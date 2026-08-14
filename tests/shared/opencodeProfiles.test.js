@@ -311,3 +311,82 @@ test('every operation leaves the caller a fresh map instead of mutating theirs',
   removeCredential(profiles, 'work', 'cookie');
   assert.equal(JSON.stringify(profiles), snapshot);
 });
+
+// `enabled` describes the account, not the credential, and the two directions
+// of a move answer differently. The bug these pin was one operation reading two
+// ways depending on which function reached it: a merge took the source's state
+// (so absorbing a switched-off account switched off the one it merged into),
+// while a split took neither and forced `true` (so a credential pulled out of a
+// switched-off account started reporting the moment it got a name).
+test('splitting a credential onto a new name carries the account state with it', () => {
+  const profiles = { work: { apiKey: 'sk-a', cookie: 'auth=a', enabled: false } };
+  const result = moveCredential(profiles, 'work', 'api', 'spare');
+  assert.equal(result.ok, true);
+  assert.equal(result.profiles.spare.enabled, false);
+  assert.equal(result.profiles.work.enabled, false);
+});
+
+test('merging a credential into an existing account keeps that account switched on', () => {
+  const profiles = {
+    work: { apiKey: 'sk-a', enabled: false },
+    personal: { cookie: 'auth=b', enabled: true }
+  };
+  const result = moveCredential(profiles, 'work', 'api', 'personal', { merge: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.profiles.personal.enabled, true);
+});
+
+test('renaming a whole account onto another keeps the destination account state', () => {
+  const profiles = {
+    work: { apiKey: 'sk-a', enabled: true },
+    personal: { cookie: 'auth=b', enabled: false }
+  };
+  const result = renameProfile(profiles, 'work', 'personal', { merge: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.profiles.personal.enabled, false);
+  assert.equal(result.profiles.personal.apiKey, 'sk-a');
+});
+
+test('a plain rename carries the account state to the new name', () => {
+  const profiles = { work: { cookie: 'auth=a', enabled: false } };
+  const result = renameProfile(profiles, 'work', 'personal');
+  assert.equal(result.ok, true);
+  assert.equal(result.profiles.personal.enabled, false);
+});
+
+test('saving another credential under a switched-off account does not switch it on', () => {
+  const profiles = { work: { cookie: 'auth=a', enabled: false } };
+  const result = saveCredential(profiles, 'work', { apiKey: 'sk-a' }, { merge: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.profiles.work.enabled, false);
+});
+
+// Account names are typed by the user and this map is keyed on them, so a name
+// that collides with an inherited key must behave like any other string. On a
+// normal object it did not: the save reported success and stored nothing, and
+// the account then read as present through the prototype.
+test('an account name that collides with an inherited key is stored like any other', () => {
+  const result = saveCredential({}, '__proto__', { apiKey: 'sk-a' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(Object.keys(result.profiles), ['__proto__']);
+  assert.equal(Object.hasOwn(result.profiles, '__proto__'), true);
+  assert.equal(result.profiles['__proto__'].apiKey, 'sk-a');
+  assert.equal({}.apiKey, undefined);
+});
+
+test('an inherited key is not mistaken for an account that exists', () => {
+  for (const name of ['__proto__', 'constructor', 'toString']) {
+    assert.equal(renameProfile({}, name, 'work').ok, false);
+    assert.equal(moveCredential({}, name, 'api', 'work').ok, false);
+    assert.equal(removeCredential({}, name, 'api').ok, false);
+  }
+});
+
+test('a collision-prone name round-trips through JSON like a stored setting', () => {
+  const saved = saveCredential({}, '__proto__', { cookie: 'auth=a' }).profiles;
+  const reloaded = JSON.parse(JSON.stringify(saved));
+  const result = removeCredential(reloaded, '__proto__', 'cookie');
+  assert.equal(result.ok, true);
+  assert.equal(result.removedCookie, 'auth=a');
+  assert.deepEqual(Object.keys(result.profiles), []);
+});

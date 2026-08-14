@@ -65,12 +65,45 @@ function withoutOrphanCompanions(profile) {
   return clean;
 }
 
+// Account names are typed by the user, and this map is keyed on them. On a
+// normal object `next['__proto__'] = {…}` sets the prototype instead of adding
+// an entry, so saving an account named `__proto__` reported success and stored
+// nothing, and a later `profiles[name].enabled = …` wrote through to a shared
+// prototype. A null-prototype map has no inherited key to collide with, which
+// is the fix for the whole class rather than for the one name that names it.
+// It survives the JSON round trip through settings.json: `JSON.parse` creates
+// an own property for `__proto__`, and spreading copies own properties without
+// invoking the setter.
+function emptyProfiles() {
+  return Object.create(null);
+}
+
+// Reads must not fall through to the prototype either, or `__proto__` resolves
+// to an inherited object and reads as an account that exists.
+function readProfile(profiles, name) {
+  if (!profiles || typeof profiles !== 'object') return undefined;
+  return Object.hasOwn(profiles, name) ? profiles[name] : undefined;
+}
+
 function cloneProfiles(profiles) {
-  const next = {};
+  const next = emptyProfiles();
   for (const [name, profile] of Object.entries(profiles || {})) {
     if (profile && typeof profile === 'object') next[name] = { ...profile };
   }
   return next;
+}
+
+// `enabled` describes the account, not the credential, which settles both
+// directions of a move. Merging into an existing account keeps that account's
+// own state: absorbing a credential is not a request to flip its switch.
+// Splitting a credential onto a new name carries the source account's state,
+// because a credential taken out of a switched-off account must not start
+// reporting the moment it gets a name of its own. Resolved explicitly rather
+// than by spread order, which had merges take the source and splits take
+// neither — the same operation reading two different ways depending on which
+// function reached it.
+function accountEnabled(profile) {
+  return !profile || profile.enabled !== false;
 }
 
 // Stores one credential under `name`, replacing only that kind.
@@ -96,13 +129,13 @@ function saveCredential(profiles, name, credential, options = {}) {
   const [field] = fields;
 
   const next = cloneProfiles(profiles);
-  const existing = next[accountName];
+  const existing = readProfile(next, accountName);
   const otherKinds = credentialKinds(existing).filter((kind) => CREDENTIAL_FIELDS[kind] !== field);
   const changesPairing = existing && (otherKinds.length > 0 || (hasAnyCredential(existing) && !existing[field]));
   if (changesPairing && options.merge !== true) {
     return { ok: false, error: 'Profile name already exists', nameTaken: true };
   }
-  next[accountName] = { enabled: true, ...(existing || {}), ...credential };
+  next[accountName] = { ...(existing || {}), ...credential, enabled: accountEnabled(existing) };
   return { ok: true, profiles: next };
 }
 
@@ -152,7 +185,7 @@ function ambientKeyClaimed(profiles, ambientKey, ambientIdentity) {
 function moveCredential(profiles, name, kind, targetName, options = {}) {
   const field = credentialField(kind);
   if (!field) return { ok: false, error: `Unknown credential kind: ${kind}` };
-  const source = (profiles || {})[name];
+  const source = readProfile(profiles, name);
   if (!source) return { ok: false, error: 'Profile not found' };
   if (!source[field]) return { ok: false, error: 'Credential not found' };
 
@@ -161,7 +194,7 @@ function moveCredential(profiles, name, kind, targetName, options = {}) {
   if (target === name) return { ok: true, profiles: cloneProfiles(profiles), unchanged: true };
 
   const next = cloneProfiles(profiles);
-  const destination = next[target];
+  const destination = readProfile(next, target);
   if (destination && options.merge !== true) {
     return { ok: false, error: 'Profile name already exists', nameTaken: true };
   }
@@ -181,7 +214,11 @@ function moveCredential(profiles, name, kind, targetName, options = {}) {
   }
   if (hasAnyCredential(remaining)) next[name] = remaining;
   else delete next[name];
-  next[target] = { enabled: true, ...(destination || {}), ...moved };
+  next[target] = {
+    ...(destination || {}),
+    ...moved,
+    enabled: accountEnabled(destination || source)
+  };
   // No `removedCookie`: a move keeps the credential, so the legacy single-cookie
   // mirror in settings still points at something that exists.
   return { ok: true, profiles: next };
@@ -191,11 +228,11 @@ function moveCredential(profiles, name, kind, targetName, options = {}) {
 function renameProfile(profiles, oldName, newName, options = {}) {
   const target = String(newName || '').trim();
   if (!target || oldName === target) return { ok: false, error: 'Invalid name' };
-  const source = (profiles || {})[oldName];
+  const source = readProfile(profiles, oldName);
   if (!source) return { ok: false, error: 'Profile not found' };
 
   const next = cloneProfiles(profiles);
-  const destination = next[target];
+  const destination = readProfile(next, target);
   if (destination && options.merge !== true) {
     return { ok: false, error: 'Profile name already exists', nameTaken: true };
   }
@@ -206,9 +243,9 @@ function renameProfile(profiles, oldName, newName, options = {}) {
     }
   }
   next[target] = {
-    enabled: true,
     ...withoutOrphanCompanions(destination || {}),
-    ...withoutOrphanCompanions(source)
+    ...withoutOrphanCompanions(source),
+    enabled: accountEnabled(destination || source)
   };
   delete next[oldName];
   return { ok: true, profiles: next };
@@ -219,7 +256,7 @@ function renameProfile(profiles, oldName, newName, options = {}) {
 function removeCredential(profiles, name, kind) {
   const field = credentialField(kind);
   if (!field) return { ok: false, error: `Unknown credential kind: ${kind}` };
-  const profile = (profiles || {})[name];
+  const profile = readProfile(profiles, name);
   if (!profile) return { ok: false, error: 'Profile not found' };
   if (!profile[field]) return { ok: false, error: 'Credential not found' };
 
@@ -237,6 +274,8 @@ function removeCredential(profiles, name, kind) {
 
 module.exports = {
   CREDENTIAL_FIELDS,
+  accountEnabled,
+  readProfile,
   credentialField,
   credentialProperties,
   credentialKinds,

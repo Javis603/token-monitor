@@ -13430,18 +13430,18 @@ function renderOpenCodeProfiles() {
       // exist offers the button instead of quietly merging.
       const mergeBtn = document.createElement('button');
       mergeBtn.className = 'credential-merge-btn hidden';
-      let pendingName = '';
+      const offer = opencodeMergeOffer(mergeBtn, (name) => applyNaming(name, true));
       const applyNaming = async (name, merge) => {
+        const at = offer.revision();
         // 'ambient' stores a reference rather than the key, so a key rotated
         // inside OpenCode keeps being read live.
         const result = await window.tokenMonitor.opencode.saveProfile(name, '', 'ambient', { merge });
         if (!result.ok) {
           if (result.nameTaken) {
-            pendingName = name;
-            mergeBtn.textContent = t('settings.opencode.mergeInto', { name });
-            mergeBtn.classList.remove('hidden');
+            offer.offer(at, name, t('settings.opencode.mergeInto', { name }));
             return;
           }
+          if (offer.stale(at)) return;
           const errorEl = document.getElementById('opencodeErrorMessage');
           errorEl.textContent = opencodeSaveErrorText(result);
           errorEl.classList.remove('hidden');
@@ -13455,18 +13455,14 @@ function renderOpenCodeProfiles() {
         const name = nameInput.value.trim();
         if (!save || !name) {
           nameInput.value = '';
-          mergeBtn.classList.add('hidden');
+          offer.hide();
           return;
         }
         await applyNaming(name, false);
       };
-      mergeBtn.addEventListener('click', () => applyNaming(pendingName, true));
       // Editing the name withdraws the offer: the confirmation names one account,
       // and it must be the one on screen when the user clicks it.
-      nameInput.addEventListener('input', () => {
-        pendingName = '';
-        mergeBtn.classList.add('hidden');
-      });
+      nameInput.addEventListener('input', () => offer.withdraw());
       nameInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') endNaming(true);
         if (e.key === 'Escape') endNaming(false);
@@ -13543,17 +13539,17 @@ function renderOpenCodeProfiles() {
       // not something they discover by pressing Enter again.
       const mergeBtn = document.createElement('button');
       mergeBtn.className = 'credential-merge-btn hidden';
-      let pendingMergeName = '';
+      const offer = opencodeMergeOffer(mergeBtn, (next) => applyRename(next, true));
       const applyRename = async (next, merge) => {
+        const at = offer.revision();
         const errorEl = document.getElementById('opencodeErrorMessage');
         const result = await api.renameProfile(name, next, { merge });
         if (!result.ok) {
           if (result.nameTaken) {
-            pendingMergeName = next;
-            mergeBtn.textContent = t('settings.opencode.mergeInto', { name: next });
-            mergeBtn.classList.remove('hidden');
+            offer.offer(at, next, t('settings.opencode.mergeInto', { name: next }));
             return;
           }
+          if (offer.stale(at)) return;
           errorEl.textContent = opencodeSaveErrorText(result);
           errorEl.classList.remove('hidden');
           return;
@@ -13563,13 +13559,9 @@ function renderOpenCodeProfiles() {
         updateOpenCodeProfilesStatus();
         renderSettingsSummaries();
       };
-      mergeBtn.addEventListener('click', () => applyRename(pendingMergeName, true));
       // Retyping withdraws the offer, so the button can only ever confirm the
       // name the user is currently proposing.
-      nameInput.addEventListener('input', () => {
-        pendingMergeName = '';
-        mergeBtn.classList.add('hidden');
-      });
+      nameInput.addEventListener('input', () => offer.withdraw());
       async function endRename(save) {
         if (!editing) return;
         editing = false;
@@ -13702,6 +13694,45 @@ function opencodeSaveErrorText(result) {
   return result?.error || t('settings.opencode.saveFailedShort');
 }
 
+// A merge confirmation names one specific proposal: this credential, into this
+// account. Editing the field withdraws it, so the click the main process
+// receives is consent to what the user is looking at.
+//
+// Hiding the button is not enough on its own, because the answer that offers it
+// arrives after an await: an edit made while that request is in flight is
+// overtaken by the reply, and the button comes back describing the proposal the
+// user has just moved on from. So a withdrawal advances a revision the reply is
+// checked against, and a reply from a superseded revision is dropped rather
+// than shown. The same rule reached four call sites by copy, which is why it
+// lives in one place now.
+function opencodeMergeOffer(button, confirm) {
+  let revision = 0;
+  let pending = '';
+  button.addEventListener('click', () => {
+    if (pending !== '') confirm(pending);
+  });
+  return {
+    // Captured before the await, compared after it.
+    revision: () => revision,
+    stale: (at) => at !== revision,
+    withdraw: () => {
+      revision += 1;
+      pending = '';
+      button.classList.add('hidden');
+    },
+    hide: () => {
+      pending = '';
+      button.classList.add('hidden');
+    },
+    offer: (at, name, label) => {
+      if (at !== revision) return;
+      pending = name;
+      button.textContent = label;
+      button.classList.remove('hidden');
+    }
+  };
+}
+
 // One credential inside an expanded account. Renaming moves it to another
 // account name, which is what splits a binding apart or forms a new one;
 // deleting drops just this credential and leaves the rest of the account.
@@ -13739,17 +13770,17 @@ function opencodeCredentialRow(accountName, kind, label) {
   // twice and hoping the user reads why.
   const mergeBtn = document.createElement('button');
   mergeBtn.className = 'credential-merge-btn hidden';
-  let pendingTarget = '';
+  const offer = opencodeMergeOffer(mergeBtn, (target) => finishMove(target, true));
 
   const finishMove = async (target, merge) => {
+    const at = offer.revision();
     const result = await api.moveCredential(accountName, kind, target, { merge });
     if (!result.ok) {
       if (result.nameTaken) {
-        pendingTarget = target;
-        mergeBtn.textContent = t('settings.opencode.mergeInto', { name: target });
-        mergeBtn.classList.remove('hidden');
+        offer.offer(at, target, t('settings.opencode.mergeInto', { name: target }));
         return;
       }
+      if (offer.stale(at)) return;
       errorEl().textContent = opencodeSaveErrorText(result);
       errorEl().classList.remove('hidden');
       return;
@@ -13760,7 +13791,7 @@ function opencodeCredentialRow(accountName, kind, label) {
     const target = nameInput.value.trim();
     if (!save || !target || target === accountName) {
       nameInput.value = accountName;
-      mergeBtn.classList.add('hidden');
+      offer.hide();
       return;
     }
     await finishMove(target, false);
@@ -13769,16 +13800,12 @@ function opencodeCredentialRow(accountName, kind, label) {
   // Same rule as everywhere else: retyping the target withdraws the pending
   // confirmation rather than leaving a button that would move it somewhere the
   // user is no longer proposing.
-  nameInput.addEventListener('input', () => {
-    pendingTarget = '';
-    mergeBtn.classList.add('hidden');
-  });
+  nameInput.addEventListener('input', () => offer.withdraw());
   nameInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') endMove(true);
     if (e.key === 'Escape') endMove(false);
   });
   nameInput.addEventListener('blur', () => endMove(true));
-  mergeBtn.addEventListener('click', () => finishMove(pendingTarget, true));
 
   const removeBtn = document.createElement('button');
   removeBtn.className = 'profile-delete';
@@ -14696,12 +14723,14 @@ function setupCursorAccountUI() {
     // credential. Editing any part of the form makes the offer on screen stale,
     // and a confirmation the user gives has to be a confirmation of what they
     // are looking at, so any edit withdraws it.
-    const clearOpenCodeMergeOffer = () => {
-      const button = document.getElementById('opencodeCredentialMerge');
-      if (!button) return;
-      button.classList.add('hidden');
-      button.onclick = null;
-    };
+    const addMergeButton = document.getElementById('opencodeCredentialMerge');
+    // Confirming re-runs the submit handler's own closure, which is what holds
+    // the name and credential the offer was made for.
+    let confirmOpenCodeMerge = () => {};
+    const addMergeOffer = addMergeButton
+      ? opencodeMergeOffer(addMergeButton, () => confirmOpenCodeMerge())
+      : null;
+    const clearOpenCodeMergeOffer = () => addMergeOffer?.withdraw();
     for (const id of ['opencodeProfileName', 'opencodeApiKeyInput', 'opencodeCookieInput']) {
       document.getElementById(id)?.addEventListener('input', clearOpenCodeMergeOffer);
     }
@@ -14756,27 +14785,33 @@ function setupCursorAccountUI() {
       // one account, so the main process refuses it and the form asks first.
       // The confirmation replaces the submit button rather than appearing beside
       // it: the next click has different consequences from the one just made.
-      const mergeBtn = document.getElementById('opencodeCredentialMerge');
       const submit = async (merge) => {
+        const at = addMergeOffer?.revision();
+        confirmOpenCodeMerge = () => submit(true);
         const result = await window.tokenMonitor.opencode.saveProfile(
           name,
           cookie,
           opencodeCredentialKind,
           { merge }
         );
+        // Whether or not the form still shows this proposal, a save that landed
+        // has to reach the list. Only the fields are left alone, so an edit made
+        // while the request was in flight is not wiped by its reply.
+        const stale = addMergeOffer ? addMergeOffer.stale(at) : false;
         if (result.ok) {
-          input.value = '';
-          nameInput.value = '';
-          mergeBtn?.classList.add('hidden');
+          if (!stale) {
+            input.value = '';
+            nameInput.value = '';
+          }
+          addMergeOffer?.hide();
           renderOpenCodeProfiles();
           updateOpenCodeProfilesStatus();
           renderSettingsSummaries();
           return;
         }
-        if (result.nameTaken && mergeBtn) {
-          mergeBtn.textContent = t('settings.opencode.mergeInto', { name });
-          mergeBtn.classList.remove('hidden');
-          mergeBtn.onclick = () => submit(true);
+        if (stale) return;
+        if (result.nameTaken && addMergeOffer) {
+          addMergeOffer.offer(at, name, t('settings.opencode.mergeInto', { name }));
           return;
         }
         errorEl.textContent = opencodeSaveErrorText(result);

@@ -209,13 +209,19 @@ test('OpenCode account panel provides multi-profile management', () => {
   // retrying with merge on its own.
   assert.match(setupBody, /window\.tokenMonitor\.opencode\.saveProfile\(\s*name,\s*cookie,\s*opencodeCredentialKind,\s*\{ merge \}\s*\)/);
   assert.match(setupBody, /await submit\(false\);/);
-  assert.match(setupBody, /if \(result\.nameTaken && mergeBtn\)/);
-  assert.match(setupBody, /mergeBtn\.onclick = \(\) => submit\(true\);/);
+  assert.match(setupBody, /if \(result\.nameTaken && addMergeOffer\)/);
+  assert.match(setupBody, /confirmOpenCodeMerge = \(\) => submit\(true\);/);
   // `submit` closes over the name and credential captured when Save was pressed,
   // so any edit afterwards has to withdraw the offer: the backend still demands
   // `merge`, but the click it receives would otherwise be consent to a proposal
-  // that is no longer on screen.
-  assert.match(setupBody, /const clearOpenCodeMergeOffer = \(\) => \{/);
+  // that is no longer on screen. Withdrawing has to outlast the round trip too,
+  // since the reply that offers the button arrives after the edit — hence the
+  // revision captured before the await and checked in every branch after it.
+  assert.match(setupBody, /const at = addMergeOffer\?\.revision\(\);/);
+  assert.match(setupBody, /const stale = addMergeOffer \? addMergeOffer\.stale\(at\) : false;/);
+  assert.match(setupBody, /if \(stale\) return;/);
+  assert.match(setupBody, /addMergeOffer\.offer\(at, name, t\('settings\.opencode\.mergeInto', \{ name \}\)\)/);
+  assert.match(setupBody, /const clearOpenCodeMergeOffer = \(\) => addMergeOffer\?\.withdraw\(\);/);
   assert.match(setupBody, /for \(const id of \['opencodeProfileName', 'opencodeApiKeyInput', 'opencodeCookieInput'\]\)/);
   assert.match(setupBody, /addEventListener\('input', clearOpenCodeMergeOffer\)/);
   // Switching credential type already clears the hidden field; it clears this too.
@@ -284,12 +290,21 @@ test('OpenCode disabled profiles still count in the account summary', () => {
   // instead of merging on a blur that happened to land on that name.
   assert.match(renderBody, /saveProfile\(name, '', 'ambient', \{ merge \}\)/);
   assert.match(renderBody, /await applyNaming\(name, false\)/);
-  assert.match(renderBody, /mergeBtn\.addEventListener\('click', \(\) => applyNaming\(pendingName, true\)\)/);
+  assert.match(renderBody, /opencodeMergeOffer\(mergeBtn, \(name\) => applyNaming\(name, true\)\)/);
+  assert.match(renderBody, /opencodeMergeOffer\(mergeBtn, \(next\) => applyRename\(next, true\)\)/);
   // A confirmation has to confirm what is on screen, so editing the name
   // withdraws the pending offer instead of leaving a button that would commit
-  // the account name the user has already moved on from.
-  assert.match(renderBody, /nameInput\.addEventListener\('input', \(\) => \{\s*pendingName = '';\s*mergeBtn\.classList\.add\('hidden'\);/);
-  assert.match(renderBody, /nameInput\.addEventListener\('input', \(\) => \{\s*pendingMergeName = '';\s*mergeBtn\.classList\.add\('hidden'\);/);
+  // the account name the user has already moved on from. Every path goes through
+  // the one helper: the rule reached four call sites by copy, and each copy is
+  // another place an in-flight reply can put a withdrawn offer back on screen.
+  // Nothing else may reveal a merge button, which is what makes that exhaustive.
+  assert.equal((app.match(/opencodeMergeOffer\(/g) || []).length, 5);
+  assert.equal((app.match(/mergeBtn\.classList\.remove\('hidden'\)/g) || []).length, 0);
+  // Three inline name fields (the auto-detected row, an account rename, a
+  // credential move); the add form withdraws through its own named helper.
+  assert.equal((app.match(/nameInput\.addEventListener\('input', \(\) => offer\.withdraw\(\)\);/g) || []).length, 3);
+  assert.equal((app.match(/const at = offer\.revision\(\);/g) || []).length, 3);
+  assert.doesNotMatch(renderBody, /pendingName|pendingMergeName|pendingTarget/);
   // Its status element cannot be produced by sanitizing any account name.
   assert.match(renderBody, /infoSpan\.id = 'opencodeAmbientInfo'/);
   // Merging is confirmed with a button the user chooses, not a repeated keypress.
@@ -301,7 +316,10 @@ test('OpenCode disabled profiles still count in the account summary', () => {
   // off, onto an existing one it binds — the same operation either way.
   assert.match(credentialRow, /api\.moveCredential\(accountName, kind, target, \{ merge \}\)/);
   assert.match(credentialRow, /api\.removeCredential\(accountName, kind\)/);
-  assert.match(credentialRow, /nameInput\.addEventListener\('input', \(\) => \{\s*pendingTarget = '';\s*mergeBtn\.classList\.add\('hidden'\);/);
+  assert.match(credentialRow, /opencodeMergeOffer\(mergeBtn, \(target\) => finishMove\(target, true\)\)/);
+  assert.match(credentialRow, /nameInput\.addEventListener\('input', \(\) => offer\.withdraw\(\)\);/);
+  assert.match(credentialRow, /if \(offer\.stale\(at\)\) return;/);
+  assert.doesNotMatch(credentialRow, /pendingTarget/);
   // Unbinding is not undoable from here, so it confirms like deleting an account.
   assert.match(credentialRow, /if \(!confirming\)/);
   assert.match(renderBody, /api\.setProfileEnabled\(name, toggle\.checked\)\.then\(\(\) => \{/);
@@ -327,7 +345,7 @@ test('OpenCode profile deletion clears the legacy default cookie when it owns th
     main.indexOf("ipcMain.handle('opencode:renameProfile'")
   );
   assert.ok(handler, 'opencode:deleteProfile handler should exist');
-  assert.match(handler, /const deletedProfile = profiles\[name\];/);
+  assert.match(handler, /const deletedProfile = opencodeProfiles\.readProfile\(profiles, name\);/);
   assert.match(handler, /if \(deletedProfile\?\.cookie && settings\.opencodeCookie === deletedProfile\.cookie\) \{/);
   assert.match(handler, /settings\.opencodeCookie = '';/);
 });
@@ -339,7 +357,11 @@ test('OpenCode profile enable toggles refresh only the affected limits lane', ()
     main.indexOf("ipcMain.handle('codex:accounts'")
   );
   assert.ok(handler, 'opencode:setProfileEnabled handler should exist');
-  assert.match(handler, /profiles\[name\]\.enabled = Boolean\(enabled\);/);
+  // Read through the module's own-property lookup. A bare `profiles[name]`
+  // resolves an inherited key, so an account named `__proto__` passed the
+  // "not found" guard and then wrote `enabled` onto a shared prototype.
+  assert.match(handler, /const profile = opencodeProfiles\.readProfile\(profiles, name\);/);
+  assert.match(handler, /profile\.enabled = Boolean\(enabled\);/);
   assert.match(handler, /saveSettings\(\{ throwOnError: true \}\);/);
   assert.match(handler, /opencodeStatusCache = \{ value: null, at: 0 \};/);
   assert.match(handler, /queueLimitInvalidation\(\{ provider: 'opencode', accountName: name \}, 'profile-state'/);
@@ -1576,4 +1598,106 @@ test('an expanded OpenCode account animates and its merge button gets its own ro
   // The summary line runs at 9px; the group-header chevron size reads as an
   // oversized arrow beside it.
   assert.match(css, /\.opencode-profile-item \.profile-detail \.cursor-disclosure-icon \{\s*width: 9px;/);
+});
+
+// The merge confirmation rule, run rather than pattern-matched. Hiding the
+// button on an edit is not enough on its own: the reply that offers it arrives
+// after an await, so an edit made while the request is in flight is overtaken
+// by that reply and the button comes back describing the proposal the user has
+// already left. Loaded through `vm` like the other renderer controllers, so the
+// assertions are about behaviour and not about the source that produces it.
+function loadOpencodeMergeOffer() {
+  const app = readRendererFile('app.js');
+  const start = app.indexOf('function opencodeMergeOffer(');
+  assert.notEqual(start, -1, 'opencodeMergeOffer should exist');
+  const end = app.indexOf('\nfunction ', start + 1);
+  assert.notEqual(end, -1, 'opencodeMergeOffer should be followed by another function');
+  const context = { module: { exports: null } };
+  vm.runInNewContext(`${app.slice(start, end)}\nmodule.exports = opencodeMergeOffer;`, context);
+  return context.module.exports;
+}
+
+function fakeMergeButton() {
+  const clicks = [];
+  const button = {
+    textContent: '',
+    visible: false,
+    classList: {
+      add: (name) => { if (name === 'hidden') button.visible = false; },
+      remove: (name) => { if (name === 'hidden') button.visible = true; }
+    },
+    addEventListener: (type, listener) => { if (type === 'click') clicks.push(listener); },
+    click: () => clicks.forEach((listener) => listener())
+  };
+  return button;
+}
+
+// One save, no interference: the offer appears and confirming it names exactly
+// what was proposed.
+test('a merge offer confirms the proposal it was made for', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  let release;
+  const reply = new Promise((resolve) => { release = resolve; });
+  const save = (async () => {
+    const at = offer.revision();
+    await reply;
+    offer.offer(at, 'work', 'merge into work');
+  })();
+
+  assert.equal(button.visible, false);
+  release();
+  await save;
+  assert.equal(button.visible, true);
+  assert.equal(button.textContent, 'merge into work');
+  button.click();
+  assert.deepEqual(confirmed, ['work']);
+});
+
+test('an edit made while the save is in flight cancels the offer its reply carries', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  let release;
+  const reply = new Promise((resolve) => { release = resolve; });
+  const save = (async () => {
+    const at = offer.revision();
+    await reply;
+    // The proposal this reply answers is no longer the one on screen.
+    assert.equal(offer.stale(at), true);
+    offer.offer(at, 'work', 'merge into work');
+  })();
+
+  offer.withdraw();
+  release();
+  await save;
+
+  assert.equal(button.visible, false, 'a superseded reply must not put the button back');
+  button.click();
+  assert.deepEqual(confirmed, [], 'a hidden offer has nothing to confirm');
+});
+
+test('a withdrawn offer stays withdrawn until a new proposal is made', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  const first = offer.revision();
+  offer.withdraw();
+  offer.offer(first, 'work', 'merge into work');
+  assert.equal(button.visible, false);
+
+  // The next save captures the revision the withdrawal left behind, so the
+  // user's new proposal is offered normally.
+  const second = offer.revision();
+  offer.offer(second, 'personal', 'merge into personal');
+  assert.equal(button.visible, true);
+  button.click();
+  assert.deepEqual(confirmed, ['personal']);
 });

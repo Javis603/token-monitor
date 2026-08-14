@@ -4087,7 +4087,7 @@ function currentWindowToggleShortcutStatus() {
 // is exactly how a credential leaks.
 function redactOpencodeProfilesForRenderer(profiles) {
   if (!profiles || typeof profiles !== 'object') return profiles;
-  const out = {};
+  const out = Object.create(null);
   for (const [name, profile] of Object.entries(profiles)) {
     out[name] = {
       enabled: profile?.enabled !== false,
@@ -6652,7 +6652,9 @@ app.whenReady().then(() => {
     // the list can show what a profile actually holds.
     const ambientKey = opencodeGoApi.readGoApiKey(process.env);
     const ambientIdentity = ambientKey ? opencodeGoApi.goApiIdentity(ambientKey) : '';
-    const safe = {};
+    // Keyed on user-typed names, so it must not inherit one. Structured clone
+    // hands the renderer a plain object either way.
+    const safe = Object.create(null);
     for (const [name, p] of Object.entries(profiles)) {
       safe[name] = {
         enabled: p.enabled,
@@ -6762,7 +6764,7 @@ app.whenReady().then(() => {
   ipcMain.handle('opencode:deleteProfile', async (_event, name) => {
     const profiles = settings.opencodeProfiles || {};
     const ambientWasActive = opencodeAmbientKeyActive(profiles);
-    const deletedProfile = profiles[name];
+    const deletedProfile = opencodeProfiles.readProfile(profiles, name);
     delete profiles[name];
     if (deletedProfile?.cookie && settings.opencodeCookie === deletedProfile.cookie) {
       settings.opencodeCookie = '';
@@ -6866,8 +6868,12 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('opencode:setProfileEnabled', async (_event, name, enabled) => {
     const profiles = settings.opencodeProfiles || {};
-    if (!profiles[name]) return { ok: false, error: 'Profile not found' };
-    profiles[name].enabled = Boolean(enabled);
+    // Own properties only. An inherited key resolves to an object that is not an
+    // account, and writing `enabled` onto it would reach whatever else shares
+    // that prototype.
+    const profile = opencodeProfiles.readProfile(profiles, name);
+    if (!profile) return { ok: false, error: 'Profile not found' };
+    profile.enabled = Boolean(enabled);
     settings.opencodeProfiles = profiles;
     try {
       saveSettings({ throwOnError: true });
