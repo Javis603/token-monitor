@@ -10050,8 +10050,14 @@ function moveOpenCodeLocalFallbackSetting() {
     // without clearing stacks one copy of the toggle per re-render.
     for (const stale of [...target.children]) if (stale !== list) stale.remove();
     // The group header already names the setting, so the item's own title would
-    // read twice. Its description and switch are what the section is for.
-    for (const title of target.querySelectorAll('.settings-item-title')) title.remove();
+    // read twice. Dropping it alone leaves the label cell empty and the switch
+    // adrift, so the description moves into that cell and becomes the label.
+    for (const item of target.querySelectorAll('.settings-item')) {
+      item.querySelector('.settings-item-title')?.remove();
+      const cell = item.querySelector('.settings-item-text');
+      const desc = item.querySelector('.settings-item-desc');
+      if (cell && desc && desc.parentElement !== cell) cell.append(desc);
+    }
   }
 
   const pill = document.getElementById('opencodeLocalFallbackStatus');
@@ -13562,13 +13568,20 @@ function renderOpenCodeProfiles() {
       const multiCredential = credentials.length > 1;
       const detail = document.createElement(multiCredential ? 'button' : 'span');
       detail.className = 'profile-detail';
+      let chevron = null;
       if (multiCredential) {
         detail.type = 'button';
         detail.classList.add('is-expandable');
         detail.setAttribute('aria-expanded', 'false');
         detail.title = t('settings.opencode.showCredentials');
+        // The same disclosure chevron every other group uses, so it animates and
+        // reads the same; only the direction differs, pointing right when closed.
+        chevron = document.createElement('span');
+        chevron.className = 'cursor-disclosure-icon';
+        chevron.setAttribute('aria-hidden', 'true');
       }
       detail.textContent = credentials.map(([, , label]) => label).join(' + ');
+      if (chevron) detail.append(chevron);
 
       nameBox.append(nameSpan, nameInput, renameBtn, mergeBtn, detail);
 
@@ -13646,18 +13659,18 @@ function opencodeCredentialRow(accountName, kind, label) {
   labelSpan.className = 'credential-label';
   labelSpan.textContent = label;
 
+  // The account name is shown on every credential rather than hidden behind an
+  // edit button, because seeing the same name twice is the explanation for why
+  // these are one account. Typing a different one moves that credential out.
   const nameInput = document.createElement('input');
-  nameInput.className = 'credential-name-input hidden';
+  nameInput.className = 'credential-name-input';
   nameInput.type = 'text';
+  nameInput.value = accountName;
+  nameInput.title = t('settings.opencode.moveCredential', { kind: label });
   nameInput.placeholder = t('settings.opencode.profileNamePlaceholder');
 
   const actions = document.createElement('span');
   actions.className = 'credential-actions';
-
-  const moveBtn = document.createElement('button');
-  moveBtn.className = 'profile-rename-btn';
-  moveBtn.textContent = '✎';
-  moveBtn.title = t('settings.opencode.moveCredential', { kind: label });
 
   // A merge is a claim that two credentials belong to one OpenCode account, so
   // it is confirmed with a visible button rather than by pressing the same key
@@ -13666,16 +13679,6 @@ function opencodeCredentialRow(accountName, kind, label) {
   mergeBtn.className = 'credential-merge-btn hidden';
   let pendingTarget = '';
 
-  let editing = false;
-  const beginMove = () => {
-    if (editing) return;
-    editing = true;
-    nameInput.value = accountName;
-    labelSpan.classList.add('hidden');
-    nameInput.classList.remove('hidden');
-    nameInput.focus();
-    nameInput.select();
-  };
   const finishMove = async (target, merge) => {
     const result = await api.moveCredential(accountName, kind, target, { merge });
     if (!result.ok) {
@@ -13692,16 +13695,15 @@ function opencodeCredentialRow(accountName, kind, label) {
     refresh();
   };
   const endMove = async (save) => {
-    if (!editing) return;
-    editing = false;
-    nameInput.classList.add('hidden');
-    labelSpan.classList.remove('hidden');
     const target = nameInput.value.trim();
-    if (!save || !target || target === accountName) return;
+    if (!save || !target || target === accountName) {
+      nameInput.value = accountName;
+      mergeBtn.classList.add('hidden');
+      return;
+    }
     await finishMove(target, false);
   };
 
-  moveBtn.addEventListener('click', beginMove);
   nameInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') endMove(true);
     if (e.key === 'Escape') endMove(false);
@@ -13726,7 +13728,7 @@ function opencodeCredentialRow(accountName, kind, label) {
     if (result.ok) refresh();
   });
 
-  actions.append(moveBtn, removeBtn);
+  actions.append(removeBtn);
   row.append(labelSpan, nameInput, mergeBtn, actions);
   return row;
 }

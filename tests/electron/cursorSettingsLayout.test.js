@@ -1452,8 +1452,10 @@ test('the OpenCode local fallback toggle is relocated once, not once per render'
   // The shared renderer builds a fresh settings list every pass, so a move that
   // does not clear the destination stacks one copy of the toggle per re-render.
   assert.match(body, /for \(const stale of \[\.\.\.target\.children\]\) if \(stale !== list\) stale\.remove\(\);/);
-  // The group header already names the setting, so the item title would read twice.
-  assert.match(body, /querySelectorAll\('\.settings-item-title'\)\) title\.remove\(\)/);
+  // The group header already names the setting, so the item title would read
+  // twice; dropping it alone leaves the label cell empty and the switch adrift.
+  assert.match(body, /querySelector\('\.settings-item-title'\)\?\.remove\(\)/);
+  assert.match(body, /if \(cell && desc && desc\.parentElement !== cell\) cell\.append\(desc\)/);
   // The shared collapsible helper, not a second hand-rolled one, which also
   // means the ids have to follow its \`\${prefix}SettingsToggle\` convention.
   assert.match(body, /setAccountGroupExpanded\(\s*'opencodeLocalFallback'/);

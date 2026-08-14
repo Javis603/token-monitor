@@ -5587,24 +5587,27 @@ html.is-windows .limit-live-badge {
   text-align: left;
   cursor: pointer;
 }
-/* Right when closed, down when open — the usual disclosure direction. Drawn
-   with a border wedge rather than a glyph so it centres on the text instead of
-   sitting on its baseline. */
-.opencode-profile-item .profile-detail.is-expandable::after {
-  content: '';
-  width: 0;
-  height: 0;
-  border-top: 3px solid transparent;
-  border-bottom: 3px solid transparent;
-  border-left: 4px solid currentColor;
-  transition: transform 0.15s ease;
-}
 .opencode-profile-item .profile-detail.is-expandable:hover,
 .opencode-profile-item .profile-detail.is-expandable:focus-visible {
   color: var(--text);
 }
-.opencode-profile-item .profile-detail.is-open::after {
-  transform: rotate(90deg);
+/* Right when closed, down when open. The shared chevron points down at rest and
+   the app-wide rule rotates it to up; these two selectors are more specific, so
+   they win, and the shared transition still animates the turn.
+   `.cursor-account-group.expanded .cursor-disclosure-icon` is a descendant rule,
+   so an icon nested inside an expanded group inherits its rotation — which is
+   why the nested fallback group needs its own pair as well. */
+.opencode-profile-item .profile-detail .cursor-disclosure-icon {
+  transform: rotate(-90deg);
+}
+.opencode-profile-item .profile-detail.is-open .cursor-disclosure-icon {
+  transform: rotate(0deg);
+}
+#opencodeLocalFallbackAccountGroup > .settings-group-header .cursor-disclosure-icon {
+  transform: rotate(-90deg);
+}
+#opencodeLocalFallbackAccountGroup.expanded > .settings-group-header .cursor-disclosure-icon {
+  transform: rotate(0deg);
 }
 .opencode-credential-list {
   grid-column: 2 / -1;
@@ -5631,6 +5634,9 @@ html.is-windows .limit-live-badge {
   color: var(--muted);
   font-size: 10px;
 }
+/* Always visible: two credentials showing the same name is the reason they are
+   one account, so the name is the row's content rather than something behind an
+   edit button. */
 .opencode-credential-row .credential-name-input {
   flex: 1;
   min-width: 0;
@@ -5638,7 +5644,6 @@ html.is-windows .limit-live-badge {
   box-sizing: border-box;
   font-size: 11px;
 }
-.opencode-credential-row .credential-name-input.hidden { display: none; }
 .opencode-credential-row .credential-actions {
   display: inline-flex;
   align-items: center;
