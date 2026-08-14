@@ -13442,6 +13442,12 @@ function renderOpenCodeProfiles() {
         await applyNaming(name, false);
       };
       mergeBtn.addEventListener('click', () => applyNaming(pendingName, true));
+      // Editing the name withdraws the offer: the confirmation names one account,
+      // and it must be the one on screen when the user clicks it.
+      nameInput.addEventListener('input', () => {
+        pendingName = '';
+        mergeBtn.classList.add('hidden');
+      });
       nameInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') endNaming(true);
         if (e.key === 'Escape') endNaming(false);
@@ -13539,6 +13545,12 @@ function renderOpenCodeProfiles() {
         renderSettingsSummaries();
       };
       mergeBtn.addEventListener('click', () => applyRename(pendingMergeName, true));
+      // Retyping withdraws the offer, so the button can only ever confirm the
+      // name the user is currently proposing.
+      nameInput.addEventListener('input', () => {
+        pendingMergeName = '';
+        mergeBtn.classList.add('hidden');
+      });
       async function endRename(save) {
         if (!editing) return;
         editing = false;
@@ -13728,6 +13740,13 @@ function opencodeCredentialRow(accountName, kind, label) {
     await finishMove(target, false);
   };
 
+  // Same rule as everywhere else: retyping the target withdraws the pending
+  // confirmation rather than leaving a button that would move it somewhere the
+  // user is no longer proposing.
+  nameInput.addEventListener('input', () => {
+    pendingTarget = '';
+    mergeBtn.classList.add('hidden');
+  });
   nameInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') endMove(true);
     if (e.key === 'Escape') endMove(false);
@@ -14640,6 +14659,19 @@ function setupCursorAccountUI() {
     // API key is the default: it needs no browser round trip. The cookie stays
     // selectable because it is the only thing that reaches the Zen balance.
     const kindSelect = document.getElementById('opencodeCredentialKind');
+    // The merge confirmation is about one specific proposal: this name, this
+    // credential. Editing any part of the form makes the offer on screen stale,
+    // and a confirmation the user gives has to be a confirmation of what they
+    // are looking at, so any edit withdraws it.
+    const clearOpenCodeMergeOffer = () => {
+      const button = document.getElementById('opencodeCredentialMerge');
+      if (!button) return;
+      button.classList.add('hidden');
+      button.onclick = null;
+    };
+    for (const id of ['opencodeProfileName', 'opencodeApiKeyInput', 'opencodeCookieInput']) {
+      document.getElementById(id)?.addEventListener('input', clearOpenCodeMergeOffer);
+    }
     const applyOpenCodeCredentialKind = () => {
       const isCookie = kindSelect?.value === 'cookie';
       document.getElementById('opencodeApiFields')?.classList.toggle('hidden', isCookie);
@@ -14658,6 +14690,7 @@ function setupCursorAccountUI() {
       const stale = document.getElementById(isCookie ? 'opencodeApiKeyInput' : 'opencodeCookieInput');
       if (stale) stale.value = '';
       document.getElementById('opencodeErrorMessage')?.classList.add('hidden');
+      clearOpenCodeMergeOffer();
     };
     kindSelect?.addEventListener('change', applyOpenCodeCredentialKind);
     applyOpenCodeCredentialKind();

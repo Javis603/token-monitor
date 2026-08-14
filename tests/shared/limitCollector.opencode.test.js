@@ -1041,8 +1041,8 @@ test('a missing key still leaves room for the local estimate', async () => {
 });
 
 test('a profile referencing the auto-detected key resolves it live', async () => {
-  // The reference is stored, not the key: a key rotated inside OpenCode is
-  // picked up on the next tick instead of going stale at 401.
+  // The reference is stored, not the key, so the current key is read on every
+  // tick instead of going stale behind a snapshot.
   const seen = [];
   const collect = async (ambient) => collectLimitsOnce(
     {
@@ -1060,10 +1060,10 @@ test('a profile referencing the auto-detected key resolves it live', async () =>
   );
 
   const before = await collect('key-one');
-  const after = await collect('key-two');
-  assert.deepStrictEqual(seen, ['key-one', 'key-two']);
-  // A cookie pins the workspace identity, so rotating the key does not make the
-  // account look like a different one.
+  const after = await collect('key-one');
+  assert.deepStrictEqual(seen, ['key-one', 'key-one']);
+  // A cookie pins the workspace identity, so re-reading the key each tick does
+  // not make the account look like a different one.
   const id = (s) => s.providers.find((x) => x.provider === 'opencode').accountKey;
   assert.strictEqual(id(before), id(after));
 
@@ -1072,6 +1072,108 @@ test('a profile referencing the auto-detected key resolves it live', async () =>
   assert.strictEqual(p.balanceUsd, 9);
   // Only one row: claiming the key removes the separate auto-detected account.
   assert.strictEqual(after.providers.filter((x) => x.provider === 'opencode').length, 1);
+});
+
+// The API's own `notConfigured` is ranked below a cookie failure so an expired
+// cookie still wins, but on an account with no cookie there is nothing to lose
+// to, and it is the true answer. Falling through to the literal told the user to
+// sign in again about a workspace that simply has no Go plan.
+test('an API-only account with no Go plan reports notConfigured, not unauthorized', async () => {
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: {
+        // Two accounts, so this runs the multi-account path.
+        work: { enabled: true, apiKey: 'sk-work' },
+        personal: { enabled: true, cookie: 'sess=personal' }
+      }
+    },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async () => ({ status: 'notConfigured', entitled: false, windows: [], identity: 'go-api:work' }),
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 3 })
+    }
+  );
+  const work = summary.providers.find((p) => p.provider === 'opencode' && p.accountName === 'work');
+  assert.ok(work, 'the API-only account should still be listed');
+  assert.strictEqual(work.status, 'notConfigured');
+});
+
+// A scope always comes from an action on a stored account, and the auto-detected
+// entry is not one. Matching it by name would let a user who happens to name an
+// account the same string scope a refresh onto both.
+test('a scoped refresh never selects the auto-detected account', async () => {
+  const probed = [];
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      limitRefreshScope: { provider: 'opencode', accountName: 'default (auto)' },
+      opencodeProfiles: { 'default (auto)': { enabled: true, cookie: 'sess=named' } }
+    },
+    {
+      now: () => now403,
+      opencodeReadGoApiKey: () => 'sk-ambient',
+      opencodeCollectGoApi: async (d) => { probed.push(d.apiKey); return goApiOk; },
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 3 })
+    }
+  );
+  // Only the stored cookie account is refreshed. The ambient key shares its name
+  // but is never probed, so the scope cannot fan out onto it.
+  assert.deepStrictEqual(probed, []);
+  const rows = summary.providers.filter((p) => p.provider === 'opencode');
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].source, 'web');
+});
+
+// The reference names the account that was signed in when it was bound. The
+// usage API returns no workspace id, so a key that has since changed cannot be
+// told apart from another account's key, and pairing it with this account's
+// cookie would publish that account's quota under this workspace's identity.
+test('a bound reference stops resolving when the machine key changes', async () => {
+  const seen = [];
+  const collect = async (ambient) => collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: {
+        work: {
+          enabled: true,
+          useAmbientKey: true,
+          ambientKeyIdentity: goApiIdentity('key-one'),
+          cookie: 'sess=work'
+        }
+      }
+    },
+    {
+      now: () => now403,
+      opencodeReadGoApiKey: () => ambient,
+      opencodeCollectGoApi: async (d) => { seen.push(d.apiKey); return goApiOk; },
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 9 })
+    }
+  );
+
+  const bound = await collect('key-one');
+  assert.deepStrictEqual(seen, ['key-one']);
+  assert.strictEqual(bound.providers.filter((x) => x.provider === 'opencode').length, 1);
+
+  const rotated = await collect('key-two');
+  const rows = rotated.providers.filter((x) => x.provider === 'opencode');
+  // Two rows: the bound account falls back to what its cookie alone answers, and
+  // the new key comes back as its own auto-detected account for the user to
+  // place deliberately rather than being adopted by the account it is not.
+  assert.strictEqual(rows.length, 2);
+  const bound2 = rows.find((r) => r.accountName === 'work');
+  const detected = rows.find((r) => r.accountName !== 'work');
+  assert.ok(bound2 && detected, 'both the bound account and the detected key should be listed');
+  // The bound row is answered by its cookie, not by the key it no longer owns.
+  assert.strictEqual(bound2.source, 'web');
+  assert.strictEqual(detected.accountKey, hashKey('opencode', goApiIdentity('key-two')));
+  assert.strictEqual(detected.source, 'api');
 });
 
 test('an account holding only a key identifies itself by that key', async () => {

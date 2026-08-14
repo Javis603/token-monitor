@@ -5,6 +5,7 @@ const assert = require('node:assert');
 
 const {
   credentialKinds,
+  ambientKeyFor,
   saveCredential,
   moveCredential,
   renameProfile,
@@ -55,12 +56,35 @@ test('naming the auto-detected key onto an existing account is the same binding'
   assert.equal(confirmed.profiles.work.cookie, 'auth=a');
 });
 
-// Refreshing an expired cookie under the account that already owns it changes
+// Refreshing an expired cookie under an account that holds nothing else changes
 // nothing about which account is which, so it must not demand confirmation.
-test('replacing the same credential kind is not a binding', () => {
+test('replacing the same credential kind on a single-credential account is not a binding', () => {
   const result = saveCredential({ work: cookie('auth=old') }, 'work', { cookie: 'auth=new' });
   assert.equal(result.ok, true);
   assert.equal(result.profiles.work.cookie, 'auth=new');
+});
+
+// The exemption must not become a hole in the binding rule. On an account whose
+// cookie already identifies a workspace, storing a *different* key asserts that
+// the new key belongs to that workspace too, which is the same unverifiable
+// claim as the original binding and carries the same consequence: publishing one
+// account's quota under another's identity.
+test('replacing a credential on an account that holds another kind still needs merge', () => {
+  const profiles = { work: { cookie: 'auth=b', apiKey: 'sk-a', enabled: true } };
+  const refused = saveCredential(profiles, 'work', { apiKey: 'sk-c' });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.nameTaken, true);
+  assert.equal(profiles.work.apiKey, 'sk-a');
+
+  const confirmed = saveCredential(profiles, 'work', { apiKey: 'sk-c' }, { merge: true });
+  assert.equal(confirmed.ok, true);
+  assert.equal(confirmed.profiles.work.apiKey, 'sk-c');
+  assert.equal(confirmed.profiles.work.cookie, 'auth=b');
+});
+
+test('re-pointing the auto-detected reference on a bound account also needs merge', () => {
+  const profiles = { work: { ...AMBIENT, cookie: 'auth=b' } };
+  assert.equal(saveCredential(profiles, 'work', { useAmbientKey: true }).nameTaken, true);
 });
 
 test('saving into a name that exists but holds nothing is not a binding', () => {
@@ -187,6 +211,28 @@ test('removeCredential rejects unknown kinds and credentials that are not there'
   assert.equal(removeCredential({ work: key() }, 'work', 'nope').ok, false);
   assert.equal(removeCredential({ work: key() }, 'work', 'cookie').ok, false);
   assert.equal(removeCredential({}, 'work', 'api').ok, false);
+});
+
+// The usage API returns no workspace id, so "same account, rotated key" and
+// "signed into a different account" are indistinguishable. A reference that was
+// bound to one account must not silently start resolving to another's key while
+// still paired with this account's cookie.
+test('a bound auto-detected reference stops resolving once the key changes', () => {
+  const bound = { useAmbientKey: true, ambientKeyIdentity: 'go-api:aaa', cookie: 'auth=b' };
+  assert.equal(ambientKeyFor(bound, 'sk-current', 'go-api:aaa'), 'sk-current');
+  assert.equal(ambientKeyFor(bound, 'sk-other', 'go-api:bbb'), '');
+});
+
+test('a reference stored before identities were recorded keeps resolving', () => {
+  // There is no way to reconstruct what it was bound to, so refusing to resolve
+  // it would break existing installs to guard against a case we cannot detect.
+  assert.equal(ambientKeyFor({ useAmbientKey: true }, 'sk-current', 'go-api:aaa'), 'sk-current');
+});
+
+test('ambientKeyFor resolves nothing without a reference or without a key', () => {
+  assert.equal(ambientKeyFor({ cookie: 'auth=b' }, 'sk-current', 'go-api:aaa'), '');
+  assert.equal(ambientKeyFor({ useAmbientKey: true }, '', ''), '');
+  assert.equal(ambientKeyFor(null, 'sk-current', 'go-api:aaa'), '');
 });
 
 test('every operation leaves the caller a fresh map instead of mutating theirs', () => {

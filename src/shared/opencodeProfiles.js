@@ -46,10 +46,18 @@ function cloneProfiles(profiles) {
 
 // Stores one credential under `name`, replacing only that kind.
 //
-// Landing on an account that already holds a *different* kind is a binding, so
-// it needs `merge: true`. Replacing the same kind is not: refreshing an expired
-// cookie or rotating a key under the account that already owns it changes
-// nothing about which account is which.
+// Confirmation is required whenever the write would state something new about
+// which credentials belong together. On an account that holds nothing else,
+// replacing the same kind states nothing: refreshing an expired cookie under
+// the account that already owns it leaves the pairing exactly as it was, and
+// making that ask would be noise.
+//
+// On an account that already holds another kind it is not a replacement in that
+// sense. Storing a different API key under an account whose cookie identifies
+// workspace B asserts that the new key also belongs to B, which is the same
+// unverifiable claim as binding it there in the first place — and the one whose
+// consequence is publishing one account's quota under another's identity. So
+// the exemption is narrow: no other credential present.
 function saveCredential(profiles, name, credential, options = {}) {
   const accountName = String(name || '').trim();
   if (!accountName) return { ok: false, error: 'Empty name' };
@@ -60,11 +68,29 @@ function saveCredential(profiles, name, credential, options = {}) {
 
   const next = cloneProfiles(profiles);
   const existing = next[accountName];
-  if (existing && hasAnyCredential(existing) && !existing[field] && options.merge !== true) {
+  const otherKinds = credentialKinds(existing).filter((kind) => CREDENTIAL_FIELDS[kind] !== field);
+  const changesPairing = existing && (otherKinds.length > 0 || (hasAnyCredential(existing) && !existing[field]));
+  if (changesPairing && options.merge !== true) {
     return { ok: false, error: 'Profile name already exists', nameTaken: true };
   }
   next[accountName] = { enabled: true, ...(existing || {}), ...credential };
   return { ok: true, profiles: next };
+}
+
+// The account the auto-detected key belongs to is the one that was signed in
+// when the reference was stored. The usage API returns no workspace id, so a key
+// that has since changed cannot be told apart from a different account's key:
+// "same account, rotated key" and "signed into another account" look identical.
+// Pairing the new key with this account's cookie would publish that account's
+// quota under this one's workspace identity, which is precisely what nothing is
+// allowed to assert automatically.
+//
+// A reference stored before this was recorded has no identity to compare, so it
+// keeps resolving; there is no way to reconstruct what it was bound to.
+function ambientKeyFor(profile, ambientKey, ambientIdentity) {
+  if (!profile?.useAmbientKey || !ambientKey) return '';
+  if (profile.ambientKeyIdentity && profile.ambientKeyIdentity !== ambientIdentity) return '';
+  return ambientKey;
 }
 
 // Moves one credential to another account name, creating it when needed. Moving
@@ -151,6 +177,7 @@ module.exports = {
   credentialField,
   credentialKinds,
   hasAnyCredential,
+  ambientKeyFor,
   saveCredential,
   moveCredential,
   renameProfile,

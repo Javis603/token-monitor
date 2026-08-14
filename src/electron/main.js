@@ -133,8 +133,10 @@ const OPENCODE_API_PROBE_TIMEOUT_MS = 15_000;
 function opencodeAmbientKeyActive(profiles) {
   const ambientKey = opencodeGoApi.readGoApiKey(process.env);
   if (!ambientKey) return false;
+  const ambientIdentity = opencodeGoApi.goApiIdentity(ambientKey);
   return !Object.values(profiles || {})
-    .some((p) => p?.useAmbientKey || p?.apiKey === ambientKey);
+    .some((p) => Boolean(opencodeProfiles.ambientKeyFor(p, ambientKey, ambientIdentity))
+      || p?.apiKey === ambientKey);
 }
 
 async function probeOpenCodeApiKey(apiKey) {
@@ -6505,7 +6507,9 @@ app.whenReady().then(() => {
     // its own, so filtering on `cookie || apiKey` alone would skip it and leave
     // its row stuck on the placeholder while the collector reads live quota
     // from that very key. Resolve the key the same way the collector does.
-    const profileKey = (p) => p.apiKey || (p.useAmbientKey ? opencodeGoApi.readGoApiKey(process.env) : '');
+    const ambientKey = opencodeGoApi.readGoApiKey(process.env);
+    const ambientIdentity = ambientKey ? opencodeGoApi.goApiIdentity(ambientKey) : '';
+    const profileKey = (p) => p.apiKey || opencodeProfiles.ambientKeyFor(p, ambientKey, ambientIdentity);
     const entries = Object.entries(profiles).filter(([, p]) => (p.cookie || profileKey(p)) && p.enabled);
 
     // Query all profiles in parallel
@@ -6646,10 +6650,19 @@ app.whenReady().then(() => {
         // Naming the auto-detected credential. A reference is stored, never the
         // key itself, so a key rotated inside OpenCode is still picked up live
         // instead of going stale at 401 behind a snapshot.
-        if (!opencodeGoApi.readGoApiKey(process.env)) {
+        const ambientKey = opencodeGoApi.readGoApiKey(process.env);
+        if (!ambientKey) {
           return { ok: false, error: 'No OpenCode credential found on this machine' };
         }
-        credential = { useAmbientKey: true, enabled: true };
+        // Records which account the reference was bound to, so a key that later
+        // changes stops resolving here instead of quietly pairing whoever is
+        // signed in next with this account's cookie. It is a digest, not the
+        // key: the value itself is never stored for this credential kind.
+        credential = {
+          useAmbientKey: true,
+          ambientKeyIdentity: opencodeGoApi.goApiIdentity(ambientKey),
+          enabled: true
+        };
       } else if (kind === 'api') {
         const apiKey = String(raw || '').trim();
         if (!apiKey) return { ok: false, error: 'Empty API key' };

@@ -21,6 +21,7 @@ const cursorProbe = require('./cursorProbe');
 const antigravityProbe = require('./antigravityProbe');
 const opencodeLimits = require('./opencodeLimits');
 const opencodeGoApi = require('./opencodeGoApi');
+const opencodeProfiles = require('./opencodeProfiles');
 const opencodeWeb = require('./opencodeWeb');
 const openrouterLimits = require('./openrouterLimits');
 const thirdPartyLimits = require('./thirdPartyLimits');
@@ -3177,11 +3178,13 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   // come from another. The reference is stored rather than the key itself, so a
   // key rotated inside OpenCode is picked up on the next tick.
   const ambientKey = readGoApiKey(deps.env || process.env);
+  const ambientIdentity = ambientKey ? opencodeGoApi.goApiIdentity(ambientKey) : '';
+  const ambientFor = (p) => opencodeProfiles.ambientKeyFor(p, ambientKey, ambientIdentity);
   let cookies = [];
   if (explicitProfiles && Object.keys(explicitProfiles).length > 0) {
     for (const [name, p] of Object.entries(explicitProfiles)) {
       if (!p.enabled) continue;
-      const apiKey = p.apiKey || (p.useAmbientKey ? ambientKey : '');
+      const apiKey = p.apiKey || ambientFor(p);
       if (apiKey || p.cookie) cookies.push({ name, apiKey, cookie: p.cookie });
     }
   } else if (options.opencodeCookie) {
@@ -3197,8 +3200,12 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   // tracked on its own so the zero-config path never disappears, and dropped as
   // soon as a profile claims it — either by referencing it or by storing the
   // same key — because from then on it belongs to that account.
+  // A reference whose key has since changed claims nothing: the key now on this
+  // machine belongs to whoever is signed in, not to the account that stored the
+  // reference, so it goes back to being its own row until the user says
+  // otherwise.
   const ambientClaimed = Boolean(explicitProfiles && Object.values(explicitProfiles)
-    .some((p) => p?.useAmbientKey || (ambientKey && p?.apiKey === ambientKey)));
+    .some((p) => Boolean(ambientFor(p)) || (ambientKey && p?.apiKey === ambientKey)));
   if (ambientKey && !ambientClaimed) {
     cookies.push({ name: OPENCODE_AMBIENT_ACCOUNT_NAME, apiKey: ambientKey, ambient: true });
   }
@@ -3209,8 +3216,12 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     : null;
   if (scope && multiAccountMode) {
     const profileName = scope.accountName || scope.accountLabel;
+    // Every scope originates from an action on a *stored* account, and the
+    // auto-detected entry is by definition not one. Excluding it by that fact
+    // rather than by its name keeps a user who happens to name an account the
+    // same string from scoping a refresh onto both.
     cookies = profileName
-      ? cookies.filter(({ name }) => name === profileName)
+      ? cookies.filter(({ name, ambient }) => !ambient && name === profileName)
       : [];
   }
 
@@ -3426,8 +3437,12 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
       // which is a fallback condition rather than a failure. Letting it win here
       // would hide the cookie's own `unauthorized` and tell the user nothing is
       // configured when what actually happened is that their cookie expired.
+      // The API's own `notConfigured` is ranked last rather than dropped: it
+      // must not outrank an expired cookie, but on an account with no cookie at
+      // all it is the true answer, and falling through to the literal would
+      // report "sign in again" for a workspace that simply has no Go plan.
       const failStatus = (OPENCODE_REMOTE_FAIL_STATUSES.includes(goApi?.status) && goApi.status)
-        || goWeb?.status || zen?.status || 'unauthorized';
+        || goWeb?.status || zen?.status || goApi?.status || 'unauthorized';
       status = failStatus;
     }
 

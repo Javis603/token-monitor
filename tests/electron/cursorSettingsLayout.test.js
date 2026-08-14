@@ -211,6 +211,15 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(setupBody, /await submit\(false\);/);
   assert.match(setupBody, /if \(result\.nameTaken && mergeBtn\)/);
   assert.match(setupBody, /mergeBtn\.onclick = \(\) => submit\(true\);/);
+  // `submit` closes over the name and credential captured when Save was pressed,
+  // so any edit afterwards has to withdraw the offer: the backend still demands
+  // `merge`, but the click it receives would otherwise be consent to a proposal
+  // that is no longer on screen.
+  assert.match(setupBody, /const clearOpenCodeMergeOffer = \(\) => \{/);
+  assert.match(setupBody, /for \(const id of \['opencodeProfileName', 'opencodeApiKeyInput', 'opencodeCookieInput'\]\)/);
+  assert.match(setupBody, /addEventListener\('input', clearOpenCodeMergeOffer\)/);
+  // Switching credential type already clears the hidden field; it clears this too.
+  assert.match(setupBody, /clearOpenCodeMergeOffer\(\);\s*\};/);
   assert.match(setupBody, /kindSelect\?\.addEventListener\('change', applyOpenCodeCredentialKind\)/);
   // The account name is required, not defaulted. Saving one credential keeps the
   // other under that name and the collector reads that as "same account", so a
@@ -269,6 +278,11 @@ test('OpenCode disabled profiles still count in the account summary', () => {
   assert.match(renderBody, /saveProfile\(name, '', 'ambient', \{ merge \}\)/);
   assert.match(renderBody, /await applyNaming\(name, false\)/);
   assert.match(renderBody, /mergeBtn\.addEventListener\('click', \(\) => applyNaming\(pendingName, true\)\)/);
+  // A confirmation has to confirm what is on screen, so editing the name
+  // withdraws the pending offer instead of leaving a button that would commit
+  // the account name the user has already moved on from.
+  assert.match(renderBody, /nameInput\.addEventListener\('input', \(\) => \{\s*pendingName = '';\s*mergeBtn\.classList\.add\('hidden'\);/);
+  assert.match(renderBody, /nameInput\.addEventListener\('input', \(\) => \{\s*pendingMergeName = '';\s*mergeBtn\.classList\.add\('hidden'\);/);
   // Its status element cannot be produced by sanitizing any account name.
   assert.match(renderBody, /infoSpan\.id = 'opencodeAmbientInfo'/);
   // Merging is confirmed with a button the user chooses, not a repeated keypress.
@@ -280,6 +294,7 @@ test('OpenCode disabled profiles still count in the account summary', () => {
   // off, onto an existing one it binds — the same operation either way.
   assert.match(credentialRow, /api\.moveCredential\(accountName, kind, target, \{ merge \}\)/);
   assert.match(credentialRow, /api\.removeCredential\(accountName, kind\)/);
+  assert.match(credentialRow, /nameInput\.addEventListener\('input', \(\) => \{\s*pendingTarget = '';\s*mergeBtn\.classList\.add\('hidden'\);/);
   // Unbinding is not undoable from here, so it confirms like deleting an account.
   assert.match(credentialRow, /if \(!confirming\)/);
   assert.match(renderBody, /api\.setProfileEnabled\(name, toggle\.checked\)\.then\(\(\) => \{/);
@@ -1403,7 +1418,11 @@ test('a zero-config OpenCode machine is not reported as unconfigured', () => {
   // account whenever it exists, and is hidden only once a saved account carries
   // that same key — the point at which the user has said they are one account.
   assert.match(gate, /opencodeGoApi\.readGoApiKey\(process\.env\)/);
-  assert.match(gate, /p\?\.useAmbientKey \|\| p\?\.apiKey === ambientKey/);
+  // Resolved through the shared helper, so a reference whose key has since
+  // changed stops claiming the ambient key here exactly as it does in the
+  // collector. Two copies of that rule would drift into a panel showing a row
+  // the collector is not tracking.
+  assert.match(gate, /opencodeProfiles\.ambientKeyFor\(p, ambientKey, ambientIdentity\)/);
 
   const status = main.slice(
     main.indexOf("ipcMain.handle('opencode:status'"),
@@ -1419,7 +1438,7 @@ test('a zero-config OpenCode machine is not reported as unconfigured', () => {
   // so a `cookie || apiKey` filter drops it and its row never leaves the
   // placeholder while the collector is reading live quota from that same key.
   // Both the filter and the probe resolve the key the way the collector does.
-  assert.match(status, /const profileKey = \(p\) => p\.apiKey \|\| \(p\.useAmbientKey \? opencodeGoApi\.readGoApiKey\(process\.env\) : ''\);/);
+  assert.match(status, /const profileKey = \(p\) => p\.apiKey \|\| opencodeProfiles\.ambientKeyFor\(p, ambientKey, ambientIdentity\);/);
   assert.match(status, /\.filter\(\(\[, p\]\) => \(p\.cookie \|\| profileKey\(p\)\) && p\.enabled\)/);
   assert.match(status, /const apiKey = profileKey\(profile\);/);
   assert.doesNotMatch(status, /probeOpenCodeApiKey\(profile\.apiKey\)/);
@@ -1449,7 +1468,9 @@ test('OpenCode credentials are named, merged and removed one at a time', () => {
   // Naming the auto-detected credential stores a reference, never the key, so a
   // key rotated inside OpenCode is still read live instead of going stale.
   assert.match(save, /\['api', 'cookie', 'ambient'\]\.includes\(kind\)/);
-  assert.match(save, /credential = \{ useAmbientKey: true, enabled: true \}/);
+  // Bound to the account signed in at the time: the API returns no workspace id,
+  // so a key that later changes cannot be told apart from a different account's.
+  assert.match(save, /ambientKeyIdentity: opencodeGoApi\.goApiIdentity\(ambientKey\)/);
   assert.doesNotMatch(save, /useAmbientKey: true, apiKey/);
 
   // Every operation that could bind or destroy a credential goes through the

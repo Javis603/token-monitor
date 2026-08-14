@@ -172,14 +172,14 @@ async function fetchGoApi(apiKey, deps = {}) {
   }
 
   const code = Number(response?.status) || 0;
-  // 403 is the upstream EntitlementError: the account simply has no Go
-  // subscription. That is not a failure — it has to fall through to the cookie
-  // and local paths quietly instead of surfacing an error on the card.
-  // `entitled: false` marks this as the server's authoritative answer rather
-  // than an absent credential: the key is valid, the account simply has no Go
-  // plan. Callers use it to stop falling back to the local estimate, which
-  // cannot tell a cancelled subscription from a current one and would keep
-  // deriving quota from historical rows.
+  // 403 is the upstream EntitlementError: the key is valid and the account
+  // simply has no Go subscription. That is not a failure, so it falls through to
+  // the cookie quietly instead of surfacing an error on the card. It does not
+  // fall through to the local estimate: `entitled: false` marks it as the
+  // server's authoritative answer rather than an absent credential, and callers
+  // use that to stop the estimate taking over, since it cannot tell a cancelled
+  // subscription from a current one and would keep deriving quota from rows the
+  // cancelled one left behind.
   if (code === 403) return { status: 'notConfigured', entitled: false, windows: [] };
   if (code === 401) return { status: 'unauthorized', windows: [] };
   if (code === 429) return { status: 'sourceRateLimited', windows: [] };
