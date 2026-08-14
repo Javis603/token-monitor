@@ -6,6 +6,7 @@ const assert = require('node:assert');
 const {
   credentialKinds,
   ambientKeyFor,
+  ambientKeyClaimed,
   saveCredential,
   moveCredential,
   renameProfile,
@@ -277,6 +278,28 @@ test('a merge cannot carry an orphaned pin onto a real reference', () => {
   assert.equal(result.ok, true);
   assert.equal(result.profiles.live.ambientKeyIdentity, 'go-api:bbb');
   assert.equal(ambientKeyFor(result.profiles.live, 'sk-b', 'go-api:bbb'), 'sk-b');
+});
+
+test('the auto-detected key is claimed by a resolving reference or a stored copy', () => {
+  const claimed = (profiles) => ambientKeyClaimed(profiles, 'sk-a', 'go-api:aaa');
+  assert.equal(claimed({}), false);
+  assert.equal(claimed({ work: cookie() }), false);
+  assert.equal(claimed({ work: { useAmbientKey: true, ambientKeyIdentity: 'go-api:aaa' } }), true);
+  assert.equal(claimed({ work: { apiKey: 'sk-a' } }), true);
+  // A reference whose key has changed owns nothing: the key on the machine now
+  // belongs to whoever is signed in, not to the account that stored it.
+  assert.equal(claimed({ work: { useAmbientKey: true, ambientKeyIdentity: 'go-api:bbb' } }), false);
+  assert.equal(ambientKeyClaimed({ work: { apiKey: 'sk-a' } }, '', ''), false);
+});
+
+// Both reviews of this design landed on the same answer and it is easy to
+// reverse by accident: credentials belong to the account holding them, so
+// disabling an account turns off its key as well. Handing the same key back as
+// an unnamed row would resurrect, under another name, the account the user just
+// switched off.
+test('a disabled account still owns the auto-detected key', () => {
+  const profiles = { work: { useAmbientKey: true, ambientKeyIdentity: 'go-api:aaa', enabled: false } };
+  assert.equal(ambientKeyClaimed(profiles, 'sk-a', 'go-api:aaa'), true);
 });
 
 test('every operation leaves the caller a fresh map instead of mutating theirs', () => {

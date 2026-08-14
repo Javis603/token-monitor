@@ -1418,11 +1418,10 @@ test('a zero-config OpenCode machine is not reported as unconfigured', () => {
   // account whenever it exists, and is hidden only once a saved account carries
   // that same key — the point at which the user has said they are one account.
   assert.match(gate, /opencodeGoApi\.readGoApiKey\(process\.env\)/);
-  // Resolved through the shared helper, so a reference whose key has since
-  // changed stops claiming the ambient key here exactly as it does in the
-  // collector. Two copies of that rule would drift into a panel showing a row
-  // the collector is not tracking.
-  assert.match(gate, /opencodeProfiles\.ambientKeyFor\(p, ambientKey, ambientIdentity\)/);
+  // One predicate, shared with the collector. Two copies of "who owns the
+  // auto-detected key" drift into a panel offering a row the collector is not
+  // scanning; its behaviour is covered in tests/shared/opencodeProfiles.test.js.
+  assert.match(gate, /!opencodeProfiles\.ambientKeyClaimed\(profiles, ambientKey, ambientIdentity\)/);
 
   const status = main.slice(
     main.indexOf("ipcMain.handle('opencode:status'"),

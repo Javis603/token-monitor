@@ -3197,16 +3197,11 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     cookies.push({ name: 'default (env)', cookie: envCookie });
   }
 
-  // The auto-detected key is an unnamed credential until someone names it. It is
-  // tracked on its own so the zero-config path never disappears, and dropped as
-  // soon as a profile claims it — either by referencing it or by storing the
-  // same key — because from then on it belongs to that account.
-  // A reference whose key has since changed claims nothing: the key now on this
-  // machine belongs to whoever is signed in, not to the account that stored the
-  // reference, so it goes back to being its own row until the user says
-  // otherwise.
-  const ambientClaimed = Boolean(explicitProfiles && Object.values(explicitProfiles)
-    .some((p) => Boolean(ambientFor(p)) || (ambientKey && p?.apiKey === ambientKey)));
+  // The auto-detected key is an unnamed credential until someone names it, so it
+  // is tracked on its own and the zero-config path never disappears. Ownership is
+  // the shared predicate rather than a copy of it here, so the settings panel
+  // cannot end up offering a row this scan is not reading.
+  const ambientClaimed = opencodeProfiles.ambientKeyClaimed(explicitProfiles, ambientKey, ambientIdentity);
   if (ambientKey && !ambientClaimed) {
     cookies.push({ name: OPENCODE_AMBIENT_ACCOUNT_NAME, apiKey: ambientKey, ambient: true });
   }

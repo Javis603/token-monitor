@@ -125,18 +125,14 @@ const opencodeProfiles = require('../shared/opencodeProfiles');
 // the account panel spinning and "Save account" pending forever.
 const OPENCODE_API_PROBE_TIMEOUT_MS = 15_000;
 
-// Reserved key for the auto-detected account in the status map. It is not a
-// stored profile, so it can never collide with one: it is only added when the
-// profile map is empty.
-// Mirrors fetchOpenCodeLimits: the auto-detected key is its own account until an
-// account claims it, either by referencing it or by storing the same key.
+// The auto-detected key has an account of its own for exactly as long as no
+// stored account claims it. Ownership is the shared predicate the collector
+// uses, so the panel never offers a row the collector is not scanning.
 function opencodeAmbientKeyActive(profiles) {
   const ambientKey = opencodeGoApi.readGoApiKey(process.env);
   if (!ambientKey) return false;
   const ambientIdentity = opencodeGoApi.goApiIdentity(ambientKey);
-  return !Object.values(profiles || {})
-    .some((p) => Boolean(opencodeProfiles.ambientKeyFor(p, ambientKey, ambientIdentity))
-      || p?.apiKey === ambientKey);
+  return !opencodeProfiles.ambientKeyClaimed(profiles, ambientKey, ambientIdentity);
 }
 
 async function probeOpenCodeApiKey(apiKey) {

@@ -126,6 +126,26 @@ function ambientKeyFor(profile, ambientKey, ambientIdentity) {
   return ambientKey;
 }
 
+// Whether a stored account owns the auto-detected key: by holding a reference
+// that still resolves to it, or by having stored the same key verbatim. While
+// nothing claims it, it is tracked as an account of its own, which is what keeps
+// the zero-config path alive.
+//
+// Deliberately looks at every account, enabled or not. Credentials belong to the
+// account holding them, so disabling one turns off its key too; handing that
+// same key back as an unnamed row would resurrect, under another name, the
+// account the user just switched off.
+//
+// Shared rather than reimplemented per caller: the collector decides whether to
+// scan it and the settings panel decides whether to show it, and a disagreement
+// between those two is a row the panel reports on and nothing is reading.
+function ambientKeyClaimed(profiles, ambientKey, ambientIdentity) {
+  if (!ambientKey) return false;
+  return Object.values(profiles || {}).some((profile) => (
+    Boolean(ambientKeyFor(profile, ambientKey, ambientIdentity)) || profile?.apiKey === ambientKey
+  ));
+}
+
 // Moves one credential to another account name, creating it when needed. Moving
 // to a fresh name splits the credential off; moving onto an existing name binds
 // it there, which is the same assertion `saveCredential` gates.
@@ -222,6 +242,7 @@ module.exports = {
   credentialKinds,
   hasAnyCredential,
   ambientKeyFor,
+  ambientKeyClaimed,
   saveCredential,
   moveCredential,
   renameProfile,
