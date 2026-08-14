@@ -22,6 +22,7 @@ function rendererClientIds() {
 
 function readmeTrackedClientIds() {
   const iconToClient = {
+    deepseek: 'dsh',
     'hermes-agent': 'hermes',
     xai: 'grok',
     'mimo-code': 'micode'
