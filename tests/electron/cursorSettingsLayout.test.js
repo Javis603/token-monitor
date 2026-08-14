@@ -251,13 +251,23 @@ test('OpenCode disabled profiles still count in the account summary', () => {
   assert.match(renderBody, /\['ambient', profile\.usesAmbientKey/);
   assert.match(renderBody, /\['api', profile\.hasApiKey/);
   assert.match(renderBody, /\['cookie', profile\.hasCookie/);
-  assert.match(renderBody, /const removable = credentials\.length > 1;/);
-  assert.match(renderBody, /api\.removeCredential\(name, kind\)/);
+  // Per-credential actions live in an expanded section, not inline beside the
+  // account's own controls, and only appear once there is more than one.
+  assert.match(renderBody, /if \(credentials\.length > 1\)/);
+  assert.match(renderBody, /opencodeCredentialRow\(name, kind, label\)/);
   // Naming the auto-detected credential is what lets it join an account.
   assert.match(renderBody, /saveProfile\(name, '', 'ambient'\)/);
-  // Merging on rename is confirmed, never silent.
-  assert.match(renderBody, /pendingMergeName === next/);
-  assert.match(renderBody, /settings\.opencode\.mergeConfirm/);
+  // Merging is confirmed with a button the user chooses, not a repeated keypress.
+  assert.match(renderBody, /settings\.opencode\.mergeInto/);
+  assert.doesNotMatch(renderBody, /mergeConfirm/);
+
+  const credentialRow = functionBody(app, 'opencodeCredentialRow', 'updateOpenCodeProfilesStatus');
+  // Renaming a credential moves it to another account: to a fresh name it splits
+  // off, onto an existing one it binds — the same operation either way.
+  assert.match(credentialRow, /api\.moveCredential\(accountName, kind, target, \{ merge \}\)/);
+  assert.match(credentialRow, /api\.removeCredential\(accountName, kind\)/);
+  // Unbinding is not undoable from here, so it confirms like deleting an account.
+  assert.match(credentialRow, /if \(!confirming\)/);
   assert.match(renderBody, /api\.setProfileEnabled\(name, toggle\.checked\)\.then\(\(\) => \{/);
   assert.match(renderBody, /updateOpenCodeProfilesStatus\(\);/);
   assert.doesNotMatch(renderBody, /if \(toggle\.checked\) updateOpenCodeProfilesStatus\(\)/);

@@ -13462,28 +13462,23 @@ function renderOpenCodeProfiles() {
         nameInput.select();
       }
       // Renaming onto an existing account merges the two, which asserts they are
-      // the same OpenCode account. That claim is never made silently: the first
-      // attempt is refused and the message explains what confirming means.
+      // the same OpenCode account. That claim gets a visible button rather than
+      // a repeated keypress: confirming should be something the user chooses,
+      // not something they discover by pressing Enter again.
+      const mergeBtn = document.createElement('button');
+      mergeBtn.className = 'credential-merge-btn hidden';
       let pendingMergeName = '';
-      async function endRename(save) {
-        if (!editing) return;
-        editing = false;
-        nameInput.classList.add('hidden');
-        nameSpan.classList.remove('hidden');
-        const next = nameInput.value.trim();
-        if (!save || !next || next === name) { pendingMergeName = ''; return; }
-
+      const applyRename = async (next, merge) => {
         const errorEl = document.getElementById('opencodeErrorMessage');
-        const merge = pendingMergeName === next;
-        pendingMergeName = '';
         const result = await api.renameProfile(name, next, { merge });
         if (!result.ok) {
           if (result.nameTaken) {
             pendingMergeName = next;
-            errorEl.textContent = t('settings.opencode.mergeConfirm', { name: next });
-          } else {
-            errorEl.textContent = result.error || t('settings.opencode.saveFailedShort');
+            mergeBtn.textContent = t('settings.opencode.mergeInto', { name: next });
+            mergeBtn.classList.remove('hidden');
+            return;
           }
+          errorEl.textContent = result.error || t('settings.opencode.saveFailedShort');
           errorEl.classList.remove('hidden');
           return;
         }
@@ -13491,6 +13486,16 @@ function renderOpenCodeProfiles() {
         renderOpenCodeProfiles();
         updateOpenCodeProfilesStatus();
         renderSettingsSummaries();
+      };
+      mergeBtn.addEventListener('click', () => applyRename(pendingMergeName, true));
+      async function endRename(save) {
+        if (!editing) return;
+        editing = false;
+        nameInput.classList.add('hidden');
+        nameSpan.classList.remove('hidden');
+        const next = nameInput.value.trim();
+        if (!save || !next || next === name) return;
+        await applyRename(next, false);
       }
       renameBtn.addEventListener('click', beginRename);
       nameInput.addEventListener('keydown', (e) => {
@@ -13500,44 +13505,22 @@ function renderOpenCodeProfiles() {
       nameInput.addEventListener('blur', () => endRename(true));
 
       // Which credentials this account holds. Two of them under one name is the
-      // user's own assertion that they are the same OpenCode account, and that
-      // assertion changes which source answers for quota and which identity the
-      // account is published under — so it has to stay visible afterwards.
-      // Which credentials this account holds, each removable on its own. Two of
-      // them under one name is the user's assertion that they are the same
-      // OpenCode account, and that assertion decides which source answers for
-      // quota and which identity the account is published under — so it stays
-      // visible, and undoing it must not cost the credential they wanted.
-      const detail = document.createElement('span');
-      detail.className = 'profile-detail';
+      // user's assertion that they are the same OpenCode account, and that
+      // assertion decides which source answers for quota and which identity the
+      // account is published under, so it stays visible. Acting on them lives in
+      // the expanded section rather than inline: a click that unbinds an account
+      // should not sit one pixel from the account's own controls.
       const credentials = [
         ['ambient', profile.usesAmbientKey, t('settings.opencode.ambientName')],
         ['api', profile.hasApiKey, t('settings.opencode.kindApi')],
         ['cookie', profile.hasCookie, t('settings.opencode.kindCookie')]
       ].filter(([, present]) => present);
-      const removable = credentials.length > 1;
-      for (const [kind, , label] of credentials) {
-        const chip = document.createElement('span');
-        chip.className = 'profile-credential';
-        chip.textContent = label;
-        if (removable) {
-          const drop = document.createElement('button');
-          drop.className = 'profile-credential-remove';
-          drop.textContent = '×';
-          drop.title = t('settings.opencode.removeCredential', { kind: label });
-          drop.addEventListener('click', async () => {
-            const result = await api.removeCredential(name, kind);
-            if (!result.ok) return;
-            renderOpenCodeProfiles();
-            updateOpenCodeProfilesStatus();
-            renderSettingsSummaries();
-          });
-          chip.append(drop);
-        }
-        detail.append(chip);
-      }
 
-      nameBox.append(nameSpan, nameInput, renameBtn, detail);
+      const detail = document.createElement('span');
+      detail.className = 'profile-detail';
+      detail.textContent = credentials.map(([, , label]) => label).join(' + ');
+
+      nameBox.append(nameSpan, nameInput, renameBtn, mergeBtn, detail);
 
       const rightBox = document.createElement('span');
       rightBox.className = 'profile-right';
@@ -13566,13 +13549,142 @@ function renderOpenCodeProfiles() {
         renderSettingsSummaries();
       });
 
-      rightBox.append(infoSpan, deleteBtn);
+      // Expanding is only worth offering once an account holds more than one
+      // credential — with a single one the row already says everything.
+      let expandBtn = null;
+      let credentialList = null;
+      if (credentials.length > 1) {
+        expandBtn = document.createElement('button');
+        expandBtn.className = 'profile-expand-btn';
+        expandBtn.textContent = '⌄';
+        expandBtn.title = t('settings.opencode.showCredentials');
+        expandBtn.setAttribute('aria-expanded', 'false');
+
+        credentialList = document.createElement('div');
+        credentialList.className = 'opencode-credential-list hidden';
+        for (const [kind, , label] of credentials) {
+          credentialList.append(opencodeCredentialRow(name, kind, label));
+        }
+
+        expandBtn.addEventListener('click', () => {
+          const open = credentialList.classList.toggle('hidden') === false;
+          expandBtn.setAttribute('aria-expanded', String(open));
+          expandBtn.classList.toggle('is-open', open);
+        });
+      }
+
+      rightBox.append(infoSpan, ...(expandBtn ? [expandBtn] : []), deleteBtn);
       item.append(toggle, nameBox, rightBox);
+      if (credentialList) item.append(credentialList);
       listEl.appendChild(item);
     }
 
     updateOpenCodeProfilesStatus();
   });
+}
+
+// One credential inside an expanded account. Renaming moves it to another
+// account name, which is what splits a binding apart or forms a new one;
+// deleting drops just this credential and leaves the rest of the account.
+function opencodeCredentialRow(accountName, kind, label) {
+  const api = window.tokenMonitor.opencode;
+  const errorEl = () => document.getElementById('opencodeErrorMessage');
+  const refresh = () => {
+    renderOpenCodeProfiles();
+    updateOpenCodeProfilesStatus();
+    renderSettingsSummaries();
+  };
+
+  const row = document.createElement('div');
+  row.className = 'opencode-credential-row';
+
+  const labelSpan = document.createElement('span');
+  labelSpan.className = 'credential-label';
+  labelSpan.textContent = label;
+
+  const nameInput = document.createElement('input');
+  nameInput.className = 'credential-name-input hidden';
+  nameInput.type = 'text';
+  nameInput.placeholder = t('settings.opencode.profileNamePlaceholder');
+
+  const actions = document.createElement('span');
+  actions.className = 'credential-actions';
+
+  const moveBtn = document.createElement('button');
+  moveBtn.className = 'profile-rename-btn';
+  moveBtn.textContent = '✎';
+  moveBtn.title = t('settings.opencode.moveCredential', { kind: label });
+
+  // A merge is a claim that two credentials belong to one OpenCode account, so
+  // it is confirmed with a visible button rather than by pressing the same key
+  // twice and hoping the user reads why.
+  const mergeBtn = document.createElement('button');
+  mergeBtn.className = 'credential-merge-btn hidden';
+  let pendingTarget = '';
+
+  let editing = false;
+  const beginMove = () => {
+    if (editing) return;
+    editing = true;
+    nameInput.value = accountName;
+    labelSpan.classList.add('hidden');
+    nameInput.classList.remove('hidden');
+    nameInput.focus();
+    nameInput.select();
+  };
+  const finishMove = async (target, merge) => {
+    const result = await api.moveCredential(accountName, kind, target, { merge });
+    if (!result.ok) {
+      if (result.nameTaken) {
+        pendingTarget = target;
+        mergeBtn.textContent = t('settings.opencode.mergeInto', { name: target });
+        mergeBtn.classList.remove('hidden');
+        return;
+      }
+      errorEl().textContent = result.error || t('settings.opencode.saveFailedShort');
+      errorEl().classList.remove('hidden');
+      return;
+    }
+    refresh();
+  };
+  const endMove = async (save) => {
+    if (!editing) return;
+    editing = false;
+    nameInput.classList.add('hidden');
+    labelSpan.classList.remove('hidden');
+    const target = nameInput.value.trim();
+    if (!save || !target || target === accountName) return;
+    await finishMove(target, false);
+  };
+
+  moveBtn.addEventListener('click', beginMove);
+  nameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') endMove(true);
+    if (e.key === 'Escape') endMove(false);
+  });
+  nameInput.addEventListener('blur', () => endMove(true));
+  mergeBtn.addEventListener('click', () => finishMove(pendingTarget, true));
+
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'profile-delete';
+  removeBtn.textContent = '✕';
+  removeBtn.title = t('settings.opencode.removeCredential', { kind: label });
+  // Two-step, like deleting an account: unbinding is not undoable from here.
+  let confirming = false;
+  removeBtn.addEventListener('click', async () => {
+    if (!confirming) {
+      confirming = true;
+      removeBtn.classList.add('confirming');
+      removeBtn.textContent = '✓';
+      return;
+    }
+    const result = await api.removeCredential(accountName, kind);
+    if (result.ok) refresh();
+  });
+
+  actions.append(moveBtn, removeBtn);
+  row.append(labelSpan, nameInput, mergeBtn, actions);
+  return row;
 }
 
 async function updateOpenCodeProfilesStatus() {

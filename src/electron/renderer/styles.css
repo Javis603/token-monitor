@@ -5571,35 +5571,76 @@ html.is-windows .limit-live-badge {
 .opencode-profile-item.is-ambient .profile-name {
   color: var(--muted);
 }
-/* One chip per credential the account holds, each removable once there is more
-   than one — undoing a binding must not cost the credential being kept. */
-.opencode-profile-item .profile-credential {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-.opencode-profile-item .profile-credential + .profile-credential::before {
-  content: '+';
-  margin-right: 3px;
-  opacity: 0.5;
-}
-.opencode-profile-item .profile-credential-remove {
-  padding: 0;
+/* Acting on a single credential lives in the expanded section, not inline next
+   to the account's own controls: unbinding is one click and should not sit a
+   pixel away from the control that disables the whole account. */
+.opencode-profile-item .profile-expand-btn {
+  padding: 0 2px;
   border: 0;
   background: none;
-  color: inherit;
+  color: var(--muted);
   font: inherit;
+  font-size: 10px;
   line-height: 1;
-  opacity: 0;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.opencode-profile-item .profile-expand-btn.is-open {
+  transform: rotate(180deg);
+}
+.opencode-credential-list {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+}
+.opencode-credential-list.hidden { display: none; }
+.opencode-credential-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 0 3px 8px;
+  border-left: 1px solid var(--line);
+}
+.opencode-credential-row .credential-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 10px;
+}
+.opencode-credential-row .credential-name-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  box-sizing: border-box;
+  font-size: 11px;
+}
+.opencode-credential-row .credential-name-input.hidden { display: none; }
+.opencode-credential-row .credential-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+/* Merging asserts two credentials are one account, so confirming is a button
+   the user chooses rather than a keypress they repeat. */
+.credential-merge-btn {
+  padding: 2px 6px;
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: 4px;
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.3;
+  white-space: nowrap;
   cursor: pointer;
 }
-.opencode-profile-item:hover .profile-credential-remove {
-  opacity: 0.55;
-}
-.opencode-profile-item .profile-credential-remove:hover,
-.opencode-profile-item .profile-credential-remove:focus-visible {
-  opacity: 1;
-}
+.credential-merge-btn.hidden { display: none; }
 .opencode-profile-item .profile-name-box {
   display: grid;
   grid-template-columns: minmax(0, max-content) auto minmax(0, 1fr);

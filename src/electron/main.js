@@ -6730,6 +6730,47 @@ app.whenReady().then(() => {
     });
     return { ok: true };
   });
+  // Moves one credential to another account name, creating it when needed. This
+  // is what "rename a credential" means in a model where the name is the
+  // account: moving it to a fresh name splits it off, moving it onto an
+  // existing name binds it there. The value never crosses to the renderer.
+  ipcMain.handle('opencode:moveCredential', async (_event, name, kind, targetName, options = {}) => {
+    const profiles = settings.opencodeProfiles || {};
+    const profile = profiles[name];
+    if (!profile) return { ok: false, error: 'Profile not found' };
+    const field = { api: 'apiKey', cookie: 'cookie', ambient: 'useAmbientKey' }[kind];
+    if (!field) return { ok: false, error: `Unknown credential kind: ${kind}` };
+    if (!profile[field]) return { ok: false, error: 'Credential not found' };
+
+    const target = String(targetName || '').trim();
+    if (!target) return { ok: false, error: 'Empty name' };
+    if (target === name) return { ok: true };
+    // Landing on an account that already exists asserts they are one account,
+    // so it needs the same confirmation as any other binding.
+    if (profiles[target] && options.merge !== true) {
+      return { ok: false, error: 'Profile name already exists', nameTaken: true };
+    }
+
+    const source = { ...profile };
+    const value = source[field];
+    delete source[field];
+    if (!source.apiKey && !source.cookie && !source.useAmbientKey) delete profiles[name];
+    else profiles[name] = source;
+    profiles[target] = { ...(profiles[target] || { enabled: true }), [field]: value };
+    settings.opencodeProfiles = profiles;
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not persist OpenCode credential move' };
+    }
+    opencodeStatusCache = { value: null, at: 0 };
+    for (const account of [name, target]) {
+      void queueLimitInvalidation({ provider: 'opencode', accountName: account }, 'credential-move', {
+        clear: true
+      });
+    }
+    return { ok: true };
+  });
   // `merge` is the caller confirming that renaming onto an existing account
   // asserts the two are the same OpenCode account — the same claim as saving a
   // second credential under one name, and the only thing that licenses reading
