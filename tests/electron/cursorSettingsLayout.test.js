@@ -1360,19 +1360,18 @@ test('a zero-config OpenCode machine is not reported as unconfigured', () => {
     main.indexOf('async function probeOpenCodeApiKey')
   );
   assert.ok(gate, 'ambient gate should exist');
-  // It must mirror the collector's selection, which gates on enabled
-  // credentials: a disabled account supplies nothing to the collector, so the
-  // ambient key is what actually answers and the panel has to say so.
-  assert.match(gate, /p\?\.enabled && \(p\.apiKey \|\| p\.cookie\)/);
-  assert.match(gate, /hasEnvCookie \|\| settings\.opencodeCookie/);
+  // It must mirror the collector's selection: the ambient key is its own
+  // account whenever it exists, and is hidden only once a saved account carries
+  // that same key — the point at which the user has said they are one account.
   assert.match(gate, /opencodeGoApi\.readGoApiKey\(process\.env\)/);
+  assert.match(gate, /p\?\.apiKey === ambientKey/);
 
   const status = main.slice(
     main.indexOf("ipcMain.handle('opencode:status'"),
     main.indexOf("ipcMain.handle('opencode:getProfiles'")
   );
   assert.ok(status, 'status handler should exist');
-  assert.match(status, /opencodeAmbientKeyActive\(profiles, Boolean\(envCookie\)\)/);
+  assert.match(status, /opencodeAmbientKeyActive\(profiles\)/);
   assert.match(status, /OPENCODE_AMBIENT_ACCOUNT_KEY/);
 
   const profilesHandler = main.slice(

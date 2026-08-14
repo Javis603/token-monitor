@@ -3139,6 +3139,11 @@ const OPENCODE_COMPONENT_PROVENANCE_DETAIL = 'managed';
 // for this account, so a later source may still answer.
 const OPENCODE_REMOTE_FAIL_STATUSES = ['unauthorized', 'sourceRateLimited', 'unavailable'];
 
+// Name for the account behind the key OpenCode stores for itself. Parallel to
+// the existing 'default (env)' entry: not a user-chosen name, so it cannot be
+// mistaken for a saved account, and stable so the row keeps its identity.
+const OPENCODE_AMBIENT_ACCOUNT_NAME = 'default (auto)';
+
 function openCodeSupplementalZenWindows(goWeb, zen) {
   const goWindowKeys = new Set(
     (goWeb?.status === 'ok' ? goWeb.windows || [] : [])
@@ -3156,6 +3161,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   const updatedAt = nowIso(nowMs);
   const collectGo = deps.opencodeCollectGo || ((d) => opencodeLimits.collectGo(d));
   const collectGoApi = deps.opencodeCollectGoApi || ((d) => opencodeGoApi.collectGoApi(d));
+  const readGoApiKey = deps.opencodeReadGoApiKey || ((env) => opencodeGoApi.readGoApiKey(env));
   const fetchGoWeb = deps.opencodeFetchGoWeb || ((cookie, d) => opencodeWeb.fetchGoWeb(cookie, d));
   const fetchZen = deps.opencodeFetchZen || ((cookie, d) => opencodeWeb.fetchZen(cookie, d));
 
@@ -3186,10 +3192,22 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     cookies.push({ name: 'default (env)', cookie: envCookie });
   }
 
-  // Explicit profiles take over from the auto-detected local key exactly as they
-  // already take over from `opencodeCookie`: once the user manages the account
-  // list, nothing is added to it behind their back. The zero-config path is
-  // untouched below, where 0 or 1 profile still falls back to auth.json.
+  // The key OpenCode stores for itself is an account too, so it is always
+  // tracked — same rule as the env cookie above, and skipped once a profile
+  // carries it. It is deliberately its own entry rather than being folded into
+  // a configured account: nothing can prove the locally signed-in account is
+  // the account behind a cookie, since the usage endpoint returns no workspace
+  // id to compare. Two rows for what may be one account is a display
+  // imprecision where every number shown is still its own source's truth;
+  // folding them would publish one account's quota under the other's identity,
+  // and suppressing it would silently drop the zero-config path the moment any
+  // account exists. A user who knows they are the same account says so by
+  // saving the key under that account's name, which merges them here.
+  const ambientKey = readGoApiKey(deps.env || process.env);
+  if (ambientKey && !cookies.some((c) => c.apiKey === ambientKey)) {
+    cookies.push({ name: OPENCODE_AMBIENT_ACCOUNT_NAME, apiKey: ambientKey, ambient: true });
+  }
+
   const multiAccountMode = cookies.length > 1;
   const scope = options.limitRefreshScope?.provider === 'opencode'
     ? options.limitRefreshScope
@@ -3210,33 +3228,19 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       : { status: 'notConfigured', windows: [] };
     const primary = cookies[0] || {};
     const cookie = primary.cookie;
-    // Which key this account is read with:
-    //   profile carrying a key -> that key (with or without a cookie beside it)
-    //   any other configuration -> none ('' suppresses the ambient lookup)
-    //   nothing configured at all -> undefined, i.e. the ambient auth.json/env key
-    //
-    // The ambient key is deliberately never paired with a credential the user
-    // configured. Pairing them asserts that whoever is signed in to OpenCode on
-    // this machine is the same account, and nothing can verify that: the usage
-    // endpoint returns no workspace id to compare against the cookie's. Where
-    // they differ the cookie's workspace identity wins further down
-    // (`webAccountKey`), so the result would publish one account's quota — and
-    // merge it across devices — under the other account's identity.
-    //
-    // The gate is what is *enabled*, not whether a profile map exists. A stored
-    // but disabled account contributes no credential to pair with, so the
-    // ambient key stands alone under its own identity and nothing can be
-    // mis-attributed. Gating on the map instead makes turning every account off
-    // also turn off the zero-config path, which is not what disabling an
-    // account asks for.
-    const primaryApiKey = primary.apiKey || (cookie ? '' : undefined);
+    // Only this entry's own key, never the ambient one as a stand-in. The
+    // ambient key is its own entry above; reaching for it here would pair it
+    // with a cookie whose account nothing can prove it shares, and the cookie's
+    // workspace identity wins below, so the result would publish one account's
+    // quota — and merge it across devices — under the other's identity.
+    const primaryApiKey = primary.apiKey || '';
     const [goApi, goWeb, zen] = await Promise.all([
       collectGoApi({
         env: deps.env || process.env,
         now: () => nowMs,
         fetch: deps.fetch,
         signal: deps.signal,
-        ...(primaryApiKey === undefined ? {} : { apiKey: primaryApiKey })
+        apiKey: primaryApiKey
       }),
       cookie ? fetchGoWeb(cookie, { now: () => nowMs }) : null,
       cookie ? fetchZen(cookie, { now: () => nowMs, workspaceId: '' }) : null

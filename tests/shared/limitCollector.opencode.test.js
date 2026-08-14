@@ -6,11 +6,13 @@ const { hashKey } = require('../../src/shared/hashKey');
 const { aggregateLimits } = require('../../src/shared/limits');
 
 // The Go usage API is a zero-config path: left unstubbed it would read the
-// developer's real auth.json and probe opencode.ai. Default it to "no key" so
-// each test opts in to the response it actually wants.
+// developer's real auth.json and probe opencode.ai, and the ambient key would
+// silently add a second account to every fixture. Both are defaulted to "no
+// key" so each test opts in to the credentials it actually wants.
 const OPENCODE_API_UNCONFIGURED = { status: 'notConfigured', windows: [], identity: '' };
 const collectLimitsOnce = (options, deps = {}) => collectLimitsOnceRaw(options, {
   opencodeCollectGoApi: async () => OPENCODE_API_UNCONFIGURED,
+  opencodeReadGoApiKey: () => '',
   ...deps
 });
 
@@ -873,9 +875,13 @@ test('zero configuration still reads the ambient key', async () => {
   const seen = [];
   const summary = await collectLimitsOnce(
     { limitProviders: 'opencode', limitsEnabled: true },
-    { now: () => now403, opencodeCollectGoApi: async (d) => { seen.push(d.apiKey); return goApiOk; } }
+    {
+      now: () => now403,
+      opencodeReadGoApiKey: () => 'ambient-key',
+      opencodeCollectGoApi: async (d) => { seen.push(d.apiKey); return goApiOk; }
+    }
   );
-  assert.deepStrictEqual(seen, [undefined]);
+  assert.deepStrictEqual(seen, ['ambient-key']);
   assert.strictEqual(summary.providers.find((x) => x.provider === 'opencode').source, 'api');
 });
 
@@ -896,11 +902,61 @@ test('a single API account keeps its identity when the probe fails', async () =>
   assert.notStrictEqual(failed.accountKey, '');
 });
 
-test('disabling every account falls back to the auto-detected one', async () => {
-  // A disabled account contributes no credential, so there is nothing for the
-  // ambient key to be mis-paired with: it stands alone under its own identity.
-  // Gating on "a profile map exists" instead would make turning every account
-  // off also turn off the zero-config path, which is not what that asks for.
+test('the auto-detected account is tracked alongside a configured one', async () => {
+  // Two rows, because nothing can prove the locally signed-in account is the
+  // account behind the cookie. Folding them would publish one account's quota
+  // under the other's identity; hiding the ambient one would drop the
+  // zero-config path the moment anything is configured. A user who knows they
+  // are one account says so by saving the key under that account's name.
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: { work: { enabled: true, cookie: 'sess=work' } }
+    },
+    {
+      now: () => now403,
+      opencodeReadGoApiKey: () => 'ambient-key',
+      opencodeCollectGoApi: async (d) => (d.apiKey === 'ambient-key'
+        ? goApiOk
+        : { status: 'notConfigured', windows: [], identity: '' }),
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 6 })
+    }
+  );
+  const rows = summary.providers.filter((x) => x.provider === 'opencode');
+  assert.strictEqual(rows.length, 2);
+  const auto = rows.find((r) => r.source === 'api');
+  const cookieAccount = rows.find((r) => r.source === 'web');
+  assert.strictEqual(auto.windows.find((w) => w.kind === 'weekly').usedPercent, 57);
+  assert.strictEqual(auto.balanceUsd, null);
+  assert.strictEqual(cookieAccount.windows.find((w) => w.kind === 'weekly').usedPercent, 11);
+  assert.strictEqual(cookieAccount.balanceUsd, 6);
+  assert.notStrictEqual(auto.accountKey, cookieAccount.accountKey);
+});
+
+test('binding the ambient key into an account stops tracking it separately', async () => {
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: { work: { enabled: true, apiKey: 'ambient-key', cookie: 'sess=work' } }
+    },
+    {
+      now: () => now403,
+      opencodeReadGoApiKey: () => 'ambient-key',
+      opencodeCollectGoApi: async () => goApiOk,
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 6 })
+    }
+  );
+  const rows = summary.providers.filter((x) => x.provider === 'opencode');
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].source, 'api');
+  assert.strictEqual(rows[0].balanceUsd, 6);
+});
+
+test('disabling every account still leaves the auto-detected one', async () => {
   const seen = [];
   const summary = await collectLimitsOnce(
     {
@@ -913,16 +969,11 @@ test('disabling every account falls back to the auto-detected one', async () => 
     },
     {
       now: () => now403,
-      // Faithful to the real collectGoApi: undefined resolves the ambient key,
-      // '' suppresses it. A stub ignoring apiKey would assert a state that
-      // production cannot reach.
-      opencodeCollectGoApi: async (d) => {
-        seen.push(d.apiKey);
-        return d.apiKey === undefined ? goApiOk : { status: 'notConfigured', windows: [], identity: '' };
-      }
+      opencodeReadGoApiKey: () => 'ambient-key',
+      opencodeCollectGoApi: async (d) => { seen.push(d.apiKey); return goApiOk; }
     }
   );
-  assert.deepStrictEqual(seen, [undefined]);
+  assert.deepStrictEqual(seen, ['ambient-key']);
   const p = summary.providers.find((x) => x.provider === 'opencode');
   assert.strictEqual(p.status, 'ok');
   assert.strictEqual(p.source, 'api');

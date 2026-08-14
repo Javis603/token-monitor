@@ -133,14 +133,14 @@ const OPENCODE_AMBIENT_ACCOUNT_KEY = '__ambient';
 // the ambient key is read only when nothing at all is configured, so the panel
 // must apply the same three conditions or it will claim an auto-detected
 // account the collector is not actually using. See fetchOpenCodeLimits.
-function opencodeAmbientKeyActive(profiles, hasEnvCookie) {
-  // Enabled credentials only: a stored but disabled account supplies nothing to
-  // the collector, so the ambient key is what actually answers and the panel has
-  // to say so.
-  const enabled = Object.values(profiles || {}).filter((p) => p?.enabled && (p.apiKey || p.cookie));
-  if (enabled.length > 0) return false;
-  if (hasEnvCookie || settings.opencodeCookie) return false;
-  return Boolean(opencodeGoApi.readGoApiKey(process.env));
+function opencodeAmbientKeyActive(profiles) {
+  const ambientKey = opencodeGoApi.readGoApiKey(process.env);
+  if (!ambientKey) return false;
+  // Tracked as its own account whenever it exists, and hidden only once a saved
+  // account carries the same key — the point at which the user has said the two
+  // are one account. Suppressing it because some other account is enabled would
+  // drop the zero-config path the moment anything is configured.
+  return !Object.values(profiles || {}).some((p) => p?.apiKey === ambientKey);
 }
 
 async function probeOpenCodeApiKey(apiKey) {
@@ -6577,7 +6577,7 @@ app.whenReady().then(() => {
     // Zero configuration still has an account behind it. Without probing the key
     // OpenCode stored for itself, the panel reports "not set up" while the limits
     // card is showing live quota read from that very key.
-    if (opencodeAmbientKeyActive(profiles, Boolean(envCookie))) {
+    if (opencodeAmbientKeyActive(profiles)) {
       const probe = await probeOpenCodeApiKey(opencodeGoApi.readGoApiKey(process.env));
       result[OPENCODE_AMBIENT_ACCOUNT_KEY] = {
         linked: probe.status === 'ok',
@@ -6603,7 +6603,7 @@ app.whenReady().then(() => {
     // Kept as its own field rather than folded into hasEnvVar: an environment
     // cookie and a key OpenCode stored for itself are different sources, and a
     // later reader seeing hasEnvVar would reasonably assume the former.
-    const hasAmbientKey = opencodeAmbientKeyActive(profiles, hasEnvVar);
+    const hasAmbientKey = opencodeAmbientKeyActive(profiles);
     // Credential values never cross to the renderer; which kinds exist does, so
     // the list can show what a profile actually holds.
     const safe = {};

@@ -23,6 +23,8 @@ const updatedAt = '2026-08-09T08:03:00.000Z';
 // auth.json and probes opencode.ai.
 const collectLimitsOnce = (options, deps = {}) => collectLimitsOnceRaw(options, {
   opencodeCollectGoApi: async () => ({ status: 'notConfigured', windows: [], identity: '' }),
+  // Without this the ambient key adds a second account to every fixture here.
+  opencodeReadGoApiKey: () => '',
   ...deps
 });
 
