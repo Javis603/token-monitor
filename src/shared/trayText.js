@@ -32,6 +32,35 @@
     return platform === 'darwin';
   }
 
+  // Generated tray icons are drawn in a single ink colour picked here rather than
+  // at each canvas, so the bars, the session text and the custom layout cannot
+  // drift apart. macOS keeps the black: its icons ship as template images and the
+  // menubar re-inks them for light and dark itself, so lightening the source would
+  // break the inversion. Every other platform hands the bitmap to the shell as-is,
+  // which is why a dark taskbar or panel needs light ink — black on black is how
+  // the icon went invisible. The light-surface values are the historical black.
+  const TRAY_INK_ON_LIGHT_SURFACE = { track: 'rgba(0, 0, 0, 0.32)', fill: 'rgba(0, 0, 0, 1)', text: 'rgba(0, 0, 0, 1)' };
+  const TRAY_INK_ON_DARK_SURFACE = { track: 'rgba(255, 255, 255, 0.32)', fill: 'rgba(255, 255, 255, 1)', text: 'rgba(255, 255, 255, 1)' };
+
+  function trayGeneratedIconColors(platform, systemDarkUi = false) {
+    if (platform === 'darwin' || systemDarkUi !== true) return { ...TRAY_INK_ON_LIGHT_SURFACE };
+    return { ...TRAY_INK_ON_DARK_SURFACE };
+  }
+
+  // Most provider marks are authored `fill="currentColor"`, i.e. they expect the
+  // host to ink them, and rasterize to flat black in a canvas. macOS re-inks them
+  // through the template image, so only the other platforms do it here — but in
+  // both directions, not just onto dark: a few marks are authored white and would
+  // otherwise vanish on a light taskbar exactly as the black ones did on a dark
+  // one. Full-colour brand artwork is never tinted, since flattening it to one
+  // ink throws the brand colour away — hence a monochrome test on the rasterized
+  // pixels rather than a list of ids that would drift as icons are added.
+  // Returns '' for "draw the artwork as it is".
+  function trayProviderGlyphInk(platform, systemDarkUi = false, monochrome = false) {
+    if (platform === 'darwin' || monochrome !== true) return '';
+    return systemDarkUi === true ? TRAY_INK_ON_DARK_SURFACE.text : TRAY_INK_ON_LIGHT_SURFACE.text;
+  }
+
   function formatCompactNumber(value, options = {}) {
     if (compactTokens?.formatCompactTokens) {
       return compactTokens.formatCompactTokens(
@@ -354,6 +383,8 @@
     pickRecentUsageProviderId,
     pickWorstLimit,
     pickWorstLimitProvider,
+    trayGeneratedIconColors,
+    trayProviderGlyphInk,
     trayShowsTitle,
     usageSessionActivityTimestampMs
   };

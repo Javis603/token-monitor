@@ -304,7 +304,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
@@ -10642,6 +10642,13 @@ window.addEventListener('blur', () => {
 
 async function init() {
   try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
+  state.systemDarkUi = state.appInfo?.systemDarkUi === true;
+  window.tokenMonitor.onSystemUiThemePush?.((payload) => {
+    const dark = payload?.dark === true;
+    if (dark === state.systemDarkUi) return;
+    state.systemDarkUi = dark;
+    void maybeUpdateBarsIcon();
+  });
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
   applyEffectiveCurrencyRates();
@@ -11491,15 +11498,31 @@ function providerImageOpticalSample(image) {
   ctx.drawImage(image, 0, 0, sampleSize, sampleSize);
 
   let bounds = { x: 0, y: 0, width: sampleSize, height: sampleSize };
+  // Whether every opaque pixel is grey: a mark authored `fill="currentColor"`
+  // rasterizes to flat black here and is meant to be re-inked, while brand
+  // artwork carries hue and must be left alone. Answered in the scan that
+  // already walks these pixels for the bounds, and cached alongside them.
+  // Unreadable pixels (a future non-local image) leave it false, i.e. untinted.
+  let monochrome = false;
   try {
     const pixels = ctx.getImageData(0, 0, sampleSize, sampleSize).data;
     let minX = sampleSize;
     let minY = sampleSize;
     let maxX = -1;
     let maxY = -1;
+    let grey = true;
     for (let y = 0; y < sampleSize; y += 1) {
       for (let x = 0; x < sampleSize; x += 1) {
-        if (pixels[(y * sampleSize + x) * 4 + 3] <= 12) continue;
+        const offset = (y * sampleSize + x) * 4;
+        if (pixels[offset + 3] <= 12) continue;
+        if (grey) {
+          const r = pixels[offset];
+          const g = pixels[offset + 1];
+          const b = pixels[offset + 2];
+          // Tolerance, not equality: PNG/SVG rasterization and subpixel edges
+          // leave a channel or two off by a hair on artwork that is still grey.
+          if (Math.max(r, g, b) - Math.min(r, g, b) > 12) grey = false;
+        }
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x);
@@ -11513,12 +11536,13 @@ function providerImageOpticalSample(image) {
         width: maxX - minX + 1,
         height: maxY - minY + 1
       };
+      monochrome = grey;
     }
   } catch (_) {
     // Keep the original frame if a future non-local image cannot be inspected.
   }
 
-  const sample = { canvas, bounds };
+  const sample = { canvas, bounds, monochrome };
   trayProviderImageOpticalSamples.set(image, sample);
   return sample;
 }
@@ -11553,6 +11577,21 @@ function paintProviderImage(ctx, image, x, y, size, templateColor = '') {
     maskCtx.fillRect(0, 0, maskSize, maskSize);
   }
   ctx.drawImage(mask, x, y, size, size);
+}
+
+// Which ink a provider mark is drawn in. An explicit colour always wins — the
+// menubar previews and the floating bubble pass their own, and the bubble
+// deliberately passes none to keep the artwork in colour. `trayInk` is set only
+// by the two paths that hand a bitmap to the system tray, where a monochrome
+// mark has to be re-inked for a dark taskbar (see trayProviderGlyphInk).
+function trayGlyphInk(options, image) {
+  if (options?.templateIconColor) return options.templateIconColor;
+  if (options?.trayInk !== true || !image) return '';
+  return window.TokenMonitorTrayText.trayProviderGlyphInk(
+    state.appInfo?.platform,
+    state.systemDarkUi,
+    providerImageOpticalSample(image).monochrome
+  );
 }
 
 function drawProviderImage(ctx, image, x, y, size, contrastHalo = false, templateColor = '') {
@@ -11591,7 +11630,7 @@ function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors =
       layout.iconY,
       layout.iconSize,
       options.providerContrastHalo === true,
-      options.templateIconColor || ''
+      trayGlyphInk(options, providerImage)
     );
   }
 
@@ -11727,7 +11766,7 @@ function renderLimitSessionsIcon(stats, height = 44, configOrder, colors = {}, o
     if (entry.image) {
       drawProviderImage(ctx, entry.image, x, layout.iconY, iconSize,
         options.providerContrastHalo === true,
-        options.templateIconColor || ''
+        trayGlyphInk(options, entry.image)
       );
       x += iconSize + gap;
     }
@@ -11915,7 +11954,7 @@ function drawCustomTrayProviderImage(ctx, img, provider, x, y, size, options = {
     y + inset,
     imageSize,
     options.providerContrastHalo === true,
-    options.templateIconColor || ''
+    trayGlyphInk(options, img)
   );
   if (showBadge) {
     drawCustomTrayProviderBadge(
@@ -12182,7 +12221,11 @@ async function maybeUpdateBarsIcon(options = {}) {
   const mode = state.settings?.trayContent;
   if (!window.TokenMonitorTrayText.isGeneratedTrayIconMode(mode)) return;
   if (!window.tokenMonitor.setTrayIcons) return;
-  const dataUrl = trayDataUrlForMode(mode, 44);
+  // Ink follows the surface the shell will draw this on, not the app's own theme
+  // (see trayGeneratedIconColors) — on a dark taskbar the historical black made
+  // the icon invisible.
+  const colors = window.TokenMonitorTrayText.trayGeneratedIconColors(state.appInfo?.platform, state.systemDarkUi);
+  const dataUrl = trayDataUrlForMode(mode, 44, colors, { trayInk: true });
   try { await window.tokenMonitor.setTrayIcons({ [mode]: dataUrl || null }); } catch (_) {}
 }
 
@@ -12520,7 +12563,7 @@ function providerImageToPngDataUrl(img, size, showBadge = false, options = {}) {
     imageInset,
     imageSize,
     false,
-    showBadge ? '' : options.templateColor || ''
+    showBadge ? '' : trayGlyphInk({ templateIconColor: options.templateColor, trayInk: options.trayInk }, img)
   );
 
   if (!showBadge) return canvas.toDataURL('image/png');
@@ -12564,7 +12607,7 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
       const img = await loadImage(path);
       trayProviderImages[id] = img;
       trayProviderImageIds.set(img, id);
-      icons[id] = providerImageToPngDataUrl(img, 44, showBadge);
+      icons[id] = providerImageToPngDataUrl(img, 44, showBadge, { trayInk: true });
     } catch (_) { /* skip missing */ }
   }
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;

@@ -693,7 +693,14 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.doesNotMatch(renderLimitSessionsIcon, /limitFillPercent/);
   assert.match(renderLimitSessionsIcon, /·/);
   assert.match(maybeUpdateBarsIcon, /TokenMonitorTrayText\.isGeneratedTrayIconMode\(mode\)/);
-  assert.match(maybeUpdateBarsIcon, /trayDataUrlForMode\(mode, 44\)/);
+  assert.match(maybeUpdateBarsIcon, /trayDataUrlForMode\(mode, 44, colors, \{ trayInk: true \}\)/);
+  // The tray ink must come from the platform-aware helper, not the app theme:
+  // macOS needs the black its template inversion expects, while a dark Windows
+  // taskbar needs light ink or the icon disappears into it.
+  assert.match(
+    maybeUpdateBarsIcon,
+    /const colors = window\.TokenMonitorTrayText\.trayGeneratedIconColors\(state\.appInfo\?\.platform, state\.systemDarkUi\)/
+  );
   assert.match(maybeUpdateBarsIcon, /\{ \[mode\]: dataUrl \|\| null \}/);
   assert.match(updateTrayDisplay, /mode === 'limitsAllSessions'/);
   assert.match(updateTrayDisplay, /const barsImageMode = isBarsTrayIconMode\(mode\) && !limitText && providerTrayIcons\[mode\]/);
@@ -718,7 +725,9 @@ test('provider tray badges are opt-in and keep monochrome assets visible', () =>
   assert.match(app, /showTrayProviderBadgeInput: document\.getElementById\('showTrayProviderBadgeInput'\)/);
   assert.match(app, /saveSettings\(\{ showTrayProviderBadge: els\.showTrayProviderBadgeInput\.checked \}\)/);
   assert.match(app, /deliverTrayProviderIcons\(patch\.showTrayProviderBadge === true\)/);
-  assert.match(app, /providerImageToPngDataUrl\(img, 44, showBadge\)/);
+  // `trayInk` is what lets a monochrome mark be re-inked for a dark taskbar; the
+  // badge path still keeps the artwork in colour inside providerImageToPngDataUrl.
+  assert.match(app, /providerImageToPngDataUrl\(img, 44, showBadge, \{ trayInk: true \}\)/);
   assert.match(app, /if \(!trayProviderIconDeliveryGuard\.isCurrent\(deliveryId\)\) return;/);
   assert.match(providerImage, /if \(!showBadge\) return canvas\.toDataURL\('image\/png'\)/);
   assert.match(providerImage, /shadowColor = 'rgba\(255, 255, 255, 0\.95\)'/);
