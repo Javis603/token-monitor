@@ -128,6 +128,17 @@ const OPENCODE_API_PROBE_TIMEOUT_MS = 15_000;
 // The auto-detected key has an account of its own for exactly as long as no
 // stored account claims it. Ownership is the shared predicate the collector
 // uses, so the panel never offers a row the collector is not scanning.
+// The auto-detected account is not addressable by name, because it has none.
+// Every credential mutation queues an account-scoped refresh, and a scoped
+// refresh rebuilds only the account it names, so nothing could ever create its
+// row or retire it: removing the credential that claimed the key left the card
+// without the account that took it over, and naming it left the old synthetic
+// row behind. When ownership of the key changes, the whole provider is rebuilt.
+function refreshOpencodeAmbientOwnership(wasActive) {
+  if (opencodeAmbientKeyActive(settings.opencodeProfiles || {}) === wasActive) return;
+  void queueLimitInvalidation({ provider: 'opencode' }, 'ambient-ownership', { clear: true });
+}
+
 function opencodeAmbientKeyActive(profiles) {
   const ambientKey = opencodeGoApi.readGoApiKey(process.env);
   if (!ambientKey) return false;
@@ -6718,6 +6729,7 @@ app.whenReady().then(() => {
       // binding is refused here until the caller confirms it, whichever UI path
       // asked. A blur that happens to land on an existing name must not be able
       // to make that claim on the user's behalf.
+      const ambientWasActive = opencodeAmbientKeyActive(settings.opencodeProfiles || {});
       const result = opencodeProfiles.saveCredential(
         settings.opencodeProfiles || {},
         name,
@@ -6729,6 +6741,7 @@ app.whenReady().then(() => {
       saveSettings({ throwOnError: true });
       opencodeStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'opencode', accountName: name }, 'profile-save');
+      refreshOpencodeAmbientOwnership(ambientWasActive);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -6736,6 +6749,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('opencode:deleteProfile', async (_event, name) => {
     const profiles = settings.opencodeProfiles || {};
+    const ambientWasActive = opencodeAmbientKeyActive(profiles);
     const deletedProfile = profiles[name];
     delete profiles[name];
     if (deletedProfile?.cookie && settings.opencodeCookie === deletedProfile.cookie) {
@@ -6752,12 +6766,14 @@ app.whenReady().then(() => {
       clear: true,
       refresh: false
     });
+    refreshOpencodeAmbientOwnership(ambientWasActive);
     return { ok: true };
   });
   // Removes one credential from an account, leaving the others. Deleting the
   // account removes all of them; this is how a binding is undone without
   // losing the credential the user wanted to keep.
   ipcMain.handle('opencode:removeCredential', async (_event, name, kind) => {
+    const ambientWasActive = opencodeAmbientKeyActive(settings.opencodeProfiles || {});
     const result = opencodeProfiles.removeCredential(settings.opencodeProfiles || {}, name, kind);
     if (!result.ok) return result;
     if (result.removedCookie && settings.opencodeCookie === result.removedCookie) {
@@ -6773,6 +6789,7 @@ app.whenReady().then(() => {
     void queueLimitInvalidation({ provider: 'opencode', accountName: name }, 'credential-remove', {
       clear: true
     });
+    refreshOpencodeAmbientOwnership(ambientWasActive);
     return { ok: true };
   });
   // Moves one credential to another account name, creating it when needed. This
@@ -6780,6 +6797,7 @@ app.whenReady().then(() => {
   // account: moving it to a fresh name splits it off, moving it onto an
   // existing name binds it there. The value never crosses to the renderer.
   ipcMain.handle('opencode:moveCredential', async (_event, name, kind, targetName, options = {}) => {
+    const ambientWasActive = opencodeAmbientKeyActive(settings.opencodeProfiles || {});
     const result = opencodeProfiles.moveCredential(
       settings.opencodeProfiles || {},
       name,
@@ -6802,6 +6820,7 @@ app.whenReady().then(() => {
         clear: true
       });
     }
+    refreshOpencodeAmbientOwnership(ambientWasActive);
     return { ok: true };
   });
   // `merge` is the caller confirming that renaming onto an existing account
@@ -6810,6 +6829,7 @@ app.whenReady().then(() => {
   // quota from one credential while identity comes from another. Without it an
   // existing name is refused, so the assertion is never made by accident.
   ipcMain.handle('opencode:renameProfile', async (_event, oldName, newName, options = {}) => {
+    const ambientWasActive = opencodeAmbientKeyActive(settings.opencodeProfiles || {});
     const result = opencodeProfiles.renameProfile(
       settings.opencodeProfiles || {},
       oldName,
@@ -6829,6 +6849,7 @@ app.whenReady().then(() => {
       refresh: false
     });
     void queueLimitInvalidation({ provider: 'opencode', accountName: newName }, 'profile-rename');
+    refreshOpencodeAmbientOwnership(ambientWasActive);
     return { ok: true };
   });
   ipcMain.handle('opencode:setProfileEnabled', async (_event, name, enabled) => {

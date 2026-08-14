@@ -5023,10 +5023,10 @@ function renderMimoAccountGroup(label, providers, color) {
 
 function opencodeAccountTitle(provider, index) {
   const name = String(provider?.accountName || '').trim();
-  // The auto-detected account has no user-given name, so the collector publishes
-  // a canonical English one and it is localized here rather than on the wire,
-  // where another device may be reading in a different language.
-  if (name === 'Auto-detected') return t('settings.opencode.ambientName');
+  // The collector's canonical name is shown as-is. This column holds account
+  // names, which are user strings and almost never translated, so a localized
+  // phrase reads as a stray UI label among them — and the plan and source
+  // columns beside it are English for the same reason.
   if (name) return name;
   // Older synced clients put the user-defined profile name in accountLabel.
   // Keep those rows identifiable while new clients carry profile and plan in
@@ -13808,10 +13808,10 @@ async function updateOpenCodeProfilesStatus() {
     if (!infoEl) continue;
 
     if (s.needsRebind) {
-      // The key this reference was bound to is no longer the one on the machine.
-      // Nothing is broken and nothing expired; the account just has to be told
-      // whether the key now present is the same account.
-      infoEl.textContent = t('settings.opencode.needsRebind');
+      // Said once, on the credential line, which has room for it and is the
+      // thing that needs re-attaching. This cell is a fixed narrow column and
+      // would only repeat it truncated.
+      infoEl.textContent = '';
     } else if (s.expired) {
       infoEl.textContent = t('settings.opencode.statusExpired');
     } else if (s.linked) {
