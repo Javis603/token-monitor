@@ -184,6 +184,7 @@ const {
   pickUsageTrayIconId,
   popoverBounds,
   reconcileCodexAccountSelection,
+  runTrayMenuAction,
   sortCodexAccountsForDisplay,
   shouldUseTemplateTrayIcon,
   trayShowsTitle
@@ -3721,11 +3722,16 @@ function updateDiscordRpcDisplay(stats) {
   updateDiscordRpc(stats, settings?.currency, compactTokenDisplayOptions());
 }
 
+function refreshTrayContextMenu() {
+  if (!tray || tray.isDestroyed()) return;
+  if (typeof tray.refreshContextMenu === 'function') tray.refreshContextMenu();
+}
+
 function updateTrayDisplay() {
   if (!tray || tray.isDestroyed()) return;
   // Keep the exported D-Bus menu in sync (radio checks, refresh state, Codex
   // accounts) — see the Linux note in createTray().
-  if (typeof tray.refreshContextMenu === 'function') tray.refreshContextMenu();
+  refreshTrayContextMenu();
   const visibleStats = electronPresentationStats(latestStats);
   const mode = settings?.trayContent || 'tokens';
   const currency = normalizeCurrency(settings?.currency);
@@ -4300,21 +4306,24 @@ function sendMainWindowEvent(channel, payload, isStillCurrent) {
 async function refreshFromTray() {
   if (trayRefreshInFlight) return;
   const widgetProducerOwner = captureMacWidgetProducerOwner();
-  trayRefreshInFlight = true;
-  try {
-    const stats = await fetchStats({ force: true });
-    // Collector ticks normally publish their own final snapshot. Only bridge the
-    // result when fetchStats returned a different object (for example, a remote hub
-    // fetch while an external headless agent owns collection).
-    if (stats && stats !== latestStats) {
-      sendPush({ event: 'stats', data: { stats, mode, reason: 'manual' } }, { widgetProducerOwner });
+  return runTrayMenuAction({
+    setInFlight: (value) => { trayRefreshInFlight = value; },
+    refreshContextMenu: refreshTrayContextMenu,
+    action: async () => {
+      try {
+        const stats = await fetchStats({ force: true });
+        // Collector ticks normally publish their own final snapshot. Only bridge the
+        // result when fetchStats returned a different object (for example, a remote hub
+        // fetch while an external headless agent owns collection).
+        if (stats && stats !== latestStats) {
+          sendPush({ event: 'stats', data: { stats, mode, reason: 'manual' } }, { widgetProducerOwner });
+        }
+      } catch (error) {
+        console.warn(`[tray] refresh failed: ${error.message}`);
+        showTrayRefreshError(error?.message || error);
+      }
     }
-  } catch (error) {
-    console.warn(`[tray] refresh failed: ${error.message}`);
-    showTrayRefreshError(error?.message || error);
-  } finally {
-    trayRefreshInFlight = false;
-  }
+  });
 }
 
 function setTrayContentFromMenu(value) {
@@ -4420,22 +4429,25 @@ async function switchCodexAccountFromTray(accountId) {
   if (trayCodexSwitchInFlight || !accountId) return;
   const currentId = trayCodexPendingAccountId || trayCodexActiveAccountId;
   if (accountId === currentId) return;
-  trayCodexSwitchInFlight = true;
-  try {
-    const result = await switchCodexSystemAccount(accountId);
-    if (!result?.ok) {
-      showTrayCodexSwitchError(result?.error);
-      return;
+  return runTrayMenuAction({
+    setInFlight: (value) => { trayCodexSwitchInFlight = value; },
+    refreshContextMenu: refreshTrayContextMenu,
+    action: async () => {
+      try {
+        const result = await switchCodexSystemAccount(accountId);
+        if (!result?.ok) {
+          showTrayCodexSwitchError(result?.error);
+          return;
+        }
+        trayCodexActiveAccountId = result.activeAccountId || accountId;
+        trayCodexPendingAccountId = trayCodexActiveAccountId;
+        trayCodexPendingSince = Date.now();
+        pushSettingsToRenderer();
+      } catch (error) {
+        showTrayCodexSwitchError(error?.message || error);
+      }
     }
-    trayCodexActiveAccountId = result.activeAccountId || accountId;
-    trayCodexPendingAccountId = trayCodexActiveAccountId;
-    trayCodexPendingSince = Date.now();
-    pushSettingsToRenderer();
-  } catch (error) {
-    showTrayCodexSwitchError(error?.message || error);
-  } finally {
-    trayCodexSwitchInFlight = false;
-  }
+  });
 }
 
 function configureWindowToggleShortcut() {
@@ -4465,6 +4477,7 @@ function ensureTray() {
       const codex = trayCodexMenuState();
       return {
         appVersion: appVersion(),
+        locale: trayMenuLocale(),
         refreshing: trayRefreshInFlight,
         trayContent: settings?.trayContent || 'tokens',
         trayMode: Boolean(settings?.trayMode),
