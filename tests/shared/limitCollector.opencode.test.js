@@ -1147,6 +1147,50 @@ test('a scoped refresh never selects the auto-detected account', async () => {
   assert.strictEqual(rows[0].source, 'web');
 });
 
+// A machine may be signed in to an account whose quota the user does not want
+// reported. Only the unclaimed row is suppressed: once an account has claimed
+// the key it is that account's credential and follows that account's own switch,
+// exactly as a cookie does.
+test('the auto-detected account can be switched off without touching claimed keys', async () => {
+  const collect = async (opencodeAmbientEnabled, opencodeProfiles) => collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeAmbientEnabled, opencodeProfiles },
+    {
+      now: () => now403,
+      opencodeReadGoApiKey: () => 'sk-ambient',
+      // Honours the key it is handed, the way the real one does: a stub that
+      // answers regardless would report success for a key the collector never
+      // resolved, which is exactly what this test is checking it does not do.
+      opencodeCollectGoApi: async (d) => (d.apiKey ? goApiOk : OPENCODE_API_UNCONFIGURED),
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 1 })
+    }
+  );
+  const rows = (summary) => summary.providers.filter((p) => p.provider === 'opencode');
+
+  const on = rows(await collect(true, {}));
+  assert.strictEqual(on.length, 1);
+  assert.strictEqual(on[0].status, 'ok');
+  // Switched off, the provider is still listed (it is a selected provider) but
+  // has nothing behind it: the key is never read.
+  const off = rows(await collect(false, {}));
+  assert.strictEqual(off.length, 1);
+  assert.strictEqual(off[0].status, 'notConfigured');
+  assert.strictEqual(off[0].windows.length, 0);
+
+  // Claimed by an account: the switch above no longer applies to it.
+  const claimed = {
+    work: {
+      enabled: true,
+      useAmbientKey: true,
+      ambientKeyIdentity: goApiIdentity('sk-ambient'),
+      cookie: 'sess=work'
+    }
+  };
+  const claimedRows = rows(await collect(false, claimed));
+  assert.strictEqual(claimedRows.length, 1);
+  assert.strictEqual(claimedRows[0].accountName, 'work');
+});
+
 // The reference names the account that was signed in when it was bound. The
 // usage API returns no workspace id, so a key that has since changed cannot be
 // told apart from another account's key, and pairing it with this account's

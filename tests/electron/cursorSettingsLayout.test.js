@@ -258,7 +258,13 @@ test('OpenCode disabled profiles still count in the account summary', () => {
   // The auto-detected credential counts too: it is the account the limits card
   // is reading, so excluding it reports "not set up" next to live quota.
   assert.match(renderBody, /state\.opencodeProfileCount = entries\.length \+ \(hasAmbientKey \? 1 : 0\);/);
-  assert.match(renderBody, /\{ profiles, hasEnvVar, hasAmbientKey \}/);
+  assert.match(renderBody, /\{ profiles, hasEnvVar, hasAmbientKey, ambientEnabled = true \}/);
+  // Switching the auto-detected account off is a device preference, not a stored
+  // credential, so its row keeps rendering with the box clear rather than
+  // vanishing along with the only control that could switch it back on.
+  assert.match(renderBody, /ambientToggle\.checked = ambientEnabled;/);
+  assert.match(renderBody, /setAmbientEnabled\(ambientToggle\.checked\)/);
+  assert.match(renderBody, /item\.append\(ambientToggle, nameBox, rightBox\)/);
   assert.match(renderBody, /if \(entries\.length === 0 && !hasEnvVar && !hasAmbientKey\)/);
   // Credential composition stays visible after the fact, because two kinds under
   // one name is a user assertion that changes identity and fallback behaviour,
@@ -1444,6 +1450,18 @@ test('a zero-config OpenCode machine is not reported as unconfigured', () => {
   assert.match(status, /const needsRebind = \(p\) => Boolean\(p\.useAmbientKey\) && !profileKey\(p\) && !p\.cookie;/);
   assert.match(status, /\.filter\(\(\[, p\]\) => \(p\.cookie \|\| profileKey\(p\) \|\| needsRebind\(p\)\) && p\.enabled\)/);
   assert.match(status, /needsRebind: true/);
+  // Provider-wide, like every ownership change: this row has no account name for
+  // a scoped refresh to address.
+  const ambientToggle = main.slice(
+    main.indexOf("ipcMain.handle('opencode:setAmbientEnabled'"),
+    main.indexOf("ipcMain.handle('openrouter:getProfiles'")
+  );
+  assert.ok(ambientToggle, 'setAmbientEnabled handler should exist');
+  assert.match(ambientToggle, /queueLimitInvalidation\(\{ provider: 'opencode' \}, 'ambient-toggle', \{ clear: true \}\)/);
+  // Clearing the provider without a refresh behind it wipes every OpenCode
+  // account and rebuilds none: switching off the detected key would read as
+  // switching off the provider.
+  assert.doesNotMatch(ambientToggle, /refresh: false/);
   assert.match(status, /const apiKey = profileKey\(profile\);/);
   assert.doesNotMatch(status, /probeOpenCodeApiKey\(profile\.apiKey\)/);
 

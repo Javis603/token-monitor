@@ -3207,7 +3207,11 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   // the shared predicate rather than a copy of it here, so the settings panel
   // cannot end up offering a row this scan is not reading.
   const ambientClaimed = opencodeProfiles.ambientKeyClaimed(explicitProfiles, ambientKey, ambientIdentity);
-  if (ambientKey && !ambientClaimed) {
+  // Switched off for a machine signed in to an account the user does not want
+  // reported. Only the unclaimed row is suppressed: once an account has claimed
+  // the key it is that account's credential, and the account's own toggle owns
+  // it, exactly as for a cookie.
+  if (ambientKey && !ambientClaimed && options.opencodeAmbientEnabled !== false) {
     cookies.push({ name: OPENCODE_AMBIENT_ACCOUNT_NAME, apiKey: ambientKey, ambient: true });
   }
 

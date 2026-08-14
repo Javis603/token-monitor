@@ -115,6 +115,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
       || '',
     claudePrepaidBalanceEnabled: settings.claudePrepaidBalanceEnabled !== false,
     opencodeLocalLimitsEnabled: settings.opencodeLocalLimitsEnabled === true,
+    opencodeAmbientEnabled: settings.opencodeAmbientEnabled !== false,
     opencodeCookie: settings.opencodeCookie || env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
     opencodeProfiles: settings.opencodeProfiles || {},
     openrouterProfiles: settings.openrouterProfiles || {},

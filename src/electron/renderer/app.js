@@ -13376,7 +13376,7 @@ function renderOpenCodeProfiles() {
 
   const api = window.tokenMonitor.opencode;
 
-  api.getProfiles().then(({ profiles, hasEnvVar, hasAmbientKey }) => {
+  api.getProfiles().then(({ profiles, hasEnvVar, hasAmbientKey, ambientEnabled = true }) => {
     listEl.innerHTML = '';
     const entries = Object.entries(profiles);
 
@@ -13397,6 +13397,21 @@ function renderOpenCodeProfiles() {
     if (hasAmbientKey) {
       const item = document.createElement('div');
       item.className = 'opencode-profile-item';
+      // Switchable like any other account, even without a name. Turning it off
+      // is a device preference rather than a stored credential, so the row keeps
+      // rendering with its box clear instead of disappearing along with the only
+      // control that could bring it back.
+      const ambientToggle = document.createElement('input');
+      ambientToggle.className = 'profile-toggle';
+      ambientToggle.type = 'checkbox';
+      ambientToggle.checked = ambientEnabled;
+      ambientToggle.title = t('settings.opencode.ambientDetail');
+      ambientToggle.addEventListener('change', async () => {
+        await window.tokenMonitor.opencode.setAmbientEnabled(ambientToggle.checked);
+        renderOpenCodeProfiles();
+        updateOpenCodeProfilesStatus();
+        renderSettingsSummaries();
+      });
       const nameBox = document.createElement('span');
       nameBox.className = 'profile-name-box';
       // An editable field rather than a label behind an edit button: this row
@@ -13471,9 +13486,9 @@ function renderOpenCodeProfiles() {
       // account names, so a profile named the same as any sentinel would take
       // this row's status.
       infoSpan.id = 'opencodeAmbientInfo';
-      infoSpan.textContent = '...';
+      infoSpan.textContent = ambientEnabled ? '...' : t('settings.opencode.disabled');
       rightBox.append(infoSpan);
-      item.append(document.createElement('span'), nameBox, rightBox);
+      item.append(ambientToggle, nameBox, rightBox);
       listEl.appendChild(item);
     }
 
@@ -13807,7 +13822,9 @@ async function updateOpenCodeProfilesStatus() {
     const infoEl = document.getElementById(elementId);
     if (!infoEl) continue;
 
-    if (s.needsRebind) {
+    if (s.disabled) {
+      infoEl.textContent = t('settings.opencode.disabled');
+    } else if (s.needsRebind) {
       // Said once, on the credential line, which has room for it and is the
       // thing that needs re-attaching. This cell is a fixed narrow column and
       // would only repeat it truncated.

@@ -5664,8 +5664,12 @@ html.is-windows .limit-live-badge {
   padding: 3px 0 3px 8px;
   border-left: 1px solid var(--line);
 }
+/* One shared column width. Sized to their own content, each label took a
+   different width and the name fields started at a different x on every row,
+   which is what made an expanded account look ragged: most visible once a field
+   is focused and its box appears. */
 .opencode-credential-row .credential-label {
-  flex: 0 0 auto;
+  flex: 0 0 5.4em;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

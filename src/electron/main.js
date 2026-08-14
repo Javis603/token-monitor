@@ -454,6 +454,10 @@ function defaultSettings() {
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
+    // The key OpenCode stores for itself needs no setup, so tracking it is the
+    // default. This turns that off for a machine that is signed in to an account
+    // the user does not want reported.
+    opencodeAmbientEnabled: parseBoolean(process.env.TOKEN_MONITOR_OPENCODE_AMBIENT, true),
     opencodeLocalLimitsEnabled: false,
     showLimitUsed: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_USED, false),
     // Manual subscription metadata. Plain preferences, not credentials, so they
@@ -5931,6 +5935,7 @@ app.whenReady().then(() => {
       showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
+      opencodeAmbientEnabled: parseBoolean(patch.opencodeAmbientEnabled ?? settings.opencodeAmbientEnabled, true),
       opencodeLocalLimitsEnabled: parseBoolean(patch.opencodeLocalLimitsEnabled ?? settings.opencodeLocalLimitsEnabled, false),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
       windowMaximized: parseBoolean(settings.windowMaximized, false),
@@ -6610,7 +6615,9 @@ app.whenReady().then(() => {
     // user can also type, and the synthetic entry would then overwrite their
     // account's real status (and collide with its DOM id in the renderer).
     let ambient = null;
-    if (opencodeAmbientKeyActive(profiles)) {
+    if (opencodeAmbientKeyActive(profiles) && settings.opencodeAmbientEnabled === false) {
+      ambient = { linked: false, expired: false, go: false, zen: false, hasBalance: false, balanceUsd: null, ambient: true, disabled: true };
+    } else if (opencodeAmbientKeyActive(profiles)) {
       const probe = await probeOpenCodeApiKey(opencodeGoApi.readGoApiKey(process.env));
       ambient = {
         linked: probe.status === 'ok',
@@ -6660,7 +6667,12 @@ app.whenReady().then(() => {
           && !opencodeProfiles.ambientKeyFor(p, ambientKey, ambientIdentity)
       };
     }
-    return { profiles: safe, hasEnvVar, hasAmbientKey };
+    return {
+      profiles: safe,
+      hasEnvVar,
+      hasAmbientKey,
+      ambientEnabled: settings.opencodeAmbientEnabled !== false
+    };
   });
   // `kind` defaults to 'cookie' so an older renderer calling with two arguments
   // keeps its existing behavior.
@@ -6867,6 +6879,28 @@ app.whenReady().then(() => {
       clear: !enabled,
       refresh: Boolean(enabled)
     });
+    return { ok: true };
+  });
+  // The auto-detected account has no stored record to carry an enabled flag, so
+  // its switch is a device preference rather than a credential. Writing one
+  // instead would mean a toggle that creates an account under a name the user
+  // can also type, cannot be undone symmetrically once that account is edited,
+  // and quietly comes back enabled when the key it pinned is rotated.
+  ipcMain.handle('opencode:setAmbientEnabled', async (_event, enabled) => {
+    settings.opencodeAmbientEnabled = enabled !== false;
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not persist the OpenCode detection setting' };
+    }
+    opencodeStatusCache = { value: null, at: 0 };
+    // Provider-wide, for the same reason every ownership change is: this row has
+    // no account name for a scoped refresh to address. It must still refresh
+    // afterwards. Clearing without one wipes every OpenCode account and rebuilds
+    // none of them, so switching off the detected key read as switching off the
+    // whole provider — the rest of the accounts are unaffected by this setting
+    // and have to come straight back.
+    void queueLimitInvalidation({ provider: 'opencode' }, 'ambient-toggle', { clear: true });
     return { ok: true };
   });
   ipcMain.handle('openrouter:getProfiles', async () => {
