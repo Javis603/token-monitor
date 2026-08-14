@@ -77,11 +77,29 @@ function goAuthPath(env = process.env) {
 // OpenCode sets this itself when it spawns a workspace child process, and it is
 // the ordinary way to supply credentials in a container or a CI runner: exactly
 // where the headless agent runs, and where there is no auth.json to read.
+// The file is schema-checked, the variable is not — which is upstream's own
+// asymmetry, not an oversight here. `Auth.all()` decodes auth.json through a
+// union discriminated on `type`, whose API member is `{ type: Literal('api'),
+// key: String }`, and drops every entry that does not match; the variable it
+// returns straight from `JSON.parse`. Validating both would be tidier and would
+// reintroduce exactly the bug the variable was added to fix: a credential
+// OpenCode itself would use, that we would not.
+//
+// Sending a credential we cannot confirm is an API key as a Bearer token is the
+// thing worth avoiding on the file path, and an entry OpenCode would ignore is
+// not a credential the user has configured for anything.
+function isGoApiCredential(entry) {
+  return Boolean(entry)
+    && typeof entry === 'object'
+    && entry.type === 'api'
+    && typeof entry.key === 'string';
+}
+
 function readGoAuthDocument(env) {
   const inline = String(env.OPENCODE_AUTH_CONTENT || '').trim();
   if (inline) {
     try {
-      return JSON.parse(inline);
+      return { document: JSON.parse(inline), validated: false };
     } catch (_) { /* fall through to the file, as upstream does */ }
   }
 
@@ -93,7 +111,7 @@ function readGoAuthDocument(env) {
   }
 
   try {
-    return JSON.parse(raw);
+    return { document: JSON.parse(raw), validated: true };
   } catch (_) {
     return null;
   }
@@ -104,9 +122,11 @@ function readGoApiKey(env = process.env) {
   const explicit = cleanSecret(env.TOKEN_MONITOR_OPENCODE_API_KEY);
   if (explicit) return explicit;
 
-  const parsed = readGoAuthDocument(env);
+  const source = readGoAuthDocument(env);
+  const parsed = source?.document;
   const entry = parsed && typeof parsed === 'object' ? parsed[GO_AUTH_PROVIDER_ID] : null;
   if (!entry || typeof entry !== 'object') return '';
+  if (source.validated) return isGoApiCredential(entry) ? cleanSecret(entry.key) : '';
   const type = String(entry.type || '').toLowerCase();
   if (type && type !== 'api') return '';
   return cleanSecret(entry.key);

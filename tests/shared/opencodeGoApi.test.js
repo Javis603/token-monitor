@@ -61,6 +61,41 @@ test('readGoApiKey survives a missing or corrupt auth.json', () => {
 // process. It is also how credentials arrive in a container or a CI runner,
 // which is where the headless agent runs and where there is no auth.json — so
 // discovery has to mirror upstream rather than assume the file.
+// Upstream decodes auth.json through a union discriminated on `type` and drops
+// what does not match, so an entry OpenCode itself would ignore is not a
+// credential the user configured — and sending an unconfirmed secret to the API
+// as a Bearer token is the thing worth not doing.
+test('auth.json entries OpenCode would drop are not probed', () => {
+  const reject = [
+    { 'opencode-go': { key: 'no-type' } },
+    { 'opencode-go': { type: 'API', key: 'wrong-case' } },
+    { 'opencode-go': { type: 'api', key: 12345 } },
+    { 'opencode-go': { type: 'oauth', access: 'tok' } }
+  ];
+  for (const doc of reject) {
+    assert.strictEqual(readGoApiKey(withDataDir(JSON.stringify(doc)).env), '', JSON.stringify(doc));
+  }
+  assert.strictEqual(
+    readGoApiKey(withDataDir(JSON.stringify({ 'opencode-go': { type: 'api', key: 'good' } })).env),
+    'good'
+  );
+});
+
+// The variable keeps upstream's looser handling on purpose: `Auth.all()` returns
+// it straight from JSON.parse with no schema pass. Validating it here would
+// reintroduce the bug the variable was added to fix — a credential OpenCode uses
+// that we do not.
+test('the inline credential set keeps upstream\'s unvalidated handling', () => {
+  const { env } = withDataDir(null);
+  const inline = JSON.stringify({ 'opencode-go': { key: 'no-type-inline' } });
+  assert.strictEqual(readGoApiKey({ ...env, OPENCODE_AUTH_CONTENT: inline }), 'no-type-inline');
+  // A type that is present and is not an API key is still refused either way.
+  assert.strictEqual(
+    readGoApiKey({ ...env, OPENCODE_AUTH_CONTENT: JSON.stringify({ 'opencode-go': { type: 'oauth', key: 'x' } }) }),
+    ''
+  );
+});
+
 test('readGoApiKey reads the credential set OpenCode passes in the environment', () => {
   const { env } = withDataDir(null);
   const inline = JSON.stringify({ 'opencode-go': { type: 'api', key: 'from-inline' } });

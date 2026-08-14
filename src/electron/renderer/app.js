@@ -13625,7 +13625,7 @@ function renderOpenCodeProfiles() {
 
       const infoSpan = document.createElement('span');
       infoSpan.className = 'profile-info';
-      infoSpan.id = 'opencode-info-' + name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      infoSpan.id = opencodeRowId('opencode-info-', name);
       infoSpan.textContent = profile.enabled ? '...' : t('settings.opencode.disabled');
 
       const deleteBtn = document.createElement('button');
@@ -13653,7 +13653,7 @@ function renderOpenCodeProfiles() {
       if (multiCredential) {
         credentialList = document.createElement('div');
         credentialList.className = 'opencode-credential-list accordion-animated-container hidden';
-        credentialList.id = 'opencode-credentials-' + name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        credentialList.id = opencodeRowId('opencode-credentials-', name);
         // The shared accordion squeezes one inner wrapper, so the rows go inside
         // it rather than on the container, which cannot shrink.
         const credentialInner = document.createElement('div');
@@ -13733,6 +13733,21 @@ function opencodeMergeOffer(button, confirm) {
       button.classList.remove('hidden');
     }
   };
+}
+
+// Element ids for a row, from the account name.
+//
+// Reversible rather than sanitized. Replacing everything outside a safe set with
+// `_` is not injective, so two accounts a user is perfectly entitled to name —
+// `a b` and `a_b`, or `a/b` and `a_b` — landed on one id, and whichever rendered
+// first collected the other's status. `encodeURIComponent` is injective and
+// leaves no whitespace, which is the only thing an id may not contain.
+//
+// A counter would work too, but these two call sites are independent: one
+// renders the row, the other looks it up from a later status reply. A pure
+// function of the name cannot drift between them the way a shared table can.
+function opencodeRowId(prefix, name) {
+  return `${prefix}${encodeURIComponent(name)}`;
 }
 
 // One credential inside an expanded account. Renaming moves it to another
@@ -13842,7 +13857,7 @@ async function updateOpenCodeProfilesStatus() {
   // and lands on its own element rather than one keyed by a name a user could
   // also type.
   const entries = Object.entries(profiles).map(([name, s]) => [
-    'opencode-info-' + name.replace(/[^a-zA-Z0-9_-]/g, '_'),
+    opencodeRowId('opencode-info-', name),
     s
   ]);
   if (status.ambient) entries.push(['opencodeAmbientInfo', status.ambient]);

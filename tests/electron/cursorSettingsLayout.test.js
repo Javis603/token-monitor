@@ -1774,3 +1774,36 @@ test('a withdrawn offer stays withdrawn until a new proposal is made', async () 
   button.click();
   assert.deepEqual(confirmed, ['personal']);
 });
+
+// Account names are arbitrary user strings, so the id a row is found by has to
+// distinguish every name a user may pick. Sanitizing to a safe character set is
+// not injective: `a b` and `a_b` both became `a_b`, and whichever row rendered
+// first collected the other's status.
+function loadOpencodeRowId() {
+  const app = readRendererFile('app.js');
+  const start = app.indexOf('function opencodeRowId(');
+  assert.notEqual(start, -1, 'opencodeRowId should exist');
+  const end = app.indexOf('\n// ', start);
+  const context = { module: { exports: null }, encodeURIComponent };
+  vm.runInNewContext(`${app.slice(start, end)}\nmodule.exports = opencodeRowId;`, context);
+  return context.module.exports;
+}
+
+test('two account names a user may pick never share a row id', () => {
+  const opencodeRowId = loadOpencodeRowId();
+  const names = ['a b', 'a_b', 'a/b', 'a%b', 'a.b', 'work', 'work ', 'wörk', '__proto__', 'a+b'];
+  const ids = names.map((name) => opencodeRowId('opencode-info-', name));
+  assert.equal(new Set(ids).size, names.length, `collision among ${JSON.stringify(ids)}`);
+  // An id may not contain whitespace.
+  for (const id of ids) assert.doesNotMatch(id, /\s/, id);
+});
+
+test('the row id is a pure function of the name, shared by both call sites', () => {
+  const app = readRendererFile('app.js');
+  // Rendering and the later status lookup derive it independently, so a shared
+  // mutable table could drift between them; nothing may build one by hand.
+  assert.doesNotMatch(app, /'opencode-info-' \+ name/);
+  assert.doesNotMatch(app, /'opencode-credentials-' \+ name/);
+  assert.equal((app.match(/opencodeRowId\('opencode-info-', name\)/g) || []).length, 2);
+  assert.equal((app.match(/opencodeRowId\('opencode-credentials-', name\)/g) || []).length, 1);
+});
