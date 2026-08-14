@@ -35,6 +35,7 @@ const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryAr
 const cursorAuth = require('./cursorAuth');
 const { claudeSessionRoots } = require('./claudePaths');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
+const { annotateCodexQuotaCosts } = require('./codexQuotaCost');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
 const {
@@ -1187,6 +1188,7 @@ async function collectUsageOnce(options) {
   // window (issue #37 follow-up). Injectable for tests.
   const collectedAt = collectionDate(options.now);
   const runTokscaleFn = options.runTokscale || runTokscale;
+  const quotaCostAnnotator = options.annotateCodexQuotaCosts || annotateCodexQuotaCosts;
   const collectWsl = options.collectWslUsage || collectWslUsageImpl;
   const probeWslStateFn = options.probeWslState || probeWslStateImpl;
   // Injectable only for the WSL-status gate, so tests can exercise the win32
@@ -1256,6 +1258,13 @@ async function collectUsageOnce(options) {
     if (qoderCnPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, qoderCnPeriods.month);
     try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
   };
+  const prepareTokscaleJson = async (json, homeDir = options.homeDir || os.homedir()) => {
+    if (!trackedClientSet.has('codex')) return json;
+    if (options.runTokscale && !options.annotateCodexQuotaCosts) return json;
+    const rows = Array.isArray(json?.entries) ? json.entries : [];
+    if (!rows.some((row) => String(row?.client || '').toLowerCase() === 'codex')) return json;
+    return quotaCostAnnotator(json, { homeDir });
+  };
   if (normalizedClients) {
     const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
     await maybeSyncCursor(syncClients, options.logger, {
@@ -1318,7 +1327,7 @@ async function collectUsageOnce(options) {
       let freshPartitions = Object.create(null);
       let useTargetedPartitions = targetRequested;
       if (scanClients) {
-        const todayJson = await runTokscaleFn({ clients: scanClients, flags: ['--today'], commandTimeoutMs });
+        const todayJson = await prepareTokscaleJson(await runTokscaleFn({ clients: scanClients, flags: ['--today'], commandTimeoutMs }));
         const bundle = extractUsageBundleFromTokscale(todayJson);
         freshPartitions = bundle.byClient;
         const unattributed = freshPartitions[UNATTRIBUTED_USAGE_CLIENT];
@@ -1342,7 +1351,7 @@ async function collectUsageOnce(options) {
           // the requested set. An unattributed row or an unexpected client would
           // otherwise clear the target while partially overwriting an unrelated
           // anchor partition. Rebuild the complete today snapshot instead.
-          const fullTodayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
+          const fullTodayJson = await prepareTokscaleJson(await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs }));
           freshPartitions = extractUsageBundleFromTokscale(fullTodayJson).byClient;
           useTargetedPartitions = false;
         } else if (targetRequested) {
@@ -1381,17 +1390,17 @@ async function collectUsageOnce(options) {
     } else if (tokscaleClients) {
       // Serial on purpose: concurrent scans triple the peak CPU/IO load, which
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
-      const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
+      const todayJson = await prepareTokscaleJson(await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs }));
       const todayBundle = extractUsageBundleFromTokscale(todayJson);
       today = todayBundle.period;
       todayPartitions = todayBundle.byClient;
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today });
       emitProgress({ today });
-      const monthJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--month'], commandTimeoutMs });
+      const monthJson = await prepareTokscaleJson(await runTokscaleFn({ clients: tokscaleClients, flags: ['--month'], commandTimeoutMs }));
       month = extractUsageFromTokscale(monthJson);
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
       emitProgress({ today, month });
-      const allTimeJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--since', allTimeSince], commandTimeoutMs });
+      const allTimeJson = await prepareTokscaleJson(await runTokscaleFn({ clients: tokscaleClients, flags: ['--since', allTimeSince], commandTimeoutMs }));
       allTime = extractUsageFromTokscale(allTimeJson);
     }
     // Always decorate: session timestamps drive the recency sort regardless of the
@@ -1457,6 +1466,7 @@ async function collectUsageOnce(options) {
           pricingRevision: options.pricingRevision
         }),
         logger: options.logger,
+        prepareTokscaleJson,
         decoratePeriods: (periods, home) => applySessionTimestamps(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
       });
       wslBundle = wslResult.bundle;
@@ -1477,6 +1487,7 @@ async function collectUsageOnce(options) {
           pricingRevision: options.pricingRevision
         }),
         logger: options.logger,
+        prepareTokscaleJson,
         decoratePeriods: (periods, home) => applySessionTimestamps(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
       });
       wslBundle = wslResult.bundle;

@@ -254,9 +254,12 @@ async function collectWslUsage(options = {}, deps = {}) {
     if (clientsCsv.length === 0 || typeof runTokscale !== 'function') continue;
     try {
       // Serial on purpose (issue #15): never run these concurrently.
-      const todayJson = await runTokscale({ clients: clientsCsv, flags: ['--today', '--home', home], commandTimeoutMs });
-      const monthJson = await runTokscale({ clients: clientsCsv, flags: ['--month', '--home', home], commandTimeoutMs });
-      const allTimeJson = await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs });
+      const prepare = typeof options.prepareTokscaleJson === 'function'
+        ? (json) => options.prepareTokscaleJson(json, home)
+        : async (json) => json;
+      const todayJson = await prepare(await runTokscale({ clients: clientsCsv, flags: ['--today', '--home', home], commandTimeoutMs }));
+      const monthJson = await prepare(await runTokscale({ clients: clientsCsv, flags: ['--month', '--home', home], commandTimeoutMs }));
+      const allTimeJson = await prepare(await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs }));
       const periods = {
         today: extractUsageFromTokscale(todayJson),
         month: extractUsageFromTokscale(monthJson),

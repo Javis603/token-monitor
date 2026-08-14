@@ -124,6 +124,7 @@ Example payload:
         "sessionId": "rollout-2026-05-30T11-44-50-abc",
         "totalTokens": 1234,
         "costUsd": 0.01,
+        "quotaCostUsd": 0.025,
         "messageCount": 3,
         "inputTokens": 100,
         "outputTokens": 34,
@@ -199,6 +200,8 @@ Example payload:
   }
 }
 ```
+
+`sessions[].quotaCostUsd` is optional. Official Codex sessions include it when the collector can resolve local Fast-mode metadata; `costUsd` remains the ordinary API-equivalent price, while `quotaCostUsd` applies the Fast credit multiplier for weekly quota estimation.
 
 The hub normalizes records before storing them. The Node hub accepts JSON ingest bodies up to 1 MiB; larger bodies return `413 payload_too_large`.
 
