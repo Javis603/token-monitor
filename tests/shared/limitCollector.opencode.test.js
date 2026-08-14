@@ -925,3 +925,31 @@ test('disabling every account does not resurrect the ambient one', async () => {
   const p = summary.providers.find((x) => x.provider === 'opencode');
   assert.strictEqual(p.status, 'notConfigured');
 });
+
+test('a runtime cancellation of a bound account is not published as a row', async () => {
+  // Same shape LimitsRuntime actually uses: a plain Error, recognised through
+  // the aborted signal rather than the error name.
+  const controller = new AbortController();
+  const superseded = new Error('superseded');
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: {
+        work: { enabled: true, apiKey: 'key-work', cookie: 'sess=1' },
+        other: { enabled: true, cookie: 'sess=other' }
+      }
+    },
+    {
+      now: () => now403,
+      signal: controller.signal,
+      opencodeCollectGoApi: async () => { controller.abort(superseded); throw superseded; },
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => zenNone
+    }
+  );
+  const rows = summary.providers.filter((x) => x.provider === 'opencode');
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].status, 'unavailable');
+  assert.strictEqual(rows[0].accountName || '', '');
+});

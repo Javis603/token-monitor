@@ -49,7 +49,14 @@ function cleanSecret(value) {
 // A cancelled probe must not be reported as a provider status: the limits lane
 // is latest-wins, and turning an abort into an `unavailable` row would publish
 // a stale answer over the one that superseded it.
-function isAbortError(error) {
+//
+// The signal is the reliable test, not the error shape. LimitsRuntime cancels
+// with `controller.abort(new Error('superseded'))`, and fetch rejects with that
+// exact object — a plain Error with no AbortError name and no ABORT_ERR code —
+// so sniffing the error alone misses every cancellation the runtime actually
+// performs. The name/code check stays for an abort raised without a reason.
+function isAbortError(error, signal) {
+  if (signal?.aborted) return true;
   return error?.name === 'AbortError' || error?.code === 'ABORT_ERR';
 }
 
@@ -160,7 +167,7 @@ async function fetchGoApi(apiKey, deps = {}) {
       signal: deps.signal
     });
   } catch (error) {
-    if (isAbortError(error)) throw error;
+    if (isAbortError(error, deps.signal)) throw error;
     return { status: 'unavailable', windows: [] };
   }
 
@@ -177,7 +184,7 @@ async function fetchGoApi(apiKey, deps = {}) {
   try {
     payload = await response.json();
   } catch (error) {
-    if (isAbortError(error)) throw error;
+    if (isAbortError(error, deps.signal)) throw error;
     return { status: 'unavailable', windows: [] };
   }
 

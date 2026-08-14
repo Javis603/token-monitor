@@ -14339,10 +14339,22 @@ function setupCursorAccountUI() {
         : 'opencodeApiKeyInput');
       const nameInput = document.getElementById('opencodeProfileName');
       const errorEl = document.getElementById('opencodeErrorMessage');
-      const name = (nameInput.value || '').trim() || 'default';
+      const name = (nameInput.value || '').trim();
       const cookie = input.value;
 
       errorEl.classList.add('hidden');
+
+      // The name is required rather than defaulted. Saving one credential keeps
+      // the other under the same name, and the collector reads that as "these
+      // are the same account", so a blank name silently becoming `default`
+      // could attach one account's key to another account's cookie. Making the
+      // user type the name is what keeps the association explicit.
+      if (!name) {
+        errorEl.textContent = t('settings.opencode.nameRequired');
+        errorEl.classList.remove('hidden');
+        nameInput.focus();
+        return;
+      }
 
       const result = await window.tokenMonitor.opencode.saveProfile(name, cookie, opencodeCredentialKind);
       if (result.ok) {

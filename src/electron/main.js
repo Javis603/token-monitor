@@ -6560,18 +6560,28 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('opencode:getProfiles', async () => {
     const profiles = settings.opencodeProfiles || {};
-    const hasEnvVar = Boolean(process.env.TOKEN_MONITOR_OPENCODE_COOKIE);
-    // Strip cookie values — renderer only needs name/enabled for display
+    // The Go quota also arrives with no configuration at all, from the key
+    // OpenCode itself stores. Without counting that, the panel reports "not set
+    // up" while the limits card is showing live API data from the same account.
+    const hasAmbientKey = Object.keys(profiles).length === 0
+      && Boolean(opencodeGoApi.readGoApiKey(process.env));
+    const hasEnvVar = Boolean(process.env.TOKEN_MONITOR_OPENCODE_COOKIE) || hasAmbientKey;
+    // Credential values never cross to the renderer; which kinds exist does, so
+    // the list can show what a profile actually holds.
     const safe = {};
     for (const [name, p] of Object.entries(profiles)) {
-      safe[name] = { enabled: p.enabled };
+      safe[name] = { enabled: p.enabled, hasApiKey: Boolean(p.apiKey), hasCookie: Boolean(p.cookie) };
     }
-    return { profiles: safe, hasEnvVar };
+    return { profiles: safe, hasEnvVar, hasAmbientKey };
   });
   // `kind` defaults to 'cookie' so an older renderer calling with two arguments
   // keeps its existing behavior.
   ipcMain.handle('opencode:saveProfile', async (_event, name, raw, kind = 'cookie') => {
     if (!name) return { ok: false, error: 'Empty name' };
+    // Reject anything else rather than treating it as a cookie: an unrecognized
+    // kind would store the value in the wrong field and read as a credential it
+    // is not.
+    if (kind !== 'api' && kind !== 'cookie') return { ok: false, error: `Unknown credential kind: ${kind}` };
     try {
       let credential;
       if (kind === 'api') {

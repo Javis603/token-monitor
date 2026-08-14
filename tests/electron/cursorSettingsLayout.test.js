@@ -206,6 +206,19 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/opencode\.ai\/auth'\)/);
   assert.match(setupBody, /window\.tokenMonitor\.opencode\.saveProfile\(name, cookie, opencodeCredentialKind\)/);
   assert.match(setupBody, /kindSelect\?\.addEventListener\('change', applyOpenCodeCredentialKind\)/);
+  // The account name is required, not defaulted. Saving one credential keeps the
+  // other under that name and the collector reads that as "same account", so a
+  // blank name silently becoming 'default' could bind one account's key to
+  // another account's cookie. Scoped to this handler: the other provider forms
+  // still default a blank name, and they have no such merge semantics.
+  const opencodeSubmit = setupBody.slice(
+    setupBody.indexOf("document.getElementById('opencodeCookieSubmit')"),
+    setupBody.indexOf("document.getElementById('openrouterSettingsToggle')")
+  );
+  assert.ok(opencodeSubmit, 'opencode submit handler should be present');
+  assert.match(opencodeSubmit, /const name = \(nameInput\.value \|\| ''\)\.trim\(\);/);
+  assert.doesNotMatch(opencodeSubmit, /\|\| 'default'/);
+  assert.match(opencodeSubmit, /settings\.opencode\.nameRequired/);
   assert.match(setupBody, /renderOpenCodeProfiles\(\)/);
   assert.match(setupBody, /updateOpenCodeProfilesStatus\(\)/);
 });

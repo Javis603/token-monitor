@@ -3398,7 +3398,7 @@ async function fetchOpenCodeApiProfile(profile, collectGoApi, nowMs, updatedAt, 
     }
     return row('ok', result.windows.map((window) => ({ ...window, source: 'web' })));
   } catch (error) {
-    if (opencodeGoApi.isAbortError(error)) throw error;
+    if (opencodeGoApi.isAbortError(error, deps.signal)) throw error;
     return row('unavailable', []);
   }
 }
@@ -3511,7 +3511,7 @@ async function fetchSingleOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, no
     // Routing the API probe through this helper made it reachable by an abort,
     // which the bare catch would have turned into a stale `unavailable` row and
     // published over whatever superseded it. The lane is latest-wins.
-    if (opencodeGoApi.isAbortError(error)) throw error;
+    if (opencodeGoApi.isAbortError(error, api.deps?.signal)) throw error;
     const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
     return normalizeLimitProvider({
       provider: 'opencode', accountKey: hashKey('opencode', `cookie:${cookieHash}`),

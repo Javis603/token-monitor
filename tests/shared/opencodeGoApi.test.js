@@ -194,3 +194,31 @@ test('goApiIdentity is stable per key and distinct across keys', () => {
   // Full digest: truncating only narrows the space two accounts could collide in.
   assert.match(goApiIdentity('a'), /^go-api:[0-9a-f]{64}$/);
 });
+
+test('a runtime cancellation propagates even though it is a plain Error', async () => {
+  // LimitsRuntime cancels with controller.abort(new Error('superseded')), and
+  // fetch rejects with that exact object: no AbortError name, no ABORT_ERR
+  // code. Matching on the error shape alone misses every real cancellation, so
+  // the signal is what decides.
+  const controller = new AbortController();
+  const superseded = new Error('superseded');
+  await assert.rejects(
+    () => fetchGoApi('k', {
+      signal: controller.signal,
+      fetch: async () => {
+        controller.abort(superseded);
+        throw superseded;
+      }
+    }),
+    /superseded/
+  );
+});
+
+test('a plain failure with an untouched signal is still just unavailable', async () => {
+  const controller = new AbortController();
+  const result = await fetchGoApi('k', {
+    signal: controller.signal,
+    fetch: async () => { throw new Error('network down'); }
+  });
+  assert.strictEqual(result.status, 'unavailable');
+});
