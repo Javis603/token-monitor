@@ -5,11 +5,13 @@ const { Worker } = require('node:worker_threads');
 
 const { readSessionDetail } = require('./sessionDetail');
 const { wslUsageHomes } = require('./wslUsage');
+const { readDshSessionDetail } = require('./dshSessionDetail');
 
 const WSL_JSONL_CLIENTS = new Set(['claude', 'codex']);
 const SESSION_DETAIL_WORKER_TIMEOUT_MS = 20_000;
 
 function resolveSessionDetailForPlatform(args = {}, deps = {}) {
+  if (args.client === 'dsh') return readDshSessionDetail(args, deps);
   const readDetail = deps.readSessionDetail || readSessionDetail;
   const nativeHome = (deps.homedir || os.homedir)();
   const nativeDetail = readDetail({ ...args, home: nativeHome });

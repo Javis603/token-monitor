@@ -42,6 +42,14 @@ const {
   qoderCnDataPaths,
   resolveQoderCnPricing
 } = require('./qoderCnUsage');
+const {
+  DSH_CLIENT,
+  DSH_SESSION_LOG_NAMES,
+  buildDshHistoryGraph,
+  buildDshPeriods,
+  collectDshUsageOnce,
+  resolveDshSessionsRoot
+} = require('./dshUsage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
 const {
   createReasonixNativeSessionCache,
@@ -945,9 +953,13 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.promaGraph);
     histories.push(normalizeHistory(parseGraphResult(options.promaGraph), { capDays, todayKey }));
   }
-  if (options.qoderCnGraph) {
+if (options.qoderCnGraph) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
+  }
+  if (options.dshGraph) {
+    rawGraphs.push(options.dshGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.dshGraph), { capDays, todayKey }));
   }
   if (options.dailyHistoryArchiveEnabled) {
     try {
@@ -1012,12 +1024,15 @@ async function collectUsageOnce(options) {
     options.homeDir || os.homedir(),
     { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
   );
-  // Proma and Qoder CN remain local compatibility adapters. Reasonix aggregate
-  // usage is supplied by the same Tokscale path as every other tracked client.
-  const localClients = new Set(['proma', 'qodercn']);
-  const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
+// Proma, Qoder CN, and dsh are local compatibility adapters parsed by this
+  // process; everything else is supplied by the same Tokscale path.
+  const localClients = new Set(['proma', 'qodercn', DSH_CLIENT]);
+  const tokscaleClients = normalizedClients
+    ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',')
+    : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
+  const includesDsh = normalizedClients.split(',').includes(DSH_CLIENT);
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -1041,7 +1056,7 @@ async function collectUsageOnce(options) {
   let promaPeriods = null;
   let promaRows = null;
   let promaPricing = null;
-  let qoderCnPeriods = null;
+let qoderCnPeriods = null;
   let qoderCnRows = null;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
@@ -1052,6 +1067,10 @@ async function collectUsageOnce(options) {
     if (qoderCnPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, qoderCnPeriods.month);
     try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
   };
+  let dshPeriods = null;
+  let dshRows = null;
+  let dshPricing = null;
+  let dshUsage = null;
   if (normalizedClients) {
     const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
     await maybeSyncCursor(syncClients, options.logger, {
@@ -1081,7 +1100,7 @@ async function collectUsageOnce(options) {
         if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
       }
     }
-    if (includesQoderCn && (!targetRequested || targetClients.includes('qodercn'))) {
+if (includesQoderCn && (!targetRequested || targetClients.includes('qodercn'))) {
       try {
         const qoderCnSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
         qoderCnRows = await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger, sinceMs: qoderCnSinceMs });
@@ -1104,6 +1123,40 @@ async function collectUsageOnce(options) {
           qoderCnReadState.fallbackUsed = Boolean(options.qoderCnFallbackPeriods);
         }
         qoderCnPeriods = options.qoderCnFallbackPeriods || null;
+      }
+    }
+    if (includesDsh && (!targetRequested || targetClients.includes('dsh'))) {
+      try {
+        const dshOptions = {
+          roots: options.dshRoots || [resolveDshSessionsRoot({
+            env: options.env || process.env,
+            homeDir: options.homeDir || os.homedir(),
+            cwdDir: options.cwdDir || process.cwd()
+          })],
+          now: collectedAt,
+          allTimeSince
+        };
+        dshUsage = collectDshUsageOnce(dshOptions);
+        dshRows = dshUsage.rows;
+        dshPricing = await resolvePromaPricing(dshRows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        });
+        const dshRawPeriods = buildDshPeriods({
+          now: collectedAt,
+          allTimeSince,
+          rows: dshRows,
+          pricingByModel: dshPricing,
+          projectIdentity
+        });
+        dshPeriods = {
+          today: extractUsageFromTokscale(dshRawPeriods.today),
+          month: extractUsageFromTokscale(dshRawPeriods.month),
+          allTime: extractUsageFromTokscale(dshRawPeriods.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`dsh parse failed: ${err.message}`);
       }
     }
     if (anchorUsed) {
@@ -1131,12 +1184,13 @@ async function collectUsageOnce(options) {
         }
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
-      if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
+if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
       if (qoderCnPeriodReadFailed && anchor.todayPartitions?.qodercn) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
         freshPartitions.qodercn = anchor.todayPartitions.qodercn;
       }
+      if (dshPeriods) freshPartitions.dsh = dshPeriods.today;
       todayPartitions = useTargetedPartitions
         ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
         : completeTodayPartitions(freshPartitions, normalizedClients);
@@ -1181,11 +1235,17 @@ async function collectUsageOnce(options) {
       allTime = mergePeriods(allTime, promaPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), proma: promaPeriods.today };
     }
-    if (qoderCnPeriods && !anchorUsed) {
+if (qoderCnPeriods && !anchorUsed) {
       today = mergePeriods(today, qoderCnPeriods.today);
       month = mergePeriods(month, qoderCnPeriods.month);
       allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), qodercn: qoderCnPeriods.today };
+    }
+    if (dshPeriods && !anchorUsed) {
+      today = mergePeriods(today, dshPeriods.today);
+      month = mergePeriods(month, dshPeriods.month);
+      allTime = mergePeriods(allTime, dshPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), dsh: dshPeriods.today };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1393,7 +1453,10 @@ async function collectUsageOnce(options) {
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
-      qoderCnGraph: historyQoderCnGraph || null,
+qoderCnGraph: historyQoderCnGraph || null,
+      dshGraph: includesDsh && dshUsage
+        ? buildDshHistoryGraph({ rows: dshRows || dshUsage.rows, pricingByModel: dshPricing || {} })
+        : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1731,6 +1794,9 @@ function clientSourceRoots(clientsCsv) {
     ['cline-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')],
     ['cline-cli-sessions', clineCliSessionRoot(home)]
   );
+  // DeepSeek Harness persists usage in its own event-sourced session logs; the
+  // parser is local (dshUsage.js), so this root is diagnostic/watch-only.
+  add('dsh', ['dsh-sessions', resolveDshSessionsRoot({ env: process.env, homeDir: home })]);
   return byClient;
 }
 
@@ -2081,6 +2147,17 @@ function watchPolicyEntries(clientsCsv) {
   bound('kiro', withBasename('kiro', 'kiro-cli'), directChildOnly((name) => KIRO_DB_WATCH_PATTERN.test(name)));
   bound('zed', withBasename('zed', 'threads'), directChildOnly((name) => ZED_DB_WATCH_PATTERN.test(name)));
   bound('codebuddy', withBasename('codebuddy', 'Logs'), (parts) => !CODEBUDDY_EXTENSION_SOURCE_DIRS.has(parts[0]));
+  // dsh sessions live two directory levels deep under one root; keep project
+  // and session directories for traversal and the two fixed transcript names.
+  bound('dsh', candidates.dsh || [], (parts, resolved) => {
+    if (parts.length === 3) return !DSH_SESSION_LOG_NAMES.has(parts[2]);
+    try {
+      if (fs.statSync(resolved).isDirectory()) return false;
+    } catch (_) {
+      // Removed transcripts are handled by the fixed-name check above.
+    }
+    return true;
+  });
 
   // Everything left is a recursive transcript tree: tokscale walks it, so every
   // path inside it is a potential source. Copilot is excluded wholesale because
@@ -2436,12 +2513,17 @@ function canTargetTodayPartitions(anchor, targetClients) {
   );
 }
 
-function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '') {
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', dshSessionsRoot = '') {
   // Deterministic string that captures the config inputs anchor correctness
-  // depends on. When this changes, the persisted anchor is invalidated.
+  // depends on. When this changes, the persisted anchor is invalidated. The
+  // Qoder CN db path and dsh root are included only for clients lists that
+  // actually track those clients; moving either must invalidate an anchor
+  // carrying their partitions, while clients lists without them keep their
+  // historical fingerprints byte-identical.
   const qoderCn = String(qoderCnDbPath || '').trim();
   const qoderCnPart = qoderCn ? `|qodercn:${path.resolve(qoderCn)}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}`;
+  const base = `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}`;
+  return dshSessionsRoot ? `${base}|dsh:${dshSessionsRoot}` : base;
 }
 
 function qoderCnDbPathForClients(clientsCsv, options = {}) {
@@ -2451,6 +2533,16 @@ function qoderCnDbPathForClients(clientsCsv, options = {}) {
     platform: options.platform || process.platform,
     env: options.env || process.env
   }).dbPaths[0] || '';
+}
+
+function dshFingerprintRoot(clientsCsv, options = {}) {
+  const normalized = normalizeClientsCsv(clientsCsv);
+  if (!normalized.split(',').includes('dsh')) return '';
+  return resolveDshSessionsRoot({
+    env: options.env || process.env,
+    homeDir: options.homeDir || os.homedir(),
+    cwdDir: options.cwdDir || process.cwd()
+  });
 }
 
 // The one place that decides whether a persisted anchor may be reused, shared by
@@ -2463,10 +2555,10 @@ function qoderCnDbPathForClients(clientsCsv, options = {}) {
 // collector still reuses the periods then and simply forces a full scan, while
 // a seed has nothing to stand on and declines.
 function collectorAnchorTrust(saved, options = {}) {
-  const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', now = new Date() } = options;
+  const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', dshSessionsRoot = '', now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
-  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath)) return null;
+  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, dshSessionsRoot)) return null;
   const parsed = Date.parse(saved.fullScanAt || '');
   const capturedAtMs = Number.isFinite(parsed) && parsed <= now.getTime() ? parsed : null;
   return { capturedAtMs };
@@ -2598,6 +2690,7 @@ function startCollector(options) {
     platform: process.platform,
     env: process.env
   });
+  const dshSessionsRoot = dshFingerprintRoot(clients, options);
   let tickInFlight = false;
   let tickPending = false;
   let pendingForceHistory = false;
@@ -2733,7 +2826,8 @@ function startCollector(options) {
         clients,
         allTimeSince,
         projectsEnabled: options.projectsEnabled,
-        qoderCnDbPath
+        qoderCnDbPath,
+        dshSessionsRoot
       });
       if (trust) {
         anchor = {
@@ -2960,7 +3054,7 @@ function startCollector(options) {
               wslStatus: wslStatusAnchor,
               ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
               ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
-              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath),
+configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, dshFingerprintRoot(clients, options)),
               fullScanAt: new Date(lastFullScanAt).toISOString()
             }));
           } catch (_) {}
@@ -3447,6 +3541,7 @@ module.exports = {
   computePeriodWindows,
   collectorAnchorTrust,
   configFingerprint,
+  dshFingerprintRoot,
   qoderCnDbPathForClients,
   deriveClientHealth,
   deriveClientStatus,

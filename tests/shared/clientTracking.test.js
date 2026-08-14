@@ -46,7 +46,7 @@ test('clientsCsvForSetting uses defaults only for missing settings', () => {
 
 test('default tracked clients include current tokscale-supported tools', () => {
   const clients = DEFAULT_CLIENTS.split(',');
-  for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix']) {
+  for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh']) {
     assert.ok(clients.includes(client), `${client} should be tracked by default`);
   }
 });
@@ -76,9 +76,8 @@ test('tracked client defaults, renderer, and README share one display order', ()
 });
 
 test('default tracked clients are supported by tokscale or a native adapter', () => {
-  // Proma and Qoder CN remain local compatibility adapters. Reasonix is supported by the
-  // bundled Tokscale version and must be verified through its real client list.
-  const locallyParsedClients = new Set(['proma', 'qodercn']);
+// Proma, Qoder CN, and dsh are local adapters parsed by this process.
+  const locallyParsedClients = new Set(['proma', 'qodercn', 'dsh']);
   const result = spawnSync(process.execPath, [require.resolve('tokscale/bin.js'), '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const help = `${result.stdout || ''}\n${result.stderr || ''}`;
