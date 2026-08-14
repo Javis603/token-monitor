@@ -13392,7 +13392,7 @@ function renderOpenCodeProfiles() {
     // how a user says the two are the same OpenCode account.
     if (hasAmbientKey) {
       const item = document.createElement('div');
-      item.className = 'opencode-profile-item is-ambient';
+      item.className = 'opencode-profile-item';
       const nameBox = document.createElement('span');
       nameBox.className = 'profile-name-box';
       // An editable field rather than a label behind an edit button: this row

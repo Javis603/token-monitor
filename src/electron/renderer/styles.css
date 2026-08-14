@@ -5570,7 +5570,7 @@ html.is-windows .limit-live-badge {
   padding: 0;
 }
 /* The auto-detected credential is not a stored account, so its row carries no
-   toggle or delete. An empty first cell keeps it on the same grid. Its name
+   toggle or delete, and an empty first cell keeps it on the same grid. Its name
    field rests as the row's label and only looks like an input once pointed at,
    so an unnamed row does not read as an unfinished form. */
 .opencode-profile-item .profile-name-input.is-placeholder {
