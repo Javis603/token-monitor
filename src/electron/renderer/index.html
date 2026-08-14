@@ -668,8 +668,24 @@
                 </span>
               </button>
               <div id="opencodeSettingsDetails" class="cursor-settings-details hidden">
+                <p class="settings-note" data-i18n="settings.opencode.accountsNote">Go quota is detected automatically. Save a credential under an existing account's name to say they are the same OpenCode account: quota then comes from the API, with the Zen balance and cross-device identity still coming from the cookie.</p>
+
                 <!-- Profile list -->
                 <div id="opencodeProfileList" class="opencode-profile-list"></div>
+
+                <!-- Local DB fallback: an advanced, off-by-default estimate, so
+                     it collapses below the accounts instead of sitting above
+                     them where it reads as the first thing to configure. -->
+                <div id="opencodeLocalFallbackGroup" class="settings-group cursor-account-group">
+                  <button id="opencodeLocalFallbackToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="opencodeLocalFallbackDetails">
+                    <span data-i18n="settings.limits.opencodeLocalLimits">Use local DB fallback</span>
+                    <span class="cursor-settings-summary">
+                      <span id="opencodeLocalFallbackStatus" class="cursor-status-pill"></span>
+                      <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                    </span>
+                  </button>
+                  <div id="opencodeLocalFallbackDetails" class="cursor-settings-details hidden"></div>
+                </div>
 
                 <!-- Add new account -->
                 <div id="opencodeAddForm" class="opencode-add-form">

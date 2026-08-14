@@ -5574,18 +5574,27 @@ html.is-windows .limit-live-badge {
 /* Acting on a single credential lives in the expanded section, not inline next
    to the account's own controls: unbinding is one click and should not sit a
    pixel away from the control that disables the whole account. */
-.opencode-profile-item .profile-expand-btn {
-  padding: 0 2px;
+/* The summary line is itself the control that expands it. A chevron trails the
+   text so the affordance sits on the thing being revealed, rather than as a
+   separate button stranded between the status text and delete. */
+.opencode-profile-item button.profile-detail {
+  padding: 0;
   border: 0;
   background: none;
-  color: var(--muted);
-  font: inherit;
-  font-size: 10px;
-  line-height: 1;
+  text-align: left;
   cursor: pointer;
+}
+.opencode-profile-item .profile-detail.is-expandable::after {
+  content: '⌄';
+  margin-left: 4px;
+  display: inline-block;
   transition: transform 0.15s ease;
 }
-.opencode-profile-item .profile-expand-btn.is-open {
+.opencode-profile-item .profile-detail.is-expandable:hover,
+.opencode-profile-item .profile-detail.is-expandable:focus-visible {
+  color: var(--text);
+}
+.opencode-profile-item .profile-detail.is-open::after {
   transform: rotate(180deg);
 }
 .opencode-credential-list {

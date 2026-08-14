@@ -252,9 +252,11 @@ test('OpenCode disabled profiles still count in the account summary', () => {
   assert.match(renderBody, /\['api', profile\.hasApiKey/);
   assert.match(renderBody, /\['cookie', profile\.hasCookie/);
   // Per-credential actions live in an expanded section, not inline beside the
-  // account's own controls, and only appear once there is more than one.
-  assert.match(renderBody, /if \(credentials\.length > 1\)/);
+  // account's own controls, and only appear once there is more than one. The
+  // summary line is itself the control that expands it.
+  assert.match(renderBody, /const multiCredential = credentials\.length > 1;/);
   assert.match(renderBody, /opencodeCredentialRow\(name, kind, label\)/);
+  assert.match(renderBody, /detail\.classList\.toggle\('is-open', open\)/);
   // Naming the auto-detected credential is what lets it join an account.
   assert.match(renderBody, /saveProfile\(name, '', 'ambient'\)/);
   // Merging is confirmed with a button the user chooses, not a repeated keypress.
@@ -1441,4 +1443,21 @@ test('OpenCode credentials are named, merged and removed one at a time', () => {
   assert.match(remove, /api: 'apiKey', cookie: 'cookie', ambient: 'useAmbientKey'/);
   // An account with nothing left is a name, not an account.
   assert.match(remove, /if \(!remaining\.apiKey && !remaining\.cookie && !remaining\.useAmbientKey\) delete profiles\[name\]/);
+});
+
+test('the OpenCode local fallback toggle is relocated once, not once per render', () => {
+  const app = readRendererFile('app.js');
+  const body = functionBody(app, 'moveOpenCodeLocalFallbackSetting', 'limitProviderAccountGroup');
+  assert.ok(body, 'relocation helper should exist');
+  // The shared renderer builds a fresh settings list every pass, so a move that
+  // does not clear the destination stacks one copy of the toggle per re-render.
+  assert.match(body, /for \(const stale of \[\.\.\.target\.children\]\) if \(stale !== list\) stale\.remove\(\);/);
+
+  const html = readRendererFile('index.html');
+  const details = html.match(/<div id="opencodeSettingsDetails"[\s\S]*?<div id="opencodeErrorMessage"/)?.[0] || '';
+  // Accounts first, then the off-by-default estimate, then adding an account.
+  const order = ['settings.opencode.accountsNote', 'opencodeProfileList', 'opencodeLocalFallbackGroup', 'opencodeAddForm']
+    .map((token) => details.indexOf(token));
+  assert.ok(order.every((index) => index >= 0), 'panel should contain note, list, fallback and add form');
+  assert.deepEqual(order, [...order].sort((a, b) => a - b));
 });

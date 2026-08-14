@@ -10024,12 +10024,48 @@ function renderLimitProviderCheckboxesNow() {
     // destination must already be connected, so the row is mounted first.
     moveLimitProviderLiveNode(actions, accountStatus, disclosureIcon);
     moveLimitProviderLiveNode(optionsInner, accountGroup);
+    // OpenCode's one setting is an off-by-default fallback estimate. Rendered by
+    // the shared path it lands above the account list, reading as the first
+    // thing to set up; it belongs below the accounts, collapsed. Reparented
+    // rather than special-cased in the shared renderer so the setting keeps its
+    // change tracking and re-render signature.
+    if (id === 'opencode') moveOpenCodeLocalFallbackSetting();
   }
   for (const row of previousRows) row.remove();
   if (focusedId && document.activeElement === document.body) {
     document.getElementById(focusedId)?.focus({ preventScroll: true });
   }
   state.limitProviderRenderSignature = renderSignature;
+}
+
+// Moves the OpenCode local-DB toggle into its own collapsed group beneath the
+// account list, and keeps that group's status pill in sync with the setting.
+function moveOpenCodeLocalFallbackSetting() {
+  const target = document.getElementById('opencodeLocalFallbackDetails');
+  const list = document.querySelector('#limitProviderOptions-opencode .limit-provider-settings-list');
+  if (!target) return;
+  if (list) {
+    if (list.parentElement !== target) moveLimitProviderLiveNode(target, list);
+    // The shared renderer builds a fresh settings list on every pass, so moving
+    // without clearing stacks one copy of the toggle per re-render.
+    for (const stale of [...target.children]) if (stale !== list) stale.remove();
+  }
+
+  const pill = document.getElementById('opencodeLocalFallbackStatus');
+  if (pill) {
+    const on = (state.settings || {}).opencodeLocalLimitsEnabled === true;
+    pill.textContent = t(on ? 'settings.appearance.motion.on' : 'settings.appearance.motion.off');
+  }
+
+  const toggle = document.getElementById('opencodeLocalFallbackToggle');
+  if (toggle && !toggle.dataset.wired) {
+    toggle.dataset.wired = '1';
+    toggle.addEventListener('click', () => {
+      const details = document.getElementById('opencodeLocalFallbackDetails');
+      const open = details.classList.toggle('hidden') === false;
+      toggle.setAttribute('aria-expanded', String(open));
+    });
+  }
 }
 
 function limitProviderAccountGroup(providerId) {
@@ -13516,8 +13552,18 @@ function renderOpenCodeProfiles() {
         ['cookie', profile.hasCookie, t('settings.opencode.kindCookie')]
       ].filter(([, present]) => present);
 
-      const detail = document.createElement('span');
+      // The summary line is the control that expands it: clicking the thing you
+      // want to see beats a separate chevron stranded between the status text
+      // and the delete button.
+      const multiCredential = credentials.length > 1;
+      const detail = document.createElement(multiCredential ? 'button' : 'span');
       detail.className = 'profile-detail';
+      if (multiCredential) {
+        detail.type = 'button';
+        detail.classList.add('is-expandable');
+        detail.setAttribute('aria-expanded', 'false');
+        detail.title = t('settings.opencode.showCredentials');
+      }
       detail.textContent = credentials.map(([, , label]) => label).join(' + ');
 
       nameBox.append(nameSpan, nameInput, renameBtn, mergeBtn, detail);
@@ -13551,29 +13597,23 @@ function renderOpenCodeProfiles() {
 
       // Expanding is only worth offering once an account holds more than one
       // credential — with a single one the row already says everything.
-      let expandBtn = null;
       let credentialList = null;
-      if (credentials.length > 1) {
-        expandBtn = document.createElement('button');
-        expandBtn.className = 'profile-expand-btn';
-        expandBtn.textContent = '⌄';
-        expandBtn.title = t('settings.opencode.showCredentials');
-        expandBtn.setAttribute('aria-expanded', 'false');
-
+      if (multiCredential) {
         credentialList = document.createElement('div');
         credentialList.className = 'opencode-credential-list hidden';
+        credentialList.id = 'opencode-credentials-' + name.replace(/[^a-zA-Z0-9_-]/g, '_');
         for (const [kind, , label] of credentials) {
           credentialList.append(opencodeCredentialRow(name, kind, label));
         }
-
-        expandBtn.addEventListener('click', () => {
+        detail.setAttribute('aria-controls', credentialList.id);
+        detail.addEventListener('click', () => {
           const open = credentialList.classList.toggle('hidden') === false;
-          expandBtn.setAttribute('aria-expanded', String(open));
-          expandBtn.classList.toggle('is-open', open);
+          detail.setAttribute('aria-expanded', String(open));
+          detail.classList.toggle('is-open', open);
         });
       }
 
-      rightBox.append(infoSpan, ...(expandBtn ? [expandBtn] : []), deleteBtn);
+      rightBox.append(infoSpan, deleteBtn);
       item.append(toggle, nameBox, rightBox);
       if (credentialList) item.append(credentialList);
       listEl.appendChild(item);
