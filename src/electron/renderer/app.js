@@ -5023,6 +5023,10 @@ function renderMimoAccountGroup(label, providers, color) {
 
 function opencodeAccountTitle(provider, index) {
   const name = String(provider?.accountName || '').trim();
+  // The auto-detected account has no user-given name, so the collector publishes
+  // a canonical English one and it is localized here rather than on the wire,
+  // where another device may be reading in a different language.
+  if (name === 'Auto-detected') return t('settings.opencode.ambientName');
   if (name) return name;
   // Older synced clients put the user-defined profile name in accountLabel.
   // Keep those rows identifiable while new clients carry profile and plan in
@@ -13573,8 +13577,15 @@ function renderOpenCodeProfiles() {
       // account is published under, so it stays visible. Acting on them lives in
       // the expanded section rather than inline: a click that unbinds an account
       // should not sit one pixel from the account's own controls.
+      // A reference the collector has stopped using says so on its own row.
+      // Otherwise an account that also holds a cookie shows the credential as
+      // present, keeps reporting fine from the cookie, and nothing anywhere
+      // reveals that its Go quota is no longer coming from the detected key.
+      const ambientLabel = profile.ambientStale
+        ? `${t('settings.opencode.ambientName')} · ${t('settings.opencode.needsRebind')}`
+        : t('settings.opencode.ambientName');
       const credentials = [
-        ['ambient', profile.usesAmbientKey, t('settings.opencode.ambientName')],
+        ['ambient', profile.usesAmbientKey, ambientLabel],
         ['api', profile.hasApiKey, t('settings.opencode.kindApi')],
         ['cookie', profile.hasCookie, t('settings.opencode.kindCookie')]
       ].filter(([, present]) => present);

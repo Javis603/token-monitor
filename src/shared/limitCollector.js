@@ -3143,7 +3143,12 @@ const OPENCODE_REMOTE_FAIL_STATUSES = ['unauthorized', 'sourceRateLimited', 'una
 // Name for the account behind the key OpenCode stores for itself. Parallel to
 // the existing 'default (env)' entry: not a user-chosen name, so it cannot be
 // mistaken for a saved account, and stable so the row keeps its identity.
-const OPENCODE_AMBIENT_ACCOUNT_NAME = 'default (auto)';
+// Shown as the account's name until the user gives it one, so it has to survive
+// `normalizeAccountName` intact — the previous "default (auto)" lost its
+// brackets there and reached the card as "default auto". Canonical English on
+// the wire, because a device record is read by devices in other locales; the
+// renderer localizes this exact string.
+const OPENCODE_AMBIENT_ACCOUNT_NAME = 'Auto-detected';
 
 function openCodeSupplementalZenWindows(goWeb, zen) {
   const goWindowKeys = new Set(
@@ -3324,6 +3329,12 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     const apiAlias = goApi.identity ? hashKey('opencode', goApi.identity) : '';
     return normalizeLimitProvider({
       provider: 'opencode',
+      // The account this row is for, whether or not more than one exists. Left
+      // off, a machine that resolves to exactly one OpenCode account showed it
+      // as "Account 1", and enabling a second account did not fix it until a
+      // restart: the scoped refresh only rebuilds the account it targets, so
+      // this row kept its nameless record while the new one arrived named.
+      accountName: primary.name || '',
       accountKey,
       webAccountKey,
       accountKeyAliases: [...webIdentity.aliases, apiAlias].filter(Boolean),
@@ -3464,7 +3475,12 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
     return normalizeLimitProvider({
       provider: 'opencode',
       accountKey,
-      webAccountKey: accountKey,
+      // Only a cookie yields this. The Hub picks the canonical identity for a
+      // merged account from the webAccountKeys it collects, and it picks by
+      // sorting them, so publishing the key's hash here would let an API-only
+      // device's identity win over a real workspace id — deciding an account's
+      // canonical identity by which devices happen to be online.
+      webAccountKey: webIdentity.accountKey,
       accountKeyAliases: [...webIdentity.aliases, boundKeyAlias].filter(Boolean),
       accountName: name,
       // Keep accountLabel as the profile name for pre-accountName renderers.
@@ -3492,7 +3508,10 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
       accountKey = hashKey('opencode', `cookie:${cookieHash}`);
     }
     return normalizeLimitProvider({
-      provider: 'opencode', accountKey, webAccountKey: accountKey,
+      // No webAccountKey: this row probed nothing, so it has no workspace
+      // identity to offer, and claiming one would let a timed-out device decide
+      // the canonical identity of the merged account.
+      provider: 'opencode', accountKey,
       accountName: name, accountLabel: name, planLabel: '',
       source: api.apiKey && !cookie ? 'api' : 'web',
       sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL, status: 'unavailable',

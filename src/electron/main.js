@@ -6632,13 +6632,21 @@ app.whenReady().then(() => {
     const hasAmbientKey = opencodeAmbientKeyActive(profiles);
     // Credential values never cross to the renderer; which kinds exist does, so
     // the list can show what a profile actually holds.
+    const ambientKey = opencodeGoApi.readGoApiKey(process.env);
+    const ambientIdentity = ambientKey ? opencodeGoApi.goApiIdentity(ambientKey) : '';
     const safe = {};
     for (const [name, p] of Object.entries(profiles)) {
       safe[name] = {
         enabled: p.enabled,
         hasApiKey: Boolean(p.apiKey),
         hasCookie: Boolean(p.cookie),
-        usesAmbientKey: Boolean(p.useAmbientKey)
+        usesAmbientKey: Boolean(p.useAmbientKey),
+        // Held but not resolving, because the key it was bound to is no longer
+        // the one on this machine. Without saying so the list shows the
+        // credential as present while the collector ignores it, and on an
+        // account that also has a cookie nothing else would reveal it.
+        ambientStale: Boolean(p.useAmbientKey)
+          && !opencodeProfiles.ambientKeyFor(p, ambientKey, ambientIdentity)
       };
     }
     return { profiles: safe, hasEnvVar, hasAmbientKey };

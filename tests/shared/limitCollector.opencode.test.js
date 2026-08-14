@@ -664,7 +664,18 @@ test('a bound account groups with the same key on a device that has no cookie', 
     { deviceId: 'api-only', limits: apiOnly },
     { deviceId: 'bound', limits: bound }
   ], 0, now403);
-  assert.strictEqual(aggregated.providers.filter((x) => x.provider === 'opencode').length, 1);
+  const merged = aggregated.providers.filter((x) => x.provider === 'opencode');
+  assert.strictEqual(merged.length, 1);
+  // And the merged row is identified by the workspace the cookie resolved, not
+  // by the key. The Hub picks a merged account's canonical identity by sorting
+  // the webAccountKeys it was handed, so a key hash offered as one would win or
+  // lose on string order, making an account's identity depend on which devices
+  // happen to be online. Only a cookie may offer one.
+  const boundProvider = bound.providers.find((x) => x.provider === 'opencode');
+  const apiOnlyProvider = apiOnly.providers.find((x) => x.provider === 'opencode');
+  assert.ok(!apiOnlyProvider.webAccountKey, 'an API-only row has no workspace identity to offer');
+  assert.strictEqual(boundProvider.webAccountKey, hashKey('opencode', 'workspace:wrk_1'));
+  assert.strictEqual(merged[0].accountKey, boundProvider.webAccountKey);
 });
 
 test('a bound account surfaces an expired cookie instead of the API notConfigured', async () => {
@@ -1181,6 +1192,44 @@ test('a bound reference stops resolving when the machine key changes', async () 
   assert.strictEqual(bound2.source, 'web');
   assert.strictEqual(detected.accountKey, hashKey('opencode', goApiIdentity('key-two')));
   assert.strictEqual(detected.source, 'api');
+});
+
+// A machine that resolves to exactly one OpenCode account still has an account
+// with a name. Left off, its card read "Account 1", and enabling a second
+// account did not repair it until a restart: a scoped refresh only rebuilds the
+// account it targets, so the nameless record survived beside the named new one.
+test('a single OpenCode account is published under its own name', async () => {
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: { work: { enabled: true, cookie: 'sess=1' } }
+    },
+    {
+      now: () => now403,
+      opencodeFetchGoWeb: async () => goWebOk,
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_1', windows: [], balanceUsd: 2 })
+    }
+  );
+  const rows = summary.providers.filter((p) => p.provider === 'opencode');
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].accountName, 'work');
+});
+
+// The zero-config account is named too, and its name survives the wire's own
+// name normalization: the previous "default (auto)" lost its brackets there and
+// reached the card as "default auto".
+test('the auto-detected account is published under a name that survives normalization', async () => {
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true },
+    {
+      now: () => now403,
+      opencodeReadGoApiKey: () => 'sk-ambient',
+      opencodeCollectGoApi: async () => goApiOk
+    }
+  );
+  const row = summary.providers.find((p) => p.provider === 'opencode');
+  assert.strictEqual(row.accountName, 'Auto-detected');
 });
 
 test('an account holding only a key identifies itself by that key', async () => {

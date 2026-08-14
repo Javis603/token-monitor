@@ -263,7 +263,8 @@ test('OpenCode disabled profiles still count in the account summary', () => {
   // Credential composition stays visible after the fact, because two kinds under
   // one name is a user assertion that changes identity and fallback behaviour,
   // and each is removable so undoing it does not cost the one being kept.
-  assert.match(renderBody, /\['ambient', profile\.usesAmbientKey/);
+  assert.match(renderBody, /\['ambient', profile\.usesAmbientKey, ambientLabel\]/);
+  assert.match(renderBody, /profile\.ambientStale/);
   assert.match(renderBody, /\['api', profile\.hasApiKey/);
   assert.match(renderBody, /\['cookie', profile\.hasCookie/);
   // Per-credential actions live in an expanded section, not inline beside the
@@ -1458,6 +1459,9 @@ test('a zero-config OpenCode machine is not reported as unconfigured', () => {
   assert.match(profilesHandler, /hasApiKey: Boolean\(p\.apiKey\)/);
   assert.match(profilesHandler, /hasCookie: Boolean\(p\.cookie\)/);
   assert.match(profilesHandler, /usesAmbientKey: Boolean\(p\.useAmbientKey\)/);
+  // Held but not resolving is its own state: on an account that also has a
+  // cookie, nothing else in the panel would reveal it.
+  assert.match(profilesHandler, /ambientStale: Boolean\(p\.useAmbientKey\)/);
 });
 
 test('OpenCode credentials are named, merged and removed one at a time', () => {
