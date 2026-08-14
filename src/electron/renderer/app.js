@@ -13395,36 +13395,22 @@ function renderOpenCodeProfiles() {
       item.className = 'opencode-profile-item is-ambient';
       const nameBox = document.createElement('span');
       nameBox.className = 'profile-name-box';
-      const nameSpan = document.createElement('span');
-      nameSpan.className = 'profile-name';
-      nameSpan.textContent = t('settings.opencode.ambientName');
-
+      // An editable field rather than a label behind an edit button: this row
+      // has no name yet, and naming it is the only thing a user can do here, so
+      // hiding that behind a hover-revealed pencil hides the whole feature. The
+      // placeholder carries the label the row used to show.
       const nameInput = document.createElement('input');
-      nameInput.className = 'profile-name-input hidden';
+      nameInput.className = 'profile-name-input is-placeholder';
       nameInput.type = 'text';
-      nameInput.placeholder = t('settings.opencode.profileNamePlaceholder');
+      nameInput.placeholder = t('settings.opencode.ambientName');
+      nameInput.title = t('settings.opencode.nameAmbient');
 
-      const nameBtn = document.createElement('button');
-      nameBtn.className = 'profile-rename-btn';
-      nameBtn.textContent = '✎';
-      nameBtn.title = t('settings.opencode.nameAmbient');
-
-      let naming = false;
-      const beginNaming = () => {
-        if (naming) return;
-        naming = true;
-        nameSpan.classList.add('hidden');
-        nameInput.classList.remove('hidden');
-        nameInput.focus();
-      };
       const endNaming = async (save) => {
-        if (!naming) return;
-        naming = false;
-        nameInput.classList.add('hidden');
-        nameSpan.classList.remove('hidden');
         const name = nameInput.value.trim();
-        nameInput.value = '';
-        if (!save || !name) return;
+        if (!save || !name) {
+          nameInput.value = '';
+          return;
+        }
         // 'ambient' stores a reference rather than the key, so a key rotated
         // inside OpenCode keeps being read live. An existing name merges,
         // which is exactly the "these are one account" assertion.
@@ -13439,7 +13425,6 @@ function renderOpenCodeProfiles() {
         updateOpenCodeProfilesStatus();
         renderSettingsSummaries();
       };
-      nameBtn.addEventListener('click', beginNaming);
       nameInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') endNaming(true);
         if (e.key === 'Escape') endNaming(false);
@@ -13449,7 +13434,7 @@ function renderOpenCodeProfiles() {
       const detail = document.createElement('span');
       detail.className = 'profile-detail';
       detail.textContent = t('settings.opencode.ambientDetail');
-      nameBox.append(nameSpan, nameInput, nameBtn, detail);
+      nameBox.append(nameInput, detail);
 
       const rightBox = document.createElement('span');
       rightBox.className = 'profile-right';
@@ -13617,11 +13602,16 @@ function renderOpenCodeProfiles() {
       let credentialList = null;
       if (multiCredential) {
         credentialList = document.createElement('div');
-        credentialList.className = 'opencode-credential-list hidden';
+        credentialList.className = 'opencode-credential-list accordion-animated-container hidden';
         credentialList.id = 'opencode-credentials-' + name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        // The shared accordion squeezes one inner wrapper, so the rows go inside
+        // it rather than on the container, which cannot shrink.
+        const credentialInner = document.createElement('div');
+        credentialInner.className = 'accordion-animation-inner';
         for (const [kind, , label] of credentials) {
-          credentialList.append(opencodeCredentialRow(name, kind, label));
+          credentialInner.append(opencodeCredentialRow(name, kind, label));
         }
+        credentialList.append(credentialInner);
         detail.setAttribute('aria-controls', credentialList.id);
         detail.addEventListener('click', () => {
           const open = credentialList.classList.toggle('hidden') === false;
@@ -13729,7 +13719,9 @@ function opencodeCredentialRow(accountName, kind, label) {
   });
 
   actions.append(removeBtn);
-  row.append(labelSpan, nameInput, mergeBtn, actions);
+  // The merge label carries the target account name and never fits beside the
+  // input, so it trails the row and wraps onto its own line when it appears.
+  row.append(labelSpan, nameInput, actions, mergeBtn);
   return row;
 }
 

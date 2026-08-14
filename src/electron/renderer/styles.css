@@ -5553,7 +5553,10 @@ html.is-windows .limit-live-badge {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  /* No row gap: the credential list is the only second-row child and it stays
+     in the grid while collapsed, so a row gap would pad every multi-credential
+     row by that much even when nothing is shown. It carries its own margin. */
+  gap: 0 8px;
   min-width: 0;
   padding: 7px 8px;
   border: 1px solid var(--line);
@@ -5567,9 +5570,22 @@ html.is-windows .limit-live-badge {
   padding: 0;
 }
 /* The auto-detected credential is not a stored account, so its row carries no
-   toggle or delete. An empty first cell keeps it on the same grid. */
-.opencode-profile-item.is-ambient .profile-name {
+   toggle or delete. An empty first cell keeps it on the same grid. Its name
+   field rests as the row's label and only looks like an input once pointed at,
+   so an unnamed row does not read as an unfinished form. */
+.opencode-profile-item .profile-name-input.is-placeholder {
+  border-color: transparent;
+  background: transparent;
   color: var(--muted);
+  /* Pulls the field's own padding back so its text starts on the same column as
+     the plain names above it; only the highlight box overhangs once hovered. */
+  margin-left: -5px;
+}
+.opencode-profile-item .profile-name-input.is-placeholder:hover,
+.opencode-profile-item .profile-name-input.is-placeholder:focus {
+  border-color: rgba(var(--accent-rgb), 0.6);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text);
 }
 /* Acting on a single credential lives in the expanded section, not inline next
    to the account's own controls: unbinding is one click and should not sit a
@@ -5603,30 +5619,53 @@ html.is-windows .limit-live-badge {
 .opencode-profile-item .profile-detail.is-open .cursor-disclosure-icon {
   transform: rotate(0deg);
 }
+/* The summary line runs at 9px, so the group-header size reads as an oversized
+   arrow next to it. Scaled to the text it belongs to. */
+.opencode-profile-item .profile-detail .cursor-disclosure-icon {
+  width: 9px;
+  height: 9px;
+}
+.opencode-profile-item .profile-detail .cursor-disclosure-icon::before {
+  width: 4px;
+  height: 4px;
+  border-width: 0 1.2px 1.2px 0;
+}
 #opencodeLocalFallbackAccountGroup > .settings-group-header .cursor-disclosure-icon {
   transform: rotate(-90deg);
 }
 #opencodeLocalFallbackAccountGroup.expanded > .settings-group-header .cursor-disclosure-icon {
   transform: rotate(0deg);
 }
+/* The relocated toggle keeps only its description, and a paragraph's
+   content-based flex basis is wide enough to claim the whole line on its own,
+   pushing the switch to a second row. A zero basis lets both share the line and
+   the text reflow into the space that is left. */
+#opencodeLocalFallbackInner .settings-item > .settings-item-text {
+  flex: 1 1 0;
+}
+/* Animated like every other disclosure in the panel rather than snapping from
+   `display: none`; the container squeezes a single inner wrapper, so the rows
+   have to live inside one. */
 .opencode-credential-list {
   grid-column: 2 / -1;
+  margin-top: 6px;
+}
+.opencode-credential-list > .accordion-animation-inner {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin-top: 6px;
 }
-.opencode-credential-list.hidden { display: none; }
 .opencode-credential-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px 6px;
   min-width: 0;
   padding: 3px 0 3px 8px;
   border-left: 1px solid var(--line);
 }
 .opencode-credential-row .credential-label {
-  flex: 1;
+  flex: 0 0 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5643,6 +5682,16 @@ html.is-windows .limit-live-badge {
   height: 22px;
   box-sizing: border-box;
   font-size: 11px;
+  /* Rests as text and only looks like a field once pointed at: an expanded
+     account otherwise reads as a form waiting to be filled in, when what it is
+     showing is which name each credential already answers to. */
+  border: 1px solid transparent;
+  background: transparent;
+}
+.opencode-credential-row .credential-name-input:hover,
+.opencode-credential-row .credential-name-input:focus {
+  border-color: rgba(var(--accent-rgb), 0.6);
+  background: rgba(0, 0, 0, 0.2);
 }
 .opencode-credential-row .credential-actions {
   display: inline-flex;
@@ -5664,6 +5713,7 @@ html.is-windows .limit-live-badge {
   cursor: pointer;
 }
 .credential-merge-btn.hidden { display: none; }
+.opencode-credential-row .credential-merge-btn { flex: 0 0 auto; }
 .opencode-profile-item .profile-name-box {
   display: grid;
   grid-template-columns: minmax(0, max-content) auto minmax(0, 1fr);
@@ -5673,6 +5723,22 @@ html.is-windows .limit-live-badge {
   align-items: center;
   gap: 1px 4px;
   min-width: 0;
+}
+/* Merging is an OpenCode-only affordance, so only that list carries the extra
+   row; the shared grid stays two rows for the other profile lists. It needs a
+   row of its own because the label carries the target account name, which is
+   far wider than the cell beside the rename button, and auto-placement would
+   otherwise drop it into whichever cell happened to be free. */
+#opencodeProfileList .opencode-profile-item .profile-name-box {
+  grid-template-areas:
+    "name rename ."
+    "merge merge merge"
+    "detail detail detail";
+}
+#opencodeProfileList .opencode-profile-item .profile-name-box > .credential-merge-btn {
+  grid-area: merge;
+  justify-self: start;
+  margin-top: 3px;
 }
 .opencode-profile-item .profile-name {
   grid-area: name;

@@ -6502,18 +6502,24 @@ app.whenReady().then(() => {
       return opencodeStatusCache.value;
     }
     const profiles = settings.opencodeProfiles || {};
-    const entries = Object.entries(profiles).filter(([, p]) => (p.cookie || p.apiKey) && p.enabled);
+    // A profile that only names the auto-detected key stores no credential of
+    // its own, so filtering on `cookie || apiKey` alone would skip it and leave
+    // its row stuck on the placeholder while the collector reads live quota
+    // from that very key. Resolve the key the same way the collector does.
+    const profileKey = (p) => p.apiKey || (p.useAmbientKey ? opencodeGoApi.readGoApiKey(process.env) : '');
+    const entries = Object.entries(profiles).filter(([, p]) => (p.cookie || profileKey(p)) && p.enabled);
 
     // Query all profiles in parallel
     const results = await Promise.all(
       entries.map(async ([name, profile]) => {
+        const apiKey = profileKey(profile);
         // An API key reaches Go quota and nothing else, so it reports the same
         // shape as a cookie with the Zen half permanently absent. Without this
         // branch an API account is never probed and the panel sits at "0/1".
         // Only a cookie account can be probed for Zen, so a profile holding both
         // falls through to the cookie path and its key is used by the collector.
-        if (profile.apiKey && !profile.cookie) {
-          const probe = await probeOpenCodeApiKey(profile.apiKey);
+        if (apiKey && !profile.cookie) {
+          const probe = await probeOpenCodeApiKey(apiKey);
           // The renderer checks `linked` before `error`, so anything short of a
           // working key must not claim linked or it renders a bare "✓" with no
           // plan behind it.
@@ -6536,7 +6542,7 @@ app.whenReady().then(() => {
         const [go, zen, apiProbe] = await Promise.all([
           opencodeWeb.fetchGoWeb(profile.cookie, {}),
           opencodeWeb.fetchZen(profile.cookie, {}),
-          profile.apiKey ? probeOpenCodeApiKey(profile.apiKey) : null
+          apiKey ? probeOpenCodeApiKey(apiKey) : null
         ]);
         const summary = { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd };
         // A bound key answers for Go on its own, so the row must not read as

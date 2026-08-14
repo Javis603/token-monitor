@@ -1394,6 +1394,14 @@ test('a zero-config OpenCode machine is not reported as unconfigured', () => {
   assert.ok(status, 'status handler should exist');
   assert.match(status, /opencodeAmbientKeyActive\(profiles\)/);
   assert.match(status, /OPENCODE_AMBIENT_ACCOUNT_KEY/);
+  // A profile that only names the ambient key stores no credential of its own,
+  // so a `cookie || apiKey` filter drops it and its row never leaves the
+  // placeholder while the collector is reading live quota from that same key.
+  // Both the filter and the probe resolve the key the way the collector does.
+  assert.match(status, /const profileKey = \(p\) => p\.apiKey \|\| \(p\.useAmbientKey \? opencodeGoApi\.readGoApiKey\(process\.env\) : ''\);/);
+  assert.match(status, /\.filter\(\(\[, p\]\) => \(p\.cookie \|\| profileKey\(p\)\) && p\.enabled\)/);
+  assert.match(status, /const apiKey = profileKey\(profile\);/);
+  assert.doesNotMatch(status, /probeOpenCodeApiKey\(profile\.apiKey\)/);
 
   const profilesHandler = main.slice(
     main.indexOf("ipcMain.handle('opencode:getProfiles'"),
@@ -1471,4 +1479,36 @@ test('the OpenCode local fallback toggle is relocated once, not once per render'
     .map((token) => details.indexOf(token));
   assert.ok(order.every((index) => index >= 0), 'panel should contain note, list, fallback and add form');
   assert.deepEqual(order, [...order].sort((a, b) => a - b));
+
+  // Left with only its description, the text cell's content-based flex basis
+  // claims the whole line on its own and wraps the switch onto a second row.
+  const css = readRendererFile('styles.css');
+  assert.match(css, /#opencodeLocalFallbackInner \.settings-item > \.settings-item-text \{[^}]*flex: 1 1 0;/);
+});
+
+test('an expanded OpenCode account animates and its merge button gets its own row', () => {
+  const app = readRendererFile('app.js');
+  const css = readRendererFile('styles.css');
+
+  // The shared accordion squeezes one inner wrapper; rows placed directly on
+  // the container leave it with nothing to shrink.
+  assert.match(app, /credentialList\.className = 'opencode-credential-list accordion-animated-container hidden';/);
+  assert.match(app, /credentialInner\.className = 'accordion-animation-inner';/);
+  assert.match(app, /credentialInner\.append\(opencodeCredentialRow\(name, kind, label\)\)/);
+  assert.match(app, /credentialList\.append\(credentialInner\)/);
+  // That container stays in the grid while collapsed, so a row gap would pad
+  // every multi-credential account by its full height with nothing shown.
+  assert.match(css, /\.opencode-profile-item \{[^}]*gap: 0 8px;/);
+
+  // The merge label carries the target account name and never fits beside the
+  // input or in the cell next to the rename button.
+  assert.match(app, /row\.append\(labelSpan, nameInput, actions, mergeBtn\);/);
+  assert.match(css, /#opencodeProfileList \.opencode-profile-item \.profile-name-box \{\s*grid-template-areas:\s*"name rename \."\s*"merge merge merge"\s*"detail detail detail";/);
+  // Scoped to OpenCode: the other profile lists share this grid and have no
+  // merge button, so they keep the two-row template.
+  assert.match(css, /\.opencode-profile-item \.profile-name-box \{[^}]*grid-template-areas:\s*"name rename \."\s*"detail detail detail";/);
+
+  // The summary line runs at 9px; the group-header chevron size reads as an
+  // oversized arrow beside it.
+  assert.match(css, /\.opencode-profile-item \.profile-detail \.cursor-disclosure-icon \{\s*width: 9px;/);
 });
