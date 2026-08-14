@@ -24,6 +24,19 @@ test('resolves the packaged Widget reloader only on macOS', () => {
   }
 });
 
+test('does not resolve or launch the reloader on an unsupported macOS version', () => {
+  let launches = 0;
+  assert.deepEqual(requestMacWidgetReload({
+    platform: 'darwin',
+    runtimeSupported: false,
+    execFile: () => { launches += 1; }
+  }), {
+    ok: false,
+    reason: 'unsupported-os'
+  });
+  assert.equal(launches, 0);
+});
+
 test('requests a throttled Widget timeline reload through the helper', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-reloader-'));
   try {

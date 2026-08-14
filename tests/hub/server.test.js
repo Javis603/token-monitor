@@ -43,6 +43,25 @@ test('a hub without a secret binds to localhost only even when asked to bind eve
   }
 });
 
+test('health exposes the Node Hub build identity without authentication', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/api/health`);
+    const health = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(health.runtime, 'node-hub');
+    assert.equal(health.hubBuild.runtime, 'node-hub');
+    assert.match(health.hubBuild.coreBuildId, /^sha256:[a-f0-9]{64}$/);
+    assert.match(health.hubBuild.runtimeBuildId, /^sha256:[a-f0-9]{64}$/);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
 test('ingest inserts a device and is visible in getStats', () => {
   const dataFile = tempDataFile();
   const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', dataFile, logger: { error() {} } });

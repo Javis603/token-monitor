@@ -44,9 +44,19 @@ test('deviceBreakdownForPeriod tolerates shared models and legacy device records
 
   assert.equal(result.tools.length, 2);
   assert.equal(result.tools[0].color, '#73bdf5');
-  assert.deepEqual(deviceBreakdownForPeriod({ periods: { today: { totalTokens: 20 } } }, 'today'), {
+  assert.deepEqual(deviceBreakdownForPeriod({ periods: { today: { totalTokens: 20 } } }, 'today', {
+    unattributedLabel: '未分類'
+  }), {
     totalTokens: 20,
-    tools: []
+    tools: [{
+      key: '__unattributed',
+      client: '__unattributed',
+      name: '未分類',
+      value: 20,
+      percent: 100,
+      color: '#73bdf5',
+      models: []
+    }]
   });
 });
 

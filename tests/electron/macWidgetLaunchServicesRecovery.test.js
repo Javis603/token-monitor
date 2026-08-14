@@ -91,6 +91,19 @@ test('skips unsupported and unpackaged processes before filesystem access', asyn
     reason: 'unsupported-platform'
   });
 
+  const unsupportedOs = createMacWidgetLaunchServicesRecovery({
+    fs: fsApi,
+    execFile: () => { launches += 1; }
+  });
+  assert.deepEqual(await unsupportedOs({
+    platform: 'darwin',
+    runtimeSupported: false,
+    isPackaged: true
+  }), {
+    status: 'skipped',
+    reason: 'unsupported-os'
+  });
+
   const unpackaged = createMacWidgetLaunchServicesRecovery({
     fs: fsApi,
     execFile: () => { launches += 1; }

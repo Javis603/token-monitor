@@ -18,6 +18,7 @@ const {
 } = require('../shared/credentialStore');
 const { installSafeStdout } = require('../shared/safeStdio');
 const { appVersion } = require('../shared/appVersion');
+const { macWidgetRuntimeSupport } = require('../shared/macSystemRequirements');
 const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const motionPreferenceApi = require('./motionPreference');
@@ -51,7 +52,8 @@ const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocal
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
-const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
+const { probeHubBuild } = require('./hubBuildStatus');
+const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
@@ -147,8 +149,9 @@ const {
   fetchMimoLimits,
   normalizeMimoCookieHeader
 } = require('../shared/mimoLimits');
-const { historyPreview, historyRevision } = require('../shared/history');
-const { completeHistorySource, resolveCompleteHistory } = require('./historySource');
+const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
+const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
+const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
 const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const {
@@ -312,6 +315,11 @@ if (!gotLock) app.exit(0);
 
 const HOME_LIMIT_ACCOUNT_COUNT_DEFAULT = 3;
 const HOME_LIMIT_ACCOUNT_COUNT_MAX = 12;
+const PERIOD_MONTH_MODES = new Set(['month', 'week', 'last7', 'last30']);
+
+function normalizePeriodMonthMode(value) {
+  return PERIOD_MONTH_MODES.has(value) ? value : 'month';
+}
 
 function normalizeHomeLimitAccountCount(value) {
   const count = Math.trunc(Number(value));
@@ -358,6 +366,7 @@ function defaultSettings() {
     tokenRateMode: 'speed',
     heatmapMetric: 'cost',
     homeActiveDaysWindow: 'all',
+    periodMonthMode: 'month',
     themeColors: {},
     vendorColors: {},
     floatingBubbleEnabled: false,
@@ -402,6 +411,7 @@ function defaultSettings() {
     homeLimitProviderOrder: '',
     hiddenHomeLimitProviders: '',
     homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
+    limitsRefreshMode: normalizeLimitsRefreshMode(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE),
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
@@ -2022,6 +2032,7 @@ function readSettings() {
       merged.hiddenHomeLimitProviders = normalizeHiddenLimitProviders(saved.hiddenHomeLimitProviders);
     }
     merged.homeLimitAccountCount = normalizeHomeLimitAccountCount(merged.homeLimitAccountCount);
+    merged.periodMonthMode = normalizePeriodMonthMode(merged.periodMonthMode);
     if (saved.historyEnabled !== undefined) {
       merged.historyEnabled = parseBoolean(saved.historyEnabled, false);
     }
@@ -2323,9 +2334,11 @@ function applyNativeMaterial(source = settings) {
 }
 
 function withHistoryPreview(stats, devices) {
-  const history = settings?.historyEnabled === false ? aggregateHistory([]) : aggregateHistory(devices);
+  const historyDevices = settings?.historyEnabled === false ? [] : devices;
+  const history = aggregateHistory(historyDevices);
   stats.historyPreview = historyPreview(history);
   stats.historyRevision = historyRevision(history);
+  stats.deviceHistoryRevision = deviceHistoryRevision(historyDevices);
   return stats;
 }
 
@@ -2633,6 +2646,12 @@ function getHubInfo() {
     error: embeddedHubError,
     lanAddresses: lanIpv4Addresses()
   };
+}
+
+async function getHubBuildStatus() {
+  if (settings?.hubMode !== 'client') return { status: 'notConfigured', runtime: '', hubUrl: '' };
+  const hubUrl = String(settings.hubUrl || '').trim();
+  return probeHubBuild(hubUrl);
 }
 
 async function startEmbeddedHub() {
@@ -3387,7 +3406,7 @@ function injectLocalDeviceStatus(stats) {
 }
 
 function macWidgetConfiguration() {
-  if (process.platform !== 'darwin') return null;
+  if (!macWidgetRuntimeSupported()) return null;
   if (cachedMacWidgetConfiguration !== undefined) return cachedMacWidgetConfiguration;
 
   let appGroup = String(process.env.TOKEN_MONITOR_APP_GROUP || '').trim();
@@ -3430,6 +3449,13 @@ function macWidgetConfiguration() {
   return cachedMacWidgetConfiguration;
 }
 
+function macWidgetRuntimeSupported(
+  platform = process.platform,
+  osRelease = platform === 'darwin' ? os.release() : ''
+) {
+  return macWidgetRuntimeSupport({ platform, osRelease }).supported;
+}
+
 function historyResolverOptions() {
   const { url: hubUrl, secret } = effectiveHubConfig();
   return {
@@ -3438,7 +3464,10 @@ function historyResolverOptions() {
     historyEnabled: settings?.historyEnabled !== false,
     hubMode: settings?.hubMode,
     hubUrl,
-    localDevice,
+    // In sync/host mode the headless agent owns this machine's producer while its
+    // PID is live. Do not let the widget's last pre-handoff snapshot compete with
+    // the newer Hub record; local mode always owns its collector by contract.
+    localDevice: ownsUsageRuntime() ? (lastCollectedDevice || localDevice) : null,
     mode,
     secret
   };
@@ -3513,7 +3542,7 @@ function captureMacWidgetWork({ stats, owner }) {
 }
 
 function ensureMacWidgetSnapshotController() {
-  if (process.platform !== 'darwin') return null;
+  if (!macWidgetRuntimeSupported()) return null;
   if (macWidgetSnapshotController) return macWidgetSnapshotController;
   macWidgetSnapshotController = createMacWidgetSnapshotController({
     startPaused: !macWidgetPublicationReady,
@@ -3559,6 +3588,7 @@ function ensureMacWidgetSnapshotController() {
     reloadSnapshot: (work, options) => requestMacWidgetReload({
       widgetKind: work.widgetKind,
       isCurrent: options.isCurrent,
+      runtimeSupported: macWidgetRuntimeSupported(),
       logger: (message) => console.warn(message)
     }),
     logger: (message) => console.warn(message)
@@ -3585,7 +3615,7 @@ function refreshMacWidgetHistorySource() {
 }
 
 function scheduleMacWidgetSnapshot(stats, producerOwner) {
-  if (process.platform !== 'darwin' || !stats) return false;
+  if (!macWidgetRuntimeSupported() || !stats) return false;
   return ensureMacWidgetSnapshotController()?.enqueue({ stats, producerOwner }) || false;
 }
 
@@ -5568,8 +5598,20 @@ function createDashboardWindow() {
   return win;
 }
 
-async function getDashboardHistory() {
-  return getCompleteHistory();
+async function getDashboardHistory(options = {}) {
+  const includeDevices = options?.includeDevices === true;
+  const resolved = includeDevices
+    ? await resolveCompleteHistoryWithDevices(historyResolverOptions())
+    : { history: await getCompleteHistory(), deviceHistories: undefined };
+  const history = resolved.history;
+  const source = completeHistorySource(historyResolverOptions());
+  return {
+    ...history,
+    ...(includeDevices ? { deviceHistories: resolved.deviceHistories } : {}),
+    fixedPeriods: fixedPeriodHistoryMeta({
+      source
+    })
+  };
 }
 
 let cursorStatusCache = { value: null, at: 0 };
@@ -5612,17 +5654,25 @@ function rebuildWindow() {
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
-  const widgetRecoveryAbort = new AbortController();
-  const abortWidgetRecovery = () => widgetRecoveryAbort.abort();
-  app.once('before-quit', abortWidgetRecovery);
-  const widgetRecovery = recoverMacWidgetLaunchServicesRegistration({
+  const widgetRuntime = macWidgetRuntimeSupport({
     platform: process.platform,
-    isPackaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    userDataPath: app.getPath('userData'),
-    signal: widgetRecoveryAbort.signal,
-    logger: (message) => console.warn(message)
+    osRelease: process.platform === 'darwin' ? os.release() : ''
   });
+  const widgetRuntimeSupported = widgetRuntime.supported;
+  const widgetRecoveryAbort = widgetRuntimeSupported ? new AbortController() : null;
+  const abortWidgetRecovery = () => widgetRecoveryAbort?.abort();
+  if (widgetRecoveryAbort) app.once('before-quit', abortWidgetRecovery);
+  const widgetRecovery = widgetRuntimeSupported
+    ? recoverMacWidgetLaunchServicesRegistration({
+      platform: process.platform,
+      runtimeSupported: true,
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      userDataPath: app.getPath('userData'),
+      signal: widgetRecoveryAbort.signal,
+      logger: (message) => console.warn(message)
+    })
+    : Promise.resolve({ status: 'skipped', reason: widgetRuntime.reason });
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
@@ -5640,11 +5690,11 @@ app.whenReady().then(() => {
   if (pendingMacWidgetOpen) setImmediate(openMainWindowFromWidget);
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
-  ensureMacWidgetDemand();
+  if (widgetRuntimeSupported) ensureMacWidgetDemand();
   startMode();
   void widgetRecovery.finally(() => {
-    app.removeListener('before-quit', abortWidgetRecovery);
-    if (!widgetRecoveryAbort.signal.aborted) {
+    if (widgetRecoveryAbort) app.removeListener('before-quit', abortWidgetRecovery);
+    if (!widgetRecoveryAbort?.signal.aborted) {
       macWidgetPublicationReady = true;
       macWidgetSnapshotController?.resume();
     }
@@ -5819,6 +5869,7 @@ app.whenReady().then(() => {
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
+      periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
@@ -5830,6 +5881,7 @@ app.whenReady().then(() => {
       serviceProviderDisplayOrder: patch.serviceProviderDisplayOrder !== undefined ? String(patch.serviceProviderDisplayOrder || '') : (settings.serviceProviderDisplayOrder || ''),
       hiddenServiceProviders: patch.hiddenServiceProviders !== undefined ? String(patch.hiddenServiceProviders || '') : (settings.hiddenServiceProviders || ''),
       serviceStatusRefreshMs: normalizeServiceStatusRefreshMs(patch.serviceStatusRefreshMs ?? settings.serviceStatusRefreshMs),
+      limitsRefreshMode: normalizeLimitsRefreshMode(patch.limitsRefreshMode ?? settings.limitsRefreshMode),
       limitsRefreshMs: normalizeLimitsRefreshMs(patch.limitsRefreshMs ?? settings.limitsRefreshMs),
       showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
@@ -6118,6 +6170,7 @@ app.whenReady().then(() => {
     providerIds: Array.isArray(options?.providerIds) ? options.providerIds : null
   }));
   ipcMain.handle('hub:getInfo', () => getHubInfo());
+  ipcMain.handle('hub:getBuildStatus', () => getHubBuildStatus());
   ipcMain.handle('hub:regenerateSecret', () => {
     settings.hubHostSecret = generateHubSecret();
     saveSettings({ throwOnError: true });
@@ -6912,7 +6965,7 @@ app.whenReady().then(() => {
     else mainWindow?.close();
   });
   ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
-  ipcMain.handle('dashboard:getHistory', () => getDashboardHistory());
+  ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
   ipcMain.on('dashboard:ready', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== dashboardWindow || win.isDestroyed()) return;

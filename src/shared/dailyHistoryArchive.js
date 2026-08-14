@@ -25,6 +25,29 @@ function normalizeObservation(value) {
   const cost = Math.max(0, num(value.cost));
   const messages = Math.max(0, Math.round(num(value.messages)));
   const reasoningTokens = Math.max(0, Math.round(num(value.reasoningTokens ?? value.reasoning_tokens)));
+  const rawCacheReadTokens = Math.max(0, Math.round(num(value.cacheReadTokens ?? value.cache_read_tokens)));
+  const rawCacheWriteTokens = Math.max(0, Math.round(num(value.cacheWriteTokens ?? value.cache_write_tokens)));
+  const rawOutputTokens = Math.max(0, Math.round(num(value.outputTokens ?? value.output_tokens)));
+  const rawComponentTokens = rawCacheReadTokens + rawCacheWriteTokens + rawOutputTokens;
+  const componentsFit = rawComponentTokens <= tokens;
+  const cacheReadTokens = componentsFit ? rawCacheReadTokens : 0;
+  const cacheWriteTokens = componentsFit ? rawCacheWriteTokens : 0;
+  const outputTokens = componentsFit ? rawOutputTokens : 0;
+  const componentTokens = cacheReadTokens + cacheWriteTokens + outputTokens;
+  const hasExplicitUnclassified = Object.prototype.hasOwnProperty.call(value, 'unclassifiedTokens')
+    || Object.prototype.hasOwnProperty.call(value, 'unclassified_tokens');
+  const unclassifiedTokens = Math.min(Math.max(0, tokens - componentTokens), Math.max(0, Math.round(
+    hasExplicitUnclassified
+      ? num(value.unclassifiedTokens ?? value.unclassified_tokens)
+      : (value.tokenComponentsAvailable === true && componentsFit ? 0 : tokens)
+  )));
+  // A zero-token synthetic observation has an exact zero component breakdown
+  // even when it predates the provenance field. Do not let bookkeeping-only
+  // rows make an otherwise exact fixed-range breakdown unavailable.
+  const tokenComponentsAvailable = componentsFit
+    && componentTokens + unclassifiedTokens <= tokens
+    && unclassifiedTokens === 0
+    && (tokens === 0 || value.tokenComponentsAvailable === true);
   if (tokens === 0 && cost === 0 && messages === 0) return null;
   return {
     client,
@@ -35,7 +58,75 @@ function normalizeObservation(value) {
     tokens,
     cost,
     messages,
+    ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {}),
+    ...(tokenComponentsAvailable ? {
+      tokenComponentsAvailable: true,
+      ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+      ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
+      ...(outputTokens > 0 ? { outputTokens } : {})
+    } : {}),
     ...(reasoningTokens > 0 ? { reasoningTokens } : {})
+  };
+}
+
+function normalizeComponentValues(value, totalTokens, exact) {
+  const cacheReadTokens = Math.max(0, Math.round(num(value?.cacheReadTokens)));
+  const cacheWriteTokens = Math.max(0, Math.round(num(value?.cacheWriteTokens)));
+  const outputTokens = Math.max(0, Math.round(num(value?.outputTokens)));
+  if (cacheReadTokens + cacheWriteTokens + outputTokens > totalTokens) return null;
+  const unclassifiedTokens = Math.min(
+    totalTokens - cacheReadTokens - cacheWriteTokens - outputTokens,
+    Math.max(0, Math.round(num(value?.unclassifiedTokens
+      ?? (exact ? 0 : totalTokens - cacheReadTokens - cacheWriteTokens - outputTokens))))
+  );
+  return {
+    ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+    ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
+    ...(outputTokens > 0 ? { outputTokens } : {}),
+    ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {})
+  };
+}
+
+function observationTokenMaps(observations) {
+  const perClient = {};
+  const perModel = {};
+  let totalTokens = 0;
+  for (const observation of Object.values(observations || {})) {
+    const tokens = Math.max(0, Math.round(num(observation?.tokens)));
+    totalTokens += tokens;
+    perClient[observation.client] = num(perClient[observation.client]) + tokens;
+    perModel[observation.modelId] = num(perModel[observation.modelId]) + tokens;
+  }
+  return { totalTokens, perClient, perModel };
+}
+
+function normalizeComponentSummary(value, observations) {
+  if (!value || typeof value !== 'object') return null;
+  const exact = value.tokenComponentsAvailable === true;
+  const tokenMaps = observationTokenMaps(observations);
+  const totals = normalizeComponentValues(value, tokenMaps.totalTokens, exact);
+  if (!totals) return null;
+
+  const normalizeMap = (source, tokensByKey) => {
+    const result = {};
+    for (const [key, tokens] of Object.entries(tokensByKey)) {
+      const normalized = normalizeComponentValues(source?.[key], tokens, exact);
+      if (!normalized) return null;
+      if (Object.keys(normalized).length > 0) result[key] = normalized;
+    }
+    return result;
+  };
+  const perClient = normalizeMap(value.perClient, tokenMaps.perClient);
+  const perModel = normalizeMap(value.perModel, tokenMaps.perModel);
+  if (!perClient || !perModel) return null;
+  return {
+    tokenComponentsAvailable: exact
+      && num(totals.unclassifiedTokens) === 0
+      && Object.values(perClient).every((entry) => num(entry.unclassifiedTokens) === 0)
+      && Object.values(perModel).every((entry) => num(entry.unclassifiedTokens) === 0),
+    ...totals,
+    perClient,
+    perModel
   };
 }
 
@@ -52,10 +143,12 @@ function normalizeDay(value, fallbackDate = '') {
     observations[observationKey(observation)] = observation;
   }
   if (Object.keys(observations).length === 0 && num(value?.activeTimeMs) <= 0) return null;
+  const componentSummary = normalizeComponentSummary(value?.componentSummary, observations);
   return {
     date,
     activeTimeMs: Math.max(0, Math.round(num(value?.activeTimeMs))),
-    observations
+    observations,
+    ...(componentSummary ? { componentSummary } : {})
   };
 }
 
@@ -92,7 +185,14 @@ function observationsFromGraphs(graphs) {
         const candidate = normalizeObservation({
           ...raw,
           tokens: sumTokens(raw?.tokens, raw?.client),
-          reasoningTokens: raw?.tokens?.reasoning
+          reasoningTokens: raw?.tokens?.reasoning,
+          tokenComponentsAvailable: raw?.tokenComponentsAvailable !== false,
+          cacheReadTokens: raw?.tokens?.cacheRead ?? raw?.tokens?.cache_read,
+          cacheWriteTokens: raw?.tokens?.cacheWrite ?? raw?.tokens?.cache_write,
+          outputTokens: num(raw?.tokens?.output)
+            + (String(raw?.client || '').trim().toLowerCase() === REASONIX_CLIENT
+              ? num(raw?.tokens?.reasoning)
+              : 0)
         });
         if (!candidate) continue;
         const key = observationKey(candidate);
@@ -107,7 +207,13 @@ function observationsFromGraphs(graphs) {
           tokens: previous.tokens + candidate.tokens,
           cost: previous.cost + candidate.cost,
           messages: previous.messages + candidate.messages,
-          reasoningTokens: num(previous.reasoningTokens) + num(candidate.reasoningTokens)
+          reasoningTokens: num(previous.reasoningTokens) + num(candidate.reasoningTokens),
+          tokenComponentsAvailable: previous.tokenComponentsAvailable === true
+            && candidate.tokenComponentsAvailable === true,
+          cacheReadTokens: num(previous.cacheReadTokens) + num(candidate.cacheReadTokens),
+          cacheWriteTokens: num(previous.cacheWriteTokens) + num(candidate.cacheWriteTokens),
+          outputTokens: num(previous.outputTokens) + num(candidate.outputTokens),
+          unclassifiedTokens: num(previous.unclassifiedTokens) + num(candidate.unclassifiedTokens)
         });
       }
       days.set(date, day);
@@ -226,7 +332,37 @@ function periodLiveDay(period, date) {
     );
   }
 
-  const day = normalizeDay({ date, activeTimeMs: 0, observations: [...observations.values()] }, date);
+  const hasKnownComponents = num(period.cacheReadTokens)
+    + num(period.cacheWriteTokens)
+    + num(period.outputTokens) > 0;
+  const componentSummary = totalTokens > 0
+    && (period.capabilities?.tokenComponents === true || hasKnownComponents)
+    ? {
+        tokenComponentsAvailable: period.capabilities?.tokenComponents === true,
+        cacheReadTokens: num(period.cacheReadTokens),
+        cacheWriteTokens: num(period.cacheWriteTokens),
+        outputTokens: num(period.outputTokens),
+        unclassifiedTokens: num(period.unclassifiedTokens),
+        perClient: Object.fromEntries([...clientIds].map((client) => [client, {
+          cacheReadTokens: num(period.clientCacheReads?.[client]),
+          cacheWriteTokens: num(period.clientCacheWrites?.[client]),
+          outputTokens: num(period.clientOutputs?.[client]),
+          unclassifiedTokens: num(period.clientUnclassifiedTokens?.[client])
+        }])),
+        perModel: Object.fromEntries(Object.keys(period.models || {}).map((model) => [model, {
+          cacheReadTokens: num(period.modelCacheReads?.[model]),
+          cacheWriteTokens: num(period.modelCacheWrites?.[model]),
+          outputTokens: num(period.modelOutputs?.[model]),
+          unclassifiedTokens: num(period.modelUnclassifiedTokens?.[model])
+        }]))
+      }
+    : null;
+  const day = normalizeDay({
+    date,
+    activeTimeMs: 0,
+    observations: [...observations.values()],
+    ...(componentSummary ? { componentSummary } : {})
+  }, date);
   return day && Object.keys(day.observations).length > 0 ? day : null;
 }
 
@@ -238,11 +374,27 @@ function dayCost(day) {
   return Object.values(day?.observations || {}).reduce((sum, observation) => sum + num(observation.cost), 0);
 }
 
+function dayComponentQuality(day) {
+  if (day?.componentSummary?.tokenComponentsAvailable === true) return 2;
+  if (day?.componentSummary) return 1;
+  const usage = Object.values(day?.observations || {}).filter((observation) => num(observation.tokens) > 0);
+  if (usage.length === 0 || usage.every((observation) => observation.tokenComponentsAvailable === true)) return 2;
+  return usage.some((observation) => (
+    num(observation.cacheReadTokens) > 0
+    || num(observation.cacheWriteTokens) > 0
+    || num(observation.outputTokens) > 0
+  )) ? 1 : 0;
+}
+
 function liveDayIsGreater(incoming, previous) {
   const incomingTokens = dayTokens(incoming);
   const previousTokens = dayTokens(previous);
   if (incomingTokens !== previousTokens) return incomingTokens > previousTokens;
-  return dayCost(incoming) > dayCost(previous);
+  const qualityDifference = dayComponentQuality(incoming) - dayComponentQuality(previous);
+  if (qualityDifference !== 0) return qualityDifference > 0;
+  // Equal usage can receive a corrected price in either direction. The later
+  // live observation is authoritative once its provenance quality is equal.
+  return dayCost(incoming) !== dayCost(previous);
 }
 
 function mergeLiveDayMetadata(liveDay, previousDay) {
@@ -250,9 +402,32 @@ function mergeLiveDayMetadata(liveDay, previousDay) {
   const observations = Object.fromEntries(Object.entries(liveDay.observations).map(([key, observation]) => {
     const previous = previousDay.observations[key];
     if (!previous) return [key, observation];
+    if (liveDay.componentSummary) {
+      return [key, {
+        ...observation,
+        messages: Math.max(observation.messages, previous.messages),
+        ...(Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) > 0
+          ? { reasoningTokens: Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) }
+          : {})
+      }];
+    }
+    const incomingTokens = num(observation.tokens);
+    const previousTokens = num(previous.tokens);
+    const canRetainPreviousComponents = incomingTokens >= previousTokens;
+    const previousUnclassified = Math.min(previousTokens, num(previous.unclassifiedTokens));
+    const unclassifiedTokens = canRetainPreviousComponents
+      ? previousUnclassified + (incomingTokens - previousTokens)
+      : incomingTokens;
     return [key, {
       ...observation,
       messages: Math.max(observation.messages, previous.messages),
+      ...(canRetainPreviousComponents && previousTokens - previousUnclassified > 0 ? {
+        cacheReadTokens: num(previous.cacheReadTokens),
+        cacheWriteTokens: num(previous.cacheWriteTokens),
+        outputTokens: num(previous.outputTokens)
+      } : {}),
+      ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {}),
+      ...(unclassifiedTokens === 0 ? { tokenComponentsAvailable: true } : {}),
       ...(Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) > 0
         ? { reasoningTokens: Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) }
         : {})
@@ -319,6 +494,7 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
     .map((day) => ({
       date: day.date,
       activeTimeMs: day.activeTimeMs,
+      ...(day.componentSummary ? { tokenComponentSummary: day.componentSummary } : {}),
       clients: Object.values(day.observations)
         .sort((left, right) => observationKey(left).localeCompare(observationKey(right)))
         .map((observation) => ({
@@ -326,15 +502,21 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
           modelId: observation.modelId,
           ...(observation.providerId ? { providerId: observation.providerId } : {}),
           tokens: {
-            input: observation.tokens,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-            // Archive observations store one already-aggregated token total.
-            // Re-emitting Reasonix's additive reasoning beside that total would
-            // count it twice when history parses the reconstructed graph.
-            reasoning: observation.client === REASONIX_CLIENT ? 0 : num(observation.reasoningTokens)
+            input: Math.max(0, observation.tokens
+              - num(observation.outputTokens)
+              - num(observation.cacheReadTokens)
+              - num(observation.cacheWriteTokens)),
+            output: num(observation.outputTokens),
+            cacheRead: num(observation.cacheReadTokens),
+            cacheWrite: num(observation.cacheWriteTokens),
+            // Archive observations store one already-aggregated output family.
+            // Re-emitting reasoning separately would count it twice.
+            reasoning: 0
           },
+          tokenComponentsAvailable: observation.tokenComponentsAvailable === true,
+          ...(num(observation.unclassifiedTokens) > 0
+            ? { unclassifiedTokens: num(observation.unclassifiedTokens) }
+            : {}),
           cost: observation.cost,
           messages: observation.messages
         }))

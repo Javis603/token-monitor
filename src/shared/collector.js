@@ -282,6 +282,11 @@ function localTodayKey(date = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
+function collectionDate(now) {
+  const value = typeof now === 'function' ? now() : now;
+  return value == null ? new Date() : new Date(value);
+}
+
 // Stamp each posted snapshot with the UTC instant its today/month windows end
 // (next local midnight / next month start, in this device's timezone). The hub
 // uses these to expire a frozen snapshot once it goes offline past a day/month
@@ -290,7 +295,10 @@ function computePeriodWindows(now = new Date()) {
   const startOfNextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
   const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
   const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  let timeZone = '';
+  try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (_) {}
   return {
+    ...(timeZone ? { timeZone } : {}),
     today: { key: localTodayKey(now), endsAt: startOfNextDay.toISOString() },
     month: { key: monthKey, endsAt: startOfNextMonth.toISOString() }
   };
@@ -740,7 +748,7 @@ async function collectUsageOnce(options) {
   // reuse it for the today-window key and updatedAt, so a collection that
   // straddles local midnight cannot pair a day-N today scan with a day-N+1
   // window (issue #37 follow-up). Injectable for tests.
-  const collectedAt = options.now != null ? new Date(options.now) : new Date();
+  const collectedAt = collectionDate(options.now);
   const runTokscaleFn = options.runTokscale || runTokscale;
   const collectWsl = options.collectWslUsage || collectWslUsageImpl;
   const probeWslStateFn = options.probeWslState || probeWslStateImpl;
@@ -1020,6 +1028,7 @@ async function collectUsageOnce(options) {
     clientStatus: deriveClientStatus(normalizedClients, allTime, { sourceChecks }),
     wslStatus,
     periodWindows: computePeriodWindows(collectedAt),
+    historyAvailable: options.historyEnabled !== false,
     today,
     month,
     allTime
@@ -1286,6 +1295,7 @@ function clientSourceRoots(clientsCsv) {
     ['kilocode-tasks', path.join(home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')],
     ['kilocode-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')]
   );
+  add('commandcode', ['commandcode-projects', path.join(home, '.commandcode', 'projects')]);
   // MiMo Code: tokscale 4.8.0 unions the XDG data dir with orca's hook-sandbox
   // copy (scanner.rs `discover_micode_dbs_in_dirs`), and that copy can hold
   // sessions the XDG one is missing. Watch both so an orca-driven install still
@@ -1720,6 +1730,21 @@ function watchPolicyEntries(clientsCsv) {
       return true;
     }
   );
+
+  // Command Code recursively stores session transcripts below projects/, but
+  // checkpoint streams use the same JSONL suffix and are explicitly skipped by
+  // Tokscale. Keep directories for traversal and ordinary JSONL files (including
+  // removed paths), while pruning checkpoints and unrelated project metadata.
+  bound('commandcode', candidates.commandcode || [], (_parts, resolved) => {
+    const name = path.basename(resolved);
+    if (name.endsWith('.jsonl') && !name.endsWith('.checkpoints.jsonl')) return false;
+    try {
+      if (fs.statSync(resolved).isDirectory()) return false;
+    } catch (_) {
+      // Removed transcript paths are handled by the suffix check above.
+    }
+    return true;
+  });
 
   bound('opencode', candidates.opencode || [], (parts) => {
     if (parts.length === 1) {
@@ -2224,6 +2249,7 @@ function startCollector(options) {
   // reintroduce that by forgetting.
   const watchDebounceMs = clampTimerDelayMs(options.watchDebounceMs, 1500);
   const intervalMs = clampTimerDelayMs(options.intervalMs, 5 * 60 * 1000);
+  const historyRetryMs = clampTimerDelayMs(options.historyRetryMs, 60 * 1000);
   const watchUsePolling = resolveWatchUsePolling(options.watchUsePolling);
   const watchNativeForced = watchPollingEnvOverride() === false;
   const trackedClients = new Set(normalizeClientsCsv(clients).split(',').filter(Boolean));
@@ -2244,6 +2270,7 @@ function startCollector(options) {
   let tickInFlight = false;
   let tickPending = false;
   let pendingForceHistory = false;
+  let pendingRolloverHistoryRetry = false;
   let pendingForceSelfSync = null;
   let pendingSourceSelfSync = null;
   // null until something is actually pending. Tracked separately from the
@@ -2261,6 +2288,8 @@ function startCollector(options) {
   let lastHistorySuccessAt = 0;
   let lastHistoryFailureCode = null;
   let lastHistoryScanDurationMs = null;
+  let rolloverHistoryPending = false;
+  let rolloverHistoryRetryTimer = null;
   // Last full-scan snapshot; lets watch ticks scan only --today and derive
   // month/allTime exactly (applyPeriodDelta). Reset by every full tick.
   // anchor holds Windows-only periods; wslAnchor is the WSL contribution frozen
@@ -2401,14 +2430,54 @@ function startCollector(options) {
     for (const resolve of waiters) resolve(result);
   }
 
+  function clearRolloverHistoryRetry() {
+    if (rolloverHistoryRetryTimer) clearTimeout(rolloverHistoryRetryTimer);
+    rolloverHistoryRetryTimer = null;
+  }
+
+  function settleRolloverHistoryAttempt(success, retryAttempt) {
+    if (!rolloverHistoryPending) return;
+    if (success || retryAttempt) {
+      rolloverHistoryPending = false;
+      clearRolloverHistoryRetry();
+      return;
+    }
+    if (rolloverHistoryRetryTimer || stopped) return;
+    rolloverHistoryRetryTimer = setTimeout(() => {
+      rolloverHistoryRetryTimer = null;
+      if (stopped || !rolloverHistoryPending) return;
+      // One targeted retry closes a transient midnight graph failure without
+      // making every few-second watch event pay for another History scan. A
+      // second failure falls back to the normal History interval.
+      void runTick('history-rollover-retry', {
+        forceHistory: true,
+        rolloverHistoryRetry: true,
+        todayOnly: true
+      });
+    }, historyRetryMs);
+  }
+
   async function performTick(reason, tickOptions = {}) {
     const tickStartedAt = Date.now();
-    const includeHistory = shouldIncludeHistory(Date.now(), lastHistoryAt, historyIntervalMs, Boolean(tickOptions.forceHistory), historyEnabled);
+    const collectedAt = collectionDate(options.now);
+    const todayKey = localTodayKey(collectedAt);
+    // The previous live DAY becomes durable history at local midnight. Finalize
+    // it before publishing the new day, even when the normal History interval
+    // is not due yet, so fixed ranges never wait for the next scheduled graph.
+    const localDayRolledOver = Boolean(anchor?.dateKey && anchor.dateKey !== todayKey);
+    if (localDayRolledOver && historyEnabled) rolloverHistoryPending = true;
+    const includeHistory = shouldIncludeHistory(
+      collectedAt.getTime(),
+      lastHistoryAt,
+      historyIntervalMs,
+      Boolean(tickOptions.forceHistory) || localDayRolledOver,
+      historyEnabled
+    );
     if (includeHistory) {
-      lastHistoryAt = Date.now();
+      lastHistoryAt = collectedAt.getTime();
       lastHistoryAttemptAt = tickStartedAt;
     }
-    const todayKey = localTodayKey();
+    let historyScanSucceeded = !includeHistory;
     const requestedTargetClients = [...new Set(normalizeClientsCsv(tickOptions.targetClients).split(',').filter(Boolean))];
     const targetAnchorReady = canTargetTodayPartitions(anchor, requestedTargetClients);
     const anchored = Boolean(tickOptions.todayOnly && anchor && anchor.dateKey === todayKey);
@@ -2428,6 +2497,7 @@ function startCollector(options) {
         agentVersion,
         agentRuntime,
         osInfo: deviceOsInfo,
+        now: collectedAt,
         includeHistory,
         // Capture after the runtime's transformUsage hook so the archive uses
         // the same today period that the user actually sees. The process-local
@@ -2440,6 +2510,7 @@ function startCollector(options) {
           if (Number.isFinite(successAt)) lastHistorySuccessAt = successAt;
           lastHistoryFailureCode = status.failureCode || null;
           lastHistoryScanDurationMs = status.durationMs;
+          historyScanSucceeded = Boolean(status.successAt && !status.failureCode);
         } : null,
         forceSelfSync: tickOptions.forceSelfSync ?? null,
         sourceSelfSync: tickOptions.sourceSelfSync ?? null,
@@ -2501,6 +2572,12 @@ function startCollector(options) {
         }
       });
       if (stopped) return;
+      if (includeHistory) {
+        settleRolloverHistoryAttempt(
+          historyScanSucceeded,
+          tickOptions.rolloverHistoryRetry === true
+        );
+      }
       for (const [client, entry] of Object.entries(summary.clientHealth?.clients || {})) {
         if (entry.data?.lastActivityDay) activityDaysAnchor[client] = entry.data.lastActivityDay;
       }
@@ -2594,6 +2671,9 @@ function startCollector(options) {
       return true;
     } catch (error) {
       if (stopped) return;
+      if (includeHistory) {
+        settleRolloverHistoryAttempt(false, tickOptions.rolloverHistoryRetry === true);
+      }
       const tickFinishedAt = Date.now();
       lastTickFailureAt = tickFinishedAt;
       lastTickDurationMs = Math.max(0, tickFinishedAt - tickStartedAt);
@@ -2637,6 +2717,8 @@ function startCollector(options) {
     if (tickInFlight) {
       tickPending = true;
       pendingForceHistory = pendingForceHistory || Boolean(tickOptions.forceHistory);
+      pendingRolloverHistoryRetry = pendingRolloverHistoryRetry
+        || Boolean(tickOptions.rolloverHistoryRetry);
       pendingForceSelfSync = mergeSelfSyncSelection(pendingForceSelfSync, tickOptions.forceSelfSync);
       pendingSourceSelfSync = mergeSelfSyncSelection(pendingSourceSelfSync, tickOptions.sourceSelfSync);
       pendingTodayOnly = pendingTodayOnly === null
@@ -2656,6 +2738,7 @@ function startCollector(options) {
       });
       while (tickPending && !stopped) {
         const forceHistory = pendingForceHistory;
+        const rolloverHistoryRetry = pendingRolloverHistoryRetry;
         const forceSelfSync = pendingForceSelfSync;
         const sourceSelfSync = pendingSourceSelfSync;
         const todayOnly = pendingTodayOnly === true;
@@ -2667,6 +2750,7 @@ function startCollector(options) {
         pendingWaiters = [];
         tickPending = false;
         pendingForceHistory = false;
+        pendingRolloverHistoryRetry = false;
         pendingForceSelfSync = null;
         pendingSourceSelfSync = null;
         pendingTodayOnly = null;
@@ -2675,6 +2759,7 @@ function startCollector(options) {
         const acknowledgedSourceSync = sourceSyncQueue.acknowledge(forceSelfSync);
         const result = await performTick('coalesced', {
           forceHistory,
+          rolloverHistoryRetry,
           forceSelfSync,
           sourceSelfSync,
           acknowledgedSourceSync,
@@ -2895,6 +2980,7 @@ function startCollector(options) {
     stopped = true;
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
+    clearRolloverHistoryRetry();
     sourceSyncQueue.stop();
     if (!options.skipCloseWatchers) closeWatchers();
     watchedDirectoryKey = null;

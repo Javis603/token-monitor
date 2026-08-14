@@ -20,7 +20,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getStreamStatus: () => ipcRenderer.invoke('stream:status'),
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),
-  getDashboardHistory: () => ipcRenderer.invoke('dashboard:getHistory'),
+  getDashboardHistory: (options) => ipcRenderer.invoke('dashboard:getHistory', options),
   onDashboardHistoryChanged: (callback) => {
     const listener = () => { try { callback(); } catch (_) {} };
     ipcRenderer.on('dashboard:historyChanged', listener);
@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     close: () => ipcRenderer.send('dashboard:close')
   },
   getHubInfo: () => ipcRenderer.invoke('hub:getInfo'),
+  getHubBuildStatus: () => ipcRenderer.invoke('hub:getBuildStatus'),
   regenerateHubSecret: () => ipcRenderer.invoke('hub:regenerateSecret'),
   onHubPush: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };

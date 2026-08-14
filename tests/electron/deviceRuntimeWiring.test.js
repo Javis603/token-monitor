@@ -87,6 +87,14 @@ test('usage runtime refresh ownership follows mode and external-agent state', ()
   assert.equal(probes, 4);
 });
 
+test('History overlay follows usage producer ownership', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  assert.match(
+    main,
+    /localDevice:\s*ownsUsageRuntime\(\)\s*\?\s*\(lastCollectedDevice \|\| localDevice\)\s*:\s*null/
+  );
+});
+
 test('pending usage refreshes isolate synchronous failures', async () => {
   const pending = new Map([
     ['cursor', { clientId: 'cursor', options: { forceSync: true } }],

@@ -595,6 +595,546 @@ test('limitsRefreshMs reconfigures only one runtime timer using elapsed cadence'
   runtime.stop();
 });
 
+function burnRateRuntime(clock, usedPercent, overrides = {}, config = {}) {
+  const calls = [];
+  const runtime = createLimitsRuntime(
+    { limitProviders: ['claude', 'kimi'], limitsRefreshMode: 'adaptive', ...config },
+    runtimeDeps({
+      autoStart: true,
+      now: clock.now,
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      probeProvider: async (provider, _config, context) => {
+        calls.push({ provider, reason: context.reason, scope: context.scope });
+        return [providerRow(provider, 'acct', 'Account', {
+          updatedAt: new Date(clock.now()).toISOString(),
+          windows: [{ kind: 'session', label: '5-hour', usedPercent: usedPercent(provider) }]
+        })];
+      },
+      ...overrides
+    })
+  );
+  return { calls, runtime };
+}
+
+// A quota burning 20 points per 5-minute interval has 12 left, so it runs out in
+// three minutes. Waiting a full base interval would show that 12% right up to
+// the moment it became 0; the early probe bounds the error to the floor instead.
+test('a burning quota gets an early provider-scoped refresh before the base interval', async () => {
+  const clock = fakeClock(1_000);
+  const used = { claude: 68, kimi: 10 };
+  const { calls, runtime } = burnRateRuntime(clock, (provider) => used[provider]);
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    assert.deepEqual(clock.delays(), [300_000]);
+
+    used.claude = 88;
+    used.kimi = 20;
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+    // Only the claude lane is close enough to exhaustion to earn one: kimi burned
+    // the same 10 points but has 80% left, so the base cadence still covers it.
+    assert.deepEqual(clock.delays(), [60_000, 300_000]);
+
+    clock.advance(60_000);
+    await waitFor(() => calls.length === 5, 'burn-rate refresh');
+    assert.equal(calls[4].provider, 'claude');
+    assert.equal(calls[4].reason, 'burn-rate');
+    assert.equal(calls[4].scope.provider, 'claude');
+    assert.equal(calls[4].scope.accountKey, 'acct');
+  } finally {
+    runtime.stop();
+  }
+  assert.deepEqual(clock.delays(), []);
+});
+
+// A provider lane is latest-wins, so scheduling a scope whose probe is still
+// running aborts that probe. A provider slower than the 60s floor would publish
+// nothing at all and only emit cancelled requests, which is worse than the base
+// cadence it replaced.
+test('a probe slower than the floor is never superseded by the next urgency tick', async () => {
+  const clock = fakeClock(1_000);
+  const used = { claude: 68, kimi: 10 };
+  const aborted = [];
+  let release = null;
+  const { calls, runtime } = burnRateRuntime(clock, (provider) => used[provider], {
+    probeProvider: async (provider, _config, context) => {
+      calls.push({ provider, reason: context.reason });
+      const rows = [providerRow(provider, 'acct', 'Account', {
+        updatedAt: new Date(clock.now()).toISOString(),
+        windows: [{ kind: 'session', label: '5-hour', usedPercent: used[provider] }]
+      })];
+      if (context.reason !== 'burn-rate') return rows;
+      return new Promise((resolve, reject) => {
+        context.signal?.addEventListener('abort', () => {
+          aborted.push(provider);
+          reject(new Error('aborted'));
+        });
+        release = () => resolve(rows);
+      });
+    }
+  });
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    used.claude = 88;
+    used.kimi = 20;
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+
+    clock.advance(60_000);
+    await waitFor(() => calls.length === 5, 'burn-rate probe');
+    assert.equal(calls[4].reason, 'burn-rate');
+    // The probe is still running. No second urgency probe may be armed for it.
+    assert.equal(clock.delays().includes(60_000), false);
+
+    clock.advance(120_000);
+    assert.equal(calls.length, 5);
+    assert.deepEqual(aborted, []);
+
+    release();
+    await waitFor(
+      () => clock.delays().some((delay) => delay < 300_000),
+      'urgency re-armed after settle'
+    );
+  } finally {
+    release?.();
+    runtime.stop();
+  }
+});
+
+// Lanes are per provider and the executor is concurrent, so one provider holding
+// a probe open must not push another past its own deadline.
+test('a second provider still fires while the first urgency probe is in flight', async () => {
+  const clock = fakeClock(1_000);
+  const used = { claude: 60, kimi: 60 };
+  let release = null;
+  const { calls, runtime } = burnRateRuntime(clock, (provider) => used[provider], {
+    probeProvider: async (provider, _config, context) => {
+      calls.push({ provider, reason: context.reason });
+      const rows = [providerRow(provider, 'acct', 'Account', {
+        updatedAt: new Date(clock.now()).toISOString(),
+        windows: [{ kind: 'session', label: '5-hour', usedPercent: used[provider] }]
+      })];
+      if (context.reason !== 'burn-rate' || provider !== 'claude') return rows;
+      return new Promise((resolve) => { release = () => resolve(rows); });
+    }
+  });
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    // claude runs out in 128s (floored to a 60s deadline), kimi in 300s (75s).
+    used.claude = 88;
+    used.kimi = 80;
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+    assert.deepEqual(clock.delays(), [60_000, 300_000]);
+
+    clock.advance(60_000);
+    await waitFor(() => calls.length === 5, 'claude burn-rate probe');
+    assert.equal(calls[4].provider, 'claude');
+    // claude is still running, so the next timer belongs to kimi, 15s away.
+    assert.equal(clock.delays().includes(15_000), true);
+
+    clock.advance(15_000);
+    await waitFor(() => calls.length === 6, 'kimi burn-rate probe');
+    assert.equal(calls[5].provider, 'kimi');
+    assert.equal(calls[5].reason, 'burn-rate');
+  } finally {
+    release?.();
+    runtime.stop();
+  }
+});
+
+// previousLimits seeds lastGood rows that can be hours old, and a failed probe
+// republishes them under the failure status. Sampling one would date an offline
+// session's consumption to startup and invent an enormous burn rate.
+test('a retained row from a failed probe never becomes the burn-rate baseline', async () => {
+  const clock = fakeClock(1_000);
+  const previousLimits = {
+    providers: [providerRow('claude', 'acct', 'Account', {
+      updatedAt: '2026-08-13T00:00:00.000Z',
+      windows: [{ kind: 'session', label: '5-hour', usedPercent: 30 }]
+    })]
+  };
+  let attempt = 0;
+  const calls = [];
+  const runtime = createLimitsRuntime(
+    { limitProviders: ['claude'], limitsRefreshMode: 'adaptive', previousLimits },
+    runtimeDeps({
+      autoStart: true,
+      now: clock.now,
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      autoRetry: false,
+      probeProvider: async (provider, _config, context) => {
+        calls.push(context.reason);
+        attempt += 1;
+        if (attempt === 1) throw new Error('offline');
+        return [providerRow(provider, 'acct', 'Account', {
+          updatedAt: new Date(clock.now()).toISOString(),
+          windows: [{ kind: 'session', label: '5-hour', usedPercent: 70 }]
+        })];
+      }
+    })
+  );
+
+  try {
+    await waitFor(() => calls.length === 1, 'failed startup probe');
+    clock.advance(60_000);
+    await runtime.refresh({ provider: 'claude' }, 'manual');
+    // 30% -> 70% spans the offline gap, not the minute between these two probes,
+    // so the successful row is the first baseline and no rate exists yet. Only
+    // the base interval stays armed.
+    assert.deepEqual(clock.delays(), [240_000]);
+  } finally {
+    runtime.stop();
+  }
+});
+
+// Any provider committing rebuilds the whole snapshot, which still holds the
+// persisted rows of providers that have not answered yet. Sampling one of those
+// would date a previous session's usage to now and invent a huge burn rate.
+test('a seeded row is never sampled because another provider committed first', async () => {
+  const clock = fakeClock(1_000);
+  const previousLimits = {
+    providers: [
+      providerRow('claude', 'acct', 'Account', { windows: [{ kind: 'session', label: '5-hour', usedPercent: 30 }] }),
+      providerRow('kimi', 'acct', 'Account', { windows: [{ kind: 'session', label: '5-hour', usedPercent: 20 }] })
+    ]
+  };
+  const used = { claude: 32, kimi: 60 };
+  const calls = [];
+  const runtime = createLimitsRuntime(
+    { limitProviders: ['claude', 'kimi'], limitsRefreshMode: 'adaptive', previousLimits },
+    runtimeDeps({
+      autoStart: true,
+      maxConcurrency: 1,
+      now: clock.now,
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      probeProvider: async (provider) => {
+        calls.push(provider);
+        // Claude answers first and rebuilds the snapshot while kimi still shows
+        // its seed; kimi then answers a minute later, 20% -> 60%.
+        if (provider === 'kimi') clock.jump(60_000);
+        return [providerRow(provider, 'acct', 'Account', {
+          updatedAt: new Date(clock.now()).toISOString(),
+          windows: [{ kind: 'session', label: '5-hour', usedPercent: used[provider] }]
+        })];
+      }
+    })
+  );
+
+  try {
+    await waitFor(() => calls.length === 2, 'both startup probes');
+    assert.deepEqual(calls, ['claude', 'kimi']);
+    assert.deepEqual(clock.delays(), [240_000]);
+  } finally {
+    runtime.stop();
+  }
+});
+
+// An intent superseded by another refresh resolves its promise at once while the
+// physical probe keeps running, so inFlight alone would clear early and let the
+// next urgency tick abort a probe that another reason had legitimately started.
+test('an urgency tick never aborts a probe another reason is still running', async () => {
+  const clock = fakeClock(1_000);
+  const used = { claude: 68, kimi: 10 };
+  const aborted = [];
+  const started = [];
+  let releaseAccount = null;
+  const { calls, runtime } = burnRateRuntime(clock, (provider) => used[provider], {
+    probeProvider: async (provider, _config, context) => {
+      calls.push({ provider, reason: context.reason });
+      started.push(context.reason);
+      const rows = [providerRow(provider, 'acct', 'Account', {
+        updatedAt: new Date(clock.now()).toISOString(),
+        windows: [{ kind: 'session', label: '5-hour', usedPercent: used[provider] }]
+      })];
+      if (context.reason !== 'burn-rate' && context.reason !== 'account-state') return rows;
+      return new Promise((resolve) => {
+        context.signal?.addEventListener('abort', () => aborted.push(context.reason));
+        if (context.reason === 'account-state') releaseAccount = () => resolve(rows);
+      });
+    }
+  });
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    used.claude = 88;
+    used.kimi = 20;
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+
+    clock.advance(60_000);
+    await waitFor(() => started.includes('burn-rate'), 'burn-rate probe');
+    // Supersedes the burn-rate intent, so its promise settles while this probe runs.
+    void runtime.refresh({ provider: 'claude', accountKey: 'acct' }, 'account-state');
+    await waitFor(() => started.includes('account-state'), 'account refresh probe');
+
+    clock.advance(120_000);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(aborted.includes('account-state'), false);
+    assert.equal(started.filter((reason) => reason === 'burn-rate').length, 1);
+  } finally {
+    releaseAccount?.();
+    runtime.stop();
+  }
+});
+
+// A tick can land while the executor is saturated, so the lane is not active yet
+// but already holds queued work for this scope. Superseding it would replace a
+// real account refresh with a scheduler optimisation.
+test('an urgency tick never supersedes a refresh already queued for its scope', async () => {
+  const clock = fakeClock(1_000);
+  const used = { claude: 60, kimi: 10 };
+  const started = [];
+  let releaseKimi = null;
+  const { calls, runtime } = burnRateRuntime(clock, (provider) => used[provider], {
+    probeProvider: async (provider, _config, context) => {
+      calls.push({ provider, reason: context.reason });
+      started.push(`${provider}:${context.reason}`);
+      const rows = [providerRow(provider, 'acct', 'Account', {
+        updatedAt: new Date(clock.now()).toISOString(),
+        windows: [{ kind: 'session', label: '5-hour', usedPercent: used[provider] }]
+      })];
+      if (provider !== 'kimi' || context.reason !== 'manual') return rows;
+      return new Promise((resolve) => { releaseKimi = () => resolve(rows); });
+    }
+  });
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    used.claude = 88;
+    used.kimi = 20;
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+
+    // Occupies the single executor slot, so claude's own refresh can only queue.
+    void runtime.refresh({ provider: 'kimi' }, 'manual');
+    await waitFor(() => started.includes('kimi:manual'), 'kimi probe holding the slot');
+    void runtime.refresh({ provider: 'claude', accountKey: 'acct' }, 'account-state');
+
+    clock.advance(60_000);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releaseKimi();
+
+    await waitFor(() => started.some((entry) => entry.startsWith('claude:')
+      && !entry.endsWith(':startup') && !entry.endsWith(':interval')), 'queued claude probe');
+    assert.equal(started.includes('claude:account-state'), true);
+    assert.equal(started.includes('claude:burn-rate'), false);
+  } finally {
+    releaseKimi?.();
+    runtime.stop();
+  }
+});
+
+// An account is addressable by several aliases, and callers enqueue whichever
+// one they hold: a profile refresh uses accountName while the row itself also
+// carries an accountKey. Comparing identity keys reads those as two accounts.
+test('queued work is matched by account alias, not by identity key', async () => {
+  const clock = fakeClock(1_000);
+  const used = { claude: 60, kimi: 10 };
+  const started = [];
+  let releaseKimi = null;
+  const row = (provider) => ({
+    provider,
+    accountKey: 'acct-key',
+    accountName: 'profile-one',
+    accountLabel: 'Account',
+    source: 'api',
+    status: 'ok',
+    updatedAt: new Date(clock.now()).toISOString(),
+    windows: [{ kind: 'session', label: '5-hour', usedPercent: used[provider] }]
+  });
+  const { calls, runtime } = burnRateRuntime(clock, (provider) => used[provider], {
+    probeProvider: async (provider, _config, context) => {
+      calls.push({ provider, reason: context.reason });
+      started.push(`${provider}:${context.reason}`);
+      if (provider !== 'kimi' || context.reason !== 'manual') return [row(provider)];
+      return new Promise((resolve) => { releaseKimi = () => resolve([row(provider)]); });
+    }
+  });
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    used.claude = 88;
+    used.kimi = 20;
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+
+    void runtime.refresh({ provider: 'kimi' }, 'manual');
+    await waitFor(() => started.includes('kimi:manual'), 'kimi probe holding the slot');
+    // Enqueued by name; the urgency scope for the same account resolves by key.
+    void runtime.refresh({ provider: 'claude', accountName: 'profile-one' }, 'profile-state');
+
+    clock.advance(60_000);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releaseKimi();
+
+    await waitFor(() => started.includes('claude:profile-state'), 'queued profile refresh');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(started.includes('claude:burn-rate'), false);
+  } finally {
+    releaseKimi?.();
+    runtime.stop();
+  }
+});
+
+// Accounts on one lane queue behind each other without cancelling, so a probe
+// for a different account is not a reason to make an urgent one forfeit its turn
+// and wait another floor.
+test('an urgent account queues behind a different account on the same lane', async () => {
+  const clock = fakeClock(1_000);
+  const used = { a: 60, b: 10 };
+  const started = [];
+  const aborted = [];
+  let releaseB = null;
+  const rowFor = (key) => ({
+    provider: 'claude',
+    accountKey: key,
+    accountLabel: `Account ${key}`,
+    source: 'api',
+    status: 'ok',
+    updatedAt: new Date(clock.now()).toISOString(),
+    windows: [{ kind: 'session', label: '5-hour', usedPercent: used[key] }]
+  });
+  const runtime = createLimitsRuntime(
+    { limitProviders: ['claude'], limitsRefreshMode: 'adaptive' },
+    runtimeDeps({
+      autoStart: true,
+      now: clock.now,
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      probeProvider: async (_provider, _config, context) => {
+        const scoped = context.scope?.accountKey;
+        started.push(`${scoped || '*'}:${context.reason}`);
+        if (scoped !== 'b') return scoped ? [rowFor(scoped)] : [rowFor('a'), rowFor('b')];
+        return new Promise((resolve) => {
+          context.signal?.addEventListener('abort', () => aborted.push('b'));
+          releaseB = () => resolve([rowFor('b')]);
+        });
+      }
+    })
+  );
+
+  try {
+    await waitFor(() => started.length === 1, 'startup refresh');
+    used.a = 88;
+    used.b = 20;
+    clock.advance(300_000);
+    await waitFor(() => started.length === 2, 'interval refresh');
+
+    // Only account a is close to exhaustion; b holds the lane with a slow probe.
+    void runtime.refresh({ provider: 'claude', accountKey: 'b' }, 'manual');
+    await waitFor(() => started.includes('b:manual'), 'account b probe');
+
+    clock.advance(60_000);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(aborted, []);
+
+    releaseB();
+    await waitFor(() => started.includes('a:burn-rate'), 'account a urgency probe');
+  } finally {
+    releaseB?.();
+    runtime.stop();
+  }
+});
+
+test('fixed mode never schedules an early refresh', async () => {
+  const clock = fakeClock(1_000);
+  const used = { claude: 68, kimi: 10 };
+  const { calls, runtime } = burnRateRuntime(
+    clock,
+    (provider) => used[provider],
+    {},
+    { limitsRefreshMode: 'fixed', limitsRefreshMs: 300_000 }
+  );
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    used.claude = 88;
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+    assert.deepEqual(clock.delays(), [300_000]);
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 6, 'second interval refresh');
+    assert.deepEqual(clock.delays(), [300_000]);
+  } finally {
+    runtime.stop();
+  }
+});
+
+// Adaptive replaces the stored interval with its own baseline rather than
+// modifying it, so a device saved at 30 minutes polls at 5 while adaptive.
+test('adaptive uses its own baseline and ignores the stored interval', async () => {
+  const clock = fakeClock(1_000);
+  const { calls, runtime } = burnRateRuntime(
+    clock,
+    () => 10,
+    {},
+    { limitsRefreshMode: 'adaptive', limitsRefreshMs: 1_800_000 }
+  );
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    assert.deepEqual(clock.delays(), [300_000]);
+    assert.equal(runtime.getSnapshot().refreshMs, 300_000);
+  } finally {
+    runtime.stop();
+  }
+});
+
+// The stored interval surviving a trip through adaptive is the whole reason the
+// mode is a separate setting, so it is pinned rather than left to the reader of
+// the two assignments in the runtime.
+test('switching to adaptive and back restores the stored interval', async () => {
+  const clock = fakeClock(1_000);
+  const { calls, runtime } = burnRateRuntime(
+    clock,
+    () => 10,
+    {},
+    { limitsRefreshMode: 'fixed', limitsRefreshMs: 1_800_000 }
+  );
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    assert.deepEqual(clock.delays(), [1_800_000]);
+
+    runtime.reconfigure({ limitsRefreshMode: 'adaptive' });
+    assert.equal(runtime.getSnapshot().refreshMs, 300_000);
+    assert.deepEqual(clock.delays(), [300_000]);
+
+    // Only the mode is sent back, exactly as the settings dropdown does.
+    runtime.reconfigure({ limitsRefreshMode: 'fixed' });
+    assert.equal(runtime.getSnapshot().refreshMs, 1_800_000);
+    assert.deepEqual(clock.delays(), [1_800_000]);
+  } finally {
+    runtime.stop();
+  }
+});
+
+// The case a "remaining < N%" threshold gets wrong: low, but nothing is
+// consuming it, so nothing is gained by probing more often than configured.
+test('a low but idle quota keeps the base cadence', async () => {
+  const clock = fakeClock(1_000);
+  const { calls, runtime } = burnRateRuntime(clock, () => 88);
+
+  try {
+    await waitFor(() => calls.length === 2, 'startup refresh');
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 4, 'interval refresh');
+    assert.deepEqual(clock.delays(), [300_000]);
+    clock.advance(300_000);
+    await waitFor(() => calls.length === 6, 'second interval refresh');
+    assert.deepEqual(clock.delays(), [300_000]);
+  } finally {
+    runtime.stop();
+  }
+});
+
 test('reset boundaries enqueue the exact provider/account scope only once', async () => {
   const calls = [];
   const resetsAt = '2026-07-21T01:00:00.000Z';

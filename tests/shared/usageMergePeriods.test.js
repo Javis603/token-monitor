@@ -43,3 +43,18 @@ test('addPeriodInto accumulates clientModels nesting', () => {
   assert.deepEqual(target.clientModels, { claude: { 'claude-3': 14 } });
   assert.deepEqual(target.clientModelCosts, { claude: { 'claude-3': 1.4 } });
 });
+
+test('mergePeriods propagates token-component provenance fail closed', () => {
+  const exact = emptyPeriod();
+  exact.totalTokens = 100;
+  exact.cacheReadTokens = 60;
+  const aggregateOnly = emptyPeriod();
+  aggregateOnly.totalTokens = 50;
+  aggregateOnly.capabilities.tokenComponents = false;
+
+  const merged = mergePeriods(exact, aggregateOnly);
+
+  assert.equal(merged.totalTokens, 150);
+  assert.equal(merged.cacheReadTokens, 60);
+  assert.equal(merged.capabilities.tokenComponents, false);
+});

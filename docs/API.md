@@ -28,12 +28,23 @@ Example response:
 {
   "ok": true,
   "role": "hub",
+  "runtime": "cloudflare-worker",
   "version": 1,
+  "hubBuild": {
+    "schemaVersion": 1,
+    "runtime": "cloudflare-worker",
+    "coreRevision": 1,
+    "coreBuildId": "sha256:…",
+    "runtimeRevision": 1,
+    "runtimeBuildId": "sha256:…"
+  },
   "deviceCount": 2,
   "secretRequired": true,
   "now": "2026-05-18T00:00:00.000Z"
 }
 ```
+
+`version` remains the legacy Hub storage/API value and is not a deployment version. `hubBuild` is the content-derived deployment identity used by Token Monitor to compare the remote Hub with the core bundled by the app. `core*` identifies shared Node/Worker aggregation logic; `runtime*` identifies the Node Hub or Cloudflare Worker adapter. Product-only version bumps do not change either build ID. This is a build marker generated from the registered source closure, not a runtime attestation: a fork that changes source without regenerating its metadata may still report the marker it started from. A health response without `hubBuild` is a legacy Hub and remains otherwise compatible; present but malformed metadata is unrecognized instead of being treated as legacy.
 
 ## `POST /api/ingest`
 
@@ -53,8 +64,12 @@ Example payload:
   "agentRuntime": "headless-agent",
   "syncUploadIntervalMs": 1200000,
   "projectsEnabled": true,
+  "historyAvailable": true,
   "trackedClients": ["codex"],
   "today": {
+    "capabilities": {
+      "tokenComponents": true
+    },
     "totalTokens": 1234,
     "costUsd": 0.01,
     "cacheReadTokens": 1100,
@@ -152,6 +167,7 @@ Example payload:
     }
   },
   "periodWindows": {
+    "timeZone": "Asia/Hong_Kong",
     "today": { "key": "2026-05-18", "endsAt": "2026-05-19T00:00:00.000Z" },
     "month": { "key": "2026-05", "endsAt": "2026-06-01T00:00:00.000Z" }
   },
@@ -204,13 +220,19 @@ The collector satisfies that bound by construction, but the hub and the Worker n
 
 All three are additive over append-only messages, which keeps them exact under the delta path a watch-triggered scan uses to carry a `today` rescan into `month` and `allTime`. The one case where `timedOutputTokens` and a full rescan can disagree is a session that spans the boundary and starts or stops reporting durations partway through, since a rescan then re-gates the whole session on its combined state; the next full scan reconciles it. Closing even that needs a per-message timed-output counter from tokscale.
 
+Each native period may include `capabilities.tokenComponents`. Current producers set it to `true` when cache read/write and output were derived from individual Tokscale rows, and to `false` when any part of the period has only aggregate provenance. Partial periods retain their known components and carry the unsupported remainder in `unclassifiedTokens`, `clientUnclassifiedTokens`, and `modelUnclassifiedTokens`; consumers display that remainder as `Unclassified` instead of silently treating it as cache miss. When an aggregate remainder has no Tool or Model identity, consumers expose a synthetic `Unclassified` attribution row so the visible breakdown still adds up to the period total. Session archives preserve aggregate and Tool components, but a session spanning multiple models leaves its Model components unclassified rather than guessing a proportional split. A missing marker remains accepted for older DAY / MONTH / TOTAL payloads, but fixed-range live-day derivation requires explicit `true` or explicit unclassified fields. Device aggregation and retained client/session restoration preserve these fields and propagate incomplete provenance fail closed.
+
 `trackedClients` is optional but recommended for agents and widgets. When it is present, the hub treats omitted clients as intentionally not collected in this payload and preserves their previous usage for that device. This keeps "tracking" as "collect future data" rather than "hide existing history".
+
+`historyAvailable` is an explicit boolean capability for retained History. Current producers send it on every usage snapshot: `true` means History collection is enabled, while `false` means disabled. Fixed-range readers require both `historyAvailable: true` and a retained `history` object; a missing capability (including records passed through an older Hub) is unavailable rather than an inferred zero. The `history` field itself remains interval-gated: omission means "no History update this tick", explicit `null` means unavailable, and an object replaces the retained History.
+
+Current History daily rows may also carry `cacheReadTokens`, `cacheWriteTokens`, `outputTokens`, `unclassifiedTokens`, and the same fields inside each `perClient` / `perModel` entry. `tokenComponentsAvailable: true` means the entire row has exact component provenance. Missing provenance does not change the exact total tokens, cost, Tool, or Model attribution: fixed ranges retain every known cache/output component and place only the unsupported remainder in `unclassifiedTokens` instead of treating it as zero or cache miss. The local daily archive keeps component provenance permanently, while sync payloads keep detailed components only for the latest 30 days because WEEK / 7D / 30D never need older detail and `/api/ingest` has a 1 MiB ceiling. If even that additive detail would push a device payload over its budget, serialization drops the component fields before any existing project or session detail.
 
 Current agents and widgets include `osName` and, when known, `osVersion` so device details can show a user-facing operating-system release. macOS uses the product version from Electron or `sw_vers`; Windows uses the product family and display version from the registry; Linux uses the distribution name and version from `os-release`. Detection failures fall back to an explicitly labelled Windows build or Linux kernel release. The hub continues to accept older payloads without these fields.
 
 `syncUploadIntervalMs` is optional. A remote-hub widget includes `0` for live uploads or the selected fixed interval in milliseconds (`600000`, `1200000`, or `1800000`). The hub uses a positive interval to keep the device and its limits fresh for at least twice the upload interval; omitted or `0` values retain the configured `staleAfterMs` behavior. Local collection and embedded-host ingest remain live.
 
-`periodWindows` is optional. Agents and widgets stamp each snapshot with the UTC instant its `today`/`month` windows end, computed in the device's own local time (`endsAt` = next local midnight / next local month start; `key` is the device-local day/month for reference). The hub uses it to expire a device's `today`/`month` from the aggregate once `now >= endsAt`, so a device that goes offline before re-posting does not keep contributing a stale day/month snapshot (`allTime` never expires). Payloads without `periodWindows` fall back to a UTC day/month comparison against `updatedAt`.
+`periodWindows` is optional. Agents and widgets stamp each snapshot with the UTC instant its `today`/`month` windows end, computed in the device's own local time (`endsAt` = next local midnight / next local month start; `key` is the device-local day/month for reference). New producers also include their IANA `timeZone`, which lets retained daily History keep using that device's calendar after it goes offline. The hub uses `endsAt` to expire a device's `today`/`month` from the native aggregate once `now >= endsAt`, so an offline device does not keep contributing a stale day/month snapshot (`allTime` never expires). Payloads without `periodWindows` fall back to a UTC day/month comparison against `updatedAt`; fixed History ranges fail closed after an unzoned producer window expires.
 
 `clientHealth` is optional per-client diagnostics: why a tracked tool shows the number it shows. It sits alongside the older `clientStatus` map (`active` / `waiting` / `missing` per client), which agents continue to send unchanged.
 
@@ -311,6 +333,7 @@ Response includes:
 - `periodProjectsOmitted`, when a daily or monthly project rollup was itself too large to fit; the aggregate and affected devices expose omitted project counts and the widget marks that period's project breakdown incomplete
 - `projectsIncomplete` plus the corresponding `devices[].allTimeProjectsOmitted`, `devices[].allTimeProjectsIncomplete`, or `devices[].projectsEnabled` diagnostic
 - `historyPreview.daily[].activeTimeMs`, `historyPreview.monthly[].activeTimeMs`, and `historyPreview.summary.activeTimeMs` when tokscale graph exposes session active-time metrics
+- `historyRevision`, a compact invalidation hash for the aggregate History preview, and `deviceHistoryRevision`, a device-identity-aware hash used to invalidate per-device fixed-range caches when History ownership or availability changes
 - `limits.providers` aggregated by provider account
 - `subscriptionsUpdatedAt`, the `updatedAt` of the hub's shared subscription list, or `""` if nothing has been written to it. The version only, never the records: a device compares it against the copy it holds and re-reads `/api/subscriptions` only when it has been overtaken. This is how an edit made on one device reaches the others, so a client that does not consult it will only see the shared list as it stood when it connected. Omitted from public Worker stats. An absent field means "no news" rather than an empty list.
 - `devices`, including each device's normalized `periods`, `limits`, `receivedAt`, `osName` / `osVersion` when reported, optional `syncUploadIntervalMs`, and optional `periodWindows`

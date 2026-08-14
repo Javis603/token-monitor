@@ -146,6 +146,9 @@ function createMacWidgetLaunchServicesRecovery(options = {}) {
     if (input.platform !== 'darwin') {
       return { status: 'skipped', reason: 'unsupported-platform' };
     }
+    if (input.runtimeSupported === false) {
+      return { status: 'skipped', reason: 'unsupported-os' };
+    }
     if (input.isPackaged !== true) {
       return { status: 'skipped', reason: 'unpackaged' };
     }

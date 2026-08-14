@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { artifactNameFromReference } = require('./verify-updater-artifact-names');
+const { MAC_APP_MIN_DARWIN_VERSION } = require('../src/shared/macSystemRequirements');
 
 function stripYamlQuotes(value) {
   const trimmed = String(value || '').trim();
@@ -45,6 +46,16 @@ function parseMacUpdaterMetadata(contents, label = 'metadata') {
     throw new Error(`${label} must have exactly one top-level path`);
   }
   const pathName = artifactNameFromReference(pathLines[0].replace(/^path:\s*/, ''));
+  const minimumSystemVersionLines = lines.filter((line) => /^minimumSystemVersion:\s*/.test(line));
+  if (minimumSystemVersionLines.length > 1) {
+    throw new Error(`${label} must have at most one top-level minimumSystemVersion`);
+  }
+  const minimumSystemVersion = minimumSystemVersionLines.length === 0
+    ? null
+    : stripYamlQuotes(minimumSystemVersionLines[0].replace(/^minimumSystemVersion:\s*/, ''));
+  if (minimumSystemVersionLines.length === 1 && !minimumSystemVersion) {
+    throw new Error(`${label} has an empty top-level minimumSystemVersion`);
+  }
 
   return {
     label,
@@ -54,8 +65,30 @@ function parseMacUpdaterMetadata(contents, label = 'metadata') {
     filesEnd,
     fileLines,
     fileNames,
-    pathName
+    pathName,
+    minimumSystemVersion
   };
+}
+
+function assertMinimumSystemVersion(metadata) {
+  if (
+    metadata.minimumSystemVersion !== null
+    && metadata.minimumSystemVersion !== MAC_APP_MIN_DARWIN_VERSION
+  ) {
+    throw new Error(
+      `${metadata.label} minimumSystemVersion ${metadata.minimumSystemVersion} does not match release policy ${MAC_APP_MIN_DARWIN_VERSION}`
+    );
+  }
+}
+
+function applyMinimumSystemVersion(lines) {
+  // electron-builder does not carry mac.minimumSystemVersion into latest-mac.yml.
+  // The merged feed is the only metadata file published by the release workflow,
+  // so enforce the updater half of the policy at that final boundary.
+  const output = lines.filter((line) => !/^minimumSystemVersion:\s*/.test(line));
+  const versionIndex = output.findIndex((line) => /^version:\s*\S/.test(line));
+  output.splice(versionIndex + 1, 0, `minimumSystemVersion: ${MAC_APP_MIN_DARWIN_VERSION}`);
+  return output;
 }
 
 function assertArchitecture(metadata, arch) {
@@ -86,6 +119,8 @@ function mergeMacUpdaterMetadata(arm64Contents, x64Contents) {
   const x64 = parseMacUpdaterMetadata(x64Contents, 'x64 metadata');
   assertArchitecture(arm64, 'arm64');
   assertArchitecture(x64, 'x64');
+  assertMinimumSystemVersion(arm64);
+  assertMinimumSystemVersion(x64);
   if (arm64.version !== x64.version) {
     throw new Error(`mac updater versions differ: arm64=${arm64.version}, x64=${x64.version}`);
   }
@@ -97,12 +132,13 @@ function mergeMacUpdaterMetadata(arm64Contents, x64Contents) {
 
   // Keep arm64 as the base so path/sha512 stay valid for existing Apple Silicon
   // installs. New Intel builds use the architecture-filtered files list.
-  return [
+  const mergedLines = [
     ...arm64.lines.slice(0, arm64.filesIndex + 1),
     ...arm64.fileLines,
     ...x64.fileLines,
     ...arm64.lines.slice(arm64.filesEnd)
-  ].join('\n').replace(/\n*$/, '\n');
+  ];
+  return applyMinimumSystemVersion(mergedLines).join('\n').replace(/\n*$/, '\n');
 }
 
 function mergeMacUpdaterMetadataFiles(outputPath, arm64Path, x64Path) {

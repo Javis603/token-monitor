@@ -17,10 +17,16 @@
         <div class="title-controls">
           <nav class="tabs" aria-label="Period tabs">
             <span class="tab-indicator" aria-hidden="true"></span>
-            <button class="tab active" data-period="today">DAY</button>
-            <button class="tab" data-period="month">MONTH</button>
-            <button class="tab" data-period="allTime">TOTAL</button>
+            <button class="tab active" data-period="today" data-period-slot="today">DAY</button>
+            <button id="monthPeriodTab" class="tab" data-period="month" data-period-slot="month" aria-haspopup="menu" aria-expanded="false">MONTH</button>
+            <button class="tab" data-period="allTime" data-period-slot="allTime">TOTAL</button>
           </nav>
+          <div id="monthPeriodMenu" class="view-switcher-menu period-menu hidden" role="menu" aria-labelledby="monthPeriodTab">
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="month"><span class="view-switcher-menu-label" data-i18n="periodRange.month">This month</span></button>
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="week"><span class="view-switcher-menu-label" data-i18n="periodRange.week">This week</span></button>
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last7"><span class="view-switcher-menu-label" data-i18n="periodRange.last7">Last 7 days</span></button>
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last30"><span class="view-switcher-menu-label" data-i18n="periodRange.last30">Last 30 days</span></button>
+          </div>
           <div class="actions-hotspot" title="Window controls"></div>
           <div class="window-actions">
             <button id="pinButton" class="icon-button" title="Cycle window behavior">⇧</button>
@@ -174,6 +180,18 @@
           </button>
           <div id="mainSettingsDetails" class="settings-section-details hidden">
             <div class="settings-subgroup settings-main-screen-group">
+              <label class="settings-item period-default-setting">
+                <span class="settings-item-text">
+                  <span class="settings-item-title" data-i18n="periodRange.settingsTitle">Default usage range</span>
+                </span>
+                <select id="periodMonthModeInput">
+                  <option value="month" data-i18n="periodRange.month">This month</option>
+                  <option value="week" data-i18n="periodRange.week">This week</option>
+                  <option value="last7" data-i18n="periodRange.last7">Last 7 days</option>
+                  <option value="last30" data-i18n="periodRange.last30">Last 30 days</option>
+                </select>
+                <span class="settings-note settings-item-desc" data-i18n="periodRange.settingsNote">Choose the default usage range shown on Home. On Home, click the selected period at the top again to open the menu and switch quickly.</span>
+              </label>
               <div class="settings-note-row">
                 <p class="settings-note" data-i18n="settings.views.note">Choose which main views appear and the order of the mode button.</p>
                 <div class="tool-header-actions">
@@ -525,6 +543,7 @@
             <div id="limitProviderCheckboxes" class="client-checkboxes limit-provider-list"></div>
             <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.refresh">Refresh</span></span>
               <select id="limitsRefreshInput">
+                <option value="adaptive" data-i18n="settings.limits.refreshAdaptive">Adaptive</option>
                 <option value="60000">1 min</option>
                 <option value="120000">2 min</option>
                 <option value="300000">5 min</option>
@@ -532,6 +551,7 @@
                 <option value="1800000">30 min</option>
               </select>
             </label>
+            <p id="limitsRefreshAdaptiveNote" class="settings-note hidden" data-i18n="settings.limits.refreshAdaptiveNote">Adjusts the refresh rate to how fast a quota is being consumed: every 5 minutes normally, as often as every minute when needed.</p>
             <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.showSource">Show Source</span></span><input id="showLimitSourceInput" type="checkbox" /></label>
             <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.maskAccountEmails">Mask account emails</span></span><input id="maskLimitAccountEmailsInput" type="checkbox" /></label>
             <div class="settings-item">
@@ -1334,6 +1354,7 @@
                 </select>
               </label>
               <div id="syncClientStatus" class="hub-status" hidden></div>
+              <div id="hubBuildStatus" class="hub-status hub-build-status" role="status" hidden></div>
             </div>
             <div id="hubHostFields" class="hub-mode-fields hidden">
               <label><span data-i18n="settings.sync.port">Port</span><input id="hubPortInput" type="number" min="1" max="65535" spellcheck="false" /></label>
@@ -1369,6 +1390,8 @@
           <span data-i18n="views.backHome">Back to Home</span>
         </button>
       </div>
+
+      <section id="fixedPeriodMessage" class="fixed-period-message hidden" role="status" aria-live="polite"></section>
 
       <section id="homePanel" class="home-panel hidden"></section>
       <section id="breakdown" class="breakdown"></section>
@@ -1432,6 +1455,7 @@
     <script src="clientDisplayPreferences.js"></script>
     <script src="viewDisplayPreferences.js"></script>
     <script src="homeModulePreferences.js"></script>
+    <script src="fixedPeriodRanges.js"></script>
     <script src="preferenceDragSort.js"></script>
     <script src="verticalDragSort.js"></script>
     <script src="rowDragController.js"></script>
@@ -1440,7 +1464,9 @@
     <script src="sessionRows.js"></script>
     <script src="breakdownRenderPolicy.js"></script>
     <script src="statsRenderScheduler.js"></script>
+    <script src="hubBuildPresentation.js"></script>
     <script src="deviceBreakdown.js"></script>
+    <script src="usageAttributionRows.js"></script>
     <script src="../../shared/projectKey.js"></script>
     <script src="projectRows.js"></script>
     <script src="sessionDetail.js"></script>
@@ -1449,6 +1475,7 @@
     <script src="../../shared/currency.js"></script>
     <script src="../../shared/subscriptionDisplay.js"></script>
     <script src="../../shared/compactTokens.js"></script>
+    <script src="../../shared/compactMoney.js"></script>
     <script src="../../shared/trayText.js"></script>
     <script src="../../shared/trayLayout.js"></script>
     <script src="tokenRatePresentation.js"></script>

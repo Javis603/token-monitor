@@ -6,9 +6,66 @@ const { isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
 const SYNC_PAYLOAD_BUDGET_BYTES = MAX_JSON_BODY_BYTES - SYNC_PAYLOAD_MARGIN_BYTES;
+const SYNC_HISTORY_COMPONENT_DAYS = 30;
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function dayKeyAddDays(key, delta) {
+  const ms = Date.parse(`${String(key || '').slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(ms)) return '';
+  return new Date(ms + delta * 86400000).toISOString().slice(0, 10);
+}
+
+function stripTokenComponents(value) {
+  if (!value || typeof value !== 'object') return value;
+  const rest = { ...value };
+  delete rest.cacheReadTokens;
+  delete rest.cacheWriteTokens;
+  delete rest.outputTokens;
+  delete rest.unclassifiedTokens;
+  delete rest.tokenComponentsAvailable;
+  return rest;
+}
+
+function historyForSync(history, periodWindows) {
+  if (!history || typeof history !== 'object' || !Array.isArray(history.daily)) return history;
+  const latestDailyKey = history.daily.reduce((latest, row) => {
+    const key = String(row?.date || '').slice(0, 10);
+    return key > latest ? key : latest;
+  }, '');
+  const todayKey = String(periodWindows?.today?.key || latestDailyKey).slice(0, 10);
+  const componentStart = dayKeyAddDays(todayKey, -(SYNC_HISTORY_COMPONENT_DAYS - 1));
+  if (!componentStart) return history;
+  return {
+    ...history,
+    daily: history.daily.map((row) => {
+      const date = String(row?.date || '').slice(0, 10);
+      if (date >= componentStart && date <= todayKey) return row;
+      const stripped = stripTokenComponents(row);
+      stripped.perClient = Object.fromEntries(Object.entries(row?.perClient || {})
+        .map(([key, value]) => [key, stripTokenComponents(value)]));
+      stripped.perModel = Object.fromEntries(Object.entries(row?.perModel || {})
+        .map(([key, value]) => [key, stripTokenComponents(value)]));
+      return stripped;
+    })
+  };
+}
+
+function historyWithoutTokenComponents(history) {
+  if (!history || typeof history !== 'object' || !Array.isArray(history.daily)) return history;
+  return {
+    ...history,
+    daily: history.daily.map((row) => {
+      const stripped = stripTokenComponents(row);
+      stripped.perClient = Object.fromEntries(Object.entries(row?.perClient || {})
+        .map(([key, value]) => [key, stripTokenComponents(value)]));
+      stripped.perModel = Object.fromEntries(Object.entries(row?.perModel || {})
+        .map(([key, value]) => [key, stripTokenComponents(value)]));
+      return stripped;
+    })
+  };
 }
 
 function projectEntries(period) {
@@ -118,9 +175,18 @@ function sessionsWithoutReasonix(sessions) {
   return removed ? sanitized : sessions;
 }
 
-function buildSyncPayload(summary, { omitAllTimeProjects = false } = {}) {
+function buildSyncPayload(summary, {
+  omitAllTimeProjects = false,
+  omitHistoryTokenComponents = false
+} = {}) {
   if (!summary || typeof summary !== 'object') return summary;
   const payload = { ...summary, limits: syncLimits(summary.limits) };
+  if (summary.history && typeof summary.history === 'object') {
+    payload.history = historyForSync(summary.history, summary.periodWindows);
+    if (omitHistoryTokenComponents) {
+      payload.history = historyWithoutTokenComponents(payload.history);
+    }
+  }
   // Reasonix native sessions are a local-only view. They contain provider
   // metadata and project labels that are intentionally not part of the device
   // wire contract, and uploading them would also make local paths/preview text
@@ -158,18 +224,31 @@ function buildSyncPayload(summary, { omitAllTimeProjects = false } = {}) {
 
 function serializeSyncPayload(summary, options = {}) {
   const maxBytes = Number.isFinite(options.maxBytes) ? options.maxBytes : SYNC_PAYLOAD_BUDGET_BYTES;
-  let payload = buildSyncPayload(summary, options);
+  const buildOptions = {
+    ...options,
+    omitAllTimeProjects: options.omitAllTimeProjects === true,
+    omitHistoryTokenComponents: options.omitHistoryTokenComponents === true
+  };
+  let payload = buildSyncPayload(summary, buildOptions);
   if (!payload || typeof payload !== 'object') {
     const body = JSON.stringify(payload);
     return { payload, body, bytes: body ? Buffer.byteLength(body, 'utf8') : 0 };
   }
   let body = JSON.stringify(payload);
+  if (Buffer.byteLength(body, 'utf8') > maxBytes && payload.history && typeof payload.history === 'object') {
+    // Component detail is additive. Never let it evict an existing project/session
+    // payload or turn a previously uploadable History V1 record into a 413.
+    buildOptions.omitHistoryTokenComponents = true;
+    payload = buildSyncPayload(summary, buildOptions);
+    body = JSON.stringify(payload);
+  }
   if (
-    !options.omitAllTimeProjects
+    !buildOptions.omitAllTimeProjects
     && Buffer.byteLength(body, 'utf8') > maxBytes
     && projectEntries(payload?.allTime) > 0
   ) {
-    payload = buildSyncPayload(summary, { ...options, omitAllTimeProjects: true });
+    buildOptions.omitAllTimeProjects = true;
+    payload = buildSyncPayload(summary, buildOptions);
     body = JSON.stringify(payload);
   }
   if (Buffer.byteLength(body, 'utf8') > maxBytes) {
@@ -206,16 +285,23 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
     logger(`project detail omitted for sync (${omitted}); payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
   }
   let response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
-  const canRetryWithoutProjects = response.status === 413
-    && serialized.payload?.allTimeProjectsOmitted !== true
-    && projectEntries(serialized.payload?.allTime) > 0;
-  if (canRetryWithoutProjects) {
+  const retrySerialized = response.status === 413
+    ? serializeSyncPayload(summary, {
+        omitHistoryTokenComponents: true,
+        omitAllTimeProjects: true
+      })
+    : null;
+  const canRetryReduced = response.status === 413
+    && retrySerialized?.body !== serialized.body;
+  if (canRetryReduced) {
     try { await response.arrayBuffer(); } catch (_) { /* best-effort drain before retry */ }
-    serialized = serializeSyncPayload(summary, { omitAllTimeProjects: true });
-    if (typeof logger === 'function') logger('hub rejected the payload; retrying once without all-time projects');
+    serialized = retrySerialized;
+    if (typeof logger === 'function') {
+      logger('hub rejected the payload; retrying once without additive History components or all-time projects');
+    }
     response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   }
-  return { response, payload: serialized.payload, retried: canRetryWithoutProjects };
+  return { response, payload: serialized.payload, retried: canRetryReduced };
 }
 
 module.exports = {
