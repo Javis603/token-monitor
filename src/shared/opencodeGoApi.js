@@ -64,25 +64,47 @@ function goAuthPath(env = process.env) {
   return path.join(resolveDataDir(env), 'auth.json');
 }
 
-// Returns '' when no key is available — the caller treats that as notConfigured.
-function readGoApiKey(env = process.env) {
-  const explicit = cleanSecret(env.TOKEN_MONITOR_OPENCODE_API_KEY);
-  if (explicit) return explicit;
+// OpenCode's own credential set, read the way OpenCode itself reads it.
+//
+// Mirrors upstream `Auth.all()` rather than approximating it. Two details are
+// load-bearing. The variable is tried first and, when it parses, is returned
+// *instead of* the file rather than merged with it, so a container handed a
+// deliberately restricted credential set does not quietly fall back to a fuller
+// one on disk. Content that does not parse falls through to the file, which is
+// upstream's behaviour too — its parse sits in an empty catch — so a mangled
+// variable degrades to the file rather than to no credential at all.
+//
+// OpenCode sets this itself when it spawns a workspace child process, and it is
+// the ordinary way to supply credentials in a container or a CI runner: exactly
+// where the headless agent runs, and where there is no auth.json to read.
+function readGoAuthDocument(env) {
+  const inline = String(env.OPENCODE_AUTH_CONTENT || '').trim();
+  if (inline) {
+    try {
+      return JSON.parse(inline);
+    } catch (_) { /* fall through to the file, as upstream does */ }
+  }
 
   let raw;
   try {
     raw = fs.readFileSync(goAuthPath(env), 'utf8');
   } catch (_) {
-    return '';
+    return null;
   }
 
-  let parsed;
   try {
-    parsed = JSON.parse(raw);
+    return JSON.parse(raw);
   } catch (_) {
-    return '';
+    return null;
   }
+}
 
+// Returns '' when no key is available — the caller treats that as notConfigured.
+function readGoApiKey(env = process.env) {
+  const explicit = cleanSecret(env.TOKEN_MONITOR_OPENCODE_API_KEY);
+  if (explicit) return explicit;
+
+  const parsed = readGoAuthDocument(env);
   const entry = parsed && typeof parsed === 'object' ? parsed[GO_AUTH_PROVIDER_ID] : null;
   if (!entry || typeof entry !== 'object') return '';
   const type = String(entry.type || '').toLowerCase();

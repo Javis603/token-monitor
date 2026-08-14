@@ -56,6 +56,53 @@ test('readGoApiKey survives a missing or corrupt auth.json', () => {
   assert.strictEqual(readGoApiKey(withDataDir('{"opencode-go":{"type":"oauth"}}').env), '');
 });
 
+// OpenCode reads its own credentials from OPENCODE_AUTH_CONTENT before
+// auth.json, and sets that variable itself when it spawns a workspace child
+// process. It is also how credentials arrive in a container or a CI runner,
+// which is where the headless agent runs and where there is no auth.json — so
+// discovery has to mirror upstream rather than assume the file.
+test('readGoApiKey reads the credential set OpenCode passes in the environment', () => {
+  const { env } = withDataDir(null);
+  const inline = JSON.stringify({ 'opencode-go': { type: 'api', key: 'from-inline' } });
+  assert.strictEqual(readGoApiKey({ ...env, OPENCODE_AUTH_CONTENT: inline }), 'from-inline');
+});
+
+test('the inline credential set replaces auth.json rather than merging with it', () => {
+  const { env } = withDataDir(JSON.stringify({ 'opencode-go': { type: 'api', key: 'from-file' } }));
+  const inline = JSON.stringify({ 'opencode-go': { type: 'api', key: 'from-inline' } });
+  assert.strictEqual(readGoApiKey({ ...env, OPENCODE_AUTH_CONTENT: inline }), 'from-inline');
+
+  // A restricted set that simply has no Go key must not fall back to the fuller
+  // one on disk: upstream returns the parsed variable and never reads the file.
+  assert.strictEqual(
+    readGoApiKey({ ...env, OPENCODE_AUTH_CONTENT: JSON.stringify({ opencode: { type: 'api', key: 'zen' } }) }),
+    ''
+  );
+});
+
+test('unparseable inline credentials fall back to auth.json, as upstream does', () => {
+  const { env } = withDataDir(JSON.stringify({ 'opencode-go': { type: 'api', key: 'from-file' } }));
+  for (const broken of ['{not json', '', '   ']) {
+    assert.strictEqual(readGoApiKey({ ...env, OPENCODE_AUTH_CONTENT: broken }), 'from-file', broken);
+  }
+  // Parseable but useless shapes are still the answer, not a fallback.
+  assert.strictEqual(readGoApiKey({ ...env, OPENCODE_AUTH_CONTENT: 'null' }), '');
+  assert.strictEqual(readGoApiKey({ ...env, OPENCODE_AUTH_CONTENT: '{}' }), '');
+  assert.strictEqual(
+    readGoApiKey({ ...env, OPENCODE_AUTH_CONTENT: JSON.stringify({ 'opencode-go': { type: 'oauth' } }) }),
+    ''
+  );
+});
+
+test('our own override outranks both of OpenCode\'s credential sources', () => {
+  const { env } = withDataDir(JSON.stringify({ 'opencode-go': { type: 'api', key: 'from-file' } }));
+  const inline = JSON.stringify({ 'opencode-go': { type: 'api', key: 'from-inline' } });
+  assert.strictEqual(
+    readGoApiKey({ ...env, OPENCODE_AUTH_CONTENT: inline, TOKEN_MONITOR_OPENCODE_API_KEY: 'from-setting' }),
+    'from-setting'
+  );
+});
+
 test('readGoApiKey lets the env override win over auth.json', () => {
   const { env } = withDataDir(JSON.stringify({ 'opencode-go': { type: 'api', key: 'from-file' } }));
   assert.strictEqual(
