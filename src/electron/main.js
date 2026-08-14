@@ -3723,6 +3723,9 @@ function updateDiscordRpcDisplay(stats) {
 
 function updateTrayDisplay() {
   if (!tray || tray.isDestroyed()) return;
+  // Keep the exported D-Bus menu in sync (radio checks, refresh state, Codex
+  // accounts) — see the Linux note in createTray().
+  if (typeof tray.refreshContextMenu === 'function') tray.refreshContextMenu();
   const visibleStats = electronPresentationStats(latestStats);
   const mode = settings?.trayContent || 'tokens';
   const currency = normalizeCurrency(settings?.currency);

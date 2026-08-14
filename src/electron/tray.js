@@ -188,21 +188,33 @@ function createTray({
   const tray = new Tray(buildTrayIcon());
   tray.setToolTip('Token Monitor');
 
+  const buildMenu = () => Menu.buildFromTemplate(buildTrayMenuTemplate({
+    state: typeof getMenuState === 'function' ? getMenuState() : {},
+    onOpenSettings,
+    onOpenView,
+    onQuit,
+    onRefresh,
+    onSetTrayContent,
+    onSetWindowPresentation,
+    onSwitchCodexAccount,
+    translate: translateMenu
+  }));
+
+  // Linux tray hosts (GNOME AppIndicator/KStatusNotifier, KDE Plasma) display
+  // the D-Bus menu exported via com.canonical.dbusmenu on right-click and never
+  // deliver a 'right-click' event, so the menu has to be attached with
+  // setContextMenu() to be reachable; popUpContextMenu() alone shows nothing.
+  if (process.platform === 'linux') tray.setContextMenu(buildMenu());
+
   tray.on('click', () => onToggle(tray));
   tray.on('right-click', () => {
-    const menu = Menu.buildFromTemplate(buildTrayMenuTemplate({
-      state: typeof getMenuState === 'function' ? getMenuState() : {},
-      onOpenSettings,
-      onOpenView,
-      onQuit,
-      onRefresh,
-      onSetTrayContent,
-      onSetWindowPresentation,
-      onSwitchCodexAccount,
-      translate: translateMenu
-    }));
-    tray.popUpContextMenu(menu);
+    tray.popUpContextMenu(buildMenu());
   });
+
+  tray.refreshContextMenu = () => {
+    if (process.platform !== 'linux' || tray.isDestroyed()) return;
+    tray.setContextMenu(buildMenu());
+  };
 
   return tray;
 }
