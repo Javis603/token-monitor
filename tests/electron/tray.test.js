@@ -254,9 +254,11 @@ test('Linux tray exports current menu state and skips unchanged D-Bus rebuilds',
     ],
     codexSwitching: false,
     locale: 'en',
+    maskAccountEmails: false,
     refreshing: false,
     trayContent: 'tokens',
-    trayMode: true
+    trayMode: true,
+    viewEnabled: { project: true }
   };
   const tray = createTray({
     electron: fakeTrayElectron(calls),
@@ -295,10 +297,30 @@ test('Linux tray exports current menu state and skips unchanged D-Bus rebuilds',
     [false, true]
   );
 
+  state = {
+    ...state,
+    activeCodexAccountId: 'three',
+    codexAccounts: [
+      { id: 'one', email: 'one@example.com' },
+      { id: 'three', email: 'three@example.com' }
+    ],
+    maskAccountEmails: true,
+    viewEnabled: { project: false }
+  };
+  tray.refreshContextMenu();
+  assert.equal(calls.contextMenus.length, 6);
+  const settingsMenu = calls.contextMenus[5].template;
+  assert.equal(
+    settingsMenu[1].submenu.find((item) => item.label === 'Projects').enabled,
+    false
+  );
+  assert.doesNotMatch(JSON.stringify(settingsMenu[2]), /one@example\.com|three@example\.com|two@example\.com/);
+  assert.deepEqual(settingsMenu[2].submenu.map((item) => item.checked), [false, true]);
+
   tray.destroyed = true;
   state = { ...state, refreshing: true };
   tray.refreshContextMenu();
-  assert.equal(calls.contextMenus.length, 5);
+  assert.equal(calls.contextMenus.length, 6);
 });
 
 test('Windows tray keeps building its menu when right-clicked', () => {

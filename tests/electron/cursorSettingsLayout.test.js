@@ -1044,6 +1044,19 @@ test('credential storage failures preserve the file and surface one actionable e
   assert.match(rendererSave, /throw error;/);
 });
 
+test('successful settings saves invalidate the exported tray menu', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const saveBody = functionBody(main, 'saveSettings', 'loginItemEnabledHere');
+  const successPath = saveBody.slice(0, saveBody.indexOf('} catch (error)'));
+  const failurePath = saveBody.slice(saveBody.indexOf('} catch (error)'));
+
+  assert.match(
+    successPath,
+    /persistedSettingsSnapshot = cloneSettingsSnapshot\(settings\);\s*refreshTrayContextMenu\(\);\s*return true;/
+  );
+  assert.doesNotMatch(failurePath, /refreshTrayContextMenu\(\)/);
+});
+
 test('main settings normalize the Z.ai API region', () => {
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const defaults = main.slice(main.indexOf('function defaultSettings'), main.indexOf('function defaultLimitProviders'));

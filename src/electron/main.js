@@ -2115,6 +2115,7 @@ function saveSettings(options = {}) {
       previousSettings
     });
     persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
+    refreshTrayContextMenu();
     return true;
   } catch (error) {
     settings = previousSettings;
