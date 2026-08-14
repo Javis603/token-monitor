@@ -246,9 +246,18 @@ test('OpenCode disabled profiles still count in the account summary', () => {
   assert.match(renderBody, /\{ profiles, hasEnvVar, hasAmbientKey \}/);
   assert.match(renderBody, /if \(entries\.length === 0 && !hasEnvVar && !hasAmbientKey\)/);
   // Credential composition stays visible after the fact, because two kinds under
-  // one name is a user assertion that changes identity and fallback behaviour.
-  assert.match(renderBody, /if \(profile\.hasApiKey\) kinds\.push\(t\('settings\.opencode\.kindApi'\)\)/);
-  assert.match(renderBody, /if \(profile\.hasCookie\) kinds\.push\(t\('settings\.opencode\.kindCookie'\)\)/);
+  // one name is a user assertion that changes identity and fallback behaviour,
+  // and each is removable so undoing it does not cost the one being kept.
+  assert.match(renderBody, /\['ambient', profile\.usesAmbientKey/);
+  assert.match(renderBody, /\['api', profile\.hasApiKey/);
+  assert.match(renderBody, /\['cookie', profile\.hasCookie/);
+  assert.match(renderBody, /const removable = credentials\.length > 1;/);
+  assert.match(renderBody, /api\.removeCredential\(name, kind\)/);
+  // Naming the auto-detected credential is what lets it join an account.
+  assert.match(renderBody, /saveProfile\(name, '', 'ambient'\)/);
+  // Merging on rename is confirmed, never silent.
+  assert.match(renderBody, /pendingMergeName === next/);
+  assert.match(renderBody, /settings\.opencode\.mergeConfirm/);
   assert.match(renderBody, /api\.setProfileEnabled\(name, toggle\.checked\)\.then\(\(\) => \{/);
   assert.match(renderBody, /updateOpenCodeProfilesStatus\(\);/);
   assert.doesNotMatch(renderBody, /if \(toggle\.checked\) updateOpenCodeProfilesStatus\(\)/);

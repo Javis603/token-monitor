@@ -13340,8 +13340,10 @@ function renderOpenCodeProfiles() {
 
     // The auto-detected key counts as an account: it is what the limits card is
     // reading, so leaving it out of the total reports "not set up" next to live
-    // quota. It gets no toggle, rename or delete because Token Monitor does not
-    // own that credential — OpenCode does.
+    // quota. It has no toggle or delete because Token Monitor does not own that
+    // credential — OpenCode does — but naming it does belong here: a name is
+    // what lets it join an account, and typing an existing account's name is
+    // how a user says the two are the same OpenCode account.
     if (hasAmbientKey) {
       const item = document.createElement('div');
       item.className = 'opencode-profile-item is-ambient';
@@ -13350,10 +13352,59 @@ function renderOpenCodeProfiles() {
       const nameSpan = document.createElement('span');
       nameSpan.className = 'profile-name';
       nameSpan.textContent = t('settings.opencode.ambientName');
+
+      const nameInput = document.createElement('input');
+      nameInput.className = 'profile-name-input hidden';
+      nameInput.type = 'text';
+      nameInput.placeholder = t('settings.opencode.profileNamePlaceholder');
+
+      const nameBtn = document.createElement('button');
+      nameBtn.className = 'profile-rename-btn';
+      nameBtn.textContent = '✎';
+      nameBtn.title = t('settings.opencode.nameAmbient');
+
+      let naming = false;
+      const beginNaming = () => {
+        if (naming) return;
+        naming = true;
+        nameSpan.classList.add('hidden');
+        nameInput.classList.remove('hidden');
+        nameInput.focus();
+      };
+      const endNaming = async (save) => {
+        if (!naming) return;
+        naming = false;
+        nameInput.classList.add('hidden');
+        nameSpan.classList.remove('hidden');
+        const name = nameInput.value.trim();
+        nameInput.value = '';
+        if (!save || !name) return;
+        // 'ambient' stores a reference rather than the key, so a key rotated
+        // inside OpenCode keeps being read live. An existing name merges,
+        // which is exactly the "these are one account" assertion.
+        const result = await window.tokenMonitor.opencode.saveProfile(name, '', 'ambient');
+        if (!result.ok) {
+          const errorEl = document.getElementById('opencodeErrorMessage');
+          errorEl.textContent = result.error || t('settings.opencode.saveFailedShort');
+          errorEl.classList.remove('hidden');
+          return;
+        }
+        renderOpenCodeProfiles();
+        updateOpenCodeProfilesStatus();
+        renderSettingsSummaries();
+      };
+      nameBtn.addEventListener('click', beginNaming);
+      nameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') endNaming(true);
+        if (e.key === 'Escape') endNaming(false);
+      });
+      nameInput.addEventListener('blur', () => endNaming(true));
+
       const detail = document.createElement('span');
       detail.className = 'profile-detail';
       detail.textContent = t('settings.opencode.ambientDetail');
-      nameBox.append(nameSpan, detail);
+      nameBox.append(nameSpan, nameInput, nameBtn, detail);
+
       const rightBox = document.createElement('span');
       rightBox.className = 'profile-right';
       const infoSpan = document.createElement('span');
@@ -13410,18 +13461,36 @@ function renderOpenCodeProfiles() {
         nameInput.focus();
         nameInput.select();
       }
-      function endRename(save) {
+      // Renaming onto an existing account merges the two, which asserts they are
+      // the same OpenCode account. That claim is never made silently: the first
+      // attempt is refused and the message explains what confirming means.
+      let pendingMergeName = '';
+      async function endRename(save) {
         if (!editing) return;
         editing = false;
         nameInput.classList.add('hidden');
         nameSpan.classList.remove('hidden');
-        if (save && nameInput.value.trim() && nameInput.value.trim() !== name) {
-          api.renameProfile(name, nameInput.value.trim()).then(() => {
-            renderOpenCodeProfiles();
-            updateOpenCodeProfilesStatus();
-            renderSettingsSummaries();
-          });
+        const next = nameInput.value.trim();
+        if (!save || !next || next === name) { pendingMergeName = ''; return; }
+
+        const errorEl = document.getElementById('opencodeErrorMessage');
+        const merge = pendingMergeName === next;
+        pendingMergeName = '';
+        const result = await api.renameProfile(name, next, { merge });
+        if (!result.ok) {
+          if (result.nameTaken) {
+            pendingMergeName = next;
+            errorEl.textContent = t('settings.opencode.mergeConfirm', { name: next });
+          } else {
+            errorEl.textContent = result.error || t('settings.opencode.saveFailedShort');
+          }
+          errorEl.classList.remove('hidden');
+          return;
         }
+        errorEl.classList.add('hidden');
+        renderOpenCodeProfiles();
+        updateOpenCodeProfilesStatus();
+        renderSettingsSummaries();
       }
       renameBtn.addEventListener('click', beginRename);
       nameInput.addEventListener('keydown', (e) => {
@@ -13434,12 +13503,39 @@ function renderOpenCodeProfiles() {
       // user's own assertion that they are the same OpenCode account, and that
       // assertion changes which source answers for quota and which identity the
       // account is published under — so it has to stay visible afterwards.
+      // Which credentials this account holds, each removable on its own. Two of
+      // them under one name is the user's assertion that they are the same
+      // OpenCode account, and that assertion decides which source answers for
+      // quota and which identity the account is published under — so it stays
+      // visible, and undoing it must not cost the credential they wanted.
       const detail = document.createElement('span');
       detail.className = 'profile-detail';
-      const kinds = [];
-      if (profile.hasApiKey) kinds.push(t('settings.opencode.kindApi'));
-      if (profile.hasCookie) kinds.push(t('settings.opencode.kindCookie'));
-      detail.textContent = kinds.join(' + ');
+      const credentials = [
+        ['ambient', profile.usesAmbientKey, t('settings.opencode.ambientName')],
+        ['api', profile.hasApiKey, t('settings.opencode.kindApi')],
+        ['cookie', profile.hasCookie, t('settings.opencode.kindCookie')]
+      ].filter(([, present]) => present);
+      const removable = credentials.length > 1;
+      for (const [kind, , label] of credentials) {
+        const chip = document.createElement('span');
+        chip.className = 'profile-credential';
+        chip.textContent = label;
+        if (removable) {
+          const drop = document.createElement('button');
+          drop.className = 'profile-credential-remove';
+          drop.textContent = '×';
+          drop.title = t('settings.opencode.removeCredential', { kind: label });
+          drop.addEventListener('click', async () => {
+            const result = await api.removeCredential(name, kind);
+            if (!result.ok) return;
+            renderOpenCodeProfiles();
+            updateOpenCodeProfilesStatus();
+            renderSettingsSummaries();
+          });
+          chip.append(drop);
+        }
+        detail.append(chip);
+      }
 
       nameBox.append(nameSpan, nameInput, renameBtn, detail);
 

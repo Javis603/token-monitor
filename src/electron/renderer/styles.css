@@ -5567,9 +5567,38 @@ html.is-windows .limit-live-badge {
   padding: 0;
 }
 /* The auto-detected credential is not a stored account, so its row carries no
-   toggle, rename or delete. An empty first cell keeps it on the same grid. */
+   toggle or delete. An empty first cell keeps it on the same grid. */
 .opencode-profile-item.is-ambient .profile-name {
   color: var(--muted);
+}
+/* One chip per credential the account holds, each removable once there is more
+   than one — undoing a binding must not cost the credential being kept. */
+.opencode-profile-item .profile-credential {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.opencode-profile-item .profile-credential + .profile-credential::before {
+  content: '+';
+  margin-right: 3px;
+  opacity: 0.5;
+}
+.opencode-profile-item .profile-credential-remove {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+}
+.opencode-profile-item:hover .profile-credential-remove {
+  opacity: 0.55;
+}
+.opencode-profile-item .profile-credential-remove:hover,
+.opencode-profile-item .profile-credential-remove:focus-visible {
+  opacity: 1;
 }
 .opencode-profile-item .profile-name-box {
   display: grid;
