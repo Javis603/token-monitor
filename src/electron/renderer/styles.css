@@ -5578,16 +5578,25 @@ html.is-windows .limit-live-badge {
    text so the affordance sits on the thing being revealed, rather than as a
    separate button stranded between the status text and delete. */
 .opencode-profile-item button.profile-detail {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   padding: 0;
   border: 0;
   background: none;
   text-align: left;
   cursor: pointer;
 }
+/* Right when closed, down when open — the usual disclosure direction. Drawn
+   with a border wedge rather than a glyph so it centres on the text instead of
+   sitting on its baseline. */
 .opencode-profile-item .profile-detail.is-expandable::after {
-  content: '⌄';
-  margin-left: 4px;
-  display: inline-block;
+  content: '';
+  width: 0;
+  height: 0;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 4px solid currentColor;
   transition: transform 0.15s ease;
 }
 .opencode-profile-item .profile-detail.is-expandable:hover,
@@ -5595,7 +5604,7 @@ html.is-windows .limit-live-badge {
   color: var(--text);
 }
 .opencode-profile-item .profile-detail.is-open::after {
-  transform: rotate(180deg);
+  transform: rotate(90deg);
 }
 .opencode-credential-list {
   grid-column: 2 / -1;

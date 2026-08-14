@@ -1452,11 +1452,20 @@ test('the OpenCode local fallback toggle is relocated once, not once per render'
   // The shared renderer builds a fresh settings list every pass, so a move that
   // does not clear the destination stacks one copy of the toggle per re-render.
   assert.match(body, /for \(const stale of \[\.\.\.target\.children\]\) if \(stale !== list\) stale\.remove\(\);/);
+  // The group header already names the setting, so the item title would read twice.
+  assert.match(body, /querySelectorAll\('\.settings-item-title'\)\) title\.remove\(\)/);
+  // The shared collapsible helper, not a second hand-rolled one, which also
+  // means the ids have to follow its \`\${prefix}SettingsToggle\` convention.
+  assert.match(body, /setAccountGroupExpanded\(\s*'opencodeLocalFallback'/);
+  assert.match(body, /getElementById\('opencodeLocalFallbackSettingsToggle'\)/);
 
   const html = readRendererFile('index.html');
   const details = html.match(/<div id="opencodeSettingsDetails"[\s\S]*?<div id="opencodeErrorMessage"/)?.[0] || '';
+  // The collapse animates by squeezing one inner wrapper; a bare container has
+  // nothing to shrink and keeps its height however the class is toggled.
+  assert.match(details, /<div id="opencodeLocalFallbackSettingsDetails"[^>]*>\s*<div id="opencodeLocalFallbackInner" class="accordion-animation-inner">/);
   // Accounts first, then the off-by-default estimate, then adding an account.
-  const order = ['settings.opencode.accountsNote', 'opencodeProfileList', 'opencodeLocalFallbackGroup', 'opencodeAddForm']
+  const order = ['settings.opencode.accountsNote', 'opencodeProfileList', 'opencodeLocalFallbackAccountGroup', 'opencodeAddForm']
     .map((token) => details.indexOf(token));
   assert.ok(order.every((index) => index >= 0), 'panel should contain note, list, fallback and add form');
   assert.deepEqual(order, [...order].sort((a, b) => a - b));

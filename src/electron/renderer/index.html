@@ -676,15 +676,20 @@
                 <!-- Local DB fallback: an advanced, off-by-default estimate, so
                      it collapses below the accounts instead of sitting above
                      them where it reads as the first thing to configure. -->
-                <div id="opencodeLocalFallbackGroup" class="settings-group cursor-account-group">
-                  <button id="opencodeLocalFallbackToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="opencodeLocalFallbackDetails">
+                <div id="opencodeLocalFallbackAccountGroup" class="settings-group cursor-account-group">
+                  <button id="opencodeLocalFallbackSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="opencodeLocalFallbackSettingsDetails">
                     <span data-i18n="settings.limits.opencodeLocalLimits">Use local DB fallback</span>
                     <span class="cursor-settings-summary">
                       <span id="opencodeLocalFallbackStatus" class="cursor-status-pill"></span>
                       <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                     </span>
                   </button>
-                  <div id="opencodeLocalFallbackDetails" class="cursor-settings-details hidden"></div>
+                  <!-- The collapse animates by squeezing a single inner wrapper,
+                       so the moved setting has to land inside it rather than
+                       directly on the container, which cannot shrink. -->
+                  <div id="opencodeLocalFallbackSettingsDetails" class="cursor-settings-details hidden">
+                    <div id="opencodeLocalFallbackInner" class="accordion-animation-inner"></div>
+                  </div>
                 </div>
 
                 <!-- Add new account -->

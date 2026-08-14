@@ -10041,7 +10041,7 @@ function renderLimitProviderCheckboxesNow() {
 // Moves the OpenCode local-DB toggle into its own collapsed group beneath the
 // account list, and keeps that group's status pill in sync with the setting.
 function moveOpenCodeLocalFallbackSetting() {
-  const target = document.getElementById('opencodeLocalFallbackDetails');
+  const target = document.getElementById('opencodeLocalFallbackInner');
   const list = document.querySelector('#limitProviderOptions-opencode .limit-provider-settings-list');
   if (!target) return;
   if (list) {
@@ -10049,6 +10049,9 @@ function moveOpenCodeLocalFallbackSetting() {
     // The shared renderer builds a fresh settings list on every pass, so moving
     // without clearing stacks one copy of the toggle per re-render.
     for (const stale of [...target.children]) if (stale !== list) stale.remove();
+    // The group header already names the setting, so the item's own title would
+    // read twice. Its description and switch are what the section is for.
+    for (const title of target.querySelectorAll('.settings-item-title')) title.remove();
   }
 
   const pill = document.getElementById('opencodeLocalFallbackStatus');
@@ -10057,14 +10060,15 @@ function moveOpenCodeLocalFallbackSetting() {
     pill.textContent = t(on ? 'settings.appearance.motion.on' : 'settings.appearance.motion.off');
   }
 
-  const toggle = document.getElementById('opencodeLocalFallbackToggle');
+  const toggle = document.getElementById('opencodeLocalFallbackSettingsToggle');
   if (toggle && !toggle.dataset.wired) {
     toggle.dataset.wired = '1';
-    toggle.addEventListener('click', () => {
-      const details = document.getElementById('opencodeLocalFallbackDetails');
-      const open = details.classList.toggle('hidden') === false;
-      toggle.setAttribute('aria-expanded', String(open));
-    });
+    // The shared helper, so this collapses exactly like every other group
+    // instead of a second hand-rolled implementation of the same thing.
+    toggle.addEventListener('click', () => setAccountGroupExpanded(
+      'opencodeLocalFallback',
+      toggle.getAttribute('aria-expanded') !== 'true'
+    ));
   }
 }
 
