@@ -953,3 +953,35 @@ test('a runtime cancellation of a bound account is not published as a row', asyn
   assert.strictEqual(rows[0].status, 'unavailable');
   assert.strictEqual(rows[0].accountName || '', '');
 });
+
+test('a cancelled Go subscription is not papered over by the local estimate', async () => {
+  // 403 is the server's authoritative "this account has no Go plan". The local
+  // DB cannot tell a cancelled subscription from a current one, so it would
+  // keep deriving quota from the rows the old subscription left behind.
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeLocalLimitsEnabled: true },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async () => ({ status: 'notConfigured', entitled: false, windows: [], identity: '' }),
+      opencodeCollectGo: () => goLocalOk
+    }
+  );
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(p.status, 'notConfigured');
+  assert.deepStrictEqual(p.windows, []);
+});
+
+test('a missing key still leaves room for the local estimate', async () => {
+  // No credential at all carries no entitlement claim, so the estimate stands.
+  const summary = await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeLocalLimitsEnabled: true },
+    {
+      now: () => now403,
+      opencodeCollectGoApi: async () => ({ status: 'notConfigured', windows: [], identity: '' }),
+      opencodeCollectGo: () => goLocalOk
+    }
+  );
+  const p = summary.providers.find((x) => x.provider === 'opencode');
+  assert.strictEqual(p.status, 'ok');
+  assert.strictEqual(p.source, 'local');
+});

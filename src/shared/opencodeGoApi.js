@@ -175,7 +175,12 @@ async function fetchGoApi(apiKey, deps = {}) {
   // 403 is the upstream EntitlementError: the account simply has no Go
   // subscription. That is not a failure — it has to fall through to the cookie
   // and local paths quietly instead of surfacing an error on the card.
-  if (code === 403) return { status: 'notConfigured', windows: [] };
+  // `entitled: false` marks this as the server's authoritative answer rather
+  // than an absent credential: the key is valid, the account simply has no Go
+  // plan. Callers use it to stop falling back to the local estimate, which
+  // cannot tell a cancelled subscription from a current one and would keep
+  // deriving quota from historical rows.
+  if (code === 403) return { status: 'notConfigured', entitled: false, windows: [] };
   if (code === 401) return { status: 'unauthorized', windows: [] };
   if (code === 429) return { status: 'sourceRateLimited', windows: [] };
   if (code !== 200) return { status: 'unavailable', windows: [] };

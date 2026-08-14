@@ -123,6 +123,22 @@ const opencodeGoApi = require('../shared/opencodeGoApi');
 // paths call it directly, so they need their own bound or a hung request leaves
 // the account panel spinning and "Save account" pending forever.
 const OPENCODE_API_PROBE_TIMEOUT_MS = 15_000;
+
+// Reserved key for the auto-detected account in the status map. It is not a
+// stored profile, so it can never collide with one: it is only added when the
+// profile map is empty.
+const OPENCODE_AMBIENT_ACCOUNT_KEY = '__ambient';
+
+// Mirrors the collector's credential selection rather than approximating it:
+// the ambient key is read only when nothing at all is configured, so the panel
+// must apply the same three conditions or it will claim an auto-detected
+// account the collector is not actually using. See fetchOpenCodeLimits.
+function opencodeAmbientKeyActive(profiles, hasEnvCookie) {
+  if (Object.keys(profiles || {}).length > 0) return false;
+  if (hasEnvCookie || settings.opencodeCookie) return false;
+  return Boolean(opencodeGoApi.readGoApiKey(process.env));
+}
+
 async function probeOpenCodeApiKey(apiKey) {
   try {
     return await opencodeGoApi.fetchGoApi(apiKey, {
@@ -6554,6 +6570,22 @@ app.whenReady().then(() => {
       }
       result[envKey] = { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd, env: true };
     }
+    // Zero configuration still has an account behind it. Without probing the key
+    // OpenCode stored for itself, the panel reports "not set up" while the limits
+    // card is showing live quota read from that very key.
+    if (opencodeAmbientKeyActive(profiles, Boolean(envCookie))) {
+      const probe = await probeOpenCodeApiKey(opencodeGoApi.readGoApiKey(process.env));
+      result[OPENCODE_AMBIENT_ACCOUNT_KEY] = {
+        linked: probe.status === 'ok',
+        expired: probe.status === 'unauthorized',
+        go: probe.status === 'ok',
+        zen: false,
+        hasBalance: false,
+        balanceUsd: null,
+        ambient: true,
+        ...(probe.status === 'ok' || probe.status === 'unauthorized' ? {} : { error: probe.status })
+      };
+    }
     const value = { profiles: result, linked: Object.values(result).some(s => s.linked) };
     opencodeStatusCache = { value, at: now };
     return value;
@@ -6563,9 +6595,11 @@ app.whenReady().then(() => {
     // The Go quota also arrives with no configuration at all, from the key
     // OpenCode itself stores. Without counting that, the panel reports "not set
     // up" while the limits card is showing live API data from the same account.
-    const hasAmbientKey = Object.keys(profiles).length === 0
-      && Boolean(opencodeGoApi.readGoApiKey(process.env));
-    const hasEnvVar = Boolean(process.env.TOKEN_MONITOR_OPENCODE_COOKIE) || hasAmbientKey;
+    const hasEnvVar = Boolean(process.env.TOKEN_MONITOR_OPENCODE_COOKIE);
+    // Kept as its own field rather than folded into hasEnvVar: an environment
+    // cookie and a key OpenCode stored for itself are different sources, and a
+    // later reader seeing hasEnvVar would reasonably assume the former.
+    const hasAmbientKey = opencodeAmbientKeyActive(profiles, hasEnvVar);
     // Credential values never cross to the renderer; which kinds exist does, so
     // the list can show what a profile actually holds.
     const safe = {};
@@ -6577,6 +6611,9 @@ app.whenReady().then(() => {
   // `kind` defaults to 'cookie' so an older renderer calling with two arguments
   // keeps its existing behavior.
   ipcMain.handle('opencode:saveProfile', async (_event, name, raw, kind = 'cookie') => {
+    // Trimmed, so whitespace cannot create an account name that renders blank
+    // and that nobody could ever type again to attach a second credential.
+    name = String(name || '').trim();
     if (!name) return { ok: false, error: 'Empty name' };
     // Reject anything else rather than treating it as a cookie: an unrecognized
     // kind would store the value in the wrong field and read as a credential it

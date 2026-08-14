@@ -13326,11 +13326,11 @@ function renderOpenCodeProfiles() {
 
   const api = window.tokenMonitor.opencode;
 
-  api.getProfiles().then(({ profiles, hasEnvVar }) => {
+  api.getProfiles().then(({ profiles, hasEnvVar, hasAmbientKey }) => {
     listEl.innerHTML = '';
     const entries = Object.entries(profiles);
 
-    if (entries.length === 0 && !hasEnvVar) {
+    if (entries.length === 0 && !hasEnvVar && !hasAmbientKey) {
       listEl.innerHTML = '<div class="opencode-empty">' + t('settings.opencode.emptyList') + '</div>';
       state.opencodeProfileCount = 0;
       renderOpenCodeProfilesStatusSummary({});
@@ -13338,7 +13338,34 @@ function renderOpenCodeProfiles() {
       return;
     }
 
-    state.opencodeProfileCount = entries.length;
+    // The auto-detected key counts as an account: it is what the limits card is
+    // reading, so leaving it out of the total reports "not set up" next to live
+    // quota. It gets no toggle, rename or delete because Token Monitor does not
+    // own that credential — OpenCode does.
+    if (hasAmbientKey) {
+      const item = document.createElement('div');
+      item.className = 'opencode-profile-item is-ambient';
+      const nameBox = document.createElement('span');
+      nameBox.className = 'profile-name-box';
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'profile-name';
+      nameSpan.textContent = t('settings.opencode.ambientName');
+      const detail = document.createElement('span');
+      detail.className = 'profile-detail';
+      detail.textContent = t('settings.opencode.ambientDetail');
+      nameBox.append(nameSpan, detail);
+      const rightBox = document.createElement('span');
+      rightBox.className = 'profile-right';
+      const infoSpan = document.createElement('span');
+      infoSpan.className = 'profile-info';
+      infoSpan.id = 'opencode-info-__ambient';
+      infoSpan.textContent = '...';
+      rightBox.append(infoSpan);
+      item.append(document.createElement('span'), nameBox, rightBox);
+      listEl.appendChild(item);
+    }
+
+    state.opencodeProfileCount = entries.length + (hasAmbientKey ? 1 : 0);
     renderSettingsSummaries();
 
     for (const [name, profile] of entries) {
@@ -13403,7 +13430,18 @@ function renderOpenCodeProfiles() {
       });
       nameInput.addEventListener('blur', () => endRename(true));
 
-      nameBox.append(nameSpan, nameInput, renameBtn);
+      // Which credentials this account holds. Two of them under one name is the
+      // user's own assertion that they are the same OpenCode account, and that
+      // assertion changes which source answers for quota and which identity the
+      // account is published under — so it has to stay visible afterwards.
+      const detail = document.createElement('span');
+      detail.className = 'profile-detail';
+      const kinds = [];
+      if (profile.hasApiKey) kinds.push(t('settings.opencode.kindApi'));
+      if (profile.hasCookie) kinds.push(t('settings.opencode.kindCookie'));
+      detail.textContent = kinds.join(' + ');
+
+      nameBox.append(nameSpan, nameInput, renameBtn, detail);
 
       const rightBox = document.createElement('span');
       rightBox.className = 'profile-right';

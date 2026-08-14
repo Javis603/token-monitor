@@ -5566,6 +5566,11 @@ html.is-windows .limit-live-badge {
   height: 14px;
   padding: 0;
 }
+/* The auto-detected credential is not a stored account, so its row carries no
+   toggle, rename or delete. An empty first cell keeps it on the same grid. */
+.opencode-profile-item.is-ambient .profile-name {
+  color: var(--muted);
+}
 .opencode-profile-item .profile-name-box {
   display: grid;
   grid-template-columns: minmax(0, max-content) auto minmax(0, 1fr);

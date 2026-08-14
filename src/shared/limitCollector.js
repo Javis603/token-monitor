@@ -3273,11 +3273,15 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       windows.push(...goWeb.windows.map((window) => ({ ...window, source: 'web' })));
       status = 'ok'; source = 'web'; accountLabel = 'Go';
       accountKey = hashKey('opencode', `go:${goWeb.workspaceId || ''}`);
-    } else if (goLocal.status === 'ok') {
+    } else if (goLocal.status === 'ok' && goApi.entitled !== false) {
+      // `entitled === false` is the server saying this account has no Go plan,
+      // which the local estimate cannot know: it would keep deriving quota from
+      // rows a cancelled subscription left behind. Only an absent or failed API
+      // answer leaves room for the estimate.
       windows.push(...goLocal.windows.map((window) => ({ ...window, source: 'local' })));
       status = 'ok'; accountLabel = 'Go';
       accountKey = hashKey('opencode', goLocal.identity || 'go');
-    } else if (goLocal.status === 'unavailable') {
+    } else if (goLocal.status === 'unavailable' && goApi.entitled !== false) {
       status = 'unavailable';
     }
 

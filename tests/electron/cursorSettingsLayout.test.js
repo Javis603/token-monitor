@@ -240,7 +240,15 @@ test('OpenCode multi-account rows separate profile identity from plan label', ()
 test('OpenCode disabled profiles still count in the account summary', () => {
   const app = readRendererFile('app.js');
   const renderBody = functionBody(app, 'renderOpenCodeProfiles', 'updateOpenCodeProfilesStatus');
-  assert.match(renderBody, /state\.opencodeProfileCount = entries\.length;/);
+  // The auto-detected credential counts too: it is the account the limits card
+  // is reading, so excluding it reports "not set up" next to live quota.
+  assert.match(renderBody, /state\.opencodeProfileCount = entries\.length \+ \(hasAmbientKey \? 1 : 0\);/);
+  assert.match(renderBody, /\{ profiles, hasEnvVar, hasAmbientKey \}/);
+  assert.match(renderBody, /if \(entries\.length === 0 && !hasEnvVar && !hasAmbientKey\)/);
+  // Credential composition stays visible after the fact, because two kinds under
+  // one name is a user assertion that changes identity and fallback behaviour.
+  assert.match(renderBody, /if \(profile\.hasApiKey\) kinds\.push\(t\('settings\.opencode\.kindApi'\)\)/);
+  assert.match(renderBody, /if \(profile\.hasCookie\) kinds\.push\(t\('settings\.opencode\.kindCookie'\)\)/);
   assert.match(renderBody, /api\.setProfileEnabled\(name, toggle\.checked\)\.then\(\(\) => \{/);
   assert.match(renderBody, /updateOpenCodeProfilesStatus\(\);/);
   assert.doesNotMatch(renderBody, /if \(toggle\.checked\) updateOpenCodeProfilesStatus\(\)/);
@@ -1339,4 +1347,39 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
   assert.match(groupBody, /renderLimitProviderRow\('mimo', limitAccountTitle\('mimo', provider, index, providers\), provider, color/);
   assert.match(renderLimitsBody, /if \(id === 'mimo' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
   assert.match(renderLimitsBody, /nodes\.push\(renderMimoAccountGroup\(label, visibleProviders, color\)\);/);
+});
+
+test('a zero-config OpenCode machine is not reported as unconfigured', () => {
+  // The whole point of the API path is that Go quota needs no setup. If the
+  // panel derives its state only from stored profiles, that machine shows live
+  // quota on the limits card and "not set up" in settings at the same time.
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+
+  const gate = main.slice(
+    main.indexOf('function opencodeAmbientKeyActive'),
+    main.indexOf('async function probeOpenCodeApiKey')
+  );
+  assert.ok(gate, 'ambient gate should exist');
+  // It must mirror the collector's selection, which uses the ambient key only
+  // when nothing at all is configured.
+  assert.match(gate, /Object\.keys\(profiles \|\| \{\}\)\.length > 0/);
+  assert.match(gate, /hasEnvCookie \|\| settings\.opencodeCookie/);
+  assert.match(gate, /opencodeGoApi\.readGoApiKey\(process\.env\)/);
+
+  const status = main.slice(
+    main.indexOf("ipcMain.handle('opencode:status'"),
+    main.indexOf("ipcMain.handle('opencode:getProfiles'")
+  );
+  assert.ok(status, 'status handler should exist');
+  assert.match(status, /opencodeAmbientKeyActive\(profiles, Boolean\(envCookie\)\)/);
+  assert.match(status, /OPENCODE_AMBIENT_ACCOUNT_KEY/);
+
+  const profilesHandler = main.slice(
+    main.indexOf("ipcMain.handle('opencode:getProfiles'"),
+    main.indexOf("ipcMain.handle('opencode:saveProfile'")
+  );
+  // hasEnvVar keeps meaning "environment cookie". Folding the ambient key into
+  // it would make a later reader assume an env var that is not set.
+  assert.match(profilesHandler, /const hasEnvVar = Boolean\(process\.env\.TOKEN_MONITOR_OPENCODE_COOKIE\);/);
+  assert.match(profilesHandler, /hasApiKey: Boolean\(p\.apiKey\), hasCookie: Boolean\(p\.cookie\)/);
 });
