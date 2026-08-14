@@ -95,9 +95,9 @@ test('Discord Rich Presence uses labels and asset keys for tracked clients', () 
   }
 });
 
-test('Discord Rich Presence uses labels and asset keys for Pi, Zed, Kilo Code, and Reasonix', () => {
+test('Discord Rich Presence uses labels and asset keys for newer tracked clients', () => {
   const buildPayload = loadBuildPayload();
-  for (const [client, label] of [['pi', 'Pi'], ['zed', 'Zed'], ['kilocode', 'Kilo Code'], ['commandcode', 'Command Code'], ['micode', 'MiMo Code'], ['zcode', 'ZCode'], ['kiro', 'Kiro'], ['codebuddy', 'CodeBuddy'], ['workbuddy', 'WorkBuddy'], ['reasonix', 'Reasonix']]) {
+  for (const [client, label] of [['pi', 'Pi'], ['zed', 'Zed'], ['kilocode', 'Kilo Code'], ['commandcode', 'Command Code'], ['micode', 'MiMo Code'], ['zcode', 'ZCode'], ['kiro', 'Kiro'], ['codebuddy', 'CodeBuddy'], ['workbuddy', 'WorkBuddy'], ['reasonix', 'Reasonix'], ['dsh', 'DeepSeek Harness']]) {
     const payload = buildPayload({
       periods: {
         today: {

@@ -36,7 +36,7 @@ test('renderer client labels cover every known client', () => {
 
 test('renderer known clients include current tokscale-supported tools', () => {
   const clients = knownClientIds(rendererSource());
-  for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix']) {
+  for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh']) {
     assert.ok(clients.includes(client), `${client} should be a known renderer client`);
   }
 });
@@ -106,6 +106,11 @@ test('renderer uses the CodeBuddy and WorkBuddy brand icons for their tool rows'
 test('renderer uses the Reasonix icon for the Reasonix tool row', () => {
   const styles = rendererStyles();
   assert.match(styles, /\.row-icon-reasonix\s*\{[^}]*assets\/icons\/reasonix\.svg/s);
+});
+
+test('renderer uses the DeepSeek Harness icon for the DSH tool row', () => {
+  const styles = rendererStyles();
+  assert.match(styles, /\.row-icon-dsh\s*\{[^}]*assets\/icons\/dsh\.svg/s);
 });
 
 test('renderer uses the mask-safe Command Code icon for its tool row', () => {
