@@ -175,6 +175,7 @@ function normalizeClientName(value) {
   if (raw.includes('qwen')) return 'qwen';
   if (raw.includes('grok')) return 'grok';
   if (raw.includes('copilot')) return 'copilot';
+  if (raw.includes('harness') || raw.includes('deepseek-harness') || raw.includes('deepseek_harness') || raw === 'dsh') return 'dsh';
   if (/\bpi\b/.test(raw)) return 'pi';
   if (raw.includes('zed')) return 'zed';
   if (raw.includes('kilocode')) return 'kilocode';

@@ -35,6 +35,7 @@ const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { buildDshHistoryGraph, buildDshPeriods, collectDshRows, resolveDshHome } = require('./dshUsage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
 const {
   createReasonixNativeSessionCache,
@@ -709,6 +710,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.promaGraph);
     histories.push(normalizeHistory(parseGraphResult(options.promaGraph), { capDays, todayKey }));
   }
+  if (options.dshGraph) {
+    rawGraphs.push(options.dshGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.dshGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -772,16 +777,18 @@ async function collectUsageOnce(options) {
     options.homeDir || os.homedir(),
     { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
   );
-  // Proma remains a local compatibility adapter; Reasonix aggregate usage is
-  // supplied by the same Tokscale path as every other tracked client.
+  // Proma and DeepSeek Harness (dsh) remain local compatibility adapters;
+  // Reasonix aggregate usage is supplied by the same Tokscale path as every
+  // other tracked client.
   const tokscaleClients = normalizedClients
-    ? normalizedClients.split(',').filter((c) => c !== 'proma').join(',')
+    ? normalizedClients.split(',').filter((c) => c !== 'proma' && c !== 'dsh').join(',')
     : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
+  const includesDsh = normalizedClients.split(',').includes('dsh');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
-  const targetTokscaleClients = targetClients.filter((client) => client !== 'proma').join(',');
+  const targetTokscaleClients = targetClients.filter((client) => client !== 'proma' && client !== 'dsh').join(',');
   let today = emptyPeriod();
   let month = emptyPeriod();
   let allTime = emptyPeriod();
@@ -796,6 +803,9 @@ async function collectUsageOnce(options) {
   let promaPeriods = null;
   let promaRows = null;
   let promaPricing = null;
+  let dshPeriods = null;
+  let dshRows = null;
+  let dshPricing = null;
   if (normalizedClients) {
     const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
     await maybeSyncCursor(syncClients, options.logger, {
@@ -825,6 +835,27 @@ async function collectUsageOnce(options) {
         if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
       }
     }
+    // dsh is parsed locally (dshUsage.js) until tokscale supports the client
+    // natively; see the SWITCH-OVER note at the top of dshUsage.js for the
+    // exact flip list when that happens.
+    if (includesDsh && (!targetRequested || targetClients.includes('dsh'))) {
+      try {
+        dshRows = collectDshRows();
+        dshPricing = await resolvePromaPricing(dshRows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        });
+        const dshJson = buildDshPeriods({ now: collectedAt, allTimeSince, rows: dshRows, pricingByModel: dshPricing });
+        dshPeriods = {
+          today: extractUsageFromTokscale(dshJson.today),
+          month: extractUsageFromTokscale(dshJson.month),
+          allTime: extractUsageFromTokscale(dshJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`dsh parse failed: ${err.message}`);
+      }
+    }
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
@@ -850,6 +881,7 @@ async function collectUsageOnce(options) {
         }
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
+      if (dshPeriods) freshPartitions.dsh = dshPeriods.today;
       todayPartitions = useTargetedPartitions
         ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
         : completeTodayPartitions(freshPartitions, normalizedClients);
@@ -893,6 +925,12 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, promaPeriods.month);
       allTime = mergePeriods(allTime, promaPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), proma: promaPeriods.today };
+    }
+    if (dshPeriods && !anchorUsed) {
+      today = mergePeriods(today, dshPeriods.today);
+      month = mergePeriods(month, dshPeriods.month);
+      allTime = mergePeriods(allTime, dshPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), dsh: dshPeriods.today };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1068,6 +1106,7 @@ async function collectUsageOnce(options) {
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
+      dshGraph: includesDsh ? buildDshHistoryGraph({ rows: dshRows || collectDshRows(), pricingByModel: dshPricing || {} }) : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1275,6 +1314,10 @@ function clientSourceRoots(clientsCsv) {
   if (exporter) copilotRoots.push(['copilot-otel-exporter', exporter.dir, exporter.file]);
   add('copilot', ...copilotRoots);
   add('pi', ['pi-sessions', path.join(home, '.pi', 'agent', 'sessions')], ['omp-sessions', path.join(home, '.omp', 'agent', 'sessions')]);
+  // DeepSeek Harness keeps all user data under one home ($DSH_HOME or ~/.dsh)
+  // and writes session logs as zstd frames under <home>/sessions; the parser
+  // in dshUsage.js reads them directly, like Proma's local adapter.
+  add('dsh', ['dsh-sessions', path.join(resolveDshHome(), 'sessions')]);
   // Zed: tokscale reads the XdgData root on every platform AND the native macOS
   // (Application Support) / Windows (LOCALAPPDATA) roots (see tokscale scanner.rs
   // cfg(macos)/cfg(windows) blocks) — watch all three so native mac/win users get

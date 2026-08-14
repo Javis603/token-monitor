@@ -5,6 +5,7 @@ const { execFileSync } = require('node:child_process');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { REASONIX_CLIENT } = require('./reasonixPaths');
 const { buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { buildDshPeriods, collectDshRows } = require('./dshUsage');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 
@@ -34,6 +35,7 @@ const WSL_DATA_MARKERS = [
   '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks',
   '.pi/agent/sessions',
   '.omp/agent/sessions',
+  '.dsh',
   '.local/share/zed/threads/threads.db',
   '.config/Code/User/globalStorage/kilocode.kilo-code/tasks',
   '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks',
@@ -75,6 +77,7 @@ const MARKER_CLIENTS = {
   '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks': 'cline',
   '.pi/agent/sessions': 'pi',
   '.omp/agent/sessions': 'pi',
+  '.dsh': 'dsh',
   '.local/share/zed/threads/threads.db': 'zed',
   '.config/Code/User/globalStorage/kilocode.kilo-code/tasks': 'kilocode',
   '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks': 'kilocode',
@@ -197,6 +200,8 @@ async function collectWslUsage(options = {}, deps = {}) {
   const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, now, runTokscale, logger, decoratePeriods } = options;
   const buildProma = options.buildPromaPeriods || buildPromaPeriods;
   const collectProma = options.collectPromaRows || collectPromaRows;
+  const buildDsh = options.buildDshPeriods || buildDshPeriods;
+  const collectDsh = options.collectDshRows || collectDshRows;
   const existsSync = deps.existsSync || fs.existsSync;
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
@@ -242,6 +247,32 @@ async function collectWslUsage(options = {}, deps = {}) {
         bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(proma.allTime));
       } catch (error) {
         if (typeof logger === 'function') logger(`wsl Proma usage parse failed for ${home}: ${error.message}`);
+      }
+    }
+    // DeepSeek Harness (dsh) is likewise locally parsed: read its zstd session
+    // logs under <home>/.dsh directly so a dsh-only home contributes usage, not
+    // merely marker detection. The root is isolated per home to avoid
+    // double-counting another distro or the host's own harness sessions.
+    if (tracked.has('dsh') && homeDataClients.includes('dsh')) {
+      try {
+        const dshOptions = {
+          now,
+          allTimeSince,
+          roots: [wslHomePath(home, '.dsh')]
+        };
+        if (typeof options.resolvePromaPricing === 'function') {
+          const rows = collectDsh(dshOptions);
+          dshOptions.rows = rows;
+          dshOptions.pricingByModel = await options.resolvePromaPricing(rows);
+        } else if (options.promaPricingByModel) {
+          dshOptions.pricingByModel = options.promaPricingByModel;
+        }
+        const dsh = buildDsh(dshOptions);
+        bundle.today = mergePeriods(bundle.today, extractUsageFromTokscale(dsh.today));
+        bundle.month = mergePeriods(bundle.month, extractUsageFromTokscale(dsh.month));
+        bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(dsh.allTime));
+      } catch (error) {
+        if (typeof logger === 'function') logger(`wsl dsh usage parse failed for ${home}: ${error.message}`);
       }
     }
     // Tokscale 4.6+ keeps explicit --home scans isolated from host-native roots,
