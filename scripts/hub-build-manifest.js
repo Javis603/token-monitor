@@ -18,6 +18,7 @@ const WORKER_SHARED_MODULES = Object.freeze([
   'usage.js',
   'history.js',
   'reasonixPaths.js',
+  'dshPaths.js',
   'reasonixSessionGuard.js',
   'projectKey.js',
   'syncUploadInterval.js',

@@ -4,16 +4,27 @@
  * Proma session usage parser.
  *
  * Reads session transcripts from ~/.proma/agent-sessions/*.jsonl and
- * aggregates token usage reported in assistant-message `usage` fields.
+ * aggregates token usage reported in assistant-message 'usage' fields.
  * Returns data shaped like a tokscale JSON response so it can be fed
  * directly into extractUsageFromTokscale or merged alongside tokscale
  * results.
+ *
+ * The tokscale-shaped builders (periods / history graph / estimated cost)
+ * live in the shared localSessionAdapter pipeline; this module only owns the
+ * Proma-specific transcript extraction.
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { createHash } = require('node:crypto');
+
+const {
+  buildHistoryGraph,
+  buildPeriods,
+  buildTokscaleJson,
+  estimatedRowCost
+} = require('./localSessionAdapter');
 
 const PROMA_ROOT = path.join(os.homedir(), '.proma', 'agent-sessions');
 
@@ -39,38 +50,13 @@ function rowTotal(row) {
   return row.input + row.output + row.cacheRead + row.cacheWrite;
 }
 
-function normalizedModelId(value) {
-  return String(value || '').trim().toLowerCase();
-}
-
-// Cost is an estimate from a model-price catalog, never a provider invoice.
-// Return null rather than silently undercount when a row uses a token category
-// whose rate is unavailable (notably cache writes for some custom prices).
-function estimatedRowCost(row, pricingByModel) {
-  const pricing = pricingByModel?.[normalizedModelId(row.model)];
-  if (!pricing || typeof pricing !== 'object') return null;
-  const components = [
-    [row.input, pricing.inputCostPerToken],
-    [row.output, pricing.outputCostPerToken],
-    [row.cacheRead, pricing.cacheReadInputTokenCost],
-    [row.cacheWrite, pricing.cacheCreationInputTokenCost]
-  ];
-  let cost = 0;
-  for (const [tokens, unitCost] of components) {
-    if (!tokens) continue;
-    if (!Number.isFinite(Number(unitCost)) || Number(unitCost) < 0) return null;
-    cost += tokens * Number(unitCost);
-  }
-  return cost;
-}
-
 function sourceNamespace(root) {
   return createHash('sha256').update(path.normalize(String(root || ''))).digest('hex').slice(0, 12);
 }
 
 function collectSessionRows(filePath, options = {}) {
   const sourceId = options.sourceId || sourceNamespace(path.dirname(filePath));
-  const sessionId = `${path.basename(filePath, path.extname(filePath))}@${sourceId}`;
+  const sessionId = path.basename(filePath, path.extname(filePath)) + '@' + sourceId;
   const content = String(fs.readFileSync(filePath, 'utf8') || '');
   const lines = content.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const msgGroups = new Map(); // message.id -> [{ usage, model, createdAt }]
@@ -174,158 +160,20 @@ function collectPromaRows(options = {}) {
   return rows;
 }
 
-function windowStartMs(windows) {
-  return Math.max(0, timestampMs(windows.todayStart), timestampMs(windows.monthStart), timestampMs(windows.allTimeSince));
+function promaRows(options = {}) {
+  return Array.isArray(options.rows) ? options.rows : collectPromaRows(options);
 }
 
-/**
- * Build a tokscale-compatible JSON object from Proma session data.
- *
- * @param {{ todayStart?: number, monthStart?: number, allTimeSince?: number }} windows
- *        Unix timestamps (ms) for period boundaries.
- * @returns {{ entries: Array, totalInput: number, totalOutput: number, totalCacheRead: number, totalCacheWrite: number, totalMessages: number, totalCost: number }}
- */
-function buildTokscaleJson(windows = {}, options = {}) {
-  // Conversation transcripts can contain assistant-shaped messages that
-  // overlap agent-session records. Keep parsing limited to the verified
-  // agent-session format until conversation attribution is implemented.
-  const sinceMs = windowStartMs(windows);
-  const entries = [];
-  let allInput = 0, allOutput = 0, allCacheRead = 0, allCacheWrite = 0, allMessages = 0, allCost = 0;
-
-  // Filter after loading message-level rows. Filtering after per-model
-  // aggregation would use the model's earliest timestamp and drop today's
-  // usage from a session that began before midnight.
-  const allRows = (Array.isArray(options.rows) ? options.rows : collectPromaRows(options))
-    .filter((row) => {
-      if (!sinceMs) return true;
-      if (!row.createdAt) return options.includeUndated === true;
-      return row.createdAt >= sinceMs;
-    });
-
-  // Keep the source JSONL's stable session id while aggregating streamed
-  // messages by model. extractUsageFromTokscale() then merges all model rows
-  // for the same session into one period.sessions entry.
-  const bySessionModel = new Map();
-  for (const row of allRows) {
-    const key = `${row.sessionId || 'unknown'}\u0000${row.model}`;
-    if (!bySessionModel.has(key)) {
-      bySessionModel.set(key, { sessionId: row.sessionId || 'unknown', model: row.model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, messages: 0, cost: 0, startedAt: 0, lastUsedAt: 0 });
-    }
-    const m = bySessionModel.get(key);
-    const cost = estimatedRowCost(row, options.pricingByModel);
-    m.input += row.input;
-    m.output += row.output;
-    m.cacheRead += row.cacheRead;
-    m.cacheWrite += row.cacheWrite;
-    m.messages += Number(row.messages || 1);
-    m.cost += cost === null ? 0 : cost;
-    if (row.createdAt && (!m.startedAt || row.createdAt < m.startedAt)) m.startedAt = row.createdAt;
-    if (row.createdAt > m.lastUsedAt) m.lastUsedAt = row.createdAt;
-  }
-
-  for (const m of bySessionModel.values()) {
-    entries.push({
-      client: 'proma',
-      mergedClients: null,
-      sessionId: m.sessionId,
-      model: m.model,
-      provider: 'proma',
-      input: m.input,
-      output: m.output,
-      cacheRead: m.cacheRead,
-      cacheWrite: m.cacheWrite,
-      reasoning: 0,
-      messageCount: m.messages,
-      cost: m.cost,
-      startedAt: m.startedAt ? new Date(m.startedAt).toISOString() : '',
-      lastUsedAt: m.lastUsedAt ? new Date(m.lastUsedAt).toISOString() : '',
-      performance: null
-    });
-    allInput += m.input;
-    allOutput += m.output;
-    allCacheRead += m.cacheRead;
-    allCacheWrite += m.cacheWrite;
-    allMessages += m.messages;
-    allCost += m.cost;
-  }
-
-  return {
-    groupBy: 'client,session,model',
-    entries,
-    totalInput: allInput,
-    totalOutput: allOutput,
-    totalCacheRead: allCacheRead,
-    totalCacheWrite: allCacheWrite,
-    totalMessages: allMessages,
-    totalCost: allCost,
-    processingTimeMs: 0
-  };
+function buildPromaTokscaleJson(windows = {}, options = {}) {
+  return buildTokscaleJson(windows, { ...options, client: 'proma', provider: 'proma', rows: promaRows(options) });
 }
 
-function localDateKey(timestamp) {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-// Return raw graph-compatible contributions so collector.js can merge this
-// local adapter with tokscale's graph output through the shared history core.
 function buildPromaHistoryGraph(options = {}) {
-  const byDate = new Map();
-  const rows = Array.isArray(options.rows) ? options.rows : collectPromaRows(options);
-  for (const row of rows) {
-    const date = row.createdAt ? localDateKey(row.createdAt) : '';
-    if (!date) continue; // an undated row cannot be truthfully placed on a day
-    let day = byDate.get(date);
-    if (!day) {
-      day = { date, clients: [] };
-      byDate.set(date, day);
-    }
-    const modelId = normalizedModelId(row.model) || 'unknown';
-    let client = day.clients.find((entry) => entry.modelId === modelId);
-    if (!client) {
-      client = {
-        client: 'proma',
-        modelId,
-        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
-        cost: 0,
-        messages: 0
-      };
-      day.clients.push(client);
-    }
-    const cost = estimatedRowCost(row, options.pricingByModel);
-    client.tokens.input += row.input;
-    client.tokens.output += row.output;
-    client.tokens.cacheRead += row.cacheRead;
-    client.tokens.cacheWrite += row.cacheWrite;
-    client.cost += cost === null ? 0 : cost;
-    client.messages += 1;
-  }
-  return { contributions: [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)) };
+  return buildHistoryGraph({ ...options, client: 'proma', rows: promaRows(options) });
 }
 
-/**
- * Compute local midnight for today and month start, then build
- * tokscale-compatible JSON.
- *
- * @param {{ now?: Date | number | string, allTimeSince?: number | string, roots?: string[] }} options
- */
 function buildPromaPeriods(options = {}) {
-  const now = options.now ? new Date(options.now) : new Date();
-  const rows = Array.isArray(options.rows) ? options.rows : collectPromaRows(options);
-  const buildOptions = { rows, pricingByModel: options.pricingByModel };
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
-
-  return {
-    today: buildTokscaleJson({ todayStart }, buildOptions),
-    month: buildTokscaleJson({ monthStart }, buildOptions),
-    allTime: buildTokscaleJson({ allTimeSince: options.allTimeSince }, { ...buildOptions, includeUndated: true })
-  };
+  return buildPeriods({ ...options, client: 'proma', provider: 'proma', rows: promaRows(options) });
 }
 
 module.exports = {
@@ -334,7 +182,7 @@ module.exports = {
   collectPromaRows,
   parseSessionFile,
   estimatedRowCost,
-  buildTokscaleJson,
+  buildTokscaleJson: buildPromaTokscaleJson,
   buildPromaHistoryGraph,
   buildPromaPeriods
 };

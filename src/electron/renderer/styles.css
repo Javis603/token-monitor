@@ -3336,6 +3336,7 @@ html.is-windows .settings-panel select option {
 .row-icon-workbuddy  { -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);     mask-image: url(../../../assets/icons/workbuddy.svg); }
 .row-icon-proma      { -webkit-mask-image: url(../../../assets/icons/proma.svg);         mask-image: url(../../../assets/icons/proma.svg); }
 .row-icon-reasonix   { -webkit-mask-image: url(../../../assets/icons/reasonix.svg);      mask-image: url(../../../assets/icons/reasonix.svg); }
+.row-icon-dsh        { -webkit-mask-image: url(../../../assets/icons/dsh.svg);           mask-image: url(../../../assets/icons/dsh.svg); }
 .row-icon-opencode   { -webkit-mask-image: url(../../../assets/icons/opencode.svg);      mask-image: url(../../../assets/icons/opencode.svg); }
 .row-icon-openrouter { -webkit-mask-image: url(../../../assets/icons/openrouter.svg);    mask-image: url(../../../assets/icons/openrouter.svg); }
 .row-icon-openclaw   { -webkit-mask-image: url(../../../assets/icons/openclaw.svg);      mask-image: url(../../../assets/icons/openclaw.svg); }

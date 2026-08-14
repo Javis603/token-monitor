@@ -35,6 +35,8 @@ const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { buildDshHistoryGraph, buildDshPeriods, collectDshRows } = require('./dshUsage');
+const { DSH_SOURCE_CHECK_ID, resolveDshSessionsDir } = require('./dshPaths');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
 const {
   createReasonixNativeSessionCache,
@@ -709,6 +711,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.promaGraph);
     histories.push(normalizeHistory(parseGraphResult(options.promaGraph), { capDays, todayKey }));
   }
+  if (options.dshGraph) {
+    rawGraphs.push(options.dshGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.dshGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -772,12 +778,14 @@ async function collectUsageOnce(options) {
     options.homeDir || os.homedir(),
     { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
   );
-  // Proma remains a local compatibility adapter; Reasonix aggregate usage is
-  // supplied by the same Tokscale path as every other tracked client.
+  // Proma and DeepSeek Harness (DSH) remain local compatibility adapters;
+  // Reasonix aggregate usage is supplied by the same Tokscale path as every
+  // other tracked client.
   const tokscaleClients = normalizedClients
-    ? normalizedClients.split(',').filter((c) => c !== 'proma').join(',')
+    ? normalizedClients.split(',').filter((c) => c !== 'proma' && c !== 'dsh').join(',')
     : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
+  const includesDsh = normalizedClients.split(',').includes('dsh');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -796,6 +804,9 @@ async function collectUsageOnce(options) {
   let promaPeriods = null;
   let promaRows = null;
   let promaPricing = null;
+  let dshPeriods = null;
+  let dshRows = null;
+  let dshPricing = null;
   if (normalizedClients) {
     const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
     await maybeSyncCursor(syncClients, options.logger, {
@@ -825,6 +836,29 @@ async function collectUsageOnce(options) {
         if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
       }
     }
+    if (includesDsh && (!targetRequested || targetClients.includes('dsh'))) {
+      try {
+        dshRows = collectDshRows({
+          env: process.env,
+          homeDir: options.homeDir,
+          platform: platformValue,
+          projectIdentity: (cwd) => projectIdentity(cwd)
+        });
+        dshPricing = await resolveModelPricing(dshRows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        });
+        const dshJson = buildDshPeriods({ now: collectedAt, allTimeSince, rows: dshRows, pricingByModel: dshPricing });
+        dshPeriods = {
+          today: extractUsageFromTokscale(dshJson.today),
+          month: extractUsageFromTokscale(dshJson.month),
+          allTime: extractUsageFromTokscale(dshJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`dsh parse failed: ${err.message}`);
+      }
+    }
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
@@ -850,6 +884,7 @@ async function collectUsageOnce(options) {
         }
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
+      if (dshPeriods) freshPartitions.dsh = dshPeriods.today;
       todayPartitions = useTargetedPartitions
         ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
         : completeTodayPartitions(freshPartitions, normalizedClients);
@@ -894,6 +929,12 @@ async function collectUsageOnce(options) {
       allTime = mergePeriods(allTime, promaPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), proma: promaPeriods.today };
     }
+    if (dshPeriods && !anchorUsed) {
+      today = mergePeriods(today, dshPeriods.today);
+      month = mergePeriods(month, dshPeriods.month);
+      allTime = mergePeriods(allTime, dshPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), dsh: dshPeriods.today };
+    }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
     // period: a later targeted tick re-merges these sessions into `today`.
@@ -928,6 +969,11 @@ async function collectUsageOnce(options) {
           commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
           pricingRevision: options.pricingRevision
         }),
+        resolveDshPricing: (rows) => resolveModelPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        }),
         logger: options.logger,
         decoratePeriods: (periods, home) => applySessionTimestamps(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
       });
@@ -944,6 +990,11 @@ async function collectUsageOnce(options) {
         commandTimeoutMs,
         runTokscale: runTokscaleFn,
         resolvePromaPricing: (rows) => resolvePromaPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        }),
+        resolveDshPricing: (rows) => resolveModelPricing(rows, {
           lookupModelPricing: options.lookupModelPricing,
           commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
           pricingRevision: options.pricingRevision
@@ -1068,6 +1119,7 @@ async function collectUsageOnce(options) {
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
+    dshGraph: includesDsh ? buildDshHistoryGraph({ rows: dshRows || collectDshRows(), pricingByModel: dshPricing || {} }) : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1353,6 +1405,8 @@ function clientSourceRoots(clientsCsv) {
   add('workbuddy', ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')]);
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
+  // DeepSeek Harness (DSH) — zstd-packed session logs under <DSH_HOME>/sessions.
+  add('dsh', [DSH_SOURCE_CHECK_ID, resolveDshSessionsDir({ env: process.env, homeDir: home, platform: process.platform, cwdDir: process.cwd() })]);
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
     resolveReasonixStatsDir({ env: process.env, homeDir: home, platform: process.platform, cwdDir: process.cwd() })

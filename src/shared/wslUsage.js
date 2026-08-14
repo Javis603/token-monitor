@@ -5,6 +5,7 @@ const { execFileSync } = require('node:child_process');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { REASONIX_CLIENT } = require('./reasonixPaths');
 const { buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { buildDshPeriods, collectDshRows } = require('./dshUsage');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 
@@ -45,7 +46,8 @@ const WSL_DATA_MARKERS = [
   '.config/kiro/User/globalStorage/kiro.kiroagent',
   '.codebuddy/projects',
   '.workbuddy',
-  '.proma/agent-sessions'
+  '.proma/agent-sessions',
+  '.dsh/sessions'
 ];
 
 // Maps every WSL_DATA_MARKERS entry to the tracked-client id that owns it, so a
@@ -85,7 +87,8 @@ const MARKER_CLIENTS = {
   '.config/kiro/User/globalStorage/kiro.kiroagent': 'kiro',
   '.codebuddy/projects': 'codebuddy',
   '.workbuddy': 'workbuddy',
-  '.proma/agent-sessions': 'proma'
+  '.proma/agent-sessions': 'proma',
+  '.dsh/sessions': 'dsh'
 };
 
 // Default command runner. reg output is ANSI/utf8; wsl.exe output is UTF-16LE.
@@ -195,6 +198,8 @@ async function collectWslUsage(options = {}, deps = {}) {
   const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, now, runTokscale, logger, decoratePeriods } = options;
   const buildProma = options.buildPromaPeriods || buildPromaPeriods;
   const collectProma = options.collectPromaRows || collectPromaRows;
+  const buildDsh = options.buildDshPeriods || buildDshPeriods;
+  const collectDsh = options.collectDshRows || collectDshRows;
   const existsSync = deps.existsSync || fs.existsSync;
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
@@ -240,6 +245,32 @@ async function collectWslUsage(options = {}, deps = {}) {
         bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(proma.allTime));
       } catch (error) {
         if (typeof logger === 'function') logger(`wsl Proma usage parse failed for ${home}: ${error.message}`);
+      }
+    }
+    // DeepSeek Harness is locally parsed rather than tokscale-backed too. Scan
+    // its WSL sessions root directly so a DSH-only home contributes actual
+    // usage, not merely marker detection. The root is isolated per home to
+    // avoid double-counting another distro or the host's local DSH sessions.
+    if (tracked.has('dsh') && homeDataClients.includes('dsh')) {
+      try {
+        const dshOptions = {
+          now,
+          allTimeSince,
+          roots: [wslHomePath(home, '.dsh/sessions')]
+        };
+        if (typeof options.resolveDshPricing === 'function') {
+          const rows = collectDsh(dshOptions);
+          dshOptions.rows = rows;
+          dshOptions.pricingByModel = await options.resolveDshPricing(rows);
+        } else if (options.dshPricingByModel) {
+          dshOptions.pricingByModel = options.dshPricingByModel;
+        }
+        const dsh = buildDsh(dshOptions);
+        bundle.today = mergePeriods(bundle.today, extractUsageFromTokscale(dsh.today));
+        bundle.month = mergePeriods(bundle.month, extractUsageFromTokscale(dsh.month));
+        bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(dsh.allTime));
+      } catch (error) {
+        if (typeof logger === 'function') logger(`wsl DSH usage parse failed for ${home}: ${error.message}`);
       }
     }
     // Tokscale 4.6+ keeps explicit --home scans isolated from host-native roots,
