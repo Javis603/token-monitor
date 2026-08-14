@@ -13455,7 +13455,7 @@ function renderOpenCodeProfiles() {
         const name = nameInput.value.trim();
         if (!save || !name) {
           nameInput.value = '';
-          offer.hide();
+          offer.withdraw();
           return;
         }
         await applyNaming(name, false);
@@ -13705,6 +13705,12 @@ function opencodeSaveErrorText(result) {
 // checked against, and a reply from a superseded revision is dropped rather
 // than shown. The same rule reached four call sites by copy, which is why it
 // lives in one place now.
+//
+// There is deliberately one way to take an offer down. A plain hide looks
+// harmless on the cancel paths (Escape, a blur onto nothing) but leaves the
+// revision where it was, so the reply to the request the user just cancelled
+// still matched and put the button back — the original bug, reached through the
+// other door. Everything that ends an offer withdraws it.
 function opencodeMergeOffer(button, confirm) {
   let revision = 0;
   let pending = '';
@@ -13717,10 +13723,6 @@ function opencodeMergeOffer(button, confirm) {
     stale: (at) => at !== revision,
     withdraw: () => {
       revision += 1;
-      pending = '';
-      button.classList.add('hidden');
-    },
-    hide: () => {
       pending = '';
       button.classList.add('hidden');
     },
@@ -13791,7 +13793,7 @@ function opencodeCredentialRow(accountName, kind, label) {
     const target = nameInput.value.trim();
     if (!save || !target || target === accountName) {
       nameInput.value = accountName;
-      offer.hide();
+      offer.withdraw();
       return;
     }
     await finishMove(target, false);
@@ -14799,11 +14801,15 @@ function setupCursorAccountUI() {
         // while the request was in flight is not wiped by its reply.
         const stale = addMergeOffer ? addMergeOffer.stale(at) : false;
         if (result.ok) {
+          // Only this proposal's own offer is taken down. Two saves can overlap,
+          // and the newer one can answer first: clearing unconditionally let an
+          // older success wipe a merge confirmation the user was looking at and
+          // that was still correct.
           if (!stale) {
             input.value = '';
             nameInput.value = '';
+            addMergeOffer?.withdraw();
           }
-          addMergeOffer?.hide();
           renderOpenCodeProfiles();
           updateOpenCodeProfilesStatus();
           renderSettingsSummaries();

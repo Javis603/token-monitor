@@ -718,7 +718,11 @@
                       </div>
                       <div id="opencodeApiFields" class="opencode-credential-fields">
                         <p class="settings-note" data-i18n="settings.opencode.apiHint">Paste an OpenCode Go API key. Go quota only.</p>
-                        <input id="opencodeApiKeyInput" type="password" spellcheck="false" placeholder="opencode-go-..." data-i18n-placeholder="settings.opencode.apiKeyPlaceholder" />
+                        <!-- The nearest `<label for>` names the credential-type
+                             select, not this field, so a screen reader reaches an
+                             unnamed password box. Named after the credential kind
+                             it holds, which is what the select calls it too. -->
+                        <input id="opencodeApiKeyInput" type="password" spellcheck="false" placeholder="opencode-go-..." data-i18n-placeholder="settings.opencode.apiKeyPlaceholder" aria-label="API key" data-i18n-aria-label="settings.opencode.kindApi" />
                       </div>
                       <div id="opencodeCookieFields" class="opencode-credential-fields hidden">
                         <p class="settings-note">
@@ -727,7 +731,7 @@
                           <strong>3.</strong> <span data-i18n="settings.opencode.step3Before">Copy the</span> <code>auth</code> <span data-i18n="settings.opencode.step3After">value.</span><br>
                           <strong>4.</strong> <span data-i18n="settings.opencode.step4">Paste it below and click Save.</span>
                         </p>
-                        <textarea id="opencodeCookieInput" rows="3" spellcheck="false" placeholder="auth=..." data-i18n-placeholder="settings.opencode.cookiePlaceholder"></textarea>
+                        <textarea id="opencodeCookieInput" rows="3" spellcheck="false" placeholder="auth=..." data-i18n-placeholder="settings.opencode.cookiePlaceholder" aria-label="Cookie" data-i18n-aria-label="settings.opencode.kindCookie"></textarea>
                       </div>
                       <div class="settings-actions">
                         <button id="opencodeCookieSubmit" data-i18n="settings.opencode.saveProfile">保存</button>

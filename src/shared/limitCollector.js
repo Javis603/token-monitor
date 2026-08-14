@@ -3452,9 +3452,20 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
       // must not outrank an expired cookie, but on an account with no cookie at
       // all it is the true answer, and falling through to the literal would
       // report "sign in again" for a workspace that simply has no Go plan.
-      const failStatus = (OPENCODE_REMOTE_FAIL_STATUSES.includes(goApi?.status) && goApi.status)
-        || goWeb?.status || zen?.status || goApi?.status || 'unauthorized';
-      status = failStatus;
+      //
+      // Provenance travels with the status, as it does on the single-account
+      // path and in the timeout branch below. Left behind, the `web` default
+      // stood while the status came from the key, so one expired API key read
+      // as an `API` failure on a machine with a single account and as a `Web`
+      // failure the moment a second account existed. How many accounts are
+      // configured cannot change which credential failed.
+      const failure = (OPENCODE_REMOTE_FAIL_STATUSES.includes(goApi?.status) && { status: goApi.status, source: 'api' })
+        || (goWeb && { status: goWeb.status, source: 'web' })
+        || (zen && { status: zen.status, source: 'web' })
+        || (goApi && { status: goApi.status, source: 'api' })
+        || { status: 'unauthorized', source: api.apiKey && !cookie ? 'api' : 'web' };
+      status = failure.status;
+      source = failure.source;
     }
 
     // The key's own identity, published whenever this account holds one. The

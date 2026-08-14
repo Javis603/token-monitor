@@ -1301,3 +1301,60 @@ test('an account holding only a key identifies itself by that key', async () => 
   assert.strictEqual(work.accountKey, hashKey('opencode', goApiIdentity('key-work')));
   assert.strictEqual(work.balanceUsd, null);
 });
+
+// A failing credential must name itself. The row's `source` is shown as the
+// provenance tag beside the account, so an expired API key that reports `web`
+// sends the user to re-copy a cookie that is fine.
+test('a failed API probe reports API provenance whether or not other accounts exist', async () => {
+  const now = Date.UTC(2026, 7, 1, 12, 0, 0);
+  const collect = async (profiles) => collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeProfiles: profiles },
+    {
+      now: () => now,
+      opencodeCollectGoApi: async () => ({ status: 'unauthorized', windows: [], identity: 'go-api:work' }),
+      opencodeFetchGoWeb: async () => ({
+        status: 'ok',
+        workspaceId: 'wrk_personal',
+        windows: [{ kind: 'session', used: 1, limit: 10, usedPercent: 10, resetsAt: new Date(now).toISOString(), windowMinutes: 300 }]
+      }),
+      opencodeFetchZen: async () => ({ status: 'ok', workspaceId: 'wrk_personal', windows: [], balanceUsd: 4 })
+    }
+  );
+
+  const alone = await collect({ work: { enabled: true, apiKey: 'sk-work' } });
+  const solo = alone.providers.find((p) => p.provider === 'opencode');
+  assert.strictEqual(solo.status, 'unauthorized');
+  assert.strictEqual(solo.source, 'api');
+
+  // The same account, the same failure, with a second account configured. How
+  // many accounts exist cannot change which credential failed.
+  const together = await collect({
+    work: { enabled: true, apiKey: 'sk-work' },
+    personal: { enabled: true, cookie: 'sess=personal' }
+  });
+  const work = together.providers.find((p) => p.provider === 'opencode' && p.accountName === 'work');
+  assert.strictEqual(work.status, 'unauthorized');
+  assert.strictEqual(work.source, 'api');
+
+  // A cookie account that fails still reports Web, so this is not a blanket
+  // relabel of every multi-account failure.
+  const cookieFail = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: {
+        work: { enabled: true, apiKey: 'sk-work' },
+        personal: { enabled: true, cookie: 'sess=personal' }
+      }
+    },
+    {
+      now: () => now,
+      opencodeCollectGoApi: async () => ({ status: 'unauthorized', windows: [], identity: 'go-api:work' }),
+      opencodeFetchGoWeb: async () => ({ status: 'unauthorized', windows: [] }),
+      opencodeFetchZen: async () => ({ status: 'unauthorized', windows: [] })
+    }
+  );
+  const personal = cookieFail.providers.find((p) => p.provider === 'opencode' && p.accountName === 'personal');
+  assert.strictEqual(personal.status, 'unauthorized');
+  assert.strictEqual(personal.source, 'web');
+});

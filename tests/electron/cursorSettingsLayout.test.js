@@ -184,7 +184,12 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(details, /<select id="opencodeCredentialKind">\s*<option value="api"/);
   assert.match(details, /<option value="cookie" data-i18n="settings\.opencode\.kindCookie">/);
   assert.match(details, /<input id="opencodeApiKeyInput" type="password"[\s\S]*data-i18n-placeholder="settings\.opencode\.apiKeyPlaceholder"/);
-  assert.match(details, /<textarea id="opencodeCookieInput"[\s\S]*data-i18n-placeholder="settings\.opencode\.cookiePlaceholder"><\/textarea>/);
+  assert.match(details, /<textarea id="opencodeCookieInput"[\s\S]*data-i18n-placeholder="settings\.opencode\.cookiePlaceholder"/);
+  // Neither credential field is named by the nearest `<label for>` — that one
+  // points at the credential-type select — so each carries its own accessible
+  // name, translated by the same pass that translates the placeholders.
+  assert.match(details, /<input id="opencodeApiKeyInput"[^>]*data-i18n-aria-label="settings\.opencode\.kindApi"/);
+  assert.match(details, /<textarea id="opencodeCookieInput"[^>]*data-i18n-aria-label="settings\.opencode\.kindCookie"/);
   // The cookie steps live inside the block that hides, so API mode never shows
   // DevTools instructions. This stylesheet has no global `.hidden`.
   assert.match(details, /<div id="opencodeCookieFields" class="opencode-credential-fields hidden">/);
@@ -220,6 +225,10 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(setupBody, /const at = addMergeOffer\?\.revision\(\);/);
   assert.match(setupBody, /const stale = addMergeOffer \? addMergeOffer\.stale\(at\) : false;/);
   assert.match(setupBody, /if \(stale\) return;/);
+  // A success takes down its own offer and nothing else. Two saves can overlap
+  // and the newer one can answer first, so clearing unconditionally let an older
+  // success wipe a confirmation the user was looking at and that was still live.
+  assert.match(setupBody, /if \(!stale\) \{\s*input\.value = '';\s*nameInput\.value = '';\s*addMergeOffer\?\.withdraw\(\);\s*\}/);
   assert.match(setupBody, /addMergeOffer\.offer\(at, name, t\('settings\.opencode\.mergeInto', \{ name \}\)\)/);
   assert.match(setupBody, /const clearOpenCodeMergeOffer = \(\) => addMergeOffer\?\.withdraw\(\);/);
   assert.match(setupBody, /for \(const id of \['opencodeProfileName', 'opencodeApiKeyInput', 'opencodeCookieInput'\]\)/);
@@ -1680,6 +1689,70 @@ test('an edit made while the save is in flight cancels the offer its reply carri
   assert.equal(button.visible, false, 'a superseded reply must not put the button back');
   button.click();
   assert.deepEqual(confirmed, [], 'a hidden offer has nothing to confirm');
+});
+
+// Two saves can overlap and the newer one can answer first, so an older reply
+// has to keep its hands off a proposal that is not its own.
+test('an older successful reply leaves a newer offer standing', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  let releaseOld;
+  const oldReply = new Promise((resolve) => { releaseOld = resolve; });
+  const oldSave = (async () => {
+    const at = offer.revision();
+    await oldReply;
+    // Succeeded, but for the proposal the user has already replaced.
+    if (!offer.stale(at)) offer.withdraw();
+  })();
+
+  // The user edits and saves again; that request answers first.
+  offer.withdraw();
+  const newer = offer.revision();
+  offer.offer(newer, 'javis', 'merge into javis');
+  assert.equal(button.visible, true);
+
+  releaseOld();
+  await oldSave;
+
+  assert.equal(button.visible, true, 'an older success must not clear a newer offer');
+  button.click();
+  assert.deepEqual(confirmed, ['javis']);
+});
+
+// Escape, or a blur onto nothing, cancels the request that is already out. The
+// reply still arrives, and it must not put the cancelled proposal back.
+test('cancelling an in-flight proposal keeps its reply from resurrecting it', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  let release;
+  const reply = new Promise((resolve) => { release = resolve; });
+  const save = (async () => {
+    const at = offer.revision();
+    await reply;
+    offer.offer(at, 'work', 'merge into work');
+  })();
+
+  offer.withdraw();
+  release();
+  await save;
+
+  assert.equal(button.visible, false, 'a cancelled proposal must not come back');
+  button.click();
+  assert.deepEqual(confirmed, []);
+});
+
+// One way down, so a cancel path cannot quietly opt out of invalidating the
+// reply that is still in flight.
+test('the merge offer has no way to hide without invalidating in-flight replies', () => {
+  const app = readRendererFile('app.js');
+  assert.doesNotMatch(app, /offer\.hide\(\)|addMergeOffer\?\.hide\(\)/);
+  assert.doesNotMatch(app, /hide: \(\) =>/);
 });
 
 test('a withdrawn offer stays withdrawn until a new proposal is made', async () => {

@@ -109,17 +109,49 @@ test('fetchGoApi sends a bearer token to the official endpoint', async () => {
   assert.strictEqual(result.windows.length, 3);
 });
 
+// The body upstream actually returns for a workspace with no Go subscription.
+const ENTITLEMENT_ERROR = {
+  type: 'error',
+  error: { type: 'EntitlementError', message: 'OpenCode Go subscription required.' }
+};
+
 test('fetchGoApi maps HTTP codes onto provider statuses', async () => {
-  const statusFor = async (code) => (await fetchGoApi('k', {
-    fetch: async () => jsonResponse(code, { type: 'error' })
+  const statusFor = async (code, body = { type: 'error' }) => (await fetchGoApi('k', {
+    fetch: async () => jsonResponse(code, body)
   })).status;
 
-  // 403 is EntitlementError — no Go subscription. Not an error: it has to fall
-  // through to the cookie and local paths quietly.
-  assert.strictEqual(await statusFor(403), 'notConfigured');
+  // EntitlementError — no Go subscription. Not an error: it has to fall through
+  // to the cookie and local paths quietly.
+  assert.strictEqual(await statusFor(403, ENTITLEMENT_ERROR), 'notConfigured');
   assert.strictEqual(await statusFor(401), 'unauthorized');
   assert.strictEqual(await statusFor(429), 'sourceRateLimited');
   assert.strictEqual(await statusFor(500), 'unavailable');
+});
+
+// `entitled: false` is the server saying this account has no Go plan, and it
+// also stops the local estimate taking over. Drawing that from the status code
+// alone would let a proxy, a WAF or an edge policy in front of the endpoint —
+// none of which know anything about the account — report "no subscription" and
+// suppress the estimate that would have covered the outage.
+test('only the upstream EntitlementError concludes the account has no Go plan', async () => {
+  const entitlement = await fetchGoApi('k', {
+    fetch: async () => jsonResponse(403, ENTITLEMENT_ERROR)
+  });
+  assert.strictEqual(entitlement.status, 'notConfigured');
+  assert.strictEqual(entitlement.entitled, false);
+
+  for (const body of [{ type: 'error' }, { error: { type: 'AuthError' } }, {}, null]) {
+    const other = await fetchGoApi('k', { fetch: async () => jsonResponse(403, body) });
+    assert.strictEqual(other.status, 'unavailable', `403 body ${JSON.stringify(body)}`);
+    assert.strictEqual(other.entitled, undefined);
+  }
+
+  // A 403 that is not JSON at all, which is what an edge block usually is.
+  const html = await fetchGoApi('k', {
+    fetch: async () => ({ status: 403, json: async () => { throw new SyntaxError('Unexpected token <'); } })
+  });
+  assert.strictEqual(html.status, 'unavailable');
+  assert.strictEqual(html.entitled, undefined);
 });
 
 test('fetchGoApi reports unavailable when the request throws', async () => {

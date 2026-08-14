@@ -171,27 +171,44 @@ async function fetchGoApi(apiKey, deps = {}) {
     return { status: 'unavailable', windows: [] };
   }
 
+  const readJson = async () => {
+    try {
+      return await response.json();
+    } catch (error) {
+      if (isAbortError(error, deps.signal)) throw error;
+      return null;
+    }
+  };
+
   const code = Number(response?.status) || 0;
-  // 403 is the upstream EntitlementError: the key is valid and the account
-  // simply has no Go subscription. That is not a failure, so it falls through to
-  // the cookie quietly instead of surfacing an error on the card. It does not
-  // fall through to the local estimate: `entitled: false` marks it as the
-  // server's authoritative answer rather than an absent credential, and callers
-  // use that to stop the estimate taking over, since it cannot tell a cancelled
+  // The upstream EntitlementError means the key is valid and the account simply
+  // has no Go subscription. That is not a failure, so it falls through to the
+  // cookie quietly instead of surfacing an error on the card. It does not fall
+  // through to the local estimate: `entitled: false` marks it as the server's
+  // authoritative answer rather than an absent credential, and callers use that
+  // to stop the estimate taking over, since it cannot tell a cancelled
   // subscription from a current one and would keep deriving quota from rows the
   // cancelled one left behind.
-  if (code === 403) return { status: 'notConfigured', entitled: false, windows: [] };
+  //
+  // That is a strong conclusion to draw, so it is drawn from the error the
+  // application actually returns rather than from the status code carrying it.
+  // A 403 can also come from a proxy, a WAF or an edge policy in front of the
+  // endpoint, and none of those know anything about the account's plan; read as
+  // an entitlement answer, one of them would report "no Go subscription" and
+  // suppress the estimate that would otherwise have covered the outage.
+  if (code === 403) {
+    const body = await readJson();
+    if (body?.error?.type === 'EntitlementError') {
+      return { status: 'notConfigured', entitled: false, windows: [] };
+    }
+    return { status: 'unavailable', windows: [] };
+  }
   if (code === 401) return { status: 'unauthorized', windows: [] };
   if (code === 429) return { status: 'sourceRateLimited', windows: [] };
   if (code !== 200) return { status: 'unavailable', windows: [] };
 
-  let payload;
-  try {
-    payload = await response.json();
-  } catch (error) {
-    if (isAbortError(error, deps.signal)) throw error;
-    return { status: 'unavailable', windows: [] };
-  }
+  const payload = await readJson();
+  if (!payload) return { status: 'unavailable', windows: [] };
 
   const windows = parseGoUsage(payload);
   if (windows.length === 0) return { status: 'unavailable', windows: [] };
