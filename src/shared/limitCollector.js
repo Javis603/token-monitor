@@ -3150,15 +3150,20 @@ const OPENCODE_REMOTE_FAIL_STATUSES = ['unauthorized', 'sourceRateLimited', 'una
 // renderer localizes this exact string.
 const OPENCODE_AMBIENT_ACCOUNT_NAME = 'Auto-detected';
 
-function openCodeSupplementalZenWindows(goWeb, zen) {
-  const goWindowKeys = new Set(
-    (goWeb?.status === 'ok' ? goWeb.windows || [] : [])
+// Supplemental windows fill kinds the Go source did not answer, and are dropped
+// for any kind it did. The comparison is against the windows actually taken
+// rather than against one candidate source: Go quota resolves api → web → local,
+// so naming a single source there leaves the other two unguarded and the account
+// reports one window kind twice, from two sources and with two different numbers.
+function openCodeSupplementalZenWindows(takenWindows, zen) {
+  const takenKeys = new Set(
+    (Array.isArray(takenWindows) ? takenWindows : [])
       .map(openCodeWindowKey)
       .filter(Boolean)
   );
   return (zen?.windows || []).filter((window) => {
     const key = openCodeWindowKey(window);
-    return !key || !goWindowKeys.has(key);
+    return !key || !takenKeys.has(key);
   });
 }
 
@@ -3299,8 +3304,9 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     }
 
     if (zen && webIdentity.includeZen) {
-      windows.push(...openCodeSupplementalZenWindows(goWeb, zen)
-        .map((window) => ({ ...window, source: 'web' })));
+      const supplemental = openCodeSupplementalZenWindows(windows, zen)
+        .map((window) => ({ ...window, source: 'web' }));
+      windows.push(...supplemental);
       status = 'ok';
       // The provider-level source is the compatibility envelope used by Hubs
       // that predate windows[].source. It may claim Web only when every quota
@@ -3436,8 +3442,9 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
 
     const webIdentity = openCodeWebIdentity(goWeb, zen, cookie);
     if (zen && webIdentity.includeZen) {
-      windows.push(...openCodeSupplementalZenWindows(goWeb, zen)
-        .map((window) => ({ ...window, source: 'web' })));
+      const supplemental = openCodeSupplementalZenWindows(windows, zen)
+        .map((window) => ({ ...window, source: 'web' }));
+      windows.push(...supplemental);
       status = 'ok';
       if (!planLabel) planLabel = 'Zen';
       if (typeof zen.balanceUsd === 'number' && Number.isFinite(zen.balanceUsd)) balanceUsd = zen.balanceUsd;

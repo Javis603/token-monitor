@@ -1358,3 +1358,87 @@ test('a failed API probe reports API provenance whether or not other accounts ex
   assert.strictEqual(personal.status, 'unauthorized');
   assert.strictEqual(personal.source, 'web');
 });
+
+// Supplemental windows fill kinds the Go source did not answer. The guard used
+// to compare against the go-page scrape alone, so it only held while that scrape
+// was the Go source: whenever the usage API answered and the scrape did not, the
+// account reported one window kind twice, from two sources and with two
+// different numbers. Go quota resolves api → web → local, so the comparison has
+// to be against whatever was actually taken.
+test('opencode drops a supplemental window whose kind the usage API answered', async () => {
+  const now = Date.UTC(2026, 7, 14, 12, 0, 0);
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: { mine: { enabled: true, cookie: 'sess=1', apiKey: 'sk-mine' } }
+    },
+    {
+      now: () => now,
+      opencodeCollectGoApi: async () => ({
+        status: 'ok',
+        identity: 'go-api:mine',
+        entitled: true,
+        windows: [
+          { kind: 'session', usedPercent: 40, windowMinutes: 300 },
+          { kind: 'weekly', usedPercent: 55, windowMinutes: 10080 }
+        ]
+      }),
+      opencodeFetchGoWeb: async () => ({ status: 'unavailable', windows: [], workspaceId: 'wrk_1' }),
+      opencodeFetchZen: async () => ({
+        status: 'ok',
+        workspaceId: 'wrk_1',
+        balanceUsd: 7.5,
+        windows: [
+          { kind: 'session', usedPercent: 11, windowMinutes: 300 },
+          { kind: 'weekly', usedPercent: 12, windowMinutes: 10080 }
+        ]
+      })
+    }
+  );
+  const provider = summary.providers.find((p) => p.provider === 'opencode');
+  assert.strictEqual(provider.status, 'ok');
+  assert.deepStrictEqual(
+    provider.windows.map((window) => `${window.kind}:${window.usedPercent}`),
+    ['session:40', 'weekly:55']
+  );
+  // The cookie is still what produced the balance.
+  assert.strictEqual(provider.balanceUsd, 7.5);
+});
+
+// Same guard for the local estimate, which is the other Go source the previous
+// comparison did not cover, and had the gap before the usage API existed.
+test('opencode drops a supplemental window whose kind the local estimate answered', async () => {
+  const now = Date.UTC(2026, 7, 14, 12, 0, 0);
+  const summary = await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeLocalLimitsEnabled: true,
+      opencodeCookie: 'sess=1'
+    },
+    {
+      now: () => now,
+      opencodeCollectGo: () => ({
+        status: 'ok',
+        identity: 'go:/x',
+        windows: [{ kind: 'session', used: 1, limit: 12, usedPercent: 8.3, windowMinutes: 300 }]
+      }),
+      opencodeFetchGoWeb: async () => ({ status: 'unavailable', windows: [], workspaceId: 'wrk_1' }),
+      opencodeFetchZen: async () => ({
+        status: 'ok',
+        workspaceId: 'wrk_1',
+        balanceUsd: 3,
+        windows: [
+          { kind: 'session', usedPercent: 90, windowMinutes: 300 },
+          { kind: 'weekly', usedPercent: 20, windowMinutes: 10080 }
+        ]
+      })
+    }
+  );
+  const provider = summary.providers.find((p) => p.provider === 'opencode');
+  assert.deepStrictEqual(
+    provider.windows.map((window) => `${window.kind}:${window.usedPercent}:${window.source}`),
+    ['session:8.3:local', 'weekly:20:web']
+  );
+});
