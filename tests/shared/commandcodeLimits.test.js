@@ -70,10 +70,10 @@ test('commandcodeCookie prefers settings over env and requires a session cookie'
   assert.equal(commandcodeCookie({}), '');
 });
 
-test('normalizeCommandcodeCookieHeader forwards only better-auth cookies', () => {
-  // Everything outside better-auth's namespaces is a credential the billing API
-  // has no business receiving, so a real page's Stripe and analytics cookies are
-  // dropped rather than posted along with the session.
+test('normalizeCommandcodeCookieHeader forwards only Command Code session cookies', () => {
+  // Everything outside the exact session-cookie allowlist is a credential the
+  // billing API has no business receiving, so a real page's Stripe and analytics
+  // cookies are dropped rather than posted along with the session.
   assert.equal(
     normalizeCommandcodeCookieHeader(`${SESSION_COOKIE}; ${SESSION_DATA_COOKIE}; __stripe_mid=m; _ga=GA1.1.x; cookie-perms=2`),
     `${SESSION_COOKIE}; ${SESSION_DATA_COOKIE}`
@@ -349,6 +349,78 @@ test('a stale plan allowance is dropped rather than used as a bad denominator', 
     assert.equal(billing[0].showMeter, false);
     assert.equal(billing[0].remaining, credits.monthlyCredits);
   }
+});
+
+test('a repriced plan is detected by its published caps, not just its total', async () => {
+  // The remaining balance can never contradict a catalogued total that is too
+  // LARGE, so the published 5-hour/weekly caps are what pin the entry to the
+  // plan it was copied from. Command Code repriced Pro from $30 to $80 with its
+  // caps; a stale entry surviving that would show a confidently wrong meter.
+  const provider = await fetchCommandcodeLimits(
+    { commandcodeCookie: SESSION_COOKIE },
+    {
+      env: {},
+      fetch: stubFetch({
+        [COMMANDCODE_CREDITS_URL]: {
+          credits: {
+            monthlyCredits: 4,
+            purchasedCredits: 0,
+            // Go is catalogued at $3/$6; this account's plan has moved on.
+            windowLimits: { fiveHour: { cap: 9, used: 0 }, weekly: { cap: 18, used: 0 } }
+          }
+        },
+        [COMMANDCODE_SUBSCRIPTIONS_URL]: SUBSCRIPTION_BODY
+      })
+    }
+  );
+
+  const [monthly] = windowByKind(provider, 'billing');
+  assert.equal(provider.accountLabel, 'Go');
+  assert.equal(monthly.limit, null);
+  assert.equal(monthly.showMeter, false);
+  assert.equal(monthly.remaining, 4);
+  // The rolling windows are read off the wire, so they stay exact regardless.
+  assert.equal(windowByKind(provider, 'session')[0].limit, 9);
+  assert.equal(windowByKind(provider, 'weekly')[0].limit, 18);
+});
+
+test('accountKey follows the account, not the credential', async () => {
+  const keyFor = async (subscriptionData, cookie = `${SESSION_COOKIE}; ${SESSION_DATA_COOKIE}`) => (
+    await fetchCommandcodeLimits({ commandcodeCookie: cookie }, {
+      env: {},
+      fetch: stubFetch({
+        [COMMANDCODE_CREDITS_URL]: CREDITS_BODY,
+        [COMMANDCODE_SUBSCRIPTIONS_URL]: { success: true, data: { ...SUBSCRIPTION_BODY.data, ...subscriptionData } }
+      })
+    })
+  ).accountKey;
+
+  const base = await keyFor({ userId: 'user-abc' });
+  assert.ok(base.startsWith('sha256:'));
+  // A re-pasted cookie, a rotated session_data cache, and a cancel-and-resubscribe
+  // are all the same person — the key is what dedupes them across devices.
+  assert.equal(await keyFor({ userId: 'user-abc' }, `${SESSION_COOKIE}; __Secure-commandcode_prod_.session_data=rotated`), base);
+  assert.equal(await keyFor({ userId: 'user-abc' }, '__Secure-commandcode_prod_.session_token=different'), base);
+  assert.equal(await keyFor({ userId: 'user-abc', id: 'sub_NEW' }), base);
+  assert.notEqual(await keyFor({ userId: 'someone-else' }), base);
+
+  // Without the optional subscription read there is no account id, so the
+  // identity half of the credential seeds it — never the session_data cache.
+  const withoutPlan = await fetchCommandcodeLimits(
+    { commandcodeCookie: `${SESSION_COOKIE}; ${SESSION_DATA_COOKIE}` },
+    { env: {}, fetch: stubFetch({
+      [COMMANDCODE_CREDITS_URL]: CREDITS_BODY,
+      [COMMANDCODE_SUBSCRIPTIONS_URL]: { success: true, data: null }
+    }) }
+  );
+  const withRotatedCache = await fetchCommandcodeLimits(
+    { commandcodeCookie: `${SESSION_COOKIE}; __Secure-commandcode_prod_.session_data=rotated` },
+    { env: {}, fetch: stubFetch({
+      [COMMANDCODE_CREDITS_URL]: CREDITS_BODY,
+      [COMMANDCODE_SUBSCRIPTIONS_URL]: { success: true, data: null }
+    }) }
+  );
+  assert.equal(withoutPlan.accountKey, withRotatedCache.accountKey);
 });
 
 test('a live Go account maps onto the windows the dashboard shows', async () => {

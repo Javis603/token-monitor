@@ -69,13 +69,23 @@ function isCommandcodeAuthCookie(name) {
 // (https://commandcode.ai/docs/plans/*, checked 2026-08-15). An unrecognized id
 // is deliberately not an error: the monthly window then ships the remaining
 // money with no meter, rather than a percentage derived from a guessed total.
-// The 5-hour and weekly caps are *not* here — those come off the wire.
+//
+// The 5-hour and weekly caps are published on the same pages and are recorded
+// here even though the wire reports them, because that is what lets a stale
+// entry be detected in the direction the numbers alone cannot show — see
+// trustedMonthlyAllowance().
+//
+// One limitation to know about: GOAT and Pro publish per-model monthly
+// allowances on top of the plan total, and the only live payload behind these
+// numbers is a Go account. The plan-wide reading is what the docs describe
+// ("all the slices add up to one plan") and what the API's own single weekly cap
+// implies, but a real GOAT or Pro capture has not confirmed it.
 const COMMANDCODE_PLANS = Object.freeze({
-  'individual-go': { label: 'Go', monthlyCreditsUsd: 10 },
-  'individual-goat': { label: 'GOAT', monthlyCreditsUsd: 70 },
-  'individual-pro': { label: 'Pro', monthlyCreditsUsd: 80 },
-  'individual-max': { label: 'Max 10x', monthlyCreditsUsd: 150 },
-  'individual-ultra': { label: 'Max 20x', monthlyCreditsUsd: 300 }
+  'individual-go': { label: 'Go', monthlyCreditsUsd: 10, fiveHourCapUsd: 3, weeklyCapUsd: 6 },
+  'individual-goat': { label: 'GOAT', monthlyCreditsUsd: 70, fiveHourCapUsd: 14, weeklyCapUsd: 35 },
+  'individual-pro': { label: 'Pro', monthlyCreditsUsd: 80, fiveHourCapUsd: 16, weeklyCapUsd: 40 },
+  'individual-max': { label: 'Max 10x', monthlyCreditsUsd: 150, fiveHourCapUsd: 45, weeklyCapUsd: 90 },
+  'individual-ultra': { label: 'Max 20x', monthlyCreditsUsd: 300, fiveHourCapUsd: 90, weeklyCapUsd: 180 }
 });
 
 function cleanSecret(value) {
@@ -172,6 +182,20 @@ function normalizeCommandcodeCookieHeader(rawCookie) {
     .join('; ');
 }
 
+// Identity for the account, in preference order. The subscription carries a
+// stable account id, which is what `accountKey` is contractually for — it
+// survives a re-pasted cookie and matches across devices. Without it, fall back
+// to the session token alone: it is at least the credential's identity half, and
+// `session_data` is a short-lived cache that would otherwise churn the key on
+// its own schedule. The key can therefore change if the optional subscription
+// read fails; that is tolerable because this provider collapses by name during
+// aggregation, and subscription binding heals through its own ladder.
+function commandcodeAccountSeed(cookieHeader) {
+  const session = cookiePairs(cookieHeader)
+    .find((pair) => COMMANDCODE_SESSION_COOKIE_NAMES.has(pair.name.toLowerCase()));
+  return session ? session.value : cookieHeader;
+}
+
 function commandcodeCookie(env = process.env, options = {}) {
   const explicit = normalizeCommandcodeCookieHeader(options.commandcodeCookie);
   if (explicit) return explicit;
@@ -266,6 +290,15 @@ function parseCommandcodeSubscription(body) {
   if (!planId) throw new Error('missing planId');
   return {
     planId,
+    // The account behind the subscription, not the subscription itself: a
+    // cancel-and-resubscribe issues a new `id` for the same person.
+    accountId: String(
+      body.data.userId
+      ?? body.data.user_id
+      ?? body.data.metadata?.commandCodeUserId
+      ?? body.data.id
+      ?? ''
+    ).trim(),
     status: String(body.data.status || '').trim().toLowerCase(),
     currentPeriodEnd: toIso(body.data.currentPeriodEnd ?? body.data.current_period_end)
   };
@@ -318,10 +351,19 @@ async function fetchJson(url, cookie, deadlineMs, deps, parentSignal = deps.sign
 // an allowance that is too LARGE, so an entry that under-reports usage would
 // pass this and still be wrong. That is why the values come from the published
 // plan pages: verify them there, not against a ratio invented here.
-function trustedMonthlyAllowance(plan, { monthlyRemaining, weeklyCap }) {
+function trustedMonthlyAllowance(plan, { monthlyRemaining, fiveHourCap, weeklyCap }) {
   const allowance = plan?.monthlyCreditsUsd ?? null;
   if (allowance === null || allowance <= 0) return null;
   if (monthlyRemaining > allowance) return null;
+  // The published caps pin the plan the catalogued grant was copied from, and
+  // the wire reports what this account's caps actually are. Disagreement means
+  // the entry no longer describes this plan, which is the only signal that
+  // catches a grant that has since gone UP — the bound above cannot, because
+  // nothing about a remaining balance contradicts a total that is too large.
+  // A cap tightened without a repriced grant would trip this too; that costs a
+  // meter and keeps the money, which is the direction to be wrong in.
+  if (fiveHourCap !== null && fiveHourCap !== plan.fiveHourCapUsd) return null;
+  if (weeklyCap !== null && weeklyCap !== plan.weeklyCapUsd) return null;
   if (weeklyCap !== null && weeklyCap > allowance) return null;
   return allowance;
 }
@@ -406,6 +448,7 @@ async function fetchCommandcodeLimits(options = {}, deps = {}) {
         purchasedCredits: credits.purchasedCredits,
         limit: trustedMonthlyAllowance(plan, {
           monthlyRemaining: credits.monthlyRemaining,
+          fiveHourCap: credits.fiveHour?.limit ?? null,
           weeklyCap: credits.weekly?.limit ?? null
         }),
         periodEnd: subscription?.currentPeriodEnd || null
@@ -413,7 +456,7 @@ async function fetchCommandcodeLimits(options = {}, deps = {}) {
     ].filter(Boolean);
     return normalizeLimitProvider({
       provider: 'commandcode',
-      accountKey: hashKey('commandcode', cookie),
+      accountKey: hashKey('commandcode', subscription?.accountId || commandcodeAccountSeed(cookie)),
       accountLabel: plan?.label || '',
       source: 'web',
       status: 'ok',
