@@ -41,31 +41,44 @@ function parseWindowsSystemUsesLightTheme(output) {
   return null;
 }
 
-// Spread wide enough to cover a slow write without holding a flip visibly: the
-// measured landing is inside the first step, the rest are headroom.
-const SYSTEM_UI_THEME_SETTLE_MS = [150, 400, 1000, 2000];
+// Delays BETWEEN reads, not deadlines measured from the event — so these sample
+// at 150, 300, 450, 700, 1100, 1700, 2600 and 4000ms. Tight while the write is
+// expected (measured at ~250ms, so the typical flip is answered by the third
+// read), then stretching out: the tail is there for a machine slower than the
+// one this was measured on, and polling it at 150ms throughout would spawn
+// reg.exe two dozen times for a flip that never touched the system surface.
+const SYSTEM_UI_THEME_SETTLE_MS = [150, 150, 150, 250, 400, 600, 900, 1400];
 
-// Settles on a value seen twice in a row rather than on the first one that
-// differs from what we hold. Those are not the same thing while two flips are in
-// flight: flipping back within the write delay leaves the first flip's value
-// landing under the second flip's read, and "differs from previous" would accept
-// that intermediate reading and stop — parking the tray on a theme the user has
-// already left, with no further event coming to correct it. Two agreeing reads a
-// gap apart mean the writes have stopped moving, and every gap in the schedule is
-// wider than the write delay measured above.
+// Watches the registry until a reading stops moving, which needs two facts kept
+// apart. A value seen twice in a row is stable, but stability alone is not the
+// answer: the old value is also stable before the write has landed at all, and
+// concluding "nothing changed" there would leave the tray on the previous ink
+// with no further event coming to correct it. So a repeat of `previous` only
+// ends the watch once something else has actually been seen — otherwise the
+// window is spent waiting for the write. A repeat of anything else is the new
+// state and ends it at once, which is what keeps a flip inside half a second.
 //
-// `previous` decides only whether the settled value is worth publishing: an
-// app-theme-only flip raises the same event, and the system surface did not move
-// there. Answers null when nothing settled, or when it settled on what we hold.
+// Movement then coming back to `previous` is the fast double flip: the user
+// returned to where they started, the renderer already holds it, and there is
+// nothing to publish. That case is also why the first differing reading cannot
+// be trusted on its own — flipping back inside the write delay leaves the first
+// flip's value landing under the second flip's read.
+//
+// Answers null when nothing settled or when the surface ended where it began.
 async function settleSystemDarkUi({ read, wait, isCurrent = () => true, previous, schedule = SYSTEM_UI_THEME_SETTLE_MS }) {
   let candidate = null;
+  let sawMovement = false;
   for (const ms of schedule) {
     await wait(ms);
     if (!isCurrent()) return null;
     const value = await read();
     if (!isCurrent()) return null;
     if (typeof value !== 'boolean') continue;
-    if (value === candidate) return value === previous ? null : value;
+    if (value !== previous) sawMovement = true;
+    if (value === candidate) {
+      if (value !== previous) return value;
+      if (sawMovement) return null;
+    }
     candidate = value;
   }
   return null;

@@ -52,23 +52,37 @@ test('an answer that does not carry the value reads as unknown, not as light', (
   assert.equal(parseWindowsSystemUsesLightTheme(REG_OUTPUT('0x2')), null);
 });
 
-test('the settle loop waits out the stale read that landed before the write', () => {
-  // The measured shape: the first read still answers with the pre-flip value.
+const elapsed = (waits) => waits.reduce((total, ms) => total + ms, 0);
+
+test('a typical flip is answered inside half a second', () => {
+  // The measured shape: the first read still answers with the pre-flip value,
+  // the write lands before the second, and the third confirms it. The schedule
+  // is delays BETWEEN reads, so this is what the user actually waits.
   const io = readerReturning(true, false, false);
   return settleSystemDarkUi({ ...io, previous: true }).then((settled) => {
     assert.equal(settled, false, 'the value that stopped moving is the one published');
     assert.deepEqual(io.waits, SYSTEM_UI_THEME_SETTLE_MS.slice(0, 3));
+    assert.ok(elapsed(io.waits) <= 500, `answered in ${elapsed(io.waits)}ms`);
+  });
+});
+
+test('a write slower than the measurement is waited out, not read as no change', () => {
+  // The old value is stable too before the write has landed. Settling on it
+  // would leave the tray on the previous ink for good, since the event has
+  // already fired and nothing else is coming.
+  const io = readerReturning(true, true, false, false);
+  return settleSystemDarkUi({ ...io, previous: true }).then((settled) => {
+    assert.equal(settled, false);
+    assert.ok(elapsed(io.waits) > 500, 'it kept watching past the point a fast write would have landed');
   });
 });
 
 test('flipping back inside the write delay does not park the tray on the value in between', () => {
   // Dark -> Light -> Dark faster than the write lands. This revision belongs to
-  // the second flip, so `previous` is still dark and nothing was ever published
-  // for the first one; the opening read then catches the FIRST flip's write
-  // arriving late. Settling on that reading would have published light and left
-  // it there for good, since both events have already fired and nothing else is
-  // coming to correct it. The user ended on dark, which the renderer already
-  // holds, so the right answer is to publish nothing at all.
+  // the second flip, so `previous` is still dark and nothing was published for
+  // the first one; the opening read then catches the FIRST flip's write arriving
+  // late. Publishing that would have left the tray light for good. The user
+  // ended on dark, which the renderer already holds, so nothing is published.
   const io = readerReturning(false, true, true);
   return settleSystemDarkUi({ ...io, previous: true }).then((settled) => {
     assert.equal(settled, null);
@@ -76,20 +90,19 @@ test('flipping back inside the write delay does not park the tray on the value i
 });
 
 test('an unstable start still publishes the value it settles on when that differs', () => {
-  // Same shape, but the surface really did end somewhere else: the intermediate
-  // reading must not short-circuit the loop, and the settled one must land.
   const io = readerReturning(false, true, true);
   return settleSystemDarkUi({ ...io, previous: false }).then((settled) => {
     assert.equal(settled, true);
   });
 });
 
-test('a surface that never moved publishes nothing', () => {
-  // An app-theme-only change raises the same event; repainting there is churn.
+test('a surface that never moved spends the whole window before giving up', () => {
+  // An app-theme-only change raises the same event. Two agreeing reads of the
+  // old value cannot prove the surface stayed put, so the watch runs to the end.
   const io = readerReturning(true);
   return settleSystemDarkUi({ ...io, previous: true }).then((settled) => {
     assert.equal(settled, null);
-    assert.equal(io.waits.length, 2, 'two agreeing reads are enough to stop looking');
+    assert.equal(io.waits.length, SYSTEM_UI_THEME_SETTLE_MS.length);
   });
 });
 
