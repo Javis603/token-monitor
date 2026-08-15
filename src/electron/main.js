@@ -238,7 +238,6 @@ const {
   formatTrayText,
   isBarsTrayIconMode,
   pickUsageTrayIconId,
-  parseWindowsSystemUsesLightTheme,
   popoverBounds,
   reconcileCodexAccountSelection,
   runTrayMenuAction,
@@ -4331,51 +4330,9 @@ function systemDarkTrayUi() {
   }
 }
 
-const WINDOWS_PERSONALIZE_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize';
-
-// Chromium's cached copy of the system-integrated-UI theme is not refreshed by
-// the time `nativeTheme` fires 'updated', so reading it there reports the state
-// before the flip and the tray ends up one theme change behind. reg.exe is
-// read-only and authoritative. Resolves null when it cannot answer, and the
-// caller falls back to the cached property.
-function readWindowsSystemDarkUi() {
-  return new Promise((resolve) => {
-    try {
-      require('node:child_process').execFile(
-        'reg',
-        ['query', WINDOWS_PERSONALIZE_KEY, '/v', 'SystemUsesLightTheme'],
-        { windowsHide: true, timeout: 5000 },
-        (error, stdout) => resolve(error ? null : parseWindowsSystemUsesLightTheme(stdout))
-      );
-    } catch (_) {
-      resolve(null);
-    }
-  });
-}
-
-function pushSystemUiThemeToRenderer(dark) {
+function pushSystemUiThemeToRenderer() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const value = typeof dark === 'boolean' ? dark : systemDarkTrayUi();
-  try { mainWindow.webContents.send('theme:systemUi', { dark: value }); } catch (_) {}
-}
-
-// Only the push path needs the registry: at startup the cached property has
-// settled and answers correctly, which is why the seed in `app:getInfo` still
-// reads it directly. Flips race each other through the registry read, so the
-// same generation guard the icon delivery uses drops a reading that a newer
-// flip has already overtaken — otherwise a slow reg.exe could answer last with
-// the older theme and repaint the tray backwards.
-let systemUiThemeRevision = 0;
-
-async function pushSystemUiThemeAfterChange() {
-  const revision = ++systemUiThemeRevision;
-  if (process.platform !== 'win32') {
-    pushSystemUiThemeToRenderer();
-    return;
-  }
-  const fromRegistry = await readWindowsSystemDarkUi();
-  if (revision !== systemUiThemeRevision) return;
-  pushSystemUiThemeToRenderer(typeof fromRegistry === 'boolean' ? fromRegistry : systemDarkTrayUi());
+  try { mainWindow.webContents.send('theme:systemUi', { dark: systemDarkTrayUi() }); } catch (_) {}
 }
 
 function pushSettingsToRenderer() {
@@ -5825,7 +5782,7 @@ app.whenReady().then(() => {
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
   // it — nothing else in the app would notice the change.
-  nativeTheme.on('updated', () => { void pushSystemUiThemeAfterChange(); });
+  nativeTheme.on('updated', pushSystemUiThemeToRenderer);
   const widgetRuntime = macWidgetRuntimeSupport({
     platform: process.platform,
     osRelease: process.platform === 'darwin' ? os.release() : ''

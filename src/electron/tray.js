@@ -15,26 +15,6 @@ const { translate: translateMessage } = require('./renderer/i18n');
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 const TRAY_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icons', 'tray-token-monitor.png');
 
-// Windows keeps the taskbar's own theme in SystemUsesLightTheme, separate from
-// the AppsUseLightTheme value that drives the app theme. Chromium caches both and
-// refreshes them from different watchers, so reading its cached property inside a
-// `nativeTheme` 'updated' handler answers with the state before the flip — which
-// left the tray icon one theme change behind. reg.exe is read-only and
-// authoritative, so the push path asks it directly; parsing is separated out here
-// so the shape can be tested without a Windows machine.
-// Returns true for a dark system surface, false for light, null if unreadable.
-function parseWindowsSystemUsesLightTheme(output) {
-  const match = /SystemUsesLightTheme\s+REG_DWORD\s+0x([0-9a-fA-F]+)/.exec(String(output || ''));
-  if (!match) return null;
-  const value = Number.parseInt(match[1], 16);
-  // Windows only ever writes 0 or 1 here. Anything else is a value we do not
-  // understand, and guessing "light" from it would repaint the tray on a reading
-  // we cannot justify — answer unknown and let the caller fall back.
-  if (value === 0) return true;
-  if (value === 1) return false;
-  return null;
-}
-
 function buildTrayIcon(options = {}) {
   const platform = options.platform || process.platform;
   const nativeImage = options.nativeImage || require('electron').nativeImage;
@@ -299,7 +279,6 @@ module.exports = {
   buildTrayIcon,
   buildTrayMenuTemplate,
   createTray,
-  parseWindowsSystemUsesLightTheme,
   formatTrayText,
   isBarsTrayIconMode,
   pickUsageTrayIconId,
