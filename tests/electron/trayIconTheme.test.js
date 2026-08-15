@@ -105,19 +105,31 @@ test('an unstable start still publishes the value it settles on when that differ
   });
 });
 
+test('a correction first seen on the last sample still gets confirmed', () => {
+  // Without the trailing confirmation read the window would only really cover
+  // writes landing by 2600ms: a value first seen on the final scheduled sample
+  // has nothing after it to agree with, so it could never be published.
+  const io = watcher(false, false, false, false, false, false, false, true, true);
+  return watchSystemDarkUi({ ...io, held: true }).then(() => {
+    assert.deepEqual(io.published, [false, true]);
+    assert.equal(io.waits.length, SYSTEM_UI_THEME_SETTLE_MS.length + 1, 'the window plus its confirmation');
+  });
+});
+
 test('a surface that never moved publishes nothing and spends the whole window', () => {
   // An app-theme-only change raises the same event. Two agreeing reads of the
   // held value cannot prove the surface stayed put, so the watch runs to the end.
   const io = watcher(true);
   return watchSystemDarkUi({ ...io, held: true }).then(() => {
     assert.deepEqual(io.published, []);
-    assert.equal(io.waits.length, SYSTEM_UI_THEME_SETTLE_MS.length);
+    assert.equal(io.waits.length, SYSTEM_UI_THEME_SETTLE_MS.length + 1);
   });
 });
 
 test('a value that never stops moving publishes nothing rather than a guess', () => {
-  const io = watcher(true, false, true, false);
-  return watchSystemDarkUi({ ...io, held: true, schedule: [1, 1, 1, 1] }).then(() => {
+  // Never two in a row, confirmation read included.
+  const io = watcher(true, false, true, false, true);
+  return watchSystemDarkUi({ ...io, held: true, schedule: [1, 1, 1, 1], confirmMs: 1 }).then(() => {
     assert.deepEqual(io.published, []);
   });
 });

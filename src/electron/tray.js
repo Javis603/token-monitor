@@ -49,6 +49,11 @@ function parseWindowsSystemUsesLightTheme(output) {
 // reg.exe two dozen times for a flip that never touched the system surface.
 const SYSTEM_UI_THEME_SETTLE_MS = [150, 150, 150, 250, 400, 600, 900, 1400];
 
+// One extra read after the window closes. Without it a value first seen on the
+// last sample has nothing to confirm it, so the window would only really cover
+// writes landing by 2600ms — a boundary short of the four seconds it claims.
+const SYSTEM_UI_THEME_CONFIRM_MS = 150;
+
 // Publishes as soon as a reading looks settled, then keeps watching to the end
 // of the window instead of stopping there. Two readings that agree only prove
 // nothing moved between those two samples — they cannot prove Windows has no
@@ -63,10 +68,10 @@ const SYSTEM_UI_THEME_SETTLE_MS = [150, 150, 150, 250, 400, 600, 900, 1400];
 // renderer has been told so the same value is never published twice, which is
 // also what keeps an app-theme-only flip — the same event, no movement on the
 // system surface — from repainting anything at all.
-async function watchSystemDarkUi({ read, wait, publish, isCurrent = () => true, held, schedule = SYSTEM_UI_THEME_SETTLE_MS }) {
+async function watchSystemDarkUi({ read, wait, publish, isCurrent = () => true, held, schedule = SYSTEM_UI_THEME_SETTLE_MS, confirmMs = SYSTEM_UI_THEME_CONFIRM_MS }) {
   let current = held;
   let candidate = null;
-  for (const ms of schedule) {
+  for (const ms of [...schedule, confirmMs]) {
     await wait(ms);
     if (!isCurrent()) return current;
     const value = await read();
@@ -342,6 +347,7 @@ function popoverBounds(tray, popoverWidth, popoverHeight) {
 }
 
 module.exports = {
+  SYSTEM_UI_THEME_CONFIRM_MS,
   SYSTEM_UI_THEME_SETTLE_MS,
   buildTrayIcon,
   buildTrayMenuTemplate,

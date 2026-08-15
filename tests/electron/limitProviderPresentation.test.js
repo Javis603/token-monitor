@@ -725,8 +725,7 @@ test('provider tray badges are opt-in and keep monochrome assets visible', () =>
   assert.match(app, /showTrayProviderBadgeInput: document\.getElementById\('showTrayProviderBadgeInput'\)/);
   assert.match(app, /saveSettings\(\{ showTrayProviderBadge: els\.showTrayProviderBadgeInput\.checked \}\)/);
   assert.match(app, /deliverTrayProviderIcons\(patch\.showTrayProviderBadge === true\)/);
-  // `trayInk` is what lets a flat-ink mark be re-inked for a dark taskbar; the
-  // badge path still keeps the artwork in colour inside providerImageToPngDataUrl.
+  // `trayInk` is what lets a flat-ink mark be re-inked for the taskbar it will sit on.
   assert.match(app, /providerImageToPngDataUrl\(img, 44, showBadge, \{ trayInk: true \}\)/);
   // A system-theme flip invalidates BOTH tray bitmap caches. Repainting only the
   // generated one leaves the usage modes showing the provider icon main cached
@@ -742,6 +741,12 @@ test('provider tray badges are opt-in and keep monochrome assets visible', () =>
     /onSystemUiThemePush\?\.\(\(payload\) => applySystemUiTheme\(payload\?\.dark === true\)\);\n\s*try \{ state\.appInfo = await/
   );
   assert.match(app, /if \(!trayProviderIconDeliveryGuard\.isCurrent\(deliveryId\)\) return;/);
+  // The badge must not decide the ink. Full-colour artwork is already protected
+  // by the classifier, which answers '' for it, so the old showBadge bypass only
+  // ever kept a white-authored mark white on a light taskbar — where its white
+  // contrast halo cannot save it either.
+  assert.match(providerImage, /trayGlyphInk\(\{ templateIconColor: options\.templateColor, trayInk: options\.trayInk \}, img\)/);
+  assert.doesNotMatch(providerImage, /showBadge\s*\?\s*''\s*:\s*trayGlyphInk/);
   assert.match(providerImage, /if \(!showBadge\) return canvas\.toDataURL\('image\/png'\)/);
   assert.match(providerImage, /shadowColor = 'rgba\(255, 255, 255, 0\.95\)'/);
   assert.match(providerImage, /shadowBlur = Math\.max/);
