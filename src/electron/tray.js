@@ -45,18 +45,28 @@ function parseWindowsSystemUsesLightTheme(output) {
 // measured landing is inside the first step, the rest are headroom.
 const SYSTEM_UI_THEME_SETTLE_MS = [150, 400, 1000, 2000];
 
-// Waits for the registry to disagree with what we already believe, which is the
-// only way to tell "the new value has landed" from "we read the old one again".
-// Answers null when it never moves — an app-theme-only flip also raises the
-// event, and the system surface genuinely did not change there.
+// Settles on a value seen twice in a row rather than on the first one that
+// differs from what we hold. Those are not the same thing while two flips are in
+// flight: flipping back within the write delay leaves the first flip's value
+// landing under the second flip's read, and "differs from previous" would accept
+// that intermediate reading and stop — parking the tray on a theme the user has
+// already left, with no further event coming to correct it. Two agreeing reads a
+// gap apart mean the writes have stopped moving, and every gap in the schedule is
+// wider than the write delay measured above.
+//
+// `previous` decides only whether the settled value is worth publishing: an
+// app-theme-only flip raises the same event, and the system surface did not move
+// there. Answers null when nothing settled, or when it settled on what we hold.
 async function settleSystemDarkUi({ read, wait, isCurrent = () => true, previous, schedule = SYSTEM_UI_THEME_SETTLE_MS }) {
+  let candidate = null;
   for (const ms of schedule) {
     await wait(ms);
     if (!isCurrent()) return null;
     const value = await read();
     if (!isCurrent()) return null;
-    if (typeof value !== 'boolean' || value === previous) continue;
-    return value;
+    if (typeof value !== 'boolean') continue;
+    if (value === candidate) return value === previous ? null : value;
+    candidate = value;
   }
   return null;
 }
