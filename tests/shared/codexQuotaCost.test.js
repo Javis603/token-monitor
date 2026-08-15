@@ -8,6 +8,7 @@ const test = require('node:test');
 const {
   annotateCodexQuotaCosts,
   fastCreditMultiplier,
+  officialCodexQuotaUsageSince,
   parseCodexQuotaProfile
 } = require('../../src/shared/codexQuotaCost');
 
@@ -34,6 +35,10 @@ function usage(inputTokens) {
       input_tokens: inputTokens, cached_input_tokens: 0, output_tokens: 0
     } } }
   };
+}
+
+function at(timestamp, event) {
+  return { timestamp, ...event };
 }
 
 test('Fast credit multipliers follow supported Codex model families', () => {
@@ -75,4 +80,32 @@ test('quota cost leaves API cost intact and weights only the Fast share', (t) =>
   assert.equal(json.entries[0].cost, 2);
   assert.equal(json.entries[0].fastCostShare, 0.5);
   assert.equal(json.entries[0].quotaCostUsd, 3.5);
+});
+
+test('historical device usage reconstructs the exact reset window from local events', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-week-history-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const sessionId = 'rollout-2026-08-10T00-00-00-history';
+  writeSession(home, sessionId, [
+    at('2026-08-10T00:00:00.000Z', settings('gpt-5.6-sol', 'default')),
+    at('2026-08-10T01:00:00.000Z', usage(100)),
+    at('2026-08-11T02:00:00.000Z', settings('gpt-5.6-sol', 'priority')),
+    at('2026-08-11T03:00:00.000Z', usage(100))
+  ]);
+  const period = { sessions: {
+    spanning: {
+      client: 'codex', sessionId,
+      startedAt: '2026-08-10T00:00:00.000Z', lastUsedAt: '2026-08-11T03:00:00.000Z',
+      providers: { openai: 200 }, models: { 'gpt-5.6-sol': 200 },
+      modelCosts: { 'gpt-5.6-sol': 2 }, costUsd: 2, quotaCostUsd: 3.5
+    },
+    after: {
+      client: 'codex', sessionId: 'after',
+      startedAt: '2026-08-12T00:00:00.000Z', lastUsedAt: '2026-08-12T01:00:00.000Z',
+      providers: { openai: 100 }, costUsd: 4, quotaCostUsd: 4
+    }
+  } };
+  const result = officialCodexQuotaUsageSince(period, '2026-08-11T01:49:48.000Z', { homeDir: home });
+  assert.equal(result.reason, null);
+  assert.ok(Math.abs(result.costUsd - 6.5) < 0.000001);
 });

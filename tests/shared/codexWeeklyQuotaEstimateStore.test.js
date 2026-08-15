@@ -22,7 +22,11 @@ test('store persists samples, skips duplicates, and exposes a snapshot', () => {
   const store = createCodexWeeklyQuotaEstimateStore({
     filePath: 'samples.json',
     readJson: (_path, fallback) => fallback,
-    writeJsonAtomic: (filePath, value) => writes.push({ filePath, value: structuredClone(value) })
+    writeJsonAtomic: (filePath, value) => writes.push({ filePath, value: structuredClone(value) }),
+    historicalUsage: (_period, since) => ({
+      costUsd: since === '2026-08-10T00:00:00.000Z' ? 12.5 : 0,
+      reason: null
+    })
   });
   store.observe(stats(30, 10, 1_000_000), { minSampleCount: 1 });
   assert.equal(store.observe(stats(30, 10, 1_000_000), { minSampleCount: 1 }).changed, false);
@@ -30,6 +34,7 @@ test('store persists samples, skips duplicates, and exposes a snapshot', () => {
   const result = store.observe(stats(32, 11.3, 2_300_000), { minSampleCount: 1 });
   assert.equal(result.estimate.status, 'ready');
   assert.ok(Math.abs(result.estimate.estimatedUsd - 120) < 0.000001);
+  assert.equal(result.estimate.currentDeviceUsageUsd, 12.5);
   assert.equal(writes[0].filePath, 'samples.json');
   assert.equal(store.snapshot().accounts['account-a'].cycles[0].samples.length, 2);
 });
