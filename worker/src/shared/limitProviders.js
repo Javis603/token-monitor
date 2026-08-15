@@ -7,7 +7,7 @@
 // Saved user ordering is parsed separately and must not be overwritten.
 const LIMIT_PROVIDER_IDS = Object.freeze([
   'claude', 'codex', 'opencode', 'cursor', 'antigravity', 'kimi', 'grok',
-  'copilot', 'mimo', 'zai', 'zaiteam', 'kiro', 'commandcode', 'deepseek',
+  'copilot', 'commandcode', 'mimo', 'zai', 'zaiteam', 'kiro', 'deepseek',
   'openrouter', 'minimax', 'volcengine', 'qoder', 'ollama', 'thirdparty'
 ]);
 
