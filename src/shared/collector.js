@@ -17,7 +17,7 @@ const {
   deriveClientOverall
 } = require('./clientHealth');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
-const { customPricingPath, tokscaleConfigDir } = require('./tokscaleConfig');
+const { customPricingPath, tokscaleCacheDirs } = require('./tokscaleConfig');
 const {
   applyPeriodDelta,
   emptyPeriod,
@@ -222,82 +222,168 @@ const promaPricingCache = new Map();
 // directly (zero network) as the offline fallback: when the command fails, the
 // catalog it would have fallen back to is already on disk.
 const TOKSCALE_PRICING_CATALOG_FILES = ['pricing-litellm.json', 'pricing-openrouter.json', 'pricing-models-dev.json'];
+const CATALOG_PRICING_FIELDS = [
+  'inputCostPerToken',
+  'outputCostPerToken',
+  'cacheReadInputTokenCost',
+  'cacheCreationInputTokenCost'
+];
 
-// Parsed catalog, keyed by model id, invalidated by the files' size+mtime.
-let tokscaleCatalogCache = { revision: '', byModel: null };
+// Parsed catalog, invalidated by the selected files' path+size+mtime.
+let tokscaleCatalogCache = { revision: '', catalog: null, recheckAtMs: 0 };
 
-function tokscalePricingCatalogDir() {
-  return path.join(tokscaleConfigDir(), 'cache');
+function normalizeCatalogModelKey(key) {
+  return String(key || '').trim().toLowerCase();
 }
 
-// Catalog keys are usually "<provider>/<model>"; usage rows carry the bare
-// model id, so strip any provider prefix (deepseek/deepseek-v4-flash ->
-// deepseek-v4-flash, opencode-go/deepseek-v4-pro -> deepseek-v4-pro).
-function normalizeCatalogModelKey(key) {
-  const raw = String(key || '').trim();
-  if (!raw) return '';
-  const parts = raw.split('/');
-  return (parts[parts.length - 1] || '').trim().toLowerCase();
+function terminalCatalogModelKey(key) {
+  const parts = String(key || '').split('/');
+  return parts[parts.length - 1] || '';
+}
+
+function normalizePricingRate(value, key) {
+  const raw = value?.[key];
+  if (raw === null || raw === undefined) return undefined;
+  if (typeof raw !== 'number' && typeof raw !== 'string') return undefined;
+  if (typeof raw === 'string') {
+    const text = raw.trim();
+    if (!/^(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) return undefined;
+  }
+  const n = typeof raw === 'number' ? raw : Number(raw.trim());
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
 function normalizeCatalogPricing(value) {
-  const pick = (key) => {
-    const n = Number(value[key]);
-    return Number.isFinite(n) && n >= 0 ? n : undefined;
-  };
   const pricing = {
-    inputCostPerToken: pick('input_cost_per_token'),
-    outputCostPerToken: pick('output_cost_per_token'),
-    cacheReadInputTokenCost: pick('cache_read_input_token_cost'),
-    cacheCreationInputTokenCost: pick('cache_creation_input_token_cost')
+    inputCostPerToken: normalizePricingRate(value, 'input_cost_per_token'),
+    outputCostPerToken: normalizePricingRate(value, 'output_cost_per_token'),
+    cacheReadInputTokenCost: normalizePricingRate(value, 'cache_read_input_token_cost'),
+    cacheCreationInputTokenCost: normalizePricingRate(value, 'cache_creation_input_token_cost')
   };
   return pricing.inputCostPerToken !== undefined || pricing.outputCostPerToken !== undefined ? pricing : null;
 }
 
-// Parse (once per file-revision) the tokscale pricing catalog cache into a
-// Map<modelId, pricing>. First source wins so litellm stays authoritative.
-function tokscalePricingCatalog(options = {}) {
-  const dir = options.configDir || tokscalePricingCatalogDir();
-  const files = TOKSCALE_PRICING_CATALOG_FILES.map((name) => path.join(dir, name));
-  const revision = files.map((file) => {
+function catalogPricingFingerprint(pricing) {
+  return JSON.stringify(CATALOG_PRICING_FIELDS.map((field) => (
+    pricing[field] === undefined ? 'missing' : pricing[field]
+  )));
+}
+
+function pricingCatalogDirs(options = {}) {
+  if (Array.isArray(options.catalogDirs)) return options.catalogDirs.map(String).filter(Boolean);
+  if (options.configDir) return [options.configDir];
+  return tokscaleCacheDirs(options);
+}
+
+function pricingCatalogFile(name, dirs) {
+  for (const dir of dirs) {
+    const file = path.join(dir, name);
     try {
       const stat = fs.statSync(file);
-      return `${stat.size}:${stat.mtimeMs}`;
-    } catch (_) {
-      return '';
+      return { file, revision: `${file}:${stat.size}:${stat.mtimeMs}` };
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      // Upstream only tries a legacy path when the canonical file is missing;
+      // a permission or I/O error at that path fails this source closed.
+      return { file, revision: `${file}:error:${error?.code || 'unknown'}` };
     }
-  }).join('|');
-  if (tokscaleCatalogCache.revision === revision && tokscaleCatalogCache.byModel) return tokscaleCatalogCache.byModel;
-  const byModel = new Map();
-  for (const file of files) {
+  }
+  return { file: '', revision: `${name}:missing` };
+}
+
+function tokscalePricingCatalogSnapshot(options = {}) {
+  const dirs = pricingCatalogDirs(options);
+  const files = TOKSCALE_PRICING_CATALOG_FILES.map((name) => pricingCatalogFile(name, dirs));
+  return {
+    files,
+    revision: `${dirs.join('|')}::${files.map((entry) => entry.revision).join('|')}`
+  };
+}
+
+// Preserve complete catalog keys. A bare model id may use a terminal-key
+// fallback only when every matching entry publishes exactly the same rates;
+// otherwise guessing a provider would turn "cost unavailable" into a wrong
+// cost. Full exact keys and bare exact keys always win before that fallback.
+function tokscalePricingCatalog(options = {}) {
+  const snapshot = tokscalePricingCatalogSnapshot(options);
+  const nowMs = options.nowMs ?? Date.now();
+  if (
+    tokscaleCatalogCache.revision === snapshot.revision
+    && tokscaleCatalogCache.catalog
+    && (!tokscaleCatalogCache.recheckAtMs || nowMs < tokscaleCatalogCache.recheckAtMs)
+  ) {
+    return tokscaleCatalogCache.catalog;
+  }
+  const exact = new Map();
+  const byTerminal = new Map();
+  const nowSeconds = Math.floor(nowMs / 1000);
+  let recheckAtMs = 0;
+  for (const source of snapshot.files) {
+    if (!source.file) continue;
     let doc;
     try {
-      doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+      doc = JSON.parse(fs.readFileSync(source.file, 'utf8'));
     } catch (_) {
       continue; // missing or malformed cache file
     }
-    const data = doc && typeof doc === 'object' && doc.data && typeof doc.data === 'object' ? doc.data : null;
+    const timestamp = doc?.timestamp;
+    if (!Number.isSafeInteger(timestamp) || timestamp < 0) continue;
+    if (timestamp > nowSeconds) {
+      const eligibleAtMs = timestamp * 1000;
+      recheckAtMs = recheckAtMs ? Math.min(recheckAtMs, eligibleAtMs) : eligibleAtMs;
+      continue;
+    }
+    const data = doc && typeof doc === 'object' && !Array.isArray(doc.data)
+      && doc.data && typeof doc.data === 'object' ? doc.data : null;
     if (!data) continue;
     for (const [key, value] of Object.entries(data)) {
       if (!value || typeof value !== 'object') continue;
       const modelId = normalizeCatalogModelKey(key);
-      if (!modelId || byModel.has(modelId)) continue;
+      if (!modelId) continue;
       const pricing = normalizeCatalogPricing(value);
-      if (pricing) byModel.set(modelId, pricing);
+      if (!pricing) continue;
+      if (!exact.has(modelId)) exact.set(modelId, pricing);
+      const terminal = terminalCatalogModelKey(modelId);
+      if (!terminal) continue;
+      if (!byTerminal.has(terminal)) byTerminal.set(terminal, []);
+      byTerminal.get(terminal).push({ modelId, pricing });
     }
   }
-  tokscaleCatalogCache = { revision, byModel };
-  return byModel;
+  const catalogRevision = recheckAtMs ? `${snapshot.revision}:before:${recheckAtMs}` : snapshot.revision;
+  const catalog = { revision: catalogRevision, exact, byTerminal };
+  tokscaleCatalogCache = { revision: snapshot.revision, catalog, recheckAtMs };
+  return catalog;
 }
 
 function readTokscalePricingCatalog(modelId, options = {}) {
   const key = String(modelId || '').trim().toLowerCase();
   if (!key) return null;
-  return tokscalePricingCatalog(options).get(key) || null;
+  const catalog = tokscalePricingCatalog(options);
+  const exact = catalog.exact.get(key);
+  if (exact) return exact;
+  // A provider-scoped id that does not exist exactly must not borrow another
+  // provider's terminal match.
+  if (key.includes('/')) return null;
+  const candidates = catalog.byTerminal.get(key) || [];
+  if (candidates.length === 0) return null;
+  const fingerprints = new Set(candidates.map(({ pricing }) => catalogPricingFingerprint(pricing)));
+  return fingerprints.size === 1 ? candidates[0].pricing : null;
 }
 
 function resetTokscaleCatalogCache() {
-  tokscaleCatalogCache = { revision: '', byModel: null };
+  tokscaleCatalogCache = { revision: '', catalog: null, recheckAtMs: 0 };
+}
+
+function tokscalePricingCatalogRevision(options = {}) {
+  const snapshot = tokscalePricingCatalogSnapshot(options);
+  const nowMs = options.nowMs ?? Date.now();
+  if (tokscaleCatalogCache.revision !== snapshot.revision || !tokscaleCatalogCache.catalog) {
+    return snapshot.revision;
+  }
+  if (tokscaleCatalogCache.recheckAtMs && nowMs >= tokscaleCatalogCache.recheckAtMs) {
+    return `${snapshot.revision}:recheck:${tokscaleCatalogCache.recheckAtMs}`;
+  }
+  return tokscaleCatalogCache.catalog.revision;
 }
 
 function promaPricingRevision() {
@@ -307,23 +393,21 @@ function promaPricingRevision() {
 function normalizePromaPricing(result) {
   const source = result?.pricing;
   if (!source || typeof source !== 'object') return null;
-  const pick = (key) => {
-    const value = Number(source[key]);
-    return Number.isFinite(value) && value >= 0 ? value : undefined;
-  };
   const pricing = {
-    inputCostPerToken: pick('inputCostPerToken'),
-    outputCostPerToken: pick('outputCostPerToken'),
-    cacheReadInputTokenCost: pick('cacheReadInputTokenCost'),
-    cacheCreationInputTokenCost: pick('cacheCreationInputTokenCost')
+    inputCostPerToken: normalizePricingRate(source, 'inputCostPerToken'),
+    outputCostPerToken: normalizePricingRate(source, 'outputCostPerToken'),
+    cacheReadInputTokenCost: normalizePricingRate(source, 'cacheReadInputTokenCost'),
+    cacheCreationInputTokenCost: normalizePricingRate(source, 'cacheCreationInputTokenCost')
   };
   return pricing.inputCostPerToken !== undefined || pricing.outputCostPerToken !== undefined ? pricing : null;
 }
 
 async function resolveModelPricing(rows, options = {}) {
   const lookup = options.lookupModelPricing || lookupModelPricing;
-  const revision = options.pricingRevision ?? promaPricingRevision();
+  const customRevision = options.pricingRevision ?? promaPricingRevision();
   const nowMs = options.nowMs ?? Date.now();
+  const currentRevision = () => `${customRevision}|${tokscalePricingCatalogRevision({ ...options, nowMs })}`;
+  let revision = currentRevision();
   // Pricing is supplementary: never let a missing catalog entry hold up the
   // live usage refresh for the normal tokscale command timeout.
   const commandTimeoutMs = options.commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS;
@@ -351,6 +435,10 @@ async function resolveModelPricing(rows, options = {}) {
       // command would have fallen back to is tokscale's local catalog cache,
       // which is on disk without any network round trip.
       pricing = readTokscalePricingCatalog(modelId, options);
+      // Parsing a future-dated source adds its time boundary to the catalog
+      // revision, so an unavailable result expires when that source becomes
+      // eligible even if the file itself does not change.
+      revision = currentRevision();
     }
     promaPricingCache.set(modelId, { at: nowMs, revision, pricing });
     if (pricing) pricingByModel[modelId] = pricing;

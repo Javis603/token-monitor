@@ -27,8 +27,37 @@ function tokscaleConfigDir({ env = process.env, platform = process.platform, hom
   return path.join(configHome, 'tokscale');
 }
 
+// Mirror tokscale-core's canonical cache root plus its two pre-#470 legacy
+// fallbacks. An explicit TOKSCALE_CONFIG_DIR is hermetic upstream, so it must
+// never reach back into a real profile's legacy cache.
+function tokscaleCacheDirs({ env = process.env, platform = process.platform, homeDir = os.homedir() } = {}) {
+  const canonical = path.join(tokscaleConfigDir({ env, platform, homeDir }), 'cache');
+  const override = env.TOKSCALE_CONFIG_DIR;
+  if (typeof override === 'string' && override.length > 0) return [canonical];
+
+  let platformCache;
+  if (platform === 'darwin') {
+    platformCache = path.join(homeDir, 'Library', 'Caches', 'tokscale');
+  } else if (platform === 'win32') {
+    const localAppData = (typeof env.LOCALAPPDATA === 'string' && env.LOCALAPPDATA.length > 0)
+      ? env.LOCALAPPDATA
+      : path.join(homeDir, 'AppData', 'Local');
+    platformCache = path.join(localAppData, 'tokscale');
+  } else {
+    const xdg = env.XDG_CACHE_HOME;
+    const cacheHome = (typeof xdg === 'string' && path.isAbsolute(xdg)) ? xdg : path.join(homeDir, '.cache');
+    platformCache = path.join(cacheHome, 'tokscale');
+  }
+
+  return [...new Set([
+    canonical,
+    platformCache,
+    path.join(homeDir, '.cache', 'tokscale')
+  ])];
+}
+
 function customPricingPath(opts) {
   return path.join(tokscaleConfigDir(opts), 'custom-pricing.json');
 }
 
-module.exports = { tokscaleConfigDir, customPricingPath };
+module.exports = { tokscaleCacheDirs, tokscaleConfigDir, customPricingPath };
