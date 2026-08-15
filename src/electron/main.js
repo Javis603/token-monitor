@@ -238,9 +238,11 @@ const {
   formatTrayText,
   isBarsTrayIconMode,
   pickUsageTrayIconId,
+  parseWindowsSystemUsesLightTheme,
   popoverBounds,
   reconcileCodexAccountSelection,
   runTrayMenuAction,
+  settleSystemDarkUi,
   sortCodexAccountsForDisplay,
   shouldUseTemplateTrayIcon,
   trayShowsTitle
@@ -4330,9 +4332,56 @@ function systemDarkTrayUi() {
   }
 }
 
-function pushSystemUiThemeToRenderer() {
+const WINDOWS_PERSONALIZE_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize';
+
+function readWindowsSystemDarkUi() {
+  return new Promise((resolve) => {
+    try {
+      require('node:child_process').execFile(
+        'reg',
+        ['query', WINDOWS_PERSONALIZE_KEY, '/v', 'SystemUsesLightTheme'],
+        { windowsHide: true, timeout: 5000 },
+        (error, stdout) => resolve(error ? null : parseWindowsSystemUsesLightTheme(stdout))
+      );
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+// The value the renderer last heard, so a settled reading can be told from a
+// repeat of the one we already published.
+let currentSystemDarkUi = null;
+
+function currentSystemDarkTrayUi() {
+  if (currentSystemDarkUi === null) currentSystemDarkUi = systemDarkTrayUi();
+  return currentSystemDarkUi;
+}
+
+function pushSystemUiThemeToRenderer(dark) {
+  const value = typeof dark === 'boolean' ? dark : currentSystemDarkTrayUi();
+  currentSystemDarkUi = value;
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send('theme:systemUi', { dark: systemDarkTrayUi() }); } catch (_) {}
+  try { mainWindow.webContents.send('theme:systemUi', { dark: value }); } catch (_) {}
+}
+
+// Windows cannot answer this at event time — see settleSystemDarkUi in tray.js
+// for what was measured. Everywhere else the event already carries the truth.
+let systemUiThemeRevision = 0;
+
+async function pushSystemUiThemeAfterChange() {
+  if (process.platform !== 'win32') {
+    pushSystemUiThemeToRenderer(systemDarkTrayUi());
+    return;
+  }
+  const revision = ++systemUiThemeRevision;
+  const settled = await settleSystemDarkUi({
+    read: readWindowsSystemDarkUi,
+    wait: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
+    isCurrent: () => revision === systemUiThemeRevision,
+    previous: currentSystemDarkTrayUi()
+  });
+  if (typeof settled === 'boolean') pushSystemUiThemeToRenderer(settled);
 }
 
 function pushSettingsToRenderer() {
@@ -5782,7 +5831,7 @@ app.whenReady().then(() => {
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
   // it — nothing else in the app would notice the change.
-  nativeTheme.on('updated', pushSystemUiThemeToRenderer);
+  nativeTheme.on('updated', () => { void pushSystemUiThemeAfterChange(); });
   const widgetRuntime = macWidgetRuntimeSupport({
     platform: process.platform,
     osRelease: process.platform === 'darwin' ? os.release() : ''
@@ -6321,7 +6370,7 @@ app.whenReady().then(() => {
     sharedDataDir: sharedDataDir(),
     loginItemSupported: loginItemEnabledHere(),
     loginItemOpenAtLogin: currentLoginItemState(),
-    systemDarkUi: systemDarkTrayUi()
+    systemDarkUi: currentSystemDarkTrayUi()
   }));
   ipcMain.handle('diagnostics:generate', async () => {
     const report = await diagnosticReportGenerator.generate();

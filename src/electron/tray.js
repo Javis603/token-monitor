@@ -15,6 +15,52 @@ const { translate: translateMessage } = require('./renderer/i18n');
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 const TRAY_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icons', 'tray-token-monitor.png');
 
+// Windows keeps the taskbar's theme in SystemUsesLightTheme, separate from the
+// AppsUseLightTheme that drives the app theme. Measured on Windows 11 with
+// Electron 43.3.0, a system-theme flip lands like this:
+//
+//   nativeTheme 'updated' fires -> AppsUseLightTheme and shouldUseDarkColors are
+//   already new, SystemUsesLightTheme is still the OLD value and only lands a
+//   moment later (~250ms), while Chromium's cached
+//   shouldUseDarkColorsForSystemIntegratedUI never catches up at all until the
+//   NEXT flip.
+//
+// So neither reading the cached property nor a single registry read at event
+// time can answer: both report the state before the flip, which is what left the
+// tray one theme change behind. Re-read until the value actually moves.
+// Returns true for a dark system surface, false for light, null if unreadable.
+function parseWindowsSystemUsesLightTheme(output) {
+  const match = /SystemUsesLightTheme\s+REG_DWORD\s+0x([0-9a-fA-F]+)/.exec(String(output || ''));
+  if (!match) return null;
+  const value = Number.parseInt(match[1], 16);
+  // Windows only ever writes 0 or 1 here. Anything else is a value we do not
+  // understand, and guessing "light" from it would repaint the tray on a reading
+  // we cannot justify.
+  if (value === 0) return true;
+  if (value === 1) return false;
+  return null;
+}
+
+// Spread wide enough to cover a slow write without holding a flip visibly: the
+// measured landing is inside the first step, the rest are headroom.
+const SYSTEM_UI_THEME_SETTLE_MS = [150, 400, 1000, 2000];
+
+// Waits for the registry to disagree with what we already believe, which is the
+// only way to tell "the new value has landed" from "we read the old one again".
+// Answers null when it never moves — an app-theme-only flip also raises the
+// event, and the system surface genuinely did not change there.
+async function settleSystemDarkUi({ read, wait, isCurrent = () => true, previous, schedule = SYSTEM_UI_THEME_SETTLE_MS }) {
+  for (const ms of schedule) {
+    await wait(ms);
+    if (!isCurrent()) return null;
+    const value = await read();
+    if (!isCurrent()) return null;
+    if (typeof value !== 'boolean' || value === previous) continue;
+    return value;
+  }
+  return null;
+}
+
 function buildTrayIcon(options = {}) {
   const platform = options.platform || process.platform;
   const nativeImage = options.nativeImage || require('electron').nativeImage;
@@ -276,9 +322,12 @@ function popoverBounds(tray, popoverWidth, popoverHeight) {
 }
 
 module.exports = {
+  SYSTEM_UI_THEME_SETTLE_MS,
   buildTrayIcon,
   buildTrayMenuTemplate,
   createTray,
+  parseWindowsSystemUsesLightTheme,
+  settleSystemDarkUi,
   formatTrayText,
   isBarsTrayIconMode,
   pickUsageTrayIconId,
