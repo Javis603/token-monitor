@@ -7,12 +7,12 @@ const test = require('node:test');
 
 const root = path.resolve(__dirname, '..', '..');
 
-test('Codex panel collapses device usage and the endpoint-net weekly estimate by default', () => {
+test('Codex panel collapses the endpoint-net weekly estimate by default', () => {
   const renderer = fs.readFileSync(path.join(root, 'src', 'electron', 'renderer', 'app.js'), 'utf8');
   const i18n = fs.readFileSync(path.join(root, 'src', 'electron', 'renderer', 'i18n.js'), 'utf8');
   assert.match(renderer, /provider\.weeklyQuotaValueEstimate/);
   assert.match(renderer, /weeklyValueEstimate/);
-  assert.match(renderer, /currentDeviceUsage/);
+  assert.doesNotMatch(renderer, /currentDeviceUsage/);
   assert.match(renderer, /codex-quota-details-panel accordion-animated-container/);
   assert.match(renderer, /aria-expanded/);
   assert.match(renderer, /state\.codexQuotaDetailsExpanded/);

@@ -104,10 +104,7 @@ function normalizeSegment(value, fallbackId = 1) {
     start,
     latest,
     estimateStart,
-    estimateEnd: estimateStart && estimateEnd ? estimateEnd : estimateStart,
-    highWaterCostUsd: Math.max(start.costUsd, finiteNumber(value?.highWaterCostUsd) ?? latest.costUsd),
-    highWaterRawCostUsd: Math.max(start.rawCostUsd, finiteNumber(value?.highWaterRawCostUsd) ?? latest.rawCostUsd),
-    highWaterTokens: Math.max(start.tokens, Math.round(finiteNumber(value?.highWaterTokens) ?? latest.tokens))
+    estimateEnd: estimateStart && estimateEnd ? estimateEnd : estimateStart
   };
 }
 
@@ -121,10 +118,7 @@ function newSegment(sample, id) {
     start: sample,
     latest: sample,
     estimateStart: null,
-    estimateEnd: null,
-    highWaterCostUsd: sample.costUsd,
-    highWaterRawCostUsd: sample.rawCostUsd,
-    highWaterTokens: sample.tokens
+    estimateEnd: null
   };
 }
 
@@ -143,25 +137,11 @@ function segmentEstimate(segment) {
   };
 }
 
-function segmentDeviceUsage(segment) {
-  if (!segment?.start) return { costUsd: 0, rawCostUsd: 0, tokens: 0, percent: 0 };
-  return {
-    costUsd: Math.max(0, segment.highWaterCostUsd - segment.start.costUsd),
-    rawCostUsd: Math.max(0, segment.highWaterRawCostUsd - segment.start.rawCostUsd),
-    tokens: Math.max(0, segment.highWaterTokens - segment.start.tokens),
-    percent: Math.max(0, segment.latest.usedPercent - segment.start.usedPercent)
-  };
-}
-
 function baseCycleFields(value) {
   return {
     compactedEstimateCostUsd: finiteNumber(value?.compactedEstimateCostUsd) || 0,
     compactedEstimateSpanPercent: Math.max(0, finiteNumber(value?.compactedEstimateSpanPercent) || 0),
-    compactedEstimateSampleCount: Math.max(0, Math.round(finiteNumber(value?.compactedEstimateSampleCount) || 0)),
-    deviceUsageOffsetUsd: Math.max(0, finiteNumber(value?.deviceUsageOffsetUsd) || 0),
-    deviceRawUsageOffsetUsd: Math.max(0, finiteNumber(value?.deviceRawUsageOffsetUsd) || 0),
-    deviceTokensOffset: Math.max(0, Math.round(finiteNumber(value?.deviceTokensOffset) || 0)),
-    devicePercentOffset: Math.max(0, finiteNumber(value?.devicePercentOffset) || 0)
+    compactedEstimateSampleCount: Math.max(0, Math.round(finiteNumber(value?.compactedEstimateSampleCount) || 0))
   };
 }
 
@@ -181,8 +161,6 @@ function normalizeCycleV2(value) {
     resetAt,
     startedAt: isoTimestamp(value?.startedAt) || latest.observedAt,
     latest,
-    observationStartedAt: isoTimestamp(value?.observationStartedAt) || latest.observedAt,
-    observedFromZero: value?.observedFromZero === true,
     nextSegmentId: Math.max(
       Math.round(finiteNumber(value?.nextSegmentId) || 1),
       ...segments.map((segment) => segment.id + 1)
@@ -205,16 +183,10 @@ function migrateCycleV1(value) {
     resetAt,
     startedAt: isoTimestamp(value?.startedAt) || latest.observedAt,
     latest,
-    observationStartedAt: isoTimestamp(value?.observationStartedAt) || latest.observedAt,
-    observedFromZero: value?.observedFromZero === true,
     nextSegmentId: segmentId + 1,
     compactedEstimateCostUsd: valid.reduce((sum, sample) => sum + sample.costDeltaUsd, 0),
     compactedEstimateSpanPercent: valid.length,
     compactedEstimateSampleCount: valid.length,
-    deviceUsageOffsetUsd: Math.max(0, finiteNumber(value?.deviceObservedCostUsd) || 0),
-    deviceRawUsageOffsetUsd: Math.max(0, finiteNumber(value?.deviceObservedRawCostUsd) || 0),
-    deviceTokensOffset: Math.max(0, Math.round(finiteNumber(value?.deviceObservedTokens) || 0)),
-    devicePercentOffset: Math.max(0, finiteNumber(value?.deviceObservedPercent) || 0),
     segments: [newSegment(latest, segmentId)],
     samples
   };
@@ -252,16 +224,10 @@ function newCycle(resetAt, latest, serial = 1) {
     resetAt,
     startedAt: latest.observedAt,
     latest,
-    observationStartedAt: latest.observedAt,
-    observedFromZero: latest.usedPercent === 0,
     nextSegmentId: 2,
     compactedEstimateCostUsd: 0,
     compactedEstimateSpanPercent: 0,
     compactedEstimateSampleCount: 0,
-    deviceUsageOffsetUsd: 0,
-    deviceRawUsageOffsetUsd: 0,
-    deviceTokensOffset: 0,
-    devicePercentOffset: 0,
     segments: [],
     samples: []
   };
@@ -319,14 +285,9 @@ function compactOldestSegment(cycle) {
   if (index < 0) return false;
   const [segment] = cycle.segments.splice(index, 1);
   const estimate = segmentEstimate(segment);
-  const device = segmentDeviceUsage(segment);
   cycle.compactedEstimateCostUsd += estimate.costUsd;
   cycle.compactedEstimateSpanPercent += estimate.spanPercent;
   cycle.compactedEstimateSampleCount += estimate.sampleCount;
-  cycle.deviceUsageOffsetUsd += device.costUsd;
-  cycle.deviceRawUsageOffsetUsd += device.rawCostUsd;
-  cycle.deviceTokensOffset += device.tokens;
-  cycle.devicePercentOffset += device.percent;
   return true;
 }
 
@@ -355,20 +316,11 @@ function estimateFromCycle(cycle, options = {}) {
   let observedCostUsd = finiteNumber(cycle?.compactedEstimateCostUsd) || 0;
   let spanPercent = Math.max(0, finiteNumber(cycle?.compactedEstimateSpanPercent) || 0);
   let sampleCount = Math.max(0, Math.round(finiteNumber(cycle?.compactedEstimateSampleCount) || 0));
-  let deviceObservedCostUsd = Math.max(0, finiteNumber(cycle?.deviceUsageOffsetUsd) || 0);
-  let deviceObservedRawCostUsd = Math.max(0, finiteNumber(cycle?.deviceRawUsageOffsetUsd) || 0);
-  let deviceObservedTokens = Math.max(0, Math.round(finiteNumber(cycle?.deviceTokensOffset) || 0));
-  let deviceObservedPercent = Math.max(0, finiteNumber(cycle?.devicePercentOffset) || 0);
   for (const segment of cycle?.segments || []) {
     const estimate = segmentEstimate(segment);
-    const device = segmentDeviceUsage(segment);
     observedCostUsd += estimate.costUsd;
     spanPercent += estimate.spanPercent;
     sampleCount += estimate.sampleCount;
-    deviceObservedCostUsd += device.costUsd;
-    deviceObservedRawCostUsd += device.rawCostUsd;
-    deviceObservedTokens += device.tokens;
-    deviceObservedPercent += device.percent;
   }
   const base = {
     status: spanPercent >= minSampleCount && observedCostUsd > 0 ? 'ready' : 'collecting',
@@ -377,12 +329,6 @@ function estimateFromCycle(cycle, options = {}) {
     requiredSampleCount: minSampleCount,
     spanPercent,
     observedCostUsd,
-    deviceObservedCostUsd,
-    deviceObservedRawCostUsd,
-    deviceObservedTokens,
-    deviceObservedPercent,
-    observationStartedAt: cycle?.observationStartedAt || null,
-    observedFromZero: cycle?.observedFromZero === true,
     segmentCount: (cycle?.segments || []).length
   };
   if (base.status !== 'ready') return base;
@@ -463,9 +409,6 @@ function observeCodexWeeklyQuota(stateValue, observation, options = {}) {
   }
 
   segment.latest = sample;
-  segment.highWaterCostUsd = Math.max(segment.highWaterCostUsd, sample.costUsd);
-  segment.highWaterRawCostUsd = Math.max(segment.highWaterRawCostUsd, sample.rawCostUsd);
-  segment.highWaterTokens = Math.max(segment.highWaterTokens, sample.tokens);
 
   if (percentDelta > EPSILON) {
     if (!segment.estimateStart) {

@@ -4601,20 +4601,6 @@ function renderProviderWindows(provider, color) {
       detailsPanel.setAttribute('aria-hidden', String(!detailsExpanded));
       const detailsInner = document.createElement('div');
       detailsInner.className = 'codex-quota-details-inner accordion-animation-inner';
-      const deviceUsageReady = Number.isFinite(quotaEstimate.deviceObservedCostUsd);
-      const deviceUsageNode = limitWindowNode(
-        t('limits.codex.currentDeviceUsage'),
-        { showMeter: false },
-        color,
-        0.68,
-        deviceUsageReady ? formatMoney(quotaEstimate.deviceObservedCostUsd, 'USD') : '--',
-        ''
-      );
-      deviceUsageNode.classList.add('limit-window-wide', 'limit-window-no-reset');
-      deviceUsageNode.title = t('limits.codex.currentDeviceUsageHelp', {
-        percent: Math.max(0, quotaEstimate.deviceObservedPercent || 0)
-      });
-      detailsInner.append(deviceUsageNode);
       const ready = quotaEstimate.status === 'ready' && Number.isFinite(quotaEstimate.estimatedUsd);
       const estimateNode = limitWindowNode(
         t('limits.codex.weeklyValueEstimate'),

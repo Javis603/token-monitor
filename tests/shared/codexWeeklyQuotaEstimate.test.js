@@ -55,40 +55,17 @@ test('first boundary is an anchor and three later unit jumps publish the mean', 
   assert.ok(Math.abs(result.estimate.estimatedUsd - 120) < 0.000001);
 });
 
-test('device usage accumulates while the same account is active even before a percent jump', () => {
+test('same-percent updates stay inside the segment without becoming estimate evidence', () => {
   const result = observeSeries([
-    { usedPercent: 55, costUsd: 10, rawCostUsd: 10, tokens: 1_000 },
-    { usedPercent: 55, costUsd: 11.25, rawCostUsd: 11.25, tokens: 2_000 },
-    { usedPercent: 56, costUsd: 12.5, rawCostUsd: 12.5, tokens: 3_000 }
-  ]);
-  assert.equal(result.estimate.status, 'collecting');
-  assert.equal(result.estimate.deviceObservedCostUsd, 2.5);
-  assert.equal(result.estimate.deviceObservedTokens, 2_000);
-  assert.equal(result.estimate.deviceObservedPercent, 1);
-  assert.equal(result.estimate.observedFromZero, false);
-});
-
-test('device usage excludes account-switch gaps and restarts from zero after quota reset', () => {
-  let result = observeSeries([
-    { usedPercent: 30, costUsd: 10, tokens: 1_000 },
-    { usedPercent: 30, costUsd: 11, tokens: 2_000 }
-  ]);
-  assert.equal(result.estimate.deviceObservedCostUsd, 1);
-  result = observeCodexWeeklyQuota(result.state, observation({
-    accountKey: 'account-b', costUsd: 20, tokens: 3_000,
-    observedAt: '2026-08-12T03:00:00.000Z'
-  }));
-  result = observeCodexWeeklyQuota(result.state, observation({
-    accountKey: 'account-a', costUsd: 25, tokens: 4_000,
-    observedAt: '2026-08-12T04:00:00.000Z'
-  }));
-  assert.equal(result.estimate.deviceObservedCostUsd, 1);
-  result = observeCodexWeeklyQuota(result.state, observation({
-    accountKey: 'account-a', resetAt: '2026-08-24T00:00:00.000Z', usedPercent: 0,
-    costUsd: 26, tokens: 5_000, observedAt: '2026-08-17T00:00:00.000Z'
-  }));
-  assert.equal(result.estimate.deviceObservedCostUsd, 0);
-  assert.equal(result.estimate.observedFromZero, true);
+    { usedPercent: 55, costUsd: 10, tokens: 1_000 },
+    { usedPercent: 55, costUsd: 11.25, tokens: 2_000 },
+    { usedPercent: 56, costUsd: 12.5, tokens: 3_000 },
+    { usedPercent: 56, costUsd: 13, tokens: 3_500 },
+    { usedPercent: 57, costUsd: 13.7, tokens: 4_200 }
+  ], { minSampleCount: 1 });
+  assert.deepEqual(activeCycle(result).samples.map((sample) => sample.status), ['anchor', 'valid']);
+  assert.ok(Math.abs(result.estimate.estimatedUsd - 120) < 0.000001);
+  assert.equal(Object.hasOwn(result.estimate, 'deviceObservedCostUsd'), false);
 });
 
 test('100 to 99 remaining is recorded as an anchor but never estimated', () => {
@@ -138,10 +115,9 @@ test('counter regressions stay in one segment and endpoint netting cancels the r
   assert.equal(result.estimate.spanPercent, 3);
   assert.ok(Math.abs(result.estimate.observedCostUsd - 3.6) < 0.000001);
   assert.ok(Math.abs(result.estimate.estimatedUsd - 120) < 0.000001);
-  assert.ok(Math.abs(result.estimate.deviceObservedCostUsd - 3.7) < 0.000001);
 });
 
-test('version 1 state migrates without losing its estimate or device usage', () => {
+test('version 1 state keeps valid estimate evidence but drops legacy device usage', () => {
   const latest = observation({ usedPercent: 34, costUsd: 13.7, tokens: 4_700_000 });
   const oldState = {
     version: 1,
@@ -182,8 +158,9 @@ test('version 1 state migrates without losing its estimate or device usage', () 
   const result = observeCodexWeeklyQuota(oldState, latest, { minSampleCount: 1 });
   assert.equal(result.state.version, 2);
   assert.ok(Math.abs(result.estimate.estimatedUsd - 115) < 0.000001);
-  assert.equal(result.estimate.deviceObservedCostUsd, 3.7);
-  assert.equal(result.estimate.deviceObservedTokens, 3_700_000);
+  assert.equal(Object.hasOwn(result.estimate, 'deviceObservedCostUsd'), false);
+  const cycle = activeCycle(result);
+  assert.equal(Object.hasOwn(cycle, 'deviceUsageOffsetUsd'), false);
 });
 
 test('persisted samples and segments stay within their per-cycle bounds', () => {
