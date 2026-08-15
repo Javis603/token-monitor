@@ -43,7 +43,7 @@ test('callers cannot mutate the shared palette through the returned object', () 
   assert.deepEqual(trayGeneratedIconColors('win32', true), WHITE);
 });
 
-test('a monochrome provider mark is inked to match the surface, in both directions', () => {
+test('a flat-ink provider mark is inked to match the surface, in both directions', () => {
   assert.equal(trayProviderGlyphInk('win32', true, true), WHITE.text, 'dark taskbar');
   assert.equal(trayProviderGlyphInk('linux', true, true), WHITE.text);
   // pi and proma are authored white: leaving them as-is on a light taskbar is
@@ -63,11 +63,11 @@ test('full-colour brand artwork is never tinted, on any platform or theme', () =
   }
 });
 
-test('an unreadable or unknown monochrome verdict leaves the artwork untouched', () => {
+test('an unreadable or unknown flat-ink verdict leaves the artwork untouched', () => {
   // providerImageOpticalSample cannot always read pixels back; that must not
   // repaint a mark we failed to classify.
   for (const value of [undefined, null, 0, '', 'true', {}]) {
-    assert.equal(trayProviderGlyphInk('win32', true, value), '', `monochrome=${JSON.stringify(value)}`);
+    assert.equal(trayProviderGlyphInk('win32', true, value), '', `flatInk=${JSON.stringify(value)}`);
   }
   // A non-boolean theme flag must not read as dark; it falls to the light ink.
   assert.equal(trayProviderGlyphInk('win32', 'yes', true), BLACK.fill);

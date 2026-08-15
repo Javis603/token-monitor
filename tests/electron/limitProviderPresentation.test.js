@@ -725,9 +725,22 @@ test('provider tray badges are opt-in and keep monochrome assets visible', () =>
   assert.match(app, /showTrayProviderBadgeInput: document\.getElementById\('showTrayProviderBadgeInput'\)/);
   assert.match(app, /saveSettings\(\{ showTrayProviderBadge: els\.showTrayProviderBadgeInput\.checked \}\)/);
   assert.match(app, /deliverTrayProviderIcons\(patch\.showTrayProviderBadge === true\)/);
-  // `trayInk` is what lets a monochrome mark be re-inked for a dark taskbar; the
+  // `trayInk` is what lets a flat-ink mark be re-inked for a dark taskbar; the
   // badge path still keeps the artwork in colour inside providerImageToPngDataUrl.
   assert.match(app, /providerImageToPngDataUrl\(img, 44, showBadge, \{ trayInk: true \}\)/);
+  // A system-theme flip invalidates BOTH tray bitmap caches. Repainting only the
+  // generated one leaves the usage modes showing the provider icon main cached
+  // under the old ink, which is the whole bug on a taskbar that just went dark.
+  assert.match(
+    app,
+    /const applySystemUiTheme = \(dark\) => \{[\s\S]*?void maybeUpdateBarsIcon\(\);[\s\S]*?void deliverTrayProviderIcons\(\);[\s\S]*?\};/
+  );
+  // Subscribing before the app-info round trip is what keeps a theme flipped
+  // mid-call from being lost until the next flip.
+  assert.match(
+    app,
+    /onSystemUiThemePush\?\.\(\(payload\) => applySystemUiTheme\(payload\?\.dark === true\)\);\n\s*try \{ state\.appInfo = await/
+  );
   assert.match(app, /if \(!trayProviderIconDeliveryGuard\.isCurrent\(deliveryId\)\) return;/);
   assert.match(providerImage, /if \(!showBadge\) return canvas\.toDataURL\('image\/png'\)/);
   assert.match(providerImage, /shadowColor = 'rgba\(255, 255, 255, 0\.95\)'/);

@@ -53,11 +53,11 @@
   // both directions, not just onto dark: a few marks are authored white and would
   // otherwise vanish on a light taskbar exactly as the black ones did on a dark
   // one. Full-colour brand artwork is never tinted, since flattening it to one
-  // ink throws the brand colour away — hence a monochrome test on the rasterized
+  // ink throws the brand colour away — hence a flat-ink test on the rasterized
   // pixels rather than a list of ids that would drift as icons are added.
   // Returns '' for "draw the artwork as it is".
-  function trayProviderGlyphInk(platform, systemDarkUi = false, monochrome = false) {
-    if (platform === 'darwin' || monochrome !== true) return '';
+  function trayProviderGlyphInk(platform, systemDarkUi = false, flatInk = false) {
+    if (platform === 'darwin' || flatInk !== true) return '';
     return systemDarkUi === true ? TRAY_INK_ON_DARK_SURFACE.text : TRAY_INK_ON_LIGHT_SURFACE.text;
   }
 

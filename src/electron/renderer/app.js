@@ -10641,14 +10641,26 @@ window.addEventListener('blur', () => {
 });
 
 async function init() {
-  try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
-  state.systemDarkUi = state.appInfo?.systemDarkUi === true;
-  window.tokenMonitor.onSystemUiThemePush?.((payload) => {
-    const dark = payload?.dark === true;
+  // Subscribed before the app-info round trip, not after: a theme flipped while
+  // that call is in flight would otherwise be missed until the next flip. The
+  // seeded value then only fills in when no push has already answered.
+  let systemUiThemeSeeded = false;
+  const applySystemUiTheme = (dark) => {
+    systemUiThemeSeeded = true;
     if (dark === state.systemDarkUi) return;
     state.systemDarkUi = dark;
+    // Two caches carry baked-in ink and both go stale here: the generated bitmap
+    // for the current mode, and the provider bitmaps main holds for the usage
+    // modes. Repainting only the first leaves a black provider icon sitting on a
+    // taskbar that just turned dark.
     void maybeUpdateBarsIcon();
-  });
+    void deliverTrayProviderIcons();
+  };
+  window.tokenMonitor.onSystemUiThemePush?.((payload) => applySystemUiTheme(payload?.dark === true));
+  try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
+  // Seeding assigns directly: the rest of init delivers both icon sets anyway,
+  // and settings have not loaded yet, so repainting from here would only churn.
+  if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
   applyEffectiveCurrencyRates();
@@ -11498,30 +11510,38 @@ function providerImageOpticalSample(image) {
   ctx.drawImage(image, 0, 0, sampleSize, sampleSize);
 
   let bounds = { x: 0, y: 0, width: sampleSize, height: sampleSize };
-  // Whether every opaque pixel is grey: a mark authored `fill="currentColor"`
-  // rasterizes to flat black here and is meant to be re-inked, while brand
-  // artwork carries hue and must be left alone. Answered in the scan that
-  // already walks these pixels for the bounds, and cached alongside them.
-  // Unreadable pixels (a future non-local image) leave it false, i.e. untinted.
-  let monochrome = false;
+  // Whether the mark is drawn in one flat ink: a mark authored `fill="currentColor"`
+  // rasterizes to a single colour here and is meant to be re-inked, while brand
+  // artwork must be left alone. Two conditions, because either alone is too
+  // generous — every pixel has to be achromatic AND sit at the same level, so a
+  // greyscale artwork with real shading is not flattened onto one ink. Edges cost
+  // nothing to allow: anti-aliasing onto a transparent canvas varies the alpha,
+  // not the colour. Answered in the scan that already walks these pixels for the
+  // bounds and cached alongside them; unreadable pixels (a future non-local
+  // image) leave it false, i.e. untinted.
+  let flatInk = false;
   try {
     const pixels = ctx.getImageData(0, 0, sampleSize, sampleSize).data;
     let minX = sampleSize;
     let minY = sampleSize;
     let maxX = -1;
     let maxY = -1;
-    let grey = true;
+    // Tolerance, not equality: rasterization leaves a channel off by a hair.
+    const inkTolerance = 12;
+    let singleInk = true;
+    let inkLevel = -1;
     for (let y = 0; y < sampleSize; y += 1) {
       for (let x = 0; x < sampleSize; x += 1) {
         const offset = (y * sampleSize + x) * 4;
         if (pixels[offset + 3] <= 12) continue;
-        if (grey) {
+        if (singleInk) {
           const r = pixels[offset];
           const g = pixels[offset + 1];
           const b = pixels[offset + 2];
-          // Tolerance, not equality: PNG/SVG rasterization and subpixel edges
-          // leave a channel or two off by a hair on artwork that is still grey.
-          if (Math.max(r, g, b) - Math.min(r, g, b) > 12) grey = false;
+          const level = (r + g + b) / 3;
+          if (Math.max(r, g, b) - Math.min(r, g, b) > inkTolerance) singleInk = false;
+          else if (inkLevel < 0) inkLevel = level;
+          else if (Math.abs(level - inkLevel) > inkTolerance) singleInk = false;
         }
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);
@@ -11536,13 +11556,13 @@ function providerImageOpticalSample(image) {
         width: maxX - minX + 1,
         height: maxY - minY + 1
       };
-      monochrome = grey;
+      flatInk = singleInk;
     }
   } catch (_) {
     // Keep the original frame if a future non-local image cannot be inspected.
   }
 
-  const sample = { canvas, bounds, monochrome };
+  const sample = { canvas, bounds, flatInk };
   trayProviderImageOpticalSamples.set(image, sample);
   return sample;
 }
@@ -11590,7 +11610,7 @@ function trayGlyphInk(options, image) {
   return window.TokenMonitorTrayText.trayProviderGlyphInk(
     state.appInfo?.platform,
     state.systemDarkUi,
-    providerImageOpticalSample(image).monochrome
+    providerImageOpticalSample(image).flatInk
   );
 }
 
