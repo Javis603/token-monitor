@@ -8,6 +8,8 @@ On Windows, Token Monitor normally scans supported tools inside every running WS
 
 OpenCode and Hermes store current usage in SQLite databases. A Windows process can discover those databases through `\\wsl$` while SQLite still cannot reliably coordinate locks or an active WAL across the WSL 9P boundary. Token Monitor may therefore show the tool under **Settings → Collection → WSL detection** with no usage.
 
+ZCode is handled automatically: its `~/.zcode/cli/db/db.sqlite` database (with WAL sidecars) is staged into a local temp home on every refresh tick, so WSL ZCode usage is counted out of the box. The staged copy is best-effort per tick — a torn copy at worst yields one empty tick that self-corrects five minutes later — so the headless-agent setup below remains the exact option.
+
 Do not copy a live `.db` file as a workaround. Recent transactions may still be in `-wal`, and copying the database and sidecars separately does not guarantee a consistent snapshot.
 
 The reliable setup is:

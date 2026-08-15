@@ -418,3 +418,104 @@ test('collectWslUsage logs and skips a home that throws, keeps others', async ()
   assert.equal(logs.length, 1);
   assert.match(logs[0], /Debian/);
 });
+
+// --- zcode WSL staging -------------------------------------------------------
+
+test('homeHasData maps the zcode CLI DB dir marker to zcode', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const present = new Set([`${home}\\.zcode\\cli\\db`]);
+  const ids = homeHasData(home, (p) => present.has(p));
+  assert.deepEqual(ids, ['zcode']);
+});
+
+function zcodeStagingDeps(home, overrides = {}) {
+  const staged = 'C:\\Temp\\token-monitor-zcode-STAGED';
+  const copied = [];
+  const removed = [];
+  const deps = {
+    platform: 'win32',
+    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    readdirSync: () => ['u'],
+    existsSync: (p) => p === `${home}\\.zcode\\cli\\db`,
+    mkdtempSync: () => staged,
+    mkdirSync: () => {},
+    cpSync: (src, dst) => copied.push([src, dst]),
+    statSync: (p) => ({ size: p.endsWith('db.sqlite') ? 2048 : 512 }),
+    rmSync: (p) => removed.push(p)
+  };
+  return Object.assign(deps, { staged, copied, removed }, overrides);
+}
+
+test('stageZcodeHome copies the DB and its WAL sidecars into a temp home', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const deps = zcodeStagingDeps(home);
+  const { stageZcodeHome, ZCODE_DB_MARKER } = require('../../src/shared/wslUsage');
+  const staged = stageZcodeHome(home, deps);
+  assert.equal(staged, deps.staged);
+  assert.deepEqual(deps.copied.map(([src]) => src), [
+    path(home, ZCODE_DB_MARKER, 'db.sqlite'),
+    path(home, ZCODE_DB_MARKER, 'db.sqlite-wal'),
+    path(home, ZCODE_DB_MARKER, 'db.sqlite-shm')
+  ]);
+  function path(root, dir, file) {
+    return `${root}\\${dir.replace(/\//g, '\\')}\\${file}`;
+  }
+});
+
+test('collectWslUsage scans the staged zcode home and merges real usage', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const deps = zcodeStagingDeps(home);
+  const tokscaleCalls = [];
+  const runTokscale = async ({ clients, flags }) => {
+    tokscaleCalls.push({ clients, home: flags[flags.indexOf('--home') + 1] });
+    return { entries: [{ client: 'zcode', sessionId: 's1', model: 'glm-5.3', input: 11, output: 0, cost: 0 }] };
+  };
+  const { bundle, detected } = await collectWslUsage(
+    { clients: 'zcode', trackedClients: 'zcode', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale },
+    deps
+  );
+  assert.deepEqual(detected, ['zcode']);
+  // 3 period scans, all against the staged temp home, never the 9P home.
+  assert.equal(tokscaleCalls.length, 3);
+  assert.ok(tokscaleCalls.every((c) => c.clients === 'zcode' && c.home === deps.staged));
+  assert.equal(bundle.today.clients.zcode, 11);
+  assert.deepEqual(deps.removed, [deps.staged]); // staged home cleaned up
+});
+
+test('collectWslUsage keeps zcode out of the per-home tokscale pass', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const deps = zcodeStagingDeps(home);
+  deps.existsSync = (p) => p === `${home}\\.zcode\\cli\\db` || p === `${home}\\.codex\\sessions`;
+  const passClients = [];
+  const runTokscale = async ({ clients, flags }) => {
+    if (flags[flags.indexOf('--home') + 1] === home) passClients.push(clients);
+    return { entries: [] };
+  };
+  await collectWslUsage(
+    { clients: 'zcode,codex', trackedClients: 'zcode,codex', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale },
+    deps
+  );
+  // The per-home pass must not include zcode (staged scan owns it) but keeps codex.
+  assert.deepEqual([...new Set(passClients)], ['codex']);
+});
+
+test('collectWslUsage logs and skips an oversized zcode DB', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const deps = zcodeStagingDeps(home, {
+    statSync: (p) => ({ size: p.endsWith('db.sqlite') ? 2 * 1024 * 1024 * 1024 : 512 })
+  });
+  const logs = [];
+  let stagedRuns = 0;
+  const runTokscale = async ({ flags }) => {
+    if (flags[flags.indexOf('--home') + 1] === deps.staged) stagedRuns++;
+    return { entries: [] };
+  };
+  const { detected } = await collectWslUsage(
+    { clients: 'zcode', trackedClients: 'zcode', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale, logger: (m) => logs.push(m) },
+    deps
+  );
+  assert.deepEqual(detected, ['zcode']); // still detected, just not scanned
+  assert.equal(stagedRuns, 0);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /too large/);
+});

@@ -1,12 +1,26 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { REASONIX_CLIENT } = require('./reasonixPaths');
 const { buildPromaPeriods, collectPromaRows } = require('./promaUsage');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
+
+// ZCode stores usage in a SQLite DB under `.zcode/cli/db`. Tokscale discovers
+// the file under a `\\wsl$` home but its SQLite read silently returns zero
+// messages over the 9P redirector (same class of issue as hermes WSL homes,
+// which report detected-but-empty), so the DB is staged into a local temp home
+// and tokscale scans the staged copy instead. WAL sidecars are copied alongside
+// so writes not yet checkpointed into the main DB are not lost; a torn copy at
+// worst yields one empty scan, never a crash.
+const ZCODE_CLIENT = 'zcode';
+const ZCODE_DB_MARKER = '.zcode/cli/db';
+const ZCODE_DB_FILES = ['db.sqlite', 'db.sqlite-wal', 'db.sqlite-shm'];
+const ZCODE_STAGE_MAX_BYTES = 512 * 1024 * 1024;
 
 // Relative (Linux-style) paths under a WSL home. If any exists, a tracked client
 // stores data there and the home is worth a tokscale scan. These mirror the roots
@@ -39,6 +53,7 @@ const WSL_DATA_MARKERS = [
   '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks',
   '.local/share/mimocode/mimocode.db',
   '.zcode/projects',
+  '.zcode/cli/db',
   '.kiro/sessions',
   '.local/share/kiro-cli/data.sqlite3',
   '.config/Kiro/User/globalStorage/kiro.kiroagent',
@@ -79,6 +94,7 @@ const MARKER_CLIENTS = {
   '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks': 'kilocode',
   '.local/share/mimocode/mimocode.db': 'micode',
   '.zcode/projects': 'zcode',
+  '.zcode/cli/db': 'zcode',
   '.kiro/sessions': 'kiro',
   '.local/share/kiro-cli/data.sqlite3': 'kiro',
   '.config/Kiro/User/globalStorage/kiro.kiroagent': 'kiro',
@@ -139,6 +155,42 @@ function listRunningWslDistros(deps = {}) {
 // Empty array = no tracked client stores data here.
 function wslHomePath(home, relativePath) {
   return `${home}\\${relativePath.replace(/\//g, '\\')}`;
+}
+
+// Copies a WSL home's zcode SQLite DB (plus WAL sidecars) into a fresh local
+// temp home tokscale can read, and returns the staged home path. Throws when
+// the DB is missing/unreadable or too large to stage; the caller logs and moves
+// on, leaving detection-only attribution for that home.
+function stageZcodeHome(home, deps = {}) {
+  const mkdtempSync = deps.mkdtempSync || fs.mkdtempSync;
+  const mkdirSync = deps.mkdirSync || fs.mkdirSync;
+  const cpSync = deps.cpSync || fs.cpSync;
+  const statSync = deps.statSync || fs.statSync;
+  const dbDir = wslHomePath(home, ZCODE_DB_MARKER);
+  const staged = mkdtempSync(path.join(os.tmpdir(), 'token-monitor-zcode-'));
+  try {
+    const stagedDbDir = path.join(staged, '.zcode', 'cli', 'db');
+    mkdirSync(stagedDbDir, { recursive: true });
+    for (const name of ZCODE_DB_FILES) {
+      const source = `${dbDir}\\${name}`; // Windows-style join: dbDir is a \\wsl$ UNC path
+      let size;
+      try {
+        size = statSync(source).size;
+      } catch (_) {
+        continue; // sidecars are optional; a missing main DB fails at the tokscale scan
+      }
+      if (name === 'db.sqlite' && size > ZCODE_STAGE_MAX_BYTES) {
+        throw new Error(`zcode DB too large to stage (${size} bytes)`);
+      }
+      cpSync(source, path.join(stagedDbDir, name));
+    }
+    return staged;
+  } catch (error) {
+    try {
+      fs.rmSync(staged, { recursive: true, force: true });
+    } catch (_) { /* best-effort cleanup */ }
+    throw error;
+  }
 }
 
 function homeHasData(home, existsSync, readdirSync = fs.readdirSync) {
@@ -205,10 +257,13 @@ async function collectWslUsage(options = {}, deps = {}) {
   // Reasonix aggregate usage is supported on the host, but remains excluded
   // from WSL scans: Tokscale's Windows PathRoot::ReasonixHome conflicts with
   // the Linux-default `.reasonix/stats` path inside WSL. Native session files
-  // are local-only as well.
+  // are local-only as well. zcode is excluded for a different reason: its
+  // SQLite DB reads empty over the 9P redirector, so WSL zcode usage is
+  // collected via the staged-home scan below instead of the per-home tokscale
+  // pass (also preventing double counting once tokscale's UNC read is fixed).
   const tracked = new Set(String(trackedClients).split(',').map((c) => c.trim()).filter(Boolean));
   const clientsCsv = String(clients || '').split(',').map((c) => c.trim()).filter(Boolean)
-    .filter((client) => client !== REASONIX_CLIENT)
+    .filter((client) => client !== REASONIX_CLIENT && client !== ZCODE_CLIENT)
     .join(',');
   for (const home of wslUsageHomes(deps)) {
     // Attribution is marker-based, independent of whether a parser returns data.
@@ -242,6 +297,34 @@ async function collectWslUsage(options = {}, deps = {}) {
         if (typeof logger === 'function') logger(`wsl Proma usage parse failed for ${home}: ${error.message}`);
       }
     }
+    // ZCode usage lives in a SQLite DB, which tokscale cannot read in place
+    // over `\\wsl$` (zero messages; see stageZcodeHome). Stage the DB into a
+    // local temp home and scan that so WSL zcode contributes real usage, not
+    // merely marker detection.
+    if (tracked.has(ZCODE_CLIENT) && homeDataClients.includes(ZCODE_CLIENT) && typeof runTokscale === 'function') {
+      let stagedHome = null;
+      try {
+        stagedHome = stageZcodeHome(home, deps);
+        const stagedPeriods = {
+          today: extractUsageFromTokscale(await runTokscale({ clients: ZCODE_CLIENT, flags: ['--today', '--home', stagedHome], commandTimeoutMs })),
+          month: extractUsageFromTokscale(await runTokscale({ clients: ZCODE_CLIENT, flags: ['--month', '--home', stagedHome], commandTimeoutMs })),
+          allTime: extractUsageFromTokscale(await runTokscale({ clients: ZCODE_CLIENT, flags: ['--since', allTimeSince, '--home', stagedHome], commandTimeoutMs }))
+        };
+        if (typeof decoratePeriods === 'function') decoratePeriods(stagedPeriods, home);
+        bundle.today = mergePeriods(bundle.today, stagedPeriods.today);
+        bundle.month = mergePeriods(bundle.month, stagedPeriods.month);
+        bundle.allTime = mergePeriods(bundle.allTime, stagedPeriods.allTime);
+      } catch (error) {
+        if (typeof logger === 'function') logger(`wsl ZCode usage scan failed for ${home}: ${error.message}`);
+      } finally {
+        if (stagedHome) {
+          const rmSync = deps.rmSync || fs.rmSync;
+          try {
+            rmSync(stagedHome, { recursive: true, force: true });
+          } catch (_) { /* best-effort cleanup */ }
+        }
+      }
+    }
     // Tokscale 4.6+ keeps explicit --home scans isolated from host-native roots,
     // so every requested client can be passed through for each discovered home.
     // Keep the empty guard because an empty --client expands to all clients.
@@ -270,11 +353,13 @@ async function collectWslUsage(options = {}, deps = {}) {
 module.exports = {
   WSL_DATA_MARKERS,
   MARKER_CLIENTS,
+  ZCODE_DB_MARKER,
   collectWslUsage,
   emptyWslBundle,
   homeHasData,
   isWslInstalled,
   listRunningWslDistros,
   probeWslState,
+  stageZcodeHome,
   wslUsageHomes
 };
