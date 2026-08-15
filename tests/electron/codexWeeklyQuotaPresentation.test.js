@@ -7,15 +7,14 @@ const test = require('node:test');
 
 const root = path.resolve(__dirname, '..', '..');
 
-test('Codex panel collapses the endpoint-net weekly estimate by default', () => {
+test('Codex panel renders the endpoint-net weekly estimate directly', () => {
   const renderer = fs.readFileSync(path.join(root, 'src', 'electron', 'renderer', 'app.js'), 'utf8');
   const i18n = fs.readFileSync(path.join(root, 'src', 'electron', 'renderer', 'i18n.js'), 'utf8');
   assert.match(renderer, /provider\.weeklyQuotaValueEstimate/);
   assert.match(renderer, /weeklyValueEstimate/);
   assert.doesNotMatch(renderer, /currentDeviceUsage/);
-  assert.match(renderer, /codex-quota-details-panel accordion-animated-container/);
-  assert.match(renderer, /aria-expanded/);
-  assert.match(renderer, /state\.codexQuotaDetailsExpanded/);
+  assert.doesNotMatch(renderer, /codex-quota-details/);
+  assert.doesNotMatch(renderer, /codexQuotaDetailsExpanded/);
   const collectingHelp = i18n.split('\n').filter((line) => line.includes("'limits.codex.weeklyValueCollectingHelp'"));
   assert.equal(collectingHelp.length, 5);
   assert.ok(collectingHelp.every((line) => line.includes('{required}')));

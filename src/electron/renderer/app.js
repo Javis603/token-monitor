@@ -343,7 +343,6 @@ state.fixedPeriodHistoryPromise = null;
 state.fixedPeriodHistoryCoordinator = null;
 state.fixedPeriodSnapshot = null;
 state.periodMenuOpen = false;
-state.codexQuotaDetailsExpanded = new Set();
 let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
@@ -4581,26 +4580,6 @@ function renderProviderWindows(provider, color) {
     }
     const quotaEstimate = provider.weeklyQuotaValueEstimate;
     if (quotaEstimate) {
-      const detailsKey = String(provider.accountKey || provider.sourceDeviceId || 'codex');
-      const detailsExpanded = state.codexQuotaDetailsExpanded.has(detailsKey);
-      const details = document.createElement('div');
-      details.className = 'codex-quota-details limit-window-wide';
-      const detailsToggle = document.createElement('button');
-      detailsToggle.type = 'button';
-      detailsToggle.className = 'codex-quota-details-toggle';
-      detailsToggle.setAttribute('aria-expanded', String(detailsExpanded));
-      const detailsLabel = document.createElement('span');
-      detailsLabel.textContent = t('limits.codex.quotaDetails');
-      const detailsChevron = document.createElement('span');
-      detailsChevron.className = 'codex-quota-details-chevron';
-      detailsChevron.setAttribute('aria-hidden', 'true');
-      detailsChevron.textContent = '⌄';
-      detailsToggle.append(detailsLabel, detailsChevron);
-      const detailsPanel = document.createElement('div');
-      detailsPanel.className = `codex-quota-details-panel accordion-animated-container${detailsExpanded ? '' : ' hidden'}`;
-      detailsPanel.setAttribute('aria-hidden', String(!detailsExpanded));
-      const detailsInner = document.createElement('div');
-      detailsInner.className = 'codex-quota-details-inner accordion-animation-inner';
       const ready = quotaEstimate.status === 'ready' && Number.isFinite(quotaEstimate.estimatedUsd);
       const estimateNode = limitWindowNode(
         t('limits.codex.weeklyValueEstimate'),
@@ -4620,18 +4599,7 @@ function renderProviderWindows(provider, color) {
             span: quotaEstimate.spanPercent || 0,
             required: quotaEstimate.requiredSampleCount || 3
           });
-      detailsInner.append(estimateNode);
-      detailsPanel.append(detailsInner);
-      detailsToggle.addEventListener('click', () => {
-        const expanded = !state.codexQuotaDetailsExpanded.has(detailsKey);
-        if (expanded) state.codexQuotaDetailsExpanded.add(detailsKey);
-        else state.codexQuotaDetailsExpanded.delete(detailsKey);
-        detailsToggle.setAttribute('aria-expanded', String(expanded));
-        detailsPanel.setAttribute('aria-hidden', String(!expanded));
-        detailsPanel.classList.toggle('hidden', !expanded);
-      });
-      details.append(detailsToggle, detailsPanel);
-      windows.append(details);
+      windows.append(estimateNode);
     }
     const resetNode = codexResetCreditsNode(provider.resetCredits);
     if (resetNode) windows.append(resetNode);
