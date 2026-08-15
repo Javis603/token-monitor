@@ -23,6 +23,7 @@ const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const motionPreferenceApi = require('./motionPreference');
 const { createClaudeWebFetch } = require('./claudeWebFetch');
+const { createElectronLimitsFetch } = require('./limitsFetch');
 const {
   expandedBoundsForCollapse,
   normalWindowBounds,
@@ -41,40 +42,21 @@ const {
 // event and Electron pops a "JavaScript error in the main process" dialog.
 installSafeStdout();
 const electronClaudeWebFetch = createClaudeWebFetch(net);
-// Chromium's network stack (unlike Node's undici-based global fetch) honors
-// the OS proxy configuration with zero setup, which matters because a GUI
-// app launched from the Dock/Start Menu never inherits a shell's
-// HTTP_PROXY/HTTPS_PROXY env vars in the first place. Wrapped instead of
-// passed by reference so `net.fetch`'s internal `this` never depends on how
-// the deps object destructures it.
-//
-// Neither request option is a preference. `credentials: 'omit'` is forced
-// last: net.fetch issues from the default session, so anything else persists a
-// provider's Set-Cookie into userData and then *replaces* an explicit Cookie
-// header with whatever that jar holds — one stray cookie strands every
-// cookie-backed provider on `unauthorized`, and re-pasting the credential
-// cannot clear it. `referrerPolicy` is only a default, because a caller may
-// have a reason to tighten it: Chromium cancels a request whose explicit
-// Referer is cross-origin and carries a path (net::ERR_BLOCKED_BY_CLIENT), and
-// a main-process fetch never generates a referrer on its own, so relaxing the
-// policy can only affect a header a provider wrote deliberately.
-function electronNetFetch(input, init = {}) {
-  return net.fetch(input, { referrerPolicy: 'unsafe-url', ...init, credentials: 'omit' });
+// One transport for every widget provider call that resolves through
+// `deps.fetch` — see limitsFetch.js for why the branch and the request options
+// are what they are. Probes that build their own transport inherit neither
+// branch: cursorProbe and antigravityProbe on node:https, Claude Web on the
+// claudeWebFetch above, the CLI fallbacks on a spawned binary.
+function electronLimitsFetch() {
+  return createElectronLimitsFetch({ net, env: process.env });
 }
 
-// Transport policy belongs to the runtime, not to a provider: one branch is
-// chosen here for every probe that resolves through deps.fetch, instead of each
-// provider deciding for itself. Probes that build their own transport inherit
-// neither branch — cursorProbe and antigravityProbe on node:https, Claude Web on
-// the claudeWebFetch injected below, the CLI fallbacks on a spawned binary. An
-// explicitly configured proxy env wins over the OS setting, which keeps the
-// documented env behavior working: lowercase precedence, ALL_PROXY, NO_PROXY,
-// failing closed on an invalid proxy, and credentials embedded in the proxy URL
-// — Chromium's proxy rules accept none.
-function electronLimitsFetch() {
-  const proxy = resolveProxyConfig(process.env);
-  if (proxy.httpProxy || proxy.httpsProxy) return createOutboundFetch(process.env);
-  return electronNetFetch;
+// Settings-side provider probes take the same transport as the collector's.
+// They are what an account save is gated on, so leaving them on the global
+// fetch would refuse to save an account on exactly the machines this transport
+// exists for.
+function opencodeWebDeps() {
+  return { fetch: electronLimitsFetch() };
 }
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs, visibleDiagnosticRoots } = require('../shared/collector');
@@ -184,6 +166,7 @@ function opencodeAmbientKeyActive(profiles) {
 async function probeOpenCodeApiKey(apiKey) {
   try {
     return await opencodeGoApi.fetchGoApi(apiKey, {
+      fetch: electronLimitsFetch(),
       signal: AbortSignal.timeout(OPENCODE_API_PROBE_TIMEOUT_MS)
     });
   } catch (_) {
@@ -191,7 +174,6 @@ async function probeOpenCodeApiKey(apiKey) {
   }
 }
 const openrouterLimits = require('../shared/openrouterLimits');
-const { createOutboundFetch, resolveProxyConfig } = require('../shared/outboundFetch');
 const thirdPartyLimits = require('../shared/thirdPartyLimits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
@@ -6518,8 +6500,8 @@ app.whenReady().then(() => {
     }
     try {
       const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(cookie, {}),
-        opencodeWeb.fetchZen(cookie, {})
+        opencodeWeb.fetchGoWeb(cookie, opencodeWebDeps()),
+        opencodeWeb.fetchZen(cookie, opencodeWebDeps())
       ]);
       if (opencodeWeb.summarizeLink(go, zen).expired) {
         return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
@@ -6645,8 +6627,8 @@ app.whenReady().then(() => {
           }];
         }
         const [go, zen, apiProbe] = await Promise.all([
-          opencodeWeb.fetchGoWeb(profile.cookie, {}),
-          opencodeWeb.fetchZen(profile.cookie, {}),
+          opencodeWeb.fetchGoWeb(profile.cookie, opencodeWebDeps()),
+          opencodeWeb.fetchZen(profile.cookie, opencodeWebDeps()),
           apiKey ? probeOpenCodeApiKey(apiKey) : null
         ]);
         const summary = { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd };
@@ -6671,8 +6653,8 @@ app.whenReady().then(() => {
     const envCookie = process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '';
     if (envCookie && !entries.some(([, p]) => p.cookie === envCookie)) {
       const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(envCookie, {}),
-        opencodeWeb.fetchZen(envCookie, {})
+        opencodeWeb.fetchGoWeb(envCookie, opencodeWebDeps()),
+        opencodeWeb.fetchZen(envCookie, opencodeWebDeps())
       ]);
       let envKey = 'env';
       for (let i = 1; Object.prototype.hasOwnProperty.call(profiles, envKey); i += 1) {
@@ -6801,8 +6783,8 @@ app.whenReady().then(() => {
         const cookie = opencodeWeb.sanitizeCookieHeader(raw);
         if (!cookie) return { ok: false, error: 'Empty cookie' };
         const [go, zen] = await Promise.all([
-          opencodeWeb.fetchGoWeb(cookie, {}),
-          opencodeWeb.fetchZen(cookie, {})
+          opencodeWeb.fetchGoWeb(cookie, opencodeWebDeps()),
+          opencodeWeb.fetchZen(cookie, opencodeWebDeps())
         ]);
         if (opencodeWeb.summarizeLink(go, zen).expired) {
           return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
