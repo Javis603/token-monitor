@@ -87,11 +87,11 @@ const LIMIT_PROVIDERS = [
   { id: 'zai', label: 'GLM' },
   { id: 'zaiteam', label: 'GLM Team' },
   { id: 'kiro', label: 'Kiro' },
+  { id: 'qoder', label: 'Qoder' },
   { id: 'deepseek', label: 'DeepSeek' },
   { id: 'openrouter', label: 'OpenRouter' },
   { id: 'minimax', label: 'Minimax' },
   { id: 'volcengine', label: 'Volcengine' },
-  { id: 'qoder', label: 'Qoder' },
   { id: 'ollama', label: 'Ollama' },
   { id: 'thirdparty', label: 'Third-party APIs' }
 ];

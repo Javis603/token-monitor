@@ -24,7 +24,8 @@ function readmeTrackedClientIds() {
   const iconToClient = {
     'hermes-agent': 'hermes',
     xai: 'grok',
-    'mimo-code': 'micode'
+    'mimo-code': 'micode',
+    qoder: 'qodercn'
   };
   return fs.readFileSync(path.join(rootDir, 'README.md'), 'utf8')
     .split('\n')
