@@ -70,7 +70,7 @@ test('catalog parsing preserves full keys and keeps null rates unavailable', (t)
   });
 });
 
-test('catalog parsing rejects coercive rate values', (t) => {
+test('catalog parsing rejects a source with coercive rate values', (t) => {
   resetPricingCaches(t);
   const dir = catalogDir(t);
   writeCatalog(dir, 'pricing-litellm.json', {
@@ -79,20 +79,12 @@ test('catalog parsing rejects coercive rate values', (t) => {
       boolean: { input_cost_per_token: true, output_cost_per_token: false },
       whitespace: { input_cost_per_token: '   ', output_cost_per_token: [] },
       object: { input_cost_per_token: {}, output_cost_per_token: [2] },
-      numeric: { input_cost_per_token: '1.5e-7', output_cost_per_token: 2e-7 }
+      numericString: { input_cost_per_token: '1.5e-7', output_cost_per_token: 2e-7 }
     }
   });
 
   const catalog = tokscalePricingCatalog({ configDir: dir });
-  assert.equal(catalog.exact.has('boolean'), false);
-  assert.equal(catalog.exact.has('whitespace'), false);
-  assert.equal(catalog.exact.has('object'), false);
-  assert.deepEqual(catalog.exact.get('numeric'), {
-    inputCostPerToken: 1.5e-7,
-    outputCostPerToken: 2e-7,
-    cacheReadInputTokenCost: undefined,
-    cacheCreationInputTokenCost: undefined
-  });
+  assert.equal(catalog.exact.size, 0);
 });
 
 test('bare exact key wins over earlier reseller terminal collisions', (t) => {
@@ -153,6 +145,39 @@ test('provider-scoped ids require their own full exact key', (t) => {
     1.4e-7
   );
   assert.equal(readTokscalePricingCatalog('reseller/deepseek-v4-flash', { configDir: dir }), null);
+});
+
+test('bare routing labels never resolve through terminal matches', (t) => {
+  resetPricingCaches(t);
+  const dir = catalogDir(t);
+  writeCatalog(dir, 'pricing-litellm.json', {
+    timestamp: 0,
+    data: {
+      'morph/auto': { input_cost_per_token: 8.5e-7, output_cost_per_token: 1.55e-6 },
+      'someone/agent_review': { input_cost_per_token: 1e-7, output_cost_per_token: 2e-7 }
+    }
+  });
+
+  assert.equal(readTokscalePricingCatalog('auto', { configDir: dir }), null);
+  assert.equal(readTokscalePricingCatalog('agent_review', { configDir: dir }), null);
+  assert.equal(readTokscalePricingCatalog('morph/auto', { configDir: dir }).inputCostPerToken, 8.5e-7);
+});
+
+test('generic bare ids do not borrow provider terminal matches', (t) => {
+  resetPricingCaches(t);
+  const dir = catalogDir(t);
+  writeCatalog(dir, 'pricing-litellm.json', {
+    timestamp: 0,
+    data: {
+      default: { input_cost_per_token: 3e-7, output_cost_per_token: 4e-7 },
+      'vendor/default': { input_cost_per_token: 1e-7, output_cost_per_token: 2e-7 },
+      'vendor/router': { input_cost_per_token: 5e-7, output_cost_per_token: 6e-7 }
+    }
+  });
+
+  assert.equal(readTokscalePricingCatalog('default', { configDir: dir }).inputCostPerToken, 3e-7);
+  assert.equal(readTokscalePricingCatalog('router', { configDir: dir }), null);
+  assert.equal(readTokscalePricingCatalog('vendor/router', { configDir: dir }).inputCostPerToken, 5e-7);
 });
 
 test('catalog parsing skips malformed and future-dated sources', (t) => {
@@ -217,6 +242,27 @@ test('catalog discovery uses a legacy root only when the canonical file is missi
   writeRawCatalog(canonical, 'pricing-litellm.json', 'not json {');
   resetTokscaleCatalogCache();
   assert.equal(readTokscalePricingCatalog('legacy', { catalogDirs: [canonical, legacy] }), null);
+});
+
+test('catalog discovery skips a malformed legacy source and tracks every candidate revision', (t) => {
+  resetPricingCaches(t);
+  const canonical = catalogDir(t);
+  const firstLegacy = catalogDir(t);
+  const secondLegacy = catalogDir(t);
+  writeRawCatalog(firstLegacy, 'pricing-litellm.json', 'not json {');
+  writeCatalog(secondLegacy, 'pricing-litellm.json', {
+    timestamp: 0,
+    data: { model: { input_cost_per_token: 2, output_cost_per_token: 2 } }
+  });
+  const options = { catalogDirs: [canonical, firstLegacy, secondLegacy] };
+
+  assert.equal(readTokscalePricingCatalog('model', options).inputCostPerToken, 2);
+
+  writeCatalog(firstLegacy, 'pricing-litellm.json', {
+    timestamp: 0,
+    data: { model: { input_cost_per_token: 111, output_cost_per_token: 111 } }
+  });
+  assert.equal(readTokscalePricingCatalog('model', options).inputCostPerToken, 111);
 });
 
 test('resolvePromaPricing falls back to the local catalog when the lookup fails offline', async (t) => {
@@ -332,6 +378,13 @@ test('normalizePromaPricing rejects coercive command rates', () => {
     outputCostPerToken: [],
     cacheReadInputTokenCost: ' ',
     cacheCreationInputTokenCost: {}
+  } }), null);
+});
+
+test('normalizePromaPricing rejects numeric-string command rates', () => {
+  assert.equal(normalizePromaPricing({ pricing: {
+    inputCostPerToken: '1.5e-7',
+    outputCostPerToken: '2e-7'
   } }), null);
 });
 

@@ -222,6 +222,27 @@ const promaPricingCache = new Map();
 // directly (zero network) as the offline fallback: when the command fails, the
 // catalog it would have fallen back to is already on disk.
 const TOKSCALE_PRICING_CATALOG_FILES = ['pricing-litellm.json', 'pricing-openrouter.json', 'pricing-models-dev.json'];
+const TOKSCALE_MODEL_PRICING_RATE_FIELDS = [
+  'input_cost_per_token',
+  'input_cost_per_token_above_128k_tokens',
+  'input_cost_per_token_above_200k_tokens',
+  'input_cost_per_token_above_256k_tokens',
+  'input_cost_per_token_above_272k_tokens',
+  'output_cost_per_token',
+  'output_cost_per_token_above_128k_tokens',
+  'output_cost_per_token_above_200k_tokens',
+  'output_cost_per_token_above_256k_tokens',
+  'output_cost_per_token_above_272k_tokens',
+  'cache_creation_input_token_cost',
+  'cache_creation_input_token_cost_above_200k_tokens',
+  'cache_read_input_token_cost',
+  'cache_read_input_token_cost_above_200k_tokens',
+  'cache_read_input_token_cost_above_272k_tokens'
+];
+const TOKSCALE_ROUTING_LABELS = new Set(['auto', 'agent_review']);
+const TOKSCALE_TERMINAL_FALLBACK_BLOCKLIST = new Set([
+  'auto', 'mini', 'chat', 'base', 'claude', 'anthropic', 'gemini', 'model', 'router', 'default'
+]);
 const CATALOG_PRICING_FIELDS = [
   'inputCostPerToken',
   'outputCostPerToken',
@@ -229,7 +250,7 @@ const CATALOG_PRICING_FIELDS = [
   'cacheCreationInputTokenCost'
 ];
 
-// Parsed catalog, invalidated by the selected files' path+size+mtime.
+// Parsed catalog, invalidated by every selected candidate's file metadata.
 let tokscaleCatalogCache = { revision: '', catalog: null, recheckAtMs: 0 };
 
 function normalizeCatalogModelKey(key) {
@@ -244,13 +265,7 @@ function terminalCatalogModelKey(key) {
 function normalizePricingRate(value, key) {
   const raw = value?.[key];
   if (raw === null || raw === undefined) return undefined;
-  if (typeof raw !== 'number' && typeof raw !== 'string') return undefined;
-  if (typeof raw === 'string') {
-    const text = raw.trim();
-    if (!/^(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) return undefined;
-  }
-  const n = typeof raw === 'number' ? raw : Number(raw.trim());
-  return Number.isFinite(n) && n >= 0 ? n : undefined;
+  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 ? raw : undefined;
 }
 
 function normalizeCatalogPricing(value) {
@@ -275,29 +290,66 @@ function pricingCatalogDirs(options = {}) {
   return tokscaleCacheDirs(options);
 }
 
-function pricingCatalogFile(name, dirs) {
-  for (const dir of dirs) {
-    const file = path.join(dir, name);
-    try {
-      const stat = fs.statSync(file);
-      return { file, revision: `${file}:${stat.size}:${stat.mtimeMs}` };
-    } catch (error) {
-      if (error?.code === 'ENOENT') continue;
-      // Upstream only tries a legacy path when the canonical file is missing;
-      // a permission or I/O error at that path fails this source closed.
-      return { file, revision: `${file}:error:${error?.code || 'unknown'}` };
-    }
+function inspectPricingCatalogFile(file) {
+  try {
+    const stat = fs.statSync(file);
+    return {
+      file,
+      state: 'present',
+      revision: `${file}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.mode}`
+    };
+  } catch (error) {
+    const code = error?.code || 'unknown';
+    return { file, state: code === 'ENOENT' ? 'missing' : 'error', revision: `${file}:${code}` };
   }
-  return { file: '', revision: `${name}:missing` };
+}
+
+function pricingCatalogSource(name, dirs) {
+  if (dirs.length === 0) return { candidates: [], revision: `${name}:missing` };
+  const canonical = inspectPricingCatalogFile(path.join(dirs[0] || '', name));
+  // Canonical is authoritative whenever it exists or cannot be inspected.
+  // Only ENOENT activates upstream's ordered legacy find_map fallback.
+  const probes = canonical.state === 'missing'
+    ? [canonical, ...dirs.slice(1).map((dir) => inspectPricingCatalogFile(path.join(dir, name)))]
+    : [canonical];
+  return {
+    candidates: probes.filter((entry) => entry.state !== 'missing'),
+    revision: probes.map((entry) => entry.revision).join('|')
+  };
 }
 
 function tokscalePricingCatalogSnapshot(options = {}) {
   const dirs = pricingCatalogDirs(options);
-  const files = TOKSCALE_PRICING_CATALOG_FILES.map((name) => pricingCatalogFile(name, dirs));
+  const files = TOKSCALE_PRICING_CATALOG_FILES.map((name) => pricingCatalogSource(name, dirs));
   return {
     files,
     revision: `${dirs.join('|')}::${files.map((entry) => entry.revision).join('|')}`
   };
+}
+
+function parseTokscalePricingCatalogFile(file) {
+  let doc;
+  try {
+    doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (_) {
+    return null;
+  }
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return null;
+  if (!Number.isSafeInteger(doc.timestamp) || doc.timestamp < 0) return null;
+  if (!doc.data || typeof doc.data !== 'object' || Array.isArray(doc.data)) return null;
+  // Tokscale deserializes the whole HashMap<String, ModelPricing> before using
+  // it. A wrong type in any known Option<f64> field makes that source invalid;
+  // do not salvage rows from a cache Tokscale itself would reject.
+  for (const value of Object.values(doc.data)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    for (const field of TOKSCALE_MODEL_PRICING_RATE_FIELDS) {
+      const raw = value[field];
+      if (raw !== null && raw !== undefined && (typeof raw !== 'number' || !Number.isFinite(raw))) {
+        return null;
+      }
+    }
+  }
+  return doc;
 }
 
 // Preserve complete catalog keys. A bare model id may use a terminal-key
@@ -319,25 +371,19 @@ function tokscalePricingCatalog(options = {}) {
   const nowSeconds = Math.floor(nowMs / 1000);
   let recheckAtMs = 0;
   for (const source of snapshot.files) {
-    if (!source.file) continue;
-    let doc;
-    try {
-      doc = JSON.parse(fs.readFileSync(source.file, 'utf8'));
-    } catch (_) {
-      continue; // missing or malformed cache file
+    let doc = null;
+    for (const candidate of source.candidates) {
+      doc = parseTokscalePricingCatalogFile(candidate.file);
+      if (doc) break;
     }
+    if (!doc) continue;
     const timestamp = doc?.timestamp;
-    if (!Number.isSafeInteger(timestamp) || timestamp < 0) continue;
     if (timestamp > nowSeconds) {
       const eligibleAtMs = timestamp * 1000;
       recheckAtMs = recheckAtMs ? Math.min(recheckAtMs, eligibleAtMs) : eligibleAtMs;
       continue;
     }
-    const data = doc && typeof doc === 'object' && !Array.isArray(doc.data)
-      && doc.data && typeof doc.data === 'object' ? doc.data : null;
-    if (!data) continue;
-    for (const [key, value] of Object.entries(data)) {
-      if (!value || typeof value !== 'object') continue;
+    for (const [key, value] of Object.entries(doc.data)) {
       const modelId = normalizeCatalogModelKey(key);
       if (!modelId) continue;
       const pricing = normalizeCatalogPricing(value);
@@ -358,12 +404,16 @@ function tokscalePricingCatalog(options = {}) {
 function readTokscalePricingCatalog(modelId, options = {}) {
   const key = String(modelId || '').trim().toLowerCase();
   if (!key) return null;
+  // Bare router labels never identify the model that actually served usage.
+  // A qualified key such as morph/auto remains eligible for exact lookup.
+  if (TOKSCALE_ROUTING_LABELS.has(key)) return null;
   const catalog = tokscalePricingCatalog(options);
   const exact = catalog.exact.get(key);
   if (exact) return exact;
   // A provider-scoped id that does not exist exactly must not borrow another
   // provider's terminal match.
   if (key.includes('/')) return null;
+  if (TOKSCALE_TERMINAL_FALLBACK_BLOCKLIST.has(key)) return null;
   const candidates = catalog.byTerminal.get(key) || [];
   if (candidates.length === 0) return null;
   const fingerprints = new Set(candidates.map(({ pricing }) => catalogPricingFingerprint(pricing)));

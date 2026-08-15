@@ -8,7 +8,21 @@ const path = require('node:path');
 // OS and whether we run via `npm start` (dev) or the packaged app. We read the
 // same process.env the collector passes to the spawned binary, so TOKSCALE_CONFIG_DIR
 // and the per-OS rules stay in lockstep.
-function tokscaleConfigDir({ env = process.env, platform = process.platform, homeDir = os.homedir() } = {}) {
+function windowsNativeAbsolutePath(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  return /^[A-Za-z]:[\\/]/.test(raw) || /^[\\/]{2}[^\\/]+[\\/][^\\/]+/.test(raw);
+}
+
+function tokscaleHomeDir({ env, platform, homeDir }) {
+  if (typeof homeDir === 'string' && homeDir.length > 0) return homeDir;
+  if (platform === 'win32' && windowsNativeAbsolutePath(env.HOME)) return env.HOME.trim();
+  return os.homedir();
+}
+
+function tokscaleConfigDir(options = {}) {
+  const env = options.env || process.env;
+  const platform = options.platform || process.platform;
+  const homeDir = tokscaleHomeDir({ env, platform, homeDir: options.homeDir });
   const override = env.TOKSCALE_CONFIG_DIR;
   if (typeof override === 'string' && override.length > 0) return override;
 
@@ -30,7 +44,10 @@ function tokscaleConfigDir({ env = process.env, platform = process.platform, hom
 // Mirror tokscale-core's canonical cache root plus its two pre-#470 legacy
 // fallbacks. An explicit TOKSCALE_CONFIG_DIR is hermetic upstream, so it must
 // never reach back into a real profile's legacy cache.
-function tokscaleCacheDirs({ env = process.env, platform = process.platform, homeDir = os.homedir() } = {}) {
+function tokscaleCacheDirs(options = {}) {
+  const env = options.env || process.env;
+  const platform = options.platform || process.platform;
+  const homeDir = tokscaleHomeDir({ env, platform, homeDir: options.homeDir });
   const canonical = path.join(tokscaleConfigDir({ env, platform, homeDir }), 'cache');
   const override = env.TOKSCALE_CONFIG_DIR;
   if (typeof override === 'string' && override.length > 0) return [canonical];

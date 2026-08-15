@@ -43,6 +43,24 @@ test('Windows falls back to <home>/AppData/Roaming when APPDATA unset', () => {
   );
 });
 
+test('Windows honors a native absolute HOME override when no home is injected', () => {
+  assert.deepEqual(
+    tokscaleCacheDirs({ platform: 'win32', env: { HOME: 'D:\\sandbox\\home' } }),
+    [
+      path.join('D:\\sandbox\\home', 'AppData', 'Roaming', 'tokscale', 'cache'),
+      path.join('D:\\sandbox\\home', 'AppData', 'Local', 'tokscale'),
+      path.join('D:\\sandbox\\home', '.cache', 'tokscale')
+    ]
+  );
+});
+
+test('Windows ignores POSIX-shaped and drive-relative HOME overrides', () => {
+  for (const home of ['/home/u', 'C:relative']) {
+    const dirs = tokscaleCacheDirs({ platform: 'win32', env: { HOME: home } });
+    assert.equal(dirs.some((dir) => dir.includes(home)), false);
+  }
+});
+
 test('Linux honors absolute XDG_CONFIG_HOME', () => {
   assert.equal(
     tokscaleConfigDir({ platform: 'linux', homeDir: '/home/u', env: { XDG_CONFIG_HOME: '/xdg' } }),
