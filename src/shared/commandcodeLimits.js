@@ -77,9 +77,11 @@ function isCommandcodeAuthCookie(name) {
 //
 // One limitation to know about: GOAT and Pro publish per-model monthly
 // allowances on top of the plan total, and the only live payload behind these
-// numbers is a Go account. The plan-wide reading is what the docs describe
-// ("all the slices add up to one plan") and what the API's own single weekly cap
-// implies, but a real GOAT or Pro capture has not confirmed it.
+// numbers is a Go account. The plan-wide reading is what the docs describe — on
+// those two plans a credit is a usage-value unit drawn against the single plan
+// pool, so a lower-allowance model spends more than one credit per dollar of
+// usage rather than opening a pool of its own — and what the API's own single
+// weekly cap implies. A real GOAT or Pro capture has still not confirmed it.
 const COMMANDCODE_PLANS = Object.freeze({
   'individual-go': { label: 'Go', monthlyCreditsUsd: 10, fiveHourCapUsd: 3, weeklyCapUsd: 6 },
   'individual-goat': { label: 'GOAT', monthlyCreditsUsd: 70, fiveHourCapUsd: 14, weeklyCapUsd: 35 },
@@ -290,8 +292,11 @@ function parseCommandcodeSubscription(body) {
   if (!planId) throw new Error('missing planId');
   return {
     planId,
-    // The account behind the subscription, not the subscription itself: a
-    // cancel-and-resubscribe issues a new `id` for the same person.
+    // Prefer the account over the subscription: a cancel-and-resubscribe issues
+    // a new `id` to the same person, so `id` is the last resort before falling
+    // back to the credential. A live payload carries the user id twice, under
+    // `userId` and again in `metadata`; the rest of the ladder is for shapes
+    // that carry only one of them.
     accountId: String(
       body.data.userId
       ?? body.data.user_id
@@ -341,30 +346,31 @@ async function fetchJson(url, cookie, deadlineMs, deps, parentSignal = deps.sign
 }
 
 // The plan allowance is the one number here that is not read off the wire, so it
-// can go stale silently. Two wire values bound it from below and neither can
-// legitimately exceed it: the remaining grant is part of the allowance, and a
-// rolling weekly cap above the monthly grant could never be reached. When either
-// does, the catalogue entry is wrong — drop the denominator and show money
-// rather than a meter derived from a bad total.
+// can go stale silently. The wire has to corroborate it before it becomes a
+// denominator: the published 5-hour and weekly caps must be exactly the ones
+// this account reports, and the remaining grant must fit inside the allowance.
+// Anything else ships the money with no meter.
 //
-// There is deliberately no check the other way. Nothing on the wire contradicts
-// an allowance that is too LARGE, so an entry that under-reports usage would
-// pass this and still be wrong. That is why the values come from the published
-// plan pages: verify them there, not against a ratio invented here.
+// Requiring the caps to be PRESENT is what makes this fail closed, and it is
+// deliberate. They are the only signal that catches a catalogued grant which has
+// since gone UP — nothing about a remaining balance contradicts a total that is
+// too large — so accepting a response that carries no caps would trust the
+// catalogue in precisely the case with no evidence behind it. Every published
+// plan has both caps, and a live account reports them before either window is
+// touched (with `resetAt: 0`), so their absence means the shape moved rather
+// than that the plan is unmetered.
+//
+// What this does not do is establish what `monthlyCredits` MEANS on a plan whose
+// payload nobody here has seen. It pins a catalogue entry to the plan it was
+// copied from and catches repricing; it cannot detect a plan that reports its
+// grant in some other unit while still publishing familiar caps.
 function trustedMonthlyAllowance(plan, { monthlyRemaining, fiveHourCap, weeklyCap }) {
   const allowance = plan?.monthlyCreditsUsd ?? null;
   if (allowance === null || allowance <= 0) return null;
   if (monthlyRemaining > allowance) return null;
-  // The published caps pin the plan the catalogued grant was copied from, and
-  // the wire reports what this account's caps actually are. Disagreement means
-  // the entry no longer describes this plan, which is the only signal that
-  // catches a grant that has since gone UP — the bound above cannot, because
-  // nothing about a remaining balance contradicts a total that is too large.
-  // A cap tightened without a repriced grant would trip this too; that costs a
-  // meter and keeps the money, which is the direction to be wrong in.
-  if (fiveHourCap !== null && fiveHourCap !== plan.fiveHourCapUsd) return null;
-  if (weeklyCap !== null && weeklyCap !== plan.weeklyCapUsd) return null;
-  if (weeklyCap !== null && weeklyCap > allowance) return null;
+  if (fiveHourCap === null || weeklyCap === null) return null;
+  if (fiveHourCap !== plan.fiveHourCapUsd) return null;
+  if (weeklyCap !== plan.weeklyCapUsd) return null;
   return allowance;
 }
 

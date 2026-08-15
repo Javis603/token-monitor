@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const {
   COMMANDCODE_CREDITS_URL,
+  COMMANDCODE_PLANS,
   COMMANDCODE_SUBSCRIPTIONS_URL,
   commandcodeCookie,
   fetchCommandcodeLimits,
@@ -16,7 +17,9 @@ const {
 const SESSION_COOKIE = '__Secure-commandcode_prod_.session_token=tok';
 const SESSION_DATA_COOKIE = '__Secure-commandcode_prod_.session_data=data';
 
-// Captured from api.commandcode.ai for an active `individual-go` account.
+// A partly-spent `individual-go` account: the live shape from
+// api.commandcode.ai (see the live-capture test below) with the grant drawn
+// down, which is the state most of these tests need.
 const CREDITS_BODY = {
   credits: {
     belowThreshold: false,
@@ -25,6 +28,12 @@ const CREDITS_BODY = {
     purchasedCredits: 0,
     premiumMonthlyCredits: 0,
     opensourceMonthlyCredits: 8.7784
+  },
+  windowLimits: {
+    limited: true,
+    exceeded: null,
+    fiveHour: { used: 1.2216, cap: 3, exceeded: false, resetAt: 1786700000000 },
+    weekly: { used: 1.2216, cap: 6, exceeded: false, resetAt: 1787000000000 }
   }
 };
 
@@ -33,6 +42,8 @@ const SUBSCRIPTION_BODY = {
   data: {
     id: 'sub_1TTzt3DSZgxV3MJKG4ClCWpn',
     status: 'active',
+    userId: '015d654d-redacted',
+    metadata: { commandCode: 'true', commandCodeUserId: '015d654d-redacted' },
     currentPeriodStart: '2026-05-06T07:28:50.000Z',
     currentPeriodEnd: '2026-06-06T07:28:50.000Z',
     planId: 'individual-go'
@@ -328,8 +339,8 @@ test('a stale plan allowance is dropped rather than used as a bad denominator', 
   // with more left in it than the plan supposedly grants, both say the
   // catalogue entry has gone stale — the meter is dropped, the money stays.
   const cases = [
-    { monthlyCredits: 10, windowLimits: { weekly: { cap: 25, used: 1 } } },
-    { monthlyCredits: 42, windowLimits: { weekly: { cap: 6, used: 0 } } }
+    { monthlyCredits: 10, windowLimits: { fiveHour: { cap: 3, used: 0 }, weekly: { cap: 25, used: 1 } } },
+    { monthlyCredits: 42, windowLimits: { fiveHour: { cap: 3, used: 0 }, weekly: { cap: 6, used: 0 } } }
   ];
   for (const credits of cases) {
     const provider = await fetchCommandcodeLimits(
@@ -384,6 +395,46 @@ test('a repriced plan is detected by its published caps, not just its total', as
   assert.equal(windowByKind(provider, 'weekly')[0].limit, 18);
 });
 
+test('a response without the published caps drops the denominator too', async () => {
+  // The caps are the only thing that can catch a catalogued grant that has gone
+  // UP, so a response carrying none of them is not evidence the catalogue still
+  // matches — it is the absence of evidence, and the meter goes with it. Every
+  // published plan has both caps and a live account reports them before either
+  // window is touched, so this shape means the API moved, not that the plan is
+  // unmetered.
+  const provider = await fetchCommandcodeLimits(
+    { commandcodeCookie: SESSION_COOKIE },
+    {
+      env: {},
+      fetch: stubFetch({
+        [COMMANDCODE_CREDITS_URL]: { credits: { monthlyCredits: 8.7784, purchasedCredits: 0 } },
+        [COMMANDCODE_SUBSCRIPTIONS_URL]: SUBSCRIPTION_BODY
+      })
+    }
+  );
+
+  const [monthly] = windowByKind(provider, 'billing');
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.accountLabel, 'Go');
+  assert.equal(monthly.remaining, 8.7784);
+  assert.equal(monthly.limit, null);
+  assert.equal(monthly.showMeter, false);
+  assert.equal(windowByKind(provider, 'session').length, 0);
+  assert.equal(windowByKind(provider, 'weekly').length, 0);
+});
+
+test('every catalogued plan spends less in a window than it grants in a month', () => {
+  // The caps are checked against the wire, so a typo in the catalogue would be
+  // caught on a real account — but only on a plan someone runs. This is the
+  // cheap half of that, and it holds for every plan Command Code publishes.
+  for (const [id, plan] of Object.entries(COMMANDCODE_PLANS)) {
+    assert.ok(plan.monthlyCreditsUsd > 0, id);
+    assert.ok(plan.fiveHourCapUsd > 0 && plan.fiveHourCapUsd < plan.monthlyCreditsUsd, id);
+    assert.ok(plan.weeklyCapUsd > plan.fiveHourCapUsd && plan.weeklyCapUsd < plan.monthlyCreditsUsd, id);
+    assert.ok(plan.label, id);
+  }
+});
+
 test('accountKey follows the account, not the credential', async () => {
   const keyFor = async (subscriptionData, cookie = `${SESSION_COOKIE}; ${SESSION_DATA_COOKIE}`) => (
     await fetchCommandcodeLimits({ commandcodeCookie: cookie }, {
@@ -403,6 +454,20 @@ test('accountKey follows the account, not the credential', async () => {
   assert.equal(await keyFor({ userId: 'user-abc' }, '__Secure-commandcode_prod_.session_token=different'), base);
   assert.equal(await keyFor({ userId: 'user-abc', id: 'sub_NEW' }), base);
   assert.notEqual(await keyFor({ userId: 'someone-else' }), base);
+
+  // The ladder below `userId`, pinned so a shape that carries only one spelling
+  // of the account id still keys on the account. `id` is the subscription and
+  // is last: it survives a new session but not a resubscribe, which is why it
+  // ranks under the user id and above the credential.
+  const viaMetadata = { userId: undefined, metadata: { commandCodeUserId: 'user-abc' } };
+  assert.equal(await keyFor(viaMetadata), base);
+  assert.equal(await keyFor({ userId: undefined, user_id: 'user-abc', metadata: undefined }), base);
+  const viaSubscription = { userId: undefined, metadata: undefined, id: 'sub_ONE' };
+  assert.equal(
+    await keyFor(viaSubscription, '__Secure-commandcode_prod_.session_token=another-device'),
+    await keyFor(viaSubscription)
+  );
+  assert.notEqual(await keyFor({ ...viaSubscription, id: 'sub_TWO' }), await keyFor(viaSubscription));
 
   // Without the optional subscription read there is no account id, so the
   // identity half of the credential seeds it — never the session_data cache.
@@ -425,9 +490,12 @@ test('accountKey follows the account, not the credential', async () => {
 
 test('a live Go account maps onto the windows the dashboard shows', async () => {
   // Captured verbatim from api.commandcode.ai on a fresh individual-go
-  // subscription: no monthly allowance anywhere on the wire (hence the
-  // catalogue), premium+opensource summing to the REMAINING grant, and
-  // resetAt 0 on windows that have not been touched yet.
+  // subscription, ids redacted and nothing else removed: no monthly allowance
+  // anywhere on the wire (hence the catalogue), premium+opensource summing to
+  // the REMAINING grant, resetAt 0 on windows that have not been touched yet,
+  // and a `userId` — this response is the evidence that the account key has a
+  // real account id to hang on. Keep the untouched fields; they are what shows
+  // the shape this provider was written against if the endpoint ever moves.
   const provider = await fetchCommandcodeLimits(
     { commandcodeCookie: SESSION_COOKIE },
     {
@@ -454,10 +522,19 @@ test('a live Go account maps onto the windows the dashboard shows', async () => 
           data: {
             id: 'sub_redacted',
             status: 'active',
-            planId: 'individual-go',
+            userId: '015d654d-redacted',
+            orgId: null,
+            createdAt: '2026-08-15T04:42:16.000Z',
+            priceId: 'price_redacted',
+            metadata: { fbp: 'fb.redacted', commandCode: 'true', commandCodeUserId: '015d654d-redacted' },
+            quantity: 1,
+            cancelAtPeriodEnd: false,
             currentPeriodStart: '2026-08-15T04:42:16.000Z',
             currentPeriodEnd: '2026-09-15T04:42:16.000Z',
-            cancelAtPeriodEnd: false,
+            endedAt: null,
+            cancelAt: null,
+            canceledAt: null,
+            planId: 'individual-go',
             pendingPhase: null
           }
         }
