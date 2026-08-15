@@ -277,10 +277,12 @@ function distributeCost(exchanges, sessionCost) {
   return exchanges;
 }
 
+// Clients whose detail is parsed out of a transcript file located by `resolveSessionFile`.
+const TRANSCRIPT_PARSERS = { claude: parseClaudeTranscript, codex: parseCodexTranscript };
+
 function parseByClient(client, text) {
-  if (client === 'claude') return parseClaudeTranscript(text);
-  if (client === 'codex') return parseCodexTranscript(text);
-  return [];
+  const parse = TRANSCRIPT_PARSERS[client];
+  return parse ? parse(text) : [];
 }
 
 function totalsOf(exchanges, sessionCost) {
@@ -338,9 +340,21 @@ function readReasonixSessionDetail({ sessionId, period = 'total', home, deps = {
   };
 }
 
+// Clients that own their whole read — a database or a native sidecar — instead of a
+// transcript file.
+const SESSION_READERS = { opencode: readOpenCodeSessionDetail, reasonix: readReasonixSessionDetail };
+
+// Every client Session Detail can open, derived from the two dispatch tables above so it
+// cannot drift from them. The README's "Session Details" column is checked against this
+// list (tests/docs/readmeConsistency.test.js).
+const SESSION_DETAIL_CLIENTS = Object.freeze([
+  ...Object.keys(TRANSCRIPT_PARSERS),
+  ...Object.keys(SESSION_READERS)
+]);
+
 function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, deps = {} }) {
-  if (client === 'opencode') return readOpenCodeSessionDetail({ sessionId, period, deps });
-  if (client === 'reasonix') return readReasonixSessionDetail({ sessionId, period, home, deps });
+  const readForClient = SESSION_READERS[client];
+  if (readForClient) return readForClient({ sessionId, period, home, deps });
   const filePath = resolveSessionFile(client, sessionId, home);
   if (!filePath) return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
   let text;
@@ -361,5 +375,6 @@ module.exports = {
   filterExchangesByPeriod,
   distributeCost,
   readReasonixSessionDetail,
-  readSessionDetail
+  readSessionDetail,
+  SESSION_DETAIL_CLIENTS
 };

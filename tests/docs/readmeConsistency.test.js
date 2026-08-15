@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
+const { SESSION_DETAIL_CLIENTS } = require('../../src/shared/sessionDetail');
 
 const rootDir = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(rootDir, file), 'utf8');
@@ -190,6 +191,30 @@ test('limit provider order follows the supported-tools table', () => {
     });
 
   assert.deepEqual(fromReadme, [...LIMIT_PROVIDER_IDS]);
+});
+
+// The "Session Details" column is the one cell a reader cannot check against the row's own
+// data path: it claims a feature, not a file. Pin it to the dispatch tables in
+// sessionDetail.js, since nothing else did — Reasonix shipped its reader and a `—` in the
+// same commit (#365), and the cross-locale checks above pass happily on an error all five
+// files agree on.
+//
+// Compared as sets: unlike the limits column, no UI order depends on this one. Every id
+// here currently equals its icon id; bridge them like README_ICON_TO_LIMIT_PROVIDERS above
+// if that stops being true.
+test('README session-detail column matches the clients Session Detail can open', () => {
+  const expected = [...SESSION_DETAIL_CLIENTS].sort();
+  assert.ok(expected.length > 0, 'SESSION_DETAIL_CLIENTS should not be empty');
+
+  for (const file of localizedReadmes) {
+    const fromReadme = read(file)
+      .split('\n')
+      .filter((line) => line.startsWith('| <img'))
+      .filter((row) => row.split('|').map((cell) => cell.trim())[6] === '✅')
+      .map((row) => row.match(/tools-icon\/([^".]+)\.[a-z]+"/i)[1])
+      .sort();
+    assert.deepEqual(fromReadme, expected, file);
+  }
 });
 
 test('README tool and provider counts match the supported-tools table', () => {
