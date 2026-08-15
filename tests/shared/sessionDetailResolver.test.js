@@ -277,3 +277,26 @@ test('the public session detail resolver uses the worker boundary', async () => 
   assert.deepEqual(await result, { found: false });
   assert.equal(workerArgs, args);
 });
+
+// dsh reads its own transcript format directly, so it must dispatch before
+// the tokscale-JSONL native/WSL fallback and honor deps injection the same
+// way the generic `deps.readSessionDetail` seam already does.
+test('dsh dispatches to readDshSessionDetail with home/platform/env/cwdDir and never touches the native/WSL path', () => {
+  let received;
+  const detail = resolveSessionDetailForPlatform(
+    { client: 'dsh', sessionId: 's1' },
+    {
+      readDshSessionDetail: (args) => { received = args; return { found: true, client: 'dsh', sessionId: 's1' }; },
+      readSessionDetail: () => { throw new Error('must not call the generic reader for dsh'); },
+      homedir: () => '/home/dsh-tester',
+      platform: 'linux',
+      env: { DSH_HOME: '/custom/.dsh' },
+      cwdDir: '/work'
+    }
+  );
+  assert.deepEqual(detail, { found: true, client: 'dsh', sessionId: 's1' });
+  assert.equal(received.home, '/home/dsh-tester');
+  assert.equal(received.platform, 'linux');
+  assert.deepEqual(received.env, { DSH_HOME: '/custom/.dsh' });
+  assert.equal(received.cwdDir, '/work');
+});

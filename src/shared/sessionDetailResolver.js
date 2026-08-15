@@ -4,16 +4,23 @@ const os = require('node:os');
 const { Worker } = require('node:worker_threads');
 
 const { readSessionDetail } = require('./sessionDetail');
+const { readDshSessionDetail } = require('./dshSessionDetail');
 const { wslUsageHomes } = require('./wslUsage');
 
 const WSL_JSONL_CLIENTS = new Set(['claude', 'codex']);
 const SESSION_DETAIL_WORKER_TIMEOUT_MS = 20_000;
 
+// dsh reads its own transcript format directly and is never WSL-scanned, so
+// it bypasses the tokscale-JSONL native/WSL fallback below entirely.
 function resolveSessionDetailForPlatform(args = {}, deps = {}) {
-  const readDetail = deps.readSessionDetail || readSessionDetail;
   const nativeHome = (deps.homedir || os.homedir)();
-  const nativeDetail = readDetail({ ...args, home: nativeHome });
   const platform = deps.platform || process.platform;
+  if (args.client === 'dsh') {
+    const readDsh = deps.readDshSessionDetail || readDshSessionDetail;
+    return readDsh({ ...args, home: nativeHome, platform, env: deps.env, cwdDir: deps.cwdDir });
+  }
+  const readDetail = deps.readSessionDetail || readSessionDetail;
+  const nativeDetail = readDetail({ ...args, home: nativeHome });
 
   if (nativeDetail.found || platform !== 'win32' || !WSL_JSONL_CLIENTS.has(args.client)) {
     return nativeDetail;
