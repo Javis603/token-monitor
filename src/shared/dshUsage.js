@@ -33,6 +33,29 @@ const DSH_MAX_CACHED_FILES = 512;
 const DSH_MAX_ROWS_PER_SESSION = 200_000;
 const ZSTD_MAGIC = 0xFD2FB528;
 
+// DeepSeek V4 list prices (USD per 1M tokens), current as of 2026-08-15:
+// https://api-docs.deepseek.com/quick_start/pricing
+// These are fallback estimates only. Tokscale pricing and the user's custom
+// prices both win over this table, and a model absent from all three sources
+// stays cost-unavailable instead of inheriting an unrelated price. DeepSeek's
+// announced peak/off-peak billing is deliberately not modelled here: Token
+// Monitor prices are flat per model, and the switchover date is an upstream
+// policy change rather than something a session log can timestamp.
+const DSH_FALLBACK_MODEL_PRICING = Object.freeze({
+  'deepseek-v4-flash': Object.freeze({
+    inputCostPerToken: 0.14 / 1_000_000,
+    outputCostPerToken: 0.28 / 1_000_000,
+    cacheReadInputTokenCost: 0.0028 / 1_000_000,
+    cacheCreationInputTokenCost: 0.14 / 1_000_000
+  }),
+  'deepseek-v4-pro': Object.freeze({
+    inputCostPerToken: 0.435 / 1_000_000,
+    outputCostPerToken: 0.87 / 1_000_000,
+    cacheReadInputTokenCost: 0.003625 / 1_000_000,
+    cacheCreationInputTokenCost: 0.435 / 1_000_000
+  })
+});
+
 function numberValue(value) {
   const parsed = Number(value || 0);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -420,8 +443,17 @@ function collectDshRows(options = {}) {
 }
 
 function estimatedDshRowCost(row, pricingByModel) {
+  const modelId = normalizedModelId(row.model);
   const cost = estimatedRowCost(row, pricingByModel);
-  return cost === null ? 0 : cost;
+  if (cost !== null) return cost;
+  // An explicit entry (Toscale pricing or the user's custom prices) wins even
+  // when it is incomplete and yields null — never paper over it with the table.
+  const explicit = pricingByModel?.[modelId];
+  if (explicit && typeof explicit === 'object') return 0;
+  const fallback = DSH_FALLBACK_MODEL_PRICING[modelId];
+  if (!fallback) return 0;
+  const fallbackCost = estimatedRowCost(row, { [modelId]: fallback });
+  return fallbackCost === null ? 0 : fallbackCost;
 }
 
 function decorateProject(row, projectIdentity) {

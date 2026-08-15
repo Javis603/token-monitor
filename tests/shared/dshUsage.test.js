@@ -124,6 +124,60 @@ test('unknown model prices leave cost at zero without dropping token totals', ()
   assert.equal(allTime.costUsd, 0);
 });
 
+test('DeepSeek V4 list prices are the fallback when no pricing is registered', () => {
+  const root = tempRoot();
+  const time = Date.now();
+  writeSession(root, 'proj', 'session-fallback', [
+    JSON.stringify(headerLine('session-fallback', time)),
+    JSON.stringify(assistantEvent(time, { inputTokens: 10, outputTokens: 5, cacheReadTokens: 20, cacheWriteTokens: 2 }, 'deepseek-v4-pro'))
+  ]);
+  resetDshFileCache();
+  const collected = collectDshUsageOnce({ roots: [root], now: new Date(time) });
+  const allTime = extractUsageFromTokscale(
+    buildDshPeriods({ rows: collected.rows, now: new Date(time), pricingByModel: {} }).allTime
+  );
+  assert.equal(allTime.totalTokens, 37);
+  const expected = (10 * 0.435 + 5 * 0.87 + 20 * 0.003625 + 2 * 0.435) / 1_000_000;
+  assert.ok(Math.abs(allTime.costUsd - expected) < 1e-12, `expected ${expected}, got ${allTime.costUsd}`);
+});
+
+test('explicit pricing wins over the fallback table, including incomplete custom prices', () => {
+  const now = new Date();
+  const row = {
+    sessionId: 'session-price',
+    model: 'deepseek-v4-pro',
+    provider: 'opencode-go',
+    input: 10,
+    output: 5,
+    cacheRead: 20,
+    cacheWrite: 2,
+    reasoning: 0,
+    messages: 1,
+    time: now.getTime(),
+    createdAt: now.getTime(),
+    cwd: ''
+  };
+  const custom = {
+    'deepseek-v4-pro': {
+      inputCostPerToken: 1 / 1_000_000,
+      outputCostPerToken: 2 / 1_000_000,
+      cacheReadInputTokenCost: 3 / 1_000_000,
+      cacheCreationInputTokenCost: 4 / 1_000_000
+    }
+  };
+  const priced = extractUsageFromTokscale(buildDshPeriods({ rows: [row], now, pricingByModel: custom }).allTime);
+  const expected = (10 + 10 + 60 + 8) / 1_000_000;
+  assert.ok(Math.abs(priced.costUsd - expected) < 1e-12, `expected ${expected}, got ${priced.costUsd}`);
+
+  const incomplete = {
+    'deepseek-v4-pro': { inputCostPerToken: 1 / 1_000_000, outputCostPerToken: 2 / 1_000_000 }
+  };
+  const explicitZero = extractUsageFromTokscale(
+    buildDshPeriods({ rows: [row], now, pricingByModel: incomplete }).allTime
+  );
+  assert.equal(explicitZero.costUsd, 0);
+});
+
 test('packed chunk rows are skipped while assistant/message usage still counts', () => {
   const root = tempRoot();
   const time = Date.now();
