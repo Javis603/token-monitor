@@ -25,7 +25,8 @@ function readmeTrackedClientIds() {
     deepseek: 'dsh',
     'hermes-agent': 'hermes',
     xai: 'grok',
-    'mimo-code': 'micode'
+    'mimo-code': 'micode',
+    qoder: 'qodercn'
   };
   return fs.readFileSync(path.join(rootDir, 'README.md'), 'utf8')
     .split('\n')
@@ -62,6 +63,7 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in m
   // prefs get silently dropped on save/read.
   const known = KNOWN_CLIENTS.split(',');
   assert.ok(known.includes('micode'), 'micode must remain a known client');
+  assert.ok(known.includes('qodercn'), 'qodercn must remain a known client');
   for (const client of DEFAULT_CLIENTS.split(',')) {
     assert.ok(known.includes(client), `${client} (default-tracked) must also be known`);
   }
@@ -71,13 +73,13 @@ test('tracked client defaults, renderer, and README share one display order', ()
   const known = KNOWN_CLIENTS.split(',');
   assert.deepEqual(rendererClientIds(), known);
   assert.deepEqual(readmeTrackedClientIds(), known);
-  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => client !== 'micode'));
+  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => !['micode', 'qodercn'].includes(client)));
 });
 
 test('default tracked clients are supported by tokscale or a native adapter', () => {
-  // Proma remains a local compatibility adapter. Reasonix is supported by the
+  // Proma and Qoder CN remain local compatibility adapters. Reasonix is supported by the
   // bundled Tokscale version and must be verified through its real client list.
-  const locallyParsedClients = new Set(['proma']);
+  const locallyParsedClients = new Set(['proma', 'qodercn']);
   const result = spawnSync(process.execPath, [require.resolve('tokscale/bin.js'), '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const help = `${result.stdout || ''}\n${result.stderr || ''}`;

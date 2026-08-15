@@ -44,7 +44,8 @@ function windowIsLocalOrUnknown(window, provider) {
   // local/Web rows, so trusting their source would leak the local estimate.
   const hasCompatibilityMarker = normalizeEnumId(provider?.sourceDetail)
     === OPENCODE_COMPONENT_PROVENANCE_DETAIL;
-  return !hasCompatibilityMarker || normalizeEnumId(provider?.source) !== 'web';
+  const providerSource = normalizeEnumId(provider?.source);
+  return !hasCompatibilityMarker || (providerSource !== 'web' && providerSource !== 'api');
 }
 
 function projectLimitProviderForDisplay(provider, options = {}) {
@@ -62,7 +63,14 @@ function projectLimitProviderForDisplay(provider, options = {}) {
   const hasWebBalance = provider?.balance !== null && provider?.balance !== undefined
     || provider?.balanceUsd !== null && provider?.balanceUsd !== undefined;
   if (windows.length > 0 || hasWebBalance) {
-    if (windows.length === (provider.windows || []).length && normalizeEnumId(provider.source) === 'web') {
+    // Nothing was stripped and the provider already claims a remote source, so
+    // this snapshot never carried a local estimate. 'api' must be accepted here
+    // as well as 'web': a Go account read from the usage API has no cookie, so
+    // rewriting it below would blank an accountKey that webAccountKey cannot
+    // restore.
+    const remoteSource = normalizeEnumId(provider.source);
+    if (windows.length === (provider.windows || []).length
+      && (remoteSource === 'web' || remoteSource === 'api')) {
       return provider;
     }
     return {

@@ -120,9 +120,11 @@ test('renderer uses the mask-safe Command Code icon for its tool row', () => {
 
   assert.match(source, /clientsWithIcon = new Set\([\s\S]*'commandcode'/);
   assert.match(styles, /\.row-icon-commandcode\s*\{[^}]*assets\/icons\/commandcode\.svg/s);
-  assert.match(icon, /viewBox="0 0 137 137"/);
+  // Cropped to the glyph: the outer rounded-square frame was dropped so the
+  // mark fills the icon box like every other tool row.
+  assert.match(icon, /viewBox="26\.1784 26\.1784 83\.7708 83\.7708"/);
   assert.doesNotMatch(icon, /fill="#(?:000|fff)"/i);
-  assert.equal((icon.match(/<path\b/g) || []).length, 2);
+  assert.equal((icon.match(/<path\b/g) || []).length, 1);
 });
 
 test('Reasonix icon keeps the official color in a mask-safe SVG path', () => {

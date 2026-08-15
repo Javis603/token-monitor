@@ -49,6 +49,17 @@ const opencodeLocalLimitsEnabled = parseBoolean(
     ?? process.env.TOKEN_MONITOR_OPENCODE_LOCAL_LIMITS,
   false
 );
+// The key OpenCode stores for itself needs no configuration, so an unattended
+// agent reports it by default. Switched off for a machine signed in to an
+// account whose quota should not leave it. The widget resolves the same setting
+// through settings.json; here it is env or flag, like every other agent option.
+const opencodeAmbientEnabled = parseBoolean(
+  args['opencode-ambient']
+    ?? args.opencodeAmbient
+    ?? args.opencodeAmbientEnabled
+    ?? process.env.TOKEN_MONITOR_OPENCODE_AMBIENT,
+  true
+);
 const opencodeCookie = String(process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '').trim();
 const once = Boolean(args.once);
 const dryRun = Boolean(args['dry-run'] || args.dryRun);
@@ -80,6 +91,7 @@ const limitsOptions = {
   limitsRefreshMs,
   claudeWebCookie: '',
   opencodeLocalLimitsEnabled,
+  opencodeAmbientEnabled,
   opencodeCookie
 };
 let sessionUsageArchive;

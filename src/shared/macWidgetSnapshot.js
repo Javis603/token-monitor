@@ -259,6 +259,7 @@ const PROVIDER_LABELS = Object.freeze({
   antigravity: 'Antigravity',
   claude: 'Claude',
   codex: 'Codex',
+  commandcode: 'Command Code',
   copilot: 'GitHub Copilot',
   cursor: 'Cursor',
   deepseek: 'DeepSeek',

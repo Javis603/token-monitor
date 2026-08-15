@@ -185,6 +185,7 @@ function normalizeClientName(value) {
   if (raw.includes('codebuddy')) return 'codebuddy';
   if (raw.includes('workbuddy')) return 'workbuddy';
   if (raw.includes('proma')) return 'proma';
+  if (raw.includes('qodercn') || raw === 'qoder-cn' || raw === 'qoder cn') return 'qodercn';
   if (raw.includes('reasonix')) return 'reasonix';
   if (raw.includes('dsh')) return 'dsh';
   if (raw.includes('opencode')) return 'opencode';

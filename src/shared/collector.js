@@ -17,7 +17,7 @@ const {
   deriveClientOverall
 } = require('./clientHealth');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
-const { customPricingPath } = require('./tokscaleConfig');
+const { customPricingPath, tokscaleCacheDirs } = require('./tokscaleConfig');
 const {
   applyPeriodDelta,
   emptyPeriod,
@@ -35,6 +35,13 @@ const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const {
+  buildQoderCnHistoryGraph,
+  buildQoderCnPeriods,
+  collectQoderCnRows,
+  qoderCnDataPaths,
+  resolveQoderCnPricing
+} = require('./qoderCnUsage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./dshPaths');
 const {
@@ -214,6 +221,229 @@ const PROMA_PRICING_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const PROMA_PRICING_LOOKUP_TIMEOUT_MS = 3000;
 const promaPricingCache = new Map();
 
+// tokscale maintains its own pricing catalog cache under its config dir
+// (cache/pricing-{litellm,openrouter,models-dev}.json): the `tokscale pricing`
+// command refreshes these over the network and falls back to them when offline
+// — but that fallback costs 20-30s of network timeouts, far past the 3s lookup
+// budget (PROMA_PRICING_LOOKUP_TIMEOUT_MS), which is why local clients' costs
+// show zero on machines without catalog access. Read the same local files
+// directly (zero network) as the offline fallback: when the command fails, the
+// catalog it would have fallen back to is already on disk.
+const TOKSCALE_PRICING_CATALOG_FILES = ['pricing-litellm.json', 'pricing-openrouter.json', 'pricing-models-dev.json'];
+const TOKSCALE_MODEL_PRICING_RATE_FIELDS = [
+  'input_cost_per_token',
+  'input_cost_per_token_above_128k_tokens',
+  'input_cost_per_token_above_200k_tokens',
+  'input_cost_per_token_above_256k_tokens',
+  'input_cost_per_token_above_272k_tokens',
+  'output_cost_per_token',
+  'output_cost_per_token_above_128k_tokens',
+  'output_cost_per_token_above_200k_tokens',
+  'output_cost_per_token_above_256k_tokens',
+  'output_cost_per_token_above_272k_tokens',
+  'cache_creation_input_token_cost',
+  'cache_creation_input_token_cost_above_200k_tokens',
+  'cache_read_input_token_cost',
+  'cache_read_input_token_cost_above_200k_tokens',
+  'cache_read_input_token_cost_above_272k_tokens'
+];
+const TOKSCALE_ROUTING_LABELS = new Set(['auto', 'agent_review']);
+const TOKSCALE_TERMINAL_FALLBACK_BLOCKLIST = new Set([
+  'auto', 'mini', 'chat', 'base', 'claude', 'anthropic', 'gemini', 'model', 'router', 'default'
+]);
+const CATALOG_PRICING_FIELDS = [
+  'inputCostPerToken',
+  'outputCostPerToken',
+  'cacheReadInputTokenCost',
+  'cacheCreationInputTokenCost'
+];
+
+// Parsed catalog, invalidated by every selected candidate's file metadata.
+let tokscaleCatalogCache = { revision: '', catalog: null, recheckAtMs: 0 };
+
+function normalizeCatalogModelKey(key) {
+  return String(key || '').trim().toLowerCase();
+}
+
+function terminalCatalogModelKey(key) {
+  const parts = String(key || '').split('/');
+  return parts[parts.length - 1] || '';
+}
+
+function normalizePricingRate(value, key) {
+  const raw = value?.[key];
+  if (raw === null || raw === undefined) return undefined;
+  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 ? raw : undefined;
+}
+
+function normalizeCatalogPricing(value) {
+  const pricing = {
+    inputCostPerToken: normalizePricingRate(value, 'input_cost_per_token'),
+    outputCostPerToken: normalizePricingRate(value, 'output_cost_per_token'),
+    cacheReadInputTokenCost: normalizePricingRate(value, 'cache_read_input_token_cost'),
+    cacheCreationInputTokenCost: normalizePricingRate(value, 'cache_creation_input_token_cost')
+  };
+  return pricing.inputCostPerToken !== undefined || pricing.outputCostPerToken !== undefined ? pricing : null;
+}
+
+function catalogPricingFingerprint(pricing) {
+  return JSON.stringify(CATALOG_PRICING_FIELDS.map((field) => (
+    pricing[field] === undefined ? 'missing' : pricing[field]
+  )));
+}
+
+function pricingCatalogDirs(options = {}) {
+  if (Array.isArray(options.catalogDirs)) return options.catalogDirs.map(String).filter(Boolean);
+  if (options.configDir) return [options.configDir];
+  return tokscaleCacheDirs(options);
+}
+
+function inspectPricingCatalogFile(file) {
+  try {
+    const stat = fs.statSync(file);
+    return {
+      file,
+      state: 'present',
+      revision: `${file}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.mode}`
+    };
+  } catch (error) {
+    const code = error?.code || 'unknown';
+    return { file, state: code === 'ENOENT' ? 'missing' : 'error', revision: `${file}:${code}` };
+  }
+}
+
+function pricingCatalogSource(name, dirs) {
+  if (dirs.length === 0) return { candidates: [], revision: `${name}:missing` };
+  const canonical = inspectPricingCatalogFile(path.join(dirs[0] || '', name));
+  // Canonical is authoritative whenever it exists or cannot be inspected.
+  // Only ENOENT activates upstream's ordered legacy find_map fallback.
+  const probes = canonical.state === 'missing'
+    ? [canonical, ...dirs.slice(1).map((dir) => inspectPricingCatalogFile(path.join(dir, name)))]
+    : [canonical];
+  return {
+    candidates: probes.filter((entry) => entry.state !== 'missing'),
+    revision: probes.map((entry) => entry.revision).join('|')
+  };
+}
+
+function tokscalePricingCatalogSnapshot(options = {}) {
+  const dirs = pricingCatalogDirs(options);
+  const files = TOKSCALE_PRICING_CATALOG_FILES.map((name) => pricingCatalogSource(name, dirs));
+  return {
+    files,
+    revision: `${dirs.join('|')}::${files.map((entry) => entry.revision).join('|')}`
+  };
+}
+
+function parseTokscalePricingCatalogFile(file) {
+  let doc;
+  try {
+    doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (_) {
+    return null;
+  }
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return null;
+  if (!Number.isSafeInteger(doc.timestamp) || doc.timestamp < 0) return null;
+  if (!doc.data || typeof doc.data !== 'object' || Array.isArray(doc.data)) return null;
+  // Tokscale deserializes the whole HashMap<String, ModelPricing> before using
+  // it. A wrong type in any known Option<f64> field makes that source invalid;
+  // do not salvage rows from a cache Tokscale itself would reject.
+  for (const value of Object.values(doc.data)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    for (const field of TOKSCALE_MODEL_PRICING_RATE_FIELDS) {
+      const raw = value[field];
+      if (raw !== null && raw !== undefined && (typeof raw !== 'number' || !Number.isFinite(raw))) {
+        return null;
+      }
+    }
+  }
+  return doc;
+}
+
+// Preserve complete catalog keys. A bare model id may use a terminal-key
+// fallback only when every matching entry publishes exactly the same rates;
+// otherwise guessing a provider would turn "cost unavailable" into a wrong
+// cost. Full exact keys and bare exact keys always win before that fallback.
+function tokscalePricingCatalog(options = {}) {
+  const snapshot = tokscalePricingCatalogSnapshot(options);
+  const nowMs = options.nowMs ?? Date.now();
+  if (
+    tokscaleCatalogCache.revision === snapshot.revision
+    && tokscaleCatalogCache.catalog
+    && (!tokscaleCatalogCache.recheckAtMs || nowMs < tokscaleCatalogCache.recheckAtMs)
+  ) {
+    return tokscaleCatalogCache.catalog;
+  }
+  const exact = new Map();
+  const byTerminal = new Map();
+  const nowSeconds = Math.floor(nowMs / 1000);
+  let recheckAtMs = 0;
+  for (const source of snapshot.files) {
+    let doc = null;
+    for (const candidate of source.candidates) {
+      doc = parseTokscalePricingCatalogFile(candidate.file);
+      if (doc) break;
+    }
+    if (!doc) continue;
+    const timestamp = doc?.timestamp;
+    if (timestamp > nowSeconds) {
+      const eligibleAtMs = timestamp * 1000;
+      recheckAtMs = recheckAtMs ? Math.min(recheckAtMs, eligibleAtMs) : eligibleAtMs;
+      continue;
+    }
+    for (const [key, value] of Object.entries(doc.data)) {
+      const modelId = normalizeCatalogModelKey(key);
+      if (!modelId) continue;
+      const pricing = normalizeCatalogPricing(value);
+      if (!pricing) continue;
+      if (!exact.has(modelId)) exact.set(modelId, pricing);
+      const terminal = terminalCatalogModelKey(modelId);
+      if (!terminal) continue;
+      if (!byTerminal.has(terminal)) byTerminal.set(terminal, []);
+      byTerminal.get(terminal).push({ modelId, pricing });
+    }
+  }
+  const catalogRevision = recheckAtMs ? `${snapshot.revision}:before:${recheckAtMs}` : snapshot.revision;
+  const catalog = { revision: catalogRevision, exact, byTerminal };
+  tokscaleCatalogCache = { revision: snapshot.revision, catalog, recheckAtMs };
+  return catalog;
+}
+
+function readTokscalePricingCatalog(modelId, options = {}) {
+  const key = String(modelId || '').trim().toLowerCase();
+  if (!key) return null;
+  // Bare router labels never identify the model that actually served usage.
+  // A qualified key such as morph/auto remains eligible for exact lookup.
+  if (TOKSCALE_ROUTING_LABELS.has(key)) return null;
+  const catalog = tokscalePricingCatalog(options);
+  const exact = catalog.exact.get(key);
+  if (exact) return exact;
+  // A provider-scoped id that does not exist exactly must not borrow another
+  // provider's terminal match.
+  if (key.includes('/')) return null;
+  if (TOKSCALE_TERMINAL_FALLBACK_BLOCKLIST.has(key)) return null;
+  const candidates = catalog.byTerminal.get(key) || [];
+  if (candidates.length === 0) return null;
+  const fingerprints = new Set(candidates.map(({ pricing }) => catalogPricingFingerprint(pricing)));
+  return fingerprints.size === 1 ? candidates[0].pricing : null;
+}
+
+function resetTokscaleCatalogCache() {
+  tokscaleCatalogCache = { revision: '', catalog: null, recheckAtMs: 0 };
+}
+
+function tokscalePricingCatalogRevision(options = {}) {
+  const snapshot = tokscalePricingCatalogSnapshot(options);
+  const nowMs = options.nowMs ?? Date.now();
+  if (tokscaleCatalogCache.revision !== snapshot.revision || !tokscaleCatalogCache.catalog) {
+    return snapshot.revision;
+  }
+  if (tokscaleCatalogCache.recheckAtMs && nowMs >= tokscaleCatalogCache.recheckAtMs) {
+    return `${snapshot.revision}:recheck:${tokscaleCatalogCache.recheckAtMs}`;
+  }
+  return tokscaleCatalogCache.catalog.revision;
+}
+
 function promaPricingRevision() {
   try { return fs.statSync(customPricingPath()).mtimeMs; } catch (_) { return 0; }
 }
@@ -221,23 +451,21 @@ function promaPricingRevision() {
 function normalizePromaPricing(result) {
   const source = result?.pricing;
   if (!source || typeof source !== 'object') return null;
-  const pick = (key) => {
-    const value = Number(source[key]);
-    return Number.isFinite(value) && value >= 0 ? value : undefined;
-  };
   const pricing = {
-    inputCostPerToken: pick('inputCostPerToken'),
-    outputCostPerToken: pick('outputCostPerToken'),
-    cacheReadInputTokenCost: pick('cacheReadInputTokenCost'),
-    cacheCreationInputTokenCost: pick('cacheCreationInputTokenCost')
+    inputCostPerToken: normalizePricingRate(source, 'inputCostPerToken'),
+    outputCostPerToken: normalizePricingRate(source, 'outputCostPerToken'),
+    cacheReadInputTokenCost: normalizePricingRate(source, 'cacheReadInputTokenCost'),
+    cacheCreationInputTokenCost: normalizePricingRate(source, 'cacheCreationInputTokenCost')
   };
   return pricing.inputCostPerToken !== undefined || pricing.outputCostPerToken !== undefined ? pricing : null;
 }
 
 async function resolveModelPricing(rows, options = {}) {
   const lookup = options.lookupModelPricing || lookupModelPricing;
-  const revision = options.pricingRevision ?? promaPricingRevision();
+  const customRevision = options.pricingRevision ?? promaPricingRevision();
   const nowMs = options.nowMs ?? Date.now();
+  const currentRevision = () => `${customRevision}|${tokscalePricingCatalogRevision({ ...options, nowMs })}`;
+  let revision = currentRevision();
   // Pricing is supplementary: never let a missing catalog entry hold up the
   // live usage refresh for the normal tokscale command timeout.
   const commandTimeoutMs = options.commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS;
@@ -255,12 +483,20 @@ async function resolveModelPricing(rows, options = {}) {
       if (cached.pricing) pricingByModel[modelId] = cached.pricing;
       continue;
     }
-    let pricing = null;
+    let pricing;
     try {
       pricing = normalizePromaPricing(await lookup(modelId, commandTimeoutMs));
     } catch (_) {
       // An unknown model, offline lookup, or custom channel must remain
-      // cost-unavailable instead of inheriting an unrelated catalog price.
+      // cost-unavailable instead of inheriting an unrelated catalog price —
+      // but when the lookup itself failed (timeout/offline), the price the
+      // command would have fallen back to is tokscale's local catalog cache,
+      // which is on disk without any network round trip.
+      pricing = readTokscalePricingCatalog(modelId, options);
+      // Parsing a future-dated source adds its time boundary to the catalog
+      // revision, so an unavailable result expires when that source becomes
+      // eligible even if the file itself does not change.
+      revision = currentRevision();
     }
     promaPricingCache.set(modelId, { at: nowMs, revision, pricing });
     if (pricing) pricingByModel[modelId] = pricing;
@@ -710,6 +946,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.promaGraph);
     histories.push(normalizeHistory(parseGraphResult(options.promaGraph), { capDays, todayKey }));
   }
+  if (options.qoderCnGraph) {
+    rawGraphs.push(options.qoderCnGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -773,16 +1013,21 @@ async function collectUsageOnce(options) {
     options.homeDir || os.homedir(),
     { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
   );
-  // Proma remains a local compatibility adapter; Reasonix aggregate usage is
-  // supplied by the same Tokscale path as every other tracked client.
-  const tokscaleClients = normalizedClients
-    ? normalizedClients.split(',').filter((c) => c !== 'proma').join(',')
-    : normalizedClients;
+  // Proma and Qoder CN remain local compatibility adapters. Reasonix aggregate
+  // usage is supplied by the same Tokscale path as every other tracked client.
+  const localClients = new Set(['proma', 'qodercn']);
+  const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
+  const includesQoderCn = normalizedClients.split(',').includes('qodercn');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
-  const targetTokscaleClients = targetClients.filter((client) => client !== 'proma').join(',');
+  const targetTokscaleClients = targetClients.filter((client) => !localClients.has(client)).join(',');
+  const qoderCnReadState = options.qoderCnReadState;
+  if (qoderCnReadState) {
+    qoderCnReadState.periodFailed = false;
+    qoderCnReadState.fallbackUsed = false;
+  }
   let today = emptyPeriod();
   let month = emptyPeriod();
   let allTime = emptyPeriod();
@@ -797,6 +1042,17 @@ async function collectUsageOnce(options) {
   let promaPeriods = null;
   let promaRows = null;
   let promaPricing = null;
+  let qoderCnPeriods = null;
+  let qoderCnRows = null;
+  let qoderCnPricing = null;
+  let qoderCnPeriodReadFailed = false;
+  const emitProgress = (periods) => {
+    if (typeof options.onProgress !== 'function') return;
+    const progress = { ...periods };
+    if (qoderCnPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, qoderCnPeriods.today);
+    if (qoderCnPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, qoderCnPeriods.month);
+    try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
+  };
   if (normalizedClients) {
     const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
     await maybeSyncCursor(syncClients, options.logger, {
@@ -826,6 +1082,31 @@ async function collectUsageOnce(options) {
         if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
       }
     }
+    if (includesQoderCn && (!targetRequested || targetClients.includes('qodercn'))) {
+      try {
+        const qoderCnSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
+        qoderCnRows = await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger, sinceMs: qoderCnSinceMs });
+        qoderCnPricing = await resolveQoderCnPricing(qoderCnRows, {
+          lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs,
+          pricingRevision: options.pricingRevision
+        });
+        const qoderCnJson = buildQoderCnPeriods({ now: collectedAt, allTimeSince, rows: qoderCnRows, pricingByModel: qoderCnPricing });
+        qoderCnPeriods = {
+          today: extractUsageFromTokscale(qoderCnJson.today),
+          month: extractUsageFromTokscale(qoderCnJson.month),
+          allTime: extractUsageFromTokscale(qoderCnJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`qodercn parse failed: ${err.message}`);
+        qoderCnPeriodReadFailed = true;
+        if (qoderCnReadState) {
+          qoderCnReadState.periodFailed = true;
+          qoderCnReadState.fallbackUsed = Boolean(options.qoderCnFallbackPeriods);
+        }
+        qoderCnPeriods = options.qoderCnFallbackPeriods || null;
+      }
+    }
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
@@ -851,6 +1132,12 @@ async function collectUsageOnce(options) {
         }
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
+      if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
+      if (qoderCnPeriodReadFailed && anchor.todayPartitions?.qodercn) {
+        // A transient local.db read failure must not turn the existing Qoder CN
+        // partition into an empty one or subtract it from month/allTime.
+        freshPartitions.qodercn = anchor.todayPartitions.qodercn;
+      }
       todayPartitions = useTargetedPartitions
         ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
         : completeTodayPartitions(freshPartitions, normalizedClients);
@@ -865,11 +1152,11 @@ async function collectUsageOnce(options) {
       today = todayBundle.period;
       todayPartitions = todayBundle.byClient;
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today });
-      try { if (typeof options.onProgress === 'function') options.onProgress({ today, updatedAt: new Date().toISOString() }); } catch (_) {}
+      emitProgress({ today });
       const monthJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--month'], commandTimeoutMs });
       month = extractUsageFromTokscale(monthJson);
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
-      try { if (typeof options.onProgress === 'function') options.onProgress({ today, month, updatedAt: new Date().toISOString() }); } catch (_) {}
+      emitProgress({ today, month });
       const allTimeJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--since', allTimeSince], commandTimeoutMs });
       allTime = extractUsageFromTokscale(allTimeJson);
     }
@@ -894,6 +1181,12 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, promaPeriods.month);
       allTime = mergePeriods(allTime, promaPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), proma: promaPeriods.today };
+    }
+    if (qoderCnPeriods && !anchorUsed) {
+      today = mergePeriods(today, qoderCnPeriods.today);
+      month = mergePeriods(month, qoderCnPeriods.month);
+      allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), qodercn: qoderCnPeriods.today };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1057,6 +1350,7 @@ async function collectUsageOnce(options) {
     options.onAnchorComputed({
       windowsPeriods,
       todayPartitions,
+      qoderCnPeriods,
       wslBundle,
       wslStatus,
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
@@ -1066,9 +1360,41 @@ async function collectUsageOnce(options) {
   if (options.historyEnabled === false) {
     summary.history = null;
   } else if (options.includeHistory) {
+    // The history graph needs the full Qoder CN row set: anchored (watch/interval)
+    // ticks collect Qoder CN rows only since local midnight for the period delta,
+    // so reusing qoderCnRows here would truncate the history panel to today and
+    // archive that truncated graph. Read full rows for the graph only — this
+    // block is gated by includeHistory (historyIntervalMs), mirroring the proma
+    // full-read pattern; resolveQoderCnPricing is cached (6h TTL) so the second
+    // pass is cheap when the scan already priced the same models.
+    let qoderCnGraph = null;
+    let qoderCnHistoryReadFailed = false;
+    if (includesQoderCn) {
+      try {
+        // Reuse the scan's full rows on non-anchored ticks; anchored ticks read
+        // only since local midnight, so the graph needs its own full read there.
+        // resolveQoderCnPricing is cached (6h TTL), so the second pass is cheap.
+        const rows = (!anchorUsed && qoderCnRows) ? qoderCnRows : await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger });
+        const pricing = (!anchorUsed && qoderCnPricing) ? qoderCnPricing : await resolveQoderCnPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs,
+          pricingRevision: options.pricingRevision
+        });
+        qoderCnGraph = buildQoderCnHistoryGraph({ rows, pricingByModel: pricing });
+      } catch (err) {
+        // A failed history read must not take down the whole tick — the live
+        // periods stay authoritative and the failure remains in the local log.
+        qoderCnHistoryReadFailed = true;
+        if (typeof options.logger === 'function') options.logger(`qodercn history parse failed: ${err.message}`);
+      }
+    }
+    const historyQoderCnGraph = qoderCnHistoryReadFailed
+      ? options.qoderCnHistoryFallbackGraph
+      : qoderCnGraph;
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
+      qoderCnGraph: historyQoderCnGraph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1082,6 +1408,9 @@ async function collectUsageOnce(options) {
       logger: options.logger
     });
     if (history) summary.history = history;
+    if (!qoderCnHistoryReadFailed && qoderCnGraph && typeof options.onQoderCnHistoryGraph === 'function') {
+      options.onQoderCnHistoryGraph(qoderCnGraph);
+    }
   }
   // After history, so `lastActivityDay` can come from the daily buckets this
   // scan already produced rather than from a second source of truth.
@@ -1355,6 +1684,9 @@ function clientSourceRoots(clientsCsv) {
   add('workbuddy', ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')]);
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
+  // Qoder CN — SQLite DB under the platform Application Support dir.
+  const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform: process.platform, env: process.env });
+  add('qodercn', ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]));
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
     resolveReasonixStatsDir({ env: process.env, homeDir: home, platform: process.platform, cwdDir: process.cwd() })
@@ -2111,10 +2443,21 @@ function canTargetTodayPartitions(anchor, targetClients) {
   );
 }
 
-function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true) {
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '') {
   // Deterministic string that captures the config inputs anchor correctness
   // depends on. When this changes, the persisted anchor is invalidated.
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}`;
+  const qoderCn = String(qoderCnDbPath || '').trim();
+  const qoderCnPart = qoderCn ? `|qodercn:${path.resolve(qoderCn)}` : '';
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}`;
+}
+
+function qoderCnDbPathForClients(clientsCsv, options = {}) {
+  if (!normalizeClientsCsv(clientsCsv).split(',').includes('qodercn')) return '';
+  return qoderCnDataPaths({
+    homeDir: options.homeDir,
+    platform: options.platform || process.platform,
+    env: options.env || process.env
+  }).dbPaths[0] || '';
 }
 
 // The one place that decides whether a persisted anchor may be reused, shared by
@@ -2127,10 +2470,10 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true) {
 // collector still reuses the periods then and simply forces a full scan, while
 // a seed has nothing to stand on and declines.
 function collectorAnchorTrust(saved, options = {}) {
-  const { clients = '', allTimeSince = '', projectsEnabled = true, now = new Date() } = options;
+  const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
-  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled)) return null;
+  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath)) return null;
   const parsed = Date.parse(saved.fullScanAt || '');
   const capturedAtMs = Number.isFinite(parsed) && parsed <= now.getTime() ? parsed : null;
   return { capturedAtMs };
@@ -2216,6 +2559,13 @@ function watcherOptions(usePolling, ignored) {
   };
 }
 
+function isQoderCnSelfWatchEvent(filePath, rootsByClient = {}) {
+  if (!filePath || !path.basename(filePath).endsWith('.db-shm')) return false;
+  const resolved = path.resolve(filePath);
+  return (rootsByClient.qodercn || [])
+    .some((root) => resolved.startsWith(path.resolve(root) + path.sep));
+}
+
 function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
@@ -2249,6 +2599,12 @@ function startCollector(options) {
     ? hostOsInfo()
     : normalizeOsInfo(options.osInfo);
   const log = logger || (() => {});
+  const normalizedClients = normalizeClientsCsv(clients);
+  const qoderCnDbPath = qoderCnDbPathForClients(normalizedClients, {
+    homeDir: options.homeDir,
+    platform: process.platform,
+    env: process.env
+  });
   let tickInFlight = false;
   let tickPending = false;
   let pendingForceHistory = false;
@@ -2288,6 +2644,7 @@ function startCollector(options) {
   // process owns the shared archive. A watch tick can then hand its value to a
   // later full/history tick instead of losing it at the tick boundary.
   let liveDailyHistoryDays = {};
+  let qoderCnHistoryGraph = null;
   let lastFullScanAt = 0;
   let pendingWaiters = [];
   let debounceTimer = null;
@@ -2382,7 +2739,8 @@ function startCollector(options) {
       const trust = collectorAnchorTrust(saved, {
         clients,
         allTimeSince,
-        projectsEnabled: options.projectsEnabled
+        projectsEnabled: options.projectsEnabled,
+        qoderCnDbPath
       });
       if (trust) {
         anchor = {
@@ -2390,6 +2748,7 @@ function startCollector(options) {
           today: saved.today,
           month: saved.month,
           allTime: saved.allTime,
+          qoderCnPeriods: saved.qoderCnPeriods || null,
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -2470,6 +2829,7 @@ function startCollector(options) {
     lastTickScope = tickScopeCode(tickOptions);
     try {
       let captured = null;
+      const qoderCnReadState = { periodFailed: false };
       const summary = await collectUsageOnce({
         ...options,
         clients,
@@ -2511,7 +2871,11 @@ function startCollector(options) {
         wslStatus: anchored ? wslStatusAnchor : null,
         lastActivityDays: activityDaysAnchor,
         refreshWsl: anchored ? refreshWsl : false,
+        qoderCnFallbackPeriods: anchor?.qoderCnPeriods || null,
+        qoderCnHistoryFallbackGraph: qoderCnHistoryGraph,
+        qoderCnReadState,
         onAnchorComputed: (x) => { captured = x; },
+        onQoderCnHistoryGraph: (graph) => { qoderCnHistoryGraph = graph; },
         onProgress: (partial) => {
           if (!partial.today) return;
           try {
@@ -2519,6 +2883,9 @@ function startCollector(options) {
               // Frozen WSL snapshot, gated so a cross-day/cross-month full scan
               // doesn't merge a stale period's WSL usage into the preview.
               const wsl = wslPeriodsForPreview(wslAnchor, anchor?.dateKey, todayKey);
+              const qoderCnAnchorToday = qoderCnReadState.periodFailed && !qoderCnReadState.fallbackUsed
+                ? anchor?.todayPartitions?.qodercn
+                : null;
               const preview = {
                 deviceId, hostname: os.hostname(),
                 platform: `${process.platform}-${process.arch}`,
@@ -2530,20 +2897,30 @@ function startCollector(options) {
                 // Merge the frozen WSL snapshot into today (as month/allTime do
                 // below) so the today card keeps its WSL contribution during a
                 // warm scan instead of dropping to host-only until the final tick.
-                today: wsl.today ? mergePeriods(partial.today, wsl.today) : partial.today
+                // The upstream wsl.today guard is preserved: non-WSL machines
+                // keep the identity pass-through instead of a normalize round
+                // trip on this shared preview path.
+                today: qoderCnAnchorToday
+                  ? mergePeriods(partial.today, qoderCnAnchorToday, wsl.today)
+                  : (wsl.today ? mergePeriods(partial.today, wsl.today) : partial.today)
               };
               // Only include month/allTime when actually scanned. During warm
               // full scans the main.js handler carries the previous values
               // forward for omitted fields, so these cards don't flash empty.
-              if (partial.month) {
+              if (partial.month && !qoderCnReadState.periodFailed) {
                 preview.month = wsl.month
                   ? mergePeriods(partial.month, wsl.month)
                   : partial.month;
               }
-              if (partial.allTime) {
+              if (partial.allTime && !qoderCnReadState.periodFailed) {
                 preview.allTime = wslAnchor
                   ? mergePeriods(partial.allTime, wslAnchor.allTime)
                   : partial.allTime;
+              }
+              // Only derive clientStatus when allTime is available; warm
+              // scans carry the previous status forward in main.js.
+              if (partial.allTime && !qoderCnReadState.periodFailed) {
+                preview.clientStatus = deriveClientStatus(clients, partial.allTime);
               }
               onPreview(preview);
             }
@@ -2570,12 +2947,13 @@ function startCollector(options) {
           month: captured.windowsPeriods.month,
           allTime: captured.windowsPeriods.allTime,
           todayPartitions: captured.todayPartitions,
+          qoderCnPeriods: captured.qoderCnPeriods,
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {})
         };
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
-        lastFullScanAt = Date.now();
+        if (!qoderCnReadState.periodFailed) lastFullScanAt = Date.now();
         if (options.anchorPersistenceEnabled !== false) {
           try {
             fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
@@ -2584,12 +2962,13 @@ function startCollector(options) {
               today: anchor.today,
               month: anchor.month,
               allTime: anchor.allTime,
+              qoderCnPeriods: anchor.qoderCnPeriods,
               wslBundle: wslAnchor,
               wslStatus: wslStatusAnchor,
               ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
               ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
-              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled),
-              fullScanAt: new Date().toISOString()
+              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath),
+              fullScanAt: new Date(lastFullScanAt).toISOString()
             }));
           } catch (_) {}
         }
@@ -2597,6 +2976,13 @@ function startCollector(options) {
         // Keep the rolling per-client today partitions fresh for targeted
         // watch ticks. WSL stays independently frozen between interval ticks.
         if (captured.todayPartitions) anchor.todayPartitions = captured.todayPartitions;
+        if (!qoderCnReadState.periodFailed && captured.qoderCnPeriods?.today && anchor.qoderCnPeriods) {
+          anchor.qoderCnPeriods = {
+            today: captured.qoderCnPeriods.today,
+            month: applyPeriodDelta(anchor.qoderCnPeriods.month, captured.qoderCnPeriods.today, anchor.qoderCnPeriods.today),
+            allTime: applyPeriodDelta(anchor.qoderCnPeriods.allTime, captured.qoderCnPeriods.today, anchor.qoderCnPeriods.today)
+          };
+        }
         if (captured.nativeSessions) anchor.nativeSessions = captured.nativeSessions;
         if (captured.nativeProjects) anchor.nativeProjects = captured.nativeProjects;
         if (refreshWsl) {
@@ -2604,6 +2990,7 @@ function startCollector(options) {
           wslStatusAnchor = captured.wslStatus || null;
         }
       }
+      if (qoderCnReadState.periodFailed) scheduledWatchNeedsFullScan = true;
       const transformedSummary = await onUpdate?.(summary, reason);
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'
         ? transformedSummary
@@ -2878,6 +3265,14 @@ function startCollector(options) {
         // The quit path leaves the watcher open (see stop), so events can still
         // arrive after the collector is done with them.
         if (stopped) return;
+        // Our own read-only opens of Qoder CN's local.db recreate its SQLite
+        // wal-index (local.db-shm), so watching that sidecar re-triggers the
+        // watch loop forever — confirmed: 142 events/5min with Qoder CN fully
+        // stopped, dropping to 0 after this filter. The real data signal lives
+        // in local.db / local.db-wal, so drop *.db-shm events under the
+        // qodercn roots only. (hermes/micode may share this pattern upstream —
+        // out of scope here, their watch behaviour is left untouched.)
+        if (isQoderCnSelfWatchEvent(filePath, rootsByClient)) return;
         activityRevision += 1;
         if (tickPending) {
           pendingActivityRevision = pendingActivityRevision === null
@@ -2942,6 +3337,13 @@ function startCollector(options) {
     // unparseable, or future timestamp) — force a full scan immediately.
     const anchorToday = Boolean(!fullScanDue && anchor && anchor.dateKey === localTodayKey());
     const sourceSelfSync = intervalRequiresActivity ? sourceSyncQueue.takeDue() : null;
+    // Smart mode carries the clients its watch events named since the last tick
+    // and unions the self-synced ones on top regardless. Their tokscale cache
+    // dirs are deliberately unwatched to avoid a self-triggering loop, so a sync
+    // can refresh what tokscale reads without any event naming the client it
+    // belongs to. Antigravity's source roots are watched and do name it, but that
+    // tracks the IDE writing rather than the sync landing, so targeting alone
+    // would still miss the sync output.
     const targetClients = intervalRequiresActivity ? takeWatchClients(selfSyncedClients) : [];
     runTick('interval', {
       ...(anchorToday ? { todayOnly: true, refreshWsl: true, targetClients } : {}),
@@ -3052,6 +3454,7 @@ module.exports = {
   computePeriodWindows,
   collectorAnchorTrust,
   configFingerprint,
+  qoderCnDbPathForClients,
   deriveClientHealth,
   deriveClientStatus,
   mergeClientActivityDays,
@@ -3073,12 +3476,16 @@ module.exports = {
   resolvePlatformBinary,
   resolvePromaPricing,
   resetPromaPricingCache,
+  readTokscalePricingCatalog,
+  resetTokscaleCatalogCache,
+  tokscalePricingCatalog,
   resolveWatchUsePolling,
   selfSyncSourceRootsForClients,
   // The process-wide sync throttle this module drives. Exported so a test can
   // read or pin a client's floor directly instead of inferring it from tick
   // timings; the collector never takes a second instance.
   selfSyncThrottle,
+  isQoderCnSelfWatchEvent,
   shouldIncludeHistory,
   startCollector,
   tokscaleCommand,
