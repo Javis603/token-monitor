@@ -14,6 +14,7 @@ const {
 } = require('../../src/shared/commandcodeLimits');
 
 const SESSION_COOKIE = '__Secure-commandcode_prod_.session_token=tok';
+const SESSION_DATA_COOKIE = '__Secure-commandcode_prod_.session_data=data';
 
 // Captured from api.commandcode.ai for an active `individual-go` account.
 const CREDITS_BODY = {
@@ -69,14 +70,26 @@ test('commandcodeCookie prefers settings over env and requires a session cookie'
   assert.equal(commandcodeCookie({}), '');
 });
 
-test('normalizeCommandcodeCookieHeader keeps the whole header once a session cookie is present', () => {
+test('normalizeCommandcodeCookieHeader forwards only better-auth cookies', () => {
+  // Everything outside better-auth's namespaces is a credential the billing API
+  // has no business receiving, so a real page's Stripe and analytics cookies are
+  // dropped rather than posted along with the session.
   assert.equal(
-    normalizeCommandcodeCookieHeader('__Secure-commandcode_prod_.session_token=tok; __Secure-commandcode_prod_.session_data=data; stripe=x'),
-    '__Secure-commandcode_prod_.session_token=tok; __Secure-commandcode_prod_.session_data=data; stripe=x'
+    normalizeCommandcodeCookieHeader(`${SESSION_COOKIE}; ${SESSION_DATA_COOKIE}; __stripe_mid=m; _ga=GA1.1.x; cookie-perms=2`),
+    `${SESSION_COOKIE}; ${SESSION_DATA_COOKIE}`
   );
   // better-auth's unprefixed and __Host- spellings are the same session.
   assert.equal(normalizeCommandcodeCookieHeader('better-auth.session_token=tok'), 'better-auth.session_token=tok');
   assert.equal(normalizeCommandcodeCookieHeader('__Host-better-auth.session_token=tok'), '__Host-better-auth.session_token=tok');
+  // `better-auth.session_token` is better-auth's DEFAULT name, not one Command
+  // Code owns, so a header pasted from an unrelated site that happens to use
+  // better-auth is indistinguishable here. Nothing in a bare header says where
+  // it came from; least privilege is what bounds this, so the unrelated cookies
+  // beside it must not travel too.
+  assert.equal(
+    normalizeCommandcodeCookieHeader('better-auth.session_token=SOMEONE_ELSES; theme=dark; sid=42'),
+    'better-auth.session_token=SOMEONE_ELSES'
+  );
   // A bare token is not accepted: guessing a cookie name would send a header
   // the API cannot authenticate and report it as an expired session.
   assert.equal(normalizeCommandcodeCookieHeader('tok'), '');
@@ -86,18 +99,56 @@ test('normalizeCommandcodeCookieHeader keeps the whole header once a session coo
 test('normalizeCommandcodeCookieHeader accepts a DevTools "Copy as cURL" paste', () => {
   const curl = "curl 'https://api.commandcode.ai/internal/billing/credits' "
     + "-H 'accept: application/json' "
-    + `-H 'cookie: ${SESSION_COOKIE}; __Secure-commandcode_prod_.session_data=data'`;
-  assert.equal(
-    normalizeCommandcodeCookieHeader(curl),
-    `${SESSION_COOKIE}; __Secure-commandcode_prod_.session_data=data`
-  );
+    + `-H 'cookie: ${SESSION_COOKIE}; ${SESSION_DATA_COOKIE}; _ga=GA1.1.x'`;
+  assert.equal(normalizeCommandcodeCookieHeader(curl), `${SESSION_COOKIE}; ${SESSION_DATA_COOKIE}`);
   // Chrome switches to ANSI-C quoting once a value needs escaping, and Windows
   // DevTools emits -b instead of a cookie header.
-  assert.equal(normalizeCommandcodeCookieHeader(`curl 'https://x' -H $'cookie: ${SESSION_COOKIE}'`), SESSION_COOKIE);
-  assert.equal(normalizeCommandcodeCookieHeader(`curl.exe 'https://x' -b '${SESSION_COOKIE}'`), SESSION_COOKIE);
+  assert.equal(
+    normalizeCommandcodeCookieHeader(`curl 'https://commandcode.ai/settings/usage' -H $'cookie: ${SESSION_COOKIE}'`),
+    SESSION_COOKIE
+  );
+  assert.equal(
+    normalizeCommandcodeCookieHeader(`curl.exe 'https://www.commandcode.ai/' -b '${SESSION_COOKIE}'`),
+    SESSION_COOKIE
+  );
   // A capture of the wrong request has no Cookie header. Falling back to the
   // raw text would parse the command line itself as cookie pairs.
-  assert.equal(normalizeCommandcodeCookieHeader("curl 'https://x' -H 'user-agent: Mozilla'"), '');
+  assert.equal(normalizeCommandcodeCookieHeader("curl 'https://api.commandcode.ai/x' -H 'user-agent: Mozilla'"), '');
+});
+
+test('a cURL capture from another origin is refused outright', () => {
+  // Unlike a bare header, a capture says which request it came from — so use it.
+  // Without this, one mis-copied capture posts another site's session to
+  // api.commandcode.ai, and better-auth's default cookie name means an unrelated
+  // better-auth site would look exactly like a valid Command Code session.
+  for (const origin of ['https://evil.example', 'https://commandcode.ai.evil.example', 'http://localhost:3000']) {
+    assert.equal(
+      normalizeCommandcodeCookieHeader(`curl '${origin}/api/me' -H 'cookie: ${SESSION_COOKIE}'`),
+      '',
+      origin
+    );
+    assert.equal(
+      normalizeCommandcodeCookieHeader(`curl '${origin}/api/me' -H 'cookie: better-auth.session_token=tok'`),
+      '',
+      origin
+    );
+  }
+  // The request URL is the argument that *starts* with a scheme; one merely
+  // quoted inside a header must not be mistaken for it, in either direction.
+  assert.equal(
+    normalizeCommandcodeCookieHeader(
+      `curl 'https://commandcode.ai/settings/usage' -H 'referer: https://evil.example' -H 'cookie: ${SESSION_COOKIE}'`
+    ),
+    SESSION_COOKIE
+  );
+  assert.equal(
+    normalizeCommandcodeCookieHeader(
+      `curl 'https://evil.example/x' -H 'referer: https://commandcode.ai/' -H 'cookie: ${SESSION_COOKIE}'`
+    ),
+    ''
+  );
+  // No URL at all means nothing to verify against, so it is not trusted.
+  assert.equal(normalizeCommandcodeCookieHeader(`curl -H 'cookie: ${SESSION_COOKIE}'`), '');
 });
 
 test('parseCommandcodeCredits reads rolling limits at the root and nested in credits', () => {
@@ -412,6 +463,26 @@ test('a stalled subscription lookup does not hold the probe past the credits dea
   assert.equal(provider.status, 'ok');
   assert.equal(provider.accountLabel, '');
   assert.equal(windowByKind(provider, 'billing')[0].remaining, 8.7784);
+});
+
+test('a fast credits failure does not wait out the enrichment deadline', async () => {
+  // The plan lookup is discarded on this path, so holding the error behind its
+  // deadline would make an expired cookie take seconds to report.
+  const startedAt = Date.now();
+  const provider = await fetchCommandcodeLimits(
+    { commandcodeCookie: SESSION_COOKIE },
+    {
+      env: {},
+      commandcodeSubscriptionTimeoutMs: 5_000,
+      fetch: stubFetch({
+        [COMMANDCODE_CREDITS_URL]: () => jsonResponse(401, {}),
+        [COMMANDCODE_SUBSCRIPTIONS_URL]: () => new Promise(() => {})
+      })
+    }
+  );
+
+  assert.equal(provider.status, 'unauthorized');
+  assert.ok(Date.now() - startedAt < 1_000, `took ${Date.now() - startedAt}ms`);
 });
 
 test('an exhausted credits probe reports unavailable rather than hanging', async () => {

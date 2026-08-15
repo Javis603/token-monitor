@@ -29,6 +29,29 @@ const COMMANDCODE_SESSION_COOKIE_NAMES = new Set([
   'better-auth.session_token'
 ]);
 
+// Only cookies in one of better-auth's namespaces are forwarded. Everything else
+// on the page — Stripe, analytics, whatever the site sets — is a credential the
+// billing API has no business receiving, and `better-auth.session_token` is
+// better-auth's *default* name rather than anything Command Code owns, so a
+// header copied from an unrelated site that happens to use better-auth would
+// otherwise be posted to api.commandcode.ai intact.
+const COMMANDCODE_COOKIE_NAMESPACES = ['commandcode_prod_.', 'better-auth.'];
+
+// Hosts a session cookie for this provider can legitimately have been captured
+// from. Deliberately the whole host and not just the billing paths: copying the
+// cURL of the usage page's own document request is a perfectly good way to get
+// the header, and pinning the path would reject it.
+const COMMANDCODE_COOKIE_HOSTS = new Set([
+  'commandcode.ai',
+  'www.commandcode.ai',
+  'api.commandcode.ai'
+]);
+
+function isCommandcodeAuthCookie(name) {
+  const bare = String(name).toLowerCase().replace(/^__(?:secure|host)-/, '');
+  return COMMANDCODE_COOKIE_NAMESPACES.some((namespace) => bare.startsWith(namespace));
+}
+
 // `/internal/billing/credits` reports what is *left* of the monthly grant and
 // never the plan's allowance, so the denominator has to come from the plan id on
 // `/internal/billing/subscriptions` matched against the published pricing
@@ -90,7 +113,25 @@ function looksLikeCurlCapture(raw) {
 // single-quoted, double-quoted, ANSI-C quoted ($'...'), or bare.
 const CURL_HEADER_ARGUMENT = /(?:^|\s)(-H|--header|-b|--cookie)(?:\s+|=)\$?(?:'([^']*)'|"((?:[^"\\]|\\.)*)"|(\S+))/g;
 
+// The request URL is the first argument whose value *starts* with a scheme —
+// header values that mention one (`referer: https://…`) never do, so this picks
+// the captured request rather than something quoted inside it.
+const CURL_TOKEN = /'([^']*)'|"((?:[^"\\]|\\.)*)"|(\S+)/g;
+
+function curlRequestUrl(raw) {
+  for (const match of raw.matchAll(CURL_TOKEN)) {
+    const value = match[1] ?? match[2] ?? match[3];
+    if (!/^https?:\/\//i.test(value || '')) continue;
+    try { return new URL(value); } catch (_) { return null; }
+  }
+  return null;
+}
+
 function cookieHeaderFromCurl(raw) {
+  // A capture carries the origin its cookies belong to, so use it: without this
+  // a cURL copied from any other site would have its session forwarded here.
+  const requestUrl = curlRequestUrl(raw);
+  if (!requestUrl || !COMMANDCODE_COOKIE_HOSTS.has(requestUrl.hostname.toLowerCase())) return '';
   for (const match of raw.matchAll(CURL_HEADER_ARGUMENT)) {
     const [, flag, single, double, bare] = match;
     // Only a double-quoted shell word carries escapes; inside single quotes a
@@ -109,14 +150,18 @@ function cookieHeaderFromCurl(raw) {
   return '';
 }
 
-// The whole header is forwarded, not just the session token: better-auth pairs
-// the token with a `.session_data` cookie cache, and dropping it would make the
-// API re-read the session on every poll.
+// Keeps better-auth's own cookies and drops everything else. The session token
+// alone would authenticate, but `.session_data` is the cache that saves the API
+// a session lookup per poll, so the namespace is kept whole rather than pinned
+// to two exact names.
 function normalizeCommandcodeCookieHeader(rawCookie) {
   const raw = cleanSecret(rawCookie);
   const pairs = cookiePairs(looksLikeCurlCapture(raw) ? cookieHeaderFromCurl(raw) : raw);
   if (!pairs.some((pair) => COMMANDCODE_SESSION_COOKIE_NAMES.has(pair.name.toLowerCase()))) return '';
-  return pairs.map((pair) => `${pair.name}=${pair.value}`).join('; ');
+  return pairs
+    .filter((pair) => isCommandcodeAuthCookie(pair.name))
+    .map((pair) => `${pair.name}=${pair.value}`)
+    .join('; ');
 }
 
 function commandcodeCookie(env = process.env, options = {}) {
@@ -235,7 +280,7 @@ function requestHeaders(cookie) {
   };
 }
 
-async function fetchJson(url, cookie, deadlineMs, deps) {
+async function fetchJson(url, cookie, deadlineMs, deps, parentSignal = deps.signal) {
   return runWithProbeDeadline(
     async ({ signal }) => {
       const response = await (deps.fetch || fetch)(url, { headers: requestHeaders(cookie), signal });
@@ -250,7 +295,7 @@ async function fetchJson(url, cookie, deadlineMs, deps) {
       }
       return response.json();
     },
-    { signal: deps.signal, deadlineMs }
+    { signal: parentSignal, deadlineMs }
   );
 }
 
@@ -325,8 +370,19 @@ async function fetchCommandcodeLimits(options = {}, deps = {}) {
   );
   // Both reads start together: the plan lookup is optional enrichment, so its
   // failure resolves to null rather than rejecting the credits read beside it.
+  // It also gets its own abort, so a credits call that fails fast — a 401, say —
+  // reports that immediately instead of waiting out the enrichment deadline for
+  // an answer it is about to discard.
+  const subscriptionAbort = typeof AbortController === 'undefined' ? null : new AbortController();
+  const subscriptionSignals = [deps.signal, subscriptionAbort?.signal].filter(Boolean);
   const creditsRequest = fetchJson(COMMANDCODE_CREDITS_URL, cookie, creditsDeadline, deps);
-  const subscriptionRequest = fetchJson(COMMANDCODE_SUBSCRIPTIONS_URL, cookie, subscriptionDeadline, deps)
+  const subscriptionRequest = fetchJson(
+    COMMANDCODE_SUBSCRIPTIONS_URL,
+    cookie,
+    subscriptionDeadline,
+    deps,
+    subscriptionSignals.length > 1 ? AbortSignal.any(subscriptionSignals) : subscriptionSignals[0]
+  )
     .then(parseCommandcodeSubscription)
     .catch(() => null);
 
@@ -357,9 +413,10 @@ async function fetchCommandcodeLimits(options = {}, deps = {}) {
       windows
     });
   } catch (error) {
-    // The optional read already swallowed its own failures, so anything landing
-    // here came from the credits call or from parsing it.
-    await subscriptionRequest;
+    // Anything landing here came from the credits call or from parsing it — the
+    // optional read swallows its own failures. Cancel it rather than awaiting
+    // it: its result is unusable now, and it already handles its own rejection.
+    subscriptionAbort?.abort();
     return normalizeLimitProvider({
       provider: 'commandcode',
       source: 'web',
