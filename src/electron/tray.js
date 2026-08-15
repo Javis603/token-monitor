@@ -27,8 +27,12 @@ function parseWindowsSystemUsesLightTheme(output) {
   const match = /SystemUsesLightTheme\s+REG_DWORD\s+0x([0-9a-fA-F]+)/.exec(String(output || ''));
   if (!match) return null;
   const value = Number.parseInt(match[1], 16);
-  if (!Number.isFinite(value)) return null;
-  return value === 0;
+  // Windows only ever writes 0 or 1 here. Anything else is a value we do not
+  // understand, and guessing "light" from it would repaint the tray on a reading
+  // we cannot justify — answer unknown and let the caller fall back.
+  if (value === 0) return true;
+  if (value === 1) return false;
+  return null;
 }
 
 function buildTrayIcon(options = {}) {

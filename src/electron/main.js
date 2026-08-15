@@ -4361,13 +4361,20 @@ function pushSystemUiThemeToRenderer(dark) {
 
 // Only the push path needs the registry: at startup the cached property has
 // settled and answers correctly, which is why the seed in `app:getInfo` still
-// reads it directly.
+// reads it directly. Flips race each other through the registry read, so the
+// same generation guard the icon delivery uses drops a reading that a newer
+// flip has already overtaken — otherwise a slow reg.exe could answer last with
+// the older theme and repaint the tray backwards.
+let systemUiThemeRevision = 0;
+
 async function pushSystemUiThemeAfterChange() {
+  const revision = ++systemUiThemeRevision;
   if (process.platform !== 'win32') {
     pushSystemUiThemeToRenderer();
     return;
   }
   const fromRegistry = await readWindowsSystemDarkUi();
+  if (revision !== systemUiThemeRevision) return;
   pushSystemUiThemeToRenderer(typeof fromRegistry === 'boolean' ? fromRegistry : systemDarkTrayUi());
 }
 

@@ -35,3 +35,10 @@ test('the value is read as hex and tolerates reg.exe spacing', () => {
   assert.equal(parseWindowsSystemUsesLightTheme('SystemUsesLightTheme REG_DWORD 0x00000000'), true);
   assert.equal(parseWindowsSystemUsesLightTheme('SystemUsesLightTheme\tREG_DWORD\t0x00000001'), false);
 });
+
+test('a DWORD outside 0/1 is unknown rather than assumed light', () => {
+  // Windows only writes 0 or 1. Reading anything else as "light" would repaint
+  // the tray from a value we cannot justify.
+  assert.equal(parseWindowsSystemUsesLightTheme(REG_OUTPUT('0x2')), null);
+  assert.equal(parseWindowsSystemUsesLightTheme(REG_OUTPUT('0xff')), null);
+});
