@@ -16,26 +16,38 @@ const COMMANDCODE_SUBSCRIPTIONS_URL = `${COMMANDCODE_API_BASE}/internal/billing/
 const COMMANDCODE_WEB_ORIGIN = 'https://commandcode.ai';
 const COMMANDCODE_USAGE_URL = `${COMMANDCODE_WEB_ORIGIN}/settings/usage`;
 
-// better-auth names its session cookie by deployment: the `__Secure-`/`__Host-`
-// prefixes are what browsers require over HTTPS, and Command Code additionally
-// namespaces production under `commandcode_prod_`. Any of these identifies a
-// signed-in session; a pasted header without one is not a Command Code session.
+// Command Code namespaces its better-auth cookies under `commandcode_prod_`; the
+// `__Secure-`/`__Host-` prefixes are what browsers require over HTTPS. This is
+// what identifies a signed-in session — a pasted header without one is not a
+// Command Code session.
+//
+// better-auth's own defaults (`better-auth.session_token` and its prefixed
+// spellings) are deliberately NOT here, though other clients accept them as a
+// fallback. That name belongs to the library, not to this provider, so any site
+// built on better-auth produces a header indistinguishable from a real session —
+// and a bare header carries nothing that says where it came from, so one
+// mis-paste would post someone else's session to api.commandcode.ai. Production
+// has been observed using the namespaced spelling, which is the condition that
+// fallback was waiting on. Restore it only with a live deployment that needs it,
+// and then only for a capture whose origin has been verified.
 const COMMANDCODE_SESSION_COOKIE_NAMES = new Set([
   '__secure-commandcode_prod_.session_token',
   '__host-commandcode_prod_.session_token',
-  'commandcode_prod_.session_token',
-  '__secure-better-auth.session_token',
-  '__host-better-auth.session_token',
-  'better-auth.session_token'
+  'commandcode_prod_.session_token'
 ]);
 
-// Only cookies in one of better-auth's namespaces are forwarded. Everything else
-// on the page — Stripe, analytics, whatever the site sets — is a credential the
-// billing API has no business receiving, and `better-auth.session_token` is
-// better-auth's *default* name rather than anything Command Code owns, so a
-// header copied from an unrelated site that happens to use better-auth would
-// otherwise be posted to api.commandcode.ai intact.
-const COMMANDCODE_COOKIE_NAMESPACES = ['commandcode_prod_.', 'better-auth.'];
+// What actually gets sent. `session_token` is the identity; `session_data` is
+// better-auth's short-lived cookie cache, kept so the API is not made to re-read
+// the session on every poll. Everything else — Stripe, analytics, and the rest
+// of the same namespace (`dont_remember`, `two_factor`, …) — is a credential the
+// billing API has no business receiving, so this is an exact list rather than a
+// namespace prefix.
+const COMMANDCODE_FORWARDED_COOKIE_NAMES = new Set([
+  ...COMMANDCODE_SESSION_COOKIE_NAMES,
+  '__secure-commandcode_prod_.session_data',
+  '__host-commandcode_prod_.session_data',
+  'commandcode_prod_.session_data'
+]);
 
 // Hosts a session cookie for this provider can legitimately have been captured
 // from. Deliberately the whole host and not just the billing paths: copying the
@@ -48,8 +60,7 @@ const COMMANDCODE_COOKIE_HOSTS = new Set([
 ]);
 
 function isCommandcodeAuthCookie(name) {
-  const bare = String(name).toLowerCase().replace(/^__(?:secure|host)-/, '');
-  return COMMANDCODE_COOKIE_NAMESPACES.some((namespace) => bare.startsWith(namespace));
+  return COMMANDCODE_FORWARDED_COOKIE_NAMES.has(String(name).toLowerCase());
 }
 
 // `/internal/billing/credits` reports what is *left* of the monthly grant and
@@ -150,10 +161,7 @@ function cookieHeaderFromCurl(raw) {
   return '';
 }
 
-// Keeps better-auth's own cookies and drops everything else. The session token
-// alone would authenticate, but `.session_data` is the cache that saves the API
-// a session lookup per poll, so the namespace is kept whole rather than pinned
-// to two exact names.
+// Keeps the two cookies the billing API needs and drops everything else.
 function normalizeCommandcodeCookieHeader(rawCookie) {
   const raw = cleanSecret(rawCookie);
   const pairs = cookiePairs(looksLikeCurlCapture(raw) ? cookieHeaderFromCurl(raw) : raw);
@@ -429,6 +437,7 @@ async function fetchCommandcodeLimits(options = {}, deps = {}) {
 
 module.exports = {
   COMMANDCODE_CREDITS_URL,
+  COMMANDCODE_FORWARDED_COOKIE_NAMES,
   COMMANDCODE_FETCH_TIMEOUT_MS,
   COMMANDCODE_PLANS,
   COMMANDCODE_SESSION_COOKIE_NAMES,

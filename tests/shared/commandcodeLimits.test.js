@@ -78,18 +78,30 @@ test('normalizeCommandcodeCookieHeader forwards only better-auth cookies', () =>
     normalizeCommandcodeCookieHeader(`${SESSION_COOKIE}; ${SESSION_DATA_COOKIE}; __stripe_mid=m; _ga=GA1.1.x; cookie-perms=2`),
     `${SESSION_COOKIE}; ${SESSION_DATA_COOKIE}`
   );
-  // better-auth's unprefixed and __Host- spellings are the same session.
-  assert.equal(normalizeCommandcodeCookieHeader('better-auth.session_token=tok'), 'better-auth.session_token=tok');
-  assert.equal(normalizeCommandcodeCookieHeader('__Host-better-auth.session_token=tok'), '__Host-better-auth.session_token=tok');
-  // `better-auth.session_token` is better-auth's DEFAULT name, not one Command
-  // Code owns, so a header pasted from an unrelated site that happens to use
-  // better-auth is indistinguishable here. Nothing in a bare header says where
-  // it came from; least privilege is what bounds this, so the unrelated cookies
-  // beside it must not travel too.
+  // Command Code's namespace in all three browser spellings.
   assert.equal(
-    normalizeCommandcodeCookieHeader('better-auth.session_token=SOMEONE_ELSES; theme=dark; sid=42'),
-    'better-auth.session_token=SOMEONE_ELSES'
+    normalizeCommandcodeCookieHeader('commandcode_prod_.session_token=tok'),
+    'commandcode_prod_.session_token=tok'
   );
+  assert.equal(
+    normalizeCommandcodeCookieHeader('__Host-commandcode_prod_.session_token=tok'),
+    '__Host-commandcode_prod_.session_token=tok'
+  );
+  // The rest of the namespace is better-auth machinery the billing API has no
+  // use for, so the allowlist is exact rather than a namespace prefix.
+  assert.equal(
+    normalizeCommandcodeCookieHeader(`${SESSION_COOKIE}; __Secure-commandcode_prod_.dont_remember=1; __Secure-commandcode_prod_.two_factor=x`),
+    SESSION_COOKIE
+  );
+  // better-auth's DEFAULT names are not accepted at all: they belong to the
+  // library, not to this provider, so any site built on better-auth would
+  // produce a header indistinguishable from a real session — and a bare header
+  // carries nothing that says which site it came from.
+  for (const foreign of [
+    'better-auth.session_token=SOMEONE_ELSES; theme=dark',
+    '__Secure-better-auth.session_token=SOMEONE_ELSES',
+    '__Host-better-auth.session_token=SOMEONE_ELSES'
+  ]) assert.equal(normalizeCommandcodeCookieHeader(foreign), '', foreign);
   // A bare token is not accepted: guessing a cookie name would send a header
   // the API cannot authenticate and report it as an expired session.
   assert.equal(normalizeCommandcodeCookieHeader('tok'), '');
@@ -124,11 +136,6 @@ test('a cURL capture from another origin is refused outright', () => {
   for (const origin of ['https://evil.example', 'https://commandcode.ai.evil.example', 'http://localhost:3000']) {
     assert.equal(
       normalizeCommandcodeCookieHeader(`curl '${origin}/api/me' -H 'cookie: ${SESSION_COOKIE}'`),
-      '',
-      origin
-    );
-    assert.equal(
-      normalizeCommandcodeCookieHeader(`curl '${origin}/api/me' -H 'cookie: better-auth.session_token=tok'`),
       '',
       origin
     );
