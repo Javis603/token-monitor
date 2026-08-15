@@ -23,6 +23,7 @@ const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const motionPreferenceApi = require('./motionPreference');
 const { createClaudeWebFetch } = require('./claudeWebFetch');
+const { createElectronLimitsFetch } = require('./limitsFetch');
 const {
   expandedBoundsForCollapse,
   normalWindowBounds,
@@ -41,6 +42,22 @@ const {
 // event and Electron pops a "JavaScript error in the main process" dialog.
 installSafeStdout();
 const electronClaudeWebFetch = createClaudeWebFetch(net);
+// One transport for every widget provider call that resolves through
+// `deps.fetch` — see limitsFetch.js for why the branch and the request options
+// are what they are. Probes that build their own transport inherit neither
+// branch: cursorProbe and antigravityProbe on node:https, Claude Web on the
+// claudeWebFetch above, the CLI fallbacks on a spawned binary.
+function electronLimitsFetch() {
+  return createElectronLimitsFetch({ net, env: process.env });
+}
+
+// Settings-side provider probes take the same transport as the collector's.
+// Most of them are what an account save is gated on, so leaving one on the
+// global fetch refuses to save an account on exactly the machines this
+// transport exists for.
+function electronProviderDeps(deps = {}) {
+  return { ...deps, fetch: electronLimitsFetch() };
+}
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs, visibleDiagnosticRoots } = require('../shared/collector');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
@@ -149,6 +166,7 @@ function opencodeAmbientKeyActive(profiles) {
 async function probeOpenCodeApiKey(apiKey) {
   try {
     return await opencodeGoApi.fetchGoApi(apiKey, {
+      fetch: electronLimitsFetch(),
       signal: AbortSignal.timeout(OPENCODE_API_PROBE_TIMEOUT_MS)
     });
   } catch (_) {
@@ -654,6 +672,7 @@ function persistClaudeWebCookieRenewal({ previousCookie, cookie } = {}) {
 
 function electronLimitsDeps() {
   return {
+    fetch: electronLimitsFetch(),
     claudeWebFetch: electronClaudeWebFetch,
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal
@@ -890,7 +909,7 @@ function hydrateCodexManagedWorkspaceLabels() {
           description: 'Managed Codex auth',
           encoding: 'utf8'
         }));
-        const workspaces = await listCodexWorkspaces(auth, { env: process.env });
+        const workspaces = await listCodexWorkspaces(auth, electronProviderDeps({ env: process.env }));
         const workspace = workspaces.find((entry) => entry.id === account.workspaceAccountId);
         return workspace
           ? {
@@ -1034,7 +1053,7 @@ async function addMimoManagedAccount(cookieValue) {
   const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
   const result = createMimoManagedAccount(cookieValue, accounts);
   if (!result.ok) return result;
-  const [validation] = await fetchMimoLimits({ mimoManagedAccounts: [result.account] });
+  const [validation] = await fetchMimoLimits({ mimoManagedAccounts: [result.account] }, electronProviderDeps());
   if (validation?.status !== 'ok') {
     const errorCode = validation?.status === 'unauthorized'
       ? 'invalidCookie'
@@ -1266,10 +1285,10 @@ async function resolveCodexWorkspaceAfterLogin(auth, homePath, options = {}) {
   const initialIdentity = codexAuthIdentity(auth);
   let workspaces;
   try {
-    workspaces = await listCodexWorkspaces(auth, {
+    workspaces = await listCodexWorkspaces(auth, electronProviderDeps({
       env: process.env,
       signal: options.signal
-    });
+    }));
   } catch (error) {
     if (options.signal?.aborted) return { cancelled: true };
     console.warn('Could not list Codex workspaces after sign-in:', error?.message || error);
@@ -6461,7 +6480,7 @@ app.whenReady().then(() => {
   ipcMain.handle('ollama:validateCookie', async (_event, raw) => {
     const cookie = normalizeOllamaCookie(raw);
     if (!cookie) return { ok: false, status: 'notConfigured' };
-    const provider = await fetchOllamaLimits({ ollamaCookie: cookie }, { bypassValidationCache: true });
+    const provider = await fetchOllamaLimits({ ollamaCookie: cookie }, electronProviderDeps({ bypassValidationCache: true }));
     rememberOllamaValidation(cookie, provider);
     return { ok: provider.status === 'ok', status: provider.status };
   });
@@ -6481,8 +6500,8 @@ app.whenReady().then(() => {
     }
     try {
       const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(cookie, {}),
-        opencodeWeb.fetchZen(cookie, {})
+        opencodeWeb.fetchGoWeb(cookie, electronProviderDeps()),
+        opencodeWeb.fetchZen(cookie, electronProviderDeps())
       ]);
       if (opencodeWeb.summarizeLink(go, zen).expired) {
         return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
@@ -6608,8 +6627,8 @@ app.whenReady().then(() => {
           }];
         }
         const [go, zen, apiProbe] = await Promise.all([
-          opencodeWeb.fetchGoWeb(profile.cookie, {}),
-          opencodeWeb.fetchZen(profile.cookie, {}),
+          opencodeWeb.fetchGoWeb(profile.cookie, electronProviderDeps()),
+          opencodeWeb.fetchZen(profile.cookie, electronProviderDeps()),
           apiKey ? probeOpenCodeApiKey(apiKey) : null
         ]);
         const summary = { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd };
@@ -6634,8 +6653,8 @@ app.whenReady().then(() => {
     const envCookie = process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '';
     if (envCookie && !entries.some(([, p]) => p.cookie === envCookie)) {
       const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(envCookie, {}),
-        opencodeWeb.fetchZen(envCookie, {})
+        opencodeWeb.fetchGoWeb(envCookie, electronProviderDeps()),
+        opencodeWeb.fetchZen(envCookie, electronProviderDeps())
       ]);
       let envKey = 'env';
       for (let i = 1; Object.prototype.hasOwnProperty.call(profiles, envKey); i += 1) {
@@ -6764,8 +6783,8 @@ app.whenReady().then(() => {
         const cookie = opencodeWeb.sanitizeCookieHeader(raw);
         if (!cookie) return { ok: false, error: 'Empty cookie' };
         const [go, zen] = await Promise.all([
-          opencodeWeb.fetchGoWeb(cookie, {}),
-          opencodeWeb.fetchZen(cookie, {})
+          opencodeWeb.fetchGoWeb(cookie, electronProviderDeps()),
+          opencodeWeb.fetchZen(cookie, electronProviderDeps())
         ]);
         if (opencodeWeb.summarizeLink(go, zen).expired) {
           return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
@@ -6958,10 +6977,10 @@ app.whenReady().then(() => {
     if (!name) return { ok: false, errorCode: 'invalidName' };
     if (!apiKey) return { ok: false, errorCode: 'missingApiKey' };
     try {
-      const provider = await openrouterLimits.fetchOpenRouterAccount(name, apiKey, {
+      const provider = await openrouterLimits.fetchOpenRouterAccount(name, apiKey, electronProviderDeps({
         env: process.env,
         signal: AbortSignal.timeout(15_000)
-      });
+      }));
       if (provider?.status !== 'ok') {
         return { ok: false, error: provider?.status === 'unauthorized' ? 'OpenRouter rejected the API key' : 'Could not validate the OpenRouter API key' };
       }
@@ -7094,10 +7113,10 @@ app.whenReady().then(() => {
     });
     if (!profile) return { ok: false, errorCode: 'invalidCredential' };
     try {
-      const provider = await thirdPartyLimits.fetchThirdPartyAccount({ name, ...profile }, {
+      const provider = await thirdPartyLimits.fetchThirdPartyAccount({ name, ...profile }, electronProviderDeps({
         env: process.env,
         signal: AbortSignal.timeout(15_000)
-      });
+      }));
       if (provider?.status !== 'ok') {
         return {
           ok: false,

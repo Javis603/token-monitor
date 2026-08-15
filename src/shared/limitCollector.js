@@ -3260,8 +3260,8 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
         signal: deps.signal,
         apiKey: primaryApiKey
       }),
-      cookie ? fetchGoWeb(cookie, { now: () => nowMs }) : null,
-      cookie ? fetchZen(cookie, { now: () => nowMs, workspaceId: '' }) : null
+      cookie ? fetchGoWeb(cookie, { now: () => nowMs, fetch: deps.fetch }) : null,
+      cookie ? fetchZen(cookie, { now: () => nowMs, workspaceId: '', fetch: deps.fetch }) : null
     ]);
     const webIdentity = openCodeWebIdentity(goWeb, zen, cookie);
     const webAccountKey = webIdentity.accountKey;
@@ -3404,8 +3404,8 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
     const result = await Promise.race([
       (async () => {
         const [goWeb, zen, goApi] = await Promise.all([
-          cookie ? fetchGoWeb(cookie, { now: () => nowMs }) : null,
-          cookie ? fetchZen(cookie, { now: () => nowMs, workspaceId: '' }) : null,
+          cookie ? fetchGoWeb(cookie, { now: () => nowMs, fetch: api.deps?.fetch }) : null,
+          cookie ? fetchZen(cookie, { now: () => nowMs, workspaceId: '', fetch: api.deps?.fetch }) : null,
           api.apiKey
             ? api.collectGoApi({
               env: api.deps?.env || process.env,
