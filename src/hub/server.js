@@ -4,13 +4,15 @@ const http = require('node:http');
 const path = require('node:path');
 const { URL } = require('node:url');
 const { aggregateDevices, mergeDeviceRecord, aggregateHistory } = require('../shared/usage');
-const { historyPreview, historyRevision } = require('../shared/history');
+const { DEFAULT_STALE_AFTER_MS } = require('../shared/syncUploadInterval');
+const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const {
   emptySubscriptionDocument,
   isStaleSubscriptionWrite,
   subscriptionDocument
 } = require('../shared/subscriptionDisplay');
 const { CURRENCY_CODES, normalizeCurrency } = require('../shared/currency');
+const { currentHubBuild } = require('../shared/hubBuildIdentity');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
 
@@ -30,7 +32,7 @@ function createHub({
   port = 17321,
   host = '0.0.0.0',
   secret = '',
-  staleAfterMs = 10 * 60 * 1000,
+  staleAfterMs = DEFAULT_STALE_AFTER_MS,
   dataFile = path.join(projectRoot(), 'data', 'devices.json'),
   logger = console
 } = {}) {
@@ -55,6 +57,7 @@ function createHub({
     const history = aggregateHistory(Object.values(store.devices));
     stats.historyPreview = historyPreview(history);
     stats.historyRevision = historyRevision(history);
+    stats.deviceHistoryRevision = deviceHistoryRevision(Object.values(store.devices));
     // The version of the shared subscription list, never the list itself. A
     // device compares it against the copy it holds and re-reads only when it has
     // been overtaken, so learning about another device's edit costs nothing in
@@ -65,6 +68,10 @@ function createHub({
 
   function getHistory() {
     return aggregateHistory(Object.values(store.devices));
+  }
+
+  function getDevices() {
+    return Object.values(store.devices);
   }
 
   const sseClients = new Set();
@@ -177,7 +184,9 @@ function createHub({
       return sendJson(res, 200, {
         ok: true,
         role: 'hub',
+        runtime: 'node-hub',
         version: store.version || 1,
+        hubBuild: currentHubBuild('node-hub'),
         deviceCount: Object.keys(store.devices).length,
         secretRequired: Boolean(secret),
         now: new Date().toISOString()
@@ -187,7 +196,7 @@ function createHub({
     if (!isAuthorized(req, secret)) return sendJson(res, 401, { error: 'unauthorized' });
 
     if (req.method === 'GET' && url.pathname === '/api/stats') return sendJson(res, 200, getStats());
-    if (req.method === 'GET' && url.pathname === '/api/devices') return sendJson(res, 200, { devices: Object.values(store.devices) });
+    if (req.method === 'GET' && url.pathname === '/api/devices') return sendJson(res, 200, { devices: getDevices() });
     if (req.method === 'GET' && url.pathname === '/api/history') return sendJson(res, 200, getHistory());
 
     if (req.method === 'GET' && url.pathname === '/api/stats/stream') {
@@ -282,7 +291,7 @@ function createHub({
   }
 
   return {
-    start, stop, server, getStats, getHistory, ingest, deleteDevice, onStats, bindHost,
+    start, stop, server, getStats, getHistory, getDevices, ingest, deleteDevice, onStats, bindHost,
     getSubscriptions, setSubscriptions
   };
 }
@@ -293,7 +302,7 @@ if (require.main === module) {
   const port = Number(args.port || process.env.TOKEN_MONITOR_PORT || 17321);
   const host = String(args.host || process.env.TOKEN_MONITOR_HOST || '0.0.0.0');
   const secret = String(args.secret || process.env.TOKEN_MONITOR_SECRET || '').trim();
-  const staleAfterMs = Number(args.staleAfterMs || process.env.TOKEN_MONITOR_STALE_AFTER_MS || 10 * 60 * 1000);
+  const staleAfterMs = Number(args.staleAfterMs || process.env.TOKEN_MONITOR_STALE_AFTER_MS || DEFAULT_STALE_AFTER_MS);
   const dataFile = String(args.dataFile || process.env.TOKEN_MONITOR_DATA_FILE || path.join(projectRoot(), 'data', 'devices.json'));
 
   const hub = createHub({ port, host, secret, staleAfterMs, dataFile });

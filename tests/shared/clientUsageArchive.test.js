@@ -98,30 +98,42 @@ function liveSummaryWithoutHermes() {
     today: {
       totalTokens: 50,
       costUsd: 0.25,
+      outputTokens: 30,
+      capabilities: { tokenComponents: true },
       clients: { codex: 50 },
       clientCosts: { codex: 0.25 },
+      clientOutputs: { codex: 30 },
       models: { 'gpt-5': 50 },
       modelCosts: { 'gpt-5': 0.25 },
+      modelOutputs: { 'gpt-5': 30 },
       clientModels: { codex: { 'gpt-5': 50 } },
       clientModelCosts: { codex: { 'gpt-5': 0.25 } }
     },
     month: {
       totalTokens: 150,
       costUsd: 0.75,
+      outputTokens: 90,
+      capabilities: { tokenComponents: true },
       clients: { codex: 150 },
       clientCosts: { codex: 0.75 },
+      clientOutputs: { codex: 90 },
       models: { 'gpt-5': 150 },
       modelCosts: { 'gpt-5': 0.75 },
+      modelOutputs: { 'gpt-5': 90 },
       clientModels: { codex: { 'gpt-5': 150 } },
       clientModelCosts: { codex: { 'gpt-5': 0.75 } }
     },
     allTime: {
       totalTokens: 300,
       costUsd: 0.75,
+      outputTokens: 180,
+      capabilities: { tokenComponents: true },
       clients: { codex: 300 },
       clientCosts: { codex: 0.75 },
+      clientOutputs: { codex: 180 },
       models: { 'gpt-5': 300 },
       modelCosts: { 'gpt-5': 0.75 },
+      modelOutputs: { 'gpt-5': 180 },
       clientModels: { codex: { 'gpt-5': 300 } },
       clientModelCosts: { codex: { 'gpt-5': 0.75 } }
     }
@@ -201,6 +213,41 @@ test('archived client usage restores the cache/output breakdown from its session
   assert.equal(summary.allTime.modelCacheReads['claude-3-5-sonnet'], 700);
   assert.equal(summary.allTime.modelCacheWrites['claude-3-5-sonnet'], 110);
   assert.equal(summary.allTime.modelOutputs['claude-3-5-sonnet'], 90);
+  assert.equal(summary.allTime.capabilities.tokenComponents, true);
+  assert.equal(summary.allTime.unclassifiedTokens, 0);
+});
+
+test('multi-model archived client sessions do not guess model component attribution', () => {
+  const record = deviceRecord();
+  record.allTime.clientModels.hermes = { alpha: 450, beta: 450 };
+  record.allTime.clientModelCosts.hermes = { alpha: 5.625, beta: 5.625 };
+  Object.assign(record.allTime.sessions['hermes:h1'], {
+    models: { alpha: 450, beta: 450 },
+    modelCosts: { alpha: 5.625, beta: 5.625 },
+    cacheReadTokens: 600,
+    cacheWriteTokens: 100,
+    outputTokens: 100
+  });
+
+  const archive = captureArchivedClientUsage({}, record, ['hermes'], new Date('2026-05-30T12:00:00.000Z'));
+  const summary = applyArchivedClientUsage(liveSummaryWithoutHermes(), archive, {
+    activeClients: 'codex',
+    now: new Date('2026-05-30T13:00:00.000Z')
+  });
+
+  assert.equal(summary.allTime.cacheReadTokens, 600);
+  assert.equal(summary.allTime.cacheWriteTokens, 100);
+  assert.equal(summary.allTime.outputTokens, 280);
+  assert.equal(summary.allTime.clientCacheReads.hermes, 600);
+  assert.equal(summary.allTime.clientCacheWrites.hermes, 100);
+  assert.equal(summary.allTime.clientOutputs.hermes, 100);
+  assert.equal(summary.allTime.modelCacheReads.alpha, undefined);
+  assert.equal(summary.allTime.modelCacheReads.beta, undefined);
+  assert.equal(summary.allTime.modelCacheWrites.alpha, undefined);
+  assert.equal(summary.allTime.modelOutputs.beta, undefined);
+  assert.equal(summary.allTime.modelUnclassifiedTokens.alpha, 450);
+  assert.equal(summary.allTime.modelUnclassifiedTokens.beta, 450);
+  assert.equal(summary.allTime.capabilities.tokenComponents, false);
 });
 
 test('archived client usage is ignored and pruned once the client is tracked again', () => {

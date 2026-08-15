@@ -73,6 +73,11 @@ test('tokscaleClientFilter expands a targeted client to all of its aliases', () 
   }
 });
 
+test('tokscaleClientFilter keeps Reasonix in the current Tokscale subprocess', () => {
+  assert.equal(tokscaleClientFilter('reasonix'), 'reasonix');
+  assert.equal(tokscaleClientFilter('reasonix,claude'), 'reasonix,claude');
+});
+
 test('tokscaleClientFilter never emits the synthetic pseudo-client', () => {
   // tokscale treats a client list containing `synthetic` as "enable every
   // client" (include_synthetic in scanner.rs), which re-enables all scan roots

@@ -6,6 +6,7 @@ const { isDeepStrictEqual } = require('node:util');
 const { PERIODS, normalizePeriod } = require('./usage');
 const { hasSummaryPeriod } = require('./archivePeriods');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
+const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 
 function numberValue(value) {
   const parsed = Number(value || 0);
@@ -59,6 +60,7 @@ function periodFor(record, periodName) {
 }
 
 function normalizedSessionFrom(value, fallbackKey) {
+  if (isReasonixSyntheticSession(value, fallbackKey)) return null;
   const period = normalizePeriod({ sessions: { [fallbackKey || 'session']: value } });
   return Object.values(period.sessions)[0] || null;
 }
@@ -74,6 +76,7 @@ function normalizeSessionUsageArchive(value) {
 
   for (const [rawKey, rawEntry] of Object.entries(source)) {
     if (!rawEntry || typeof rawEntry !== 'object') continue;
+    if (isReasonixSyntheticSession(rawEntry, rawKey)) continue;
     const rawPeriods = rawEntry.periods && typeof rawEntry.periods === 'object'
       ? rawEntry.periods
       : rawEntry;
@@ -89,7 +92,7 @@ function normalizeSessionUsageArchive(value) {
 
     for (const periodName of PERIODS) {
       const session = normalizedSessionFrom(rawPeriods?.[periodName], rawKey);
-      if (!session || !hasSessionUsage(session)) continue;
+      if (!session || isReasonixSyntheticSession(session, rawKey) || !hasSessionUsage(session)) continue;
       const key = sessionKey(session.client, session.sessionId);
       if (!key) continue;
       entry.client = session.client;
@@ -118,7 +121,7 @@ function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = 
   for (const periodName of PERIODS) {
     const period = periodFor(deviceRecord, periodName);
     for (const session of Object.values(period.sessions || {})) {
-      if (!hasSessionUsage(session)) continue;
+      if (isReasonixSyntheticSession(session) || !hasSessionUsage(session)) continue;
       const archiveKey = sessionKey(session.client, session.sessionId);
       if (!archiveKey) continue;
       const entry = archive.sessions[archiveKey] || {
@@ -164,19 +167,6 @@ function targetPeriod(summary, periodName) {
   return summary[periodName];
 }
 
-function allocateIntegerTotal(total, weightedEntries) {
-  if (total <= 0 || weightedEntries.length === 0) return new Map();
-  const weightTotal = weightedEntries.reduce((sum, [, weight]) => sum + weight, 0);
-  const allocations = weightedEntries.map(([key, weight]) => {
-    const exact = total * weight / weightTotal;
-    return { key, value: Math.floor(exact), remainder: exact - Math.floor(exact) };
-  });
-  let remaining = total - allocations.reduce((sum, item) => sum + item.value, 0);
-  allocations.sort((a, b) => b.remainder - a.remainder || a.key.localeCompare(b.key));
-  for (let index = 0; index < remaining; index += 1) allocations[index].value += 1;
-  return new Map(allocations.map(({ key, value }) => [key, value]));
-}
-
 function addSessionBreakdown(period, session) {
   const client = session.client;
   const cacheRead = Math.max(0, Math.round(numberValue(session.cacheReadTokens)));
@@ -192,22 +182,31 @@ function addSessionBreakdown(period, session) {
     .filter(([, tokens]) => tokens > 0);
   const totalModelTokens = modelTokens.reduce((sum, [, tokens]) => sum + tokens, 0);
   if (totalModelTokens === 0) return;
+  if (modelTokens.length > 1) {
+    for (const [model, tokens] of modelTokens) {
+      period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + tokens;
+    }
+    period.capabilities.tokenComponents = false;
+    return;
+  }
 
-  const cacheReads = allocateIntegerTotal(cacheRead, modelTokens);
-  const cacheWrites = allocateIntegerTotal(cacheWrite, modelTokens);
-  const outputs = allocateIntegerTotal(output, modelTokens);
-
-  for (const [model] of modelTokens) {
-    const cr = cacheReads.get(model) || 0;
-    const cw = cacheWrites.get(model) || 0;
-    const ou = outputs.get(model) || 0;
+  for (const [model, tokens] of modelTokens) {
+    const cr = Math.min(tokens, cacheRead);
+    const cw = Math.min(tokens - cr, cacheWrite);
+    const ou = Math.min(tokens - cr - cw, output);
     if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
     if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
     if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
+    const unclassified = Math.max(0, tokens - cr - cw - ou);
+    if (unclassified > 0) {
+      period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + unclassified;
+      period.capabilities.tokenComponents = false;
+    }
   }
 }
 
 function addArchivedSession(period, session) {
+  if (isReasonixSyntheticSession(session)) return;
   const key = sessionKey(session.client, session.sessionId);
   if (!key || period.sessions[key]) return;
 
@@ -224,6 +223,12 @@ function addArchivedSession(period, session) {
   period.cacheReadTokens += cacheRead;
   period.cacheWriteTokens += cacheWrite;
   period.outputTokens += output;
+  const unclassified = Math.max(0, tokens - cacheRead - cacheWrite - output);
+  if (unclassified > 0) {
+    period.unclassifiedTokens += unclassified;
+    period.clientUnclassifiedTokens[archived.client] = (period.clientUnclassifiedTokens[archived.client] || 0) + unclassified;
+    period.capabilities.tokenComponents = false;
+  }
   if (tokens > 0) period.clients[archived.client] = (period.clients[archived.client] || 0) + tokens;
   if (cost > 0) period.clientCosts[archived.client] = (period.clientCosts[archived.client] || 0) + cost;
 
@@ -256,6 +261,13 @@ function applySessionUsageArchive(summary, archive, options = {}) {
   const normalizedArchive = normalizeSessionUsageArchive(archive);
   const now = toDate(options.now);
   const next = clone(summary);
+  const periodContainer = next.periods && typeof next.periods === 'object' ? next.periods : next;
+  for (const periodName of PERIODS) {
+    const period = periodContainer?.[periodName];
+    if (period && typeof period === 'object' && Object.prototype.hasOwnProperty.call(period, 'sessions')) {
+      period.sessions = filterReasonixSyntheticSessions(period.sessions);
+    }
+  }
   const targetPeriods = new Map();
   const targetFor = (periodName) => {
     if (!targetPeriods.has(periodName)) targetPeriods.set(periodName, targetPeriod(next, periodName));

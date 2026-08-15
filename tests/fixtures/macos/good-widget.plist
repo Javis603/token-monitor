@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>ApplicationIdentifierPrefix</key>
+  <array><string>ABCDE12345</string></array>
+  <key>TeamIdentifier</key>
+  <array><string>ABCDE12345</string></array>
+  <key>ExpirationDate</key>
+  <date>2099-01-01T00:00:00Z</date>
+  <key>ProvisionsAllDevices</key>
+  <true/>
+  <key>Entitlements</key>
+  <dict>
+    <key>application-identifier</key>
+    <string>ABCDE12345.com.example.tokenmonitor.widget</string>
+    <key>com.apple.application-identifier</key>
+    <string>ABCDE12345.com.example.tokenmonitor.widget</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>ABCDE12345</string>
+    <key>com.apple.security.application-groups</key>
+    <array><string>group.com.example.tokenmonitor</string></array>
+    <key>get-task-allow</key>
+    <false/>
+  </dict>
+</dict>
+</plist>

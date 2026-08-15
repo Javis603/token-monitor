@@ -22,7 +22,7 @@
     codex: { rpc: 'RPC' },
     cursor: { web: 'Web' },
     antigravity: { rpc: 'RPC' },
-    opencode: { local: 'Local', web: 'Web' },
+    opencode: { local: 'Local', web: 'Web', api: 'API' },
     openrouter: { api: 'API' },
     deepseek: { api: 'API' },
     minimax: { api: 'API' },
@@ -34,6 +34,7 @@
     zaiteam: { api: 'API' },
     volcengine: { api: 'API' },
     qoder: { web: 'Web' },
+    commandcode: { web: 'Web' },
     kimi: { api: 'API', web: 'Web' },
     ollama: { web: 'Web' },
     thirdparty: { api: 'API' }
@@ -51,7 +52,7 @@
     codex: ['Auto', 'App/CLI RPC'],
     cursor: ['Manual login', 'Web'],
     antigravity: ['App/CLI must be open', 'RPC'],
-    opencode: ['Local/Web', 'Manual login'],
+    opencode: ['Auto', 'API/Web'],
     openrouter: ['Pay-as-you-go', 'API key'],
     deepseek: ['Pay-as-you-go', 'API key'],
     minimax: ['Token Plan', 'API key'],
@@ -63,6 +64,7 @@
     zaiteam: ['Team Plan', 'API key'],
     volcengine: ['Coding Plan', 'API key'],
     qoder: ['Manual login', 'Web'],
+    commandcode: ['Manual login', 'Web'],
     kimi: ['Coding Plan', 'Web/API'],
     ollama: ['Manual login', 'Web'],
     thirdparty: ['Relay', 'API']
@@ -93,7 +95,7 @@
   }
 
   function deviceKey(value) {
-    return String(value || '').trim().toLowerCase();
+    return String(value || '').trim();
   }
 
   function deviceLabel(deviceOrId) {
@@ -269,7 +271,7 @@
     if (status === 'notConfigured') {
       if (providerName === 'kimi') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'antigravity') return { label: 'Open app or CLI', tone: 'setup' };
-      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'qoder' || providerName === 'ollama') return { label: 'Sign in', tone: 'setup' };
+      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'qoder' || providerName === 'commandcode' || providerName === 'ollama') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi') return { label: 'Add API key', tone: 'setup' };
       if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };
@@ -310,11 +312,19 @@
     return String(value || '').trim();
   }
 
+  function accountIdentityKeys(value) {
+    return new Set([
+      value?.accountKey,
+      value?.webAccountKey,
+      ...(Array.isArray(value?.accountKeyAliases) ? value.accountKeyAliases : [])
+    ].map(accountKey).filter(Boolean));
+  }
+
   function providerMatchesTarget(candidate, target) {
     if (providerId(candidate) !== providerId(target)) return false;
-    const targetAccountKey = accountKey(target?.accountKey);
-    if (!targetAccountKey) return true;
-    return accountKey(candidate?.accountKey) === targetAccountKey;
+    const targetAccountKeys = accountIdentityKeys(target);
+    if (targetAccountKeys.size === 0) return true;
+    return [...accountIdentityKeys(candidate)].some((key) => targetAccountKeys.has(key));
   }
 
   function deviceProviderCandidate(device, target) {

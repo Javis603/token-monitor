@@ -71,6 +71,46 @@
     return new Set(availableIconIds).has(client) ? client : null;
   }
 
+  function usageSessionActivityTimestampMs(session, source = 'period') {
+    const value = source === 'native'
+      ? session?.lastMessageAt || session?.createdAt || session?.startedAt
+      : session?.lastUsedAt || session?.startedAt || session?.createdAt;
+    const timestamp = Date.parse(value || '');
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  }
+
+  function pickRecentUsageActivity(stats) {
+    let latest = null;
+    const considerSessions = (sessions, source) => {
+      for (const session of Object.values(sessions || {})) {
+        const client = normalizedProviderId(session?.client);
+        if (!client) continue;
+        const lastUsedMs = usageSessionActivityTimestampMs(session, source);
+        if (lastUsedMs <= 0) continue;
+        if (!latest || lastUsedMs > latest.lastUsedMs || (
+          lastUsedMs === latest.lastUsedMs && client.localeCompare(latest.client) < 0
+        )) latest = { client, lastUsedMs };
+      }
+    };
+    for (const period of Object.values(stats?.periods || {})) {
+      considerSessions(period?.sessions, 'period');
+    }
+    // This helper receives one device's presentation source. Reasonix native
+    // sessions are intentionally excluded from periods.sessions, so include
+    // their trusted activity timestamps without treating telemetry as usage.
+    for (const sessions of Object.values(stats?.nativeSessions || {})) {
+      considerSessions(sessions, 'native');
+    }
+    return latest ? { provider: latest.client, timestampMs: latest.lastUsedMs } : null;
+  }
+
+  function pickRecentUsageProviderId(stats, availableIconIds) {
+    const client = normalizedProviderId(stats?.localRecentUsageActivity?.provider);
+    if (!client) return null;
+    if (!Array.isArray(availableIconIds)) return client;
+    return new Set(availableIconIds).has(client) ? client : null;
+  }
+
   function csvValues(value) {
     return Array.isArray(value) ? value : String(value || '').split(',');
   }
@@ -310,8 +350,11 @@
     pickConfiguredSessionLimits,
     pickLimitProviderByKindPriority,
     pickUsageProviderId,
+    pickRecentUsageActivity,
+    pickRecentUsageProviderId,
     pickWorstLimit,
     pickWorstLimitProvider,
-    trayShowsTitle
+    trayShowsTitle,
+    usageSessionActivityTimestampMs
   };
 });

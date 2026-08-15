@@ -2,7 +2,11 @@
 
 const { clientsCsvForSetting } = require('../shared/clientTracking');
 const { normalizeHistoryIntervalMs } = require('../shared/collector');
-const { normalizeLimitsRefreshMs, parseLimitProviders } = require('../shared/limitCollector');
+const {
+  normalizeLimitsRefreshMode,
+  normalizeLimitsRefreshMs,
+  parseLimitProviders
+} = require('../shared/limitCollector');
 const { normalizeSyncUploadIntervalMs } = require('../shared/syncUploadInterval');
 
 const DEFAULT_ALL_TIME_SINCE = '2024-01-01';
@@ -29,12 +33,14 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
 const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsEnabled',
   'limitProviders',
-  'limitsRefreshMs'
+  'limitsRefreshMode',
+  'limitsRefreshMs',
+  'opencodeLocalLimitsEnabled'
 ]);
 const SINK_STRUCTURAL_KEYS = Object.freeze(['syncUploadIntervalMs']);
 const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   claude: ['claudeWebCookie'],
-  opencode: ['opencodeCookie', 'opencodeProfiles'],
+  opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
   openrouter: ['openrouterProfiles'],
   deepseek: ['deepseekApiKey'],
   minimax: ['minimaxApiKey'],
@@ -43,6 +49,7 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   zaiteam: ['zaiTeamApiKey', 'zaiTeamOrganizationId', 'zaiTeamProjectId'],
   volcengine: ['volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion'],
   qoder: ['qoderCookie', 'qoderSite'],
+  commandcode: ['commandcodeCookie'],
   kimi: ['kimiApiKey', 'kimiWebAccessToken'],
   ollama: ['ollamaCookie'],
   codex: ['codexManagedAccounts'],
@@ -81,6 +88,7 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
     dailyHistoryArchiveWriteEnabled: context.dailyHistoryArchiveWriteEnabled,
     projectsEnabled: settings.projectsEnabled !== false,
+    reasonixNativeSessionsEnabled: context.reasonixNativeSessionsEnabled === true,
     historyIntervalMs: context.historyIntervalMs ?? settings.historyIntervalMs,
     watchEnabled: context.watchEnabled,
     // Deliberately passed through as a tri-state rather than coerced: undefined
@@ -101,11 +109,14 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
   return {
     limitsEnabled: settings.limitsEnabled !== false,
     limitProviders: settings.limitProviders ?? context.defaultLimitProviders,
+    limitsRefreshMode: normalizeLimitsRefreshMode(settings.limitsRefreshMode),
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
     claudeWebCookie: settings.claudeWebCookie
       || env.CLAUDE_WEB_COOKIE
       || '',
     claudePrepaidBalanceEnabled: settings.claudePrepaidBalanceEnabled !== false,
+    opencodeLocalLimitsEnabled: settings.opencodeLocalLimitsEnabled === true,
+    opencodeAmbientEnabled: settings.opencodeAmbientEnabled !== false,
     opencodeCookie: settings.opencodeCookie || env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
     opencodeProfiles: settings.opencodeProfiles || {},
     openrouterProfiles: settings.openrouterProfiles || {},
@@ -123,6 +134,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     volcengineRegion: settings.volcengineRegion || '',
     qoderCookie: settings.qoderCookie || '',
     qoderSite: settings.qoderSite || 'global',
+    commandcodeCookie: settings.commandcodeCookie || '',
     kimiApiKey: settings.kimiApiKey || '',
     kimiWebAccessToken: settings.kimiWebAccessToken || '',
     ollamaCookie: settings.ollamaCookie || '',
@@ -145,6 +157,7 @@ function diagnosticConfigurationFromSettings(settings = {}, context = {}) {
     syncUploadIntervalMs: normalizeSyncUploadIntervalMs(
       context.syncUploadIntervalMs ?? settings.syncUploadIntervalMs
     ),
+    limitsRefreshMode: limits.limitsRefreshMode,
     limitsRefreshMs: limits.limitsRefreshMs
   };
 }

@@ -2,6 +2,7 @@
 
 // Portable (Node-free) usage-history core. Mirrors usage.js conventions so the
 // Cloudflare Worker can import it. Pure functions only — no I/O.
+const { REASONIX_CLIENT } = require('./reasonixPaths');
 
 function num(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -22,12 +23,52 @@ function normalizeTimeMetrics(value) {
   };
 }
 
-// Additive token components. `reasoning` is excluded on purpose: tokscale already
-// folds reasoning into `output`, so adding it would double-count (same rule as usage.js).
-function sumTokens(breakdown) {
+// Additive token components. Existing clients expose reasoning inside `output`,
+// but Reasonix emits it as a disjoint component.
+function sumTokens(breakdown, client = '') {
   if (!breakdown || typeof breakdown !== 'object') return 0;
   return num(breakdown.input) + num(breakdown.output)
-    + num(breakdown.cacheRead) + num(breakdown.cacheWrite);
+    + num(breakdown.cacheRead) + num(breakdown.cacheWrite)
+    + (String(client).trim().toLowerCase() === REASONIX_CLIENT ? num(breakdown.reasoning) : 0);
+}
+
+function sumOutputTokens(breakdown, client = '') {
+  if (!breakdown || typeof breakdown !== 'object') return 0;
+  return num(breakdown.output)
+    + (String(client).trim().toLowerCase() === REASONIX_CLIENT ? num(breakdown.reasoning) : 0);
+}
+
+function componentValues(value, totalTokens, exact) {
+  const cacheReadTokens = Math.max(0, num(value?.cacheReadTokens));
+  const cacheWriteTokens = Math.max(0, num(value?.cacheWriteTokens));
+  const outputTokens = Math.max(0, num(value?.outputTokens));
+  if (cacheReadTokens + cacheWriteTokens + outputTokens > totalTokens) return null;
+  const unclassifiedTokens = Math.min(
+    totalTokens - cacheReadTokens - cacheWriteTokens - outputTokens,
+    Math.max(0, num(value?.unclassifiedTokens
+      ?? (exact ? 0 : totalTokens - cacheReadTokens - cacheWriteTokens - outputTokens)))
+  );
+  return { cacheReadTokens, cacheWriteTokens, outputTokens, unclassifiedTokens };
+}
+
+function applyComponentSummary(summary, totalTokens, perClient, perModel) {
+  if (!summary || typeof summary !== 'object') return null;
+  const exact = summary.tokenComponentsAvailable === true;
+  const totals = componentValues(summary, totalTokens, exact);
+  if (!totals) return null;
+  const clients = {};
+  for (const [key, value] of Object.entries(perClient)) {
+    const components = componentValues(summary.perClient?.[key], num(value.tokens), exact);
+    if (!components) return null;
+    clients[key] = components;
+  }
+  const models = {};
+  for (const [key, value] of Object.entries(perModel)) {
+    const components = componentValues(summary.perModel?.[key], num(value.tokens), exact);
+    if (!components) return null;
+    models[key] = components;
+  }
+  return { totals, clients, models };
 }
 
 // Folds tokscale `graph` output (contributions[].clients[]) into a per-day shape where a
@@ -44,27 +85,94 @@ function parseGraphResult(raw) {
     let tokens = 0;
     let cost = 0;
     let messages = 0;
+    let cacheReadTokens = 0;
+    let cacheWriteTokens = 0;
+    let outputTokens = 0;
+    let unclassifiedTokens = 0;
+    let tokenComponentsAvailable = true;
     const clientRows = Array.isArray(row.clients) ? row.clients : [];
     for (const c of clientRows) {
       if (!c || typeof c !== 'object') continue;
       const client = String(c.client || 'unknown');
       const model = String(c.modelId || c.model || c.model_id || 'unknown');
-      const t = sumTokens(c.tokens);
+      const t = sumTokens(c.tokens, client);
       const cst = num(c.cost);
-      const msg = num(c.messages);
+      const cacheRead = num(c.tokens?.cacheRead ?? c.tokens?.cache_read);
+      const cacheWrite = num(c.tokens?.cacheWrite ?? c.tokens?.cache_write);
+      const output = sumOutputTokens(c.tokens, client);
+      const componentsAvailable = c.tokenComponentsAvailable !== false;
+      const hasExplicitUnclassified = Object.prototype.hasOwnProperty.call(c, 'unclassifiedTokens')
+        || Object.prototype.hasOwnProperty.call(c, 'unclassified_tokens');
+      const unclassified = Math.min(t, Math.max(0, hasExplicitUnclassified
+        ? num(c.unclassifiedTokens ?? c.unclassified_tokens)
+        : (t > 0 && !componentsAvailable ? t : 0)));
+      // Reasonix's `messages` field is a provider request count, not user turns.
+      // Keep it out of Token Monitor's message/activity semantics; its tokens and
+      // cost still contribute normally to the history totals.
+      const msg = String(client).trim().toLowerCase() === REASONIX_CLIENT ? 0 : num(c.messages);
       tokens += t;
       cost += cst;
       messages += msg;
-      const pc = perClient[client] || (perClient[client] = { tokens: 0, cost: 0, messages: 0 });
+      cacheReadTokens += cacheRead;
+      cacheWriteTokens += cacheWrite;
+      outputTokens += output;
+      unclassifiedTokens += unclassified;
+      tokenComponentsAvailable = tokenComponentsAvailable
+        && (t === 0 || (componentsAvailable && unclassified === 0));
+      const pc = perClient[client] || (perClient[client] = {
+        tokens: 0, cost: 0, messages: 0, unclassifiedTokens: 0
+      });
       pc.tokens += t; pc.cost += cst; pc.messages += msg;
-      const pm = perModel[model] || (perModel[model] = { tokens: 0, cost: 0 });
+      if (cacheRead > 0) pc.cacheReadTokens = num(pc.cacheReadTokens) + cacheRead;
+      if (cacheWrite > 0) pc.cacheWriteTokens = num(pc.cacheWriteTokens) + cacheWrite;
+      if (output > 0) pc.outputTokens = num(pc.outputTokens) + output;
+      pc.unclassifiedTokens += unclassified;
+      const pm = perModel[model] || (perModel[model] = {
+        tokens: 0, cost: 0, unclassifiedTokens: 0
+      });
       pm.tokens += t; pm.cost += cst;
+      if (cacheRead > 0) pm.cacheReadTokens = num(pm.cacheReadTokens) + cacheRead;
+      if (cacheWrite > 0) pm.cacheWriteTokens = num(pm.cacheWriteTokens) + cacheWrite;
+      if (output > 0) pm.outputTokens = num(pm.outputTokens) + output;
+      pm.unclassifiedTokens += unclassified;
+    }
+    const componentSummary = applyComponentSummary(
+      row.tokenComponentSummary,
+      tokens,
+      perClient,
+      perModel
+    );
+    if (componentSummary) {
+      cacheReadTokens = componentSummary.totals.cacheReadTokens;
+      cacheWriteTokens = componentSummary.totals.cacheWriteTokens;
+      outputTokens = componentSummary.totals.outputTokens;
+      unclassifiedTokens = componentSummary.totals.unclassifiedTokens;
+      tokenComponentsAvailable = unclassifiedTokens === 0;
+      for (const [client, value] of Object.entries(perClient)) {
+        value.cacheReadTokens = componentSummary.clients[client].cacheReadTokens;
+        value.cacheWriteTokens = componentSummary.clients[client].cacheWriteTokens;
+        value.outputTokens = componentSummary.clients[client].outputTokens;
+        value.unclassifiedTokens = componentSummary.clients[client].unclassifiedTokens;
+        tokenComponentsAvailable = tokenComponentsAvailable && value.unclassifiedTokens === 0;
+      }
+      for (const [model, value] of Object.entries(perModel)) {
+        value.cacheReadTokens = componentSummary.models[model].cacheReadTokens;
+        value.cacheWriteTokens = componentSummary.models[model].cacheWriteTokens;
+        value.outputTokens = componentSummary.models[model].outputTokens;
+        value.unclassifiedTokens = componentSummary.models[model].unclassifiedTokens;
+        tokenComponentsAvailable = tokenComponentsAvailable && value.unclassifiedTokens === 0;
+      }
     }
     contributions.push({
       date,
       tokens,
       cost,
       messages,
+      cacheReadTokens,
+      cacheWriteTokens,
+      outputTokens,
+      unclassifiedTokens,
+      tokenComponentsAvailable,
       activeTimeMs: num(row.activeTimeMs ?? row.active_time_ms),
       perClient,
       perModel
@@ -131,18 +239,43 @@ function computeStreaks(days, todayKey) {
   return { currentStreak, longestStreak };
 }
 
-function addPerClient(target, source) {
+function addPerClient(target, source, includeTokenComponents = false) {
   for (const [client, v] of Object.entries(source || {})) {
     const t = target[client] || (target[client] = { tokens: 0, cost: 0, messages: 0 });
     t.tokens += num(v.tokens); t.cost += num(v.cost); t.messages += num(v.messages);
+    if (includeTokenComponents) {
+      if (num(v.cacheReadTokens) > 0) t.cacheReadTokens = num(t.cacheReadTokens) + num(v.cacheReadTokens);
+      if (num(v.cacheWriteTokens) > 0) t.cacheWriteTokens = num(t.cacheWriteTokens) + num(v.cacheWriteTokens);
+      if (num(v.outputTokens) > 0) t.outputTokens = num(t.outputTokens) + num(v.outputTokens);
+      const unclassifiedTokens = unclassifiedTokensFor(v);
+      if (unclassifiedTokens > 0) t.unclassifiedTokens = num(t.unclassifiedTokens) + unclassifiedTokens;
+    }
   }
 }
 
-function addPerModel(target, source) {
+function addPerModel(target, source, includeTokenComponents = false) {
   for (const [model, v] of Object.entries(source || {})) {
     const t = target[model] || (target[model] = { tokens: 0, cost: 0 });
     t.tokens += num(v.tokens); t.cost += num(v.cost);
+    if (includeTokenComponents) {
+      if (num(v.cacheReadTokens) > 0) t.cacheReadTokens = num(t.cacheReadTokens) + num(v.cacheReadTokens);
+      if (num(v.cacheWriteTokens) > 0) t.cacheWriteTokens = num(t.cacheWriteTokens) + num(v.cacheWriteTokens);
+      if (num(v.outputTokens) > 0) t.outputTokens = num(t.outputTokens) + num(v.outputTokens);
+      const unclassifiedTokens = unclassifiedTokensFor(v);
+      if (unclassifiedTokens > 0) t.unclassifiedTokens = num(t.unclassifiedTokens) + unclassifiedTokens;
+    }
   }
+}
+
+function unclassifiedTokensFor(value) {
+  if (!value || typeof value !== 'object') return 0;
+  if (Object.prototype.hasOwnProperty.call(value, 'unclassifiedTokens')) {
+    return Math.min(
+      Math.max(0, num(value.tokens)),
+      Math.max(0, num(value.unclassifiedTokens))
+    );
+  }
+  return value.tokenComponentsAvailable === true ? 0 : Math.max(0, num(value.tokens));
 }
 
 function activeTimeTotal(days) {
@@ -230,10 +363,20 @@ function mergeDailyMaps(histories) {
   for (const h of histories) {
     for (const d of (h && Array.isArray(h.daily) ? h.daily : [])) {
       const cur = byDate.get(d.date)
-        || { date: d.date, tokens: 0, cost: 0, messages: 0, activeTimeMs: 0, perClient: {}, perModel: {} };
+        || {
+          date: d.date, tokens: 0, cost: 0, messages: 0, activeTimeMs: 0,
+          cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0,
+          tokenComponentsAvailable: true,
+          perClient: {}, perModel: {}
+        };
       cur.tokens += num(d.tokens); cur.cost += num(d.cost); cur.messages += num(d.messages); cur.activeTimeMs += num(d.activeTimeMs);
-      addPerClient(cur.perClient, d.perClient);
-      addPerModel(cur.perModel, d.perModel);
+      cur.cacheReadTokens += num(d.cacheReadTokens);
+      cur.cacheWriteTokens += num(d.cacheWriteTokens);
+      cur.outputTokens += num(d.outputTokens);
+      cur.unclassifiedTokens += unclassifiedTokensFor(d);
+      cur.tokenComponentsAvailable = cur.tokenComponentsAvailable && d.tokenComponentsAvailable === true;
+      addPerClient(cur.perClient, d.perClient, true);
+      addPerModel(cur.perModel, d.perModel, true);
       byDate.set(d.date, cur);
     }
   }
@@ -324,8 +467,8 @@ function stableJson(value) {
 // Compact, deterministic invalidation token for the full history payload. This
 // includes daily/monthly breakdowns (not just headline totals), stays portable
 // to the Worker runtime, and keeps /api/stats small.
-function historyRevision(history) {
-  const source = stableJson(coerceHistory(history));
+function stableRevision(value) {
+  const source = stableJson(value);
   let first = 0x811c9dc5;
   let second = 0x9e3779b9;
   for (let i = 0; i < source.length; i += 1) {
@@ -336,8 +479,38 @@ function historyRevision(history) {
   return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`;
 }
 
+function historyRevision(history) {
+  return stableRevision(coerceHistory(history));
+}
+
+// The aggregate History hash cannot detect attribution-only changes such as two
+// devices exchanging otherwise identical daily rows. Keep the public stats
+// payload small while ensuring renderer caches follow the per-device source of
+// each History record, including explicit missing/unavailable states.
+function deviceHistoryRevision(devices) {
+  const entries = (Array.isArray(devices) ? devices : [])
+    .map((record) => {
+      const deviceId = String(record?.deviceId || record?.id || '').trim();
+      if (!deviceId) return null;
+      const hasHistory = Object.prototype.hasOwnProperty.call(record || {}, 'history');
+      const hasAvailability = Object.prototype.hasOwnProperty.call(record || {}, 'historyAvailable');
+      return {
+        deviceId,
+        historyAvailable: hasAvailability ? record.historyAvailable === true : 'missing',
+        history: !hasHistory
+          ? 'missing'
+          : record.history === null
+            ? 'unavailable'
+            : historyRevision(record.history)
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.deviceId.localeCompare(right.deviceId));
+  return stableRevision(entries);
+}
+
 module.exports = {
   num, sumTokens, parseGraphResult, computeIntensities,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
-  coerceHistory, historyPreview, historyRevision
+  coerceHistory, historyPreview, historyRevision, deviceHistoryRevision
 };

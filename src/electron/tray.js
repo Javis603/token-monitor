@@ -172,7 +172,19 @@ function buildTrayMenuTemplate(options = {}) {
   ];
 }
 
+async function runTrayMenuAction({ setInFlight, refreshContextMenu, action }) {
+  setInFlight(true);
+  try {
+    refreshContextMenu();
+    return await action();
+  } finally {
+    setInFlight(false);
+    refreshContextMenu();
+  }
+}
+
 function createTray({
+  electron = require('electron'),
   getMenuState,
   onOpenSettings,
   onOpenView,
@@ -182,27 +194,57 @@ function createTray({
   onSetWindowPresentation,
   onSwitchCodexAccount,
   onToggle,
+  platform = process.platform,
   translateMenu
 }) {
-  const { Tray, Menu } = require('electron');
-  const tray = new Tray(buildTrayIcon());
+  const { Tray, Menu, nativeImage } = electron;
+  const tray = new Tray(buildTrayIcon({ platform, nativeImage }));
   tray.setToolTip('Token Monitor');
+
+  const menuState = () => (typeof getMenuState === 'function' ? getMenuState() : {});
+  const buildMenu = (state = menuState()) => Menu.buildFromTemplate(buildTrayMenuTemplate({
+    state,
+    onOpenSettings,
+    onOpenView,
+    onQuit,
+    onRefresh,
+    onSetTrayContent,
+    // Non-tray presentation changes can keep an existing Linux tray alive,
+    // so re-export the D-Bus menu after the callback mutates settings.
+    onSetWindowPresentation: (value) => {
+      try {
+        return typeof onSetWindowPresentation === 'function'
+          ? onSetWindowPresentation(value)
+          : undefined;
+      } finally {
+        refreshContextMenu();
+      }
+    },
+    onSwitchCodexAccount,
+    translate: translateMenu
+  }));
+
+  // Linux tray hosts (GNOME AppIndicator/KStatusNotifier, KDE Plasma) display
+  // the D-Bus menu exported via com.canonical.dbusmenu on right-click and never
+  // deliver a 'right-click' event, so the menu has to be attached with
+  // setContextMenu() to be reachable; popUpContextMenu() alone shows nothing.
+  let exportedMenuState = '';
+  const refreshContextMenu = () => {
+    if (platform !== 'linux' || tray.isDestroyed()) return;
+    const state = menuState();
+    const stateKey = JSON.stringify(state);
+    if (stateKey === exportedMenuState) return;
+    tray.setContextMenu(buildMenu(state));
+    exportedMenuState = stateKey;
+  };
+  refreshContextMenu();
 
   tray.on('click', () => onToggle(tray));
   tray.on('right-click', () => {
-    const menu = Menu.buildFromTemplate(buildTrayMenuTemplate({
-      state: typeof getMenuState === 'function' ? getMenuState() : {},
-      onOpenSettings,
-      onOpenView,
-      onQuit,
-      onRefresh,
-      onSetTrayContent,
-      onSetWindowPresentation,
-      onSwitchCodexAccount,
-      translate: translateMenu
-    }));
-    tray.popUpContextMenu(menu);
+    tray.popUpContextMenu(buildMenu());
   });
+
+  tray.refreshContextMenu = refreshContextMenu;
 
   return tray;
 }
@@ -243,6 +285,7 @@ module.exports = {
   pickWorstLimit,
   popoverBounds,
   reconcileCodexAccountSelection,
+  runTrayMenuAction,
   shouldUseTemplateTrayIcon,
   sortCodexAccountsForDisplay,
   trayShowsTitle

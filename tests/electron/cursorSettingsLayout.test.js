@@ -172,10 +172,29 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(details, /<div id="opencodeAddForm" class="opencode-add-form">/);
   assert.match(details, /<button id="opencodeAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="opencodeAddDetails">/);
   assert.match(details, /<div id="opencodeAddDetails" class="opencode-add-details accordion-animated-container hidden">/);
-  assert.match(details, /<button id="opencodeOpenBrowser"[\s\S]*data-i18n="settings\.opencode\.openBrowser">/);
+  // The browser button serves both credential types, so it lives above the
+  // selector rather than inside either block; the renderer relabels it.
+  assert.match(details, /<button id="opencodeOpenBrowser" data-i18n="settings\.opencode\.openBrowserKeys">/);
+  const cookieBlock = details.match(/<div id="opencodeCookieFields"[\s\S]*?<\/textarea>/)?.[0] || '';
+  assert.doesNotMatch(cookieBlock, /opencodeOpenBrowser/);
   assert.match(details, /<span data-i18n="settings\.opencode\.addProfile"/);
   assert.match(details, /<input id="opencodeProfileName" type="text"[\s\S]*data-i18n-placeholder="settings\.opencode\.profileNamePlaceholder"/);
-  assert.match(details, /<textarea id="opencodeCookieInput"[\s\S]*placeholder="auth=\.\.\."><\/textarea>/);
+  // Credential type is a labelled select like the other provider forms use, and
+  // API key is first so it is the default. Each type owns its own input.
+  assert.match(details, /<select id="opencodeCredentialKind">\s*<option value="api"/);
+  assert.match(details, /<option value="cookie" data-i18n="settings\.opencode\.kindCookie">/);
+  assert.match(details, /<input id="opencodeApiKeyInput" type="password"[\s\S]*data-i18n-placeholder="settings\.opencode\.apiKeyPlaceholder"/);
+  assert.match(details, /<textarea id="opencodeCookieInput"[\s\S]*data-i18n-placeholder="settings\.opencode\.cookiePlaceholder"/);
+  // Neither credential field is named by the nearest `<label for>` — that one
+  // points at the credential-type select — so each carries its own accessible
+  // name, translated by the same pass that translates the placeholders.
+  assert.match(details, /<input id="opencodeApiKeyInput"[^>]*data-i18n-aria-label="settings\.opencode\.kindApi"/);
+  assert.match(details, /<textarea id="opencodeCookieInput"[^>]*data-i18n-aria-label="settings\.opencode\.kindCookie"/);
+  // The cookie steps live inside the block that hides, so API mode never shows
+  // DevTools instructions. This stylesheet has no global `.hidden`.
+  assert.match(details, /<div id="opencodeCookieFields" class="opencode-credential-fields hidden">/);
+  const css = readRendererFile('styles.css');
+  assert.match(css, /\.opencode-credential-fields\.hidden \{ display: none; \}/);
   assert.match(details, /<div class="settings-actions">\s*<button id="opencodeCookieSubmit" data-i18n="settings\.opencode\.saveProfile">/);
   assert.match(details, /<div id="opencodeErrorMessage" class="settings-note error hidden"><\/div>/);
 
@@ -190,7 +209,46 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(setupBody, /addDetails\?\.classList\.toggle\('hidden'/);
   assert.match(setupBody, /document\.getElementById\('opencodeOpenBrowser'\)\?\.addEventListener\('click'/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/opencode\.ai\/auth'\)/);
-  assert.match(setupBody, /window\.tokenMonitor\.opencode\.saveProfile\(/);
+  // The add form asks before binding: main refuses a name that already holds a
+  // different credential, and the form offers the confirmation rather than
+  // retrying with merge on its own.
+  assert.match(setupBody, /window\.tokenMonitor\.opencode\.saveProfile\(\s*name,\s*cookie,\s*opencodeCredentialKind,\s*\{ merge \}\s*\)/);
+  assert.match(setupBody, /await submit\(false\);/);
+  assert.match(setupBody, /if \(result\.nameTaken && addMergeOffer\)/);
+  assert.match(setupBody, /confirmOpenCodeMerge = \(\) => submit\(true\);/);
+  // `submit` closes over the name and credential captured when Save was pressed,
+  // so any edit afterwards has to withdraw the offer: the backend still demands
+  // `merge`, but the click it receives would otherwise be consent to a proposal
+  // that is no longer on screen. Withdrawing has to outlast the round trip too,
+  // since the reply that offers the button arrives after the edit — hence the
+  // revision captured before the await and checked in every branch after it.
+  assert.match(setupBody, /const at = addMergeOffer\?\.revision\(\);/);
+  assert.match(setupBody, /const stale = addMergeOffer \? addMergeOffer\.stale\(at\) : false;/);
+  assert.match(setupBody, /if \(stale\) return;/);
+  // A success takes down its own offer and nothing else. Two saves can overlap
+  // and the newer one can answer first, so clearing unconditionally let an older
+  // success wipe a confirmation the user was looking at and that was still live.
+  assert.match(setupBody, /if \(!stale\) \{\s*input\.value = '';\s*nameInput\.value = '';\s*addMergeOffer\?\.withdraw\(\);\s*\}/);
+  assert.match(setupBody, /addMergeOffer\.offer\(at, name, t\('settings\.opencode\.mergeInto', \{ name \}\)\)/);
+  assert.match(setupBody, /const clearOpenCodeMergeOffer = \(\) => addMergeOffer\?\.withdraw\(\);/);
+  assert.match(setupBody, /for \(const id of \['opencodeProfileName', 'opencodeApiKeyInput', 'opencodeCookieInput'\]\)/);
+  assert.match(setupBody, /addEventListener\('input', clearOpenCodeMergeOffer\)/);
+  // Switching credential type already clears the hidden field; it clears this too.
+  assert.match(setupBody, /clearOpenCodeMergeOffer\(\);\s*\};/);
+  assert.match(setupBody, /kindSelect\?\.addEventListener\('change', applyOpenCodeCredentialKind\)/);
+  // The account name is required, not defaulted. Saving one credential keeps the
+  // other under that name and the collector reads that as "same account", so a
+  // blank name silently becoming 'default' could bind one account's key to
+  // another account's cookie. Scoped to this handler: the other provider forms
+  // still default a blank name, and they have no such merge semantics.
+  const opencodeSubmit = setupBody.slice(
+    setupBody.indexOf("document.getElementById('opencodeCookieSubmit')"),
+    setupBody.indexOf("document.getElementById('openrouterSettingsToggle')")
+  );
+  assert.ok(opencodeSubmit, 'opencode submit handler should be present');
+  assert.match(opencodeSubmit, /const name = \(nameInput\.value \|\| ''\)\.trim\(\);/);
+  assert.doesNotMatch(opencodeSubmit, /\|\| 'default'/);
+  assert.match(opencodeSubmit, /settings\.opencode\.nameRequired/);
   assert.match(setupBody, /renderOpenCodeProfiles\(\)/);
   assert.match(setupBody, /updateOpenCodeProfilesStatus\(\)/);
 });
@@ -212,14 +270,80 @@ test('OpenCode multi-account rows separate profile identity from plan label', ()
 test('OpenCode disabled profiles still count in the account summary', () => {
   const app = readRendererFile('app.js');
   const renderBody = functionBody(app, 'renderOpenCodeProfiles', 'updateOpenCodeProfilesStatus');
-  assert.match(renderBody, /state\.opencodeProfileCount = entries\.length;/);
+  // The auto-detected credential counts too: it is the account the limits card
+  // is reading, so excluding it reports "not set up" next to live quota.
+  assert.match(renderBody, /state\.opencodeProfileCount = entries\.length \+ \(hasAmbientKey \? 1 : 0\);/);
+  assert.match(renderBody, /\{ profiles, hasEnvVar, hasAmbientKey, ambientEnabled = true \}/);
+  // Switching the auto-detected account off is a device preference, not a stored
+  // credential, so its row keeps rendering with the box clear rather than
+  // vanishing along with the only control that could switch it back on.
+  assert.match(renderBody, /ambientToggle\.checked = ambientEnabled;/);
+  assert.match(renderBody, /setAmbientEnabled\(ambientToggle\.checked\)/);
+  assert.match(renderBody, /item\.append\(ambientToggle, nameBox, rightBox\)/);
+  assert.match(renderBody, /if \(entries\.length === 0 && !hasEnvVar && !hasAmbientKey\)/);
+  // Credential composition stays visible after the fact, because two kinds under
+  // one name is a user assertion that changes identity and fallback behaviour,
+  // and each is removable so undoing it does not cost the one being kept.
+  assert.match(renderBody, /\['ambient', profile\.usesAmbientKey, ambientLabel\]/);
+  assert.match(renderBody, /profile\.ambientStale/);
+  assert.match(renderBody, /\['api', profile\.hasApiKey/);
+  assert.match(renderBody, /\['cookie', profile\.hasCookie/);
+  // Per-credential actions live in an expanded section, not inline beside the
+  // account's own controls, and only appear once there is more than one. The
+  // summary line is itself the control that expands it.
+  assert.match(renderBody, /const multiCredential = credentials\.length > 1;/);
+  assert.match(renderBody, /opencodeCredentialRow\(name, kind, label\)/);
+  assert.match(renderBody, /detail\.classList\.toggle\('is-open', open\)/);
+  // Naming the auto-detected credential is what lets it join an account, and a
+  // name that already exists is a binding, so it waits for the confirmation
+  // instead of merging on a blur that happened to land on that name.
+  assert.match(renderBody, /saveProfile\(name, '', 'ambient', \{ merge \}\)/);
+  assert.match(renderBody, /await applyNaming\(name, false\)/);
+  assert.match(renderBody, /opencodeMergeOffer\(mergeBtn, \(name\) => applyNaming\(name, true\)\)/);
+  assert.match(renderBody, /opencodeMergeOffer\(mergeBtn, \(next\) => applyRename\(next, true\)\)/);
+  // A confirmation has to confirm what is on screen, so editing the name
+  // withdraws the pending offer instead of leaving a button that would commit
+  // the account name the user has already moved on from. Every path goes through
+  // the one helper: the rule reached four call sites by copy, and each copy is
+  // another place an in-flight reply can put a withdrawn offer back on screen.
+  // Nothing else may reveal a merge button, which is what makes that exhaustive.
+  assert.equal((app.match(/opencodeMergeOffer\(/g) || []).length, 5);
+  assert.equal((app.match(/mergeBtn\.classList\.remove\('hidden'\)/g) || []).length, 0);
+  // Three inline name fields (the auto-detected row, an account rename, a
+  // credential move); the add form withdraws through its own named helper.
+  assert.equal((app.match(/nameInput\.addEventListener\('input', \(\) => offer\.withdraw\(\)\);/g) || []).length, 3);
+  assert.equal((app.match(/const at = offer\.revision\(\);/g) || []).length, 3);
+  assert.doesNotMatch(renderBody, /pendingName|pendingMergeName|pendingTarget/);
+  // Its status element cannot be produced by sanitizing any account name.
+  assert.match(renderBody, /infoSpan\.id = 'opencodeAmbientInfo'/);
+  // Merging is confirmed with a button the user chooses, not a repeated keypress.
+  assert.match(renderBody, /settings\.opencode\.mergeInto/);
+  assert.doesNotMatch(renderBody, /mergeConfirm/);
+
+  const credentialRow = functionBody(app, 'opencodeCredentialRow', 'updateOpenCodeProfilesStatus');
+  // Renaming a credential moves it to another account: to a fresh name it splits
+  // off, onto an existing one it binds — the same operation either way.
+  assert.match(credentialRow, /api\.moveCredential\(accountName, kind, target, \{ merge \}\)/);
+  assert.match(credentialRow, /api\.removeCredential\(accountName, kind\)/);
+  assert.match(credentialRow, /opencodeMergeOffer\(mergeBtn, \(target\) => finishMove\(target, true\)\)/);
+  assert.match(credentialRow, /nameInput\.addEventListener\('input', \(\) => offer\.withdraw\(\)\);/);
+  assert.match(credentialRow, /if \(offer\.stale\(at\)\) return;/);
+  assert.doesNotMatch(credentialRow, /pendingTarget/);
+  // Unbinding is not undoable from here, so it confirms like deleting an account.
+  assert.match(credentialRow, /if \(!confirming\)/);
   assert.match(renderBody, /api\.setProfileEnabled\(name, toggle\.checked\)\.then\(\(\) => \{/);
   assert.match(renderBody, /updateOpenCodeProfilesStatus\(\);/);
   assert.doesNotMatch(renderBody, /if \(toggle\.checked\) updateOpenCodeProfilesStatus\(\)/);
 
   const statusBody = functionBody(app, 'updateOpenCodeProfilesStatus', 'renderCursorStatus');
   assert.match(statusBody, /const configuredProfileCount = state\.opencodeProfileCount \|\| 0;/);
-  assert.match(statusBody, /Math\.max\(Object\.keys\(profiles\)\.length, configuredProfileCount\)/);
+  // The auto-detected account arrives in its own field, so both halves of the
+  // summary have to include it or a zero-config machine reports "0/0" beside
+  // live quota.
+  assert.match(statusBody, /if \(status\.ambient\) entries\.push\(\['opencodeAmbientInfo', status\.ambient\]\)/);
+  assert.match(statusBody, /renderOpenCodeProfilesStatusSummary\(profiles, status\.ambient\)/);
+  assert.match(statusBody, /const statuses = \[\.\.\.Object\.values\(profiles\), \.\.\.\(ambient \? \[ambient\] : \[\]\)\];/);
+  assert.match(statusBody, /Math\.max\(statuses\.length, configuredProfileCount\)/);
   assert.match(statusBody, /t\('settings\.opencode\.connected', \{ linked: linkedCount, total: totalCount \}\)/);
 });
 
@@ -230,7 +354,7 @@ test('OpenCode profile deletion clears the legacy default cookie when it owns th
     main.indexOf("ipcMain.handle('opencode:renameProfile'")
   );
   assert.ok(handler, 'opencode:deleteProfile handler should exist');
-  assert.match(handler, /const deletedProfile = profiles\[name\];/);
+  assert.match(handler, /const deletedProfile = opencodeProfiles\.readProfile\(profiles, name\);/);
   assert.match(handler, /if \(deletedProfile\?\.cookie && settings\.opencodeCookie === deletedProfile\.cookie\) \{/);
   assert.match(handler, /settings\.opencodeCookie = '';/);
 });
@@ -242,7 +366,11 @@ test('OpenCode profile enable toggles refresh only the affected limits lane', ()
     main.indexOf("ipcMain.handle('codex:accounts'")
   );
   assert.ok(handler, 'opencode:setProfileEnabled handler should exist');
-  assert.match(handler, /profiles\[name\]\.enabled = Boolean\(enabled\);/);
+  // Read through the module's own-property lookup. A bare `profiles[name]`
+  // resolves an inherited key, so an account named `__proto__` passed the
+  // "not found" guard and then wrote `enabled` onto a shared prototype.
+  assert.match(handler, /const profile = opencodeProfiles\.readProfile\(profiles, name\);/);
+  assert.match(handler, /profile\.enabled = Boolean\(enabled\);/);
   assert.match(handler, /saveSettings\(\{ throwOnError: true \}\);/);
   assert.match(handler, /opencodeStatusCache = \{ value: null, at: 0 \};/);
   assert.match(handler, /queueLimitInvalidation\(\{ provider: 'opencode', accountName: name \}, 'profile-state'/);
@@ -265,7 +393,9 @@ test('Codex account panel supports per-account enable toggles without showing ti
   assert.match(body, /account\.workspaceKind === 'personal'/);
   assert.match(body, /t\('settings\.codex\.personalWorkspace'\)/);
   assert.match(body, /account\.workspaceLabel/);
-  assert.match(body, /enabled \? limitProviderPresentationApi\.limitProviderDisplayLabel\(account\.accountLabel\) : t\('settings\.codex\.disabled'\)/);
+  assert.match(body, /const codexProviders = localProviderStatuses\('codex'\);/);
+  assert.match(body, /accountIdentityApi\.codexManagedAccountPlanLabel\(account, codexProviders\)/);
+  assert.match(body, /: t\('settings\.codex\.disabled'\)/);
   assert.match(body, /info\.textContent = accountMetadata\.join\(' · '\);/);
   assert.match(body, /right\.append\(info, remove\)/);
   assert.match(body, /row\.append\(input, main, right\)/);
@@ -527,19 +657,19 @@ test('API key account entries share styling and Copilot uses the folded token en
   const css = readRendererFile('styles.css');
 
   const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
-  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#kimiManualPanel'/);
+  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#kimiManualPanel'/);
   assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
 
   assert.match(css, /#deepseekManualPanel\.hidden,\n#minimaxManualPanel\.hidden,/);
-  assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#ollamaManualPanel\.hidden,\n#mimoManualPanel\.hidden,\n#kimiManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
+  assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#commandcodeManualPanel\.hidden,\n#ollamaManualPanel\.hidden,\n#mimoManualPanel\.hidden,\n#kimiManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
   assert.match(css, /#copilotManualPanel\.hidden,\n#copilotManualDetails\.hidden,/);
-  assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#zaiteamErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#ollamaErrorMessage\.hidden,\n#kimiErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
-  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#zaiteamErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#commandcodeErrorMessage\.hidden,\n#ollamaErrorMessage\.hidden,\n#kimiErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
+  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#commandcodeManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
 });
 
 test('Copilot account panel provides GitHub sign-in plus manual token fallback', () => {
@@ -657,6 +787,32 @@ test('Z.ai, Volcengine, Qoder, and Ollama account panels are exposed in settings
   assert.match(zaiUrlBody, /https:\/\/z\.ai\/manage-apikey\/coding-plan\/personal\/my-plan/);
   const volcengineUrlBody = functionBody(app, 'volcenginePlatformUrl', 'qoderPlatformUrl');
   assert.match(volcengineUrlBody, /console\.volcengine\.com\/ark\/region:ark\+cn-beijing\/openManagement/);
+});
+
+test('Command Code account panel saves a cookie, enables its provider, and opens the allowlisted usage page', () => {
+  const html = readRendererFile('index.html');
+  assert.match(html, /<div id="commandcodeAccountGroup"[\s\S]*?<textarea id="commandcodeCookieInput"[\s\S]*?<button id="commandcodeCookieSubmit"[\s\S]*data-i18n="settings\.commandcode\.saveCookie">/);
+  const details = html.match(/<div id="commandcodeSettingsDetails"[\s\S]*?<div id="commandcodeErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  for (const step of [1, 2, 3, 4]) {
+    assert.match(details, new RegExp(`<strong>${step}\\.<\\/strong> <span data-i18n="settings\\.commandcode\\.step${step}">`));
+  }
+  assert.match(details, /placeholder="__Secure-commandcode_prod_\.session_token=\.\.\."/);
+
+  const app = readRendererFile('app.js');
+  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
+  assert.match(setupBody, /commandcodeCookie: input\.value,\n\s*limitProviders: limitProviderSelectionIncluding\('commandcode'\),\n\s*limitsEnabled: true/);
+  assert.match(setupBody, /saveSettings\(\{ commandcodeCookie: '' \}\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(commandcodePlatformUrl\(\)\)/);
+  const urlBody = functionBody(app, 'commandcodePlatformUrl', 'ollamaValidationError');
+  assert.match(urlBody, /return 'https:\/\/commandcode\.ai\/settings\/usage';/);
+
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
+  assert.match(allowlist, /parsed\.hostname === 'commandcode\.ai' \|\| parsed\.hostname === 'www\.commandcode\.ai'/);
+  // The cookie is a credential: the renderer only ever learns that one is set.
+  const settingsForRenderer = functionBody(main, 'settingsForRenderer', 'pushSettingsToRenderer');
+  assert.match(settingsForRenderer, /commandcodeCookie: settings\?\.commandcodeCookie \? 'set' : ''/);
+  assert.match(settingsForRenderer, /commandcodeCookieConfigured: Boolean\(currentCommandcodeCookie\(\)\)/);
 });
 
 test('Kimi account panel stores web access separately and opens the allowlisted Code console', () => {
@@ -982,6 +1138,16 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(body, /opencodeCookie:[^,}]*\?\s*'set'\s*:\s*''/);
   // Multi-account profile cookies are redacted the same way.
   assert.match(body, /opencodeProfiles: redactOpencodeProfilesForRenderer\(/);
+  // That redactor must name the fields it forwards. A spread of the stored
+  // profile hands any field added later to the renderer verbatim, which is how
+  // the API key would have leaked when profiles gained one.
+  const opencodeRedactor = main.slice(
+    main.indexOf('function redactOpencodeProfilesForRenderer'),
+    main.indexOf('function redactOpenRouterProfilesForRenderer')
+  );
+  assert.doesNotMatch(opencodeRedactor, /\.\.\.profile/);
+  assert.match(opencodeRedactor, /cookie: profile\?\.cookie \? 'set' : ''/);
+  assert.match(opencodeRedactor, /apiKey: profile\?\.apiKey \? 'set' : ''/);
   assert.match(credentialStore, /kimiWebAccessToken: \['providers', 'kimi', 'webAccessToken'\]/);
   assert.match(body, /kimiWebAccessTokenConfigured: Boolean\(currentKimiWebAccessToken\(\)\)/);
   const mimoRendererShape = main.slice(
@@ -1040,6 +1206,19 @@ test('credential storage failures preserve the file and surface one actionable e
   const rendererSave = functionBody(renderer, 'saveSettings', 'renderHomeIfVisible');
   assert.match(rendererSave, /state\.settings = await window\.tokenMonitor\.getSettings\(\)/);
   assert.match(rendererSave, /throw error;/);
+});
+
+test('successful settings saves invalidate the exported tray menu', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const saveBody = functionBody(main, 'saveSettings', 'loginItemEnabledHere');
+  const successPath = saveBody.slice(0, saveBody.indexOf('} catch (error)'));
+  const failurePath = saveBody.slice(saveBody.indexOf('} catch (error)'));
+
+  assert.match(
+    successPath,
+    /persistedSettingsSnapshot = cloneSettingsSnapshot\(settings\);\s*refreshTrayContextMenu\(\);\s*return true;/
+  );
+  assert.doesNotMatch(failurePath, /refreshTrayContextMenu\(\)/);
 });
 
 test('main settings normalize the Z.ai API region', () => {
@@ -1151,6 +1330,32 @@ test('sync upload interval setting is exposed in the Multi-device Sync panel', (
   assert.match(listenerSlice, /saveSettings\(\{ syncUploadIntervalMs: Number\(els\.syncUploadIntervalInput\.value\) \}\)/);
 });
 
+test('remote Hub build status is wired as a separate localized sync hint', () => {
+  const html = readRendererFile('index.html');
+  const app = readRendererFile('app.js');
+  const i18n = readRendererFile('i18n.js');
+  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const clientFields = html.slice(html.indexOf('<div id="hubClientFields"'), html.indexOf('<div id="hubHostFields"'));
+
+  assert.match(clientFields, /id="syncClientStatus"[\s\S]*id="hubBuildStatus"[\s\S]*role="status"[\s\S]*hidden/);
+  assert.ok(html.indexOf('hubBuildPresentation.js') < html.indexOf('app.js'));
+  assert.match(app, /getHubBuildStatus/);
+  assert.match(app, /function renderHubBuildStatus\(\)/);
+  assert.doesNotMatch(app, /await refreshHubBuildStatus\(\)/);
+  assert.equal([...app.matchAll(/void refreshHubBuildStatus\(\)/g)].length, 5);
+  const refreshBody = functionBody(app, 'refreshHubBuildStatus', 'syncPeriodTabs');
+  assert.match(refreshBody, /const request = \+\+hubBuildStatusRequest/);
+  assert.equal([...refreshBody.matchAll(/request !== hubBuildStatusRequest/g)].length, 2);
+  assert.match(app, /HUB_BUILD_STATUS_REFRESH_TTL_MS = 5 \* 60 \* 1000/);
+  assert.match(app, /visibilitychange[\s\S]*hubBuildStatusRefreshDue\(\)[\s\S]*void refreshHubBuildStatus\(\)/);
+  assert.match(preload, /getHubBuildStatus: \(\) => ipcRenderer\.invoke\('hub:getBuildStatus'\)/);
+  assert.match(main, /ipcMain\.handle\('hub:getBuildStatus'/);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.current':/g)].length, 5);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.updateAvailable':/g)].length, 5);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.legacy':/g)].length, 0);
+});
+
 test('main settings normalize collection cadence and restart only the device runtime when it changes', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const collector = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'collector.js'), 'utf8');
@@ -1251,7 +1456,8 @@ test('main collectors share one live GUI limit credential resolver in every widg
   assert.doesNotMatch(renewalPersistence, /queueLimitInvalidation|classifySettingsChange/);
   for (const key of [
     'claudeWebCookie', 'zaiApiKey', 'zaiApiRegion', 'volcengineAccessKeyId', 'volcengineSecretAccessKey',
-    'volcengineRegion', 'qoderCookie', 'qoderSite', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie'
+    'volcengineRegion', 'qoderCookie', 'qoderSite', 'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken',
+    'ollamaCookie'
   ]) assert.match(runtimeConfig, new RegExp(`${key}: settings\\.${key}`));
 });
 
@@ -1273,4 +1479,371 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
   assert.match(groupBody, /renderLimitProviderRow\('mimo', limitAccountTitle\('mimo', provider, index, providers\), provider, color/);
   assert.match(renderLimitsBody, /if \(id === 'mimo' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
   assert.match(renderLimitsBody, /nodes\.push\(renderMimoAccountGroup\(label, visibleProviders, color\)\);/);
+});
+
+test('a zero-config OpenCode machine is not reported as unconfigured', () => {
+  // The whole point of the API path is that Go quota needs no setup. If the
+  // panel derives its state only from stored profiles, that machine shows live
+  // quota on the limits card and "not set up" in settings at the same time.
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+
+  const gate = main.slice(
+    main.indexOf('function opencodeAmbientKeyActive'),
+    main.indexOf('async function probeOpenCodeApiKey')
+  );
+  assert.ok(gate, 'ambient gate should exist');
+  // It must mirror the collector's selection: the ambient key is its own
+  // account whenever it exists, and is hidden only once a saved account carries
+  // that same key — the point at which the user has said they are one account.
+  assert.match(gate, /opencodeGoApi\.readGoApiKey\(process\.env\)/);
+  // One predicate, shared with the collector. Two copies of "who owns the
+  // auto-detected key" drift into a panel offering a row the collector is not
+  // scanning; its behaviour is covered in tests/shared/opencodeProfiles.test.js.
+  assert.match(gate, /!opencodeProfiles\.ambientKeyClaimed\(profiles, ambientKey, ambientIdentity\)/);
+
+  const status = main.slice(
+    main.indexOf("ipcMain.handle('opencode:status'"),
+    main.indexOf("ipcMain.handle('opencode:getProfiles'")
+  );
+  assert.ok(status, 'status handler should exist');
+  assert.match(status, /opencodeAmbientKeyActive\(profiles\)/);
+  // Account names are user-chosen, so any sentinel key inside `profiles` is one
+  // a user can type; the synthetic entry rides in its own field instead.
+  assert.match(status, /const value = \{\s*profiles: result,\s*ambient,/);
+  assert.doesNotMatch(status, /result\[[^\]]*[Aa]mbient/);
+  // A profile that only names the ambient key stores no credential of its own,
+  // so a `cookie || apiKey` filter drops it and its row never leaves the
+  // placeholder while the collector is reading live quota from that same key.
+  // Both the filter and the probe resolve the key the way the collector does.
+  assert.match(status, /const profileKey = \(p\) => p\.apiKey \|\| opencodeProfiles\.ambientKeyFor\(p, ambientKey, ambientIdentity\);/);
+  // A reference whose pin no longer matches keeps its row and says so, rather
+  // than being filtered out and leaving the row on its placeholder forever.
+  assert.match(status, /const needsRebind = \(p\) => Boolean\(p\.useAmbientKey\) && !profileKey\(p\) && !p\.cookie;/);
+  assert.match(status, /\.filter\(\(\[, p\]\) => \(p\.cookie \|\| profileKey\(p\) \|\| needsRebind\(p\)\) && p\.enabled\)/);
+  assert.match(status, /needsRebind: true/);
+  // Provider-wide, like every ownership change: this row has no account name for
+  // a scoped refresh to address.
+  const ambientToggle = main.slice(
+    main.indexOf("ipcMain.handle('opencode:setAmbientEnabled'"),
+    main.indexOf("ipcMain.handle('openrouter:getProfiles'")
+  );
+  assert.ok(ambientToggle, 'setAmbientEnabled handler should exist');
+  assert.match(ambientToggle, /queueLimitInvalidation\(\{ provider: 'opencode' \}, 'ambient-toggle', \{ clear: true \}\)/);
+  // Clearing the provider without a refresh behind it wipes every OpenCode
+  // account and rebuilds none: switching off the detected key would read as
+  // switching off the provider.
+  assert.doesNotMatch(ambientToggle, /refresh: false/);
+  assert.match(status, /const apiKey = profileKey\(profile\);/);
+  assert.doesNotMatch(status, /probeOpenCodeApiKey\(profile\.apiKey\)/);
+
+  const profilesHandler = main.slice(
+    main.indexOf("ipcMain.handle('opencode:getProfiles'"),
+    main.indexOf("ipcMain.handle('opencode:saveProfile'")
+  );
+  // hasEnvVar keeps meaning "environment cookie". Folding the ambient key into
+  // it would make a later reader assume an env var that is not set.
+  assert.match(profilesHandler, /const hasEnvVar = Boolean\(process\.env\.TOKEN_MONITOR_OPENCODE_COOKIE\);/);
+  // Which credential kinds an account holds crosses to the renderer; none of
+  // their values do.
+  assert.match(profilesHandler, /hasApiKey: Boolean\(p\.apiKey\)/);
+  assert.match(profilesHandler, /hasCookie: Boolean\(p\.cookie\)/);
+  assert.match(profilesHandler, /usesAmbientKey: Boolean\(p\.useAmbientKey\)/);
+  // Held but not resolving is its own state: on an account that also has a
+  // cookie, nothing else in the panel would reveal it.
+  assert.match(profilesHandler, /ambientStale: Boolean\(p\.useAmbientKey\)/);
+});
+
+test('OpenCode credentials are named, merged and removed one at a time', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+
+  const save = main.slice(
+    main.indexOf("ipcMain.handle('opencode:saveProfile'"),
+    main.indexOf("ipcMain.handle('opencode:setProfileEnabled'")
+  );
+  assert.ok(save, 'saveProfile handler should exist');
+  // Naming the auto-detected credential stores a reference, never the key, so a
+  // key rotated inside OpenCode is still read live instead of going stale.
+  assert.match(save, /\['api', 'cookie', 'ambient'\]\.includes\(kind\)/);
+  // Bound to the account signed in at the time: the API returns no workspace id,
+  // so a key that later changes cannot be told apart from a different account's.
+  assert.match(save, /ambientKeyIdentity: opencodeGoApi\.goApiIdentity\(ambientKey\)/);
+  assert.doesNotMatch(save, /useAmbientKey: true, apiKey/);
+
+  // Every operation that could bind or destroy a credential goes through the
+  // shared profile algebra, so the rule is one testable function rather than
+  // four handlers that have to agree. Its behaviour is covered for real in
+  // tests/shared/opencodeProfiles.test.js; what matters here is that no handler
+  // reaches around it.
+  const handlers = main.slice(
+    main.indexOf("ipcMain.handle('opencode:saveProfile'"),
+    main.indexOf("ipcMain.handle('openrouter:getProfiles'")
+  );
+  for (const call of [
+    /opencodeProfiles\.saveCredential\(\s*settings\.opencodeProfiles \|\| \{\},\s*name,\s*credential,\s*\{ merge: options\.merge === true \}/,
+    /opencodeProfiles\.removeCredential\(settings\.opencodeProfiles \|\| \{\}, name, kind\)/,
+    /opencodeProfiles\.moveCredential\(/,
+    /opencodeProfiles\.renameProfile\(/
+  ]) assert.match(handlers, call);
+  // The rule is not re-implemented alongside the module that owns it.
+  assert.doesNotMatch(handlers, /options\.merge !== true/);
+  assert.doesNotMatch(handlers, /api: 'apiKey', cookie: 'cookie', ambient: 'useAmbientKey'/);
+});
+
+test('the OpenCode local fallback toggle is relocated once, not once per render', () => {
+  const app = readRendererFile('app.js');
+  const body = functionBody(app, 'moveOpenCodeLocalFallbackSetting', 'limitProviderAccountGroup');
+  assert.ok(body, 'relocation helper should exist');
+  // The shared renderer builds a fresh settings list every pass, so a move that
+  // does not clear the destination stacks one copy of the toggle per re-render.
+  assert.match(body, /for \(const stale of \[\.\.\.target\.children\]\) if \(stale !== list\) stale\.remove\(\);/);
+  // The group header already names the setting, so the item title would read
+  // twice; dropping it alone leaves the label cell empty and the switch adrift.
+  assert.match(body, /querySelector\('\.settings-item-title'\)\?\.remove\(\)/);
+  assert.match(body, /if \(cell && desc && desc\.parentElement !== cell\) cell\.append\(desc\)/);
+  // The shared collapsible helper, not a second hand-rolled one, which also
+  // means the ids have to follow its \`\${prefix}SettingsToggle\` convention.
+  assert.match(body, /setAccountGroupExpanded\(\s*'opencodeLocalFallback'/);
+  assert.match(body, /getElementById\('opencodeLocalFallbackSettingsToggle'\)/);
+
+  const html = readRendererFile('index.html');
+  const details = html.match(/<div id="opencodeSettingsDetails"[\s\S]*?<div id="opencodeErrorMessage"/)?.[0] || '';
+  // The collapse animates by squeezing one inner wrapper; a bare container has
+  // nothing to shrink and keeps its height however the class is toggled.
+  assert.match(details, /<div id="opencodeLocalFallbackSettingsDetails"[^>]*>\s*<div id="opencodeLocalFallbackInner" class="accordion-animation-inner">/);
+  // Accounts first, then the off-by-default estimate, then adding an account.
+  const order = ['settings.opencode.accountsNote', 'opencodeProfileList', 'opencodeLocalFallbackAccountGroup', 'opencodeAddForm']
+    .map((token) => details.indexOf(token));
+  assert.ok(order.every((index) => index >= 0), 'panel should contain note, list, fallback and add form');
+  assert.deepEqual(order, [...order].sort((a, b) => a - b));
+
+  // Left with only its description, the text cell's content-based flex basis
+  // claims the whole line on its own and wraps the switch onto a second row.
+  const css = readRendererFile('styles.css');
+  assert.match(css, /#opencodeLocalFallbackInner \.settings-item > \.settings-item-text \{[^}]*flex: 1 1 0;/);
+});
+
+test('an expanded OpenCode account animates and its merge button gets its own row', () => {
+  const app = readRendererFile('app.js');
+  const css = readRendererFile('styles.css');
+
+  // The shared accordion squeezes one inner wrapper; rows placed directly on
+  // the container leave it with nothing to shrink.
+  assert.match(app, /credentialList\.className = 'opencode-credential-list accordion-animated-container hidden';/);
+  assert.match(app, /credentialInner\.className = 'accordion-animation-inner';/);
+  assert.match(app, /credentialInner\.append\(opencodeCredentialRow\(name, kind, label\)\)/);
+  assert.match(app, /credentialList\.append\(credentialInner\)/);
+  // That container stays in the grid while collapsed, so a row gap would pad
+  // every multi-credential account by its full height with nothing shown.
+  assert.match(css, /\.opencode-profile-item \{[^}]*gap: 0 8px;/);
+
+  // The merge label carries the target account name and never fits beside the
+  // input or in the cell next to the rename button.
+  assert.match(app, /row\.append\(labelSpan, nameInput, actions, mergeBtn\);/);
+  assert.match(css, /#opencodeProfileList \.opencode-profile-item \.profile-name-box \{\s*grid-template-areas:\s*"name rename \."\s*"merge merge merge"\s*"detail detail detail";/);
+  // Scoped to OpenCode: the other profile lists share this grid and have no
+  // merge button, so they keep the two-row template.
+  assert.match(css, /\.opencode-profile-item \.profile-name-box \{[^}]*grid-template-areas:\s*"name rename \."\s*"detail detail detail";/);
+
+  // The summary line runs at 9px; the group-header chevron size reads as an
+  // oversized arrow beside it.
+  assert.match(css, /\.opencode-profile-item \.profile-detail \.cursor-disclosure-icon \{\s*width: 9px;/);
+});
+
+// The merge confirmation rule, run rather than pattern-matched. Hiding the
+// button on an edit is not enough on its own: the reply that offers it arrives
+// after an await, so an edit made while the request is in flight is overtaken
+// by that reply and the button comes back describing the proposal the user has
+// already left. Loaded through `vm` like the other renderer controllers, so the
+// assertions are about behaviour and not about the source that produces it.
+function loadOpencodeMergeOffer() {
+  const app = readRendererFile('app.js');
+  const start = app.indexOf('function opencodeMergeOffer(');
+  assert.notEqual(start, -1, 'opencodeMergeOffer should exist');
+  const end = app.indexOf('\nfunction ', start + 1);
+  assert.notEqual(end, -1, 'opencodeMergeOffer should be followed by another function');
+  const context = { module: { exports: null } };
+  vm.runInNewContext(`${app.slice(start, end)}\nmodule.exports = opencodeMergeOffer;`, context);
+  return context.module.exports;
+}
+
+function fakeMergeButton() {
+  const clicks = [];
+  const button = {
+    textContent: '',
+    visible: false,
+    classList: {
+      add: (name) => { if (name === 'hidden') button.visible = false; },
+      remove: (name) => { if (name === 'hidden') button.visible = true; }
+    },
+    addEventListener: (type, listener) => { if (type === 'click') clicks.push(listener); },
+    click: () => clicks.forEach((listener) => listener())
+  };
+  return button;
+}
+
+// One save, no interference: the offer appears and confirming it names exactly
+// what was proposed.
+test('a merge offer confirms the proposal it was made for', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  let release;
+  const reply = new Promise((resolve) => { release = resolve; });
+  const save = (async () => {
+    const at = offer.revision();
+    await reply;
+    offer.offer(at, 'work', 'merge into work');
+  })();
+
+  assert.equal(button.visible, false);
+  release();
+  await save;
+  assert.equal(button.visible, true);
+  assert.equal(button.textContent, 'merge into work');
+  button.click();
+  assert.deepEqual(confirmed, ['work']);
+});
+
+test('an edit made while the save is in flight cancels the offer its reply carries', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  let release;
+  const reply = new Promise((resolve) => { release = resolve; });
+  const save = (async () => {
+    const at = offer.revision();
+    await reply;
+    // The proposal this reply answers is no longer the one on screen.
+    assert.equal(offer.stale(at), true);
+    offer.offer(at, 'work', 'merge into work');
+  })();
+
+  offer.withdraw();
+  release();
+  await save;
+
+  assert.equal(button.visible, false, 'a superseded reply must not put the button back');
+  button.click();
+  assert.deepEqual(confirmed, [], 'a hidden offer has nothing to confirm');
+});
+
+// Two saves can overlap and the newer one can answer first, so an older reply
+// has to keep its hands off a proposal that is not its own.
+test('an older successful reply leaves a newer offer standing', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  let releaseOld;
+  const oldReply = new Promise((resolve) => { releaseOld = resolve; });
+  const oldSave = (async () => {
+    const at = offer.revision();
+    await oldReply;
+    // Succeeded, but for the proposal the user has already replaced.
+    if (!offer.stale(at)) offer.withdraw();
+  })();
+
+  // The user edits and saves again; that request answers first.
+  offer.withdraw();
+  const newer = offer.revision();
+  offer.offer(newer, 'javis', 'merge into javis');
+  assert.equal(button.visible, true);
+
+  releaseOld();
+  await oldSave;
+
+  assert.equal(button.visible, true, 'an older success must not clear a newer offer');
+  button.click();
+  assert.deepEqual(confirmed, ['javis']);
+});
+
+// Escape, or a blur onto nothing, cancels the request that is already out. The
+// reply still arrives, and it must not put the cancelled proposal back.
+test('cancelling an in-flight proposal keeps its reply from resurrecting it', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  let release;
+  const reply = new Promise((resolve) => { release = resolve; });
+  const save = (async () => {
+    const at = offer.revision();
+    await reply;
+    offer.offer(at, 'work', 'merge into work');
+  })();
+
+  offer.withdraw();
+  release();
+  await save;
+
+  assert.equal(button.visible, false, 'a cancelled proposal must not come back');
+  button.click();
+  assert.deepEqual(confirmed, []);
+});
+
+// One way down, so a cancel path cannot quietly opt out of invalidating the
+// reply that is still in flight.
+test('the merge offer has no way to hide without invalidating in-flight replies', () => {
+  const app = readRendererFile('app.js');
+  assert.doesNotMatch(app, /offer\.hide\(\)|addMergeOffer\?\.hide\(\)/);
+  assert.doesNotMatch(app, /hide: \(\) =>/);
+});
+
+test('a withdrawn offer stays withdrawn until a new proposal is made', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  const first = offer.revision();
+  offer.withdraw();
+  offer.offer(first, 'work', 'merge into work');
+  assert.equal(button.visible, false);
+
+  // The next save captures the revision the withdrawal left behind, so the
+  // user's new proposal is offered normally.
+  const second = offer.revision();
+  offer.offer(second, 'personal', 'merge into personal');
+  assert.equal(button.visible, true);
+  button.click();
+  assert.deepEqual(confirmed, ['personal']);
+});
+
+// Account names are arbitrary user strings, so the id a row is found by has to
+// distinguish every name a user may pick. Sanitizing to a safe character set is
+// not injective: `a b` and `a_b` both became `a_b`, and whichever row rendered
+// first collected the other's status.
+function loadOpencodeRowId() {
+  const app = readRendererFile('app.js');
+  const start = app.indexOf('function opencodeRowId(');
+  assert.notEqual(start, -1, 'opencodeRowId should exist');
+  const end = app.indexOf('\n// ', start);
+  const context = { module: { exports: null }, encodeURIComponent };
+  vm.runInNewContext(`${app.slice(start, end)}\nmodule.exports = opencodeRowId;`, context);
+  return context.module.exports;
+}
+
+test('two account names a user may pick never share a row id', () => {
+  const opencodeRowId = loadOpencodeRowId();
+  const names = ['a b', 'a_b', 'a/b', 'a%b', 'a.b', 'work', 'work ', 'wörk', '__proto__', 'a+b'];
+  const ids = names.map((name) => opencodeRowId('opencode-info-', name));
+  assert.equal(new Set(ids).size, names.length, `collision among ${JSON.stringify(ids)}`);
+  // An id may not contain whitespace.
+  for (const id of ids) assert.doesNotMatch(id, /\s/, id);
+});
+
+test('the row id is a pure function of the name, shared by both call sites', () => {
+  const app = readRendererFile('app.js');
+  // Rendering and the later status lookup derive it independently, so a shared
+  // mutable table could drift between them; nothing may build one by hand.
+  assert.doesNotMatch(app, /'opencode-info-' \+ name/);
+  assert.doesNotMatch(app, /'opencode-credentials-' \+ name/);
+  assert.equal((app.match(/opencodeRowId\('opencode-info-', name\)/g) || []).length, 2);
+  assert.equal((app.match(/opencodeRowId\('opencode-credentials-', name\)/g) || []).length, 1);
 });

@@ -78,6 +78,10 @@ test('normalizeInitialRendererViewState restores a persisted last-used view', ()
     { period: 'month', breakdown: 'trends' }
   );
   assert.deepEqual(
+    normalizeInitialRendererViewState({ period: 'last7', breakdown: 'model' }),
+    { period: 'last7', breakdown: 'model' }
+  );
+  assert.deepEqual(
     normalizeInitialRendererViewState({ period: 'allTime', breakdown: 'project' }),
     { period: 'allTime', breakdown: 'project' }
   );

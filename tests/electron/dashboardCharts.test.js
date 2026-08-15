@@ -27,9 +27,11 @@ test('clientColors carries the known palette and a default', () => {
   assert.equal(clientColors.claude, '#cc7c5e');
   assert.equal(clientColors.codex, '#49a3b0');
   assert.equal(clientColors.cline, '#323B43');
+  assert.equal(clientColors.commandcode, '#8C4EDD');
   assert.equal(clientColors.volcengine, '#006EFF');
   assert.equal(clientColors.qoder, '#2ADB5C');
   assert.equal(clientColors.ollama, '#888888');
+  assert.equal(clientColors.hunyuan, '#0053E0');
   assert.equal(typeof clientColors.default, 'string');
 });
 
@@ -39,7 +41,10 @@ test('modelVendorFor maps families and modelColor falls back deterministically',
   assert.equal(modelVendorFor('kimi-k2'), 'kimi');
   assert.equal(modelVendorFor('moonshot-v1'), 'kimi');
   assert.equal(modelVendorFor('doubao-seed-1.6'), 'doubao');
+  assert.equal(modelVendorFor('hy3'), 'hunyuan');
+  assert.equal(modelVendorFor('hunyuan-t1'), 'hunyuan');
   assert.equal(modelColor('claude-opus'), clientColors.claude);
+  assert.equal(modelColor('hy3'), clientColors.hunyuan);
   assert.equal(modelColor('totally-unknown'), modelColor('totally-unknown')); // stable
 });
 

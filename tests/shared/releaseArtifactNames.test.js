@@ -14,6 +14,7 @@ const {
 } = require('../../scripts/verify-updater-artifact-names');
 const { mergeMacUpdaterMetadata } = require('../../scripts/merge-mac-updater-metadata');
 const { extractReleaseNotes } = require('../../src/shared/appUpdater');
+const { MAC_APP_MIN_DARWIN_VERSION } = require('../../src/shared/macSystemRequirements');
 
 function macUpdaterMetadata(version, arch) {
   return [
@@ -84,14 +85,16 @@ test('mac release scripts build native Apple Silicon and Intel artifacts', () =>
   assert.equal(intelBullets.length, 5);
   assert.ok(intelBullets.every((line) => line.split(intelDmg).length === 3));
   assert.ok(intelBullets.every((line) => line.includes(`/download/v${rootPackage.version}/`)));
-  const fullChangelogLines = releaseTemplate.split('\n').filter((line) => line.startsWith('**Full Changelog:**'));
-  assert.equal(fullChangelogLines.length, 1);
-  assert.match(fullChangelogLines[0], /\[v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+\]/);
-  assert.match(fullChangelogLines[0], /https:\/\/github\.com\/Javis603\/token-monitor\/compare\/v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+/);
-  assert.ok(fullChangelogLines[0].includes(`v${rootPackage.version}`));
+  const fullChangelogSummaries = releaseTemplate
+    .split('\n')
+    .filter((line) => line.startsWith('<summary><strong>Full Changelog:</strong>'));
+  assert.equal(fullChangelogSummaries.length, 1);
+  assert.match(fullChangelogSummaries[0], />v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+<\/a>/);
+  assert.match(fullChangelogSummaries[0], /https:\/\/github\.com\/Javis603\/token-monitor\/compare\/v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+/);
+  assert.ok(fullChangelogSummaries[0].includes(`v${rootPackage.version}`));
   assert.match(
     releaseTemplate,
-    /---\s*\*\*Full Changelog:\*\*[\s\S]*<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>/
+    /---\s*<details>\s*<summary><strong>Full Changelog:<\/strong> <a href="[^"]+">v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+<\/a><\/summary>\s*<!-- github-generated-release-notes -->\s*<\/details>\s*<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>/
   );
 });
 
@@ -157,6 +160,8 @@ test('merges arm64 and x64 mac updater files into one architecture-aware feed', 
     `Token-Monitor-${version}-x64.dmg`
   ]);
   assert.match(merged, new RegExp(`^path: Token-Monitor-${version}-arm64\\.zip$`, 'm'));
+  assert.match(merged, new RegExp(`^minimumSystemVersion: ${MAC_APP_MIN_DARWIN_VERSION.replaceAll('.', '\\.')}$`, 'm'));
+  assert.equal((merged.match(/^minimumSystemVersion:/gm) || []).length, 1);
   assert.match(merged, /arm64 release notes survive metadata processing/);
   assert.doesNotMatch(merged, /x64 release notes survive metadata processing/);
 
@@ -198,6 +203,26 @@ test('rejects mismatched or mislabelled mac updater metadata', () => {
       macUpdaterMetadata('0.33.0', 'arm64')
     ),
     /expected only arm64 artifacts/
+  );
+  assert.throws(
+    () => mergeMacUpdaterMetadata(
+      macUpdaterMetadata('0.33.0', 'arm64').replace(
+        'files:',
+        'minimumSystemVersion: 23.0.0\nfiles:'
+      ),
+      macUpdaterMetadata('0.33.0', 'x64')
+    ),
+    /does not match release policy/
+  );
+  assert.throws(
+    () => mergeMacUpdaterMetadata(
+      macUpdaterMetadata('0.33.0', 'arm64').replace(
+        'files:',
+        'minimumSystemVersion:\nfiles:'
+      ),
+      macUpdaterMetadata('0.33.0', 'x64')
+    ),
+    /empty top-level minimumSystemVersion/
   );
 });
 

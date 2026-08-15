@@ -20,7 +20,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getStreamStatus: () => ipcRenderer.invoke('stream:status'),
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),
-  getDashboardHistory: () => ipcRenderer.invoke('dashboard:getHistory'),
+  getDashboardHistory: (options) => ipcRenderer.invoke('dashboard:getHistory', options),
   onDashboardHistoryChanged: (callback) => {
     const listener = () => { try { callback(); } catch (_) {} };
     ipcRenderer.on('dashboard:historyChanged', listener);
@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     close: () => ipcRenderer.send('dashboard:close')
   },
   getHubInfo: () => ipcRenderer.invoke('hub:getInfo'),
+  getHubBuildStatus: () => ipcRenderer.invoke('hub:getBuildStatus'),
   regenerateHubSecret: () => ipcRenderer.invoke('hub:regenerateSecret'),
   onHubPush: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
@@ -128,10 +129,13 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     logout: () => ipcRenderer.invoke('opencode:logout'),
     status: () => ipcRenderer.invoke('opencode:status'),
     getProfiles: () => ipcRenderer.invoke('opencode:getProfiles'),
-    saveProfile: (name, cookie) => ipcRenderer.invoke('opencode:saveProfile', name, cookie),
+    saveProfile: (name, credential, kind, options) => ipcRenderer.invoke('opencode:saveProfile', name, credential, kind, options),
     deleteProfile: (name) => ipcRenderer.invoke('opencode:deleteProfile', name),
-    renameProfile: (oldName, newName) => ipcRenderer.invoke('opencode:renameProfile', oldName, newName),
-    setProfileEnabled: (name, enabled) => ipcRenderer.invoke('opencode:setProfileEnabled', name, enabled)
+    renameProfile: (oldName, newName, options) => ipcRenderer.invoke('opencode:renameProfile', oldName, newName, options),
+    removeCredential: (name, kind) => ipcRenderer.invoke('opencode:removeCredential', name, kind),
+    moveCredential: (name, kind, targetName, options) => ipcRenderer.invoke('opencode:moveCredential', name, kind, targetName, options),
+    setProfileEnabled: (name, enabled) => ipcRenderer.invoke('opencode:setProfileEnabled', name, enabled),
+    setAmbientEnabled: (enabled) => ipcRenderer.invoke('opencode:setAmbientEnabled', enabled)
   },
   openrouter: {
     getProfiles: () => ipcRenderer.invoke('openrouter:getProfiles'),

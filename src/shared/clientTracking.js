@@ -5,7 +5,7 @@
 // `claude` client. tokscale 4.0.5 fixed the scan path but does not dedup imports, and
 // the imported rows aren't cleanly separable (MiMo is multi-model). It stays a known
 // client — one click to enable in Settings → tools — until tokscale dedups upstream.
-const DEFAULT_CLIENTS = 'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,kimi,qwen,grok,copilot,pi,zed,kilocode,zcode,kiro,codebuddy,workbuddy,proma';
+const DEFAULT_CLIENTS = 'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,kimi,qwen,grok,copilot,pi,zed,kilocode,commandcode,zcode,kiro,codebuddy,workbuddy,proma,reasonix';
 
 function insertClientBefore(clientsCsv, clientId, beforeClientId) {
   const clients = clientsCsv.split(',');
@@ -20,7 +20,11 @@ function insertClientBefore(clientsCsv, clientId, beforeClientId) {
 // Mirror the renderer's KNOWN_CLIENTS; add any future opt-in ids here too.
 // qodercn (Qoder CN local SQLite adapter) stays opt-in per the upstream tool-support
 // boundary — a local adapter that may break when Qoder changes its DB schema.
-const KNOWN_CLIENTS = `${insertClientBefore(DEFAULT_CLIENTS, 'micode', 'zcode')},qodercn`;
+const KNOWN_CLIENTS = insertClientBefore(
+  insertClientBefore(DEFAULT_CLIENTS, 'micode', 'zcode'),
+  'qodercn',
+  'reasonix'
+);
 
 function normalizeClientsCsv(value) {
   return String(value ?? '').split(',').map((client) => client.trim().toLowerCase()).filter(Boolean).join(',');

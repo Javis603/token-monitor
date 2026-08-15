@@ -12,7 +12,7 @@ const { usageConfigFromSettings } = require('../../src/electron/runtimeConfig');
 test('preload exposes the dashboard IPC surface', () => {
   const preload = read('src', 'electron', 'preload.js');
   assert.match(preload, /openDashboard: \(\) => ipcRenderer\.invoke\('dashboard:open'\)/);
-  assert.match(preload, /getDashboardHistory: \(\) => ipcRenderer\.invoke\('dashboard:getHistory'\)/);
+  assert.match(preload, /getDashboardHistory: \(options\) => ipcRenderer\.invoke\('dashboard:getHistory', options\)/);
   assert.match(preload, /ipcRenderer\.on\('dashboard:historyChanged', listener\)/);
   assert.match(preload, /dashboard: \{/);
   assert.match(preload, /ready: \(\) => ipcRenderer\.send\('dashboard:ready'\)/);
@@ -33,24 +33,28 @@ test('main registers dashboard handlers and a sender-scoped close', () => {
 
 test('dashboard readiness waits for data and recovers only from actual failures', () => {
   const main = read('src', 'electron', 'main.js');
+  const historySource = read('src', 'electron', 'historySource.js');
   assert.doesNotMatch(main, /dashboardShowFallback|armDashboardShowFallback/);
   assert.match(main, /webContents\.on\('did-fail-load'/);
   assert.match(main, /errorCode === -3/);
   assert.match(main, /webContents\.on\('render-process-gone'/);
   assert.match(main, /win\.on\('unresponsive'/);
   assert.match(main, /function discardFailedDashboardWindow\(win, reason\)[\s\S]*?win\.destroy\(\)/);
-  assert.match(main, /const controller = new AbortController\(\);[\s\S]*?signal: controller\.signal[\s\S]*?clearTimeout\(timeout\)/);
+  assert.match(historySource, /const controller = new AbortController\(\);[\s\S]*?signal: controller\.signal[\s\S]*?clearTimeout\(timeout\)/);
 });
 
-test('getDashboardHistory mirrors the local/sync split of fetchStats', () => {
+test('Dashboard and Widget share the complete local/host/client history resolver', () => {
   const main = read('src', 'electron', 'main.js');
-  assert.match(main, /aggregateHistory\(localDevice \? \[localDevice\] : \[\]\)/);
-  assert.match(main, /\/api\/history/);
+  const historySource = read('src', 'electron', 'historySource.js');
+  assert.match(main, /return resolveCompleteHistory\(historyResolverOptions\(\)\)/);
+  assert.match(historySource, /mode === 'local'/);
+  assert.match(historySource, /hubMode === 'host' && embeddedHub/);
+  assert.match(historySource, /\/api\/history/);
 });
 
 test('getDashboardHistory reads local history directly without a blocking collection tick', () => {
   const main = read('src', 'electron', 'main.js');
-  const fn = /async function getDashboardHistory\(\)\s*\{([\s\S]*?)\n\}/.exec(main);
+  const fn = /async function getDashboardHistory\(options = \{\}\)\s*\{([\s\S]*?)\n\}/.exec(main);
   assert.ok(fn, 'getDashboardHistory should be defined');
   // Awaiting a full collection tick here delayed the fetch for seconds; on a
   // quick close/reopen the response outlived the renderer and the dashboard
@@ -58,11 +62,20 @@ test('getDashboardHistory reads local history directly without a blocking collec
   assert.doesNotMatch(fn[1], /localCollectorHandle\.tick/);
 });
 
+test('fixed ranges request existing per-device History without changing ingest', () => {
+  const main = read('src', 'electron', 'main.js');
+  const historySource = read('src', 'electron', 'historySource.js');
+  assert.match(main, /includeDevices[\s\S]*?resolveCompleteHistoryWithDevices/);
+  assert.match(main, /ipcMain\.handle\('dashboard:getHistory', \(_event, options\) => getDashboardHistory\(options\)\)/);
+  assert.match(historySource, /\/api\/devices/);
+  assert.match(historySource, /deviceHistories: parseDeviceHistories\(devices\)/);
+});
+
 test('dashboard history is gated by the historyEnabled setting', () => {
   const main = read('src', 'electron', 'main.js');
   assert.match(main, /historyEnabled:\s*true/);
   assert.match(main, /historyEnabled:\s*parseBoolean\(patch\.historyEnabled[\s\S]*?,\s*false\)/);
-  assert.match(main, /if \(settings\?\.historyEnabled === false\) return aggregateHistory\(\[\]\)/);
+  assert.match(read('src', 'electron', 'historySource.js'), /historyEnabled === false/);
   assert.equal(usageConfigFromSettings({ historyEnabled: true }).historyEnabled, true);
   assert.equal(usageConfigFromSettings({ historyEnabled: false }).historyEnabled, false);
   assert.match(main, /usageConfigFromSettings\(settings, \{/);

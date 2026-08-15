@@ -52,9 +52,9 @@ const SAMPLE = {
       activeTimeMs: 3600000,
       clients: [
         { client: 'claude', modelId: 'opus', providerId: 'anthropic',
-          tokens: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, reasoning: 7 }, cost: 1.0, messages: 3 },
+          tokens: { input: 5, output: 20, cacheRead: 4, cacheWrite: 1, reasoning: 7 }, cost: 1.0, messages: 3 },
         { client: 'codex', modelId: 'gpt', providerId: 'openai',
-          tokens: { input: 5, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: 0.5, messages: 1 }
+          tokens: { input: 2, output: 5, cacheRead: 2, cacheWrite: 1, reasoning: 0 }, cost: 0.5, messages: 1 }
       ]
     }
   ]
@@ -70,10 +70,31 @@ test('parseGraphResult folds client rows into perClient/perModel and derives day
   assert.equal(day.cost, 1.5);
   assert.equal(day.messages, 4);
   assert.equal(day.activeTimeMs, 3600000);
-  assert.deepEqual(day.perClient.claude, { tokens: 30, cost: 1.0, messages: 3 });
-  assert.deepEqual(day.perClient.codex, { tokens: 10, cost: 0.5, messages: 1 });
-  assert.deepEqual(day.perModel.opus, { tokens: 30, cost: 1.0 });
-  assert.deepEqual(day.perModel.gpt, { tokens: 10, cost: 0.5 });
+  assert.equal(day.cacheReadTokens, 6);
+  assert.equal(day.cacheWriteTokens, 2);
+  assert.equal(day.outputTokens, 25);
+  assert.equal(day.unclassifiedTokens, 0);
+  assert.equal(day.tokenComponentsAvailable, true);
+  assert.deepEqual(day.perClient.claude, {
+    tokens: 30, cost: 1.0, messages: 3,
+    unclassifiedTokens: 0,
+    cacheReadTokens: 4, cacheWriteTokens: 1, outputTokens: 20
+  });
+  assert.deepEqual(day.perClient.codex, {
+    tokens: 10, cost: 0.5, messages: 1,
+    unclassifiedTokens: 0,
+    cacheReadTokens: 2, cacheWriteTokens: 1, outputTokens: 5
+  });
+  assert.deepEqual(day.perModel.opus, {
+    tokens: 30, cost: 1.0,
+    unclassifiedTokens: 0,
+    cacheReadTokens: 4, cacheWriteTokens: 1, outputTokens: 20
+  });
+  assert.deepEqual(day.perModel.gpt, {
+    tokens: 10, cost: 0.5,
+    unclassifiedTokens: 0,
+    cacheReadTokens: 2, cacheWriteTokens: 1, outputTokens: 5
+  });
 });
 
 test('parseGraphResult is defensive about missing/garbage input', () => {
@@ -82,7 +103,10 @@ test('parseGraphResult is defensive about missing/garbage input', () => {
   assert.deepEqual(parseGraphResult({ contributions: 'x' }), { contributions: [] });
   const out = parseGraphResult({ contributions: [{ date: '2026-01-01' }] });
   assert.deepEqual(out.contributions[0], {
-    date: '2026-01-01', tokens: 0, cost: 0, messages: 0, activeTimeMs: 0, perClient: {}, perModel: {}
+    date: '2026-01-01', tokens: 0, cost: 0, messages: 0,
+    cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0,
+    tokenComponentsAvailable: true,
+    activeTimeMs: 0, perClient: {}, perModel: {}
   });
 });
 
@@ -236,6 +260,58 @@ test('mergeHistories sums daily across devices and recomputes derived fields', (
   assert.equal(m.summary.activeTimeMs, 210000);
 });
 
+test('mergeHistories preserves known components beside legacy unclassified usage', () => {
+  const exact = {
+    daily: [{
+      date: '2026-06-07',
+      tokens: 100,
+      cost: 1,
+      cacheReadTokens: 60,
+      cacheWriteTokens: 10,
+      outputTokens: 20,
+      unclassifiedTokens: 0,
+      tokenComponentsAvailable: true,
+      perClient: { claude: {
+        tokens: 100, cost: 1, messages: 1,
+        cacheReadTokens: 60, cacheWriteTokens: 10, outputTokens: 20,
+        unclassifiedTokens: 0
+      } },
+      perModel: { opus: {
+        tokens: 100, cost: 1,
+        cacheReadTokens: 60, cacheWriteTokens: 10, outputTokens: 20,
+        unclassifiedTokens: 0
+      } }
+    }],
+    monthly: [{ month: '2026-06', tokens: 100, cost: 1, perClient: {}, perModel: {} }],
+    summary: {}
+  };
+  const legacy = {
+    daily: [{
+      date: '2026-06-07',
+      tokens: 50,
+      cost: 0.5,
+      perClient: { claude: { tokens: 50, cost: 0.5, messages: 1 } },
+      perModel: { opus: { tokens: 50, cost: 0.5 } }
+    }],
+    monthly: [{ month: '2026-06', tokens: 50, cost: 0.5, perClient: {}, perModel: {} }],
+    summary: {}
+  };
+
+  const merged = mergeHistories([exact, legacy], { todayKey: '2026-06-07' });
+  const day = merged.daily[0];
+
+  assert.equal(day.tokens, 150);
+  assert.equal(day.cacheReadTokens, 60);
+  assert.equal(day.cacheWriteTokens, 10);
+  assert.equal(day.outputTokens, 20);
+  assert.equal(day.unclassifiedTokens, 50);
+  assert.equal(day.tokenComponentsAvailable, false);
+  assert.equal(day.perClient.claude.cacheReadTokens, 60);
+  assert.equal(day.perClient.claude.unclassifiedTokens, 50);
+  assert.equal(day.perModel.opus.outputTokens, 20);
+  assert.equal(day.perModel.opus.unclassifiedTokens, 50);
+});
+
 test('mergeHistories handles empty list', () => {
   const m = mergeHistories([], { todayKey: '2026-06-07' });
   assert.deepEqual(m.daily, []);
@@ -243,7 +319,9 @@ test('mergeHistories handles empty list', () => {
   assert.equal(m.summary.totalTokens, 0);
 });
 
-const { coerceHistory, historyPreview, historyRevision } = require('../../src/shared/history');
+const {
+  coerceHistory, deviceHistoryRevision, historyPreview, historyRevision
+} = require('../../src/shared/history');
 
 test('mergeHistories re-caps stale device daily rows without losing lifetime totals', () => {
   const history = {
@@ -272,6 +350,30 @@ test('historyRevision is key-order stable and tracks breakdown changes', () => {
   assert.notEqual(historyRevision(first), historyRevision(changed));
 });
 
+test('deviceHistoryRevision tracks device identity and explicit History state', () => {
+  const history = { daily: [{ date: '2026-06-07', tokens: 10 }], monthly: [], summary: {} };
+  const first = deviceHistoryRevision([
+    { deviceId: 'mac', history },
+    { deviceId: 'pc', history: null }
+  ]);
+  assert.equal(first, deviceHistoryRevision([
+    { deviceId: 'pc', history: null },
+    { deviceId: 'mac', history }
+  ]));
+  assert.notEqual(first, deviceHistoryRevision([
+    { deviceId: 'mac', history: null },
+    { deviceId: 'pc', history }
+  ]));
+  assert.notEqual(
+    deviceHistoryRevision([{ deviceId: 'mac' }]),
+    deviceHistoryRevision([{ deviceId: 'mac', history: null }])
+  );
+  assert.notEqual(
+    deviceHistoryRevision([{ deviceId: 'mac', historyAvailable: false, history: null }]),
+    deviceHistoryRevision([{ deviceId: 'mac', historyAvailable: true, history }])
+  );
+});
+
 test('coerceHistory normalizes shape and drops garbage', () => {
   assert.deepEqual(coerceHistory(null), { daily: [], monthly: [], summary: {} });
   assert.deepEqual(coerceHistory({ daily: 'x' }), { daily: [], monthly: [], summary: {} });
@@ -294,4 +396,18 @@ test('historyPreview keeps recent totals only (no per-client)', () => {
   assert.equal(p.daily[0].perClient, undefined);    // stripped
   assert.deepEqual(p.monthly[0], { month: '2026-05', tokens: 9, cost: 1, activeTimeMs: 0 });
   assert.deepEqual(p.summary, { totalTokens: 100 });
+});
+
+test('historyPreview defaults to the compact 30-day daily window', () => {
+  const history = {
+    daily: Array.from({ length: 31 }, (_, index) => ({
+      date: `2026-07-${String(index + 1).padStart(2, '0')}`,
+      tokens: index + 1
+    })),
+    monthly: [],
+    summary: {}
+  };
+  const preview = historyPreview(history);
+  assert.equal(preview.daily.length, 30);
+  assert.equal(preview.daily[0].date, '2026-07-02');
 });

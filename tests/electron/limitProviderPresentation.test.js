@@ -274,7 +274,7 @@ test('capability tags explain how each provider is collected in settings', () =>
   assert.deepEqual(limitProviderCapabilityTags('codex'), ['Auto', 'App/CLI RPC']);
   assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Manual login', 'Web']);
   assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['App/CLI must be open', 'RPC']);
-  assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Local/Web', 'Manual login']);
+  assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Auto', 'API/Web']);
   assert.deepEqual(limitProviderCapabilityTags('minimax'), ['Token Plan', 'API key']);
   assert.deepEqual(limitProviderCapabilityTags('grok'), ['Auto', 'CLI/Web']);
   assert.deepEqual(limitProviderCapabilityTags('copilot'), ['Manual login', 'API']);
@@ -461,6 +461,28 @@ test('remote synced provider tags show the selected source device and local avai
   assert.equal(limitProviderMainDeviceLabel(provenance, { showSource: true }), 'work-mac');
 });
 
+test('device provenance uses exact case-sensitive device identity', () => {
+  const provider = {
+    provider: 'opencode',
+    status: 'ok',
+    source: 'local',
+    accountKey: 'shared',
+    sourceDeviceId: 'macbook'
+  };
+  const provenance = limitProviderProvenance(provider, {
+    localDeviceId: 'MacBook',
+    syncActive: true,
+    devices: [
+      { deviceId: 'MacBook', limits: { providers: [{ ...provider, sourceDeviceId: undefined }] } },
+      { deviceId: 'macbook', limits: { providers: [{ ...provider, sourceDeviceId: undefined }] } }
+    ]
+  });
+
+  assert.equal(provenance.selectedIsLocal, false);
+  assert.equal(provenance.selectedIsRemote, true);
+  assert.equal(provenance.selectedDeviceLabel, 'macbook');
+});
+
 test('local provider tags show when synced devices also have provider data', () => {
   const provider = { provider: 'cursor', status: 'ok', source: 'web', sourceDeviceId: 'local-mac' };
   const provenance = limitProviderProvenance(provider, {
@@ -516,6 +538,32 @@ test('multi-account Codex provenance matches synced candidates by account key', 
     limitProviderSettingsTags(provider, provenance).map((tag) => tag.key || tag.label),
     ['Live', 'Managed', 'settings.limits.device.from']
   );
+});
+
+test('OpenCode provenance matches a legacy device through canonical account aliases', () => {
+  const provider = {
+    provider: 'opencode',
+    status: 'ok',
+    source: 'web',
+    accountKey: 'sha256:canonical',
+    accountKeyAliases: ['sha256:legacy-go'],
+    sourceDeviceId: 'current-device'
+  };
+  const provenance = limitProviderProvenance(provider, {
+    localDeviceId: 'current-device',
+    syncActive: true,
+    devices: [
+      { deviceId: 'current-device', limits: { providers: [provider] } },
+      {
+        deviceId: 'legacy-device',
+        limits: { providers: [{ provider: 'opencode', status: 'ok', source: 'web', accountKey: 'sha256:legacy-go' }] }
+      }
+    ]
+  });
+
+  assert.equal(provenance.hasLocalCandidate, true);
+  assert.equal(provenance.remoteCount, 1);
+  assert.equal(provenance.candidateCount, 2);
 });
 
 test('single local synced provider tags identify local provenance without main panel noise', () => {
@@ -761,6 +809,26 @@ test('Kimi renders 5-hour and Weekly above one full-width Monthly window', () =>
   assert.match(renderProviderWindows, /node\.classList\.add\('limit-window-wide'\);/);
 });
 
+test('Command Code renders 5-hour and Weekly above full-width credit windows', () => {
+  const app = readRendererFile('app.js');
+  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+
+  assert.match(renderProviderWindows, /provider\.provider === 'commandcode'/);
+  assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
+  assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
+  // The monthly grant and any rollover top-up are both billing windows, so the
+  // branch loops rather than picking one.
+  assert.match(renderProviderWindows, /for \(const credits of windowsForKind\(provider, 'billing'\)\)/);
+  assert.match(renderProviderWindows, /formatCommandcodeCreditsDetail\(credits\)/);
+  assert.match(renderProviderWindows, /if \(credits\.showMeter === false\) node\.classList\.add\('limit-window-no-reset'\);/);
+
+  // Money, not raw credit counts: the detail under the bar is currency-formatted.
+  const detail = functionBody(app, 'formatCommandcodeCreditsDetail', 'formatKiroOverageValue');
+  assert.match(detail, /formatMoney\(value, window\?\.currency\)/);
+  assert.match(detail, /formatMoney\(limit, window\?\.currency\)/);
+  assert.match(detail, /state\.settings\?\.showLimitUsed/);
+});
+
 test('Ollama renders Session and Weekly usage windows', () => {
   const app = readRendererFile('app.js');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
@@ -810,7 +878,7 @@ test('Copilot renders monthly Premium and Chat quotas as billing windows', () =>
   assert.match(renderProviderWindows, /limitWindowNode\(billing\?\.label \|\| 'Monthly', billing, color, 0\.68\)/);
 });
 
-test('Codex renders manual reset credits below session and weekly windows', () => {
+test('Codex renders Monthly quota and manual reset credits below rolling windows', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
@@ -827,8 +895,11 @@ test('Codex renders manual reset credits below session and weekly windows', () =
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
 
   assert.match(renderProviderWindows, /provider\.provider === 'codex'/);
-  assert.match(renderProviderWindows, /if \(!weekly\) sessionNode\.classList\.add\('limit-window-wide'\);/);
-  assert.match(renderProviderWindows, /if \(!session\) weeklyNode\.classList\.add\('limit-window-wide'\);/);
+  assert.match(renderProviderWindows, /const monthly = windowForKind\(provider, 'billing'\);/);
+  assert.match(renderProviderWindows, /if \(!weekly && !monthly\) sessionNode\.classList\.add\('limit-window-wide'\);/);
+  assert.match(renderProviderWindows, /if \(!session && !monthly\) weeklyNode\.classList\.add\('limit-window-wide'\);/);
+  assert.match(renderProviderWindows, /limitWindowNode\(monthly\.label \|\| 'Monthly', monthly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /monthlyNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(renderProviderWindows, /const resetNode = codexResetCreditsNode\(provider\.resetCredits\);/);
   assert.doesNotMatch(renderProviderWindows, /limitWindowNode\('Reset credits'/);
   assert.match(resetCreditsValue, /if \(count <= 0\) return '';/);
@@ -1154,6 +1225,7 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   assert.match(statsPush, /applyCodexActiveAccountFromStats\(\);/);
   assert.match(statsPush, /statsRenderScheduler\.request\(\);/);
   assert.match(statsRender, /renderLimitProviderCheckboxes\(\);/);
+  assert.match(statsRender, /renderCodexAccounts\(\);/);
   // Account cards read state.stats, so every path that refreshes stats must
   // re-render them. Grok is automatic and belongs only to the generic provider
   // list, so it must not retain a separate account-card renderer.
@@ -1164,7 +1236,7 @@ test('settings provider status waits for stats and refreshes when stats arrive',
     assert.match(statsRender, new RegExp(`${fn}\\(\\);`), `${fn} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
   }
-  for (const provider of ['claude', 'zai', 'volcengine', 'qoder', 'kimi', 'ollama']) {
+  for (const provider of ['claude', 'zai', 'volcengine', 'qoder', 'commandcode', 'kimi', 'ollama']) {
     assert.match(statsRender, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
   }
@@ -1589,6 +1661,88 @@ test('Claude prepaid balance stays off and disabled until Web login is configure
   const loggedInInput = loggedInContext.result?.children?.[0]?.children?.[1];
   assert.equal(loggedInInput?.checked, true);
   assert.equal(loggedInInput?.disabled, false);
+});
+
+test('OpenCode local DB fallback is off by default', () => {
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const renderList = functionBody(app, 'limitProviderSettingsList', 'onToolTrackingToggle');
+  const defaults = functionBody(main, 'defaultSettings', 'normalizeCollectionMode');
+  const updateHandler = main.slice(
+    main.indexOf("ipcMain.handle('settings:update'"),
+    main.indexOf("ipcMain.handle('settings:openConfig'")
+  );
+  const settings = [{
+    key: 'opencodeLocalLimitsEnabled',
+    titleKey: 'settings.limits.opencodeLocalLimits',
+    descKey: 'settings.limits.opencodeLocalLimitsDesc',
+    defaultValue: false
+  }];
+
+  class FakeElement {
+    constructor(tagName) {
+      this.tagName = tagName;
+      this.children = [];
+      this.className = '';
+      this.classList = {
+        toggle: (name, enabled) => {
+          if (enabled) this.className = `${this.className} ${name}`.trim();
+        }
+      };
+    }
+    append(...children) { this.children.push(...children); }
+    addEventListener() {}
+  }
+
+  const context = {
+    document: { createElement: (tagName) => new FakeElement(tagName) },
+    state: { settings: {} },
+    t: (key) => key
+  };
+  const settingsContext = { ...context, settings };
+  vm.runInNewContext(
+    `${renderList}\nresult = limitProviderSettingsList('opencode', settings);`,
+    settingsContext
+  );
+  const input = settingsContext.result?.children?.[0]?.children?.[1];
+  assert.equal(input?.checked, false);
+
+  assert.match(defaults, /opencodeLocalLimitsEnabled:\s*false/);
+  assert.match(updateHandler, /opencodeLocalLimitsEnabled:\s*parseBoolean\(patch\.opencodeLocalLimitsEnabled \?\? settings\.opencodeLocalLimitsEnabled, false\)/);
+});
+
+test('provider option rerenders reuse the existing switch DOM', () => {
+  const app = readRendererFile('app.js');
+  const renderRows = functionBody(app, 'renderLimitProviderCheckboxesNow', 'limitProviderAccountGroup');
+  const renderList = functionBody(app, 'limitProviderSettingsList', 'onToolTrackingToggle');
+
+  assert.match(renderRows, /const reusableSettingInputs = new Map\(\);/);
+  assert.match(renderRows, /state\.limitProviderRenderSignature === renderSignature/);
+  assert.match(renderRows, /row\.querySelectorAll\?\.\(/);
+  assert.match(renderRows, /limitProviderSettingsList\(id, settings, reusableSettingInputs\)/);
+  assert.match(renderList, /const existingInput = reusableInputs\?\.get\(inputKey\);/);
+  assert.match(renderList, /if \(!existingInput\) \{\s*input\.addEventListener\('change'/);
+  assert.doesNotMatch(renderList, /renderLimits\(\);/);
+});
+
+test('settings pushes do not trigger a second full settings sync after save', () => {
+  const app = readRendererFile('app.js');
+  const save = functionBody(app, 'saveSettings', 'renderHomeIfVisible');
+  const settingsPush = app.match(/window\.tokenMonitor\.onSettingsPush\?\.\(\(next\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
+
+  assert.match(save, /const settingsPushRevision = state\.settingsPushRevision;/);
+  assert.match(save, /if \(state\.settingsPushRevision === settingsPushRevision\) \{\s*preserveSettingsPanelScroll\(syncSettingsForm\);/);
+  assert.match(settingsPush, /state\.settingsPushRevision \+= 1;/);
+});
+
+test('main limits rerenders coalesce identical visible provider data', () => {
+  const app = readRendererFile('app.js');
+  const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+
+  assert.match(renderLimits, /const renderSignature = JSON\.stringify\(\{/);
+  assert.match(renderLimits, /state\.limitPanelRenderSignature === renderSignature/);
+  assert.match(renderLimits, /els\.limitsPanel\.children\.length === orderedProviders\.length/);
+  assert.match(renderLimits, /state\.limitPanelRenderSignature = renderSignature;/);
 });
 
 test('successful providers use a green dot while preserving source and account labels', () => {
@@ -4092,7 +4246,7 @@ test('an edit is saved against the version its form was opened on', async () => 
   context.nextVersion = 'v4';
   assert.equal(await vm.runInContext('saveSubscriptions([], subscriptionSettingsVersion());', context), true);
   assert.deepEqual(context.sent, ['v3']);
-  assert.deepEqual(plain(context.state.subscriptionFormBase), { hub: 'https://a.example', updatedAt: 'v4' }); 
+  assert.deepEqual(plain(context.state.subscriptionFormBase), { hub: 'https://a.example', updatedAt: 'v4' });
 
   // Switching hubs under an open form is the one case re-anchoring must not
   // handle: the fields hold an edit made for the hub the user left, and giving
