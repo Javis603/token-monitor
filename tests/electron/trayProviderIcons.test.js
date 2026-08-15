@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const {
   createTrayProviderIconDeliveryGuard,
+  isFlatInkPixels,
   trayProviderIconSources,
   trayProviderBadgeLayout,
   trayProviderOpticalLayout,
@@ -96,4 +97,47 @@ test('tray provider icon delivery guard invalidates older async work', () => {
   const latestDelivery = guard.begin();
   assert.equal(guard.isCurrent(olderDelivery), false);
   assert.equal(guard.isCurrent(latestDelivery), true);
+});
+
+// Which provider marks may be re-inked for a dark taskbar. This is the one
+// genuinely heuristic step in that decision, so it is tested against pixels
+// rather than only through the palette helper that consumes its verdict.
+function rgbaPixels(...stops) {
+  return Uint8ClampedArray.from(stops.flat());
+}
+
+test('a flat mark reads as single ink however soft its edges are', () => {
+  // A `fill="currentColor"` mark: one colour, coverage carried entirely by alpha.
+  assert.equal(isFlatInkPixels(rgbaPixels([0, 0, 0, 255], [0, 0, 0, 140], [0, 0, 0, 30])), true);
+  // pi and proma are authored white rather than black.
+  assert.equal(isFlatInkPixels(rgbaPixels([255, 255, 255, 255], [255, 255, 255, 96])), true);
+  // Rasterization leaves channels off by a hair; that is inside the tolerance.
+  assert.equal(isFlatInkPixels(rgbaPixels([0, 3, 2, 255], [4, 0, 1, 210])), true);
+  // Pixels below the alpha floor are not ink and cannot decide anything.
+  assert.equal(isFlatInkPixels(rgbaPixels([0, 0, 0, 255], [200, 30, 30, 4])), true);
+});
+
+test('brand artwork is not single ink and must be left in colour', () => {
+  // tray-claude.svg is a solid terracotta: one colour, but not achromatic.
+  assert.equal(isFlatInkPixels(rgbaPixels([217, 119, 87, 255])), false);
+  assert.equal(isFlatInkPixels(rgbaPixels([0, 0, 0, 255], [217, 119, 87, 255])), false);
+  // Greyscale with real shading: achromatic, yet more than one tone. Re-inking
+  // this would flatten the artwork, which is why one condition is not enough.
+  assert.equal(isFlatInkPixels(rgbaPixels([20, 20, 20, 255], [150, 150, 150, 255])), false);
+});
+
+test('nothing opaque means no ink to match, so the artwork is left untouched', () => {
+  assert.equal(isFlatInkPixels(rgbaPixels([0, 0, 0, 0], [255, 255, 255, 5])), false);
+  assert.equal(isFlatInkPixels(rgbaPixels()), false);
+  assert.equal(isFlatInkPixels(null), false);
+  assert.equal(isFlatInkPixels(undefined), false);
+});
+
+test('the alpha floor and the tolerance are both adjustable for callers', () => {
+  const nearlyClear = rgbaPixels([0, 0, 0, 20]);
+  assert.equal(isFlatInkPixels(nearlyClear), true);
+  assert.equal(isFlatInkPixels(nearlyClear, { alphaThreshold: 40 }), false, 'raised floor discards the only ink');
+  const twoTones = rgbaPixels([20, 20, 20, 255], [60, 60, 60, 255]);
+  assert.equal(isFlatInkPixels(twoTones), false);
+  assert.equal(isFlatInkPixels(twoTones, { tolerance: 64 }), true);
 });

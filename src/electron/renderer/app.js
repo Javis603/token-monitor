@@ -11510,39 +11510,22 @@ function providerImageOpticalSample(image) {
   ctx.drawImage(image, 0, 0, sampleSize, sampleSize);
 
   let bounds = { x: 0, y: 0, width: sampleSize, height: sampleSize };
-  // Whether the mark is drawn in one flat ink: a mark authored `fill="currentColor"`
-  // rasterizes to a single colour here and is meant to be re-inked, while brand
-  // artwork must be left alone. Two conditions, because either alone is too
-  // generous — every pixel has to be achromatic AND sit at the same level, so a
-  // greyscale artwork with real shading is not flattened onto one ink. Edges cost
-  // nothing to allow: anti-aliasing onto a transparent canvas varies the alpha,
-  // not the colour. Answered in the scan that already walks these pixels for the
-  // bounds and cached alongside them; unreadable pixels (a future non-local
-  // image) leave it false, i.e. untinted.
+  // Whether the mark is drawn in one flat ink, i.e. authored `fill="currentColor"`
+  // and meant to be re-inked, as opposed to brand artwork that must be left alone.
+  // The rule itself lives in isFlatInkPixels so it can be tested against pixels
+  // directly; pixels we cannot read back (a future non-local image) leave it
+  // false, which means untinted.
   let flatInk = false;
   try {
     const pixels = ctx.getImageData(0, 0, sampleSize, sampleSize).data;
+    flatInk = window.TokenMonitorTrayProviderIcons.isFlatInkPixels(pixels);
     let minX = sampleSize;
     let minY = sampleSize;
     let maxX = -1;
     let maxY = -1;
-    // Tolerance, not equality: rasterization leaves a channel off by a hair.
-    const inkTolerance = 12;
-    let singleInk = true;
-    let inkLevel = -1;
     for (let y = 0; y < sampleSize; y += 1) {
       for (let x = 0; x < sampleSize; x += 1) {
-        const offset = (y * sampleSize + x) * 4;
-        if (pixels[offset + 3] <= 12) continue;
-        if (singleInk) {
-          const r = pixels[offset];
-          const g = pixels[offset + 1];
-          const b = pixels[offset + 2];
-          const level = (r + g + b) / 3;
-          if (Math.max(r, g, b) - Math.min(r, g, b) > inkTolerance) singleInk = false;
-          else if (inkLevel < 0) inkLevel = level;
-          else if (Math.abs(level - inkLevel) > inkTolerance) singleInk = false;
-        }
+        if (pixels[(y * sampleSize + x) * 4 + 3] <= 12) continue;
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x);
@@ -11556,7 +11539,6 @@ function providerImageOpticalSample(image) {
         width: maxX - minX + 1,
         height: maxY - minY + 1
       };
-      flatInk = singleInk;
     }
   } catch (_) {
     // Keep the original frame if a future non-local image cannot be inspected.

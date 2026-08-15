@@ -28,6 +28,32 @@
     return sources;
   }
 
+  // Whether every visible pixel of a rasterized mark is the same single ink.
+  // Both halves are needed: achromatic alone would also accept a greyscale
+  // artwork with real shading, and re-inking that would flatten it onto one
+  // tone. Anti-aliasing is free to vary the alpha — drawing onto a transparent
+  // canvas moves the coverage, not the colour channels — so soft edges still
+  // read as flat. An image with nothing opaque has no ink to match: false, i.e.
+  // leave it alone.
+  function isFlatInkPixels(pixels, options = {}) {
+    if (!pixels || typeof pixels.length !== 'number') return false;
+    const alphaThreshold = Number.isFinite(options.alphaThreshold) ? options.alphaThreshold : 12;
+    // Tolerance, not equality: rasterization leaves a channel off by a hair.
+    const tolerance = Number.isFinite(options.tolerance) ? options.tolerance : 12;
+    let level = -1;
+    for (let offset = 0; offset + 3 < pixels.length; offset += 4) {
+      if (pixels[offset + 3] <= alphaThreshold) continue;
+      const r = pixels[offset];
+      const g = pixels[offset + 1];
+      const b = pixels[offset + 2];
+      if (Math.max(r, g, b) - Math.min(r, g, b) > tolerance) return false;
+      const pixelLevel = (r + g + b) / 3;
+      if (level < 0) level = pixelLevel;
+      else if (Math.abs(pixelLevel - level) > tolerance) return false;
+    }
+    return level >= 0;
+  }
+
   function trayProviderBadgeLayout(size = 44) {
     const iconSize = Math.max(16, Math.round(Number(size) || 44));
     const badgeSize = Math.round(iconSize * 0.43);
@@ -81,6 +107,7 @@
 
   return {
     createTrayProviderIconDeliveryGuard,
+    isFlatInkPixels,
     trayProviderIconSources,
     trayProviderBadgeLayout,
     trayProviderOpticalLayout,
