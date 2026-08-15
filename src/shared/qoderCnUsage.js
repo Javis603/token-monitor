@@ -39,6 +39,11 @@ const QODER_CN_MODEL_DISPLAY_NAMES = Object.freeze({
   qmodel_preview: 'Qwen3.8-Max-Preview', // retired code, same preview model
   ultimate: 'Ultimate'
 });
+const QODER_CN_ROUTING_TIERS = new Set(['auto', 'ultimate', 'performance', 'efficient', 'lite']);
+const QODER_CN_READ_MAX_BYTES = 50 * 1024 * 1024;
+const QODER_CN_READ_MAX_ROWS = 100_000;
+const QODER_CN_NEGATIVE_SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000;
+const QODER_CN_READ_BUDGET_ERROR = 'QODER_CN_READ_BUDGET_EXCEEDED';
 const QODER_CN_USAGE_SQL = `
 SELECT rowid AS row_id, id, session_id, request_id, token_info, model_info, gmt_create,
   (SELECT cs.project_name FROM chat_session cs WHERE cs.session_id = chat_message.session_id LIMIT 1) AS project_name
@@ -109,10 +114,10 @@ function normalizeQoderCnProjectLabel(value) {
   return label === '.' ? '' : label;
 }
 
-// Only probed outcomes are cached: a confirmed answer (table+column present
-// or absent) is stable for the life of the database file, while a transient
-// probe failure returns null so the next read retries instead of locking the
-// process into the no-project fallback.
+// Positive capabilities remain cached. Confirmed-absent capabilities use a
+// bounded TTL so an in-place Qoder schema migration becomes visible without
+// probing every legacy database on every collector tick. Transient probe
+// failures are never cached.
 const qoderCnChatSessionTableCache = new Map();
 
 // Returns true when chat_session.project_name exists, false when the database
@@ -171,11 +176,15 @@ function sourceId(value) {
   return createHash('sha256').update(path.normalize(String(value || ''))).digest('hex').slice(0, 12);
 }
 
+function isQoderCnRoutingTier(value) {
+  return QODER_CN_ROUTING_TIERS.has(String(value || '').trim().toLowerCase());
+}
+
 function estimatedQoderCnRowCost(row, pricingByModel) {
-  // Qoder CN stores Auto as a routing mode without the model selected behind it.
-  // Do not let models.dev's unrelated morph/auto entry supply a false price.
+  // Qoder CN stores routing tiers without the model selected behind them. Do
+  // not let an unrelated catalog/custom-pricing entry supply a false price.
   const modelId = String(row?.model || '').trim().toLowerCase();
-  if (modelId === 'auto') return null;
+  if (isQoderCnRoutingTier(modelId)) return null;
   const pricing = pricingByModel?.[modelId];
   if (!pricing || typeof pricing !== 'object') return null;
   const components = [
@@ -225,7 +234,7 @@ async function resolveQoderCnPricing(rows, options = {}) {
   const pricingByModel = {};
   const modelIds = [...new Set((Array.isArray(rows) ? rows : [])
     .map((row) => String(row?.model || '').trim().toLowerCase())
-    .filter((modelId) => modelId && modelId !== 'auto'))];
+    .filter((modelId) => modelId && !isQoderCnRoutingTier(modelId)))];
   for (const modelId of modelIds) {
     const cached = qoderCnPricingCache.get(modelId);
     if (cached && cached.revision === revision && nowMs - cached.at < QODER_CN_PRICING_CACHE_TTL_MS) {
@@ -297,15 +306,59 @@ function qoderCnDataPaths(options = {}) {
   };
 }
 
+function positiveInteger(value, fallback) {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number > 0 ? number : fallback;
+}
+
+function positiveIntegerOrZero(value, fallback) {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : fallback;
+}
+
+function readBudgetError(kind, limit, cause) {
+  const error = new Error(`qodercn sqlite read budget exceeded (${kind} limit ${limit})`, cause ? { cause } : undefined);
+  error.code = QODER_CN_READ_BUDGET_ERROR;
+  return error;
+}
+
+function isReadBudgetError(error) {
+  return error?.code === QODER_CN_READ_BUDGET_ERROR
+    || error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
+}
+
+function boundedRows(iterable, { maxReadBytes, maxReadRows, countBytes }) {
+  const rows = [];
+  let bytes = 2; // JSON array brackets; commas are counted as rows are appended.
+  for (const row of iterable) {
+    if (rows.length >= maxReadRows) throw readBudgetError('rows', maxReadRows);
+    if (countBytes) {
+      const serialized = JSON.stringify(row);
+      bytes += Buffer.byteLength(serialized, 'utf8') + (rows.length > 0 ? 1 : 0);
+      if (bytes > maxReadBytes) throw readBudgetError('bytes', maxReadBytes);
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
 async function readQoderCnDbRows(dbPath, options = {}) {
   const run = options.execFile || execFileAsync;
   const sinceMs = options.sinceMs;
-  let probed = qoderCnChatSessionTableCache.get(dbPath);
-  if (probed === undefined) {
+  const nowMs = options.nowMs ?? Date.now();
+  const negativeSchemaCacheTtlMs = positiveIntegerOrZero(
+    options.negativeSchemaCacheTtlMs,
+    QODER_CN_NEGATIVE_SCHEMA_CACHE_TTL_MS
+  );
+  const maxReadBytes = positiveInteger(options.maxReadBytes, QODER_CN_READ_MAX_BYTES);
+  const maxReadRows = positiveInteger(options.maxReadRows, QODER_CN_READ_MAX_ROWS);
+  const cachedProbe = qoderCnChatSessionTableCache.get(dbPath);
+  let probed = cachedProbe?.hasProject;
+  const negativeCacheFresh = cachedProbe?.hasProject === false
+    && nowMs - cachedProbe.at < negativeSchemaCacheTtlMs;
+  if (probed === undefined || (probed === false && !negativeCacheFresh)) {
     probed = await probeQoderCnChatSessionTable(dbPath, { run, requireFn: options.requireFn });
-    // Only a successful probe outcome is cached (true or confirmed absent); a
-    // null probe failure is retried on the next read.
-    if (probed !== null) qoderCnChatSessionTableCache.set(dbPath, probed);
+    if (probed !== null) qoderCnChatSessionTableCache.set(dbPath, { hasProject: probed, at: nowMs });
   }
   const withProject = probed === true;
   const sql = sinceMs
@@ -316,24 +369,39 @@ async function readQoderCnDbRows(dbPath, options = {}) {
     : ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, sql];
   try {
     const result = await run('sqlite3', cliArgs, {
-      encoding: 'utf8', maxBuffer: 50 * 1024 * 1024, timeout: 30_000, windowsHide: true
+      encoding: 'utf8', maxBuffer: maxReadBytes, timeout: 30_000, windowsHide: true
     });
-    const parsed = JSON.parse(String(result?.stdout || '').trim() || '[]');
-    return Array.isArray(parsed) ? parsed : [];
+    const stdout = String(result?.stdout || '').trim();
+    if (Buffer.byteLength(stdout, 'utf8') > maxReadBytes) throw readBudgetError('bytes', maxReadBytes);
+    const parsed = JSON.parse(stdout || '[]');
+    return boundedRows(Array.isArray(parsed) ? parsed : [], { maxReadBytes, maxReadRows, countBytes: false });
   } catch (cliError) {
+    if (isReadBudgetError(cliError)) {
+      const error = cliError.code === QODER_CN_READ_BUDGET_ERROR
+        ? cliError
+        : readBudgetError('bytes', maxReadBytes, cliError);
+      if (typeof options.logger === 'function') options.logger(error.message);
+      throw error;
+    }
     try {
       const requireFn = options.requireFn || require;
       const { DatabaseSync } = requireFn('node:sqlite');
       const database = new DatabaseSync(dbPath, { readOnly: true });
       try {
         database.exec('PRAGMA busy_timeout = 250');
-        return sinceMs
-          ? database.prepare(withProject ? QODER_CN_USAGE_SINCE_SQL : QODER_CN_USAGE_SINCE_SQL_NO_PROJECT).all(sinceMs, sinceMs)
-          : database.prepare(withProject ? QODER_CN_USAGE_SQL : QODER_CN_USAGE_SQL_NO_PROJECT).all();
+        const statement = database.prepare(withProject
+          ? (sinceMs ? QODER_CN_USAGE_SINCE_SQL : QODER_CN_USAGE_SQL)
+          : (sinceMs ? QODER_CN_USAGE_SINCE_SQL_NO_PROJECT : QODER_CN_USAGE_SQL_NO_PROJECT));
+        const iterator = sinceMs ? statement.iterate(sinceMs, sinceMs) : statement.iterate();
+        return boundedRows(iterator, { maxReadBytes, maxReadRows, countBytes: true });
       } finally {
         database.close();
       }
     } catch (nodeError) {
+      if (isReadBudgetError(nodeError)) {
+        if (typeof options.logger === 'function') options.logger(nodeError.message);
+        throw nodeError;
+      }
       // Fail loudly instead of silently returning empty usage. The collector
       // logs the error and retains its last complete snapshot when available.
       const message = `qodercn sqlite read failed: sqlite3 CLI: ${cliError.message}; node:sqlite: ${nodeError.message}`;

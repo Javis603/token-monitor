@@ -2547,7 +2547,7 @@ test('Qoder CN db-shm events are ignored without suppressing real database chang
   assert.equal(isQoderCnSelfWatchEvent(path.join(os.tmpdir(), 'Other', 'local.db-shm'), roots), false);
 });
 
-test('collector preserves Qoder CN while publishing other clients after a later Qoder CN scan fails', async () => {
+test('collector preserves Qoder CN while publishing other clients after a bounded SQLite read fails', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
@@ -2559,7 +2559,11 @@ test('collector preserves Qoder CN while publishing other clients after a later 
   let failReads = false;
   let claudeTokens = 3;
   qoderCnUsage.collectQoderCnRows = async () => {
-    if (failReads) throw new Error('temporary sqlite read failure');
+    if (failReads) {
+      const error = new Error('qodercn sqlite read budget exceeded (rows limit 100000)');
+      error.code = 'QODER_CN_READ_BUDGET_EXCEEDED';
+      throw error;
+    }
     return [];
   };
   qoderCnUsage.buildQoderCnPeriods = () => ({
