@@ -1431,31 +1431,71 @@ test('main settings normalize sync upload intervals and restart only the device 
   assert.match(updateHandler, /restartDeviceRuntimeForMode\(\)/);
 });
 
-test('electronNetFetch routes limit lookups through Electron net.fetch for system-proxy support', () => {
+function runElectronNetFetch(expression, context = {}) {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  const start = main.indexOf('function electronNetFetch(');
-  assert.notEqual(start, -1, 'electronNetFetch function should exist');
-  const end = main.indexOf('\n}', start) + 2;
-  const body = main.slice(start, end);
-
   // vm.runInNewContext compiles a separate realm, so object literals built
   // inside it are not `assert.deepEqual`-comparable against outer-realm
   // objects; stringify inside the mock to sidestep that instead.
   const calls = [];
-  const context = {
-    net: {
-      fetch: (url, init) => {
-        calls.push(JSON.stringify({ url, init }));
-        return 'net-fetch-result';
-      }
+  const net = {
+    fetch: (url, init) => {
+      calls.push(JSON.stringify({ url, init }));
+      return 'net-fetch-result';
     }
   };
-  const result = vm.runInNewContext(
-    `${body}\nelectronNetFetch('https://example.com', { headers: { a: '1' } });`,
-    context
+  const result = runMainFunction(main, 'electronNetFetch', 'electronLimitsFetch', expression, { net, ...context });
+  return { calls, result };
+}
+
+test('electronNetFetch routes limit lookups through Electron net.fetch for system-proxy support', () => {
+  const { calls, result } = runElectronNetFetch(
+    `electronNetFetch('https://example.com', { headers: { a: '1' } });`
   );
   assert.equal(result, 'net-fetch-result');
-  assert.deepEqual(calls, [JSON.stringify({ url: 'https://example.com', init: { headers: { a: '1' } } })]);
+  assert.deepEqual(calls, [JSON.stringify({
+    url: 'https://example.com',
+    init: { referrerPolicy: 'unsafe-url', headers: { a: '1' }, credentials: 'omit' }
+  })]);
+});
+
+// Both options guard a Chromium behavior that has no Node equivalent, so they
+// are asserted separately from the plumbing above: the default session would
+// otherwise shadow a provider's own Cookie header with its persistent jar, and
+// a deliberately cross-origin Referer would be cancelled outright.
+test('electronNetFetch forces credentials omit and only defaults the referrer policy', () => {
+  const forced = runElectronNetFetch(
+    `electronNetFetch('https://example.com', { credentials: 'include', referrerPolicy: 'no-referrer' });`
+  );
+  assert.deepEqual(forced.calls, [JSON.stringify({
+    url: 'https://example.com',
+    init: { referrerPolicy: 'no-referrer', credentials: 'omit' }
+  })]);
+
+  const bare = runElectronNetFetch(`electronNetFetch('https://example.com');`);
+  assert.deepEqual(bare.calls, [JSON.stringify({
+    url: 'https://example.com',
+    init: { referrerPolicy: 'unsafe-url', credentials: 'omit' }
+  })]);
+});
+
+test('the Electron limits transport keeps an explicit proxy env ahead of the system proxy', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const { resolveProxyConfig } = require('../../src/shared/outboundFetch');
+  const run = (env) => {
+    const context = {
+      process: { env },
+      electronNetFetch: 'electron-net-fetch',
+      resolveProxyConfig,
+      createOutboundFetch: () => 'outbound-fetch'
+    };
+    // Brace-matched rather than sliced up to the next function: the module's
+    // require block sits between this one and the next declaration.
+    return runRendererFunctions(main, ['electronLimitsFetch'], 'electronLimitsFetch();', context);
+  };
+  assert.equal(run({}), 'electron-net-fetch');
+  assert.equal(run({ HTTPS_PROXY: 'http://127.0.0.1:7897' }), 'outbound-fetch');
+  assert.equal(run({ http_proxy: 'http://127.0.0.1:7897' }), 'outbound-fetch');
+  assert.equal(run({ ALL_PROXY: 'socks5://127.0.0.1:7890' }), 'outbound-fetch');
 });
 
 test('main collectors share one live GUI limit credential resolver in every widget mode', () => {
@@ -1471,7 +1511,7 @@ test('main collectors share one live GUI limit credential resolver in every widg
     assert.match(collector, /limitsDeps: electronLimitsDeps\(\)/);
   }
   const limitsDeps = functionBody(main, 'electronLimitsDeps', 'normalizeDeepSeekApiKey');
-  assert.match(limitsDeps, /fetch: electronNetFetch/);
+  assert.match(limitsDeps, /fetch: electronLimitsFetch\(\)/);
   assert.match(limitsDeps, /resolveConfigSnapshot: \(\) => electronLimitsConfig\(\)/);
   assert.match(limitsDeps, /onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal/);
   const renewalPersistence = functionBody(

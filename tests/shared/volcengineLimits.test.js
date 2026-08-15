@@ -80,12 +80,35 @@ test('signVolcengineRequest signs the empty POST body with Volcengine V4 headers
     date: new Date('2026-07-06T00:00:00Z')
   });
 
-  assert.equal(signed.headers.Host, 'open.volcengineapi.com');
   assert.equal(signed.headers['X-Date'], '20260706T000000Z');
   assert.equal(signed.headers['X-Content-Sha256'], 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
   assert.match(
     signed.headers.Authorization,
     /^HMAC-SHA256 Credential=ak\/20260706\/cn-beijing\/ark\/request, SignedHeaders=content-type;host;x-content-sha256;x-date, Signature=[a-f0-9]{64}$/
+  );
+});
+
+// `host` is signed but must never be handed to a transport: Chromium refuses a
+// manual Host header outright (net::ERR_INVALID_ARGUMENT), and undici replaces
+// it with the URL's host, so it was already inert. The pinned signature is the
+// point of this test — it proves dropping the wire header leaves the canonical
+// request, and therefore the signature, untouched.
+test('signVolcengineRequest signs host without sending it as a wire header', () => {
+  const signed = signVolcengineRequest({
+    url: 'https://open.volcengineapi.com/?Action=GetCodingPlanUsage&Version=2024-01-01',
+    method: 'POST',
+    body: '',
+    accessKeyId: 'ak',
+    secretAccessKey: 'sk',
+    region: 'cn-beijing',
+    date: new Date('2026-07-06T00:00:00Z')
+  });
+
+  assert.deepEqual(Object.keys(signed.headers).filter((name) => name.toLowerCase() === 'host'), []);
+  assert.match(signed.headers.Authorization, /SignedHeaders=content-type;host;x-content-sha256;x-date/);
+  assert.equal(
+    signed.headers.Authorization.split('Signature=')[1],
+    '68ffeb3bf30b0dc6b2bf535890a9dea4390245346b12a8035b940b83043cf7c0'
   );
 });
 

@@ -47,8 +47,34 @@ const electronClaudeWebFetch = createClaudeWebFetch(net);
 // HTTP_PROXY/HTTPS_PROXY env vars in the first place. Wrapped instead of
 // passed by reference so `net.fetch`'s internal `this` never depends on how
 // the deps object destructures it.
-function electronNetFetch(input, init) {
-  return net.fetch(input, init);
+//
+// Neither request option is a preference. `credentials: 'omit'` is forced
+// last: net.fetch issues from the default session, so anything else persists a
+// provider's Set-Cookie into userData and then *replaces* an explicit Cookie
+// header with whatever that jar holds — one stray cookie strands every
+// cookie-backed provider on `unauthorized`, and re-pasting the credential
+// cannot clear it. `referrerPolicy` is only a default, because a caller may
+// have a reason to tighten it: Chromium cancels a request whose explicit
+// Referer is cross-origin and carries a path (net::ERR_BLOCKED_BY_CLIENT), and
+// a main-process fetch never generates a referrer on its own, so relaxing the
+// policy can only affect a header a provider wrote deliberately.
+function electronNetFetch(input, init = {}) {
+  return net.fetch(input, { referrerPolicy: 'unsafe-url', ...init, credentials: 'omit' });
+}
+
+// Transport policy belongs to the runtime, not to a provider: one branch is
+// chosen here for every probe that resolves through deps.fetch, instead of each
+// provider deciding for itself. Probes that build their own transport inherit
+// neither branch — cursorProbe and antigravityProbe on node:https, Claude Web on
+// the claudeWebFetch injected below, the CLI fallbacks on a spawned binary. An
+// explicitly configured proxy env wins over the OS setting, which keeps the
+// documented env behavior working: lowercase precedence, ALL_PROXY, NO_PROXY,
+// failing closed on an invalid proxy, and credentials embedded in the proxy URL
+// — Chromium's proxy rules accept none.
+function electronLimitsFetch() {
+  const proxy = resolveProxyConfig(process.env);
+  if (proxy.httpProxy || proxy.httpsProxy) return createOutboundFetch(process.env);
+  return electronNetFetch;
 }
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs, visibleDiagnosticRoots } = require('../shared/collector');
@@ -165,6 +191,7 @@ async function probeOpenCodeApiKey(apiKey) {
   }
 }
 const openrouterLimits = require('../shared/openrouterLimits');
+const { createOutboundFetch, resolveProxyConfig } = require('../shared/outboundFetch');
 const thirdPartyLimits = require('../shared/thirdPartyLimits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
@@ -663,7 +690,7 @@ function persistClaudeWebCookieRenewal({ previousCookie, cookie } = {}) {
 
 function electronLimitsDeps() {
   return {
-    fetch: electronNetFetch,
+    fetch: electronLimitsFetch(),
     claudeWebFetch: electronClaudeWebFetch,
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal
