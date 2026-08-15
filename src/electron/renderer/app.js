@@ -4580,6 +4580,24 @@ function renderProviderWindows(provider, color) {
     }
     const quotaEstimate = provider.weeklyQuotaValueEstimate;
     if (quotaEstimate) {
+      if (Number.isFinite(quotaEstimate.deviceObservedCostUsd)) {
+        const deviceUsageNode = limitWindowNode(
+          t('limits.codex.currentDeviceUsage'),
+          { showMeter: false },
+          color,
+          0.68,
+          formatMoney(quotaEstimate.deviceObservedCostUsd, 'USD'),
+          ''
+        );
+        deviceUsageNode.classList.add('limit-window-wide', 'limit-window-no-reset');
+        deviceUsageNode.title = t(
+          quotaEstimate.observedFromZero
+            ? 'limits.codex.currentDeviceUsageFullHelp'
+            : 'limits.codex.currentDeviceUsagePartialHelp',
+          { percent: formatPercent(quotaEstimate.deviceObservedPercent || 0) }
+        );
+        windows.append(deviceUsageNode);
+      }
       const ready = quotaEstimate.status === 'ready' && Number.isFinite(quotaEstimate.estimatedUsd);
       const estimateNode = limitWindowNode(
         t('limits.codex.weeklyValueEstimate'),

@@ -90,6 +90,12 @@ function normalizeCycle(value) {
     startedAt: isoTimestamp(value?.startedAt) || latest.observedAt,
     latest,
     anchor: normalizeObservation(value?.anchor),
+    deviceObservedCostUsd: Math.max(0, finiteNumber(value?.deviceObservedCostUsd) || 0),
+    deviceObservedRawCostUsd: Math.max(0, finiteNumber(value?.deviceObservedRawCostUsd) || 0),
+    deviceObservedTokens: Math.max(0, Math.round(finiteNumber(value?.deviceObservedTokens) || 0)),
+    deviceObservedPercent: Math.max(0, finiteNumber(value?.deviceObservedPercent) || 0),
+    observationStartedAt: isoTimestamp(value?.observationStartedAt) || latest.observedAt,
+    observedFromZero: value?.observedFromZero === true,
     segmentId: Math.max(1, Math.round(finiteNumber(value?.segmentId) || 1)),
     samples: (value?.samples || []).map(normalizeJumpSample).filter(Boolean).slice(-MAX_SAMPLES_PER_CYCLE)
   };
@@ -123,6 +129,12 @@ function newCycle(resetAt, latest, serial = 1) {
     startedAt: latest.observedAt,
     latest,
     anchor: null,
+    deviceObservedCostUsd: 0,
+    deviceObservedRawCostUsd: 0,
+    deviceObservedTokens: 0,
+    deviceObservedPercent: 0,
+    observationStartedAt: latest.observedAt,
+    observedFromZero: latest.usedPercent === 0,
     segmentId: 1,
     samples: []
   };
@@ -188,7 +200,13 @@ function estimateFromCycle(cycle, options = {}) {
     sampleCount: samples.length,
     requiredSampleCount: minSampleCount,
     spanPercent: samples.length,
-    observedCostUsd
+    observedCostUsd,
+    deviceObservedCostUsd: Math.max(0, finiteNumber(cycle?.deviceObservedCostUsd) || 0),
+    deviceObservedRawCostUsd: Math.max(0, finiteNumber(cycle?.deviceObservedRawCostUsd) || 0),
+    deviceObservedTokens: Math.max(0, Math.round(finiteNumber(cycle?.deviceObservedTokens) || 0)),
+    deviceObservedPercent: Math.max(0, finiteNumber(cycle?.deviceObservedPercent) || 0),
+    observationStartedAt: cycle?.observationStartedAt || null,
+    observedFromZero: cycle?.observedFromZero === true
   };
   if (samples.length < minSampleCount || observedCostUsd <= 0) return base;
   return {
@@ -262,6 +280,14 @@ function observeCodexWeeklyQuota(stateValue, observation, options = {}) {
     cycle.segmentId += 1;
     return { state, estimate: estimateFromCycle(cycle, options), changed: true };
   }
+
+  // The all-time Codex counters belong to this device, but they are not split
+  // by Codex account. Add only intervals observed while the same account stays
+  // active; the account-change branch above deliberately discards the gap.
+  cycle.deviceObservedCostUsd += Math.max(0, sample.costUsd - cycle.latest.costUsd);
+  cycle.deviceObservedRawCostUsd += Math.max(0, sample.rawCostUsd - cycle.latest.rawCostUsd);
+  cycle.deviceObservedTokens += Math.max(0, sample.tokens - cycle.latest.tokens);
+  cycle.deviceObservedPercent += Math.max(0, sample.usedPercent - cycle.latest.usedPercent);
 
   const percentDelta = sample.usedPercent - cycle.latest.usedPercent;
   if (percentDelta > 0.000001) {

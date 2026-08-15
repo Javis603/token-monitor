@@ -55,6 +55,47 @@ test('first boundary is an anchor and three later unit jumps publish the mean', 
   assert.ok(Math.abs(result.estimate.estimatedUsd - 120) < 0.000001);
 });
 
+test('device usage accumulates every same-account cost interval before the estimate is ready', () => {
+  let result = observeCodexWeeklyQuota(emptyState(), observation({
+    usedPercent: 55, costUsd: 10, rawCostUsd: 10, tokens: 1000
+  }));
+  result = observeCodexWeeklyQuota(result.state, observation({
+    usedPercent: 55, costUsd: 11.25, rawCostUsd: 11.25, tokens: 2000,
+    observedAt: '2026-08-12T01:00:00.000Z'
+  }));
+  result = observeCodexWeeklyQuota(result.state, observation({
+    usedPercent: 56, costUsd: 12.5, rawCostUsd: 12.5, tokens: 3000,
+    observedAt: '2026-08-12T02:00:00.000Z'
+  }));
+  assert.equal(result.estimate.status, 'collecting');
+  assert.equal(result.estimate.deviceObservedCostUsd, 2.5);
+  assert.equal(result.estimate.deviceObservedTokens, 2000);
+  assert.equal(result.estimate.deviceObservedPercent, 1);
+  assert.equal(result.estimate.observedFromZero, false);
+});
+
+test('device usage excludes account-switch gaps and starts over after reset', () => {
+  let result = observeCodexWeeklyQuota(emptyState(), observation({ usedPercent: 10, costUsd: 10 }));
+  result = observeCodexWeeklyQuota(result.state, observation({
+    usedPercent: 11, costUsd: 11, observedAt: '2026-08-12T01:00:00.000Z'
+  }));
+  result = observeCodexWeeklyQuota(result.state, observation({
+    accountKey: 'account-b', usedPercent: 20, costUsd: 20,
+    observedAt: '2026-08-12T02:00:00.000Z'
+  }));
+  result = observeCodexWeeklyQuota(result.state, observation({
+    usedPercent: 12, costUsd: 25, observedAt: '2026-08-12T03:00:00.000Z'
+  }));
+  assert.equal(result.estimate.deviceObservedCostUsd, 1);
+
+  result = observeCodexWeeklyQuota(result.state, observation({
+    resetAt: '2026-08-24T00:00:00.000Z', usedPercent: 0, costUsd: 26,
+    observedAt: '2026-08-17T00:00:00.000Z'
+  }));
+  assert.equal(result.estimate.deviceObservedCostUsd, 0);
+  assert.equal(result.estimate.observedFromZero, true);
+});
+
 test('100 to 99 remaining is recorded as an anchor but never estimated', () => {
   const result = observeSeries([
     { usedPercent: 0, costUsd: 20, tokens: 2_000_000 },

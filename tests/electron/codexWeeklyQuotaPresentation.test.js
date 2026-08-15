@@ -12,6 +12,7 @@ test('Codex panel renders one weekly estimate with a three-sample explanation', 
   const i18n = fs.readFileSync(path.join(root, 'src', 'electron', 'renderer', 'i18n.js'), 'utf8');
   assert.match(renderer, /provider\.weeklyQuotaValueEstimate/);
   assert.match(renderer, /weeklyValueEstimate/);
+  assert.match(renderer, /currentDeviceUsage/);
   const collectingHelp = i18n.split('\n').filter((line) => line.includes("'limits.codex.weeklyValueCollectingHelp'"));
   assert.equal(collectingHelp.length, 5);
   assert.ok(collectingHelp.every((line) => line.includes('{required}')));
