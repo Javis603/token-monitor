@@ -109,15 +109,97 @@ test('a multi-percent jump is rejected, saved, and becomes the next anchor', () 
     { usedPercent: 30, costUsd: 10, tokens: 1_000_000 },
     { usedPercent: 31, costUsd: 10.1, tokens: 1_100_000 },
     { usedPercent: 40, costUsd: 15, tokens: 6_000_000 },
-    { usedPercent: 41, costUsd: 16.2, tokens: 7_200_000 }
+    { usedPercent: 41, costUsd: 16.2, tokens: 7_200_000 },
+    { usedPercent: 42, costUsd: 17.4, tokens: 8_400_000 }
   ], { minSampleCount: 1 });
   const cycle = activeCycle(result);
-  assert.deepEqual(cycle.samples.map((sample) => sample.status), ['anchor', 'rejected', 'valid']);
+  assert.deepEqual(cycle.samples.map((sample) => sample.status), ['anchor', 'rejected', 'anchor', 'valid']);
   assert.equal(cycle.samples[1].reason, 'nonUnitPercentJump');
   assert.equal(cycle.samples[1].percentDelta, 9);
   assert.equal(cycle.samples[2].beforeRemainingPercent, 60);
   assert.equal(cycle.samples[2].afterRemainingPercent, 59);
+  assert.equal(cycle.samples[3].beforeRemainingPercent, 59);
+  assert.equal(cycle.samples[3].afterRemainingPercent, 58);
   assert.ok(Math.abs(result.estimate.estimatedUsd - 120) < 0.000001);
+});
+
+test('counter regressions stay in one segment and endpoint netting cancels the rebound', () => {
+  const result = observeSeries([
+    { usedPercent: 30, costUsd: 100, rawCostUsd: 100, tokens: 10_000 },
+    { usedPercent: 31, costUsd: 100.1, rawCostUsd: 100.1, tokens: 10_100 },
+    { usedPercent: 32, costUsd: 99.1, rawCostUsd: 99.1, tokens: 9_100 },
+    { usedPercent: 33, costUsd: 102.5, rawCostUsd: 102.5, tokens: 12_500 },
+    { usedPercent: 34, costUsd: 103.7, rawCostUsd: 103.7, tokens: 13_700 }
+  ], { minSampleCount: 1 });
+  const cycle = activeCycle(result);
+  assert.equal(cycle.segments.length, 1);
+  assert.equal(cycle.samples.filter((sample) => sample.status === 'anomaly').length, 1);
+  assert.equal(cycle.samples.find((sample) => sample.status === 'anomaly').costDeltaUsd, -1);
+  assert.equal(result.estimate.spanPercent, 3);
+  assert.ok(Math.abs(result.estimate.observedCostUsd - 3.6) < 0.000001);
+  assert.ok(Math.abs(result.estimate.estimatedUsd - 120) < 0.000001);
+  assert.ok(Math.abs(result.estimate.deviceObservedCostUsd - 3.7) < 0.000001);
+});
+
+test('version 1 state migrates without losing its estimate or device usage', () => {
+  const latest = observation({ usedPercent: 34, costUsd: 13.7, tokens: 4_700_000 });
+  const oldState = {
+    version: 1,
+    activeAccountKey: 'account-a',
+    accounts: {
+      'account-a': {
+        currentCycleId: 'old-cycle',
+        cycles: [{
+          id: 'old-cycle',
+          resetAt: latest.resetAt,
+          latest,
+          observationStartedAt: latest.observedAt,
+          observedFromZero: false,
+          deviceObservedCostUsd: 3.7,
+          deviceObservedRawCostUsd: 3.7,
+          deviceObservedTokens: 3_700_000,
+          deviceObservedPercent: 4,
+          samples: [
+            {
+              jumpObservedAt: '2026-08-12T01:00:00.000Z', accountKey: 'account-a',
+              quotaCycleId: 'old-cycle', beforeRemainingPercent: 69,
+              afterRemainingPercent: 68, percentDelta: 1, previousCostUsd: 10.1,
+              currentCostUsd: 11.3, costDeltaUsd: 1.2, previousTokens: 1_100_000,
+              currentTokens: 2_300_000, tokenDelta: 1_200_000, status: 'valid', reason: ''
+            },
+            {
+              jumpObservedAt: '2026-08-12T02:00:00.000Z', accountKey: 'account-a',
+              quotaCycleId: 'old-cycle', beforeRemainingPercent: 68,
+              afterRemainingPercent: 67, percentDelta: 1, previousCostUsd: 11.3,
+              currentCostUsd: 12.4, costDeltaUsd: 1.1, previousTokens: 2_300_000,
+              currentTokens: 3_400_000, tokenDelta: 1_100_000, status: 'valid', reason: ''
+            }
+          ]
+        }]
+      }
+    }
+  };
+  const result = observeCodexWeeklyQuota(oldState, latest, { minSampleCount: 1 });
+  assert.equal(result.state.version, 2);
+  assert.ok(Math.abs(result.estimate.estimatedUsd - 115) < 0.000001);
+  assert.equal(result.estimate.deviceObservedCostUsd, 3.7);
+  assert.equal(result.estimate.deviceObservedTokens, 3_700_000);
+});
+
+test('persisted samples and segments stay within their per-cycle bounds', () => {
+  const anomalyRows = [{ usedPercent: 30, costUsd: 1_000, tokens: 10_000 }];
+  for (let index = 1; index <= 205; index += 1) {
+    anomalyRows.push({ usedPercent: 30, costUsd: 1_000 - index, tokens: 10_000 - index });
+  }
+  const anomalyResult = observeSeries(anomalyRows);
+  assert.equal(activeCycle(anomalyResult).samples.length, 200);
+
+  const jumpRows = [{ usedPercent: 0, costUsd: 0, tokens: 0 }];
+  for (let index = 1; index <= 40; index += 1) {
+    jumpRows.push({ usedPercent: index * 2, costUsd: index, tokens: index * 1_000 });
+  }
+  const jumpResult = observeSeries(jumpRows);
+  assert.ok(activeCycle(jumpResult).segments.length <= 32);
 });
 
 test('a reset is retained in the old cycle and starts an independent cycle', () => {

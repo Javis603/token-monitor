@@ -7,15 +7,19 @@ const test = require('node:test');
 
 const root = path.resolve(__dirname, '..', '..');
 
-test('Codex panel renders one weekly estimate with a three-sample explanation', () => {
+test('Codex panel collapses device usage and the endpoint-net weekly estimate by default', () => {
   const renderer = fs.readFileSync(path.join(root, 'src', 'electron', 'renderer', 'app.js'), 'utf8');
   const i18n = fs.readFileSync(path.join(root, 'src', 'electron', 'renderer', 'i18n.js'), 'utf8');
   assert.match(renderer, /provider\.weeklyQuotaValueEstimate/);
   assert.match(renderer, /weeklyValueEstimate/);
   assert.match(renderer, /currentDeviceUsage/);
+  assert.match(renderer, /codex-quota-details-panel accordion-animated-container/);
+  assert.match(renderer, /aria-expanded/);
+  assert.match(renderer, /state\.codexQuotaDetailsExpanded/);
   const collectingHelp = i18n.split('\n').filter((line) => line.includes("'limits.codex.weeklyValueCollectingHelp'"));
   assert.equal(collectingHelp.length, 5);
   assert.ok(collectingHelp.every((line) => line.includes('{required}')));
+  assert.ok(collectingHelp.every((line) => line.includes('{span}')));
 });
 
 test('active local Codex usage triggers a throttled boundary refresh', () => {

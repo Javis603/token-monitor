@@ -4035,6 +4035,47 @@ html.is-windows .limit-live-badge {
 .limit-window-wide {
   grid-column: 1 / -1;
 }
+.codex-quota-details {
+  display: grid;
+  min-width: 0;
+}
+.codex-quota-details-toggle {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  text-align: left;
+}
+.codex-quota-details-toggle:hover {
+  color: var(--text);
+}
+.codex-quota-details-chevron {
+  display: inline-block;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 180ms ease;
+}
+.codex-quota-details-toggle[aria-expanded="true"] .codex-quota-details-chevron {
+  transform: rotate(180deg);
+}
+.codex-quota-details-panel {
+  margin-top: 8px;
+}
+.codex-quota-details-inner {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
 .limit-window-text { color: var(--muted); font-size: 10px; }
 .limit-window-text span:last-child { color: var(--text); white-space: nowrap; }
 .limit-meter {
