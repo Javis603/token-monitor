@@ -154,6 +154,13 @@ test('official usage includes only OpenAI Codex sessions and honors quota cost',
   assert.deepEqual(usage, { costUsd: 1.5, rawCostUsd: 1, tokens: 100, reason: null });
 });
 
+test('official usage accepts the root allTime shape emitted by local device records', () => {
+  const usage = officialCodexUsage({ allTime: { sessions: {
+    official: { client: 'codex', costUsd: 1.2, quotaCostUsd: 2.4, providers: { openai: 1234 } }
+  } } });
+  assert.deepEqual(usage, { costUsd: 2.4, rawCostUsd: 1.2, tokens: 1234, reason: null });
+});
+
 test('tokscale quota cost survives extraction and session normalization', () => {
   const period = extractUsageFromTokscale({ entries: [{
     client: 'codex', provider: 'openai', sessionId: 'session-1', model: 'gpt-5.6-sol',

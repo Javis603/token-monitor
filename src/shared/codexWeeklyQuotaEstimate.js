@@ -291,7 +291,10 @@ function observeCodexWeeklyQuota(stateValue, observation, options = {}) {
 }
 
 function officialCodexUsage(record) {
-  const period = record?.periods?.allTime;
+  // Aggregated stats expose periods.allTime, while a freshly collected local
+  // device record carries allTime at its root. The estimator deliberately uses
+  // the local record in sync/host mode, so both wire-contract shapes are valid.
+  const period = record?.periods?.allTime || record?.allTime;
   if (!period || Number(record?.sessionDetailsOmitted?.allTime) > 0) {
     return { costUsd: null, rawCostUsd: null, tokens: null, reason: 'sessionCostsIncomplete' };
   }
