@@ -49,39 +49,36 @@ function parseWindowsSystemUsesLightTheme(output) {
 // reg.exe two dozen times for a flip that never touched the system surface.
 const SYSTEM_UI_THEME_SETTLE_MS = [150, 150, 150, 250, 400, 600, 900, 1400];
 
-// Watches the registry until a reading stops moving, which needs two facts kept
-// apart. A value seen twice in a row is stable, but stability alone is not the
-// answer: the old value is also stable before the write has landed at all, and
-// concluding "nothing changed" there would leave the tray on the previous ink
-// with no further event coming to correct it. So a repeat of `previous` only
-// ends the watch once something else has actually been seen — otherwise the
-// window is spent waiting for the write. A repeat of anything else is the new
-// state and ends it at once, which is what keeps a flip inside half a second.
+// Publishes as soon as a reading looks settled, then keeps watching to the end
+// of the window instead of stopping there. Two readings that agree only prove
+// nothing moved between those two samples — they cannot prove Windows has no
+// write still to land, in either direction. The old value is stable before the
+// first write arrives, and an intermediate value is stable between the two
+// writes of a fast flip back. Stopping on either leaves the tray on a theme the
+// user has already left, with no further event coming to correct it.
 //
-// Movement then coming back to `previous` is the fast double flip: the user
-// returned to where they started, the renderer already holds it, and there is
-// nothing to publish. That case is also why the first differing reading cannot
-// be trusted on its own — flipping back inside the write delay leaves the first
-// flip's value landing under the second flip's read.
-//
-// Answers null when nothing settled or when the surface ended where it began.
-async function settleSystemDarkUi({ read, wait, isCurrent = () => true, previous, schedule = SYSTEM_UI_THEME_SETTLE_MS }) {
+// So publishing is not the end of the watch, it is the current best answer: the
+// measured shape is answered on the third read, keeping a flip under half a
+// second, and anything that lands afterwards corrects it. `held` tracks what the
+// renderer has been told so the same value is never published twice, which is
+// also what keeps an app-theme-only flip — the same event, no movement on the
+// system surface — from repainting anything at all.
+async function watchSystemDarkUi({ read, wait, publish, isCurrent = () => true, held, schedule = SYSTEM_UI_THEME_SETTLE_MS }) {
+  let current = held;
   let candidate = null;
-  let sawMovement = false;
   for (const ms of schedule) {
     await wait(ms);
-    if (!isCurrent()) return null;
+    if (!isCurrent()) return current;
     const value = await read();
-    if (!isCurrent()) return null;
+    if (!isCurrent()) return current;
     if (typeof value !== 'boolean') continue;
-    if (value !== previous) sawMovement = true;
-    if (value === candidate) {
-      if (value !== previous) return value;
-      if (sawMovement) return null;
+    if (value === candidate && value !== current) {
+      current = value;
+      publish(value);
     }
     candidate = value;
   }
-  return null;
+  return current;
 }
 
 function buildTrayIcon(options = {}) {
@@ -350,7 +347,7 @@ module.exports = {
   buildTrayMenuTemplate,
   createTray,
   parseWindowsSystemUsesLightTheme,
-  settleSystemDarkUi,
+  watchSystemDarkUi,
   formatTrayText,
   isBarsTrayIconMode,
   pickUsageTrayIconId,

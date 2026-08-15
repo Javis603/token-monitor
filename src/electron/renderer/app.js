@@ -12565,7 +12565,7 @@ function providerImageToPngDataUrl(img, size, showBadge = false, options = {}) {
     imageInset,
     imageSize,
     false,
-    showBadge ? '' : trayGlyphInk({ templateIconColor: options.templateColor, trayInk: options.trayInk }, img)
+    trayGlyphInk({ templateIconColor: options.templateColor, trayInk: options.trayInk }, img)
   );
 
   if (!showBadge) return canvas.toDataURL('image/png');

@@ -17,7 +17,7 @@ const test = require('node:test');
 const {
   SYSTEM_UI_THEME_SETTLE_MS,
   parseWindowsSystemUsesLightTheme,
-  settleSystemDarkUi
+  watchSystemDarkUi
 } = require('../../src/electron/tray');
 
 const REG_OUTPUT = (value) => [
@@ -26,16 +26,6 @@ const REG_OUTPUT = (value) => [
   `    SystemUsesLightTheme    REG_DWORD    ${value}`,
   ''
 ].join('\r\n');
-
-function readerReturning(...values) {
-  const queue = values.slice();
-  const waits = [];
-  return {
-    waits,
-    wait: async (ms) => { waits.push(ms); },
-    read: async () => (queue.length > 1 ? queue.shift() : queue[0])
-  };
-}
 
 test('SystemUsesLightTheme is inverted into "is the system surface dark"', () => {
   assert.equal(parseWindowsSystemUsesLightTheme(REG_OUTPUT('0x0')), true, 'light theme off means a dark taskbar');
@@ -54,82 +44,95 @@ test('an answer that does not carry the value reads as unknown, not as light', (
 
 const elapsed = (waits) => waits.reduce((total, ms) => total + ms, 0);
 
+function watcher(...values) {
+  const queue = values.slice();
+  const waits = [];
+  const published = [];
+  return {
+    waits,
+    published,
+    wait: async (ms) => { waits.push(ms); },
+    read: async () => (queue.length > 1 ? queue.shift() : queue[0]),
+    publish: (value) => published.push(value)
+  };
+}
+
 test('a typical flip is answered inside half a second', () => {
   // The measured shape: the first read still answers with the pre-flip value,
-  // the write lands before the second, and the third confirms it. The schedule
-  // is delays BETWEEN reads, so this is what the user actually waits.
-  const io = readerReturning(true, false, false);
-  return settleSystemDarkUi({ ...io, previous: true }).then((settled) => {
-    assert.equal(settled, false, 'the value that stopped moving is the one published');
-    assert.deepEqual(io.waits, SYSTEM_UI_THEME_SETTLE_MS.slice(0, 3));
-    assert.ok(elapsed(io.waits) <= 500, `answered in ${elapsed(io.waits)}ms`);
+  // the write lands before the second, and the third agrees. The schedule is
+  // delays BETWEEN reads, so this is what the user actually waits.
+  const io = watcher(true, false, false);
+  return watchSystemDarkUi({ ...io, held: true }).then(() => {
+    assert.deepEqual(io.published, [false]);
+    assert.ok(elapsed(io.waits.slice(0, 3)) <= 500, `answered in ${elapsed(io.waits.slice(0, 3))}ms`);
   });
 });
 
 test('a write slower than the measurement is waited out, not read as no change', () => {
-  // The old value is stable too before the write has landed. Settling on it
-  // would leave the tray on the previous ink for good, since the event has
-  // already fired and nothing else is coming.
-  const io = readerReturning(true, true, false, false);
-  return settleSystemDarkUi({ ...io, previous: true }).then((settled) => {
-    assert.equal(settled, false);
-    assert.ok(elapsed(io.waits) > 500, 'it kept watching past the point a fast write would have landed');
+  // The old value is stable too before the write lands. Stopping there would
+  // leave the tray on the previous ink, with no further event coming.
+  const io = watcher(true, true, false, false);
+  return watchSystemDarkUi({ ...io, held: true }).then(() => {
+    assert.deepEqual(io.published, [false]);
   });
 });
 
-test('flipping back inside the write delay does not park the tray on the value in between', () => {
-  // Dark -> Light -> Dark faster than the write lands. This revision belongs to
-  // the second flip, so `previous` is still dark and nothing was published for
-  // the first one; the opening read then catches the FIRST flip's write arriving
-  // late. Publishing that would have left the tray light for good. The user
-  // ended on dark, which the renderer already holds, so nothing is published.
-  const io = readerReturning(false, true, true);
-  return settleSystemDarkUi({ ...io, previous: true }).then((settled) => {
-    assert.equal(settled, null);
+test('a fast flip back is not published at all when it returns to what is held', () => {
+  // Dark -> Light -> Dark. This revision belongs to the second flip, so the
+  // opening read catches the FIRST flip's write arriving late, and the second
+  // flip's value follows before the intermediate one is ever confirmed.
+  const io = watcher(false, true, true);
+  return watchSystemDarkUi({ ...io, held: true }).then(() => {
+    assert.deepEqual(io.published, []);
+  });
+});
+
+test('an intermediate value that does get confirmed is corrected, not left behind', () => {
+  // The dangerous shape: the first flip's write is stable across two samples, so
+  // it is published for responsiveness, and the second flip's write only lands
+  // afterwards. Stopping at the publish would have parked the tray on light for
+  // good — the watch keeps running precisely so the later write still corrects it.
+  const io = watcher(false, false, true, true);
+  return watchSystemDarkUi({ ...io, held: true }).then(() => {
+    assert.deepEqual(io.published, [false, true], 'answered fast, then corrected');
   });
 });
 
 test('an unstable start still publishes the value it settles on when that differs', () => {
-  const io = readerReturning(false, true, true);
-  return settleSystemDarkUi({ ...io, previous: false }).then((settled) => {
-    assert.equal(settled, true);
+  const io = watcher(false, true, true);
+  return watchSystemDarkUi({ ...io, held: false }).then(() => {
+    assert.deepEqual(io.published, [true]);
   });
 });
 
-test('a surface that never moved spends the whole window before giving up', () => {
+test('a surface that never moved publishes nothing and spends the whole window', () => {
   // An app-theme-only change raises the same event. Two agreeing reads of the
-  // old value cannot prove the surface stayed put, so the watch runs to the end.
-  const io = readerReturning(true);
-  return settleSystemDarkUi({ ...io, previous: true }).then((settled) => {
-    assert.equal(settled, null);
+  // held value cannot prove the surface stayed put, so the watch runs to the end.
+  const io = watcher(true);
+  return watchSystemDarkUi({ ...io, held: true }).then(() => {
+    assert.deepEqual(io.published, []);
     assert.equal(io.waits.length, SYSTEM_UI_THEME_SETTLE_MS.length);
   });
 });
 
 test('a value that never stops moving publishes nothing rather than a guess', () => {
-  const io = readerReturning(true, false, true, false);
-  return settleSystemDarkUi({ ...io, previous: true, schedule: [1, 1, 1, 1] }).then((settled) => {
-    assert.equal(settled, null);
+  const io = watcher(true, false, true, false);
+  return watchSystemDarkUi({ ...io, held: true, schedule: [1, 1, 1, 1] }).then(() => {
+    assert.deepEqual(io.published, []);
   });
 });
 
 test('an unreadable registry never publishes a guess', () => {
-  const io = readerReturning(null);
-  return settleSystemDarkUi({ ...io, previous: false }).then((settled) => {
-    assert.equal(settled, null);
+  const io = watcher(null);
+  return watchSystemDarkUi({ ...io, held: false }).then(() => {
+    assert.deepEqual(io.published, []);
   });
 });
 
-test('a flip overtaken by a newer one is dropped instead of repainting backwards', () => {
-  const io = readerReturning(false, false);
-  let current = true;
-  return settleSystemDarkUi({ ...io, previous: true, isCurrent: () => current, schedule: [1, 1] })
-    .then((settled) => {
-      assert.equal(settled, false, 'still current: the reading is published');
-      current = false;
-      return settleSystemDarkUi({ ...readerReturning(false, false), previous: true, isCurrent: () => current });
-    })
-    .then((settled) => {
-      assert.equal(settled, null, 'superseded: the reading is dropped');
-    });
+test('a flip overtaken by a newer one stops instead of repainting backwards', () => {
+  const io = watcher(false, false);
+  return watchSystemDarkUi({ ...io, held: true, isCurrent: () => false }).then(() => {
+    assert.deepEqual(io.published, [], 'superseded: nothing is published');
+    assert.equal(io.waits.length, 1, 'and the watch does not run on');
+  });
 });
