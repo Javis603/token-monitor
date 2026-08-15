@@ -43,12 +43,16 @@ test('Windows falls back to <home>/AppData/Roaming when APPDATA unset', () => {
   );
 });
 
-test('Windows honors a native absolute HOME override when no home is injected', () => {
+test('Windows native HOME redirects only the home-rooted legacy cache', () => {
   assert.deepEqual(
-    tokscaleCacheDirs({ platform: 'win32', env: { HOME: 'D:\\sandbox\\home' } }),
+    tokscaleCacheDirs({
+      platform: 'win32',
+      homeDir: 'C:\\Users\\u',
+      env: { HOME: 'D:\\sandbox\\home' }
+    }),
     [
-      path.join('D:\\sandbox\\home', 'AppData', 'Roaming', 'tokscale', 'cache'),
-      path.join('D:\\sandbox\\home', 'AppData', 'Local', 'tokscale'),
+      path.join('C:\\Users\\u', 'AppData', 'Roaming', 'tokscale', 'cache'),
+      path.join('C:\\Users\\u', 'AppData', 'Local', 'tokscale'),
       path.join('D:\\sandbox\\home', '.cache', 'tokscale')
     ]
   );
@@ -56,8 +60,14 @@ test('Windows honors a native absolute HOME override when no home is injected', 
 
 test('Windows ignores POSIX-shaped and drive-relative HOME overrides', () => {
   for (const home of ['/home/u', 'C:relative']) {
-    const dirs = tokscaleCacheDirs({ platform: 'win32', env: { HOME: home } });
-    assert.equal(dirs.some((dir) => dir.includes(home)), false);
+    assert.deepEqual(
+      tokscaleCacheDirs({ platform: 'win32', homeDir: 'C:\\Users\\u', env: { HOME: home } }),
+      [
+        path.join('C:\\Users\\u', 'AppData', 'Roaming', 'tokscale', 'cache'),
+        path.join('C:\\Users\\u', 'AppData', 'Local', 'tokscale'),
+        path.join('C:\\Users\\u', '.cache', 'tokscale')
+      ]
+    );
   }
 });
 

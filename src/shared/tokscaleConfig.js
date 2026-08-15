@@ -13,16 +13,19 @@ function windowsNativeAbsolutePath(value) {
   return /^[A-Za-z]:[\\/]/.test(raw) || /^[\\/]{2}[^\\/]+[\\/][^\\/]+/.test(raw);
 }
 
-function tokscaleHomeDir({ env, platform, homeDir }) {
-  if (typeof homeDir === 'string' && homeDir.length > 0) return homeDir;
+function profileHomeDir(homeDir) {
+  return typeof homeDir === 'string' && homeDir.length > 0 ? homeDir : os.homedir();
+}
+
+function tokscaleHomeDir({ env, platform, profileHome }) {
   if (platform === 'win32' && windowsNativeAbsolutePath(env.HOME)) return env.HOME.trim();
-  return os.homedir();
+  return profileHome;
 }
 
 function tokscaleConfigDir(options = {}) {
   const env = options.env || process.env;
   const platform = options.platform || process.platform;
-  const homeDir = tokscaleHomeDir({ env, platform, homeDir: options.homeDir });
+  const homeDir = profileHomeDir(options.homeDir);
   const override = env.TOKSCALE_CONFIG_DIR;
   if (typeof override === 'string' && override.length > 0) return override;
 
@@ -47,29 +50,30 @@ function tokscaleConfigDir(options = {}) {
 function tokscaleCacheDirs(options = {}) {
   const env = options.env || process.env;
   const platform = options.platform || process.platform;
-  const homeDir = tokscaleHomeDir({ env, platform, homeDir: options.homeDir });
-  const canonical = path.join(tokscaleConfigDir({ env, platform, homeDir }), 'cache');
+  const profileHome = profileHomeDir(options.homeDir);
+  const tokscaleHome = tokscaleHomeDir({ env, platform, profileHome });
+  const canonical = path.join(tokscaleConfigDir({ env, platform, homeDir: profileHome }), 'cache');
   const override = env.TOKSCALE_CONFIG_DIR;
   if (typeof override === 'string' && override.length > 0) return [canonical];
 
   let platformCache;
   if (platform === 'darwin') {
-    platformCache = path.join(homeDir, 'Library', 'Caches', 'tokscale');
+    platformCache = path.join(profileHome, 'Library', 'Caches', 'tokscale');
   } else if (platform === 'win32') {
     const localAppData = (typeof env.LOCALAPPDATA === 'string' && env.LOCALAPPDATA.length > 0)
       ? env.LOCALAPPDATA
-      : path.join(homeDir, 'AppData', 'Local');
+      : path.join(profileHome, 'AppData', 'Local');
     platformCache = path.join(localAppData, 'tokscale');
   } else {
     const xdg = env.XDG_CACHE_HOME;
-    const cacheHome = (typeof xdg === 'string' && path.isAbsolute(xdg)) ? xdg : path.join(homeDir, '.cache');
+    const cacheHome = (typeof xdg === 'string' && path.isAbsolute(xdg)) ? xdg : path.join(profileHome, '.cache');
     platformCache = path.join(cacheHome, 'tokscale');
   }
 
   return [...new Set([
     canonical,
     platformCache,
-    path.join(homeDir, '.cache', 'tokscale')
+    path.join(tokscaleHome, '.cache', 'tokscale')
   ])];
 }
 
