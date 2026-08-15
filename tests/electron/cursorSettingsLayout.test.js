@@ -768,7 +768,7 @@ test('Z.ai, Volcengine, Qoder, and Ollama account panels are exposed in settings
     main.indexOf("ipcMain.handle('opencode:saveCookie'")
   );
   assert.match(validationHandler, /const cookie = normalizeOllamaCookie\(raw\);/);
-  assert.match(validationHandler, /await fetchOllamaLimits\(\{ ollamaCookie: cookie \}, \{ bypassValidationCache: true \}\)/);
+  assert.match(validationHandler, /await fetchOllamaLimits\(\{ ollamaCookie: cookie \}, electronProviderDeps\(\{ bypassValidationCache: true \}\)\)/);
   assert.match(validationHandler, /rememberOllamaValidation\(cookie, provider\);/);
   assert.match(validationHandler, /return \{ ok: provider\.status === 'ok', status: provider\.status \};/);
 
@@ -1081,7 +1081,7 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(app, /function mimoSettingsAccountTitle\(account, index\) \{[\s\S]*account\?\.accountEmail[\s\S]*`Account \$\{index \+ 1\}`/);
   assert.match(app, /const accountName = mimoSettingsAccountTitle\(account, index\);/);
   const addBody = functionBody(main, 'addMimoManagedAccount', 'removeMimoManagedAccount');
-  assert.match(addBody, /const \[validation\] = await fetchMimoLimits\(\{ mimoManagedAccounts: \[result\.account\] \}\)/);
+  assert.match(addBody, /const \[validation\] = await fetchMimoLimits\(\{ mimoManagedAccounts: \[result\.account\] \}, electronProviderDeps\(\)\)/);
   assert.ok(addBody.indexOf('fetchMimoLimits') < addBody.indexOf('settings.mimoManagedAccounts ='), 'validation must happen before persistence');
   assert.match(addBody, /result\.account\.accountEmail = String\(validation\.accountEmail/);
   assert.doesNotMatch(main, /new BrowserWindow\([\s\S]{0,300}Sign in to MiMo/);

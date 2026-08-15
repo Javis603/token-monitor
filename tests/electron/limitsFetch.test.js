@@ -35,14 +35,18 @@ test('the Electron transport sends provider requests through net.fetch', async (
 // lets that session's cookie jar replace a provider-managed Cookie header —
 // which no amount of re-pasting the credential can undo. It is an invariant of
 // this transport, not a default a caller may relax.
-test('the Electron transport never lets a caller re-enable session credentials', async () => {
+// The default session also owns an HTTP cache that Node's fetch never had, so
+// a quota poll could be answered from it with a figure the provider has moved
+// past. Both invariants sit after the caller's init for that reason.
+test('the Electron transport never lets a caller re-enable session credentials or caching', async () => {
   const { calls, net } = recordingNet();
   const fetchFn = createElectronLimitsFetch({ net, env: {} });
 
-  await fetchFn('https://example.com/usage', { credentials: 'include' });
+  await fetchFn('https://example.com/usage', { credentials: 'include', cache: 'force-cache' });
   await fetchFn('https://example.com/usage');
 
   assert.deepEqual(calls.map((call) => call.init.credentials), ['omit', 'omit']);
+  assert.deepEqual(calls.map((call) => call.init.cache), ['no-store', 'no-store']);
 });
 
 // Every provider's Referer is same-origin or a bare origin today, which the
@@ -92,9 +96,16 @@ test('every widget provider probe takes the runtime transport', () => {
   assert.match(main, /function electronLimitsFetch\(\) \{\s*return createElectronLimitsFetch\(\{ net, env: process\.env \}\);/);
   assert.match(main, /fetch: electronLimitsFetch\(\)/);
   assert.match(main, /opencodeGoApi\.fetchGoApi\(apiKey, \{\s*fetch: electronLimitsFetch\(\)/);
-  assert.equal(
-    (main.match(/opencodeWeb\.fetch(?:GoWeb|Zen)\([^,]+, \{\}\)/g) || []).length,
-    0,
-    'OpenCode settings probes must not fall back to the global fetch'
-  );
+  // Every settings-side validation that can refuse to save a credential.
+  for (const call of [
+    /opencodeWeb\.fetchGoWeb\([^,]+, electronProviderDeps\(\)\)/,
+    /opencodeWeb\.fetchZen\([^,]+, electronProviderDeps\(\)\)/,
+    /fetchOllamaLimits\([^,]+, electronProviderDeps\(/,
+    /fetchMimoLimits\([^;]+electronProviderDeps\(\)\)/,
+    /fetchOpenRouterAccount\([^,]+, [^,]+, electronProviderDeps\(/,
+    /fetchThirdPartyAccount\(\{[^}]*\}, electronProviderDeps\(/,
+    /listCodexWorkspaces\(auth, electronProviderDeps\(/
+  ]) {
+    assert.match(main, call);
+  }
 });

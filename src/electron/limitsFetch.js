@@ -16,6 +16,10 @@ const { createOutboundFetch, resolveProxyConfig } = require('../shared/outboundF
  * holds — one stray cookie strands every cookie-backed provider on
  * `unauthorized`, and re-pasting the credential cannot clear it.
  *
+ * `cache: 'no-store'` is forced for the same reason: the default session owns
+ * an HTTP cache that Node's fetch never had, and a quota poll answered from it
+ * would report a figure the provider has already moved past.
+ *
  * Chromium also cancels a request whose explicit Referer is cross-origin and
  * carries a path (net::ERR_BLOCKED_BY_CLIENT). No provider needs that today —
  * their Referer headers are same-origin or a bare origin — so the default
@@ -24,7 +28,7 @@ const { createOutboundFetch, resolveProxyConfig } = require('../shared/outboundF
  */
 function createElectronNetFetch(net) {
   return function electronNetFetch(input, init = {}) {
-    return net.fetch(input, { ...init, credentials: 'omit' });
+    return net.fetch(input, { ...init, credentials: 'omit', cache: 'no-store' });
   };
 }
 

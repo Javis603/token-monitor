@@ -52,11 +52,11 @@ function electronLimitsFetch() {
 }
 
 // Settings-side provider probes take the same transport as the collector's.
-// They are what an account save is gated on, so leaving them on the global
-// fetch would refuse to save an account on exactly the machines this transport
-// exists for.
-function opencodeWebDeps() {
-  return { fetch: electronLimitsFetch() };
+// Most of them are what an account save is gated on, so leaving one on the
+// global fetch refuses to save an account on exactly the machines this
+// transport exists for.
+function electronProviderDeps(deps = {}) {
+  return { ...deps, fetch: electronLimitsFetch() };
 }
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs, visibleDiagnosticRoots } = require('../shared/collector');
@@ -909,7 +909,7 @@ function hydrateCodexManagedWorkspaceLabels() {
           description: 'Managed Codex auth',
           encoding: 'utf8'
         }));
-        const workspaces = await listCodexWorkspaces(auth, { env: process.env });
+        const workspaces = await listCodexWorkspaces(auth, electronProviderDeps({ env: process.env }));
         const workspace = workspaces.find((entry) => entry.id === account.workspaceAccountId);
         return workspace
           ? {
@@ -1053,7 +1053,7 @@ async function addMimoManagedAccount(cookieValue) {
   const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
   const result = createMimoManagedAccount(cookieValue, accounts);
   if (!result.ok) return result;
-  const [validation] = await fetchMimoLimits({ mimoManagedAccounts: [result.account] });
+  const [validation] = await fetchMimoLimits({ mimoManagedAccounts: [result.account] }, electronProviderDeps());
   if (validation?.status !== 'ok') {
     const errorCode = validation?.status === 'unauthorized'
       ? 'invalidCookie'
@@ -1285,10 +1285,10 @@ async function resolveCodexWorkspaceAfterLogin(auth, homePath, options = {}) {
   const initialIdentity = codexAuthIdentity(auth);
   let workspaces;
   try {
-    workspaces = await listCodexWorkspaces(auth, {
+    workspaces = await listCodexWorkspaces(auth, electronProviderDeps({
       env: process.env,
       signal: options.signal
-    });
+    }));
   } catch (error) {
     if (options.signal?.aborted) return { cancelled: true };
     console.warn('Could not list Codex workspaces after sign-in:', error?.message || error);
@@ -6480,7 +6480,7 @@ app.whenReady().then(() => {
   ipcMain.handle('ollama:validateCookie', async (_event, raw) => {
     const cookie = normalizeOllamaCookie(raw);
     if (!cookie) return { ok: false, status: 'notConfigured' };
-    const provider = await fetchOllamaLimits({ ollamaCookie: cookie }, { bypassValidationCache: true });
+    const provider = await fetchOllamaLimits({ ollamaCookie: cookie }, electronProviderDeps({ bypassValidationCache: true }));
     rememberOllamaValidation(cookie, provider);
     return { ok: provider.status === 'ok', status: provider.status };
   });
@@ -6500,8 +6500,8 @@ app.whenReady().then(() => {
     }
     try {
       const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(cookie, opencodeWebDeps()),
-        opencodeWeb.fetchZen(cookie, opencodeWebDeps())
+        opencodeWeb.fetchGoWeb(cookie, electronProviderDeps()),
+        opencodeWeb.fetchZen(cookie, electronProviderDeps())
       ]);
       if (opencodeWeb.summarizeLink(go, zen).expired) {
         return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
@@ -6627,8 +6627,8 @@ app.whenReady().then(() => {
           }];
         }
         const [go, zen, apiProbe] = await Promise.all([
-          opencodeWeb.fetchGoWeb(profile.cookie, opencodeWebDeps()),
-          opencodeWeb.fetchZen(profile.cookie, opencodeWebDeps()),
+          opencodeWeb.fetchGoWeb(profile.cookie, electronProviderDeps()),
+          opencodeWeb.fetchZen(profile.cookie, electronProviderDeps()),
           apiKey ? probeOpenCodeApiKey(apiKey) : null
         ]);
         const summary = { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd };
@@ -6653,8 +6653,8 @@ app.whenReady().then(() => {
     const envCookie = process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '';
     if (envCookie && !entries.some(([, p]) => p.cookie === envCookie)) {
       const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(envCookie, opencodeWebDeps()),
-        opencodeWeb.fetchZen(envCookie, opencodeWebDeps())
+        opencodeWeb.fetchGoWeb(envCookie, electronProviderDeps()),
+        opencodeWeb.fetchZen(envCookie, electronProviderDeps())
       ]);
       let envKey = 'env';
       for (let i = 1; Object.prototype.hasOwnProperty.call(profiles, envKey); i += 1) {
@@ -6783,8 +6783,8 @@ app.whenReady().then(() => {
         const cookie = opencodeWeb.sanitizeCookieHeader(raw);
         if (!cookie) return { ok: false, error: 'Empty cookie' };
         const [go, zen] = await Promise.all([
-          opencodeWeb.fetchGoWeb(cookie, opencodeWebDeps()),
-          opencodeWeb.fetchZen(cookie, opencodeWebDeps())
+          opencodeWeb.fetchGoWeb(cookie, electronProviderDeps()),
+          opencodeWeb.fetchZen(cookie, electronProviderDeps())
         ]);
         if (opencodeWeb.summarizeLink(go, zen).expired) {
           return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
@@ -6977,10 +6977,10 @@ app.whenReady().then(() => {
     if (!name) return { ok: false, errorCode: 'invalidName' };
     if (!apiKey) return { ok: false, errorCode: 'missingApiKey' };
     try {
-      const provider = await openrouterLimits.fetchOpenRouterAccount(name, apiKey, {
+      const provider = await openrouterLimits.fetchOpenRouterAccount(name, apiKey, electronProviderDeps({
         env: process.env,
         signal: AbortSignal.timeout(15_000)
-      });
+      }));
       if (provider?.status !== 'ok') {
         return { ok: false, error: provider?.status === 'unauthorized' ? 'OpenRouter rejected the API key' : 'Could not validate the OpenRouter API key' };
       }
@@ -7113,10 +7113,10 @@ app.whenReady().then(() => {
     });
     if (!profile) return { ok: false, errorCode: 'invalidCredential' };
     try {
-      const provider = await thirdPartyLimits.fetchThirdPartyAccount({ name, ...profile }, {
+      const provider = await thirdPartyLimits.fetchThirdPartyAccount({ name, ...profile }, electronProviderDeps({
         env: process.env,
         signal: AbortSignal.timeout(15_000)
-      });
+      }));
       if (provider?.status !== 'ok') {
         return {
           ok: false,

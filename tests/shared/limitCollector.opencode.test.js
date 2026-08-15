@@ -1442,3 +1442,63 @@ test('opencode drops a supplemental window whose kind the local estimate answere
     ['session:8.3:local', 'weekly:20:web']
   );
 });
+
+// The widget injects one transport so provider calls follow the OS proxy; a
+// probe that rebuilds its deps without carrying `fetch` silently drops back to
+// the global fetch, which no source-level guard would catch. The collector
+// wraps the injected transport before handing it on, so this asserts the call
+// actually lands there rather than comparing identities. Both the single- and
+// multi-account paths are checked because they build those deps separately.
+test('every OpenCode web probe receives the injected transport', async () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  let landed = 0;
+  const injected = async () => {
+    landed += 1;
+    return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({}), text: async () => '' };
+  };
+  const seen = [];
+  const record = (label) => async (cookie, deps = {}) => {
+    const before = landed;
+    if (typeof deps.fetch === 'function') await deps.fetch('https://transport.test/probe');
+    seen.push(`${label}:${cookie}:${landed > before ? 'injected' : 'MISSING'}`);
+    return { status: 'notConfigured', windows: [], workspaceId: '', balanceUsd: null };
+  };
+
+  await collectLimitsOnce(
+    { limitProviders: 'opencode', limitsEnabled: true, opencodeCookie: 'single-cookie' },
+    {
+      now: () => now,
+      fetch: injected,
+      opencodeFetchGoWeb: record('go'),
+      opencodeFetchZen: record('zen')
+    }
+  );
+  // Two enabled profiles on purpose: one would stay on the single-account path
+  // (`multiAccountMode` is `cookies.length > 1`), leaving the per-profile deps
+  // this regression is about unexercised.
+  await collectLimitsOnce(
+    {
+      limitProviders: 'opencode',
+      limitsEnabled: true,
+      opencodeProfiles: {
+        personal: { enabled: true, cookie: 'personal-cookie' },
+        work: { enabled: true, cookie: 'work-cookie' }
+      }
+    },
+    {
+      now: () => now,
+      fetch: injected,
+      opencodeFetchGoWeb: record('go'),
+      opencodeFetchZen: record('zen')
+    }
+  );
+
+  assert.deepStrictEqual(seen.sort(), [
+    'go:personal-cookie:injected',
+    'go:single-cookie:injected',
+    'go:work-cookie:injected',
+    'zen:personal-cookie:injected',
+    'zen:single-cookie:injected',
+    'zen:work-cookie:injected'
+  ]);
+});
