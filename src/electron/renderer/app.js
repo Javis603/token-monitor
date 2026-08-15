@@ -4580,19 +4580,17 @@ function renderProviderWindows(provider, color) {
     }
     const quotaEstimate = provider.weeklyQuotaValueEstimate;
     if (quotaEstimate) {
-      const deviceUsageReady = Number.isFinite(quotaEstimate.currentDeviceUsageUsd);
+      const deviceUsageReady = Number.isFinite(quotaEstimate.deviceObservedCostUsd);
       const deviceUsageNode = limitWindowNode(
         t('limits.codex.currentDeviceUsage'),
         { showMeter: false },
         color,
         0.68,
-        deviceUsageReady ? formatMoney(quotaEstimate.currentDeviceUsageUsd, 'USD') : '--',
+        deviceUsageReady ? formatMoney(quotaEstimate.deviceObservedCostUsd, 'USD') : '--',
         ''
       );
       deviceUsageNode.classList.add('limit-window-wide', 'limit-window-no-reset');
-      deviceUsageNode.title = t(deviceUsageReady
-        ? 'limits.codex.currentDeviceUsageHelp'
-        : 'limits.codex.currentDeviceUsageUnavailableHelp');
+      deviceUsageNode.title = t('limits.codex.currentDeviceUsageHelp');
       windows.append(deviceUsageNode);
       const ready = quotaEstimate.status === 'ready' && Number.isFinite(quotaEstimate.estimatedUsd);
       const estimateNode = limitWindowNode(

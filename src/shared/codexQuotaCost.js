@@ -45,16 +45,17 @@ function addUsage(target, usage) {
   target.cacheWrite += numberValue(usage?.cache_creation_input_tokens);
 }
 
-function readCodexQuotaEvents(filePath) {
+function parseCodexQuotaProfile(filePath) {
   let stat;
   try { stat = fs.statSync(filePath); } catch (_) { return null; }
   const key = `${stat.size}:${stat.mtimeMs}`;
   const cached = profileCache.get(filePath);
-  if (cached?.key === key) return cached;
+  if (cached?.key === key) return cached.value;
 
-  const events = [];
+  const byModel = {};
   let model = '';
   let serviceTier = 'default';
+  let incomplete = false;
   let content;
   try { content = fs.readFileSync(filePath, 'utf8'); } catch (_) { return null; }
   for (const line of content.split(/\r?\n/)) {
@@ -73,36 +74,11 @@ function readCodexQuotaEvents(filePath) {
       continue;
     }
     if (payload.type !== 'token_count' || !payload.info?.last_token_usage) continue;
-    events.push({
-      model: model || 'unknown',
-      tier: isFastTier(serviceTier) ? 'fast' : 'standard',
-      timestampMs: Date.parse(event.timestamp || payload.timestamp || ''),
-      usage: payload.info.last_token_usage
-    });
-  }
-  const value = { key, events };
-  profileCache.set(filePath, value);
-  return value;
-}
-
-function parseCodexQuotaProfile(filePath, options = {}) {
-  const source = readCodexQuotaEvents(filePath);
-  if (!source) return null;
-  const sinceMs = Date.parse(options.since || '');
-  const filterByTime = Number.isFinite(sinceMs);
-  const byModel = {};
-  let incomplete = false;
-  for (const event of source.events) {
-    if (filterByTime && !Number.isFinite(event.timestampMs)) {
-      incomplete = true;
-      continue;
-    }
-    if (filterByTime && event.timestampMs < sinceMs) continue;
-    if (event.model === 'unknown') incomplete = true;
-    const modelKey = event.model;
-    const tierKey = event.tier;
+    if (!model) incomplete = true;
+    const modelKey = model || 'unknown';
+    const tierKey = isFastTier(serviceTier) ? 'fast' : 'standard';
     if (!byModel[modelKey]) byModel[modelKey] = { standard: emptyComponents(), fast: emptyComponents() };
-    addUsage(byModel[modelKey][tierKey], event.usage);
+    addUsage(byModel[modelKey][tierKey], payload.info.last_token_usage);
   }
 
   const knownModels = Object.keys(byModel).filter((key) => key !== 'unknown');
@@ -117,7 +93,9 @@ function parseCodexQuotaProfile(filePath, options = {}) {
     incomplete = false;
   }
 
-  return { byModel, incomplete };
+  const value = { byModel, incomplete };
+  profileCache.set(filePath, { key, value });
+  return value;
 }
 
 function componentCost(components, pricing) {
@@ -168,55 +146,6 @@ function annotateCodexQuotaCosts(json, options = {}) {
   return json;
 }
 
-function modelProfileCost(profile, pricing) {
-  if (!profile) return { standard: 0, fast: 0, total: 0 };
-  const standard = componentCost(profile.standard, pricing);
-  const fast = componentCost(profile.fast, pricing);
-  return { standard, fast, total: standard + fast };
-}
-
-function officialCodexQuotaUsageSince(period, since, options = {}) {
-  const sinceMs = Date.parse(since || '');
-  if (!Number.isFinite(sinceMs) || !period) return { costUsd: null, reason: 'historyUnavailable' };
-  const home = options.homeDir || os.homedir();
-  const pricingByModel = options.pricingByModel || {};
-  let costUsd = 0;
-  let found = false;
-  for (const session of Object.values(period.sessions || {})) {
-    if (String(session?.client || '').trim().toLowerCase() !== 'codex') continue;
-    const providers = Object.entries(session.providers || {}).filter(([, value]) => numberValue(value) > 0);
-    if (providers.length !== 1 || String(providers[0][0]).toLowerCase() !== 'openai') continue;
-    const lastUsedMs = Date.parse(session.lastUsedAt || '');
-    if (Number.isFinite(lastUsedMs) && lastUsedMs < sinceMs) continue;
-    found = true;
-    const startedMs = Date.parse(session.startedAt || '');
-    if (Number.isFinite(startedMs) && startedMs >= sinceMs) {
-      costUsd += Math.max(0, numberValue(session.quotaCostUsd) || numberValue(session.costUsd));
-      continue;
-    }
-
-    const sessionId = String(session.sessionId || '').trim();
-    const filePath = sessionId ? resolveSessionFile('codex', sessionId, home) : '';
-    const full = filePath ? parseCodexQuotaProfile(filePath) : null;
-    const filtered = filePath ? parseCodexQuotaProfile(filePath, { since }) : null;
-    if (!full || !filtered || full.incomplete || filtered.incomplete) {
-      return { costUsd: null, reason: 'historyIncomplete' };
-    }
-    for (const [modelValue, rawModelCostValue] of Object.entries(session.modelCosts || {})) {
-      const model = normalizedModel(modelValue);
-      const rawModelCost = numberValue(rawModelCostValue);
-      const fullCost = modelProfileCost(full.byModel[model], pricingByModel[model]);
-      const filteredCost = modelProfileCost(filtered.byModel[model], pricingByModel[model]);
-      if (filteredCost.total <= 0) continue;
-      if (fullCost.total <= 0 || rawModelCost <= 0) return { costUsd: null, reason: 'historyIncomplete' };
-      const rawFilteredCost = rawModelCost * Math.min(1, filteredCost.total / fullCost.total);
-      const fastShare = filteredCost.fast / filteredCost.total;
-      costUsd += rawFilteredCost * (1 + fastShare * (fastCreditMultiplier(model) - 1));
-    }
-  }
-  return found ? { costUsd, reason: null } : { costUsd: 0, reason: null };
-}
-
 function resetCodexQuotaProfileCache() {
   profileCache.clear();
 }
@@ -225,7 +154,6 @@ module.exports = {
   annotateCodexQuotaCosts,
   fastCreditMultiplier,
   isFastTier,
-  officialCodexQuotaUsageSince,
   parseCodexQuotaProfile,
   resetCodexQuotaProfileCache
 };

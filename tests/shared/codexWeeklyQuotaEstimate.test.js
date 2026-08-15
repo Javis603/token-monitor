@@ -6,8 +6,7 @@ const {
   emptyState,
   extractCodexWeeklyObservation,
   observeCodexWeeklyQuota,
-  officialCodexUsage,
-  weeklyWindowStartAt
+  officialCodexUsage
 } = require('../../src/shared/codexWeeklyQuotaEstimate');
 const { extractUsageFromTokscale } = require('../../src/shared/usage');
 
@@ -56,19 +55,40 @@ test('first boundary is an anchor and three later unit jumps publish the mean', 
   assert.ok(Math.abs(result.estimate.estimatedUsd - 120) < 0.000001);
 });
 
-test('history window starts at the previous weekly reset and manual reset starts a new window', () => {
-  assert.equal(weeklyWindowStartAt(
-    { resetsAt: '2026-08-18T01:49:48.000Z', windowMinutes: 10080 },
-    Date.parse('2026-08-15T00:00:00.000Z')
-  ), '2026-08-11T01:49:48.000Z');
-  let result = observeCodexWeeklyQuota(emptyState(), observation({
-    historySince: '2026-08-10T00:00:00.000Z', resetCreditsAvailable: 2
-  }));
-  assert.equal(result.estimate.historySince, '2026-08-10T00:00:00.000Z');
+test('device usage accumulates while the same account is active even before a percent jump', () => {
+  const result = observeSeries([
+    { usedPercent: 55, costUsd: 10, rawCostUsd: 10, tokens: 1_000 },
+    { usedPercent: 55, costUsd: 11.25, rawCostUsd: 11.25, tokens: 2_000 },
+    { usedPercent: 56, costUsd: 12.5, rawCostUsd: 12.5, tokens: 3_000 }
+  ]);
+  assert.equal(result.estimate.status, 'collecting');
+  assert.equal(result.estimate.deviceObservedCostUsd, 2.5);
+  assert.equal(result.estimate.deviceObservedTokens, 2_000);
+  assert.equal(result.estimate.deviceObservedPercent, 1);
+  assert.equal(result.estimate.observedFromZero, false);
+});
+
+test('device usage excludes account-switch gaps and restarts from zero after quota reset', () => {
+  let result = observeSeries([
+    { usedPercent: 30, costUsd: 10, tokens: 1_000 },
+    { usedPercent: 30, costUsd: 11, tokens: 2_000 }
+  ]);
+  assert.equal(result.estimate.deviceObservedCostUsd, 1);
   result = observeCodexWeeklyQuota(result.state, observation({
-    usedPercent: 0, resetCreditsAvailable: 1, observedAt: '2026-08-13T01:00:00.000Z'
+    accountKey: 'account-b', costUsd: 20, tokens: 3_000,
+    observedAt: '2026-08-12T03:00:00.000Z'
   }));
-  assert.equal(result.estimate.historySince, '2026-08-13T01:00:00.000Z');
+  result = observeCodexWeeklyQuota(result.state, observation({
+    accountKey: 'account-a', costUsd: 25, tokens: 4_000,
+    observedAt: '2026-08-12T04:00:00.000Z'
+  }));
+  assert.equal(result.estimate.deviceObservedCostUsd, 1);
+  result = observeCodexWeeklyQuota(result.state, observation({
+    accountKey: 'account-a', resetAt: '2026-08-24T00:00:00.000Z', usedPercent: 0,
+    costUsd: 26, tokens: 5_000, observedAt: '2026-08-17T00:00:00.000Z'
+  }));
+  assert.equal(result.estimate.deviceObservedCostUsd, 0);
+  assert.equal(result.estimate.observedFromZero, true);
 });
 
 test('100 to 99 remaining is recorded as an anchor but never estimated', () => {

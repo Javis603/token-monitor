@@ -8,7 +8,6 @@ const {
   normalizeState,
   observeCodexWeeklyQuota
 } = require('./codexWeeklyQuotaEstimate');
-const { officialCodexQuotaUsageSince } = require('./codexQuotaCost');
 
 function defaultFilePath() {
   return path.join(sharedDataDir(), 'codex-weekly-quota-samples.json');
@@ -40,21 +39,8 @@ function createCodexWeeklyQuotaEstimateStore(options = {}) {
       const result = observeCodexWeeklyQuota(ensureLoaded(), extracted.observation, observeOptions);
       state = result.state;
       if (result.changed) write(filePath, state);
-      const period = extracted.localRecord?.periods?.allTime || extracted.localRecord?.allTime;
-      const historyUsage = Number(extracted.localRecord?.sessionDetailsOmitted?.allTime) > 0
-        ? { costUsd: null, reason: 'historyIncomplete' }
-        : (options.historicalUsage || officialCodexQuotaUsageSince)(
-            period,
-            result.estimate?.historySince,
-            { homeDir: observeOptions.homeDir }
-          );
       return {
-        estimate: result.estimate ? {
-          ...result.estimate,
-          currentDeviceUsageUsd: historyUsage.costUsd,
-          currentDeviceUsageSince: result.estimate.historySince,
-          currentDeviceUsageReason: historyUsage.reason
-        } : null,
+        estimate: result.estimate,
         reason: null,
         accountKey: extracted.accountKey,
         changed: result.changed

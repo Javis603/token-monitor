@@ -17,15 +17,6 @@ function isoTimestamp(value) {
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
-function weeklyWindowStartAt(window, now = Date.now()) {
-  const durationMinutes = finiteNumber(window?.windowMinutes) || 7 * 24 * 60;
-  const durationMs = durationMinutes * 60 * 1000;
-  let endMs = Date.parse(window?.resetsAt || '');
-  if (!Number.isFinite(endMs) || durationMs <= 0) return null;
-  while (endMs <= now) endMs += durationMs;
-  return new Date(endMs - durationMs).toISOString();
-}
-
 function emptyState() {
   return { version: STATE_VERSION, activeAccountKey: '', accounts: {} };
 }
@@ -93,14 +84,18 @@ function normalizeCycle(value) {
   const resetAt = isoTimestamp(value?.resetAt);
   const latest = normalizeObservation(value?.latest);
   if (!resetAt || !latest) return null;
-  const naturalStartAt = new Date(Date.parse(resetAt) - 7 * 24 * 60 * 60 * 1000).toISOString();
   return {
     id: String(value?.id || `${resetAt}#${latest.observedAt}`),
     resetAt,
     startedAt: isoTimestamp(value?.startedAt) || latest.observedAt,
     latest,
     anchor: normalizeObservation(value?.anchor),
-    historySince: isoTimestamp(value?.historySince) || naturalStartAt,
+    deviceObservedCostUsd: Math.max(0, finiteNumber(value?.deviceObservedCostUsd) || 0),
+    deviceObservedRawCostUsd: Math.max(0, finiteNumber(value?.deviceObservedRawCostUsd) || 0),
+    deviceObservedTokens: Math.max(0, Math.round(finiteNumber(value?.deviceObservedTokens) || 0)),
+    deviceObservedPercent: Math.max(0, finiteNumber(value?.deviceObservedPercent) || 0),
+    observationStartedAt: isoTimestamp(value?.observationStartedAt) || latest.observedAt,
+    observedFromZero: value?.observedFromZero === true,
     segmentId: Math.max(1, Math.round(finiteNumber(value?.segmentId) || 1)),
     samples: (value?.samples || []).map(normalizeJumpSample).filter(Boolean).slice(-MAX_SAMPLES_PER_CYCLE)
   };
@@ -127,15 +122,19 @@ function currentCycle(account) {
     || null;
 }
 
-function newCycle(resetAt, latest, serial = 1, historySince = null) {
+function newCycle(resetAt, latest, serial = 1) {
   return {
     id: `${resetAt}#${latest.observedAt}#${serial}`,
     resetAt,
     startedAt: latest.observedAt,
     latest,
     anchor: null,
-    historySince: isoTimestamp(historySince)
-      || new Date(Date.parse(resetAt) - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    deviceObservedCostUsd: 0,
+    deviceObservedRawCostUsd: 0,
+    deviceObservedTokens: 0,
+    deviceObservedPercent: 0,
+    observationStartedAt: latest.observedAt,
+    observedFromZero: latest.usedPercent === 0,
     segmentId: 1,
     samples: []
   };
@@ -202,7 +201,12 @@ function estimateFromCycle(cycle, options = {}) {
     requiredSampleCount: minSampleCount,
     spanPercent: samples.length,
     observedCostUsd,
-    historySince: cycle?.historySince || null
+    deviceObservedCostUsd: Math.max(0, finiteNumber(cycle?.deviceObservedCostUsd) || 0),
+    deviceObservedRawCostUsd: Math.max(0, finiteNumber(cycle?.deviceObservedRawCostUsd) || 0),
+    deviceObservedTokens: Math.max(0, Math.round(finiteNumber(cycle?.deviceObservedTokens) || 0)),
+    deviceObservedPercent: Math.max(0, finiteNumber(cycle?.deviceObservedPercent) || 0),
+    observationStartedAt: cycle?.observationStartedAt || null,
+    observedFromZero: cycle?.observedFromZero === true
   };
   if (samples.length < minSampleCount || observedCostUsd <= 0) return base;
   return {
@@ -237,7 +241,7 @@ function observeCodexWeeklyQuota(stateValue, observation, options = {}) {
 
   let account = state.accounts[accountKey];
   if (!account) {
-    const cycle = newCycle(resetAt, sample, 1, observation?.historySince);
+    const cycle = newCycle(resetAt, sample);
     state.accounts[accountKey] = { currentCycleId: cycle.id, cycles: [cycle] };
     return { state, estimate: estimateFromCycle(cycle, options), changed: true };
   }
@@ -257,8 +261,7 @@ function observeCodexWeeklyQuota(stateValue, observation, options = {}) {
   if (resetCreditConsumed || naturalReset || percentageReset) {
     const reason = resetCreditConsumed ? 'resetCreditConsumed' : naturalReset ? 'resetAtChanged' : 'percentageIncreased';
     recordReset(cycle, accountKey, sample, reason);
-    const historySince = naturalReset ? observation?.historySince : sample.observedAt;
-    const next = newCycle(resetAt, sample, account.cycles.length + 1, historySince);
+    const next = newCycle(resetAt, sample, account.cycles.length + 1);
     account.cycles.push(next);
     account.cycles = account.cycles.slice(-MAX_CYCLES_PER_ACCOUNT);
     account.currentCycleId = next.id;
@@ -277,6 +280,14 @@ function observeCodexWeeklyQuota(stateValue, observation, options = {}) {
     cycle.segmentId += 1;
     return { state, estimate: estimateFromCycle(cycle, options), changed: true };
   }
+
+  // The local all-time counter has no account id. Attribute only intervals
+  // observed while this account remains active; account-switch gaps are
+  // deliberately discarded by the branch above.
+  cycle.deviceObservedCostUsd += Math.max(0, sample.costUsd - cycle.latest.costUsd);
+  cycle.deviceObservedRawCostUsd += Math.max(0, sample.rawCostUsd - cycle.latest.rawCostUsd);
+  cycle.deviceObservedTokens += Math.max(0, sample.tokens - cycle.latest.tokens);
+  cycle.deviceObservedPercent += Math.max(0, sample.usedPercent - cycle.latest.usedPercent);
 
   const percentDelta = sample.usedPercent - cycle.latest.usedPercent;
   if (percentDelta > 0.000001) {
@@ -360,7 +371,6 @@ function extractCodexWeeklyObservation(stats, now = Date.now(), options = {}) {
   const weekly = (provider.windows || []).find((window) => String(window?.kind || '').toLowerCase() === 'weekly');
   const usedPercent = finiteNumber(weekly?.usedPercent);
   const resetAt = isoTimestamp(weekly?.resetsAt);
-  const historySince = weeklyWindowStartAt(weekly, now);
   const accountKey = String(provider.accountKey || '').trim() || 'single-codex-account';
   const localRecord = localRecordForProvider(stats, provider, localDeviceId);
   const usage = officialCodexUsage(localRecord);
@@ -370,11 +380,9 @@ function extractCodexWeeklyObservation(stats, now = Date.now(), options = {}) {
   return {
     reason: null,
     accountKey,
-    localRecord,
     observation: {
       accountKey,
       resetAt,
-      historySince,
       usedPercent,
       costUsd: usage.costUsd,
       rawCostUsd: usage.rawCostUsd,
@@ -393,6 +401,5 @@ module.exports = {
   extractCodexWeeklyObservation,
   normalizeState,
   observeCodexWeeklyQuota,
-  officialCodexUsage,
-  weeklyWindowStartAt
+  officialCodexUsage
 };
