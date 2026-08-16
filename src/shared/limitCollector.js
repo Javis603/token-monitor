@@ -652,7 +652,7 @@ async function fetchJson(url, headers, deps = {}, options = {}) {
       if (sourceChallenge) error.code = 'CLAUDE_WEB_SOURCE_CHALLENGE';
       throw error;
     }
-    return response.json();
+    return await response.json();
   } catch (error) {
     if (error?.name === 'AbortError') throw errorWithStatus('unavailable', `${url} timed out`);
     throw error;

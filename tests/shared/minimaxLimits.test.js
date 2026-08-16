@@ -557,3 +557,27 @@ test('fetchMinimaxLimits reports cn region when pinned to the CN endpoint', asyn
   assert.equal(r.status, 'ok');
   assert.equal(r.region, 'cn');
 });
+
+// The abort timer must outlive the body read, not just the headers. Undici resolves the
+// fetch as soon as the head arrives, so a body that never arrives is only bounded if the
+// timer is still armed while `.json()` is pending.
+test('fetchMinimaxLimits aborts when the body stalls after the headers', { timeout: 5000 }, async () => {
+  const r = await fetchMinimaxLimits({ minimaxApiHost: 'cn' }, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test' },
+    now: () => 1_716_350_000_000,
+    fetchTimeoutMs: 10,
+    fetch: async (_url, init) => ({
+      ok: true,
+      status: 200,
+      json: () => new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      })
+    })
+  });
+  assert.equal(r.status, 'unavailable');
+  assert.deepEqual(r.windows, []);
+});

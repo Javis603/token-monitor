@@ -235,7 +235,7 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
         error.statusCode = response.status;
         throw error;
       }
-      return response.json();
+      return await response.json();
     } finally {
       if (timer) clearTimeout(timer);
     }

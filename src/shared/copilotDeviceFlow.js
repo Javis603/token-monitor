@@ -96,7 +96,7 @@ async function fetchForm(url, body, deps = {}) {
       ...(controller ? { signal: controller.signal } : {})
     });
     if (!response.ok) throw errorWithStatus('unavailable', `${url} returned ${response.status}`);
-    return response.json();
+    return await response.json();
   } catch (error) {
     if (externalSignal?.aborted) throw errorWithStatus('cancelled', 'Sign-in cancelled');
     if (error?.name === 'AbortError') throw errorWithStatus('timedOut', 'GitHub request timed out');
