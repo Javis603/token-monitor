@@ -953,7 +953,7 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.promaGraph);
     histories.push(normalizeHistory(parseGraphResult(options.promaGraph), { capDays, todayKey }));
   }
-if (options.qoderCnGraph) {
+  if (options.qoderCnGraph) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
   }
@@ -1024,7 +1024,7 @@ async function collectUsageOnce(options) {
     options.homeDir || os.homedir(),
     { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
   );
-// Proma, Qoder CN, and dsh are local compatibility adapters parsed by this
+  // Proma, Qoder CN, and dsh are local compatibility adapters parsed by this
   // process; everything else is supplied by the same Tokscale path.
   const localClients = new Set(['proma', 'qodercn', DSH_CLIENT]);
   const tokscaleClients = normalizedClients
@@ -1056,7 +1056,7 @@ async function collectUsageOnce(options) {
   let promaPeriods = null;
   let promaRows = null;
   let promaPricing = null;
-let qoderCnPeriods = null;
+  let qoderCnPeriods = null;
   let qoderCnRows = null;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
@@ -1100,7 +1100,7 @@ let qoderCnPeriods = null;
         if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
       }
     }
-if (includesQoderCn && (!targetRequested || targetClients.includes('qodercn'))) {
+    if (includesQoderCn && (!targetRequested || targetClients.includes('qodercn'))) {
       try {
         const qoderCnSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
         qoderCnRows = await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger, sinceMs: qoderCnSinceMs });
@@ -1184,7 +1184,7 @@ if (includesQoderCn && (!targetRequested || targetClients.includes('qodercn'))) 
         }
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
-if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
+      if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
       if (qoderCnPeriodReadFailed && anchor.todayPartitions?.qodercn) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
@@ -1235,7 +1235,7 @@ if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
       allTime = mergePeriods(allTime, promaPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), proma: promaPeriods.today };
     }
-if (qoderCnPeriods && !anchorUsed) {
+    if (qoderCnPeriods && !anchorUsed) {
       today = mergePeriods(today, qoderCnPeriods.today);
       month = mergePeriods(month, qoderCnPeriods.month);
       allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
@@ -1453,7 +1453,7 @@ if (qoderCnPeriods && !anchorUsed) {
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
-qoderCnGraph: historyQoderCnGraph || null,
+      qoderCnGraph: historyQoderCnGraph || null,
       dshGraph: includesDsh && dshUsage
         ? buildDshHistoryGraph({ rows: dshRows || dshUsage.rows, pricingByModel: dshPricing || {} })
         : null,
@@ -3054,7 +3054,7 @@ function startCollector(options) {
               wslStatus: wslStatusAnchor,
               ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
               ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
-configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, dshFingerprintRoot(clients, options)),
+              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, dshFingerprintRoot(clients, options)),
               fullScanAt: new Date(lastFullScanAt).toISOString()
             }));
           } catch (_) {}
