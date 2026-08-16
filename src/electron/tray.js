@@ -86,15 +86,69 @@ async function watchSystemDarkUi({ read, wait, publish, isCurrent = () => true, 
   return current;
 }
 
+// Each platform renders the notification-area / menubar icon at a different
+// logical size, so the resize target is platform-specific instead of the old
+// one-size-fits-all height: 20.
+//   - macOS menubar icons sit at ~22 pt and use template tinting.
+//   - Windows draws the notification-area icon at the small-icon system metric
+//     (SM_CXSMICON): 16 px at 100%, scaling with the display's DPI factor
+//     (24 @150%, 32 @200%, 40 @250%, 48 @300%) — track the metric, no cap.
+// https://learn.microsoft.com/en-us/windows/win32/shell/notification-area
+const DARWIN_TRAY_ICON_HEIGHT = 20;
+const WINDOWS_SMALL_ICON_BASE_PX = 16;
+
+function windowsTrayIconHeight(scaleFactor) {
+  const factor = Math.max(1, Number(scaleFactor) || 1);
+  return Math.max(WINDOWS_SMALL_ICON_BASE_PX, Math.round(WINDOWS_SMALL_ICON_BASE_PX * factor));
+}
+
+function primaryDisplayScaleFactor() {
+  // Best-effort: the tray lives on the primary display's taskbar. In contexts
+  // without a live Electron screen (tests), fall back to 1 (= 100% metric).
+  try {
+    return require('electron').screen.getPrimaryDisplay().scaleFactor || 1;
+  } catch (_) {
+    return 1;
+  }
+}
+
+// Resize a tray source image to the platform's metric. `height`-only resizing
+// preserves aspect ratio, so wide bar-style icons keep their width while square
+// provider icons stay square. Windows keeps a larger, metric-matched source so
+// the OS never has to blur-upscale an undersized icon on HiDPI.
+function resizeTrayIconForPlatform(img, { platform = process.platform, scaleFactor, square = false } = {}) {
+  if (platform === 'darwin') {
+    return img.resize({ height: DARWIN_TRAY_ICON_HEIGHT, quality: 'best' });
+  }
+  if (platform === 'win32') {
+    const factor = scaleFactor == null ? primaryDisplayScaleFactor() : scaleFactor;
+    return img.resize({ height: windowsTrayIconHeight(factor), quality: 'best' });
+  }
+  // Linux and anything else. Generated tray icons (bars / sessions / limits) are
+  // wider than tall, so default to the aspect-preserving height-only resize the
+  // tray:setIcons handler always used. The bundled default app icon is square
+  // and opts into force-square sizing via `square` to guarantee a 20x20 tile
+  // regardless of the source aspect (the historical buildTrayIcon sizing).
+  return square
+    ? img.resize({ width: 20, height: 20 })
+    : img.resize({ height: 20, quality: 'best' });
+}
+
 function buildTrayIcon(options = {}) {
   const platform = options.platform || process.platform;
   const nativeImage = options.nativeImage || require('electron').nativeImage;
   if (platform === 'darwin') {
-    const image = nativeImage.createFromPath(TRAY_ICON_PATH).resize({ height: 20, quality: 'best' });
-    image.setTemplateImage(true);
-    return image;
+    const image = nativeImage.createFromPath(TRAY_ICON_PATH);
+    const sized = resizeTrayIconForPlatform(image, { platform, scaleFactor: options.scaleFactor });
+    sized.setTemplateImage(true);
+    return sized;
   }
-  return nativeImage.createFromPath(ICON_PATH).resize({ width: 20, height: 20 });
+  // Windows / Linux: the bundled icon.png is already high-resolution, so a
+  // single best-quality downscale to the platform metric keeps the small
+  // notification-area icon crisp on HiDPI instead of the old fixed 20x20. The
+  // default app icon is square, so it keeps the force-square 20x20 tile.
+  const image = nativeImage.createFromPath(ICON_PATH);
+  return resizeTrayIconForPlatform(image, { platform, scaleFactor: options.scaleFactor, square: true });
 }
 
 function trayUsagePeriod(contentMode) {
@@ -359,9 +413,12 @@ module.exports = {
   pickUsageTrayIconId,
   pickWorstLimit,
   popoverBounds,
+  primaryDisplayScaleFactor,
   reconcileCodexAccountSelection,
+  resizeTrayIconForPlatform,
   runTrayMenuAction,
   shouldUseTemplateTrayIcon,
   sortCodexAccountsForDisplay,
-  trayShowsTitle
+  trayShowsTitle,
+  windowsTrayIconHeight
 };

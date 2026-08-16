@@ -242,6 +242,7 @@ const {
   parseWindowsSystemUsesLightTheme,
   popoverBounds,
   reconcileCodexAccountSelection,
+  resizeTrayIconForPlatform,
   runTrayMenuAction,
   watchSystemDarkUi,
   sortCodexAccountsForDisplay,
@@ -6318,8 +6319,15 @@ app.whenReady().then(() => {
       const img = nativeImage.createFromDataURL(dataUrl);
       if (img.isEmpty()) continue;
       // Resize by height only; aspect ratio is preserved, so wide bar-style
-      // icons keep their width while square provider icons stay 20x20.
-      const sized = img.resize({ height: 20, quality: 'best' });
+      // icons keep their width while square provider icons stay square.
+      // Windows targets its own small-icon metric (16px x the display scale
+      // factor) rather than the macOS menubar height, so a single high-quality
+      // downscale of the 44px-tall renderer source stays crisp in the
+      // notification area instead of the old fixed 20px-for-all blur.
+      const sized = resizeTrayIconForPlatform(img, {
+        platform: process.platform,
+        scaleFactor: screen.getPrimaryDisplay().scaleFactor
+      });
       if (shouldUseTemplateTrayIcon(id, process.platform, settings?.showTrayProviderBadge)) sized.setTemplateImage(true);
       providerTrayIcons[id] = sized;
     }
