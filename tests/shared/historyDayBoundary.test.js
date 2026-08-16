@@ -264,6 +264,38 @@ test('aggregateHistory accepts a producer at the opposite end of the zone range'
   });
 });
 
+// The envelope is 26 hours wide, so how many calendar days it covers depends on where
+// in the UTC day it is read: at 00:30 UTC it reaches only 2026-08-15 (UTC-12) through
+// 2026-08-16 (UTC+14), and no correct clock anywhere is on the 17th yet. A device one
+// day fast is not exotic enough to look wrong — it is well formed, adjacent, and
+// passes the expiry gate because its endsAt is a day ahead too — so nothing else here
+// stops it from taking the boundary. When it happens to be idle on its own "today" it
+// contributes no row there either, and the streak of every device that is on time
+// reads 0. Anchoring ±1 day on the UTC date would admit exactly this producer.
+test('aggregateHistory rejects a producer day no zone has reached yet', (t) => {
+  inZone(t, 'UTC', '2026-08-16T00:30:00.000Z', () => {
+    const onTime = deviceOf({
+      deviceId: 'on-time',
+      todayKey: '2026-08-16',
+      endsAt: '2026-08-17T00:00:00.000Z',
+      days: [
+        { date: '2026-08-14', tokens: 5 },
+        { date: '2026-08-15', tokens: 5 },
+        { date: '2026-08-16', tokens: 10 }
+      ]
+    });
+    const fast = deviceOf({
+      deviceId: 'fast',
+      todayKey: '2026-08-17',
+      endsAt: '2026-08-18T00:00:00.000Z',
+      days: [{ date: '2026-08-16', tokens: 1 }]
+    });
+    const merged = aggregateHistory([onTime, fast]);
+    assert.deepEqual(merged.daily.map((d) => d.date), ['2026-08-14', '2026-08-15', '2026-08-16']);
+    assert.equal(merged.summary.currentStreak, 3);
+  });
+});
+
 // A device offline since last year still reports last year's day. Honouring it
 // would pin the rolling window there and keep serving a streak that ended with it.
 test('aggregateHistory does not freeze the window on a closed producer day', (t) => {

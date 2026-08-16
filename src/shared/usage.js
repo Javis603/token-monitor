@@ -1117,17 +1117,18 @@ function calendarDayKey(value) {
     : '';
 }
 
-// Could a correct clock somewhere on Earth be naming this day right now? The bound is
-// the real UTC-offset envelope, not a tolerance: every legal zone sits within
-// [-12h, +14h] of UTC, and both are under 24h, so at any instant a correct clock names
-// the UTC day, the one before it, or the one after. Anchored on UTC precisely because
-// the ends of that envelope are 26 hours apart — a UTC-12 reader and a UTC+14 producer
-// are both right and name days two apart, so the reader's own calendar day is not a
-// reference either end can be measured from. `key` is calendarDayKey() output, so the
-// parse cannot fail.
+// Could a correct clock somewhere on Earth be naming this day right now? A zone at
+// offset o reads the UTC day of now+o, and every legal o sits within [-12h, +14h], so
+// the answer is exactly the UTC days this 26-hour interval touches — an envelope read
+// off the offset range itself, not a tolerance around a reference day. Which is why
+// neither end is a reference: the ends are 26 hours apart, so a UTC-12 reader and a
+// UTC+14 producer are both correct and name days two apart. Measuring ±1 day from
+// either would be both too loose and too tight — at 00:30 UTC the interval covers only
+// two days, and admitting the third lets a producer one day fast take the boundary and
+// zero the streak of every device that is on time.
 function isPlausibleProducerDay(key, nowMs) {
-  const utcMidnight = Date.parse(`${utcDayKey(new Date(nowMs))}T00:00:00.000Z`);
-  return Math.abs(Date.parse(`${key}T00:00:00.000Z`) - utcMidnight) <= 86400000;
+  return key >= utcDayKey(new Date(nowMs - 12 * 3600000))
+    && key <= utcDayKey(new Date(nowMs + 14 * 3600000));
 }
 
 // History is durable device data, not live presence. Keep a stored device's
