@@ -6,6 +6,7 @@
   if (root) root.TokenMonitorFontSettings = api;
 })(typeof window !== 'undefined' ? window : null, function createFontSettingsApi() {
   const DEFAULT_INTERFACE_FONT = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+  const DEFAULT_DASHBOARD_INTERFACE_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   const DEFAULT_DISPLAY_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif';
   const SYSTEM_UI_FONT = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   const FONT_PRESETS = Object.freeze({
@@ -27,10 +28,12 @@
     return normalized;
   }
 
-  function resolveFontFamily(value, role = 'interface') {
-    const custom = normalizeFontFamily(value);
-    if (custom) return custom;
-    return role === 'display' ? DEFAULT_DISPLAY_FONT : DEFAULT_INTERFACE_FONT;
+  function resolveEffectiveFontSettings(settings = {}, options = {}) {
+    const source = settings && typeof settings === 'object' ? settings : {};
+    const interfaceDefault = normalizeFontFamily(options.interfaceDefault) || DEFAULT_INTERFACE_FONT;
+    const interfaceFont = normalizeFontFamily(source.interfaceFontFamily) || interfaceDefault;
+    const displayFont = normalizeFontFamily(source.displayFontFamily) || interfaceFont;
+    return { interfaceFont, displayFont };
   }
 
   function presetForFontFamily(value, role = 'interface') {
@@ -52,6 +55,7 @@
   }
 
   return {
+    DEFAULT_DASHBOARD_INTERFACE_FONT,
     DEFAULT_DISPLAY_FONT,
     DEFAULT_INTERFACE_FONT,
     FONT_PRESETS,
@@ -60,6 +64,6 @@
     fontFamilyForPreset,
     normalizeFontFamily,
     presetForFontFamily,
-    resolveFontFamily
+    resolveEffectiveFontSettings
   };
 });

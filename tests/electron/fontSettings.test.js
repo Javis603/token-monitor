@@ -17,8 +17,13 @@ test('font settings preserve the built-in roles and reject declaration injection
   assert.equal(fontSettings.normalizeFontFamily(''), '');
   assert.equal(fontSettings.normalizeFontFamily('font-family: sans-serif;'), '');
   assert.equal(fontSettings.normalizeFontFamily('A'.repeat(fontSettings.MAX_FONT_FAMILY_LENGTH + 1)), '');
-  assert.equal(fontSettings.resolveFontFamily('', 'interface'), fontSettings.DEFAULT_INTERFACE_FONT);
-  assert.equal(fontSettings.resolveFontFamily('', 'display'), fontSettings.DEFAULT_DISPLAY_FONT);
+  assert.deepEqual(
+    fontSettings.resolveEffectiveFontSettings({ interfaceFontFamily: '', displayFontFamily: '' }),
+    {
+      interfaceFont: fontSettings.DEFAULT_INTERFACE_FONT,
+      displayFont: fontSettings.DEFAULT_INTERFACE_FONT
+    }
+  );
 });
 
 test('font presets cover common roles and preserve custom values', () => {
@@ -35,6 +40,77 @@ test('font presets cover common roles and preserve custom values', () => {
   assert.equal(fontSettings.fontFamilyForPreset('system'), fontSettings.SYSTEM_UI_FONT);
   assert.equal(fontSettings.fontFamilyForPreset('mono'), fontSettings.FONT_PRESETS.mono);
   assert.equal(fontSettings.fontFamilyForPreset('custom', 'Noto Sans CJK TC'), 'Noto Sans CJK TC');
+});
+
+test('follow interface resolves against each renderer effective default', () => {
+  const customA = 'Noto Sans CJK TC';
+  const customB = 'IBM Plex Mono';
+  const cases = [
+    {
+      name: 'App default + App default',
+      settings: {
+        interfaceFontFamily: '',
+        displayFontFamily: fontSettings.DEFAULT_DISPLAY_FONT
+      },
+      expected: {
+        interfaceFont: fontSettings.DEFAULT_INTERFACE_FONT,
+        displayFont: fontSettings.DEFAULT_DISPLAY_FONT
+      }
+    },
+    {
+      name: 'App default + Follow interface',
+      settings: { interfaceFontFamily: '', displayFontFamily: '' },
+      expected: {
+        interfaceFont: fontSettings.DEFAULT_INTERFACE_FONT,
+        displayFont: fontSettings.DEFAULT_INTERFACE_FONT
+      }
+    },
+    {
+      name: 'System UI + Follow interface',
+      settings: { interfaceFontFamily: fontSettings.SYSTEM_UI_FONT, displayFontFamily: '' },
+      expected: {
+        interfaceFont: fontSettings.SYSTEM_UI_FONT,
+        displayFont: fontSettings.SYSTEM_UI_FONT
+      }
+    },
+    {
+      name: 'Mono + Follow interface',
+      settings: { interfaceFontFamily: fontSettings.FONT_PRESETS.mono, displayFontFamily: '' },
+      expected: {
+        interfaceFont: fontSettings.FONT_PRESETS.mono,
+        displayFont: fontSettings.FONT_PRESETS.mono
+      }
+    },
+    {
+      name: 'Custom A + Follow interface',
+      settings: { interfaceFontFamily: customA, displayFontFamily: '' },
+      expected: { interfaceFont: customA, displayFont: customA }
+    },
+    {
+      name: 'Custom A + Custom B',
+      settings: { interfaceFontFamily: customA, displayFontFamily: customB },
+      expected: { interfaceFont: customA, displayFont: customB }
+    }
+  ];
+
+  for (const scenario of cases) {
+    assert.deepEqual(
+      fontSettings.resolveEffectiveFontSettings(scenario.settings),
+      scenario.expected,
+      scenario.name
+    );
+  }
+
+  assert.deepEqual(
+    fontSettings.resolveEffectiveFontSettings(
+      { interfaceFontFamily: '', displayFontFamily: '' },
+      { interfaceDefault: fontSettings.DEFAULT_DASHBOARD_INTERFACE_FONT }
+    ),
+    {
+      interfaceFont: fontSettings.DEFAULT_DASHBOARD_INTERFACE_FONT,
+      displayFont: fontSettings.DEFAULT_DASHBOARD_INTERFACE_FONT
+    }
+  );
 });
 
 test('font controls live inside Appearance advanced customization', () => {
@@ -63,7 +139,7 @@ test('font controls live inside Appearance advanced customization', () => {
   assert.match(advanced, /data-i18n="settings\.appearance\.fontNote"/);
 });
 
-test('font settings apply to both renderer surfaces without replacing technical monospace roles', () => {
+test('font settings wiring keeps renderer defaults concrete and technical monospace roles intact', () => {
   const app = readProjectFile('src', 'electron', 'renderer', 'app.js');
   const dashboard = readProjectFile('src', 'electron', 'renderer', 'dashboard.js');
   const styles = readProjectFile('src', 'electron', 'renderer', 'styles.css');
@@ -72,16 +148,9 @@ test('font settings apply to both renderer surfaces without replacing technical 
 
   assert.match(main, /interfaceFontFamily/);
   assert.match(main, /displayFontFamily/);
-  assert.match(app, /applyFontSettings\(settings\)/);
-  assert.match(app, /interfaceFontPreset/);
-  assert.match(app, /handleFontPresetChange/);
-  assert.match(app, /updateFontPreview/);
-  assert.match(app, /if \(controls\.preset\?\.value === 'custom'\)/);
-  assert.match(app, /'--display-font', 'var\(--ui-font\)'/);
-  assert.match(app, /displayFontPreset\) els\.displayFontPreset\.value = 'app'/);
-  assert.match(app, /saveFontSettingsFromControls/);
-  assert.match(dashboard, /applyFontSettings\(next\)/);
-  assert.match(dashboard, /'--display-font', 'var\(--ui-font\)'/);
+  assert.match(app, /resolveEffectiveFontSettings\(source\)/);
+  assert.match(dashboard, /resolveEffectiveFontSettings\(settings, \{/);
+  assert.doesNotMatch(`${app}\n${dashboard}`, /setProperty\('--display-font', 'var\(--ui-font\)'/);
   assert.match(styles, /font-family: var\(--ui-font,/);
   assert.match(styles, /font-family: var\(--display-font,/);
   const fontControlsCss = styles.match(/\.settings-font-controls \{([\s\S]*?)\}/)?.[1] || '';

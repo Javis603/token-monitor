@@ -7338,12 +7338,9 @@ function applyControlLayout(swapSettingsAndRefresh) {
 function applyFontSettings(settings) {
   const source = { ...(state.settings || {}), ...(settings || {}) };
   const root = document.documentElement.style;
-  const interfaceFont = fontSettingsApi.normalizeFontFamily(source.interfaceFontFamily);
-  const displayFont = fontSettingsApi.normalizeFontFamily(source.displayFontFamily);
-  if (interfaceFont) root.setProperty('--ui-font', interfaceFont);
-  else root.removeProperty('--ui-font');
-  if (displayFont) root.setProperty('--display-font', displayFont);
-  else root.setProperty('--display-font', 'var(--ui-font)');
+  const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(source);
+  root.setProperty('--ui-font', interfaceFont);
+  root.setProperty('--display-font', displayFont);
 }
 
 function applyAppearanceSettings(settings) {
@@ -8024,12 +8021,11 @@ function fontFamilyFromControls(role) {
 }
 
 function fontPreviewForControls(role) {
-  const controls = fontControlsFor(role);
-  const preset = controls.preset?.value || (role === 'display' ? 'follow' : 'app');
-  if (preset === 'follow') return 'var(--ui-font)';
-  const selected = fontSettingsApi.fontFamilyForPreset(preset, controls.input?.value, role);
-  if (selected) return selected;
-  return role === 'display' ? fontSettingsApi.DEFAULT_DISPLAY_FONT : 'var(--ui-font)';
+  const resolved = fontSettingsApi.resolveEffectiveFontSettings({
+    interfaceFontFamily: fontFamilyFromControls('interface'),
+    displayFontFamily: fontFamilyFromControls('display')
+  });
+  return role === 'display' ? resolved.displayFont : resolved.interfaceFont;
 }
 
 function updateFontPreview(role) {

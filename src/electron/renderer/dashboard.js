@@ -224,12 +224,11 @@ function applyAppearance(settings) {
 
 function applyFontSettings(settings) {
   const root = document.documentElement.style;
-  const interfaceFont = fontSettingsApi.normalizeFontFamily(settings?.interfaceFontFamily);
-  const displayFont = fontSettingsApi.normalizeFontFamily(settings?.displayFontFamily);
-  if (interfaceFont) root.setProperty('--ui-font', interfaceFont);
-  else root.removeProperty('--ui-font');
-  if (displayFont) root.setProperty('--display-font', displayFont);
-  else root.setProperty('--display-font', 'var(--ui-font)');
+  const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(settings, {
+    interfaceDefault: fontSettingsApi.DEFAULT_DASHBOARD_INTERFACE_FONT
+  });
+  root.setProperty('--ui-font', interfaceFont);
+  root.setProperty('--display-font', displayFont);
 }
 
 function applyThemeColors(overrides) {
