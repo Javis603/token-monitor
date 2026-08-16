@@ -93,8 +93,12 @@ function normalizeSegment(value, fallbackId = 1) {
   const start = normalizeObservation(value?.start);
   const latest = normalizeObservation(value?.latest);
   if (!start || !latest) return null;
-  const estimateStart = normalizeObservation(value?.estimateStart);
+  let estimateStart = normalizeObservation(value?.estimateStart);
   const estimateEnd = normalizeObservation(value?.estimateEnd);
+  // Older v2 builds anchored the reset cycle at the first 99% observation.
+  // A witnessed 100% point is an exact cycle boundary, so retain its cost as
+  // the endpoint-net start when loading those records as well.
+  if (start.usedPercent === 0 && estimateStart?.usedPercent === 1) estimateStart = start;
   return {
     id: Math.max(1, Math.round(finiteNumber(value?.id) || fallbackId)),
     status: value?.status === 'closed' ? 'closed' : 'active',
@@ -438,11 +442,12 @@ function observeCodexWeeklyQuota(stateValue, observation, options = {}) {
 
   if (percentDelta > EPSILON) {
     if (!segment.estimateStart) {
-      const reason = previous.usedPercent === 0 && sample.usedPercent >= 1
+      const startsAtReset = previous.usedPercent === 0 && sample.usedPercent <= 1 + EPSILON;
+      const reason = startsAtReset
         ? 'initialRoundedBucket'
         : 'initialBoundary';
       appendSample(cycle, jumpSample(cycle, accountKey, previous, sample, 'anchor', reason, segment.id));
-      segment.estimateStart = sample;
+      segment.estimateStart = startsAtReset ? previous : sample;
       segment.estimateEnd = sample;
     } else {
       appendSample(cycle, jumpSample(cycle, accountKey, previous, sample, 'valid', '', segment.id));
