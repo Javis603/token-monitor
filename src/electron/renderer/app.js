@@ -6,6 +6,7 @@ const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
+const fontSettingsApi = window.TokenMonitorFontSettings;
 const wslStatusPresentationApi = window.TokenMonitorWslStatusPresentation;
 const statsRenderSchedulerApi = window.TokenMonitorStatsRenderScheduler;
 const tokenRateApi = window.TokenMonitorTokenRate;
@@ -458,6 +459,16 @@ Object.assign(els, {
   themeAdvancedGroup: document.getElementById('themeAdvancedGroup'),
   themeAdvancedToggle: document.getElementById('themeAdvancedToggle'),
   themeAdvancedDetails: document.getElementById('themeAdvancedDetails'),
+  interfaceFontPreset: document.getElementById('interfaceFontPreset'),
+  interfaceFontInput: document.getElementById('interfaceFontInput'),
+  interfaceFontCustomRow: document.getElementById('interfaceFontCustomRow'),
+  interfaceFontPreview: document.getElementById('interfaceFontPreview'),
+  displayFontPreset: document.getElementById('displayFontPreset'),
+  displayFontInput: document.getElementById('displayFontInput'),
+  displayFontCustomRow: document.getElementById('displayFontCustomRow'),
+  displayFontPreview: document.getElementById('displayFontPreview'),
+  resetInterfaceFontButton: document.getElementById('resetInterfaceFontButton'),
+  resetDisplayFontButton: document.getElementById('resetDisplayFontButton'),
   themeVendorGroup: document.getElementById('themeVendorGroup'),
   themeVendorToggle: document.getElementById('themeVendorToggle'),
   themeVendorDetails: document.getElementById('themeVendorDetails'),
@@ -7324,6 +7335,17 @@ function applyControlLayout(swapSettingsAndRefresh) {
   }
 }
 
+function applyFontSettings(settings) {
+  const source = { ...(state.settings || {}), ...(settings || {}) };
+  const root = document.documentElement.style;
+  const interfaceFont = fontSettingsApi.normalizeFontFamily(source.interfaceFontFamily);
+  const displayFont = fontSettingsApi.normalizeFontFamily(source.displayFontFamily);
+  if (interfaceFont) root.setProperty('--ui-font', interfaceFont);
+  else root.removeProperty('--ui-font');
+  if (displayFont) root.setProperty('--display-font', displayFont);
+  else root.setProperty('--display-font', 'var(--ui-font)');
+}
+
 function applyAppearanceSettings(settings) {
   const opacity = glassRenderingApi.renderedGlassOpacity(settings, {
     platform: state.appInfo?.platform,
@@ -7352,6 +7374,7 @@ function applyAppearanceSettings(settings) {
     els.windowsBackdropNote.classList.toggle('hidden', !windowsGlass.showAccentNote);
   }
   applyReduceMotionPreference(settings?.reduceMotion);
+  applyFontSettings(settings);
   // Only full settings objects carry themeColors; glass/zoom preview patches
   // omit it, so we must not wipe theme overrides mid-slider-drag.
   if (settings && 'themeColors' in settings) applyThemeColors(settings.themeColors);
@@ -7981,6 +8004,95 @@ function appearancePatchFromControls() {
   };
 }
 
+function fontControlsFor(role) {
+  return role === 'display'
+    ? { preset: els.displayFontPreset, input: els.displayFontInput, customRow: els.displayFontCustomRow }
+    : { preset: els.interfaceFontPreset, input: els.interfaceFontInput, customRow: els.interfaceFontCustomRow };
+}
+
+function syncFontCustomRow(role) {
+  const controls = fontControlsFor(role);
+  const isCustom = controls.preset?.value === 'custom';
+  controls.customRow?.classList.toggle('hidden', !isCustom);
+  if (controls.input) controls.input.disabled = !isCustom;
+  updateFontPreview(role);
+}
+
+function fontFamilyFromControls(role) {
+  const controls = fontControlsFor(role);
+  return fontSettingsApi.fontFamilyForPreset(controls.preset?.value || (role === 'display' ? 'follow' : 'app'), controls.input?.value, role);
+}
+
+function fontPreviewForControls(role) {
+  const controls = fontControlsFor(role);
+  const preset = controls.preset?.value || (role === 'display' ? 'follow' : 'app');
+  if (preset === 'follow') return 'var(--ui-font)';
+  const selected = fontSettingsApi.fontFamilyForPreset(preset, controls.input?.value, role);
+  if (selected) return selected;
+  return role === 'display' ? fontSettingsApi.DEFAULT_DISPLAY_FONT : 'var(--ui-font)';
+}
+
+function updateFontPreview(role) {
+  const preview = role === 'display' ? els.displayFontPreview : els.interfaceFontPreview;
+  if (preview) preview.style.fontFamily = fontPreviewForControls(role);
+}
+
+function fontPatchFromControls() {
+  return {
+    interfaceFontFamily: fontFamilyFromControls('interface'),
+    displayFontFamily: fontFamilyFromControls('display')
+  };
+}
+
+function previewFontSettings() {
+  syncFontCustomRow('interface');
+  syncFontCustomRow('display');
+  applyFontSettings(fontPatchFromControls());
+}
+
+async function saveFontSettingsFromControls() {
+  previewFontSettings();
+  await saveSettings(fontPatchFromControls());
+}
+
+function handleFontPresetChange(role) {
+  syncFontCustomRow(role);
+  const controls = fontControlsFor(role);
+  previewFontSettings();
+  if (controls.preset?.value === 'custom') {
+    controls.input?.focus();
+    if (!fontSettingsApi.normalizeFontFamily(controls.input?.value)) return;
+  }
+  void saveFontSettingsFromControls();
+}
+
+async function resetInterfaceFont() {
+  if (els.interfaceFontPreset) els.interfaceFontPreset.value = 'app';
+  if (els.interfaceFontInput) els.interfaceFontInput.value = '';
+  syncFontCustomRow('interface');
+  previewFontSettings();
+  await saveSettings({ interfaceFontFamily: '' });
+}
+
+async function resetDisplayFont() {
+  if (els.displayFontPreset) els.displayFontPreset.value = 'app';
+  if (els.displayFontInput) els.displayFontInput.value = '';
+  syncFontCustomRow('display');
+  previewFontSettings();
+  await saveSettings({ displayFontFamily: fontSettingsApi.DEFAULT_DISPLAY_FONT });
+}
+
+function syncFontSettingsControls() {
+  for (const [role, settingKey] of [['interface', 'interfaceFontFamily'], ['display', 'displayFontFamily']]) {
+    const controls = fontControlsFor(role);
+    const value = fontSettingsApi.normalizeFontFamily(state.settings?.[settingKey]);
+    const preset = fontSettingsApi.presetForFontFamily(value, role);
+    if (controls.preset) controls.preset.value = preset;
+    if (controls.input) controls.input.value = preset === 'custom' ? value : '';
+    syncFontCustomRow(role);
+  }
+}
+
 function syncSliderRow(input) {
   if (!input) return;
   const valueEl = input.closest('.settings-slider-item')?.querySelector('.slider-value');
@@ -8286,6 +8398,7 @@ function syncSettingsForm() {
   if (els.compactTokenUnitsInput) {
     els.compactTokenUnitsInput.value = state.settings.compactTokenUnits === 'localized' ? 'localized' : 'western';
   }
+  syncFontSettingsControls();
   els.compactTokenUnitsRow?.classList.toggle(
     'hidden',
     !supportsLocalizedCompactTokenUnits(currentLocale())
@@ -11081,6 +11194,14 @@ els.blurInput.addEventListener('input', applyAppearanceFromControls);
 els.zoomInput.addEventListener('input', applyAppearanceFromControls);
 els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}));
 els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
+els.interfaceFontPreset?.addEventListener('change', () => handleFontPresetChange('interface'));
+els.displayFontPreset?.addEventListener('change', () => handleFontPresetChange('display'));
+els.interfaceFontInput?.addEventListener('input', previewFontSettings);
+els.displayFontInput?.addEventListener('input', previewFontSettings);
+els.interfaceFontInput?.addEventListener('change', saveFontSettingsFromControls);
+els.displayFontInput?.addEventListener('change', saveFontSettingsFromControls);
+els.resetInterfaceFontButton?.addEventListener('click', () => resetInterfaceFont());
+els.resetDisplayFontButton?.addEventListener('click', () => resetDisplayFont());
 els.applyThemeCodeButton?.addEventListener('click', () => { void pasteAndApplyThemeCode(); });
 els.copyThemeCodeButton?.addEventListener('click', () => { void copyCurrentThemeCode(); });
 els.themeCodeInput?.addEventListener('keydown', (event) => {

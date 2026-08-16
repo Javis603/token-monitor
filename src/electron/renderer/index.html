@@ -375,6 +375,50 @@
                 </button>
                 <div id="themeAdvancedDetails" class="cursor-settings-details hidden" inert>
                   <div id="themeColorGrid" class="color-picker-grid"></div>
+                  <div class="settings-font-controls">
+                    <div class="settings-font-field">
+                      <label class="settings-item-title" for="interfaceFontPreset" data-i18n="settings.appearance.fontInterface">Interface font</label>
+                      <span class="settings-font-input-row">
+                        <select id="interfaceFontPreset" aria-describedby="fontSettingsNote">
+                          <option value="app" data-i18n="settings.appearance.fontPresetApp">App default</option>
+                          <option value="system" data-i18n="settings.appearance.fontPresetSystem">System UI</option>
+                          <option value="mono" data-i18n="settings.appearance.fontPresetMono">Monospace</option>
+                          <option value="custom" data-i18n="settings.appearance.fontPresetCustom">Custom…</option>
+                        </select>
+                        <button id="resetInterfaceFontButton" class="reset-appearance-button reset-inline" type="button" title="Reset font" data-i18n-title="settings.appearance.resetFont" aria-label="Reset interface font" data-i18n-aria-label="settings.appearance.resetInterfaceFont">↺</button>
+                      </span>
+                      <div id="interfaceFontCustomRow" class="settings-font-custom-row hidden">
+                        <label for="interfaceFontInput" data-i18n="settings.appearance.fontCustomLabel">Custom font family</label>
+                        <input id="interfaceFontInput" type="text" maxlength="160" autocomplete="off" spellcheck="false" placeholder="Enter a font family" data-i18n-placeholder="settings.appearance.fontPlaceholder" aria-describedby="fontSettingsNote" />
+                        <div class="settings-font-preview">
+                          <span class="settings-font-preview-label" data-i18n="settings.appearance.fontPreview">Preview</span>
+                          <span id="interfaceFontPreview" class="settings-font-preview-sample">Aa 中文 0123</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="settings-font-field">
+                      <label class="settings-item-title" for="displayFontPreset" data-i18n="settings.appearance.fontDisplay">Display and number font</label>
+                      <span class="settings-font-input-row">
+                        <select id="displayFontPreset" aria-describedby="fontSettingsNote">
+                          <option value="follow" data-i18n="settings.appearance.fontPresetFollow">Follow interface</option>
+                          <option value="app" data-i18n="settings.appearance.fontPresetApp">App default</option>
+                          <option value="system" data-i18n="settings.appearance.fontPresetSystem">System UI</option>
+                          <option value="mono" data-i18n="settings.appearance.fontPresetMono">Monospace</option>
+                          <option value="custom" data-i18n="settings.appearance.fontPresetCustom">Custom…</option>
+                        </select>
+                        <button id="resetDisplayFontButton" class="reset-appearance-button reset-inline" type="button" title="Reset font" data-i18n-title="settings.appearance.resetFont" aria-label="Reset display font" data-i18n-aria-label="settings.appearance.resetDisplayFont">↺</button>
+                      </span>
+                      <div id="displayFontCustomRow" class="settings-font-custom-row hidden">
+                        <label for="displayFontInput" data-i18n="settings.appearance.fontCustomLabel">Custom font family</label>
+                        <input id="displayFontInput" type="text" maxlength="160" autocomplete="off" spellcheck="false" placeholder="Enter a font family" data-i18n-placeholder="settings.appearance.fontPlaceholder" aria-describedby="fontSettingsNote" />
+                        <div class="settings-font-preview">
+                          <span class="settings-font-preview-label" data-i18n="settings.appearance.fontPreview">Preview</span>
+                          <span id="displayFontPreview" class="settings-font-preview-sample">Aa 中文 0123</span>
+                        </div>
+                      </div>
+                    </div>
+                    <p id="fontSettingsNote" class="settings-note" data-i18n="settings.appearance.fontNote">App default uses Token Monitor's built-in typography. System UI uses your operating system's interface font. Choose Custom… to enter a font family.</p>
+                  </div>
                 </div>
               </div>
               <div id="themeVendorGroup" class="settings-group cursor-account-group theme-color-accordion settings-vendor-color-group">
@@ -1547,6 +1591,7 @@
     <script src="../../shared/subscriptionDisplay.js"></script>
     <script src="../../shared/compactTokens.js"></script>
     <script src="../../shared/compactMoney.js"></script>
+    <script src="../../shared/fontSettings.js"></script>
     <script src="../../shared/trayText.js"></script>
     <script src="../../shared/trayLayout.js"></script>
     <script src="tokenRatePresentation.js"></script>
