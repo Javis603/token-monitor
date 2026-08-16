@@ -102,6 +102,10 @@ test('mac release scripts build native Apple Silicon and Intel artifacts', () =>
 
 test('release workflow pins Electron only for the Linux artifact', () => {
   assert.equal(rootPackage.devDependencies.electron, '43.4.0');
+  assert.match(
+    rootPackage.scripts['dist:linux'],
+    /^electron-builder --config scripts\/electron-builder\.config\.js --linux --x64 --publish never$/
+  );
   assert.equal(resolveElectronVersionOverride({}), undefined);
   assert.equal(
     resolveElectronVersionOverride({
@@ -151,6 +155,7 @@ test('release workflow pins Electron only for the Linux artifact', () => {
   const workflow = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'release.yml'), 'utf8');
   assert.match(workflow, /if: matrix\.target == 'linux'\s+run: \|\s+echo "TOKEN_MONITOR_ELECTRON_TARGET=linux" >> "\$GITHUB_ENV"/);
   assert.match(workflow, /echo "TOKEN_MONITOR_LINUX_ELECTRON_VERSION=43\.2\.0" >> "\$GITHUB_ENV"/);
+  assert.match(workflow, /- name: Verify Electron packaging version\s+run: \|\s+node -e /);
   assert.match(workflow, /require\('\.\/scripts\/electron-builder\.config\.js'\)/);
   assert.match(workflow, /npm run \$\{\{ matrix\.dist_script \}\}/);
 });

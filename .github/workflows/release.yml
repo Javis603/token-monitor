@@ -65,7 +65,8 @@ jobs:
           echo "TOKEN_MONITOR_ELECTRON_TARGET=linux" >> "$GITHUB_ENV"
           echo "TOKEN_MONITOR_LINUX_ELECTRON_VERSION=43.2.0" >> "$GITHUB_ENV"
       - name: Verify Electron packaging version
-        run: node -e "const config = require('./scripts/electron-builder.config.js'); const installed = require('electron/package.json').version; const effective = config.electronVersion || installed; const expected = process.env.TOKEN_MONITOR_LINUX_ELECTRON_VERSION || installed; console.log('Electron packaging version:', effective, '(installed:', installed + ')'); if (effective !== expected) throw new Error('Electron packaging version mismatch: expected ' + expected + ', got ' + effective);"
+        run: |
+          node -e "const config = require('./scripts/electron-builder.config.js'); const installed = require('electron/package.json').version; const effective = config.electronVersion || installed; const expected = process.env.TOKEN_MONITOR_LINUX_ELECTRON_VERSION || installed; console.log('Electron packaging version:', effective, '(installed:', installed + ')'); if (effective !== expected) throw new Error('Electron packaging version mismatch: expected ' + expected + ', got ' + effective);"
       # electron-builder needs the notarization key as a file, not the base64 secret directly.
       - name: Decode Apple API key
         if: matrix.target == 'mac'

@@ -26,7 +26,7 @@
     "dist:win": "electron-builder --win --x64 --publish never",
     "dist:win:dir": "electron-builder --win dir --x64 --publish never",
     "dist:win:prepackaged": "electron-builder --prepackaged dist/win-unpacked --win nsis portable --x64 --publish never",
-    "dist:linux": "electron-builder --linux --x64 --publish never",
+    "dist:linux": "electron-builder --config scripts/electron-builder.config.js --linux --x64 --publish never",
     "verify:release-artifact-names": "node scripts/verify-updater-artifact-names.js dist",
     "lint": "eslint .",
     "verify": "npm run lint && npm test"
