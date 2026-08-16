@@ -157,8 +157,11 @@ function normalizeCycleV2(value) {
     normalizeSegment(segment, index + 1)
   )).filter(Boolean).slice(-MAX_SEGMENTS_PER_CYCLE);
   if (segments.length === 0) segments.push(newSegment(latest, 1));
-  if (!segments.some((segment) => segment.status === 'active')) {
-    segments.push(newSegment(latest, Math.max(...segments.map((segment) => segment.id)) + 1));
+  const activeSegments = segments.filter((segment) => segment.status === 'active');
+  for (const segment of activeSegments.slice(0, -1)) {
+    segment.status = 'closed';
+    segment.reason ||= 'superseded';
+    segment.endedAt ||= segment.latest.observedAt;
   }
   return {
     id: String(value?.id || `${resetAt}#${latest.observedAt}`),

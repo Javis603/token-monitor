@@ -267,6 +267,8 @@ test('switching away and back requires a fresh boundary before sampling', () => 
   const samples = activeCycle(result).samples;
   assert.equal(samples.at(-1).status, 'valid');
   assert.ok(Math.abs(samples.at(-1).costDeltaUsd - 1.2) < 0.000001);
+  assert.equal(activeCycle(result).segments.length, 2);
+  assert.equal(activeCycle(result).segments.filter((segment) => segment.status === 'active').length, 1);
 });
 
 test('stored estimates are selected independently by account and reset cycle', () => {
