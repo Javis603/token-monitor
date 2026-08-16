@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -13,6 +14,7 @@ const {
   verifyUpdaterArtifactNames
 } = require('../../scripts/verify-updater-artifact-names');
 const { mergeMacUpdaterMetadata } = require('../../scripts/merge-mac-updater-metadata');
+const { resolveElectronVersionOverride } = require('../../scripts/electron-builder-version');
 const { extractReleaseNotes } = require('../../src/shared/appUpdater');
 const { MAC_APP_MIN_DARWIN_VERSION } = require('../../src/shared/macSystemRequirements');
 
@@ -96,6 +98,61 @@ test('mac release scripts build native Apple Silicon and Intel artifacts', () =>
     releaseTemplate,
     /---\s*<details>\s*<summary><strong>Full Changelog:<\/strong> <a href="[^"]+">v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+<\/a><\/summary>\s*<!-- github-generated-release-notes -->\s*<\/details>\s*<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>/
   );
+});
+
+test('release workflow pins Electron only for the Linux artifact', () => {
+  assert.equal(rootPackage.devDependencies.electron, '43.4.0');
+  assert.equal(resolveElectronVersionOverride({}), undefined);
+  assert.equal(
+    resolveElectronVersionOverride({
+      TOKEN_MONITOR_ELECTRON_TARGET: 'linux',
+      TOKEN_MONITOR_LINUX_ELECTRON_VERSION: '43.2.0'
+    }),
+    '43.2.0'
+  );
+  assert.throws(
+    () => resolveElectronVersionOverride({ TOKEN_MONITOR_LINUX_ELECTRON_VERSION: '43.2.0' }),
+    /only valid for a Linux build/
+  );
+  const defaultConfig = execFileSync(
+    process.execPath,
+    ['-e', "process.stdout.write(String(require('./scripts/electron-builder.config.js').electronVersion || ''))"],
+    {
+      cwd: path.join(__dirname, '..', '..'),
+      env: {
+        ...process.env,
+        TOKEN_MONITOR_ELECTRON_TARGET: '',
+        TOKEN_MONITOR_LINUX_ELECTRON_VERSION: ''
+      }
+    }
+  ).toString();
+  assert.equal(defaultConfig, '');
+  const configWithLinuxOverride = execFileSync(
+    process.execPath,
+    ['-e', "process.stdout.write(String(require('./scripts/electron-builder.config.js').electronVersion || ''))"],
+    {
+      cwd: path.join(__dirname, '..', '..'),
+      env: {
+        ...process.env,
+        TOKEN_MONITOR_ELECTRON_TARGET: 'linux',
+        TOKEN_MONITOR_LINUX_ELECTRON_VERSION: '43.2.0'
+      }
+    }
+  ).toString();
+  assert.equal(configWithLinuxOverride, '43.2.0');
+  assert.throws(
+    () => resolveElectronVersionOverride({
+      TOKEN_MONITOR_ELECTRON_TARGET: 'linux',
+      TOKEN_MONITOR_LINUX_ELECTRON_VERSION: '43.2'
+    }),
+    /must be an exact semver version/
+  );
+
+  const workflow = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'release.yml'), 'utf8');
+  assert.match(workflow, /if: matrix\.target == 'linux'\s+run: \|\s+echo "TOKEN_MONITOR_ELECTRON_TARGET=linux" >> "\$GITHUB_ENV"/);
+  assert.match(workflow, /echo "TOKEN_MONITOR_LINUX_ELECTRON_VERSION=43\.2\.0" >> "\$GITHUB_ENV"/);
+  assert.match(workflow, /require\('\.\/scripts\/electron-builder\.config\.js'\)/);
+  assert.match(workflow, /npm run \$\{\{ matrix\.dist_script \}\}/);
 });
 
 test('release icons use source assets without the legacy generator', () => {
