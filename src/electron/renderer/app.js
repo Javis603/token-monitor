@@ -9668,20 +9668,20 @@ function renderWslPanel() {
       row.append(name, tag);
       els.wslPanel.append(row);
     }
+  }
 
-    if (wslStatusPresentationApi.sqliteHelpClients(status).length > 0) {
-      const help = document.createElement('p');
-      help.className = 'settings-note wsl-panel-help';
-      const message = document.createElement('span');
-      message.textContent = t('settings.collection.wslPanel.sqliteHelp');
-      const guide = document.createElement('button');
-      guide.type = 'button';
-      guide.className = 'inline-link';
-      guide.textContent = t('settings.collection.wslPanel.setupGuide');
-      guide.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL));
-      help.append(message, ' ', guide);
-      els.wslPanel.append(help);
-    }
+  if (wslStatusPresentationApi.shouldShowSqliteHelp(status)) {
+    const help = document.createElement('p');
+    help.className = 'settings-note wsl-panel-help';
+    const message = document.createElement('span');
+    message.textContent = t('settings.collection.wslPanel.sqliteHelp');
+    const guide = document.createElement('button');
+    guide.type = 'button';
+    guide.className = 'inline-link';
+    guide.textContent = t('settings.collection.wslPanel.setupGuide');
+    guide.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL));
+    help.append(message, ' ', guide);
+    els.wslPanel.append(help);
   }
 }
 
