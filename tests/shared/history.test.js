@@ -319,7 +319,11 @@ test('mergeHistories handles empty list', () => {
   assert.equal(m.summary.totalTokens, 0);
 });
 
-test('localDayKey renders the local calendar day, not the UTC one', () => {
+// A formatter smoke test: it derives `expected` the same way localDayKey() does, so it
+// pins the zero-padded shape and nothing about which calendar the key belongs to. The
+// local-vs-UTC behaviour is covered in historyDayBoundary.test.js, which fixes the
+// timezone and the instant so the two calendars actually disagree.
+test('localDayKey renders a zero-padded calendar day', () => {
   const at = new Date('2026-06-07T23:30:00.000Z');
   const expected = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
   assert.equal(localDayKey(at), expected);

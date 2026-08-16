@@ -1184,8 +1184,12 @@ function isPlausibleProducerDay(key, nowMs) {
 // fleet of those keeps the best-effort local-day behaviour it has always had.
 function aggregateHistory(devices, options = {}) {
   const explicitToday = calendarDayKey(options.todayKey);
-  const clockToday = localDayKey();
-  const nowMs = Date.now();
+  // One instant for the whole pass. Reading the clock twice lets a local midnight fall
+  // between them, which would date the fallback a day behind the expiry and
+  // plausibility tests it is meant to back up.
+  const now = new Date();
+  const nowMs = now.getTime();
+  const clockToday = localDayKey(now);
   const histories = [];
   let reportedToday = '';
   for (const record of devices) {
