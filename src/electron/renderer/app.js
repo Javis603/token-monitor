@@ -10940,7 +10940,8 @@ els.saveSettingsButton.addEventListener('click', async () => {
   const patch = {
     hubUrl: els.hubUrlInput.value.trim(),
     secret: els.secretInput.value,
-    deviceId: els.deviceIdInput.value.trim()
+    deviceId: els.deviceIdInput.value.trim(),
+    syncUploadIntervalMs: Number(els.syncUploadIntervalInput.value)
   };
   if (state.settings.hubMode === 'host') {
     patch.hubHostPort = Number(els.hubPortInput.value) || 17321;
@@ -11110,9 +11111,6 @@ for (const input of els.showLimitUsedInputs || []) {
     if (input.checked) await saveSettings({ showLimitUsed: input.value === 'used' });
   });
 }
-els.syncUploadIntervalInput?.addEventListener('change', async () => {
-  await saveSettings({ syncUploadIntervalMs: Number(els.syncUploadIntervalInput.value) });
-});
 els.collectionCadenceInput?.addEventListener('change', async () => {
   const value = els.collectionCadenceInput.value;
   await saveSettings({
