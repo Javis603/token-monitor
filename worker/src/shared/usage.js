@@ -6,7 +6,7 @@
 const PERIODS = ['today', 'month', 'allTime'];
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
 const { normalizeClientHealth } = require('./clientHealth');
-const { coerceHistory, mergeHistories } = require('./history');
+const { coerceHistory, localDayKey, mergeHistories } = require('./history');
 const { REASONIX_CLIENT } = require('./reasonixPaths');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
@@ -1105,18 +1105,93 @@ function carryDeviceHistory(previous, incoming) {
   return incoming;
 }
 
+// A real calendar day or nothing. This key arrives on the wire from anything that can
+// ingest, and it is consumed as a lexical maximum, so shape-only matching is not
+// enough twice over: an impossible day ('2026-99-99') outranks every real one forever,
+// and it makes dayKeyAddDays() build an invalid Date whose toISOString() throws —
+// taking down the stats read for every device on the hub. Match the whole string, then
+// confirm the day survives a UTC round trip, which is what rejects '2026-02-31'.
+function calendarDayKey(value) {
+  const key = String(value || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return '';
+  const parsed = new Date(`${key}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === key
+    ? key
+    : '';
+}
+
+// Could a correct clock somewhere on Earth be naming this day right now? The bound is
+// the real UTC-offset envelope, not a tolerance: every legal zone sits within
+// [-12h, +14h] of UTC, and both are under 24h, so at any instant a correct clock names
+// the UTC day, the one before it, or the one after. Anchored on UTC precisely because
+// the ends of that envelope are 26 hours apart — a UTC-12 reader and a UTC+14 producer
+// are both right and name days two apart, so the reader's own calendar day is not a
+// reference either end can be measured from. `key` is calendarDayKey() output, so the
+// parse cannot fail.
+function isPlausibleProducerDay(key, nowMs) {
+  const utcMidnight = Date.parse(`${utcDayKey(new Date(nowMs))}T00:00:00.000Z`);
+  return Math.abs(Date.parse(`${key}T00:00:00.000Z`) - utcMidnight) <= 86400000;
+}
+
 // History is durable device data, not live presence. Keep a stored device's
 // contributions in the aggregate while it is offline; explicit device deletion
 // is the boundary that removes them. Staleness still applies independently to
 // live limits and expired today/month period snapshots.
-function aggregateHistory(devices) {
+//
+// The aggregate's "today" is not the aggregating machine's today. Every day key in
+// a History is the *producer's* local calendar day, but this runs wherever the Hub
+// happens to be: a self-hosted Node hub can sit in another zone, and a Cloudflare
+// Worker isolate always reads UTC. Reading the wall clock there re-keys every
+// producer's day against a boundary they never used, which sorts a device's current
+// day past the rolling window (dropping it from the daily tier while the monthly
+// tier still counts it) or starts the streak walk on a day that holds no data.
+//
+// So the end key comes from the producers themselves: each one already stamps its
+// local day into periodWindows.today.key, and the aggregate takes the latest one it
+// was told about — the only end key that cannot cut off a device's own current day.
+// A caller that knows better (a widget aggregating its own record) may pass todayKey.
+//
+// Three conditions narrow which producers get that vote, and each is load-bearing.
+// Only a device that actually contributes a History may move the boundary: one that
+// merely reports a window would otherwise push the end past every contributing
+// device's day and zero their streak — the very failure this function exists to
+// prevent. Both spellings of "no History" are excluded, and they are different
+// records: an omitted field means this tick carried no History update, while an
+// explicit null is the sentinel for History disabled or unavailable. Hence the
+// `=== null` test rather than a truthiness check — the distinction is contractual.
+//
+// Only a window that has not closed yet counts, because a device offline since last
+// year still reports last year's day, and without that gate a dormant fleet pins the
+// rolling window and keeps serving a streak that ended with it.
+//
+// And only a day some correct clock could be naming right now, because one device
+// with a dead RTC reporting 2099 is a lexical maximum that drags the window there and
+// blanks every other device's daily tier. That bound never re-keys the day — the
+// whole point is that no clock here can — it only rejects what no zone explains.
+//
+// When no producer passes, nothing on the wire describes today and this machine's
+// clock is all there is. That is also all a pre-periodWindows agent ever offers, so a
+// fleet of those keeps the best-effort local-day behaviour it has always had.
+function aggregateHistory(devices, options = {}) {
+  const explicitToday = calendarDayKey(options.todayKey);
+  const clockToday = localDayKey();
+  const nowMs = Date.now();
   const histories = [];
+  let reportedToday = '';
   for (const record of devices) {
     const normalized = normalizeDeviceRecord(record);
-    if (!hasOwn(normalized, 'history')) continue;
+    if (!hasOwn(normalized, 'history') || normalized.history === null) continue;
     histories.push(normalized.history);
+    const reported = calendarDayKey(normalized.periodWindows?.today?.key);
+    if (reported > reportedToday
+      && isPlausibleProducerDay(reported, nowMs)
+      && !isPeriodExpired(normalized, 'today', nowMs)) {
+      reportedToday = reported;
+    }
   }
-  return mergeHistories(histories);
+  return mergeHistories(histories, {
+    todayKey: explicitToday || reportedToday || clockToday
+  });
 }
 
 // Adds every numeric field and nested map of `source` into `target` (an
