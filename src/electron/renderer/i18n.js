@@ -3197,7 +3197,7 @@
       'limits.codex.switchFailed': '切换 Codex 账号失败。',
       'limits.codex.activeAccountHint': '本机',
       'limits.codex.switchAccountTitle': '将 {account} 设为本机 Codex 账号',
-      'limits.codex.weeklyValueEstimate': '每周额度预估',
+      'limits.codex.weeklyValueEstimate': '周额度预估',
       'limits.codex.weeklyValueCollecting': '正在收集数据',
       'limits.codex.weeklyValueReadyHelp': '仅使用本机官方 Codex 用量；根据连续观测的 {span}% 区间及其净成本 {cost} 估算。',
       'limits.codex.weeklyValueCollectingHelp': '仅使用本机官方 Codex 用量；已收集 {span}/{required}% 的连续额度变化。',

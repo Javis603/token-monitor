@@ -33,4 +33,10 @@ test('store persists samples, skips duplicates, and exposes a snapshot', () => {
   assert.equal(Object.hasOwn(result.estimate, 'deviceObservedCostUsd'), false);
   assert.equal(writes[0].filePath, 'samples.json');
   assert.equal(store.snapshot().accounts['account-a'].cycles[0].samples.length, 2);
+  assert.ok(Math.abs(store.estimateForAccount(
+    'account-a', '2026-08-17T00:00:00Z', { minSampleCount: 1 }
+  ).estimatedUsd - 120) < 0.000001);
+  assert.equal(store.estimateForAccount(
+    'account-b', '2026-08-17T00:00:00Z'
+  ).status, 'collecting');
 });

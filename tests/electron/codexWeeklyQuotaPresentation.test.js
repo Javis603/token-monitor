@@ -12,6 +12,7 @@ test('Codex panel renders the endpoint-net weekly estimate directly', () => {
   const i18n = fs.readFileSync(path.join(root, 'src', 'electron', 'renderer', 'i18n.js'), 'utf8');
   assert.match(renderer, /provider\.weeklyQuotaValueEstimate/);
   assert.match(renderer, /weeklyValueEstimate/);
+  assert.match(i18n, /'limits\.codex\.weeklyValueEstimate': '周额度预估'/);
   assert.doesNotMatch(renderer, /currentDeviceUsage/);
   assert.doesNotMatch(renderer, /codex-quota-details/);
   assert.doesNotMatch(renderer, /codexQuotaDetailsExpanded/);
@@ -25,4 +26,10 @@ test('active local Codex usage triggers a throttled boundary refresh', () => {
   const main = fs.readFileSync(path.join(root, 'src', 'electron', 'main.js'), 'utf8');
   assert.match(main, /CODEX_QUOTA_ACTIVE_PROBE_MS = 15 \* 1000/);
   assert.match(main, /refreshLimits\(\{ provider: 'codex' \}, 'quota-boundary-probe'\)/);
+});
+
+test('every identified Codex weekly account receives its own stored estimate', () => {
+  const main = fs.readFileSync(path.join(root, 'src', 'electron', 'main.js'), 'utf8');
+  assert.match(main, /codexWeeklyQuotaEstimateStore\.estimateForAccount\(accountKey, weekly\.resetsAt\)/);
+  assert.match(main, /if \(!accountKey\) return provider/);
 });

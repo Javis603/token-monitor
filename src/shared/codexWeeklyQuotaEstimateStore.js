@@ -4,6 +4,7 @@ const path = require('node:path');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 const {
   emptyState,
+  estimateForAccount: estimateCodexWeeklyQuotaForAccount,
   extractCodexWeeklyObservation,
   normalizeState,
   observeCodexWeeklyQuota
@@ -45,6 +46,9 @@ function createCodexWeeklyQuotaEstimateStore(options = {}) {
         accountKey: extracted.accountKey,
         changed: result.changed
       };
+    },
+    estimateForAccount(accountKey, resetAt = null, estimateOptions = {}) {
+      return estimateCodexWeeklyQuotaForAccount(ensureLoaded(), accountKey, resetAt, estimateOptions);
     },
     snapshot() {
       return structuredClone(ensureLoaded());

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   emptyState,
+  estimateForAccount,
   extractCodexWeeklyObservation,
   observeCodexWeeklyQuota,
   officialCodexUsage
@@ -224,6 +225,39 @@ test('switching away and back requires a fresh boundary before sampling', () => 
   const samples = activeCycle(result).samples;
   assert.equal(samples.at(-1).status, 'valid');
   assert.ok(Math.abs(samples.at(-1).costDeltaUsd - 1.2) < 0.000001);
+});
+
+test('stored estimates are selected independently by account and reset cycle', () => {
+  let accountA = observeSeries([
+    { usedPercent: 30, costUsd: 10, tokens: 1_000_000 },
+    { usedPercent: 31, costUsd: 10.1, tokens: 1_100_000 },
+    { usedPercent: 32, costUsd: 11.3, tokens: 2_300_000 }
+  ], { minSampleCount: 1 });
+  accountA = observeCodexWeeklyQuota(accountA.state, observation({
+    accountKey: 'account-b', usedPercent: 20, costUsd: 20, tokens: 3_000_000,
+    observedAt: '2026-08-12T05:00:00.000Z'
+  }), { minSampleCount: 1 });
+  accountA = observeCodexWeeklyQuota(accountA.state, observation({
+    accountKey: 'account-b', usedPercent: 21, costUsd: 20.1, tokens: 3_100_000,
+    observedAt: '2026-08-12T06:00:00.000Z'
+  }), { minSampleCount: 1 });
+  accountA = observeCodexWeeklyQuota(accountA.state, observation({
+    accountKey: 'account-b', usedPercent: 22, costUsd: 22.1, tokens: 5_100_000,
+    observedAt: '2026-08-12T07:00:00.000Z'
+  }), { minSampleCount: 1 });
+
+  assert.ok(Math.abs(estimateForAccount(
+    accountA.state, 'account-a', '2026-08-17T00:00:00Z', { minSampleCount: 1 }
+  ).estimatedUsd - 120) < 0.000001);
+  assert.ok(Math.abs(estimateForAccount(
+    accountA.state, 'account-b', '2026-08-17T00:00:00Z', { minSampleCount: 1 }
+  ).estimatedUsd - 200) < 0.000001);
+  assert.equal(estimateForAccount(
+    accountA.state, 'account-c', '2026-08-17T00:00:00Z'
+  ).status, 'collecting');
+  assert.equal(estimateForAccount(
+    accountA.state, 'account-a', '2026-08-24T00:00:00Z'
+  ).status, 'collecting');
 });
 
 test('persisted sample fields contain account, cycle, percentages, costs, and tokens', () => {

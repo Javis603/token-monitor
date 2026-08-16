@@ -339,6 +339,32 @@ function estimateFromCycle(cycle, options = {}) {
   };
 }
 
+function estimateForAccount(stateValue, accountKeyValue, resetAtValue = null, options = {}) {
+  const state = normalizeState(stateValue);
+  const accountKey = String(accountKeyValue || '').trim();
+  const resetAt = isoTimestamp(resetAtValue);
+  const minSampleCount = Math.max(1, Math.round(
+    finiteNumber(options.minSampleCount) ?? MIN_VALID_SAMPLE_COUNT
+  ));
+  const account = state.accounts[accountKey];
+  let cycle = currentCycle(account);
+  if (cycle && resetAt && timestampDistance(cycle.resetAt, resetAt) > RESET_AT_JITTER_MS) {
+    cycle = account.cycles.findLast((entry) => (
+      timestampDistance(entry.resetAt, resetAt) <= RESET_AT_JITTER_MS
+    )) || null;
+  }
+  if (cycle) return estimateFromCycle(cycle, options);
+  return {
+    status: 'collecting',
+    resetAt,
+    sampleCount: 0,
+    requiredSampleCount: minSampleCount,
+    spanPercent: 0,
+    observedCostUsd: 0,
+    segmentCount: 0
+  };
+}
+
 function observeCodexWeeklyQuota(stateValue, observation, options = {}) {
   const state = normalizeState(stateValue);
   const accountKey = String(observation?.accountKey || '').trim();
@@ -509,6 +535,7 @@ module.exports = {
   MIN_VALID_SAMPLE_COUNT,
   STATE_VERSION,
   emptyState,
+  estimateForAccount,
   estimateFromCycle,
   extractCodexWeeklyObservation,
   normalizeState,
