@@ -3,7 +3,7 @@
 const PERIODS = ['today', 'month', 'allTime'];
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
 const { normalizeClientHealth } = require('./clientHealth');
-const { coerceHistory, localDayKey, mergeHistories } = require('./history');
+const { coerceHistory, dayKeyAddDays, localDayKey, mergeHistories } = require('./history');
 const { REASONIX_CLIENT } = require('./reasonixPaths');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
@@ -1149,23 +1149,32 @@ function isPlausibleProducerDay(key, nowMs) {
 // was told about — the only end key that cannot cut off a device's own current day.
 // A caller that knows better (a widget aggregating its own record) may pass todayKey.
 //
-// Three conditions narrow which producers get that vote, and each is load-bearing.
-// Only a device that actually contributes a History may move the boundary: one that
-// merely reports a window would otherwise push the end past every contributing
+// Two conditions narrow which producers get that vote, and each is load-bearing.
+//
+// Only a device that puts days into the merge may move the boundary. One that reports
+// a window but contributes nothing would otherwise push the end past every real
 // device's day and zero their streak — the very failure this function exists to
-// prevent. Both spellings of "no History" are excluded, and they are different
-// records: an omitted field means this tick carried no History update, while an
-// explicit null is the sentinel for History disabled or unavailable. Hence the
-// `=== null` test rather than a truthiness check — the distinction is contractual.
+// prevent — so the test is that its daily tier is non-empty, not that a `history`
+// field arrived. Those are far apart on the wire: coerceHistory() turns a string, an
+// array, a number and `{}` alike into an empty History, so a presence check hands a
+// vote to records that describe no day at all. The `=== null` test above is still
+// contractual and separate: an omitted field means this tick carried no History
+// update, while an explicit null is the disabled/unavailable sentinel.
 //
-// Only a window that has not closed yet counts, because a device offline since last
-// year still reports last year's day, and without that gate a dormant fleet pins the
-// rolling window and keeps serving a streak that ended with it.
+// And only a day some correct clock could be naming right now, because the key is a
+// lexical maximum and one device with a dead RTC reporting 2099 would drag the window
+// there and blank every other device's daily tier. That bound never re-keys the day —
+// the whole point is that no clock here can — it only rejects what no zone explains.
 //
-// And only a day some correct clock could be naming right now, because one device
-// with a dead RTC reporting 2099 is a lexical maximum that drags the window there and
-// blanks every other device's daily tier. That bound never re-keys the day — the
-// whole point is that no clock here can — it only rejects what no zone explains.
+// What each producer contributes is a lower bound on its own current day, which its
+// window states in one of two ways. While the window is open that day is exactly the
+// reported key. Once endsAt has passed the device has rolled over to at least the day
+// after, and dropping the key there rather than advancing it is not neutral: the
+// fallback would re-select the very day the window just declared finished, which is
+// how a UTC+14 laptop asleep across its own midnight kept feeding a live streak to a
+// UTC Worker for the next fourteen hours. Advancing it also retires a dormant fleet on
+// its own, since a window closed long enough ago has a successor no zone has been on
+// for years, and the plausibility bound drops it.
 //
 // When no producer passes, nothing on the wire describes today and this machine's
 // clock is all there is. That is also all a pre-periodWindows agent ever offers, so a
@@ -1180,12 +1189,13 @@ function aggregateHistory(devices, options = {}) {
     const normalized = normalizeDeviceRecord(record);
     if (!hasOwn(normalized, 'history') || normalized.history === null) continue;
     histories.push(normalized.history);
+    if (!normalized.history.daily.length) continue;
     const reported = calendarDayKey(normalized.periodWindows?.today?.key);
-    if (reported > reportedToday
-      && isPlausibleProducerDay(reported, nowMs)
-      && !isPeriodExpired(normalized, 'today', nowMs)) {
-      reportedToday = reported;
-    }
+    if (!reported) continue;
+    const floor = isPeriodExpired(normalized, 'today', nowMs)
+      ? dayKeyAddDays(reported, 1)
+      : reported;
+    if (floor > reportedToday && isPlausibleProducerDay(floor, nowMs)) reportedToday = floor;
   }
   return mergeHistories(histories, {
     todayKey: explicitToday || reportedToday || clockToday

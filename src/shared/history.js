@@ -522,7 +522,7 @@ function deviceHistoryRevision(devices) {
 }
 
 module.exports = {
-  num, sumTokens, parseGraphResult, computeIntensities, localDayKey,
+  num, sumTokens, parseGraphResult, computeIntensities, localDayKey, dayKeyAddDays,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
   coerceHistory, historyPreview, historyRevision, deviceHistoryRevision
 };

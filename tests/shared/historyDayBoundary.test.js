@@ -74,16 +74,27 @@ function graphOf(days) {
   };
 }
 
-// `history` mirrors the three wire states normalizeDeviceRecord distinguishes:
-// 'present' carries a payload, 'omitted' leaves the field off (no History update on
-// this tick), and 'disabled' sends the explicit null the collector emits when
-// historyEnabled is false. The last two are different records, not two spellings.
+// Every record shape that reaches the merge carrying no day. They are not spellings of
+// each other on the wire — an omitted field means this tick had no History update and
+// an explicit null is the disabled/unavailable sentinel — but coerceHistory() flattens
+// the rest to the same empty History, which is exactly why a `history` field being
+// present cannot stand in for a device having contributed anything.
+const NO_CONTRIBUTION = {
+  omitted: {},
+  disabled: { history: null },
+  string: { history: 'oops' },
+  array: { history: [] },
+  number: { history: 7 },
+  empty: { history: {} },
+  unavailable: { history: {}, historyAvailable: false }
+};
+
 function deviceOf({ deviceId, todayKey, endsAt, days, history = 'present' }) {
   return {
     deviceId,
     receivedAt: '2026-08-16T18:00:00.000Z',
     ...(todayKey ? { periodWindows: { today: { key: todayKey, endsAt } } } : {}),
-    ...(history === 'omitted' ? {} : { history: history === 'disabled' ? null : historyOf(days) })
+    ...(history === 'present' ? { history: historyOf(days) } : NO_CONTRIBUTION[history])
   };
 }
 
@@ -162,12 +173,13 @@ test('aggregateHistory takes the latest producer day across timezones', (t) => {
 // Only a device that puts contributions into the merge may move the end of it. A
 // device reporting a window without a History would otherwise push the boundary past
 // the day of every device that did contribute, and zero a streak nothing in the
-// aggregate disagrees with. Both no-History records are covered: 'disabled' is the
-// explicit null the collector sends for historyEnabled: false, which a hasOwn() gate
-// lets through, and it is the shape a real deployment actually produces.
+// aggregate disagrees with. Every no-day shape is covered because they reach this
+// function as one thing: 'disabled' is the explicit null a real deployment sends for
+// historyEnabled: false, which a hasOwn() gate lets through, and the rest are what
+// coerceHistory() returns for a payload that is not a History at all.
 test('aggregateHistory ignores the day of a device that contributes no history', (t) => {
   inZone(t, 'UTC', EAST_DIVERGES, () => {
-    for (const history of ['omitted', 'disabled']) {
+    for (const history of Object.keys(NO_CONTRIBUTION)) {
       const merged = aggregateHistory([
         deviceOf({ deviceId: 'tokyo', todayKey: '2026-08-17', endsAt: TOKYO_MIDNIGHT, history }),
         deviceOf({
@@ -293,6 +305,44 @@ test('aggregateHistory rejects a producer day no zone has reached yet', (t) => {
     const merged = aggregateHistory([onTime, fast]);
     assert.deepEqual(merged.daily.map((d) => d.date), ['2026-08-14', '2026-08-15', '2026-08-16']);
     assert.equal(merged.summary.currentStreak, 3);
+  });
+});
+
+// A closed window is not silence: it says the device has rolled over to at least the
+// day after the one it reported. Dropping the key instead of advancing it lets the
+// clock fallback re-select the day the window just declared finished — here a laptop
+// at UTC+14 asleep one minute past its own midnight, read by a UTC Worker that is
+// still on the 17th. The device's own widget would key on the 18th and show 0; before
+// this the Hub kept serving the 17th's live streak for the next fourteen hours.
+test('aggregateHistory advances past a producer day its window has closed', (t) => {
+  inZone(t, 'UTC', '2026-08-17T10:01:00.000Z', () => {
+    const merged = aggregateHistory([deviceOf({
+      deviceId: 'kiritimati',
+      todayKey: '2026-08-17',
+      endsAt: '2026-08-17T10:00:00.000Z', // 2026-08-18T00:00+14, one minute ago
+      days: [{ date: '2026-08-16', tokens: 5 }, { date: '2026-08-17', tokens: 10 }]
+    })]);
+    assert.equal(merged.daily[merged.daily.length - 1].date, '2026-08-17');
+    assert.equal(merged.summary.currentStreak, 0);
+    assert.equal(merged.summary.activeDays, 2);
+  });
+});
+
+// The reader's clock never re-enters the choice, not even as one term of a maximum.
+// A Hub east of a live producer is the case that first broke: taking the later of the
+// two would key the fleet on a day the only device with data has not reached, which is
+// the original bug wearing the producer-derived design as a disguise.
+test('aggregateHistory keeps a live producer day behind the reader clock', (t) => {
+  // 2026-08-17T13:00Z: 2026-08-18 03:00 at UTC+14, still 2026-08-17 01:00 at UTC-12.
+  inZone(t, 'Pacific/Kiritimati', '2026-08-17T13:00:00.000Z', () => {
+    assert.equal(localDayKey(), '2026-08-18'); // the reader really is a day ahead
+    const merged = aggregateHistory([deviceOf({
+      deviceId: 'baker',
+      todayKey: '2026-08-17',
+      endsAt: '2026-08-18T12:00:00.000Z', // 2026-08-18T00:00-12, still open
+      days: [{ date: '2026-08-16', tokens: 5 }, { date: '2026-08-17', tokens: 10 }]
+    })]);
+    assert.equal(merged.summary.currentStreak, 2);
   });
 });
 
