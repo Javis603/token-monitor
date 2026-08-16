@@ -1305,7 +1305,7 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   assert.match(listenerSlice, /600000/);
 });
 
-test('sync upload interval setting is exposed and saved with the Hub connection', () => {
+test('sync upload interval setting is exposed in the Multi-device Sync panel', () => {
   const html = readRendererFile('index.html');
   const controls = html.match(/<label class="sync-upload-interval-row[^"]*"[\s\S]*?<select id="syncUploadIntervalInput"[\s\S]*?<\/select>[\s\S]*?<\/label>/)?.[0] || '';
   const clientFields = html.slice(html.indexOf('<div id="hubClientFields"'), html.indexOf('<div id="hubHostFields"'));
@@ -1322,13 +1322,94 @@ test('sync upload interval setting is exposed and saved with the Hub connection'
   assert.match(syncBody, /state\.settings\.syncUploadIntervalMs/);
   assert.match(syncBody, /Array\.from\(els\.syncUploadIntervalInput\.options/);
   assert.doesNotMatch(syncBody, /const allowed = \[0, 600000, 1200000, 1800000\]/);
+  assert.doesNotMatch(app, /saveSettings\(\{\s*syncUploadIntervalMs:/);
+});
 
-  const saveHandler = app.slice(
-    app.indexOf("els.saveSettingsButton.addEventListener('click'"),
-    app.indexOf("els.hubModeOptions.addEventListener('change'")
-  );
-  assert.match(saveHandler, /syncUploadIntervalMs: Number\(els\.syncUploadIntervalInput\.value\)/);
-  assert.doesNotMatch(app, /els\.syncUploadIntervalInput\?\.addEventListener\('change'/);
+// Run the shipped event wiring against controls that model the settings push:
+// every save rehydrates the form from persisted state, which is the path that
+// used to replace an unsaved URL and secret when the interval changed.
+function fakeHubControl(value = '') {
+  const listeners = new Map();
+  return {
+    value,
+    addEventListener(type, listener) {
+      const current = listeners.get(type) || [];
+      current.push(listener);
+      listeners.set(type, current);
+    },
+    async dispatch(type) {
+      for (const listener of listeners.get(type) || []) await listener({ target: this });
+    }
+  };
+}
+
+function loadHubSettingsWiring(els, context) {
+  const app = readRendererFile('app.js');
+  const saveStart = app.indexOf("els.saveSettingsButton.addEventListener('click'");
+  const saveEnd = app.indexOf("els.hubModeOptions.addEventListener('change'", saveStart);
+  const intervalStart = app.indexOf('for (const input of els.showLimitUsedInputs || [])', saveEnd);
+  const intervalEnd = app.indexOf("els.collectionCadenceInput?.addEventListener('change'", intervalStart);
+  assert.notEqual(saveStart, -1, 'Hub Save handler should exist');
+  assert.notEqual(saveEnd, -1, 'Hub mode handler should follow Hub Save');
+  assert.notEqual(intervalStart, -1, 'limits display wiring should precede sync upload wiring');
+  assert.notEqual(intervalEnd, -1, 'collection cadence wiring should follow sync upload wiring');
+  vm.runInNewContext(`${app.slice(saveStart, saveEnd)}\n${app.slice(intervalStart, intervalEnd)}`, { els, ...context });
+}
+
+test('changing sync upload frequency preserves Hub drafts until one complete Save', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  const syncSettingsForm = () => {
+    els.hubUrlInput.value = state.settings.hubUrl;
+    els.secretInput.value = state.settings.secret;
+    els.deviceIdInput.value = state.settings.deviceId;
+    els.syncUploadIntervalInput.value = String(state.settings.syncUploadIntervalMs);
+  };
+  loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      Object.assign(state.settings, patch);
+      syncSettingsForm();
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+
+  els.hubUrlInput.value = 'https://draft.example';
+  els.secretInput.value = 'draft-secret';
+  els.deviceIdInput.value = 'draft-device';
+  els.syncUploadIntervalInput.value = '1200000';
+
+  await els.syncUploadIntervalInput.dispatch('change');
+  assert.equal(els.hubUrlInput.value, 'https://draft.example');
+  assert.equal(els.secretInput.value, 'draft-secret');
+  assert.deepEqual(patches, []);
+
+  await els.saveSettingsButton.dispatch('click');
+  assert.deepEqual(patches, [{
+    hubUrl: 'https://draft.example',
+    secret: 'draft-secret',
+    deviceId: 'draft-device',
+    syncUploadIntervalMs: 1200000
+  }]);
 });
 
 test('remote Hub build status is wired as a separate localized sync hint', () => {
