@@ -154,8 +154,9 @@ function extractPortFlag(flag, command) {
 }
 
 // `Win32_Process.CommandLine` reports the command line a process was created
-// with, which quotes the executable path whenever it contains spaces (and
-// PowerShell quotes it even when it does not). Unwrap that one leading pair so
+// with, verbatim: whoever launched it quotes the executable path when it
+// contains spaces, and PowerShell quotes it even when it does not, so the
+// closing quote reaches us as part of the line. Unwrap that one leading pair so
 // the matchers above keep anchoring on path separators and whitespace alone;
 // quoted flag values further along the line are left untouched.
 function commandForMatching(command) {

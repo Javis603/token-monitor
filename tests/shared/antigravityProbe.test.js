@@ -112,6 +112,11 @@ test('parseProcessLine matches a quoted language_server.exe on win32 cmdlines', 
   assert.equal(info.csrfToken, 'win-token');
 });
 
+test('parseProcessLine does not match a quoted agy.exe inside a flag value', () => {
+  const line = '703 C:\\tools\\watcher.exe --exec "C:\\Users\\j\\.antigravity\\agy.exe"';
+  assert.equal(probe._parseProcessLine(line), null);
+});
+
 test('parseProcessLine does not match agy embedded in an unrelated path', () => {
   assert.equal(probe._parseProcessLine('700 /opt/imagytool/bin/run --serve'), null);
   assert.equal(probe._parseProcessLine('701 /usr/local/bin/legacy-agent start'), null);
@@ -212,6 +217,13 @@ test('detectProcessInfo (win32) finds the agy.exe CLI when no IDE LS is running'
   assert.equal(info.pid, 9001);
   assert.equal(info.kind, 'cli');
   assert.equal(info.csrfToken, '');
+});
+
+test('detectProcessInfo (win32) reports unavailable for a quoted desktop LS without csrf', async () => {
+  const stdout = '7777 "C:\\Program Files\\Antigravity\\language_server.exe" --app_data_dir antigravity\n';
+  const err = await probe.detectProcessInfo({ platform: 'win32', spawn: fakeSpawn(stdout) })
+    .catch((e) => e);
+  assert.equal(err.status, 'unavailable');
 });
 
 test('listeningPorts (posix) extracts ports from lsof output', async () => {
