@@ -463,6 +463,42 @@ test('Codex account email masking is an opt-in display-only setting', () => {
   // Title rendering for every provider lives in limitAccountTitles.test.js.
 });
 
+test('hiding unconfigured limit providers is an opt-out display-only setting', () => {
+  const app = readRendererFile('app.js');
+  const html = readRendererFile('index.html');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const runtimeConfig = fs.readFileSync(path.join(rendererDir, '..', 'runtimeConfig.js'), 'utf8');
+
+  assert.match(html, /<input id="hideUnconfiguredLimitProvidersInput" type="checkbox" checked \/>/);
+  assert.match(html, /data-i18n="settings\.limits\.hideUnconfigured"/);
+
+  const defaults = functionBody(main, 'defaultSettings', 'normalizeCollectionMode');
+  assert.match(defaults, /hideUnconfiguredLimitProviders:\s*true/);
+
+  const updateHandler = main.slice(
+    main.indexOf("ipcMain.handle('settings:update'"),
+    main.indexOf("ipcMain.handle('settings:openConfig'")
+  );
+  assert.match(
+    updateHandler,
+    /hideUnconfiguredLimitProviders:\s*parseBoolean\(patch\.hideUnconfiguredLimitProviders \?\? settings\.hideUnconfiguredLimitProviders, true\)/
+  );
+  assert.doesNotMatch(updateHandler, /accountEmail|accountKey|syncLimits|publicLimits/);
+
+  const settingsBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
+  assert.match(
+    settingsBody,
+    /els\.hideUnconfiguredLimitProvidersInput\.checked = state\.settings\.hideUnconfiguredLimitProviders !== false;/
+  );
+
+  assert.match(app, /hideUnconfiguredLimitProvidersInput: document\.getElementById\('hideUnconfiguredLimitProvidersInput'\)/);
+  assert.match(app, /els\.hideUnconfiguredLimitProvidersInput\.addEventListener\('change'/);
+  assert.match(app, /saveSettings\(\{ hideUnconfiguredLimitProviders: els\.hideUnconfiguredLimitProvidersInput\.checked \}\)/);
+  assert.match(app, /renderLimits\(\);/);
+
+  assert.doesNotMatch(runtimeConfig, /hideUnconfiguredLimitProviders/);
+});
+
 test('Codex system account switching is exposed from limits account rows', () => {
   const app = readRendererFile('app.js');
   const renderHead = functionBody(app, 'renderLimitProviderHead', 'renderProviderWindows');

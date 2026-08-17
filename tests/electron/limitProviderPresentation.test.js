@@ -18,6 +18,8 @@ const {
   limitProviderCompactWindows,
   limitProviderMainDeviceLabel,
   namedApiProfileStatus,
+  limitProviderHasQuota,
+  shouldShowLimitProviderRow,
   limitProviderProvenance,
   limitResetRemainingMs,
   limitProviderSettingsTags
@@ -44,6 +46,29 @@ test('isCodexLiveAccount only marks the local live login, not a synced remote de
 test('isCodexLiveAccount stays marked when both devices are signed in but the remote record is selected', () => {
   const liveProvider = { provider: 'codex', status: 'ok', sourceDetail: 'app' };
   assert.equal(isCodexLiveAccount(liveProvider, { selectedIsRemote: true, hasLocalCandidate: true }), true);
+});
+
+test('shouldShowLimitProviderRow hides empty setup states and keeps failures and quota', () => {
+  const hide = { hideUnconfigured: true };
+  assert.equal(shouldShowLimitProviderRow({ status: 'notConfigured', windows: [] }, hide), false);
+  assert.equal(shouldShowLimitProviderRow({ status: 'noSyncedData', windows: [] }, hide), false);
+  assert.equal(shouldShowLimitProviderRow({ status: 'ok', windows: [] }, hide), true);
+  assert.equal(shouldShowLimitProviderRow({ status: 'unauthorized', windows: [] }, hide), true);
+  assert.equal(shouldShowLimitProviderRow({ status: 'error', windows: [] }, hide), true);
+  assert.equal(shouldShowLimitProviderRow({ status: 'unavailable', windows: [] }, hide), true);
+  assert.equal(shouldShowLimitProviderRow({
+    status: 'notConfigured',
+    windows: [{ kind: 'session', remainingPercent: 40 }]
+  }, hide), true);
+  assert.equal(shouldShowLimitProviderRow({
+    status: 'notConfigured',
+    windows: [],
+    balance: { amount: 1.5, currency: 'USD' }
+  }, hide), true);
+  assert.equal(limitProviderHasQuota({ windows: [] }), false);
+  assert.equal(limitProviderHasQuota({ balanceUsd: 12 }), true);
+  assert.equal(shouldShowLimitProviderRow({ status: 'notConfigured', windows: [] }, { hideUnconfigured: false }), true);
+  assert.equal(shouldShowLimitProviderRow({ status: 'notConfigured', windows: [] }), true);
 });
 
 test('limitProviderDisplayLabel normalizes short account labels without rewriting identifiers', () => {
@@ -605,6 +630,18 @@ test('capability tags are settings-only and do not alter the main Limits panel',
   assert.match(renderHead, /head\.append\(titleBlock, decoratePlanWithSubscription\(plan, provider\)\);/);
   assert.match(renderSettings, /limitProviderSettingsTags\(provider, provenance/);
   assert.doesNotMatch(styles, /\.limit-status\b/);
+});
+
+test('limits page hides empty setup rows behind a display-only setting', () => {
+  const app = readRendererFile('app.js');
+  const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
+  const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+
+  assert.match(renderLimits, /hideUnconfiguredLimitProviders !== false/);
+  assert.match(renderLimits, /shouldShowLimitProviderRow\(provider, \{ hideUnconfigured \}\)/);
+  assert.match(renderLimits, /if \(shown\.length\) visibleProviderEntries\.set\(id, shown\)/);
+  assert.doesNotMatch(homeLimits, /shouldShowLimitProviderRow|hideUnconfiguredLimitProviders/);
+  assert.doesNotMatch(renderLimits, /SELF_DISCOVERED_LIMIT_PROVIDERS/);
 });
 
 test('Codex limits render as one provider group with account subrows', () => {
@@ -1768,7 +1805,7 @@ test('main limits rerenders coalesce identical visible provider data', () => {
 
   assert.match(renderLimits, /const renderSignature = JSON\.stringify\(\{/);
   assert.match(renderLimits, /state\.limitPanelRenderSignature === renderSignature/);
-  assert.match(renderLimits, /els\.limitsPanel\.children\.length === orderedProviders\.length/);
+  assert.match(renderLimits, /els\.limitsPanel\.children\.length === rows\.length/);
   assert.match(renderLimits, /state\.limitPanelRenderSignature = renderSignature;/);
 });
 

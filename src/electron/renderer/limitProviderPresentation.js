@@ -308,6 +308,25 @@
     return status !== 'disabled' && status !== 'notConfigured';
   }
 
+  // Display-only: Home already drops accounts with no windows. The limits page
+  // used to paint a "Not set up" card for every enabled provider. Hide only the
+  // two empty-setup statuses, and only when they also have no quota data — no
+  // provider allowlist. Ambient-credential providers arrive as `ok`;
+  // unauthorized/error rows stay visible.
+  function limitProviderHasQuota(provider) {
+    if (Array.isArray(provider?.windows) && provider.windows.length > 0) return true;
+    if (provider?.balance != null) return true;
+    if (provider?.balanceUsd != null) return true;
+    return false;
+  }
+
+  function shouldShowLimitProviderRow(provider, options = {}) {
+    if (!options.hideUnconfigured) return true;
+    const status = statusId(provider);
+    if (status !== 'notConfigured' && status !== 'noSyncedData') return true;
+    return limitProviderHasQuota(provider);
+  }
+
   function accountKey(value) {
     return String(value || '').trim();
   }
@@ -425,6 +444,8 @@
     limitProviderDisplayLabel,
     limitProviderMainDeviceLabel,
     namedApiProfileStatus,
+    limitProviderHasQuota,
+    shouldShowLimitProviderRow,
     limitProviderProvenance,
     limitResetRemainingMs,
     limitProviderSourceLabel,
