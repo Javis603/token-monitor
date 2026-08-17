@@ -193,6 +193,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(body, /state\.toolPreferenceSourceSignature !== sourceSignature/);
   assert.match(body, /loadClientSources\(state\.clientHealthExpanded\);\s*refillOpenClientHealthPanel\(\);/);
   assert.match(body, /else \{\s*refillOpenClientHealthPanel\(\);\s*\}/);
+  assert.match(body, /const detail = clientHealthDetailFor\(id\);/);
   assert.match(body, /visibility\.id = `toolVisibility-\$\{id\}`/);
   assert.match(body, /pin\.id = `toolPin-\$\{id\}`/);
   assert.match(body, /const focusedId = document\.activeElement\?\.id \|\| ''/);

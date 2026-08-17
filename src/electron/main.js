@@ -6401,17 +6401,16 @@ app.whenReady().then(() => {
       journalOmittedCount: report.journalOmittedCount
     };
   });
-  // Where each tracked tool's data is read from on THIS machine. The absolute
+  // Where each known tool's data is read from on THIS machine. The absolute
   // paths stay local by design — they carry the user's home directory and never
   // go on the wire — so the renderer asks the main process for them instead.
   //
   // Probe only the client whose detail panel is open. The renderer caches the
-  // result for the current health snapshot, avoiding both eager filesystem work
-  // and path flicker when a stats tick rebuilds the panel.
+  // result for the current health snapshot, or for the current device/client
+  // pair when the tool is not tracked, avoiding eager filesystem work.
   ipcMain.handle('usage:clientSources', (_event, clientId) => {
     const client = String(clientId || '').trim().toLowerCase();
-    const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
-    if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return null;
+    if (!KNOWN_CLIENTS.split(',').includes(client)) return null;
     try {
       const seen = new Set();
       const all = (visibleDiagnosticRoots(client)[client] || [])
@@ -6430,8 +6429,7 @@ app.whenReady().then(() => {
   // anything it could send would otherwise become an arbitrary filesystem open.
   ipcMain.handle('usage:revealClientSource', async (_event, clientId) => {
     const client = String(clientId || '').trim().toLowerCase();
-    const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
-    if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return false;
+    if (!KNOWN_CLIENTS.split(',').includes(client)) return false;
     try {
       const roots = clientDiagnosticRoots(client)[client] || [];
       const target = roots.find((root) => root.exists);

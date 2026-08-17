@@ -11,7 +11,8 @@ const {
   clientPeriodUsage,
   exactDevice,
   friendlyPath,
-  hasClientHealth
+  hasClientHealth,
+  untrackedClientHealthDetail
 } = require('../../src/electron/renderer/clientHealthPresentation');
 
 const entry = (overrides = {}) => ({
@@ -49,6 +50,34 @@ test('a client the device never reported gets no panel and no disclosure', () =>
   assert.equal(clientHealthDetail(null, 'codex'), null);
   assert.equal(hasClientHealth(health({ codex: entry() }), 'CODEX'), true);
   assert.equal(hasClientHealth(health({ codex: entry() }), 'claude'), false);
+});
+
+test('an untracked client can show on-demand source details without health data', () => {
+  const detail = untrackedClientHealthDetail({
+    sources: [{ id: 'codebuddy-data', dir: '/Users/x/.codebuddy', exists: true }],
+    usage: {
+      today: { tokens: 0, cost: 0 },
+      month: { tokens: 0, cost: 0 },
+      allTime: { tokens: 0, cost: 0 }
+    }
+  });
+  assert.equal(detail.tone, 'muted');
+  assert.equal(detail.groups[0].state, 'detected');
+  assert.deepEqual(detail.groups[0].checks, [{
+    id: 'codebuddy-data',
+    exists: true,
+    paths: [{ dir: '/Users/x/.codebuddy', exists: true, pending: false }]
+  }]);
+  assert.equal(detail.groups[1].state, 'notTracked');
+  assert.deepEqual(detail.groups[2].periods.map(({ period, tokens }) => ({ period, tokens })), [
+    { period: 'today', tokens: 0 },
+    { period: 'month', tokens: 0 },
+    { period: 'allTime', tokens: 0 }
+  ]);
+  assert.equal(
+    untrackedClientHealthDetail({ collectionState: 'waiting' }).groups[1].state,
+    'waiting'
+  );
 });
 
 test('detail always has source, collection, and data groups with raw values', () => {

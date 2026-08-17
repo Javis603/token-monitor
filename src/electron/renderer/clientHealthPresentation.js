@@ -170,8 +170,7 @@
     return notes;
   }
 
-  function clientHealthDetail(health, clientId, options = {}) {
-    const entry = healthFor(health, clientId);
+  function clientHealthDetailFromEntry(entry, options = {}) {
     if (!entry) return null;
     const overall = String(entry.overall || 'unknown');
     return {
@@ -180,6 +179,40 @@
       groups: clientHealthGroups(entry, options),
       notes: clientHealthNotes(entry)
     };
+  }
+
+  function clientHealthDetail(health, clientId, options = {}) {
+    return clientHealthDetailFromEntry(healthFor(health, clientId), options);
+  }
+
+  // Untracked tools have no health entry because the collector intentionally
+  // probes only selected clients. They can still expose their local source
+  // roots on demand, so the disclosure can show useful context without
+  // pretending that the tool is being collected.
+  function untrackedClientHealthDetail(options = {}) {
+    const sources = Array.isArray(options.sources) ? options.sources : [];
+    const checks = new Map();
+    for (const source of sources) {
+      const id = String(source?.id || '').trim();
+      if (!id) continue;
+      const current = checks.get(id);
+      if (current) current.exists ||= source.exists === true;
+      else checks.set(id, { id, exists: source.exists === true });
+    }
+    const sourceChecks = [...checks.values()];
+    const detectedCount = sourceChecks.filter((check) => check.exists).length;
+    const entry = {
+      source: {
+        state: sourceChecks.length === 0 ? 'unknown' : detectedCount > 0 ? 'detected' : 'missing',
+        detectedCount,
+        checkedCount: sourceChecks.length,
+        ...(sourceChecks.length > 0 ? { checks: sourceChecks } : {})
+      },
+      collection: { state: options.collectionState || 'notTracked' },
+      data: { liveTokens: 0 },
+      overall: 'unknown'
+    };
+    return clientHealthDetailFromEntry(entry, options);
   }
 
   function hasClientHealth(health, clientId) {
@@ -191,6 +224,7 @@
     OVERALL_TONES,
     clientHealthCountsForTracked,
     clientHealthDetail,
+    untrackedClientHealthDetail,
     clientHealthGroups,
     clientHealthNotes,
     clientPeriodUsage,

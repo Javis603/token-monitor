@@ -9409,10 +9409,16 @@ function clientPeriodUsage(clientId) {
 // per snapshot without spending IPC on progressive previews that carry the old
 // envelope.
 function clientSourcesIdentity(clientId) {
+  const id = String(clientId || '');
+  const observedAt = String(localClientHealth()?.observedAt || '');
+  const tracked = enabledClientSet().has(id);
   return {
     deviceId: String(localDevice()?.deviceId || ''),
-    clientId: String(clientId || ''),
-    observedAt: String(localClientHealth()?.observedAt || '')
+    clientId: id,
+    // A client without a health observation can still be inspected on demand.
+    // Keep tracked and untracked snapshots distinct until a real observation
+    // replaces this local placeholder.
+    observedAt: observedAt || (tracked ? 'waiting' : 'untracked')
   };
 }
 
@@ -9478,10 +9484,14 @@ function refillOpenClientHealthPanel() {
 // Everything the panel draws beyond the health record itself: the numbers the
 // app already renders elsewhere, and this machine's own paths.
 function clientHealthDetailFor(clientId) {
-  return clientHealthPresentationApi.clientHealthDetail(localClientHealth(), clientId, {
+  const options = {
     usage: clientPeriodUsage(clientId),
-    sources: localClientSources(clientId)
-  });
+    sources: localClientSources(clientId),
+    collectionState: enabledClientSet().has(clientId) ? 'waiting' : 'notTracked'
+  };
+  const detail = clientHealthPresentationApi.clientHealthDetail(localClientHealth(), clientId, options);
+  if (detail) return detail;
+  return clientHealthPresentationApi.untrackedClientHealthDetail(options);
 }
 
 function sameRenderedNode(current, next) {
@@ -9673,7 +9683,9 @@ function clientHealthActions(clientId) {
   // The detail is already bound to the exact local device. Renderer mode is a
   // transport state (`local`/`sync`), not topology, so host and client collectors
   // expose the same targeted capability through preload.
-  if (localDevice() && typeof window.tokenMonitor?.rescanClient === 'function') {
+  if (enabledClientSet().has(clientId)
+    && localDevice()
+    && typeof window.tokenMonitor?.rescanClient === 'function') {
     const rescanState = state.clientRescans.snapshot(clientId);
     const feedback = document.createElement('span');
     feedback.className = 'tool-health-action-feedback';
@@ -9970,9 +9982,9 @@ function renderToolPreferencesNow() {
     const actions = document.createElement('div');
     actions.className = 'tool-preference-actions';
     actions.append(visibility, pin);
-    // A device whose agent predates the health field gets no chevron rather than
-    // one that opens onto an empty panel.
-    const detail = clientHealthPresentationApi.clientHealthDetail(health, id);
+    // Tracked tools use the health snapshot; untracked tools get an on-demand
+    // source view so every row keeps the same disclosure affordance.
+    const detail = clientHealthDetailFor(id);
     if (detail) {
       const expanded = state.clientHealthExpanded === id;
       row.classList.toggle('expanded', expanded);
