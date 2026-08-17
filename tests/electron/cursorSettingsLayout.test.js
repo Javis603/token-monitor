@@ -1349,21 +1349,31 @@ function fakeHubControl(value = '') {
 
 function loadHubSettingsWiring(els, context) {
   const app = readRendererFile('app.js');
+  const modeStart = app.indexOf('function syncHubModeUi()');
+  const modeEnd = app.indexOf('function renderHubStatus()', modeStart);
   const draftStart = app.indexOf('const HUB_DRAFT_FIELDS = [');
   const draftEnd = app.indexOf('function syncSettingsForm()', draftStart);
   const saveStart = app.indexOf("els.saveSettingsButton.addEventListener('click'");
   const saveEnd = app.indexOf("els.hubModeOptions.addEventListener('change'", saveStart);
   const intervalStart = app.indexOf('for (const input of els.showLimitUsedInputs || [])', saveEnd);
   const intervalEnd = app.indexOf("els.collectionCadenceInput?.addEventListener('change'", intervalStart);
+  assert.notEqual(modeStart, -1, 'Hub mode UI sync should exist');
+  assert.notEqual(modeEnd, -1, 'Hub mode UI sync should precede Hub status rendering');
   assert.notEqual(draftStart, -1, 'Hub draft tracking should exist');
   assert.notEqual(draftEnd, -1, 'Hub draft tracking should precede settings sync');
   assert.notEqual(saveStart, -1, 'Hub Save handler should exist');
   assert.notEqual(saveEnd, -1, 'Hub mode handler should follow Hub Save');
   assert.notEqual(intervalStart, -1, 'limits display wiring should precede sync upload wiring');
   assert.notEqual(intervalEnd, -1, 'collection cadence wiring should follow sync upload wiring');
-  const vmContext = { els, ...context };
+  const vmContext = {
+    els,
+    ...context,
+    renderHubStatus: () => {},
+    renderSyncClientStatus: () => {},
+    renderHubBuildStatus: () => {}
+  };
   vm.runInNewContext(
-    `${app.slice(draftStart, draftEnd)}\n${app.slice(saveStart, saveEnd)}\n${app.slice(intervalStart, intervalEnd)}`,
+    `${app.slice(modeStart, modeEnd)}\n${app.slice(draftStart, draftEnd)}\n${app.slice(saveStart, saveEnd)}\n${app.slice(intervalStart, intervalEnd)}`,
     vmContext
   );
   return vmContext;
@@ -1493,6 +1503,118 @@ test('Hub Save keeps edits made while persistence is in flight', async () => {
   assert.equal(els.deviceIdInput.value, 'draft-device');
   vmContext.syncHubDraftFields();
   assert.equal(els.hubUrlInput.value, 'https://draft-b.example');
+});
+
+test('Hub Save keeps an in-flight edit even when it returns to the persisted value', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  let releaseSave;
+  let resolveSaveStarted;
+  const saveGate = new Promise((resolve) => { releaseSave = resolve; });
+  const saveStarted = new Promise((resolve) => { resolveSaveStarted = resolve; });
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      resolveSaveStarted();
+      await saveGate;
+      Object.assign(state.settings, patch);
+      vmContext.syncHubDraftFields();
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  els.hubUrlInput.value = 'https://draft.example';
+  await els.hubUrlInput.dispatch('input');
+
+  const savePromise = els.saveSettingsButton.dispatch('click');
+  await saveStarted;
+  els.hubUrlInput.value = 'https://saved.example';
+  await els.hubUrlInput.dispatch('input');
+  releaseSave();
+  await savePromise;
+
+  assert.equal(els.hubUrlInput.value, 'https://saved.example');
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubUrlInput.value, 'https://saved.example');
+});
+
+test('Host Hub port draft survives settings rehydration and saves with Hub fields', async () => {
+  const classList = { toggle() {} };
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubModeOptions: { querySelectorAll: () => [] },
+    hubClientFields: { classList },
+    hubHostFields: { classList },
+    hubPortInput: fakeHubControl(),
+    hubSecretInput: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'host',
+      hubHostPort: 17321,
+      hubHostSecret: 'host-secret',
+      hubUrl: '',
+      secret: '',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      Object.assign(state.settings, patch);
+      vmContext.syncHubModeUi();
+      vmContext.syncHubDraftFields();
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubModeUi();
+  vmContext.syncHubDraftFields();
+
+  els.hubPortInput.value = '18000';
+  await els.hubPortInput.dispatch('input');
+  // Model the same renderer rehydration that follows any settings push.
+  vmContext.syncHubModeUi();
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubPortInput.value, '18000');
+
+  await els.saveSettingsButton.dispatch('click');
+  assert.deepEqual(patches, [{
+    hubUrl: '',
+    secret: '',
+    deviceId: 'saved-device',
+    hubHostPort: 18000
+  }]);
+  assert.equal(els.hubPortInput.value, '18000');
 });
 
 test('remote Hub build status is wired as a separate localized sync hint', () => {

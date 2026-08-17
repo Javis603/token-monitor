@@ -8120,7 +8120,6 @@ function syncHubModeUi() {
   els.hubClientFields.classList.toggle('hidden', mode !== 'client');
   els.hubHostFields.classList.toggle('hidden', mode !== 'host');
   if (mode === 'host') {
-    els.hubPortInput.value = String(state.settings.hubHostPort || 17321);
     els.hubSecretInput.value = state.settings.hubHostSecret || '';
     renderHubStatus();
   }
@@ -8324,31 +8323,48 @@ function renderSessionUsageArchiveStatus() {
 const HUB_DRAFT_FIELDS = [
   ['hubUrl', 'hubUrlInput'],
   ['secret', 'secretInput'],
-  ['deviceId', 'deviceIdInput']
+  ['deviceId', 'deviceIdInput'],
+  ['hubHostPort', 'hubPortInput']
 ];
 const hubDraftDirty = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [field, false]));
+const hubDraftRevisions = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [field, 0]));
 
 function markHubDraftDirty(field) {
   const inputId = HUB_DRAFT_FIELDS.find(([name]) => name === field)?.[1];
   const input = inputId ? els[inputId] : null;
   if (!input) return;
-  hubDraftDirty[field] = input.value !== String(state.settings?.[field] || '');
+  hubDraftRevisions[field] += 1;
+  hubDraftDirty[field] = true;
 }
 
 function syncHubDraftFields() {
   for (const [field, inputId] of HUB_DRAFT_FIELDS) {
     const input = els[inputId];
     if (!input || hubDraftDirty[field]) continue;
-    input.value = state.settings?.[field] || '';
+    input.value = field === 'hubHostPort'
+      ? String(state.settings?.hubHostPort || 17321)
+      : state.settings?.[field] || '';
   }
 }
 
-function reconcileHubDraftsAfterSave(submitted) {
+function normalizeHubDraftValue(field, value) {
+  if (field === 'hubHostPort') return String(Number(value) || 17321);
+  if (field === 'secret') return String(value ?? '');
+  return String(value ?? '').trim();
+}
+
+function reconcileHubDraftsAfterSave(submitted, submittedRevisions) {
   for (const [field, inputId] of HUB_DRAFT_FIELDS) {
     const input = els[inputId];
     if (!input) continue;
-    const current = field === 'secret' ? input.value : input.value.trim();
-    if (current === submitted[field]) hubDraftDirty[field] = false;
+    if (!Object.prototype.hasOwnProperty.call(submitted, field)) continue;
+    const current = normalizeHubDraftValue(field, input.value);
+    if (
+      hubDraftRevisions[field] === submittedRevisions[field]
+      && current === submitted[field]
+    ) {
+      hubDraftDirty[field] = false;
+    }
   }
   syncHubDraftFields();
 }
@@ -10974,10 +10990,15 @@ els.saveSettingsButton.addEventListener('click', async () => {
   };
   const patch = { ...submittedHubFields };
   if (state.settings.hubMode === 'host') {
-    patch.hubHostPort = Number(els.hubPortInput.value) || 17321;
+    const hubHostPort = Number(els.hubPortInput.value) || 17321;
+    submittedHubFields.hubHostPort = String(hubHostPort);
+    patch.hubHostPort = hubHostPort;
   }
+  const submittedHubRevisions = Object.fromEntries(
+    Object.keys(submittedHubFields).map((field) => [field, hubDraftRevisions[field]])
+  );
   await saveSettings(patch);
-  reconcileHubDraftsAfterSave(submittedHubFields);
+  reconcileHubDraftsAfterSave(submittedHubFields, submittedHubRevisions);
   await refreshHubInfo();
   void refreshHubBuildStatus();
   await refreshStats();
