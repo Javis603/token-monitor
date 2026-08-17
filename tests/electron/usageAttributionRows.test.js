@@ -63,6 +63,19 @@ test('display rows hide a zero-token synthetic residual that formats as zero', (
   );
 });
 
+test('display rows hide zero-token synthetic residuals with a custom key', () => {
+  const rows = attributionRows(
+    { codex: 100 },
+    { codex: 1 },
+    { totalValue: 100, totalCost: 1.000001, unattributedKey: 'custom-unclassified' }
+  );
+
+  assert.deepEqual(
+    visibleAttributionRows(rows, (value) => `$${Number(value || 0).toFixed(4)}`),
+    [{ key: 'codex', value: 100, cost: 1 }]
+  );
+});
+
 test('display rows retain meaningful synthetic and known cost-only rows', () => {
   const synthetic = attributionRows(
     { codex: 100 },

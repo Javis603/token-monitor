@@ -43,7 +43,7 @@
     if (typeof formatCost !== 'function') return sourceRows;
     const zeroCost = String(formatCost(0));
     return sourceRows.filter((row) => (
-      row?.key !== UNATTRIBUTED_KEY
+      row?.unattributed !== true
       || finiteNumber(row.value) > 0
       || String(formatCost(row.cost)) !== zeroCost
     ));
