@@ -95,6 +95,23 @@ test('parseProcessLine matches agy.exe on win32 cmdlines', () => {
   assert.equal(info.kind, 'cli');
 });
 
+test('parseProcessLine matches a quoted agy.exe on win32 cmdlines', () => {
+  const info = probe._parseProcessLine('9001 "C:\\Users\\j\\.antigravity\\agy.exe" language-server');
+  assert.equal(info.pid, 9001);
+  assert.equal(info.kind, 'cli');
+});
+
+test('parseProcessLine matches a quoted agy.exe with no directory component', () => {
+  assert.equal(probe._parseProcessLine('9002 "agy.exe" language-server').kind, 'cli');
+});
+
+test('parseProcessLine matches a quoted language_server.exe on win32 cmdlines', () => {
+  const line = '7777 "C:\\Program Files\\Antigravity\\language_server.exe" --app_data_dir antigravity --csrf_token win-token';
+  const info = probe._parseProcessLine(line);
+  assert.equal(info.kind, 'app');
+  assert.equal(info.csrfToken, 'win-token');
+});
+
 test('parseProcessLine does not match agy embedded in an unrelated path', () => {
   assert.equal(probe._parseProcessLine('700 /opt/imagytool/bin/run --serve'), null);
   assert.equal(probe._parseProcessLine('701 /usr/local/bin/legacy-agent start'), null);

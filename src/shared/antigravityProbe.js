@@ -103,9 +103,7 @@ function isAntigravityCommand(lowerCommand) {
 // (e.g. `/opt/imagytool/...`, `legacy-agent`) do not match.
 function isAntigravityCliCommand(lowerCommand) {
   if (/(^|[/\\])(antigravity-cli|antigravity_cli)([\s/\\]|$)/.test(lowerCommand)) return true;
-  // Win32_Process.CommandLine preserves the closing quote around a quoted
-  // executable path, so `agy.exe"` is also a complete command token.
-  if (/(^|[/\\])agy(\.exe)?(["\s]|$)/.test(lowerCommand)) return true;
+  if (/(^|[/\\])agy(\.exe)?(\s|$)/.test(lowerCommand)) return true;
   return false;
 }
 
@@ -155,6 +153,15 @@ function extractPortFlag(flag, command) {
   return Number.isFinite(n) && n > 0 && n < 65536 ? n : null;
 }
 
+// `Win32_Process.CommandLine` reports the command line a process was created
+// with, which quotes the executable path whenever it contains spaces (and
+// PowerShell quotes it even when it does not). Unwrap that one leading pair so
+// the matchers above keep anchoring on path separators and whitespace alone;
+// quoted flag values further along the line are left untouched.
+function commandForMatching(command) {
+  return command.replace(/^"([^"]+)"(?=\s|$)/, '$1').toLowerCase();
+}
+
 function parseProcessLine(line) {
   const trimmed = String(line || '').trim();
   if (!trimmed) return null;
@@ -164,7 +171,7 @@ function parseProcessLine(line) {
   if (!Number.isFinite(pid) || pid <= 0) return null;
   const command = trimmed.slice(split + 1).trim();
   if (!command) return null;
-  const lower = command.toLowerCase();
+  const lower = commandForMatching(command);
   const kind = antigravityProcessKind(lower);
   if (!kind) return null;
   const csrfToken = extractFlag('--csrf_token', command);
@@ -231,7 +238,7 @@ function processInfosFromText(stdout) {
       continue;
     }
     const split = trimmed.indexOf(' ');
-    const lower = split === -1 ? '' : trimmed.slice(split + 1).trim().toLowerCase();
+    const lower = split === -1 ? '' : commandForMatching(trimmed.slice(split + 1).trim());
     const kind = antigravityProcessKind(lower);
     if ((kind === 'app' || kind === 'ide') && !extractFlag('--csrf_token', trimmed)) {
       sawDesktopWithoutCsrf = true;
