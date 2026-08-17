@@ -279,7 +279,7 @@ const {
   runManualDeviceRefresh,
   settingsLimitInvalidationPlan
 } = require('./deviceRuntimeCoordinator');
-const { describeWindowBehavior, normalizeWindowBehaviorSettings } = require('./windowBehavior');
+const { describeWindowBehavior, normalizeWindowBehaviorSettings, windowBehaviorSelection } = require('./windowBehavior');
 const {
   normalizeWindowToggleShortcut,
   windowToggleShortcutAction,
@@ -6119,7 +6119,7 @@ app.whenReady().then(() => {
       customModelPricing: patch.customModelPricing !== undefined
         ? normalizeCustomPricingSetting(patch.customModelPricing)
         : normalizeCustomPricingSetting(settings.customModelPricing)
-    }, normalizedPatch);
+    }, windowBehaviorSelection(normalizedPatch));
     settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
     if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
     delete settings.edgeDrawerEnabled;

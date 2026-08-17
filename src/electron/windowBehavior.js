@@ -63,6 +63,17 @@ function describeWindowBehavior(settings = {}) {
   return { ...WINDOW_BEHAVIOR_PROFILES[modeFromSettings(settings)] };
 }
 
+// The only two keys that select a mode. A caller which has already merged and
+// normalized its patch must narrow it through this before handing it over, since
+// normalizeWindowBehaviorSettings spreads whatever patch it is given over the
+// settings and would otherwise reinstate the raw values it just normalized away.
+function windowBehaviorSelection(patch = {}) {
+  const selection = {};
+  if (hasOwn(patch, 'windowBehavior')) selection.windowBehavior = patch.windowBehavior;
+  if (hasOwn(patch, 'alwaysOnTop')) selection.alwaysOnTop = patch.alwaysOnTop;
+  return selection;
+}
+
 function normalizeWindowBehaviorSettings(settings = {}, patch = {}) {
   const merged = { ...settings, ...patch };
   const previousMode = modeFromSettings(settings);
@@ -85,5 +96,6 @@ function normalizeWindowBehaviorSettings(settings = {}, patch = {}) {
 module.exports = {
   describeWindowBehavior,
   normalizeWindowBehavior,
-  normalizeWindowBehaviorSettings
+  normalizeWindowBehaviorSettings,
+  windowBehaviorSelection
 };
