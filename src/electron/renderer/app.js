@@ -8321,6 +8321,38 @@ function renderSessionUsageArchiveStatus() {
     : t('settings.collection.sessionArchiveEmpty');
 }
 
+const HUB_DRAFT_FIELDS = [
+  ['hubUrl', 'hubUrlInput'],
+  ['secret', 'secretInput'],
+  ['deviceId', 'deviceIdInput']
+];
+const hubDraftDirty = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [field, false]));
+
+function markHubDraftDirty(field) {
+  const inputId = HUB_DRAFT_FIELDS.find(([name]) => name === field)?.[1];
+  const input = inputId ? els[inputId] : null;
+  if (!input) return;
+  hubDraftDirty[field] = input.value !== String(state.settings?.[field] || '');
+}
+
+function syncHubDraftFields() {
+  for (const [field, inputId] of HUB_DRAFT_FIELDS) {
+    const input = els[inputId];
+    if (!input || hubDraftDirty[field]) continue;
+    input.value = state.settings?.[field] || '';
+  }
+}
+
+function reconcileHubDraftsAfterSave(submitted) {
+  for (const [field, inputId] of HUB_DRAFT_FIELDS) {
+    const input = els[inputId];
+    if (!input) continue;
+    const current = field === 'secret' ? input.value : input.value.trim();
+    if (current === submitted[field]) hubDraftDirty[field] = false;
+  }
+  syncHubDraftFields();
+}
+
 function syncSettingsForm() {
   applySettingsTranslations();
   applyInitialBreakdownPreference();
@@ -8332,9 +8364,7 @@ function syncSettingsForm() {
   }
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
   syncCurrencyRateControls();
-  els.hubUrlInput.value = state.settings.hubUrl || '';
-  els.secretInput.value = state.settings.secret || '';
-  els.deviceIdInput.value = state.settings.deviceId || '';
+  syncHubDraftFields();
   els.limitsRefreshInput.value = state.settings.limitsRefreshMode === 'adaptive'
     ? 'adaptive'
     : String(LIMIT_REFRESH_OPTIONS.includes(Number(state.settings.limitsRefreshMs)) ? state.settings.limitsRefreshMs : 300000);
@@ -10937,16 +10967,17 @@ els.settingsButton.addEventListener('click', (event) => {
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
 });
 els.saveSettingsButton.addEventListener('click', async () => {
-  const patch = {
+  const submittedHubFields = {
     hubUrl: els.hubUrlInput.value.trim(),
     secret: els.secretInput.value,
-    deviceId: els.deviceIdInput.value.trim(),
-    syncUploadIntervalMs: Number(els.syncUploadIntervalInput.value)
+    deviceId: els.deviceIdInput.value.trim()
   };
+  const patch = { ...submittedHubFields };
   if (state.settings.hubMode === 'host') {
     patch.hubHostPort = Number(els.hubPortInput.value) || 17321;
   }
   await saveSettings(patch);
+  reconcileHubDraftsAfterSave(submittedHubFields);
   await refreshHubInfo();
   void refreshHubBuildStatus();
   await refreshStats();
@@ -11035,6 +11066,7 @@ els.secretPasteButton?.addEventListener('click', async () => {
     const text = await navigator.clipboard.readText();
     if (text) {
       els.secretInput.value = text.trim();
+      markHubDraftDirty('secret');
     }
   } catch (_) {}
 });
@@ -11111,6 +11143,12 @@ for (const input of els.showLimitUsedInputs || []) {
     if (input.checked) await saveSettings({ showLimitUsed: input.value === 'used' });
   });
 }
+for (const [field, inputId] of HUB_DRAFT_FIELDS) {
+  els[inputId]?.addEventListener('input', () => markHubDraftDirty(field));
+}
+els.syncUploadIntervalInput?.addEventListener('change', async () => {
+  await saveSettings({ syncUploadIntervalMs: Number(els.syncUploadIntervalInput.value) });
+});
 els.collectionCadenceInput?.addEventListener('change', async () => {
   const value = els.collectionCadenceInput.value;
   await saveSettings({

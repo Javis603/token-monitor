@@ -155,7 +155,7 @@ test('Hub secret input stays masked and exposes an accessible paste button', () 
   const pasteBody = app.slice(start, end);
   assert.match(pasteBody, /const text = await navigator\.clipboard\.readText\(\);/);
   assert.match(pasteBody, /els\.secretInput\.value = text\.trim\(\);/);
-  assert.doesNotMatch(pasteBody, /dispatchEvent\(new Event\('input'/);
+  assert.match(pasteBody, /markHubDraftDirty\('secret'\);/);
 });
 
 test('Cursor account header omits plan and reset details', () => {
@@ -1322,12 +1322,16 @@ test('sync upload interval setting is exposed in the Multi-device Sync panel', (
   assert.match(syncBody, /state\.settings\.syncUploadIntervalMs/);
   assert.match(syncBody, /Array\.from\(els\.syncUploadIntervalInput\.options/);
   assert.doesNotMatch(syncBody, /const allowed = \[0, 600000, 1200000, 1800000\]/);
-  assert.doesNotMatch(app, /saveSettings\(\{\s*syncUploadIntervalMs:/);
+  const listenerStart = app.indexOf("els.syncUploadIntervalInput?.addEventListener('change'");
+  const listenerEnd = app.indexOf("els.collectionCadenceInput?.addEventListener('change'", listenerStart);
+  assert.notEqual(listenerStart, -1, 'sync upload interval listener should exist');
+  assert.notEqual(listenerEnd, -1, 'collection cadence listener should follow sync upload listener');
+  assert.match(app.slice(listenerStart, listenerEnd), /saveSettings\(\{\s*syncUploadIntervalMs:/);
 });
 
-// Run the shipped event wiring against controls that model the settings push:
-// every save rehydrates the form from persisted state, which is the path that
-// used to replace an unsaved URL and secret when the interval changed.
+// Run the shipped event wiring against controls that model a settings push:
+// an auto-saved interval updates persisted state while the Hub fields keep
+// their local drafts until the explicit Hub Save commits them.
 function fakeHubControl(value = '') {
   const listeners = new Map();
   return {
@@ -1345,18 +1349,27 @@ function fakeHubControl(value = '') {
 
 function loadHubSettingsWiring(els, context) {
   const app = readRendererFile('app.js');
+  const draftStart = app.indexOf('const HUB_DRAFT_FIELDS = [');
+  const draftEnd = app.indexOf('function syncSettingsForm()', draftStart);
   const saveStart = app.indexOf("els.saveSettingsButton.addEventListener('click'");
   const saveEnd = app.indexOf("els.hubModeOptions.addEventListener('change'", saveStart);
   const intervalStart = app.indexOf('for (const input of els.showLimitUsedInputs || [])', saveEnd);
   const intervalEnd = app.indexOf("els.collectionCadenceInput?.addEventListener('change'", intervalStart);
+  assert.notEqual(draftStart, -1, 'Hub draft tracking should exist');
+  assert.notEqual(draftEnd, -1, 'Hub draft tracking should precede settings sync');
   assert.notEqual(saveStart, -1, 'Hub Save handler should exist');
   assert.notEqual(saveEnd, -1, 'Hub mode handler should follow Hub Save');
   assert.notEqual(intervalStart, -1, 'limits display wiring should precede sync upload wiring');
   assert.notEqual(intervalEnd, -1, 'collection cadence wiring should follow sync upload wiring');
-  vm.runInNewContext(`${app.slice(saveStart, saveEnd)}\n${app.slice(intervalStart, intervalEnd)}`, { els, ...context });
+  const vmContext = { els, ...context };
+  vm.runInNewContext(
+    `${app.slice(draftStart, draftEnd)}\n${app.slice(saveStart, saveEnd)}\n${app.slice(intervalStart, intervalEnd)}`,
+    vmContext
+  );
+  return vmContext;
 }
 
-test('changing sync upload frequency preserves Hub drafts until one complete Save', async () => {
+test('changing sync upload frequency auto-saves without replacing Hub drafts', async () => {
   const els = {
     saveSettingsButton: fakeHubControl(),
     hubUrlInput: fakeHubControl(),
@@ -1375,41 +1388,111 @@ test('changing sync upload frequency preserves Hub drafts until one complete Sav
     }
   };
   const patches = [];
-  const syncSettingsForm = () => {
-    els.hubUrlInput.value = state.settings.hubUrl;
-    els.secretInput.value = state.settings.secret;
-    els.deviceIdInput.value = state.settings.deviceId;
-    els.syncUploadIntervalInput.value = String(state.settings.syncUploadIntervalMs);
-  };
-  loadHubSettingsWiring(els, {
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
     state,
     saveSettings: async (patch) => {
       patches.push({ ...patch });
       Object.assign(state.settings, patch);
-      syncSettingsForm();
+      vmContext.syncHubDraftFields();
+      els.syncUploadIntervalInput.value = String(state.settings.syncUploadIntervalMs);
     },
     refreshHubInfo: async () => {},
     refreshHubBuildStatus: async () => {},
     refreshStats: async () => {}
   });
+  vmContext.syncHubDraftFields();
 
   els.hubUrlInput.value = 'https://draft.example';
   els.secretInput.value = 'draft-secret';
   els.deviceIdInput.value = 'draft-device';
+  await els.hubUrlInput.dispatch('input');
+  await els.secretInput.dispatch('input');
+  await els.deviceIdInput.dispatch('input');
   els.syncUploadIntervalInput.value = '1200000';
 
   await els.syncUploadIntervalInput.dispatch('change');
   assert.equal(els.hubUrlInput.value, 'https://draft.example');
   assert.equal(els.secretInput.value, 'draft-secret');
-  assert.deepEqual(patches, []);
+  assert.equal(els.deviceIdInput.value, 'draft-device');
+  assert.deepEqual(patches, [{ syncUploadIntervalMs: 1200000 }]);
 
   await els.saveSettingsButton.dispatch('click');
   assert.deepEqual(patches, [{
+    syncUploadIntervalMs: 1200000
+  }, {
     hubUrl: 'https://draft.example',
     secret: 'draft-secret',
-    deviceId: 'draft-device',
-    syncUploadIntervalMs: 1200000
+    deviceId: 'draft-device'
   }]);
+  assert.equal(els.hubUrlInput.value, 'https://draft.example');
+  assert.equal(els.secretInput.value, 'draft-secret');
+  assert.equal(els.deviceIdInput.value, 'draft-device');
+});
+
+test('Hub Save keeps edits made while persistence is in flight', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let releaseSave;
+  let resolveSaveStarted;
+  const saveGate = new Promise((resolve) => { releaseSave = resolve; });
+  const saveStarted = new Promise((resolve) => { resolveSaveStarted = resolve; });
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      resolveSaveStarted();
+      await saveGate;
+      Object.assign(state.settings, patch);
+      vmContext.syncHubDraftFields();
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  els.hubUrlInput.value = 'https://draft-a.example';
+  els.secretInput.value = 'draft-secret';
+  els.deviceIdInput.value = 'draft-device';
+  await els.hubUrlInput.dispatch('input');
+  await els.secretInput.dispatch('input');
+  await els.deviceIdInput.dispatch('input');
+
+  const savePromise = els.saveSettingsButton.dispatch('click');
+  await saveStarted;
+  els.hubUrlInput.value = 'https://draft-b.example';
+  await els.hubUrlInput.dispatch('input');
+  releaseSave();
+  await savePromise;
+
+  assert.deepEqual(patches, [{
+    hubUrl: 'https://draft-a.example',
+    secret: 'draft-secret',
+    deviceId: 'draft-device'
+  }]);
+  assert.equal(els.hubUrlInput.value, 'https://draft-b.example');
+  assert.equal(els.secretInput.value, 'draft-secret');
+  assert.equal(els.deviceIdInput.value, 'draft-device');
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubUrlInput.value, 'https://draft-b.example');
 });
 
 test('remote Hub build status is wired as a separate localized sync hint', () => {
