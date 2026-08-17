@@ -69,7 +69,7 @@ test('tool diagnostics bind source values to the full health snapshot key', () =
   assert.match(loader, /clientSourceCacheApi\.writeClientSources/);
   assert.match(loader, /catch[\s\S]*state\.clientSourcesKey = ''[\s\S]*refillOpenClientHealthPanel\(\)/);
   assert.match(loader, /return true;/);
-  assert.match(expand, /if \(open\)[\s\S]*loadClientSources\(row\.dataset\.client\)/);
+  assert.match(expand, /if \(open\)[\s\S]*loadClientSources\(row\.dataset\.client, \{ force \}\)/);
   assert.match(actions, /succeeded = await window\.tokenMonitor\.rescanClient\(clientId\) === true/);
   assert.match(actions, /if \(succeeded\) loadClientSources/);
   assert.match(actions, /rescan\.id = `toolHealthRescan-\$\{clientId\}`/);
@@ -186,6 +186,13 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(signature, /health\?\.clients\?\.\[id\]\?\.overall/);
   assert.doesNotMatch(signature, /periods/);
 
+  const expanded = functionBody(app, 'setClientHealthExpanded', 'clientPeriodUsage');
+  assert.match(expanded, /function setClientHealthExpanded\(clientId, options = \{\}\)/);
+  assert.match(
+    expanded,
+    /const force = options\.refreshPlaceholder === true[\s\S]*clientHealthPresentationApi\.hasClientHealth\(localClientHealth\(\), row\.dataset\.client\)[\s\S]*loadClientSources\(row\.dataset\.client, \{ force \}\)/
+  );
+
   const body = functionBody(app, 'renderToolPreferencesNow', 'connectLimitProviderCheckboxName');
   const fill = functionBody(app, 'fillClientHealthPanel', 'clientHealthGroup');
   assert.match(body, /state\.toolPreferenceRenderSignature === renderSignature/);
@@ -201,6 +208,13 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(body, /document\.getElementById\(focusedId\)\?\.focus/);
   assert.match(body, /return;/);
   assert.doesNotMatch(body, /replaceChildren/);
+  assert.match(
+    body,
+    /main\.addEventListener\('click', \(\) => \{[\s\S]*const open = state\.clientHealthExpanded !== id;[\s\S]*setClientHealthExpanded\(open \? id : '', \{ refreshPlaceholder: open \}\);/
+  );
+  const wiring = app.slice(app.indexOf('const clientPreferenceRowDrag = '), app.indexOf('function renderToolPreferences('));
+  assert.match(wiring, /setExpanded: setClientHealthExpanded,/);
+  assert.doesNotMatch(wiring, /refreshPlaceholder/);
   assert.match(fill, /patchRenderedNode\(current, next\)/);
   assert.match(fill, /else container\.replaceChildren\(next\)/);
 

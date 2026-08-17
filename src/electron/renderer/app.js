@@ -9365,10 +9365,10 @@ function localClientHealth() {
   return localDevice()?.clientHealth || null;
 }
 
-// Single entry point for the tracked-tool detail accordion, mirroring the limits
+// Single entry point for the tool detail accordion, mirroring the limits
 // list: the drag gesture collapses and restores it too, so the class and aria
 // bookkeeping cannot live inside the disclosure's own click handler.
-function setClientHealthExpanded(clientId) {
+function setClientHealthExpanded(clientId, options = {}) {
   state.clientHealthExpanded = clientId || '';
   const rows = els.clientDisplayList?.querySelectorAll('.tool-preference-row[data-client]') || [];
   for (const row of rows) {
@@ -9381,7 +9381,9 @@ function setClientHealthExpanded(clientId) {
     // rebuilt every stats tick — to render nothing. A panel already filled is
     // left alone so a collapse still has something to animate.
     if (open) {
-      loadClientSources(row.dataset.client);
+      const force = options.refreshPlaceholder === true
+        && !clientHealthPresentationApi.hasClientHealth(localClientHealth(), row.dataset.client);
+      loadClientSources(row.dataset.client, { force });
       if (container.childElementCount === 0) {
         fillClientHealthPanel(container, row.dataset.client);
       }
@@ -10009,7 +10011,10 @@ function renderToolPreferencesNow() {
         loadClientSources(id);
         panel.append(clientHealthPanel(clientHealthDetailFor(id) || detail, id));
       }
-      main.addEventListener('click', () => setClientHealthExpanded(state.clientHealthExpanded === id ? '' : id));
+      main.addEventListener('click', () => {
+        const open = state.clientHealthExpanded !== id;
+        setClientHealthExpanded(open ? id : '', { refreshPlaceholder: open });
+      });
       // Last of the row's controls, where the eye and the pin already are —
       // the label stays plain text, exactly as it reads without this feature.
       actions.append(main);

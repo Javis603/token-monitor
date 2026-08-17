@@ -45,7 +45,7 @@ test('health summary falls back rather than hiding incomplete or unknown clients
   });
 });
 
-test('a client the device never reported gets no panel and no disclosure', () => {
+test('clientHealthDetail requires an actual health entry', () => {
   assert.equal(clientHealthDetail(health({ codex: entry() }), 'claude'), null);
   assert.equal(clientHealthDetail(null, 'codex'), null);
   assert.equal(hasClientHealth(health({ codex: entry() }), 'CODEX'), true);
