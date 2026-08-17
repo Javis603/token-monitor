@@ -9491,7 +9491,7 @@ function clientHealthDetailFor(clientId) {
   };
   const detail = clientHealthPresentationApi.clientHealthDetail(localClientHealth(), clientId, options);
   if (detail) return detail;
-  return clientHealthPresentationApi.untrackedClientHealthDetail(options);
+  return clientHealthPresentationApi.clientHealthPlaceholderDetail(options);
 }
 
 function sameRenderedNode(current, next) {

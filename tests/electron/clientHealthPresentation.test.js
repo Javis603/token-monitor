@@ -12,7 +12,7 @@ const {
   exactDevice,
   friendlyPath,
   hasClientHealth,
-  untrackedClientHealthDetail
+  clientHealthPlaceholderDetail
 } = require('../../src/electron/renderer/clientHealthPresentation');
 
 const entry = (overrides = {}) => ({
@@ -52,8 +52,8 @@ test('a client the device never reported gets no panel and no disclosure', () =>
   assert.equal(hasClientHealth(health({ codex: entry() }), 'claude'), false);
 });
 
-test('an untracked client can show on-demand source details without health data', () => {
-  const detail = untrackedClientHealthDetail({
+test('a client without health data can show on-demand source details', () => {
+  const detail = clientHealthPlaceholderDetail({
     sources: [{ id: 'codebuddy-data', dir: '/Users/x/.codebuddy', exists: true }],
     usage: {
       today: { tokens: 0, cost: 0 },
@@ -75,7 +75,7 @@ test('an untracked client can show on-demand source details without health data'
     { period: 'allTime', tokens: 0 }
   ]);
   assert.equal(
-    untrackedClientHealthDetail({ collectionState: 'waiting' }).groups[1].state,
+    clientHealthPlaceholderDetail({ collectionState: 'waiting' }).groups[1].state,
     'waiting'
   );
 });

@@ -185,11 +185,10 @@
     return clientHealthDetailFromEntry(healthFor(health, clientId), options);
   }
 
-  // Untracked tools have no health entry because the collector intentionally
-  // probes only selected clients. They can still expose their local source
-  // roots on demand, so the disclosure can show useful context without
-  // pretending that the tool is being collected.
-  function untrackedClientHealthDetail(options = {}) {
+  // Tools without a health entry have no collector snapshot yet. They can
+  // still expose their local source roots on demand, so the disclosure can
+  // show useful context without pretending that the tool is being collected.
+  function clientHealthPlaceholderDetail(options = {}) {
     const sources = Array.isArray(options.sources) ? options.sources : [];
     const checks = new Map();
     for (const source of sources) {
@@ -224,7 +223,7 @@
     OVERALL_TONES,
     clientHealthCountsForTracked,
     clientHealthDetail,
-    untrackedClientHealthDetail,
+    clientHealthPlaceholderDetail,
     clientHealthGroups,
     clientHealthNotes,
     clientPeriodUsage,
