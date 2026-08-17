@@ -89,6 +89,28 @@ test('Claude Code keeps its intentional wide mark while other providers use the 
   assert.equal(trayProviderOpticalRatio('codex'), 0.78);
 });
 
+test('a standalone mark fills the Windows notification-area cell, everywhere else keeps the inset', () => {
+  // Windows gives each tray icon one square cell and spaces the cells itself,
+  // so the 0.78 optical inset drew 18px of mark in a 24px cell at 150% (#314).
+  assert.equal(trayProviderOpticalRatio('codex', { standalone: true, platform: 'win32' }), 1);
+  assert.equal(trayProviderOpticalRatio('codex', { standalone: true, platform: 'darwin' }), 0.78);
+  assert.equal(trayProviderOpticalRatio('codex', { standalone: true, platform: 'linux' }), 0.78);
+  // Composed icons (bars / sessions / the custom layout) share their canvas with
+  // bars or text on every platform, so the mark keeps its breathing room there.
+  assert.equal(trayProviderOpticalRatio('codex', { platform: 'win32' }), 0.78);
+  assert.equal(trayProviderOpticalRatio('codex', { standalone: false, platform: 'win32' }), 0.78);
+});
+
+test('a standalone Windows mark is scaled to fill its box edge to edge', () => {
+  const ratio = trayProviderOpticalRatio('codex', { standalone: true, platform: 'win32' });
+  assert.deepEqual(trayProviderOpticalLayout({ width: 128, height: 128 }, 44, ratio), {
+    x: 0,
+    y: 0,
+    width: 44,
+    height: 44
+  });
+});
+
 test('tray provider icon delivery guard invalidates older async work', () => {
   const guard = createTrayProviderIconDeliveryGuard();
   const olderDelivery = guard.begin();

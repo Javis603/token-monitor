@@ -85,11 +85,24 @@
     };
   }
 
-  function trayProviderOpticalRatio(providerId) {
+  // How much of its box a provider mark fills. The inset is optical balance for
+  // a mark sharing a canvas with bars or text — the macOS menubar case, where
+  // the composed icon is one wide image and the glyph must not crowd its
+  // neighbours.
+  const TRAY_PROVIDER_OPTICAL_RATIO = 0.78;
+
+  function trayProviderOpticalRatio(providerId, options = {}) {
+    // A mark that IS the whole tray icon is a different problem. Windows hands
+    // each notification-area icon one square cell of the small-icon metric and
+    // spaces the cells itself, so anything short of filling that cell reads
+    // smaller than every neighbouring app — 18px of mark in a 24px cell at 150%
+    // (#314). macOS keeps the inset: its menubar has no cell to fill, and the
+    // icon sits inline with text that the breathing room is measured against.
+    if (options.standalone === true && options.platform === 'win32') return 1;
     // Claude Code's intentionally wide mark already uses the full horizontal
     // viewBox with balanced vertical breathing room. Cropping it into the
     // shared square optical box makes it noticeably smaller than its peers.
-    return providerId === 'claude' ? 1 : 0.78;
+    return providerId === 'claude' ? 1 : TRAY_PROVIDER_OPTICAL_RATIO;
   }
 
   function createTrayProviderIconDeliveryGuard() {

@@ -248,7 +248,8 @@ const {
   watchSystemDarkUi,
   sortCodexAccountsForDisplay,
   shouldUseTemplateTrayIcon,
-  trayShowsTitle
+  trayShowsTitle,
+  trimTrayIconPadding
 } = require('./tray');
 const {
   macActivationPolicyMode,
@@ -314,7 +315,11 @@ const { applyWindowsAccentBlur } = require('./windowsBackdrop');
 if (!app.isPackaged) loadDotEnv();
 
 const APP_NAME = 'Token Monitor';
-const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
+// Same split as the tray (see WINDOWS_ICON_PATH in tray.js): the macOS artwork
+// carries the Dock's inset margin, so passing it as the BrowserWindow `icon`
+// would override the exe's own full-bleed icon with a visibly smaller taskbar
+// and Alt-Tab entry. app.dock.setIcon is darwin-only and keeps icon.png.
+const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', process.platform === 'win32' ? 'icon-win.png' : 'icon.png');
 
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
@@ -6319,13 +6324,17 @@ app.whenReady().then(() => {
       if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png')) continue;
       const img = nativeImage.createFromDataURL(dataUrl);
       if (img.isEmpty()) continue;
+      // Windows fits the bitmap into one square cell, so the renderer's macOS
+      // breathing room is cell space the icon never gets back (see
+      // trimTrayIconPadding). Everywhere else the padding is load-bearing.
+      const source = process.platform === 'win32' ? trimTrayIconPadding(img) : img;
       // Resize by height only; aspect ratio is preserved, so wide bar-style
       // icons keep their width while square provider icons stay square.
       // Windows targets its own small-icon metric (16px x the display scale
       // factor) rather than the macOS menubar height, so a single high-quality
       // downscale of the 44px-tall renderer source stays crisp in the
       // notification area instead of the old fixed 20px-for-all blur.
-      const sized = resizeTrayIconForPlatform(img, {
+      const sized = resizeTrayIconForPlatform(source, {
         platform: process.platform,
         scaleFactor: screen.getPrimaryDisplay().scaleFactor
       });

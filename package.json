@@ -42,6 +42,7 @@
       "src/shared/**/*",
       "src/hub/**/*",
       "assets/icon.png",
+      "assets/icon-win.png",
       "assets/icons/**/*",
       "package.json"
     ],
