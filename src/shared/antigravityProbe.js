@@ -103,7 +103,9 @@ function isAntigravityCommand(lowerCommand) {
 // (e.g. `/opt/imagytool/...`, `legacy-agent`) do not match.
 function isAntigravityCliCommand(lowerCommand) {
   if (/(^|[/\\])(antigravity-cli|antigravity_cli)([\s/\\]|$)/.test(lowerCommand)) return true;
-  if (/(^|[/\\])agy(\.exe)?(\s|$)/.test(lowerCommand)) return true;
+  // Win32_Process.CommandLine preserves the closing quote around a quoted
+  // executable path, so `agy.exe"` is also a complete command token.
+  if (/(^|[/\\])agy(\.exe)?(["\s]|$)/.test(lowerCommand)) return true;
   return false;
 }
 

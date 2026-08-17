@@ -190,7 +190,7 @@ test('detectProcessInfo (win32) includes hyphenated language-server names in the
 });
 
 test('detectProcessInfo (win32) finds the agy.exe CLI when no IDE LS is running', async () => {
-  const stdout = '9001 C:\\Users\\j\\.antigravity\\agy.exe language-server\n';
+  const stdout = '9001 "C:\\Users\\j\\.antigravity\\agy.exe" language-server\n';
   const info = await probe.detectProcessInfo({ platform: 'win32', spawn: fakeSpawn(stdout) });
   assert.equal(info.pid, 9001);
   assert.equal(info.kind, 'cli');
