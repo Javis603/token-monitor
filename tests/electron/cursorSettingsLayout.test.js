@@ -132,7 +132,15 @@ test('Hub secret input stays masked and exposes an accessible paste button', () 
   // No standalone .hub-secret-field layout rule — settings-field handles it
   assert.doesNotMatch(css, /\.hub-secret-field\s*\{/);
 
-  const sharedInputRule = cssRule(css, '.settings-panel input, .settings-panel select');
+  const sharedInputRule = cssRulesForSelector(css, '.settings-panel input').find(rule => (
+    declaration(rule, 'width') === '100%'
+      && declaration(rule, 'min-width') === '0'
+      && declaration(rule, 'padding') === '7px 8px'
+      && declaration(rule, 'border') === '1px solid var(--line)'
+      && declaration(rule, 'border-radius') === '6px'
+      && declaration(rule, 'background') === 'rgba(var(--sunken-rgb), 0.48)'
+  ));
+  assert.ok(sharedInputRule, 'settings inputs should use the shared control styling');
   assert.equal(declaration(sharedInputRule, 'width'), '100%');
   assert.equal(declaration(sharedInputRule, 'min-width'), '0');
   assert.equal(declaration(sharedInputRule, 'padding'), '7px 8px');
@@ -891,6 +899,17 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
       && declaration(rule, 'font-size') === '12px'
   )));
   assert.ok(textareaRules.some(rule => declaration(rule, 'font-family') === 'monospace'));
+  const textareaControlRules = cssRulesForSelector(css, '.settings-panel textarea');
+  assert.ok(textareaControlRules.some(rule => (
+    declaration(rule, 'height') === '54px'
+      && declaration(rule, 'min-height') === '54px'
+      && declaration(rule, 'resize') === 'vertical'
+  )));
+  assert.ok(textareaControlRules.some(rule => (
+    declaration(rule, 'background') === 'rgba(var(--sunken-rgb), 0.48)'
+      && declaration(rule, 'color') === 'var(--text)'
+      && declaration(rule, 'border') === '1px solid var(--line)'
+  )));
   const collapsedRules = cssRulesForSelector(css, '.accordion-animated-container.hidden');
   assert.ok(collapsedRules.some(rule => (
     declaration(rule, 'grid-template-rows') === '0fr'

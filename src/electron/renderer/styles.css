@@ -2515,7 +2515,9 @@ span.settings-note.settings-item-desc {
   overflow-y: auto;
   padding-right: 4px;
 }
-.settings-panel input, .settings-panel select {
+.settings-panel input,
+.settings-panel select,
+.settings-panel textarea {
   width: 100%;
   min-width: 0;
   padding: 7px 8px;
@@ -2524,6 +2526,11 @@ span.settings-note.settings-item-desc {
   background: rgba(var(--sunken-rgb), 0.48);
   color: var(--text);
   outline: none;
+}
+.settings-panel textarea {
+  height: 54px;
+  min-height: 54px;
+  resize: vertical;
 }
 .settings-panel select {
   appearance: none;
