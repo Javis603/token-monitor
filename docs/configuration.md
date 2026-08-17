@@ -17,7 +17,7 @@ Click the `⚙` button in the bottom-right corner of the widget to open the sett
 |---|---|
 | **General** | Language, launch at login, app updates, Discord Rich Presence, About, and Advanced (open the raw `settings.json` for less-common options such as `allTimeSince`). |
 | **Main** | Which Home modules appear and their order, plus the display currency (USD, TWD, HKD, or CNY; daily auto rate or a manual override). |
-| **Window** | Window behavior (float above other apps / normal / desktop-pinned), tray mode (macOS menu bar or Windows system tray, and what shows next to the icon), the floating bubble, and the global show/hide shortcut. |
+| **Window** | Window behavior (float above other apps / normal / desktop-pinned), tray mode (macOS menu bar or Windows system tray, and what shows next to the icon), the floating bubble, the Windows taskbar widget, and the global show/hide shortcut. |
 | **Appearance** | Interface theme (presets such as Default and Obsidian, a porcelain light mode, or custom colors), per-vendor tool colors, and system glass opacity / blur. |
 | **Collection** | Tracked tools (and hide / pin / drag-reorder for the main list), collection cadence, **Keep usage from deleted sessions**, custom pricing, data export, and — on Windows — the built-in WSL scan toggle. |
 | **AI Tool Limits** | Which providers to enable, their credentials and sign-in options, multiple accounts per provider (including switching the active local Codex account), session / weekly / billing / credit windows, and how often to refresh. |

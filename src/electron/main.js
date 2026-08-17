@@ -282,6 +282,12 @@ const {
 } = require('./deviceRuntimeCoordinator');
 const { describeWindowBehavior, normalizeWindowBehaviorSettings } = require('./windowBehavior');
 const {
+  canUseTaskbarWidget,
+  normalizeTaskbarWidgetPeriod,
+  taskbarWidgetBounds,
+  taskbarWidgetPagePath
+} = require('./taskbarWidget');
+const {
   normalizeWindowToggleShortcut,
   windowToggleShortcutAction,
   windowToggleShortcutStatus
@@ -442,6 +448,8 @@ function defaultSettings() {
     showCompactTotalTokens: false,
     compactTokenUnits: 'western',
     tokenRateMode: 'speed',
+    taskbarWidgetEnabled: false,
+    taskbarWidgetPeriod: 'allTime',
     heatmapMetric: 'cost',
     homeActiveDaysWindow: 'all',
     periodMonthMode: 'month',
@@ -2173,6 +2181,8 @@ function readSettings() {
     merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
     merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
+    merged.taskbarWidgetEnabled = parseBoolean(merged.taskbarWidgetEnabled, false);
+    merged.taskbarWidgetPeriod = normalizeTaskbarWidgetPeriod(merged.taskbarWidgetPeriod);
     merged.archivedClientUsage = normalizeArchivedClientUsage(merged.archivedClientUsage);
     delete merged.edgeDrawerEnabled;
     merged.floatingBubbleTrigger = merged.floatingBubbleTrigger === 'hover' ? 'hover' : 'click';
@@ -2402,6 +2412,82 @@ function applyWindowSettings() {
   if (typeof mainWindow.setFocusable === 'function') mainWindow.setFocusable(behavior.focusable);
   if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(Boolean(settings?.trayMode));
   if (!behavior.focusable && typeof mainWindow.blur === 'function') mainWindow.blur();
+}
+
+let taskbarWidgetWindow = null;
+
+function positionTaskbarWidget() {
+  if (!taskbarWidgetWindow || taskbarWidgetWindow.isDestroyed()) return;
+  const bounds = taskbarWidgetBounds(screen.getPrimaryDisplay());
+  if (bounds) {
+    taskbarWidgetWindow.setBounds(bounds);
+    // The taskbar is an always-on-top window that may reassert itself above
+    // this overlay at any time (window re-shuffles, Explorer/DWM refreshes),
+    // silently covering the widget. Re-assert topmost on every pass.
+    taskbarWidgetWindow.setAlwaysOnTop(true, 'screen-saver');
+  }
+}
+
+function destroyTaskbarWidget() {
+  if (taskbarWidgetWindow && !taskbarWidgetWindow.isDestroyed()) taskbarWidgetWindow.destroy();
+  taskbarWidgetWindow = null;
+}
+
+function createTaskbarWidget() {
+  if (taskbarWidgetWindow && !taskbarWidgetWindow.isDestroyed()) return;
+  const bounds = taskbarWidgetBounds(screen.getPrimaryDisplay());
+  if (!bounds) return;
+  const win = new BrowserWindow({
+    ...bounds,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    roundedCorners: false,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      // Keep the tiny overlay compositing even while DWM/Chromium would classify
+      // it as occluded under the always-on-top taskbar.
+      backgroundThrottling: false
+    }
+  });
+  taskbarWidgetWindow = win;
+  win.setAlwaysOnTop(true, 'screen-saver');
+  // Capture clicks so the overlay can cycle today / this month / all time.
+  win.setIgnoreMouseEvents(false);
+  win.setMenu(null);
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (event) => event.preventDefault());
+  win.once('ready-to-show', () => {
+    win.show();
+    // Re-assert position + topmost after first paint: forces DWM to recomposite
+    // the layered window over the taskbar instead of treating the show as a
+    // no-op under the occluded-region classification.
+    setTimeout(() => {
+      if (win.isDestroyed()) return;
+      const bounds = taskbarWidgetBounds(screen.getPrimaryDisplay());
+      if (bounds) win.setBounds(bounds);
+      win.setAlwaysOnTop(true, 'screen-saver');
+    }, 300);
+  });
+  const loadTarget = taskbarWidgetPagePath();
+  // The app injects a strict CSP on HTTP responses; file: pages (like the main
+  // window) are not intercepted, so the widget lives as a real file renderer.
+  win.loadFile(loadTarget);
+}
+
+function syncTaskbarWidget() {
+  if (canUseTaskbarWidget(settings)) createTaskbarWidget();
+  else destroyTaskbarWidget();
 }
 
 function nativeBlurEnabled(source = settings) {
@@ -3752,6 +3838,9 @@ function sendPush(payload, options = {}) {
   } else if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('stats:push', rendererPayload); } catch (_) {}
   }
+  if (taskbarWidgetWindow && !taskbarWidgetWindow.isDestroyed()) {
+    try { taskbarWidgetWindow.webContents.send('stats:push', payload); } catch (_) {}
+  }
   if (payload?.data?.stats) {
     const nextHistoryRevision = statsHistoryRevision(payload.data.stats);
     if (nextHistoryRevision !== previousHistoryRevision && dashboardWindow && !dashboardWindow.isDestroyed()) {
@@ -4412,6 +4501,9 @@ function pushSettingsToRenderer() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('settings:push', payload); } catch (_) {}
   }
+  if (taskbarWidgetWindow && !taskbarWidgetWindow.isDestroyed()) {
+    try { taskbarWidgetWindow.webContents.send('settings:push', payload); } catch (_) {}
+  }
   // The trends dashboard is a separate renderer with its own currency module
   // instance; it must receive effective-rate updates too, otherwise an
   // already-open dashboard keeps showing the previous rate after an auto
@@ -4697,6 +4789,7 @@ function destroyTray() {
 
 function enterTrayMode() {
   applyMacActivationPolicy();
+  syncTaskbarWidget();
   ensureTray();
   updateTrayDisplay();
   applyWindowSettings();
@@ -4715,6 +4808,7 @@ function enterTrayMode() {
 
 function exitTrayMode() {
   applyMacActivationPolicy({ mainWindowVisible: true });
+  syncTaskbarWidget();
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(false);
     setWindowMaximizable(mainWindow, true);
@@ -5884,6 +5978,13 @@ app.whenReady().then(() => {
   });
   applyMacActivationPolicy();
   createWindow();
+  syncTaskbarWidget();
+  screen.on('display-metrics-changed', () => {
+    positionTaskbarWidget();
+  });
+  // Keep the overlay above the always-on-top taskbar; cheap no-op while the
+  // widget is disabled (positionTaskbarWidget early-returns without a window).
+  setInterval(positionTaskbarWidget, 5000);
   syncLoginItemSettingFromOs();
   configureWindowToggleShortcut();
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
@@ -6045,6 +6146,8 @@ app.whenReady().then(() => {
       ),
       tokenRateMode: normalizeTokenRateMode(patch.tokenRateMode ?? settings.tokenRateMode),
       floatingBubbleEnabled: parseBoolean(patch.floatingBubbleEnabled ?? settings.floatingBubbleEnabled, false),
+      taskbarWidgetEnabled: parseBoolean(patch.taskbarWidgetEnabled ?? settings.taskbarWidgetEnabled, false),
+      taskbarWidgetPeriod: normalizeTaskbarWidgetPeriod(patch.taskbarWidgetPeriod ?? settings.taskbarWidgetPeriod),
       discordRpcEnabled: patch.discordRpcEnabled ?? settings.discordRpcEnabled ?? false,
       limitsEnabled: parseBoolean(patch.limitsEnabled ?? settings.limitsEnabled, true),
       // Sourced from settings only, never from the patch: subscriptions:save is
@@ -6235,6 +6338,7 @@ app.whenReady().then(() => {
       // therefore may not send another frame after this local-only setting changes.
       refreshLimitStatsPresentation();
     }
+    syncTaskbarWidget();
     pushSettingsToRenderer();
     return settingsForRenderer();
   });

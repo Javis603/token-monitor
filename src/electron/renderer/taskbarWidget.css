@@ -1,0 +1,59 @@
+:root {
+  --fg: #1a1a1a;
+  --sub: rgba(26, 26, 26, 0.68);
+  --accent: #0067c0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #ffffff;
+    --sub: rgba(255, 255, 255, 0.72);
+    --accent: #4cc2ff;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  user-select: none;
+  cursor: pointer;
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+}
+
+/* The strip window's height is the taskbar's height; html/body must fill it
+   (height: 100% above) for the row's own height: 100% + align-items to resolve,
+   otherwise the content collapses to the top edge of the strip. */
+.row {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.icon {
+  flex: none;
+}
+
+.total {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+  line-height: 1.15;
+}
+
+.period {
+  font-size: 10.5px;
+  color: var(--sub);
+  white-space: nowrap;
+  line-height: 1.15;
+}
