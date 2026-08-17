@@ -9410,16 +9410,18 @@ function clientPeriodUsage(clientId) {
 // envelope.
 function clientSourcesIdentity(clientId) {
   const id = String(clientId || '');
-  const observedAt = String(localClientHealth()?.observedAt || '');
+  const health = localClientHealth();
   const tracked = enabledClientSet().has(id);
-  return {
-    deviceId: String(localDevice()?.deviceId || ''),
+  return clientSourceCacheApi.clientSourceIdentity({
+    deviceId: localDevice()?.deviceId,
     clientId: id,
-    // A client without a health observation can still be inspected on demand.
-    // Keep tracked and untracked snapshots distinct until a real observation
-    // replaces this local placeholder.
-    observedAt: observedAt || (tracked ? 'waiting' : 'untracked')
-  };
+    observedAt: health?.observedAt,
+    tracked,
+    // The health envelope timestamp is shared by every client. Only use it
+    // when this client has its own health entry; otherwise unrelated client
+    // updates must not invalidate this client's source probe cache.
+    hasObservation: clientHealthPresentationApi.hasClientHealth(health, id)
+  });
 }
 
 function exactLocalClientSources(clientId) {

@@ -61,6 +61,7 @@ test('tool diagnostics bind source values to the full health snapshot key', () =
   const actions = functionBody(app, 'clientHealthActions', 'clientHealthPanel');
 
   assert.match(identity, /deviceId[\s\S]*clientId[\s\S]*observedAt/);
+  assert.match(identity, /clientHealthPresentationApi\.hasClientHealth\(health, id\)/);
   assert.match(exactReader, /clientSourceCacheApi\.readClientSources/);
   assert.match(reader, /state\.clientSourcesKey === key[\s\S]*readLatestClientSources/);
   assert.match(loader, /clientSourceCacheApi\.clientSourceRequestKey\(identity\)/);

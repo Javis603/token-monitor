@@ -21,6 +21,22 @@
     return Boolean(value.deviceId && value.clientId && value.observedAt);
   }
 
+  function clientSourceIdentity({
+    deviceId = '',
+    clientId = '',
+    observedAt = '',
+    tracked = false,
+    hasObservation = false
+  } = {}) {
+    return {
+      deviceId: String(deviceId || ''),
+      clientId: String(clientId || ''),
+      observedAt: hasObservation
+        ? String(observedAt || '')
+        : tracked ? 'waiting' : 'untracked'
+    };
+  }
+
   function clientSourceRequestKey(identity) {
     const value = normalizedIdentity(identity);
     return hasCompleteIdentity(value)
@@ -58,6 +74,7 @@
   }
 
   return {
+    clientSourceIdentity,
     clientSourceRequestKey,
     createClientSourceCache,
     readClientSources,
