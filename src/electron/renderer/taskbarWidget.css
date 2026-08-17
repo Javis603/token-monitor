@@ -37,10 +37,20 @@ body {
   padding: 0 10px;
   box-sizing: border-box;
   cursor: pointer;
+  /* Windows hit-tests layered windows per-pixel: clicks on fully transparent
+     pixels fall through to the taskbar underneath, so only the icon/text
+     glyphs were clickable and the rest of the module silently ignored clicks
+     (or hit the Start/Task View buttons sitting right beside it). A
+     near-invisible background makes the whole strip clickable; an alpha of
+     1/255 is imperceptible against the taskbar. */
+  background: rgba(0, 0, 0, 0.01);
 }
 
 .icon {
   flex: none;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
 }
 
 .total {

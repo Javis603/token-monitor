@@ -65,8 +65,13 @@ test('taskbar widget renderer is a CSP-safe file page fed by the preload bridge'
   assert.match(html, /<script src="taskbarWidget\.js"><\/script>/);
   assert.doesNotMatch(html, /<style>/);
   assert.match(html, /id="period"/);
-  assert.match(html, /data-i18n-title="settings\.display\.taskbarWidgetClickHint"/);
+  // The widget must stay hint-free on hover: no title means no native tooltip.
+  assert.doesNotMatch(html, /data-i18n-title/);
   assert.match(css, /prefers-color-scheme: dark/);
+  // Windows hit-tests layered windows per-pixel, so fully transparent pixels
+  // pass clicks through to the taskbar; the near-invisible row background
+  // keeps the whole module clickable.
+  assert.match(css, /background: rgba\(0, 0, 0, 0\.01\)/);
   assert.match(js, /window\.tokenMonitor/);
   assert.match(js, /getStats\(\)\.then\(render\)/);
   assert.match(js, /onStatsPush\(render\)/);
