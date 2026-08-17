@@ -23,6 +23,7 @@ const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
+const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./claudeWebFetch');
 const { createElectronLimitsFetch } = require('./limitsFetch');
 const {
@@ -6408,54 +6409,22 @@ app.whenReady().then(() => {
   // Probe only the client whose detail panel is open. The renderer caches the
   // result for the current health snapshot, or for the current device/client
   // pair when the tool is not tracked, avoiding eager filesystem work.
-  ipcMain.handle('usage:clientSources', (_event, clientId) => {
-    const client = String(clientId || '').trim().toLowerCase();
-    if (!KNOWN_CLIENTS.split(',').includes(client)) return null;
-    try {
-      const seen = new Set();
-      const all = (visibleDiagnosticRoots(client)[client] || [])
-        .filter((root) => {
-          const key = `${root.id}\0${root.dir}`;
-          return !seen.has(key) && seen.add(key);
-        })
-        .map((root) => ({ id: root.id, dir: root.dir, exists: root.exists === true }));
-      const sources = all.slice(0, 32);
-      return { sources, omittedCount: all.length - sources.length };
-    } catch (_) {
-      return null;
-    }
+  const clientSourceIpcHandlers = createClientSourceIpcHandlers({
+    knownClients: KNOWN_CLIENTS,
+    trackedClients: () => trackedClientSet(clientsCsvForSetting(settings?.clients)),
+    visibleDiagnosticRoots,
+    clientDiagnosticRoots,
+    showItemInFolder: (target) => shell.showItemInFolder(target),
+    openPath: (target) => shell.openPath(target),
+    canRunRescan: () => ownsUsageRuntime(),
+    rescanClient: (client) => refreshUsageClient(client, { forceSync: true }),
+    onRescanError: (error) => console.log(`[usage-runtime] rescan failed: ${error.message}`)
   });
-  // Reveals one of those paths. The renderer sends a client id, never a path:
-  // anything it could send would otherwise become an arbitrary filesystem open.
-  ipcMain.handle('usage:revealClientSource', async (_event, clientId) => {
-    const client = String(clientId || '').trim().toLowerCase();
-    if (!KNOWN_CLIENTS.split(',').includes(client)) return false;
-    try {
-      const roots = clientDiagnosticRoots(client)[client] || [];
-      const target = roots.find((root) => root.exists);
-      if (!target) return false;
-      // An exact-file source would otherwise be handed to openPath, which opens
-      // the file in whatever app claims .db/.jsonl. Select it in its folder
-      // instead — the user asked where the data lives, not to open it.
-      if (target.sourcePath) {
-        shell.showItemInFolder(target.sourcePath);
-        return true;
-      }
-      return await shell.openPath(target.dir) === '';
-    } catch (_) {
-      return false;
-    }
-  });
-  ipcMain.handle('usage:rescanClient', async (_event, clientId) => {
-    const client = String(clientId || '').trim().toLowerCase();
-    if (!client || !ownsUsageRuntime()) return false;
-    try {
-      return await refreshUsageClient(client, { forceSync: true }) === true;
-    } catch (error) {
-      console.log(`[usage-runtime] rescan failed: ${error.message}`);
-      return false;
-    }
-  });
+  ipcMain.handle('usage:clientSources', (_event, clientId) => clientSourceIpcHandlers.clientSources(clientId));
+  // The renderer sends a client id, never a path: anything it could send would
+  // otherwise become an arbitrary filesystem open.
+  ipcMain.handle('usage:revealClientSource', (_event, clientId) => clientSourceIpcHandlers.revealClientSource(clientId));
+  ipcMain.handle('usage:rescanClient', (_event, clientId) => clientSourceIpcHandlers.rescanClient(clientId));
   ipcMain.handle('clipboard:write', (_event, text) => {
     clipboard.writeText(String(text || ''));
     return true;
