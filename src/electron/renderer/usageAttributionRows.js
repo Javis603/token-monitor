@@ -38,6 +38,17 @@
     return rows;
   }
 
+  function visibleAttributionRows(rows, formatCost) {
+    const sourceRows = Array.isArray(rows) ? rows : [];
+    if (typeof formatCost !== 'function') return sourceRows;
+    const zeroCost = String(formatCost(0));
+    return sourceRows.filter((row) => (
+      row?.key !== UNATTRIBUTED_KEY
+      || finiteNumber(row.value) > 0
+      || String(formatCost(row.cost)) !== zeroCost
+    ));
+  }
+
   function attributionValue(values, total, key) {
     if (key !== UNATTRIBUTED_KEY) return finiteNumber(values?.[key]);
     const attributed = Object.values(values || {}).reduce(
@@ -47,5 +58,5 @@
     return Math.max(0, finiteNumber(total) - attributed);
   }
 
-  return { attributionRows, attributionValue, UNATTRIBUTED_KEY };
+  return { attributionRows, visibleAttributionRows, attributionValue, UNATTRIBUTED_KEY };
 });

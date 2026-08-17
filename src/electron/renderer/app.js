@@ -2098,11 +2098,17 @@ function attributionComponent(period, field, key) {
   );
 }
 
-function toolRowsForPeriod(period) {
-  const clientRows = usageAttributionRowsApi.attributionRows(period?.clients, period?.clientCosts, {
+function periodAttributionRows(period, values, costs) {
+  const rows = usageAttributionRowsApi.attributionRows(values, costs, {
     totalValue: period?.totalTokens,
     totalCost: period?.costUsd
-  }).map(({ key: client, value, cost }) => ({ key: client, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client) }));
+  });
+  return usageAttributionRowsApi.visibleAttributionRows(rows, formatCost);
+}
+
+function toolRowsForPeriod(period) {
+  const clientRows = periodAttributionRows(period, period?.clients, period?.clientCosts)
+    .map(({ key: client, value, cost }) => ({ key: client, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client) }));
   if (clientRows.length > 0) {
     const usageSortedRows = clientRows.sort((a, b) => b.value - a.value);
     return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, state.settings?.clientDisplayOrder, state.settings?.hiddenClients, KNOWN_CLIENTS, state.settings?.pinnedClients);
@@ -2112,10 +2118,7 @@ function toolRowsForPeriod(period) {
 }
 
 function modelRowsForPeriod(period) {
-  const modelRows = usageAttributionRowsApi.attributionRows(period?.models, period?.modelCosts, {
-    totalValue: period?.totalTokens,
-    totalCost: period?.costUsd
-  }).map(({ key: model, value, cost }) => ({
+  const modelRows = periodAttributionRows(period, period?.models, period?.modelCosts).map(({ key: model, value, cost }) => ({
     key: model,
     name: model === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : model,
     value,
@@ -6380,10 +6383,7 @@ function renderHomeModelModule(period) {
 }
 
 function homeToolSourceRows(period) {
-  return usageAttributionRowsApi.attributionRows(period?.clients, period?.clientCosts, {
-    totalValue: period?.totalTokens,
-    totalCost: period?.costUsd
-  }).map(({ key: client, value }) => ({
+  return periodAttributionRows(period, period?.clients, period?.clientCosts).map(({ key: client, value }) => ({
     key: client,
     name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client,
     value: Number(value || 0),
