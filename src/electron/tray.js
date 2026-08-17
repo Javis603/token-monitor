@@ -185,6 +185,14 @@ function trimTrayIconPadding(img) {
   return img.crop(bounds);
 }
 
+// The whole path from a renderer-composed bitmap to the one the shell draws, so
+// the Windows-only trim travels with the resize it belongs to instead of living
+// at the IPC boundary.
+function prepareTrayIconForPlatform(img, { platform = process.platform, scaleFactor, square = false } = {}) {
+  const source = platform === 'win32' ? trimTrayIconPadding(img) : img;
+  return resizeTrayIconForPlatform(source, { platform, scaleFactor, square });
+}
+
 function buildTrayIcon(options = {}) {
   const platform = options.platform || process.platform;
   const nativeImage = options.nativeImage || require('electron').nativeImage;
@@ -465,6 +473,7 @@ module.exports = {
   pickUsageTrayIconId,
   pickWorstLimit,
   popoverBounds,
+  prepareTrayIconForPlatform,
   primaryDisplayScaleFactor,
   reconcileCodexAccountSelection,
   resizeTrayIconForPlatform,

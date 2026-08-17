@@ -12,6 +12,7 @@ const test = require('node:test');
 
 const {
   buildTrayIcon,
+  prepareTrayIconForPlatform,
   primaryDisplayScaleFactor,
   resizeTrayIconForPlatform,
   trayIconOpaqueBounds,
@@ -32,12 +33,21 @@ function bitmapWithOpaqueRect(width, height, rect, alpha = 255) {
 }
 
 function fakeTrayImage(width, height, bitmap) {
-  const calls = [];
+  const crops = [];
+  const resizes = [];
   return {
-    calls,
+    crops,
+    resizes,
     getSize() { return { width, height }; },
     toBitmap() { return bitmap; },
-    crop(bounds) { calls.push(bounds); return { cropped: bounds }; }
+    crop(bounds) {
+      crops.push(bounds);
+      return {
+        cropped: bounds,
+        resize(opts) { resizes.push(opts); return { resized: opts, source: 'cropped' }; }
+      };
+    },
+    resize(opts) { resizes.push(opts); return { resized: opts, source: 'whole' }; }
   };
 }
 
@@ -111,8 +121,8 @@ test('tray:setIcons does not force-square the generated tray icons', () => {
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const handlerStart = main.indexOf("ipcMain.handle('tray:setIcons'");
   assert.notEqual(handlerStart, -1, 'tray:setIcons handler exists');
-  const callStart = main.indexOf('resizeTrayIconForPlatform(', handlerStart);
-  assert.notEqual(callStart, -1, 'handler calls resizeTrayIconForPlatform');
+  const callStart = main.indexOf('prepareTrayIconForPlatform(', handlerStart);
+  assert.notEqual(callStart, -1, 'handler calls prepareTrayIconForPlatform');
   const callEnd = main.indexOf('});', callStart);
   assert.notEqual(callEnd, -1, 'resizeTrayIconForPlatform call terminates with });');
   const callText = main.slice(callStart, callEnd + '});'.length);
@@ -182,41 +192,72 @@ test('trimTrayIconPadding crops a padded tray bitmap and leaves a full-bleed one
   // Windows fits the whole bitmap into one square cell, so that padding is cell
   // space the icon never gets back (#314).
   const padded = fakeTrayImage(44, 44, bitmapWithOpaqueRect(44, 44, { x: 5, y: 5, width: 34, height: 34 }));
-  assert.deepEqual(trimTrayIconPadding(padded), { cropped: { x: 5, y: 5, width: 34, height: 34 } });
-  assert.deepEqual(padded.calls, [{ x: 5, y: 5, width: 34, height: 34 }]);
+  assert.deepEqual(trimTrayIconPadding(padded).cropped, { x: 5, y: 5, width: 34, height: 34 });
+  assert.deepEqual(padded.crops, [{ x: 5, y: 5, width: 34, height: 34 }]);
 
   const fullBleed = fakeTrayImage(44, 44, bitmapWithOpaqueRect(44, 44, { x: 0, y: 0, width: 44, height: 44 }));
   assert.equal(trimTrayIconPadding(fullBleed), fullBleed, 'already edge to edge: no crop');
-  assert.deepEqual(fullBleed.calls, []);
+  assert.deepEqual(fullBleed.crops, []);
 
   // A wide composed icon is width-bound in the square cell, so the horizontal
   // trim is the part that buys anything — but the crop must keep both axes tight.
   const wide = fakeTrayImage(91, 44, bitmapWithOpaqueRect(91, 44, { x: 2, y: 11, width: 87, height: 22 }));
-  assert.deepEqual(trimTrayIconPadding(wide), { cropped: { x: 2, y: 11, width: 87, height: 22 } });
+  assert.deepEqual(trimTrayIconPadding(wide).cropped, { x: 2, y: 11, width: 87, height: 22 });
 
   // An icon whose canvas is entirely transparent has no bounds to crop to;
   // cropping it to nothing would hand the tray an empty image.
   const blank = fakeTrayImage(44, 44, Buffer.alloc(44 * 44 * 4));
   assert.equal(trimTrayIconPadding(blank), blank);
-  assert.deepEqual(blank.calls, []);
+  assert.deepEqual(blank.crops, []);
 });
 
-test('only Windows trims the tray bitmap before resizing it', () => {
+test('prepareTrayIconForPlatform trims before resizing on Windows only', () => {
+  const padded = () => fakeTrayImage(44, 44, bitmapWithOpaqueRect(44, 44, { x: 5, y: 5, width: 34, height: 34 }));
+
+  const windows = padded();
+  const sized = prepareTrayIconForPlatform(windows, { platform: 'win32', scaleFactor: 1.5 });
+  assert.deepEqual(windows.crops, [{ x: 5, y: 5, width: 34, height: 34 }]);
+  assert.deepEqual(windows.resizes, [{ height: 24, quality: 'best' }]);
+  assert.equal(sized.source, 'cropped', 'the resize consumes the trimmed image, not the original');
+
   // macOS must keep the padding: its menubar has no cell to fill and the icon
   // sits inline with the title text that the breathing room is measured against.
-  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
-  const handlerStart = main.indexOf("ipcMain.handle('tray:setIcons'");
-  assert.notEqual(handlerStart, -1, 'tray:setIcons handler exists');
-  const handler = main.slice(handlerStart, main.indexOf("ipcMain.handle('stats:get'", handlerStart));
-  assert.match(handler, /const source = process\.platform === 'win32' \? trimTrayIconPadding\(img\) : img;/);
-  assert.match(handler, /resizeTrayIconForPlatform\(source, \{/, 'the resize consumes the trimmed source');
+  for (const platform of ['darwin', 'linux']) {
+    const other = padded();
+    const result = prepareTrayIconForPlatform(other, { platform, scaleFactor: 1.5 });
+    assert.deepEqual(other.crops, [], `${platform} never trims`);
+    assert.deepEqual(other.resizes, [{ height: 20, quality: 'best' }]);
+    assert.equal(result.source, 'whole');
+  }
+
+  // The bundled square app icon opts into the force-square tile, and that has to
+  // survive the extra hop rather than being dropped by the wrapper.
+  const linuxSquare = padded();
+  prepareTrayIconForPlatform(linuxSquare, { platform: 'linux', square: true });
+  assert.deepEqual(linuxSquare.resizes, [{ width: 20, height: 20 }]);
 });
 
-test('the full-bleed Windows icon ships in the packaged app', () => {
+test('the full-bleed Windows icon ships in the Windows package and nowhere else', () => {
   // The tray reads this at runtime, but electron-builder only treats `win.icon`
   // as a build input — left out of `files` it would be missing from the asar and
   // the Windows tray would come up blank, which no CI job here would catch.
+  // Platform `files` are appended to the shared list rather than replacing it,
+  // so scoping it to `win` keeps a 1MB Windows-only asset out of the macOS and
+  // Linux artifacts without narrowing what they package.
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
   assert.ok(fs.existsSync(path.join(__dirname, '../../assets/icon-win.png')), 'assets/icon-win.png exists');
-  assert.ok(pkg.build.files.includes('assets/icon-win.png'), 'assets/icon-win.png is in build.files');
+  assert.ok(pkg.build.win.files.includes('assets/icon-win.png'), 'assets/icon-win.png is in build.win.files');
+  assert.ok(!pkg.build.files.includes('assets/icon-win.png'), 'and not in the shared list');
+});
+
+test('Windows leaves the window icon to the executable that already carries an ICO', () => {
+  // Electron falls back to the exe icon when a window names none, and
+  // electron-builder generates a multi-resolution ICO from win.icon. Naming a
+  // PNG here overrides that with a worse source at 16-32px, which is what the
+  // taskbar and Alt-Tab regression was (#314).
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  assert.doesNotMatch(main, /\n\s*icon: APP_ICON_PATH,/, 'no window names the icon directly');
+  assert.match(main, /function appWindowIcon\(\) \{[\s\S]*?return app\.isPackaged \? \{\} : \{ icon: WINDOWS_APP_ICON_PATH \};[\s\S]*?\}/);
+  // app.dock.setIcon is darwin-only and keeps the macOS-grid artwork.
+  assert.match(main, /process\.platform === 'darwin' && app\.dock\) app\.dock\.setIcon\(APP_ICON_PATH\)/);
 });

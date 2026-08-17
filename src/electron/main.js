@@ -242,14 +242,13 @@ const {
   pickUsageTrayIconId,
   parseWindowsSystemUsesLightTheme,
   popoverBounds,
+  prepareTrayIconForPlatform,
   reconcileCodexAccountSelection,
-  resizeTrayIconForPlatform,
   runTrayMenuAction,
   watchSystemDarkUi,
   sortCodexAccountsForDisplay,
   shouldUseTemplateTrayIcon,
-  trayShowsTitle,
-  trimTrayIconPadding
+  trayShowsTitle
 } = require('./tray');
 const {
   macActivationPolicyMode,
@@ -315,11 +314,22 @@ const { applyWindowsAccentBlur } = require('./windowsBackdrop');
 if (!app.isPackaged) loadDotEnv();
 
 const APP_NAME = 'Token Monitor';
-// Same split as the tray (see WINDOWS_ICON_PATH in tray.js): the macOS artwork
-// carries the Dock's inset margin, so passing it as the BrowserWindow `icon`
-// would override the exe's own full-bleed icon with a visibly smaller taskbar
-// and Alt-Tab entry. app.dock.setIcon is darwin-only and keeps icon.png.
-const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', process.platform === 'win32' ? 'icon-win.png' : 'icon.png');
+const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
+const WINDOWS_APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-win.png');
+
+// Electron falls back to the executable's own icon when a window is given none,
+// and on Windows that executable carries the multi-resolution ICO
+// electron-builder generates from `win.icon` — a better source at 16-32px than
+// a 1024px PNG downscaled at runtime. So a packaged window deliberately sets
+// nothing here: whatever it set could only override that, which is exactly what
+// naming the macOS artwork was doing to the taskbar button and Alt-Tab entry
+// (it carries the Dock's inset margin — see WINDOWS_ICON_PATH in tray.js). An
+// unpackaged run has no icon of ours inside electron.exe to inherit, so it names
+// the same full-bleed artwork the installer is built from.
+function appWindowIcon() {
+  if (process.platform !== 'win32') return { icon: APP_ICON_PATH };
+  return app.isPackaged ? {} : { icon: WINDOWS_APP_ICON_PATH };
+}
 
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
@@ -5590,7 +5600,7 @@ function createWindow(boundsOverride, options = {}) {
     resizable: !collapsedFloatingBubble,
     show: false,
     backgroundColor: '#00000000',
-    icon: APP_ICON_PATH,
+    ...appWindowIcon(),
     skipTaskbar: collapsedFloatingBubble || Boolean(settings?.trayMode),
     ...(collapsedFloatingBubble ? { fullscreenable: false, maximizable: false, minimizable: false } : {}),
     // Keeps a popover unmaximizable across rebuilds, which never re-run enterTrayMode().
@@ -5745,7 +5755,7 @@ function createDashboardWindow() {
     transparent: !(process.platform === 'win32' && glass),
     show: false,
     backgroundColor: '#00000000',
-    icon: APP_ICON_PATH,
+    ...appWindowIcon(),
     skipTaskbar: false,
     ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass ? { backgroundMaterial: 'acrylic' } : {}),
@@ -6324,17 +6334,14 @@ app.whenReady().then(() => {
       if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png')) continue;
       const img = nativeImage.createFromDataURL(dataUrl);
       if (img.isEmpty()) continue;
-      // Windows fits the bitmap into one square cell, so the renderer's macOS
-      // breathing room is cell space the icon never gets back (see
-      // trimTrayIconPadding). Everywhere else the padding is load-bearing.
-      const source = process.platform === 'win32' ? trimTrayIconPadding(img) : img;
       // Resize by height only; aspect ratio is preserved, so wide bar-style
       // icons keep their width while square provider icons stay square.
       // Windows targets its own small-icon metric (16px x the display scale
       // factor) rather than the macOS menubar height, so a single high-quality
       // downscale of the 44px-tall renderer source stays crisp in the
-      // notification area instead of the old fixed 20px-for-all blur.
-      const sized = resizeTrayIconForPlatform(source, {
+      // notification area instead of the old fixed 20px-for-all blur, and its
+      // square cell gets the bitmap trimmed to the pixels the renderer drew.
+      const sized = prepareTrayIconForPlatform(img, {
         platform: process.platform,
         scaleFactor: screen.getPrimaryDisplay().scaleFactor
       });

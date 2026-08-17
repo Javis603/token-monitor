@@ -42,7 +42,6 @@
       "src/shared/**/*",
       "src/hub/**/*",
       "assets/icon.png",
-      "assets/icon-win.png",
       "assets/icons/**/*",
       "package.json"
     ],
@@ -81,6 +80,9 @@
         }
       ],
       "icon": "assets/icon-win.png",
+      "files": [
+        "assets/icon-win.png"
+      ],
       "verifyUpdateCodeSignature": true,
       "signtoolOptions": {
         "publisherName": "SignPath Foundation"
