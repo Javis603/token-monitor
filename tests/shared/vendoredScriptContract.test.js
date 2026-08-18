@@ -39,3 +39,17 @@ test('ordinary install-adjacent scripts do not pull the vendored binary', () => 
   assert.equal(packageJson.scripts.postinstall, undefined);
   assert.equal(packageJson.scripts.prepack, undefined);
 });
+
+test('only the mac-widget CI structural build opts out of a strict cross-arch ensure', () => {
+  // pack:mac:widget:x64 exists to let the mac-widget CI job cross-build both
+  // arm64 and x64 widget variants on one arm64 runner purely to verify app
+  // structure — that output is never uploaded or distributed. Every script
+  // that actually produces a distributable artifact (dist:mac:x64,
+  // dist:mac:widget:x64) must stay strict: a missing target npm package on a
+  // real cross-arch build has to fail the build, not silently ship without
+  // the pinned binary.
+  assert.match(packageJson.scripts['pack:mac:widget:x64'], /--allow-missing-target-package/);
+  for (const name of ['dist:mac:x64', 'dist:mac:widget:x64', 'dist:mac', 'dist:mac:widget', 'dist:win', 'dist:win:dir', 'dist:linux', 'pack', 'pack:mac:widget']) {
+    assert.doesNotMatch(packageJson.scripts[name], /--allow-missing-target-package/, name);
+  }
+});

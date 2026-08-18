@@ -153,10 +153,30 @@ test('explicitly requested unsupported target remains fail-closed', async () => 
   );
 });
 
-test('a vendored target whose npm package is absent on this host degrades instead of crashing', async () => {
+test('a vendored target whose npm package is absent on this host fails closed by default', async () => {
   // Real case: packaging darwin-x64 on an Apple Silicon host (or vice versa)
   // — the platform is genuinely in the manifest, but npm's optionalDependencies
   // cpu/os gating means that platform's package was never installed here.
+  // Every real packaging/distribution command must still fail here — only an
+  // explicit opt-in (below) may accept the gap.
+  const notInstalled = new Error("Cannot find module '@tokscale/cli-darwin-x64/package.json'");
+  notInstalled.code = 'MODULE_NOT_FOUND';
+  let downloads = 0;
+
+  await assert.rejects(
+    ensureVendoredTokscale({
+      manifest: manifestFor(Buffer.from('vendored binary'), { package: '@tokscale/cli-darwin-x64' }),
+      requestedKey: 'darwin-arm64',
+      resolveTarget: () => { throw notInstalled; },
+      download: async () => { downloads += 1; return Buffer.from('vendored binary'); },
+      log: () => {}
+    }),
+    /is not installed for darwin-arm64/
+  );
+  assert.equal(downloads, 0);
+});
+
+test('--allow-missing-target-package lets a cross-arch structural build degrade instead of crashing', async () => {
   const notInstalled = new Error("Cannot find module '@tokscale/cli-darwin-x64/package.json'");
   notInstalled.code = 'MODULE_NOT_FOUND';
   const logs = [];
@@ -165,6 +185,7 @@ test('a vendored target whose npm package is absent on this host degrades instea
   const result = await ensureVendoredTokscale({
     manifest: manifestFor(Buffer.from('vendored binary'), { package: '@tokscale/cli-darwin-x64' }),
     requestedKey: 'darwin-arm64',
+    allowMissingTargetPackage: true,
     resolveTarget: () => { throw notInstalled; },
     download: async () => { downloads += 1; return Buffer.from('vendored binary'); },
     log: (message) => logs.push(message)
@@ -172,7 +193,7 @@ test('a vendored target whose npm package is absent on this host degrades instea
 
   assert.deepEqual(result, { status: 'unavailable', key: 'darwin-arm64' });
   assert.equal(downloads, 0);
-  assert.ok(logs.some((line) => line.includes('cross-arch')));
+  assert.ok(logs.some((line) => line.includes('explicitly allowed')));
 });
 
 test('a resolveTarget failure unrelated to a missing module still fails closed', async () => {

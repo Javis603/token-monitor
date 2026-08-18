@@ -64,6 +64,15 @@ function targetPlatformForKey(key) {
 async function ensureVendoredTokscale({
   manifest = loadManifest(),
   requestedKey = null,
+  // Strict by default: an explicit --platform target that is genuinely
+  // vendored but whose npm optional package isn't installed on this host
+  // (a real cross-arch build) still fails closed, same as every other
+  // packaging/distribution command — "ensure the pinned binary" must mean
+  // that, not "ensure it if convenient". The one legitimate exception is a
+  // source-only structural CI build that never ships its output (the
+  // mac-widget workflow's x64 leg, cross-built on an arm64 runner purely to
+  // verify app structure) — that caller opts in explicitly.
+  allowMissingTargetPackage = false,
   download = (currentManifest, entry) => downloadAsset(currentManifest, entry),
   fsImpl = fs,
   resolveTarget = resolveTargetBinPath,
@@ -84,20 +93,21 @@ async function ensureVendoredTokscale({
 
   log(`Ensuring vendored tokscale (${manifest.releaseTag}, source ${manifest.commit.slice(0, 12)}) for ${key}...`);
 
-  // An explicitly requested target can be a real cross-arch/cross-OS build
-  // (e.g. packaging darwin-x64 for local testing on an Apple Silicon host):
-  // the platform is genuinely vendored, but npm's optionalDependencies never
-  // installed that platform's package on this host in the first place. That
-  // is a materially different condition from an unknown platform key (which
-  // resolveManifestEntry already rejected above) — degrade the same way an
-  // unsupported host does, rather than crashing a build that never had this
-  // binary to begin with.
   let targetBinPath;
   try {
     targetBinPath = resolveTarget(entry, targetPlatformForKey(key));
   } catch (error) {
     if (error && error.code === 'MODULE_NOT_FOUND') {
-      log(`${entry.package} is not installed for ${key} on this host (likely a cross-arch/cross-OS build) — packaging will proceed without the pinned binary for this target.`);
+      if (!allowMissingTargetPackage) {
+        throw new Error(
+          `${entry.package} is not installed for ${key} on this host — a real cross-arch/cross-OS build needs ` +
+            `that npm optional package present (run npm ci on a matching host, or on the ${key} target directly). ` +
+            'If this is deliberately a source-only structural build that never ships its output, pass ' +
+            '--allow-missing-target-package to accept packaging without the pinned binary.',
+          { cause: error }
+        );
+      }
+      log(`${entry.package} is not installed for ${key} on this host (cross-arch/cross-OS build, explicitly allowed) — packaging will proceed without the pinned binary for this target.`);
       return { status: 'unavailable', key };
     }
     throw error;
@@ -143,9 +153,11 @@ async function ensureVendoredTokscale({
 }
 
 async function main() {
-  const platformArg = process.argv.slice(2).find((arg) => arg.startsWith('--platform='));
+  const args = process.argv.slice(2);
+  const platformArg = args.find((arg) => arg.startsWith('--platform='));
   const requestedKey = platformArg ? platformArg.slice('--platform='.length) : null;
-  return ensureVendoredTokscale({ requestedKey });
+  const allowMissingTargetPackage = args.includes('--allow-missing-target-package');
+  return ensureVendoredTokscale({ requestedKey, allowMissingTargetPackage });
 }
 
 if (require.main === module) {
