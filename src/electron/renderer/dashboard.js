@@ -7,6 +7,7 @@ const currencyApi = window.TokenMonitorCurrency;
 const compactMoneyApi = window.TokenMonitorCompactMoney;
 const compactTokenApi = window.TokenMonitorCompactTokens;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
+const fontSettingsApi = window.TokenMonitorFontSettings;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
 // Canonical brand colours, captured before any override (clientColors is shared
@@ -215,9 +216,19 @@ function applyAppearance(settings) {
   root.setProperty('--glass-alpha', opacity.toFixed(2));
   root.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
   applyReduceMotionPreference(settings?.reduceMotion);
+  applyFontSettings(settings);
   applyThemeColors(settings?.themeColors);
   applyVendorColorOverrides(settings?.vendorColors);
   els.body.classList.toggle('flat', state.flat);
+}
+
+function applyFontSettings(settings) {
+  const root = document.documentElement.style;
+  const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(settings, {
+    interfaceDefault: fontSettingsApi.DEFAULT_DASHBOARD_INTERFACE_FONT
+  });
+  root.setProperty('--ui-font', interfaceFont);
+  root.setProperty('--display-font', displayFont);
 }
 
 function applyThemeColors(overrides) {
@@ -615,6 +626,7 @@ async function boot() {
 // dashboard shares the main window's preload, so it receives the same push.
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
+  applyFontSettings(next);
   let needsRender = false;
   const nextLocale = i18n.resolveLocale(next.locale || next.language, navigator.languages);
   if (state.locale !== nextLocale) {

@@ -16,7 +16,9 @@ npm run verify     # lint + test (single local entry point)
 
 Automated verification is `npm run verify` (= `npm run lint && npm test`); CI (`.github/workflows/ci.yml`) runs lint + test on push/PR across Node 22 & 24. The toolchain (ESLint 10 + the node:test glob) needs Node 22.13+, which is why `engines.node` is `>=22.13.0` (Node 18 & 20 are both EOL as of 2026-06).
 
-To dry-run the agent without posting: `node src/agent/agent.js --once --dry-run`.
+To dry-run the agent without posting: `npm run agent:once -- --dry-run`.
+
+The app, headless-agent, and packaging scripts explicitly run `ensure:tokscale` before execution: the four vendored targets get the pinned binary from `scripts/vendor/tokscale.json`, other source platforms keep the npm binary and cache a capability filter for unsupported clients. `npm install`/`ci`/`hub`/lint/test/verify never download it. The manifest's `mode` (`override`/`upstream`) only ever gates binary provenance — `upstream` stops `ensure:tokscale` from downloading/replacing (it still fails closed on a missing packaging-target npm package), while both `verify-vendored-tokscale*.js` gates keep running against whichever binary is authoritative, so CI still catches a client-coverage or DSH-parsing regression either way. Flipping mode back is a manifest edit, not new wiring.
 
 ## Architecture
 

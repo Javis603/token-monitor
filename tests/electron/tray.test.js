@@ -222,7 +222,9 @@ test('macOS tray icon downsamples the high-resolution template like provider ico
   ]);
 });
 
-test('non-macOS tray icon keeps the resized full-color app asset', () => {
+test('Linux tray icon keeps the resized full-color app asset at the unchanged square size', () => {
+  // Windows now gets its own small-icon metric branch (see
+  // trayIconSizing.test.js); Linux remains the square 20x20 catch-all.
   const calls = [];
   const resized = {};
   const image = {
@@ -231,7 +233,7 @@ test('non-macOS tray icon keeps the resized full-color app asset', () => {
   };
 
   assert.equal(buildTrayIcon({
-    platform: 'win32',
+    platform: 'linux',
     nativeImage: {
       createFromPath(iconPath) {
         calls.push(['path', iconPath]);

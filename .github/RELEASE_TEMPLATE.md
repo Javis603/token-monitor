@@ -4,30 +4,29 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Reasonix usage:** Track Reasonix alongside other tools, including local `Sessions` and `Projects` views for native session and project activity. Large Reasonix telemetry snapshots no longer block usage reads while valid cumulative usage stays visible. (#365, #384)
-- **Usage ranges:** Clicking Home's `MONTH` tab opens a menu with `This week`, `Last 7 days`, and `Last 30 days`. After switching, `Tools`, `Models`, and `Devices` show token-component and cost details for the selected period; usage whose components cannot be reconstructed is grouped under `Unclassified`. (#393, #398)
-- **Hub deployment status:** `Connect to a hub` now reports whether the remote `Hub`, `Node Hub`, or `Worker` is up to date, needs redeployment, was deployed by a newer version of Token Monitor, or has unrecognized build information. (#399)
-- **Tray activity source:** Tray icons and `Tokens`/`Cost` items can now follow the `Most recently active tool`, while their values continue to use the selected period aggregates. (#397)
-
-### Improved
-- **Tray cost display:** Each tray cost item can use `Cost format` (`Compact` or `Full number`) and `Decimal places` (`Automatic` or 0–4). New cost items default to compact two-decimal display; existing layouts keep their previous full-number presentation. (#396)
-- **Windows installer:** The installer now lets users choose the installation directory. (#390)
+- **Command Code usage:** Command Code usage now appears in the usage views. (#411)
+- **Qoder CN usage:** Turn on `Qoder CN` in `Settings → Tools` to see Qoder CN usage. (#301)
+- **OpenCode Go quotas:** Go accounts signed in on this computer are detected automatically, so their quotas appear without copying a Cookie by hand. (#406, #414, #416)
+- **Command Code limits:** `AI Tool Limits` now shows Command Code's 5-hour, weekly, monthly, and top-up credits. (#421)
+- **Adaptive refresh:** Choose `Adaptive` to update percentage-based limits more often when usage is high. (#405)
+- **Custom fonts:** Choose separate `Interface font` and `Display font` settings in `Appearance → Advanced customization`. (#432)
 
 ### Fixed
-- **Codex limits:** Fresh plan metadata now overrides stale saved labels when available, and the standard 30-day window appears as `Monthly` instead of falling through to an incorrect long-window category. (#379)
-- **Proma usage:** Assistant messages with incomplete IDs are still counted instead of disappearing from usage totals. (#392)
-- **Kiro live updates:** Kiro session and CLI activity refresh live without large IDE data slowing live collection. (#381)
-- **Tray composer:** Open picker menus stay attached to the active composer item during live updates, so an in-progress selection is not lost. (#395)
-- **macOS compatibility:** The host app now supports macOS 12+, with matching minimum-version metadata in the update feed. (#394)
+- **Trends dates:** Today's activity and streaks now follow the date on the device that produced the data, even when the Hub is in another time zone. (#428)
+- **WSL detection guidance:** When WSL detects a tool such as CLI-only ZCode but cannot read its usage, the settings panel now prompts you to run the headless agent inside WSL. (#431)
+- **Windows tray icons:** Tray icons stay visible when switching between light and dark themes. (#420)
+- **Linux tray menu:** The Linux tray context menu is available again. (#413)
+- **Proma cost estimates:** Known-model cost estimates remain available when online pricing cannot be reached. (#418)
+- **AI Tool Limits with system proxy:** Limits can load through the operating system proxy without an extra shell proxy setting. (#380)
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.44.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.44.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.44.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-Setup-0.44.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.44.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.44.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.45.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-Setup-0.45.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.45.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.45.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -65,30 +64,29 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **Reasonix 用量：** Token Monitor 现在会像其他工具一样追踪 Reasonix，并提供本机的“会话”和“项目”视图，用于查看原生会话与项目活动。较大的 Reasonix 遥测快照不会阻塞用量读取，同时保留有效的累计用量。（#365、#384）
-- **用量范围：** 在主页顶部点击 `MONTH` 标签，会打开期间菜单，可切换到“本周”“最近 7 天”和“最近 30 天”。切换后，可按所选期间查看“工具”、“模型”和“设备”的 Token 组成及成本明细；无法还原组成的用量会归入“未分类”。（#393、#398）
-- **Hub 部署状态：** “连接到 Hub”现在会显示远程 `Hub`、`Node Hub` 或 `Worker` 是否已是最新版本、需要重新部署、由较新的 Token Monitor 版本部署，或部署版本无法识别。（#399）
-- **托盘活动来源：** 托盘图标以及“今日 Tokens”/“今日成本”等项目现在可以跟随“最近有活动的工具”，显示数值仍使用所选期间的聚合数据。（#397）
-
-### 改进
-- **托盘费用显示：** 每个托盘费用项目都可通过“费用格式”选择“缩写”或“完整数字”，并通过“小数位数”选择“自动”或 0–4 位。新费用项目默认使用两位小数的缩写显示；现有布局保留之前的完整数字显示。（#396）
-- **Windows 安装版：** 安装时现在可以选择安装目录。（#390）
+- **Command Code 用量：** 现在可以在用量视图中查看 Command Code 用量。（#411）
+- **Qoder CN 用量：** 在“设置 → 工具”中启用 `Qoder CN` 后，即可查看 Qoder CN 用量。（#301）
+- **OpenCode Go 额度：** 本机已登录的 Go 账号会自动检测并显示额度，不再需要手动复制 Cookie。（#406、#414、#416）
+- **Command Code 额度：** “AI 工具额度”现在会显示 Command Code 的 5 小时、每周、月度和加购额度。（#421）
+- **自适应刷新：** 选择“自适应”后，额度消耗较快时会更及时更新。（#405）
+- **自定义字体：** 在“外观 → 高级自定义”中分别设置“界面字体”和“显示字体”。（#432）
 
 ### 修复
-- **Codex 额度：** 有新计划数据时会优先使用最新数据，标准 30 天窗口会显示为 `Monthly`，不再落入错误的长期窗口分类。（#379）
-- **Proma 用量：** ID 信息不完整的助手消息现在也会计入用量，不再从统计总量中消失。（#392）
-- **Kiro 实时更新：** Kiro 的会话和 CLI 活动现在会实时刷新，不会因 IDE 的大型数据而拖慢实时采集。（#381）
-- **托盘编辑器：** 实时更新期间，打开的选择菜单会继续附着在当前编辑项目上，不会丢失正在进行的选择。（#395）
-- **macOS 兼容性：** 主应用现在支持 macOS 12 及以上版本，更新源也会携带匹配的最低版本要求。（#394）
+- **趋势日期：** “趋势”按产生数据的设备日期计算今日活动和连续天数，即使 Hub 位于其他时区也不会错位。（#428）
+- **WSL 检测提示：** 当 WSL 检测到 CLI 版 ZCode 等工具但无法读取用量时，设置面板现在会提示你在 WSL 内运行 headless agent。（#431）
+- **Windows 托盘图标：** Windows 切换浅色和深色主题后，托盘图标仍会保持可见。（#420）
+- **Linux 托盘菜单：** Linux 托盘右键菜单恢复可用。（#413）
+- **Proma 成本估算：** 在线价格查询不可用时，Proma 仍会使用本地价格信息显示已知模型的成本估算。（#418）
+- **系统代理下的 AI 工具额度：** 应用会使用操作系统代理加载额度，不需要另外设置 shell 代理。（#380）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.44.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.44.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.44.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-Setup-0.44.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.44.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.44.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.45.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-Setup-0.45.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.45.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.45.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -121,7 +119,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.43.0...v0.44.0">v0.43.0...v0.44.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.44.0...v0.45.0">v0.44.0...v0.45.0</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -139,30 +137,29 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **Reasonix 用量：** Token Monitor 現在會像其他工具一樣追蹤 Reasonix，並提供本機的「會話」與「專案」檢視，用來查看原生會話與專案活動。較大的 Reasonix 遙測快照不會阻塞用量讀取，同時保留有效的累計用量。（#365、#384）
-- **用量範圍：** 在主頁頂部點擊 `MONTH` 分頁，會開啟期間選單，可切換到「本星期」「最近 7 日」與「最近 30 日」。切換後，可按所選期間查看「工具」、「模型」與「裝置」的 Token 組成及成本明細；無法還原組成的用量會歸入「未分類」。（#393、#398）
-- **Hub 部署狀態：** 「連接到 Hub」現在會顯示遠端 `Hub`、`Node Hub` 或 `Worker` 是否已是最新版本、需要重新部署、由較新的 Token Monitor 版本部署，或部署版本無法識別。（#399）
-- **托盤活動來源：** 托盤圖示以及「今日 Tokens」/「今日成本」等項目現在可以跟隨「最近有活動的工具」，顯示數值仍使用所選期間的聚合資料。（#397）
-
-### 改進
-- **托盤成本顯示：** 每個托盤成本項目都可透過「成本格式」選擇「縮寫」或「完整數字」，並透過「小數位數」選擇「自動」或 0–4 位。新成本項目預設使用兩位小數的縮寫顯示；現有布局保留之前的完整數字顯示。（#396）
-- **Windows 安裝程式：** 安裝時現在可以選擇安裝目錄。（#390）
+- **Command Code 用量：** 現在可以在用量檢視中查看 Command Code 用量。（#411）
+- **Qoder CN 用量：** 在「設定 → 工具」中啟用 `Qoder CN` 後，即可查看 Qoder CN 用量。（#301）
+- **OpenCode Go 額度：** 本機已登入的 Go 帳號會自動偵測並顯示額度，不再需要手動複製 Cookie。（#406、#414、#416）
+- **Command Code 額度：** 「AI 工具額度」現在會顯示 Command Code 的 5 小時、每週、每月和加購額度。（#421）
+- **自適應更新：** 選擇「自適應」後，額度消耗較快時會更及時更新。（#405）
+- **自訂字體：** 在「外觀 → 進階自訂」中分別設定「介面字體」和「顯示字體」。（#432）
 
 ### 修復
-- **Codex 額度：** 有新計畫資料時會優先使用最新資料，標準 30 天視窗會顯示為 `Monthly`，不再落入錯誤的長期視窗分類。（#379）
-- **Proma 用量：** ID 資訊不完整的助理訊息現在也會計入用量，不再從統計總量中消失。（#392）
-- **Kiro 即時更新：** Kiro 的會話與 CLI 活動現在會即時刷新，不會因 IDE 的大型資料而拖慢即時採集。（#381）
-- **托盤編輯器：** 即時更新期間，開啟的選單會繼續附著在目前編輯項目上，不會遺失正在進行的選擇。（#395）
-- **macOS 相容性：** 主 App 現在支援 macOS 12 及以上版本，更新來源也會攜帶相符的最低版本要求。（#394）
+- **趨勢日期：** 「趨勢」按產生資料的裝置日期計算今日活動和連續天數，即使 Hub 位於其他時區也不會錯位。（#428）
+- **WSL 偵測提示：** 當 WSL 偵測到 CLI 版 ZCode 等工具但無法讀取用量時，設定面板現在會提示你在 WSL 內執行 headless agent。（#431）
+- **Windows 托盤圖示：** Windows 切換淺色和深色主題後，托盤圖示仍會保持可見。（#420）
+- **Linux 托盤選單：** Linux 托盤右鍵選單恢復可用。（#413）
+- **Proma 成本估算：** 線上價格查詢不可用時，Proma 仍會使用本機價格資訊顯示已知模型的成本估算。（#418）
+- **系統代理下的 AI 工具額度：** 應用程式會使用作業系統代理載入額度，不需要另外設定 shell 代理。（#380）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.44.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.44.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.44.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-Setup-0.44.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.44.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.44.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.45.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-Setup-0.45.0.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.45.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.45.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0.AppImage)
 
 </details>
 
@@ -175,30 +172,29 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ko:start -->
 ### 추가
-- **Reasonix 사용량:** Token Monitor가 다른 도구와 함께 Reasonix 사용량을 추적하고, 네이티브 세션 및 프로젝트 활동을 확인할 수 있는 로컬 `세션` 및 `프로젝트` 보기를 제공합니다. 큰 Reasonix 텔레메트리 스냅샷도 사용량 읽기를 막지 않으면서 유효한 누적 사용량을 표시합니다. (#365, #384)
-- **사용량 기간:** 홈 상단의 `MONTH` 탭을 클릭하면 기간 메뉴가 열리고 `이번 주`, `최근 7일`, `최근 30일`로 전환할 수 있습니다. 전환 후 선택한 기간의 토큰 구성과 비용 내역을 `도구`, `모델`, `기기`에서 확인할 수 있으며, 구성을 복원할 수 없는 사용량은 `미분류`로 집계됩니다. (#393, #398)
-- **Hub 배포 상태:** `Hub에 연결`에서 원격 `Hub`, `Node Hub` 또는 `Worker`가 최신인지, 재배포가 필요한지, 더 최신 Token Monitor에서 배포되었는지, 빌드 정보를 인식할 수 없는지 보여줍니다. (#399)
-- **트레이 활동 소스:** 트레이 아이콘과 `오늘 토큰`/`오늘 비용` 같은 항목이 이제 `최근 활동한 도구`를 따를 수 있으며, 표시 값은 선택한 기간 집계를 계속 사용합니다. (#397)
-
-### 개선
-- **트레이 비용 표시:** 각 트레이 비용 항목에서 `비용 형식`을 `축약` 또는 `전체 숫자`로, `소수 자릿수`를 `자동` 또는 0–4로 설정할 수 있습니다. 새 비용 항목은 소수 둘째 자리의 축약 표시를 기본값으로 사용하고 기존 레이아웃은 이전 전체 숫자 표시를 유지합니다. (#396)
-- **Windows 설치 프로그램:** 설치 시 설치 디렉터리를 선택할 수 있습니다. (#390)
+- **Command Code 사용량:** 사용량 보기에서 Command Code 사용량을 확인할 수 있습니다. (#411)
+- **Qoder CN 사용량:** `설정 → 도구`에서 `Qoder CN`을 켜면 Qoder CN 사용량을 확인할 수 있습니다. (#301)
+- **OpenCode Go 한도:** 이 컴퓨터에 로그인된 Go 계정을 자동으로 감지해 한도를 표시하므로 Cookie를 수동으로 복사할 필요가 없습니다. (#406, #414, #416)
+- **Command Code 한도:** `AI 도구 한도`에 Command Code의 5시간, 주간, 월간 및 추가 크레딧이 표시됩니다. (#421)
+- **적응형 새로 고침:** `적응형`을 선택하면 한도가 빠르게 소진될 때 더 자주 업데이트합니다. (#405)
+- **글꼴 사용자 지정:** `외관 → 고급 사용자 지정`에서 `인터페이스 글꼴`과 `표시 글꼴`을 따로 설정할 수 있습니다. (#432)
 
 ### 수정
-- **Codex 한도:** 새 플랜 메타데이터가 있으면 저장된 오래된 레이블보다 우선하며, 표준 30일 창은 잘못된 장기 창 분류 대신 `Monthly`로 표시됩니다. (#379)
-- **Proma 사용량:** ID 정보가 불완전한 어시스턴트 메시지도 사용량에 포함되어 통계에서 사라지지 않습니다. (#392)
-- **Kiro 실시간 업데이트:** Kiro 세션과 CLI 활동은 실시간으로 갱신되며, IDE의 대용량 데이터가 실시간 수집을 느리게 하지 않습니다. (#381)
-- **트레이 편집기:** 실시간 업데이트 중에도 열린 선택 메뉴가 현재 편집 항목에 유지되어 진행 중인 선택이 사라지지 않습니다. (#395)
-- **macOS 호환성:** 호스트 앱은 이제 macOS 12 이상을 지원하며, 업데이트 피드에도 일치하는 최소 요구 사항이 포함됩니다. (#394)
+- **추이 날짜:** `추이`의 오늘 활동과 연속 기록이 데이터를 만든 기기의 날짜를 기준으로 계산되어 Hub가 다른 시간대에 있어도 어긋나지 않습니다. (#428)
+- **WSL 감지 안내:** WSL에서 CLI 전용 ZCode 같은 도구를 감지했지만 사용량을 읽지 못하면, 설정 패널에 WSL 안에서 headless agent를 실행하라는 안내가 표시됩니다. (#431)
+- **Windows 트레이 아이콘:** 밝은 테마와 어두운 테마를 바꿔도 트레이 아이콘이 계속 표시됩니다. (#420)
+- **Linux 트레이 메뉴:** Linux 트레이 오른쪽 메뉴를 다시 사용할 수 있습니다. (#413)
+- **Proma 비용 추정:** 온라인 가격 조회를 사용할 수 없어도 알려진 모델의 비용 추정을 표시합니다. (#418)
+- **시스템 프록시의 AI 도구 한도:** 별도의 shell 프록시 설정 없이 운영체제 프록시를 통해 한도를 불러옵니다. (#380)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.44.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.44.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.44.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-Setup-0.44.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.44.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.44.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.45.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-Setup-0.45.0.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.45.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.45.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0.AppImage)
 
 </details>
 
@@ -211,30 +207,29 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **Reasonix 使用量:** Token Monitorで他のツールと同様にReasonixの使用量を追跡し、ネイティブのセッションとプロジェクト活動を確認できるローカル「セッション」「プロジェクト」ビューを提供します。大きなReasonixテレメトリースナップショットも使用量の読み込みをブロックせず、有効な累計使用量を表示します。（#365、#384）
-- **使用期間:** ホーム上部の`MONTH`タブをクリックすると期間メニューが開き、「今週」「過去7日間」「過去30日間」に切り替えられます。切り替え後は、選択した期間のトークン構成とコストの詳細を「ツール」「モデル」「デバイス」で確認できます。構成を復元できない使用量は「未分類」に集計されます。（#393、#398）
-- **Hubデプロイ状態:** 「Hubに接続」で、リモートの`Hub`、`Node Hub`または`Worker`が最新か、再デプロイが必要か、より新しいToken Monitorでデプロイされたか、ビルド情報を認識できないかを表示します。（#399）
-- **トレイのアクティブソース:** トレイアイコンと「今日のトークン」/「今日のコスト」などの項目で「最近使用したツール」に追従できるようになり、表示値は選択した期間の集計を引き続き使用します。（#397）
-
-### 改善
-- **トレイのコスト表示:** 各トレイのコスト項目で「コスト形式」を「省略」または「完全な数値」に、「小数点以下の桁数」を「自動」または0～4に設定できます。新しいコスト項目は小数第2位の省略表示が初期値で、既存のレイアウトは以前の完全な数値表示を維持します。（#396）
-- **Windowsインストーラー:** インストール時にインストール先のディレクトリを選択できるようになりました。（#390）
+- **Command Code 使用量:** 使用量ビューで Command Code の使用量を確認できます。（#411）
+- **Qoder CN 使用量:** `設定 → ツール` で `Qoder CN` を有効にすると、Qoder CN の使用量を確認できます。（#301）
+- **OpenCode Go の上限:** このコンピューターでログイン中の Go アカウントを自動検出して上限を表示するため、Cookie を手動でコピーする必要がありません。（#406、#414、#416）
+- **Command Code の制限:** `AIツール制限` に Command Code の 5時間・週次・月次・追加クレジットが表示されます。（#421）
+- **自動調整の更新:** `自動調整` を選ぶと、上限の消費が速いときに更新頻度が上がります。（#405）
+- **フォントのカスタマイズ:** `外観 → 詳細カスタマイズ` で `インターフェースフォント` と `表示フォント` を個別に設定できます。（#432）
 
 ### 修正
-- **Codexの制限:** 新しいプランメタデータがある場合は保存済みの古いラベルより優先され、標準の30日ウィンドウは誤った長期ウィンドウ分類ではなく`Monthly`として表示されます。（#379）
-- **Promaの使用量:** ID情報が不完全なアシスタントメッセージも使用量に含まれ、統計から消えなくなりました。（#392）
-- **Kiroのリアルタイム更新:** KiroのセッションとCLIアクティビティはリアルタイムで更新され、IDEの大容量データがリアルタイム収集を遅くしません。（#381）
-- **トレイエディター:** ライブ更新中も開いた選択メニューが現在の編集項目に保持され、進行中の選択が失われません。（#395）
-- **macOS互換性:** ホストアプリはmacOS 12以降をサポートし、アップデートフィードにも一致する最低要件が含まれます。（#394）
+- **トレンドの日付:** `トレンド` の今日のアクティビティと連続日数がデータを作成したデバイスの日付を基準に計算され、Hub が別のタイムゾーンでもずれません。（#428）
+- **WSL 検出の案内:** WSL で CLI 版 ZCode などのツールを検出しても使用量を読み取れない場合、設定パネルに WSL 内で headless agent を実行する案内が表示されます。（#431）
+- **Windows のトレイアイコン:** 明るいテーマと暗いテーマを切り替えてもトレイアイコンが表示されます。（#420）
+- **Linux のトレイメニュー:** Linux でトレイの右クリックメニューを再び使えます。（#413）
+- **Proma のコスト推定:** オンラインの価格取得が使えなくても、既知のモデルのコスト推定を表示します。（#418）
+- **システムプロキシでの AIツール制限:** 別の shell プロキシ設定なしで、OS のプロキシ経由で制限を読み込めます。（#380）
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.44.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.44.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.44.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-Setup-0.44.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.44.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.44.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.44.0/Token-Monitor-0.44.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.45.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-Setup-0.45.0.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.45.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.45.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.45.0/Token-Monitor-0.45.0.AppImage)
 
 </details>
 

@@ -6,7 +6,7 @@
 
 On Windows, Token Monitor normally scans supported tools inside every running WSL distribution through `\\wsl$` and merges their usage about every five minutes. File-based sources such as Codex JSONL sessions work well with this path.
 
-OpenCode and Hermes store current usage in SQLite databases. A Windows process can discover those databases through `\\wsl$` while SQLite still cannot reliably coordinate locks or an active WAL across the WSL 9P boundary. Token Monitor may therefore show the tool under **Settings → Collection → WSL detection** with no usage.
+SQLite-backed tools such as OpenCode, Hermes, and ZCode store current usage in SQLite databases. A Windows process can discover those databases through `\\wsl$` while SQLite still cannot reliably coordinate locks or an active WAL across the WSL 9P boundary. Token Monitor may therefore show the tool under **Settings → Collection → WSL detection** with no usage.
 
 Do not copy a live `.db` file as a workaround. Recent transactions may still be in `-wal`, and copying the database and sidecars separately does not guarantee a consistent snapshot.
 
@@ -42,7 +42,7 @@ Create `token-monitor/.env`:
 TOKEN_MONITOR_HUB_URL=http://WINDOWS_HOST_IP:17321
 TOKEN_MONITOR_SECRET=YOUR_SHARED_SECRET
 TOKEN_MONITOR_DEVICE_ID=wsl-agent
-TOKEN_MONITOR_CLIENTS=opencode,hermes
+TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode
 ```
 
 `TOKEN_MONITOR_DEVICE_ID` must differ from the Windows widget device ID. The hub treats matching IDs as the same device, so a duplicate ID would make the latest post replace the previous record.
@@ -51,7 +51,7 @@ TOKEN_MONITOR_CLIENTS=opencode,hermes
 
 The hub adds device totals; it does not deduplicate the same session across devices. Choose one of these configurations:
 
-- Recommended: keep Windows WSL scanning enabled and restrict the WSL agent to SQLite-backed tools that Windows cannot read reliably, for example `TOKEN_MONITOR_CLIENTS=opencode,hermes`.
+- Recommended: keep Windows WSL scanning enabled and restrict the WSL agent to SQLite-backed tools that Windows cannot read reliably, for example `TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode`.
 - Alternative: let the WSL agent collect every WSL tool, then turn off **Settings → Collection → Scan tools inside WSL** in the Windows widget.
 
 Do not let both collectors report the same Codex, Claude Code, or other file-based sessions.
@@ -64,7 +64,7 @@ Send one snapshot first:
 npm run agent:once
 ```
 
-Confirm that a second device appears in Token Monitor and that OpenCode or Hermes has usage. Then run the continuous agent:
+Confirm that a second device appears in Token Monitor and that the SQLite-backed tool has usage. Then run the continuous agent:
 
 ```bash
 npm run agent

@@ -31,7 +31,7 @@ const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], 
 const emptyHistory = { daily: [], monthly: [], summary: {} };
 
 test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
-  assert.deepEqual(homeActivityHeatmapLayout(), { cell: 9, gap: 3, radius: 2 });
+  assert.deepEqual(homeActivityHeatmapLayout(), { cell: 9, gap: 3, radius: 2, edgePad: 10 });
 
   const rendererDir = path.join(__dirname, '../../src/electron/renderer');
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');

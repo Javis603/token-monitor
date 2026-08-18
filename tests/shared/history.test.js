@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
-  sumTokens, num, parseGraphResult, computeIntensities,
+  sumTokens, num, parseGraphResult, computeIntensities, localDayKey,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories
 } = require('../../src/shared/history');
 
@@ -317,6 +317,39 @@ test('mergeHistories handles empty list', () => {
   assert.deepEqual(m.daily, []);
   assert.deepEqual(m.monthly, []);
   assert.equal(m.summary.totalTokens, 0);
+});
+
+// A formatter smoke test: it derives `expected` the same way localDayKey() does, so it
+// pins the zero-padded shape and nothing about which calendar the key belongs to. The
+// local-vs-UTC behaviour is covered in historyDayBoundary.test.js, which fixes the
+// timezone and the instant so the two calendars actually disagree.
+test('localDayKey renders a zero-padded calendar day', () => {
+  const at = new Date('2026-06-07T23:30:00.000Z');
+  const expected = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
+  assert.equal(localDayKey(at), expected);
+  assert.match(localDayKey(), /^\d{4}-\d{2}-\d{2}$/);
+});
+
+// aggregateHistory() calls mergeHistories() with no todayKey, so the default decides the
+// rolling window and the streak walk for every widget, hub and Worker read. Contributions
+// are keyed by local day, so a UTC default drops the current local day east of UTC and
+// starts the streak walk on an empty day west of it.
+test('mergeHistories defaults todayKey to the local day', () => {
+  const history = {
+    daily: [{ date: localDayKey(), tokens: 10, cost: 1, perClient: {}, perModel: {} }],
+    monthly: [],
+    summary: {}
+  };
+  const defaulted = mergeHistories([history]);
+  assert.deepEqual(defaulted.daily.map((d) => d.date), [localDayKey()]);
+  assert.equal(defaulted.summary.currentStreak, 1);
+  assert.deepEqual(defaulted, mergeHistories([history], { todayKey: localDayKey() }));
+});
+
+test('normalizeHistory defaults todayKey to the local day', () => {
+  const graph = parseGraphResult(graphFromDays([{ date: localDayKey(), tokens: 10, cost: 1, messages: 1 }]));
+  assert.deepEqual(normalizeHistory(graph).daily.map((d) => d.date), [localDayKey()]);
+  assert.deepEqual(normalizeHistory(graph), normalizeHistory(graph, { todayKey: localDayKey() }));
 });
 
 const {

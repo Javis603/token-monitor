@@ -1,0 +1,79 @@
+name: Vendored tokscale
+
+# release.yml only runs on `v*` tag push, so regular PR/push CI never
+# exercises ensure-vendored-tokscale.js / verify-vendored-tokscale.js on any
+# platform before a real release. This gate runs those steps (no
+# electron-builder, no signing) on the same 4 targets release.yml packages,
+# so a broken asset, checksum, or DSH regression fails fast on a PR instead
+# of at release time.
+#
+# This is also the only place "does tokscale support client X" gets checked
+# against the binary Token Monitor actually ships. A client can be merged
+# upstream and pinned into the vendor build well before it's in a tagged npm
+# release (dsh, cherrystudio), so that check can't run against the plain
+# npm-installed binary in ci.yml — it would just be testing an executable
+# packaged releases don't ship. General CI stays fast and networkless;
+# whether DEFAULT_CLIENTS is fully covered is a production-capability
+# question that belongs here instead.
+#
+# When scripts/vendor/tokscale.json's "mode" is "upstream" (no downstream
+# override active), the ensure step below no-ops (nothing to download or
+# swap), but both verify steps keep running — now against the plain
+# npm-installed binary — so this job still fails if that binary doesn't
+# actually cover DEFAULT_CLIENTS or regressed DSH parsing. No
+# scripts/workflow changes are needed to switch modes either way.
+
+on:
+  push:
+    branches: [main]
+    paths: &vendor_tokscale_paths
+      - 'scripts/vendor/tokscale.json'
+      - 'scripts/ensure-vendored-tokscale.js'
+      - 'scripts/verify-vendored-tokscale.js'
+      - 'scripts/verify-vendored-tokscale-clients.js'
+      - 'scripts/vendoredTokscale.js'
+      - 'src/shared/tokscaleCapabilities.js'
+      - 'src/shared/collector.js'
+      - 'tests/shared/tokscaleCapabilities.test.js'
+      - 'tests/shared/ensureVendoredTokscale.test.js'
+      - 'tests/shared/vendoredScriptContract.test.js'
+      - 'tests/shared/collectorCapabilityFallback.test.js'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/vendor-tokscale.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'src/shared/clientTracking.js'
+      - 'tests/shared/clientTracking.test.js'
+  pull_request:
+    paths: *vendor_tokscale_paths
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          - os: macos-15-intel
+            arch: x64
+          - os: windows-latest
+            arch: x64
+          - os: ubuntu-latest
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Ensure vendored tokscale (DSH bridge)
+        run: node scripts/ensure-vendored-tokscale.js
+      - name: Verify DEFAULT_CLIENTS against the vendored binary's real capabilities
+        run: node scripts/verify-vendored-tokscale-clients.js
+      - name: Verify DSH parsing semantics
+        run: node scripts/verify-vendored-tokscale.js

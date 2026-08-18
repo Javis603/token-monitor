@@ -59,6 +59,24 @@ jobs:
       - name: Platform evidence
         run: node -p "process.platform + '-' + process.arch"
       - run: npm ci
+      # Bridges DeepSeek Harness (dsh) support merged upstream but not yet in
+      # a tagged tokscale npm release — see scripts/vendor/tokscale.json's
+      # "reason" (and "mode", once that release lands).
+      # Must run before any platform packaging step (dist:*, dist:win:dir):
+      # those bundle whatever bytes are on disk under node_modules/@tokscale
+      # at the time they run.
+      - name: Ensure vendored tokscale (DSH bridge)
+        run: node scripts/ensure-vendored-tokscale.js
+      - name: Verify vendored tokscale (DSH bridge)
+        run: node scripts/verify-vendored-tokscale.js
+      - name: Select Linux Electron runtime
+        if: matrix.target == 'linux'
+        run: |
+          echo "TOKEN_MONITOR_ELECTRON_TARGET=linux" >> "$GITHUB_ENV"
+          echo "TOKEN_MONITOR_LINUX_ELECTRON_VERSION=43.2.0" >> "$GITHUB_ENV"
+      - name: Verify Electron packaging version
+        run: |
+          node -e "const config = require('./scripts/electron-builder.config.js'); const installed = require('electron/package.json').version; const effective = config.electronVersion || installed; const expected = process.env.TOKEN_MONITOR_LINUX_ELECTRON_VERSION || installed; console.log('Electron packaging version:', effective, '(installed:', installed + ')'); if (effective !== expected) throw new Error('Electron packaging version mismatch: expected ' + expected + ', got ' + effective);"
       # electron-builder needs the notarization key as a file, not the base64 secret directly.
       - name: Decode Apple API key
         if: matrix.target == 'mac'

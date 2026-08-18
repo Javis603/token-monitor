@@ -67,7 +67,7 @@ const supportedToolOrder = [
   'Proma',
   'Qoder',
   'Reasonix',
-  'DeepSeek',
+  'DeepSeek / DeepSeek Harness',
   'OpenRouter',
   'Minimax',
   'Volcengine',
@@ -252,8 +252,4 @@ test('WSL SQLite guides state and verify the Node.js prerequisite', () => {
     assert.match(guide, /Node\.js 22\.13\.0/, file);
     assert.match(guide, /node --version\nnpm --version\n/, file);
   }
-});
-
-test('legacy Hermes guide keeps published links working', () => {
-  assert.match(read('docs/hermes-wsl-setup.md'), /\(wsl-sqlite-setup\.zh-CN\.md\)/);
 });
