@@ -59,6 +59,15 @@ jobs:
       - name: Platform evidence
         run: node -p "process.platform + '-' + process.arch"
       - run: npm ci
+      # Bridges DeepSeek Harness (dsh) support merged upstream but not yet in
+      # a tagged tokscale npm release — see vendor/tokscale.json's "reason".
+      # Must run before any platform packaging step (dist:*, dist:win:dir):
+      # those bundle whatever bytes are on disk under node_modules/@tokscale
+      # at the time they run.
+      - name: Install vendored tokscale (DSH bridge)
+        run: node scripts/install-vendored-tokscale.js
+      - name: Verify vendored tokscale (DSH bridge)
+        run: node scripts/verify-vendored-tokscale.js
       - name: Select Linux Electron runtime
         if: matrix.target == 'linux'
         run: |
