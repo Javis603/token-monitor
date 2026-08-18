@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -11,6 +12,7 @@ const {
   decodeFirstFrameText,
   decodeSessionText,
   dshSessionFiles,
+  readDshSessionHeader,
   resolveDshSessionsRoot,
   scanZstdFrames,
   zstdAvailable
@@ -113,4 +115,43 @@ test('decodeFirstFrameText reads raw .jsonl without decompression', () => {
 test('decodeSessionText reads raw .jsonl without decompression', () => {
   const text = decodeSessionText('/tmp/session.jsonl', Buffer.from('{"type":"session"}\n', 'utf8'));
   assert.equal(text, '{"type":"session"}\n');
+});
+
+// A header's first zstd frame is always tiny in practice (a small JSON
+// record), but if a compressed frame ever exceeded the 64KB bounded
+// head-read, falling back to a full read keeps the session discoverable
+// instead of silently invisible.
+test('readDshSessionHeader recovers a header whose compressed frame exceeds the 64KB bound', { skip: !hasZstd }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-bigheader-'));
+  const dir = path.join(root, 'proj', 'session-big');
+  fs.mkdirSync(dir, { recursive: true });
+  // High-entropy padding so the *compressed* frame itself exceeds 64KB —
+  // a repeated-character pad would compress back down to a few bytes.
+  const noise = crypto.randomBytes(80000).toString('base64');
+  const header = `${JSON.stringify({ type: 'session', id: 'session-big', createdAt: 1750000000000, cwd: `/work/${noise}` })}\n`;
+  const compressed = zlib.zstdCompressSync(Buffer.from(header, 'utf8'));
+  assert.ok(compressed.length > 65536, 'the fixture must actually exceed the bounded read to be a real test');
+  const filePath = path.join(dir, 'session.jsonl.zstd');
+  fs.writeFileSync(filePath, compressed);
+
+  const found = readDshSessionHeader(filePath);
+  assert.equal(found?.id, 'session-big');
+  assert.equal(found?.createdAt, 1750000000000);
+});
+
+// DSH names the transcript directory after the session id (dsh.rs
+// `session_id_from_path`). When the header itself can't be parsed at all —
+// torn, corrupt, or an unrecognized shape — the directory name is still a
+// reliable session id, so the session stays discoverable rather than
+// vanishing outright.
+test('readDshSessionHeader falls back to the directory name when the header cannot be parsed', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-badheader-'));
+  const dir = path.join(root, 'proj', 'session-unreadable-header');
+  fs.mkdirSync(dir, { recursive: true });
+  const filePath = path.join(dir, 'session.jsonl');
+  fs.writeFileSync(filePath, 'this is not a session header at all\n');
+
+  const found = readDshSessionHeader(filePath);
+  assert.equal(found?.id, 'session-unreadable-header');
+  assert.equal(found?.createdAt, undefined);
 });

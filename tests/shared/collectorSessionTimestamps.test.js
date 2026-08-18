@@ -208,6 +208,38 @@ test('applySessionTimestamps walks the DSH sessions tree once per tick, not once
   }
 });
 
+// DSH sessions never join resolvedSessionKeys, so every known id is in scope
+// again on the next tick — without a cache that would mean walking the whole
+// tree on every tick forever, the exact perceived-UI-stutter cost this file's
+// own comments describe avoiding for claude/codex. A known session's file
+// path never changes, so a second tick for the same ids must not re-walk.
+test('applySessionTimestamps does not re-walk the DSH tree for already-known sessions on the next tick', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-cache-'));
+  try {
+    const dir = path.join(home, '.dsh', 'sessions', 'proj', 's1');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'session.jsonl'), `${JSON.stringify({ type: 'session', id: 's1', createdAt: 1750000000000 })}\n`);
+
+    let calls = 0;
+    const countingIndex = (options) => { calls += 1; return indexDshSessionHeaders(options); };
+    const cache = {
+      metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set(),
+      dshSessionFileCache: new Map(), retryMisses: true,
+      indexDshSessionHeaders: countingIndex
+    };
+    const tick = () => applySessionTimestamps(
+      { today: { sessions: { 'dsh:s1': { client: 'dsh', sessionId: 's1' } } } }, home, cache
+    );
+
+    tick();
+    assert.equal(calls, 1, 'first tick resolves the unknown id via one walk');
+    tick();
+    assert.equal(calls, 1, 'second tick must reuse the cached file path, not walk again');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 // dshPaths.js's resolveDshHome checks env.DSH_HOME before the homeDir it is
 // given. `home` here is a scoped WSL distro, not this machine's own profile —
 // a host-configured DSH_HOME leaking in would silently redirect the lookup

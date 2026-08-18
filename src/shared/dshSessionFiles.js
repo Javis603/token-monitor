@@ -172,19 +172,45 @@ function decodeFirstFrameText(filePath, buffer) {
   return decodeZstdBuffer(buffer, [frame]);
 }
 
+function parseDshSessionHeader(text) {
+  const firstLine = text.split(/\r?\n/).find((line) => line.trim());
+  if (!firstLine) return null;
+  const header = JSON.parse(firstLine.trim());
+  return header?.type === 'session' && typeof header.id === 'string' ? header : null;
+}
+
+// DSH names the transcript directory after the session id; use it when the
+// header itself can't be read, mirroring tokscale's own session_id_from_path
+// fallback for a missing or unreadable leading `session` event (dsh.rs).
+function sessionIdFromPath(filePath) {
+  const dir = path.basename(path.dirname(filePath));
+  return dir ? { type: 'session', id: dir } : null;
+}
+
 // The `session` header (id, createdAt, ...) is always the first record, and
 // a bounded head-read (not the whole, possibly long-lived transcript) is
-// enough to reach it.
+// enough to reach it in every real case observed (a header is a single small
+// JSON record). If that bounded read doesn't yield a usable header — a torn
+// first frame, or in principle one whose compressed size exceeds the bound —
+// fall back to a full read before giving up, so a real session never goes
+// undiscovered over a fixed byte budget; then fall back to the directory
+// name so a header that's unreadable even on a full read still resolves to
+// its id (with no createdAt — callers already tolerate that).
 function readDshSessionHeader(filePath) {
+  let header;
   try {
-    const text = decodeFirstFrameText(filePath, readFileHead(filePath));
-    const firstLine = text.split(/\r?\n/).find((line) => line.trim());
-    if (!firstLine) return null;
-    const header = JSON.parse(firstLine.trim());
-    return header?.type === 'session' && typeof header.id === 'string' ? header : null;
+    header = parseDshSessionHeader(decodeFirstFrameText(filePath, readFileHead(filePath)));
   } catch (_) {
-    return null; // unreadable, corrupt, or a torn first frame
+    header = null;
   }
+  if (!header) {
+    try {
+      header = parseDshSessionHeader(decodeSessionText(filePath, fs.readFileSync(filePath)));
+    } catch (_) {
+      header = null;
+    }
+  }
+  return header || sessionIdFromPath(filePath);
 }
 
 // Single pass over every session file under root, keyed by session id. Used

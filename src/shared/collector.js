@@ -828,21 +828,31 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   // need: the header's `createdAt` for startedAt, and the file's mtime (an
   // append-only log, so mtime tracks the last flush) for lastUsedAt. DSH
   // sessions are deliberately never added to resolvedSessionKeys (see below),
-  // so every id in scope this tick is looked up again on the next one too —
-  // a single tree walk here, rather than one findDshSessionFile() scan per
-  // id, is what keeps that affordable as the session count grows.
+  // so every id in scope this tick is looked up again on the next one too.
+  // A session, once found, has a file path that never changes — dshFileCache
+  // (persisted across ticks by the caller, like metadataCache) lets a known
+  // id skip straight to statting its own file instead of re-walking the
+  // whole DSH sessions tree; only an id this cache has never seen triggers
+  // that walk, and it resolves every unknown id in the tick at once.
   const dshIds = byClient.get('dsh') || new Set();
   if (dshIds.size > 0) {
-    const buildIndex = deps.indexDshSessionHeaders || indexDshSessionHeaders;
-    // dshPaths.js checks env.DSH_HOME before the homeDir it's given, same as
-    // tokscale's own PathRoot::EnvVar — and tokscale's own scanner never lets
-    // that leak into an explicit --home lookup (use_env_roots: false, lib.rs).
-    // scopedHome means `home` is a specific WSL distro, not this machine's
-    // own profile, so a host-configured DSH_HOME must not redirect it back.
-    const dshEnv = deps.scopedHome ? {} : (deps.env || process.env);
-    const index = buildIndex({ homeDir: home, env: dshEnv, platform: deps.platform });
+    const dshFileCache = deps.dshSessionFileCache || new Map();
+    const unresolvedDshIds = [...dshIds].filter((id) => !dshFileCache.has(id));
+    if (unresolvedDshIds.length > 0) {
+      const buildIndex = deps.indexDshSessionHeaders || indexDshSessionHeaders;
+      // dshPaths.js checks env.DSH_HOME before the homeDir it's given, same as
+      // tokscale's own PathRoot::EnvVar — and tokscale's own scanner never lets
+      // that leak into an explicit --home lookup (use_env_roots: false, lib.rs).
+      // scopedHome means `home` is a specific WSL distro, not this machine's
+      // own profile, so a host-configured DSH_HOME must not redirect it back.
+      const dshEnv = deps.scopedHome ? {} : (deps.env || process.env);
+      const index = buildIndex({ homeDir: home, env: dshEnv, platform: deps.platform });
+      for (const [sessionId, entry] of index) {
+        if (!dshFileCache.has(sessionId)) dshFileCache.set(sessionId, entry);
+      }
+    }
     for (const sessionId of dshIds) {
-      const entry = index.get(sessionId);
+      const entry = dshFileCache.get(sessionId);
       if (!entry) continue;
       const startedAt = isoFromDate(Number(entry.createdAt));
       let lastUsedAt = '';
@@ -1131,7 +1141,13 @@ async function collectUsageOnce(options) {
     ...(options.sessionMetadataDeps || {}),
     metadataCache: new Map(),
     resolvedSessionKeys: new Set(),
-    attemptedSessionKeys: new Set()
+    attemptedSessionKeys: new Set(),
+    // DSH sessions are deliberately excluded from resolvedSessionKeys (so
+    // lastUsedAt keeps refreshing), so every DSH id in scope gets looked up
+    // again on every tick. Once a session's file has been found, this cache
+    // lets that lookup become a single stat() on the known path instead of
+    // a fresh walk of the whole DSH sessions tree.
+    dshSessionFileCache: new Map()
   };
   const decorateLocalPeriods = (periods, { retryMisses = false } = {}) => applySessionTimestamps(
     periods,
