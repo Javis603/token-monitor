@@ -250,9 +250,9 @@ test('applyTranslations updates text, title, aria-label, placeholders, and docum
 
 test('home period tabs and token total label use localized copy', () => {
   const html = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/index.html'), 'utf8');
-  assert.match(html, /data-period="today" data-i18n="trayComposer\.period\.today"/);
-  assert.match(html, /data-period="month" data-i18n="trayComposer\.period\.month"/);
-  assert.match(html, /data-period="allTime" data-i18n="dashboard\.range\.all"/);
+  assert.match(html, /data-period="today" data-period-slot="today"/);
+  assert.match(html, /data-period="month" data-period-slot="month"/);
+  assert.match(html, /data-period="allTime" data-period-slot="allTime"/);
   assert.match(html, /data-i18n="dashboard\.stat\.totalTokens">TOTAL TOKENS<\/span>/);
 });
 

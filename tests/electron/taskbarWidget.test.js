@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   TASKBAR_WIDGET_FALLBACK_HEIGHT,
@@ -77,7 +78,7 @@ test('taskbar widget renderer is a CSP-safe file page fed by the preload bridge'
   assert.match(js, /onStatsPush\(render\)/);
   assert.match(js, /formatNumber/);
   assert.match(js, /toLocaleString\('en-US'\)/);
-  assert.match(js, /addEventListener\('click', cyclePeriod\)/);
+  assert.match(js, /addEventListener\('pointerup'/);
   assert.match(js, /updateSettings\(\{ taskbarWidgetPeriod: period \}\)/);
   assert.doesNotMatch(js, /suffix: 'K'|s: 'K'|formatCompact/);
   assert.doesNotMatch(js, /require\(['"]electron['"]\)/);
@@ -121,6 +122,84 @@ test('taskbar widget click cycles today, this month, and all time', () => {
   assert.equal(taskbarWidgetPeriodTokens(stats, 'allTime'), 3000);
 });
 
+test('taskbar widget renderer cycles on pointerup (delivered even when the press is not)', async () => {
+  const source = fs.readFileSync(path.join(widgetDir, 'taskbarWidget.js'), 'utf8');
+  const listeners = new Map();
+  const elements = new Map([
+    ['widget', {
+      addEventListener(type, handler) {
+        listeners.set(type, handler);
+      }
+    }],
+    ['total', { textContent: '' }],
+    ['period', { textContent: '' }]
+  ]);
+  const updates = [];
+  const stats = {
+    periods: {
+      today: { totalTokens: 10 },
+      month: { totalTokens: 200 },
+      allTime: { totalTokens: 3000 }
+    }
+  };
+  const api = {
+    getSettings: () => Promise.resolve({ language: 'en', taskbarWidgetPeriod: 'today' }),
+    onSettingsPush: () => () => {},
+    getStats: () => Promise.resolve(stats),
+    onStatsPush: () => () => {},
+    updateSettings: (patch) => {
+      updates.push(patch);
+      return Promise.resolve(patch);
+    }
+  };
+  const periodApi = {
+    normalizeTaskbarWidgetPeriod,
+    nextTaskbarWidgetPeriod,
+    taskbarWidgetPeriodLabelKey,
+    taskbarWidgetPeriodTokens
+  };
+  const labels = {
+    'trayComposer.period.today': 'Today',
+    'trayComposer.period.month': 'This month',
+    'trayComposer.period.allTime': 'All time'
+  };
+  const context = {
+    window: {
+      tokenMonitor: api,
+      TokenMonitorTaskbarWidgetPeriod: periodApi,
+      TokenMonitorI18n: {
+        resolveLocale: () => 'en',
+        translate: (_locale, key) => labels[key] || key,
+        applyTranslations: () => {}
+      }
+    },
+    document: { getElementById: (id) => elements.get(id) },
+    navigator: { language: 'en-US' },
+    console,
+    Promise
+  };
+
+  vm.runInNewContext(source, context, { filename: 'taskbarWidget.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(elements.get('period').textContent, 'Today');
+  assert.equal(elements.get('total').textContent, '10 tokens');
+
+  listeners.get('pointerup')({ button: 0 });
+  assert.equal(elements.get('period').textContent, 'This month');
+  assert.equal(elements.get('total').textContent, '200 tokens');
+  assert.deepEqual(updates.map((patch) => patch.taskbarWidgetPeriod), ['month']);
+
+  listeners.get('pointerup')({ button: 2 });
+  assert.equal(elements.get('period').textContent, 'This month');
+  assert.equal(updates.length, 1);
+
+  listeners.get('pointerup')({ button: 0 });
+  assert.equal(elements.get('period').textContent, 'All time');
+  assert.equal(elements.get('total').textContent, '3,000 tokens');
+  assert.deepEqual(updates.map((patch) => patch.taskbarWidgetPeriod), ['month', 'allTime']);
+});
+
 test('taskbar widget settings UI is wired in the renderer and translated in every locale', () => {
   const html = fs.readFileSync(indexPath, 'utf8');
   const app = fs.readFileSync(appPath, 'utf8');
@@ -155,4 +234,63 @@ test('main process wires the taskbar widget to settings, live stats, and clickab
   assert.doesNotMatch(main, /win\.setIgnoreMouseEvents\(true, \{ forward: true \}\)/);
   assert.match(main, /win\.loadFile\(loadTarget\)/);
   assert.match(main, /screen\.on\('display-metrics-changed'/);
+});
+
+test('isEffectiveTopmost treats only visible real-size windows above the overlay as buried', () => {
+  const { isEffectiveTopmost } = require('../../src/electron/taskbarWidgetWin32');
+  const widget = 0x100n;
+  const helper1x1 = 0x101n;   // ThumbnailDeviceHelperWnd-style 1x1 window
+  const taskbar = 0x102n;     // Shell_TrayWnd
+  const rect = (w, h) => {
+    const buf = Buffer.alloc(16);
+    buf.writeInt32LE(0, 0); buf.writeInt32LE(0, 4);
+    buf.writeInt32LE(w, 8); buf.writeInt32LE(h, 12);
+    return buf;
+  };
+  const api = {
+    GetWindow: (hwnd, cmd) => {
+      assert.equal(cmd, 3); // GW_HWNDPREV
+      if (hwnd === widget) return helper1x1;
+      if (hwnd === helper1x1) return taskbar;
+      return 0n;
+    },
+    GetWindowRect: (hwnd, buf) => {
+      if (hwnd === helper1x1) rect(1, 1).copy(buf);
+      else if (hwnd === taskbar) rect(1707, 48).copy(buf);
+      else return false;
+      return true;
+    },
+    IsWindowVisible: (hwnd) => hwnd !== 0n
+  };
+  assert.equal(isEffectiveTopmost(api, widget), false, 'a visible real-size window above means buried');
+
+  api.IsWindowVisible = () => false;
+  assert.equal(isEffectiveTopmost(api, widget), true, 'invisible windows above are ignored');
+
+  api.IsWindowVisible = (hwnd) => hwnd !== 0n;
+  api.GetWindowRect = (hwnd, buf) => {
+    rect(1, 1).copy(buf);
+    return true;
+  };
+  assert.equal(isEffectiveTopmost(api, widget), true, '1x1 helper windows above are ignored');
+
+  // Degenerate helper then a real window: still buried.
+  api.GetWindow = (hwnd) => {
+    if (hwnd === widget) return helper1x1;
+    if (hwnd === helper1x1) return taskbar;
+    return 0n;
+  };
+  api.GetWindowRect = (hwnd, buf) => {
+    if (hwnd === helper1x1) rect(1, 1).copy(buf);
+    else rect(1707, 48).copy(buf);
+    return true;
+  };
+  assert.equal(isEffectiveTopmost(api, widget), false);
+});
+
+test('main process re-asserts the taskbar widget topmost only when it is buried', () => {
+  const main = fs.readFileSync(mainPath, 'utf8');
+  assert.match(main, /isTaskbarWidgetTopmost\(taskbarWidgetWindow\)/);
+  assert.match(main, /raiseTaskbarWidgetWindowSafe\(taskbarWidgetWindow\)/);
+  assert.match(main, /if \(!isTaskbarWidgetTopmost\(taskbarWidgetWindow\)\)/);
 });

@@ -28,6 +28,10 @@ const EVENT_OBJECT_REORDER = 0x8004;
 const WINEVENT_OUTOFCONTEXT = 0x0000;
 const WINEVENT_SKIPOWNPROCESS = 0x0002;
 
+// GetWindow command retrieves the window directly above the given window in
+// z-order; NULL means the window is the very top of the stack.
+const GW_HWNDPREV = 3;
+
 const HWND_TOPMOST = -1n;
 const SWP_NOSIZE = 0x0001;
 const SWP_NOMOVE = 0x0002;
@@ -47,6 +51,12 @@ const REASSERT_THROTTLE_MS = 100;
 // above the taskbar, regardless of whether Explorer re-raises it before or
 // after our event callback runs.
 const REASSERT_DELAY_MS = 150;
+// Never SetWindowPos while the primary button is down — reordering between
+// mousedown and mouseup eats the click-to-cycle even when the widget already
+// received the down event.
+const VK_LBUTTON = 0x01;
+const MOUSE_DEFER_RETRY_MS = 50;
+const MOUSE_DEFER_MAX_MS = 2000;
 
 // null = not probed, false = unavailable, object = ready
 let win32Api = null;
@@ -68,9 +78,13 @@ function loadWin32Api() {
       WinEventProc,
       FindWindowW: user32.func('uintptr_t FindWindowW(const char16_t *lpClassName, const char16_t *lpWindowName)'),
       GetAncestor: user32.func('uintptr_t GetAncestor(uintptr_t hWnd, uint gaFlags)'),
+      GetWindow: user32.func('uintptr_t GetWindow(uintptr_t hWnd, uint uCmd)'),
+      GetWindowRect: user32.func('bool GetWindowRect(uintptr_t hWnd, void *rect)'),
+      IsWindowVisible: user32.func('bool IsWindowVisible(uintptr_t hWnd)'),
       SetWindowPos: user32.func(
         'bool SetWindowPos(uintptr_t hWnd, uintptr_t hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags)'
       ),
+      GetAsyncKeyState: user32.func('int16 GetAsyncKeyState(int vKey)'),
       SetWinEventHook: user32.func(
         'uintptr_t SetWinEventHook(uint eventMin, uint eventMax, uintptr_t hmodWinEventProc, WinEventProc *pfnWinEventProc, uint idProcess, uint idThread, uint dwFlags)'
       ),
@@ -103,6 +117,85 @@ function raiseTaskbarWidgetWindow(win) {
   if (!api || !hwnd) return false;
   try {
     return Boolean(api.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, REASSERT_IMMEDIATE_FLAGS));
+  } catch {
+    return false;
+  }
+}
+
+function isPrimaryMouseButtonDown() {
+  const api = loadWin32Api();
+  if (!api) return false;
+  try {
+    return Boolean(api.GetAsyncKeyState(VK_LBUTTON) & 0x8000);
+  } catch {
+    return false;
+  }
+}
+
+// Defer SetWindowPos until the primary button is up so a re-assert never
+// lands between mousedown and mouseup (which would swallow the click event).
+const raiseDeferTimers = new WeakMap();
+
+function raiseTaskbarWidgetWindowSafe(win, startedAt = Date.now()) {
+  if (!win) return false;
+  if (isPrimaryMouseButtonDown()) {
+    if (Date.now() - startedAt > MOUSE_DEFER_MAX_MS) return false;
+    let timer = raiseDeferTimers.get(win);
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => raiseTaskbarWidgetWindowSafe(win, startedAt), MOUSE_DEFER_RETRY_MS);
+    if (timer.unref) timer.unref();
+    raiseDeferTimers.set(win, timer);
+    return false;
+  }
+  const pending = raiseDeferTimers.get(win);
+  if (pending) {
+    clearTimeout(pending);
+    raiseDeferTimers.delete(win);
+  }
+  return raiseTaskbarWidgetWindow(win);
+}
+
+// True when no visible, real-size window sits above the overlay. Re-asserting
+// topmost while the widget is covered is what keeps it above the taskbar, but
+// doing it between a click's mousedown and mouseup eats the click (the down is
+// delivered, then the window is reordered, and no click event ever fires). So
+// callers must only raise when this returns false.
+//
+// Windows keeps degenerate 1x1 helper windows (class ThumbnailDeviceHelperWnd)
+// permanently near the top of the z-order, so "nothing at all above" is too
+// strict. Walk upward skipping invisible and tiny windows: anything else above
+// the overlay means it is buried.
+const SKIP_WINDOW_MIN_SIZE = 8;
+
+function windowSize(api, hwnd) {
+  const rect = Buffer.alloc(16);
+  if (!api.GetWindowRect(hwnd, rect)) return null;
+  const width = rect.readInt32LE(8) - rect.readInt32LE(0);
+  const height = rect.readInt32LE(12) - rect.readInt32LE(4);
+  return { width, height };
+}
+
+function isEffectiveTopmost(api, hwnd) {
+  let above = api.GetWindow(hwnd, GW_HWNDPREV);
+  let guard = 0;
+  while (above && guard++ < 64) {
+    if (api.IsWindowVisible(above)) {
+      const size = windowSize(api, above);
+      if (!size || (size.width >= SKIP_WINDOW_MIN_SIZE && size.height >= SKIP_WINDOW_MIN_SIZE)) {
+        return false;
+      }
+    }
+    above = api.GetWindow(above, GW_HWNDPREV);
+  }
+  return true;
+}
+
+function isTaskbarWidgetTopmost(win) {
+  const api = loadWin32Api();
+  const hwnd = hwndOf(win);
+  if (!api || !hwnd) return false;
+  try {
+    return isEffectiveTopmost(api, hwnd);
   } catch {
     return false;
   }
@@ -164,21 +257,37 @@ function watchTaskbarWidgetZOrder(onZOrderChange) {
   let pendingDelayedRaise = null;
 
   const fire = () => {
+    pendingDelayedRaise = null;
     lastRaiseAt = 0; // bypass the throttle for the final re-assert
     onZOrderChange();
   };
 
-  // WinEventProc(hHook, event, hwnd, idObject, idChild, idEventThread, dwmsEventTime)
-  const handleEvent = (_hHook, _event, hwnd) => {
-    if (!isTaskbarRelated(hwnd)) return;
-    const now = Date.now();
-    if (now - lastRaiseAt >= REASSERT_THROTTLE_MS) {
-      lastRaiseAt = now;
-      onZOrderChange();
-    }
+  const scheduleDelayedRaise = () => {
     if (pendingDelayedRaise) return;
     pendingDelayedRaise = setTimeout(fire, REASSERT_DELAY_MS);
     if (pendingDelayedRaise.unref) pendingDelayedRaise.unref();
+  };
+
+  // WinEventProc(hHook, event, hwnd, idObject, idChild, idEventThread, dwmsEventTime)
+  const handleEvent = (_hHook, event, hwnd) => {
+    const taskbar = isTaskbarRelated(hwnd);
+    const foregroundSwitch =
+      event === EVENT_SYSTEM_FOREGROUND || event === EVENT_SYSTEM_MINIMIZEEND;
+    if (!taskbar && !foregroundSwitch) return;
+
+    if (taskbar) {
+      const now = Date.now();
+      if (now - lastRaiseAt >= REASSERT_THROTTLE_MS) {
+        lastRaiseAt = now;
+        onZOrderChange();
+      }
+    }
+    // Taskbar re-raises and foreground switches (Alt+Tab, clicking a browser
+    // window) can both bury the overlay. Always schedule a delayed re-assert
+    // so recovery happens after the gesture settles; never re-assert
+    // immediately on a non-taskbar foreground event — that would SetWindowPos
+    // between mousedown and mouseup when the user clicks the widget.
+    scheduleDelayedRaise();
   };
 
   const systemRange = installHook(api, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, handleEvent);
@@ -211,9 +320,17 @@ module.exports = {
   EVENT_OBJECT_SHOW,
   EVENT_SYSTEM_FOREGROUND,
   EVENT_SYSTEM_MINIMIZEEND,
+  GW_HWNDPREV,
   HWND_TOPMOST,
+  MOUSE_DEFER_MAX_MS,
+  MOUSE_DEFER_RETRY_MS,
   REASSERT_DELAY_MS,
   REASSERT_THROTTLE_MS,
+  VK_LBUTTON,
+  isEffectiveTopmost,
+  isPrimaryMouseButtonDown,
+  isTaskbarWidgetTopmost,
   raiseTaskbarWidgetWindow,
+  raiseTaskbarWidgetWindowSafe,
   watchTaskbarWidgetZOrder
 };

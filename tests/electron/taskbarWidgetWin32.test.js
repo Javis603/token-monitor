@@ -9,7 +9,9 @@ const {
   EVENT_SYSTEM_FOREGROUND,
   EVENT_SYSTEM_MINIMIZEEND,
   HWND_TOPMOST,
+  isPrimaryMouseButtonDown,
   raiseTaskbarWidgetWindow,
+  raiseTaskbarWidgetWindowSafe,
   watchTaskbarWidgetZOrder
 } = require('../../src/electron/taskbarWidgetWin32');
 
@@ -28,6 +30,15 @@ test('raiseTaskbarWidgetWindow is a safe no-op without a real window', () => {
   assert.equal(raiseTaskbarWidgetWindow({ getNativeWindowHandle: () => null }), false);
   assert.equal(raiseTaskbarWidgetWindow({ getNativeWindowHandle: () => undefined }), false);
   assert.equal(raiseTaskbarWidgetWindow({ isDestroyed: () => true }), false);
+});
+
+test('raiseTaskbarWidgetWindowSafe is a safe no-op without a real window', () => {
+  assert.equal(raiseTaskbarWidgetWindowSafe(null), false);
+  assert.equal(raiseTaskbarWidgetWindowSafe(undefined), false);
+});
+
+test('isPrimaryMouseButtonDown returns a boolean', () => {
+  assert.equal(typeof isPrimaryMouseButtonDown(), 'boolean');
 });
 
 test('watchTaskbarWidgetZOrder requires a callback', () => {

@@ -288,7 +288,8 @@ const {
   taskbarWidgetPagePath
 } = require('./taskbarWidget');
 const {
-  raiseTaskbarWidgetWindow,
+  isTaskbarWidgetTopmost,
+  raiseTaskbarWidgetWindowSafe,
   watchTaskbarWidgetZOrder
 } = require('./taskbarWidgetWin32');
 const {
@@ -2422,17 +2423,34 @@ let taskbarWidgetWindow = null;
 // Detach function returned by watchTaskbarWidgetZOrder; null while unwatched.
 let taskbarWidgetZOrderWatch = null;
 
-function positionTaskbarWidget() {
+function positionTaskbarWidget(options = {}) {
   if (!taskbarWidgetWindow || taskbarWidgetWindow.isDestroyed()) return;
   const bounds = taskbarWidgetBounds(screen.getPrimaryDisplay());
-  if (bounds) {
+  if (!bounds) return;
+  // Only touch the bounds when they actually changed (or on display metric
+  // changes); calling setBounds with the identical rect can itself reorder the
+  // window, and — like a re-assert — a reorder between a click's mousedown and
+  // mouseup eats the click.
+  if (options.reposition || !positionTaskbarWidget.lastBounds || !rectsEqual(bounds, positionTaskbarWidget.lastBounds)) {
     taskbarWidgetWindow.setBounds(bounds);
-    // The taskbar is an always-on-top window that may reassert itself above
-    // this overlay at any time (window re-shuffles, Explorer/DWM refreshes),
-    // silently covering the widget. Re-assert topmost on every pass.
-    taskbarWidgetWindow.setAlwaysOnTop(true, 'screen-saver');
-    raiseTaskbarWidgetWindow(taskbarWidgetWindow);
+    positionTaskbarWidget.lastBounds = bounds;
   }
+  // The taskbar is an always-on-top window that may reassert itself above this
+  // overlay at any time (window re-shuffles, Explorer/DWM refreshes), silently
+  // covering the widget. Re-assert topmost only when the overlay is actually
+  // buried: while it is already the top window, raising it again would land a
+  // SetWindowPos between the click's mousedown and mouseup and swallow the
+  // click-to-cycle. Electron's setAlwaysOnTop is a no-op on an already-topmost
+  // window, and native SetWindowPos with HWND_TOPMOST always reorders, so the
+  // check is what keeps the widget on top without reordering it constantly.
+  if (!isTaskbarWidgetTopmost(taskbarWidgetWindow)) {
+    taskbarWidgetWindow.setAlwaysOnTop(true, 'screen-saver');
+    raiseTaskbarWidgetWindowSafe(taskbarWidgetWindow);
+  }
+}
+
+function rectsEqual(a, b) {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 }
 
 function destroyTaskbarWidget() {
@@ -2477,12 +2495,17 @@ function createTaskbarWidget() {
   // taskbar over this overlay, and Electron's setAlwaysOnTop is a no-op on an
   // already-topmost window, so the periodic pass alone can never win that
   // race. Re-assert the native topmost position whenever the system z-order
-  // changes (raiseTaskbarWidgetWindow always reorders, unlike Electron's flag
-  // check; the hook fires on foreground switches and window reorders).
+  // changes (the native safe raise reorders unlike Electron's flag check; the
+  // hook fires on foreground switches and window reorders).
   taskbarWidgetZOrderWatch = watchTaskbarWidgetZOrder(() => {
     if (taskbarWidgetWindow && !taskbarWidgetWindow.isDestroyed()) {
-      taskbarWidgetWindow.setAlwaysOnTop(true, 'screen-saver');
-      raiseTaskbarWidgetWindow(taskbarWidgetWindow);
+      // Same rule as the periodic pass: never re-assert while the overlay is
+      // already the top window — a reorder between mousedown and mouseup would
+      // eat the click-to-cycle.
+      if (!isTaskbarWidgetTopmost(taskbarWidgetWindow)) {
+        taskbarWidgetWindow.setAlwaysOnTop(true, 'screen-saver');
+        raiseTaskbarWidgetWindowSafe(taskbarWidgetWindow);
+      }
     }
   });
   // Capture clicks so the overlay can cycle today / this month / all time.
@@ -2495,16 +2518,13 @@ function createTaskbarWidget() {
     // Raise only after the window is actually shown: the native call passes
     // SWP_SHOWWINDOW, which would prematurely reveal the not-yet-painted
     // overlay if applied before show().
-    raiseTaskbarWidgetWindow(win);
+    raiseTaskbarWidgetWindowSafe(win);
     // Re-assert position + topmost after first paint: forces DWM to recomposite
     // the layered window over the taskbar instead of treating the show as a
     // no-op under the occluded-region classification.
     setTimeout(() => {
       if (win.isDestroyed()) return;
-      const bounds = taskbarWidgetBounds(screen.getPrimaryDisplay());
-      if (bounds) win.setBounds(bounds);
-      win.setAlwaysOnTop(true, 'screen-saver');
-      raiseTaskbarWidgetWindow(win);
+      positionTaskbarWidget({ reposition: true });
     }, 300);
   });
   const loadTarget = taskbarWidgetPagePath();
@@ -6008,7 +6028,7 @@ app.whenReady().then(() => {
   createWindow();
   syncTaskbarWidget();
   screen.on('display-metrics-changed', () => {
-    positionTaskbarWidget();
+    positionTaskbarWidget({ reposition: true });
   });
   // Keep the overlay above the always-on-top taskbar; cheap no-op while the
   // widget is disabled (positionTaskbarWidget early-returns without a window).

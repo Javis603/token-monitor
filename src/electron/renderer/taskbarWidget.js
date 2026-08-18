@@ -74,7 +74,20 @@
   }
 
   const widget = document.getElementById('widget');
-  if (widget) widget.addEventListener('click', cyclePeriod);
+  if (widget) {
+    // Cycle on pointerup instead of click or pointerdown. The overlay is a
+    // layered window whose surface pixels outside the text/icon glyphs are
+    // fully transparent, so Windows (and Chromium's own browser-side hit
+    // test) routinely fail to deliver the press (no pointerdown, no click)
+    // for those parts of the strip — exactly the "click does nothing" bug.
+    // The release (pointerup) is delivered for every press on the window
+    // regardless of the pixel alpha, so cycling on pointerup makes the whole
+    // module switch today / this month / all time again. button 0 = primary.
+    widget.addEventListener('pointerup', (event) => {
+      if (event.button !== 0) return;
+      cyclePeriod();
+    });
+  }
 
   if (api) {
     if (typeof api.getSettings === 'function') {
