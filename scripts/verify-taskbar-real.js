@@ -11,7 +11,7 @@
  */
 
 const { app, BrowserWindow, screen, desktopCapturer } = require('electron');
-const { spawn, execFileSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
