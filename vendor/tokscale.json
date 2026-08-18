@@ -5,7 +5,7 @@
   "commitTitle": "feat(clients): add DeepSeek Harness support (#1126)",
   "releaseRepo": "Javis603/tokscale",
   "releaseTag": "token-monitor-59712ada",
-  "reason": "Bridges DeepSeek Harness (dsh) client support merged upstream but not yet in a tagged tokscale npm release. Remove this override once an official tokscale release includes commit 59712ada or later — the bundled npm binary then wins again automatically.",
+  "reason": "Bridges DeepSeek Harness (dsh) client support merged upstream but not yet in a tagged tokscale npm release. Once Token Monitor updates its npm lockfile to an official tokscale release containing commit 59712ada or later, remove this override so the official bundled binary becomes authoritative again — the bundled version is never faked, so tokscaleUpdater.js's existing semver comparison keeps working, but packaged builds themselves need that explicit lockfile bump and step removal, not just an upstream release existing.",
   "platforms": {
     "darwin-arm64": {
       "package": "@tokscale/cli-darwin-arm64",

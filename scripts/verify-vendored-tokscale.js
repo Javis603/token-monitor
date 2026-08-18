@@ -12,7 +12,16 @@
 // (reasoning_tokens_do_not_inflate_the_additive_output_bucket): raw
 // outputTokens 25 with reasoningTokens 23 must report output 2 (25 - 23), not
 // 25 — otherwise reasoning tokens get billed twice, once inside "output" and
-// once as "reasoning".
+// once as "reasoning". Same fixture as tokscale's own
+// test_dsh_zstd_transcript_counts_identically_cold_and_warm_cache.
+//
+// The child process must be hermetic: without pinning HOME/XDG_*/config dirs
+// and clearing scan-path env vars, a run on a machine (or CI runner) that
+// happens to have its own tokscale config, DSH_HOME, or TOKSCALE_EXTRA_DIRS
+// set could read real data instead of the fixture and pass or fail for the
+// wrong reason, or hit the network for pricing and flake on a slow/blocked
+// runner. This mirrors tokscale's own cmd_with_home()/prime_pricing_cache()
+// in crates/tokscale-cli/tests/cli_tests.rs — same guarantees, ported to JS.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -28,6 +37,12 @@ const FIXTURE_LINES = [
 ];
 const EXPECTED = { client: 'dsh', model: 'deepseek-reasoner', input: 2885, output: 2, reasoning: 23, cacheRead: 0 };
 
+// Guaranteed-unreachable loopback port (nothing listens on 9/discard), used
+// as an offline guarantee for pricing lookups even if TOKSCALE_PRICING_CACHE_ONLY
+// is ever bypassed by a future code path — same technique tokscale's own
+// harness uses.
+const BLACKHOLE_PROXY = 'http://127.0.0.1:9';
+
 function writeFixtureHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-fixture-'));
   const sessionDir = path.join(home, '.dsh', 'sessions', FIXTURE_WORKSPACE_DIR, FIXTURE_SESSION_ID);
@@ -40,10 +55,55 @@ function writeFixtureHome() {
   return home;
 }
 
+// Empty-but-fresh pricing cache: TOKSCALE_PRICING_CACHE_ONLY=1 stops the
+// pricing service from fetching, but it still needs *some* non-stale cache
+// file to read instead of treating the cache as missing. Content is
+// deliberately empty — this fixture doesn't assert on cost, only on the
+// token buckets — matching tokscale's own prime_pricing_cache() fixture.
+function primePricingCache(configDir) {
+  const cacheDir = path.join(configDir, 'cache');
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const now = Math.floor(Date.now() / 1000);
+  const empty = JSON.stringify({ timestamp: now, data: {} });
+  fs.writeFileSync(path.join(cacheDir, 'pricing-litellm.json'), empty);
+  fs.writeFileSync(path.join(cacheDir, 'pricing-openrouter.json'), empty);
+  fs.writeFileSync(path.join(cacheDir, 'pricing-models-dev.json'), empty);
+}
+
+function hermeticEnv(home) {
+  const configDir = path.join(home, '.config', 'tokscale');
+  primePricingCache(configDir);
+
+  const env = {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home, // Windows equivalent of HOME for path resolution
+    XDG_CONFIG_HOME: path.join(home, '.config'),
+    XDG_DATA_HOME: path.join(home, '.local', 'share'),
+    XDG_CACHE_HOME: path.join(home, '.cache'),
+    TOKSCALE_CONFIG_DIR: configDir,
+    TOKSCALE_PRICING_CACHE_ONLY: '1',
+    HTTP_PROXY: BLACKHOLE_PROXY,
+    HTTPS_PROXY: BLACKHOLE_PROXY,
+    ALL_PROXY: BLACKHOLE_PROXY,
+    http_proxy: BLACKHOLE_PROXY,
+    https_proxy: BLACKHOLE_PROXY,
+    all_proxy: BLACKHOLE_PROXY
+  };
+  // Scan-path overrides that must not leak in from the runner/dev shell —
+  // DSH_HOME in particular would otherwise redirect the scan away from the
+  // fixture entirely, since DSH resolves it ahead of `~/.dsh`.
+  for (const key of ['NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'DSH_HOME']) {
+    delete env[key];
+  }
+  return env;
+}
+
 function runAgainstFixture(binPath, home) {
-  const result = spawnSync(binPath, ['--home', home, '--json', '--client', 'dsh', '--group-by', 'client,model'], {
+  const result = spawnSync(binPath, ['--json', '--client', 'dsh', '--group-by', 'client,model', '--no-spinner'], {
     encoding: 'utf8',
-    timeout: 15_000
+    timeout: 15_000,
+    env: hermeticEnv(home)
   });
   if (result.error) throw new Error(`Fixture run failed to execute: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`Fixture run exited ${result.status}: ${result.stderr || result.stdout}`);
