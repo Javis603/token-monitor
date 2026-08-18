@@ -17,6 +17,7 @@ const {
   deriveClientOverall
 } = require('./clientHealth');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
+const { createTokscaleCapabilityResolver, filterSupportedClients, parseSupportedClients } = require('./tokscaleCapabilities');
 const { customPricingPath, tokscaleCacheDirs } = require('./tokscaleConfig');
 const {
   applyPeriodDelta,
@@ -139,8 +140,13 @@ function resolvePlatformBinary() {
 function tokscaleCommand() {
   const resolved = resolvePlatformBinary();
   const useDirect = Boolean(resolved && resolved.source !== 'shim');
-  if (useDirect) return { bin: resolved.path, prefixArgs: [], env: process.env };
-  return { bin: process.execPath, prefixArgs: [TOKSCALE_BIN_JS], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } };
+  const command = useDirect
+    ? { bin: resolved.path, prefixArgs: [], env: process.env }
+    : { bin: process.execPath, prefixArgs: [TOKSCALE_BIN_JS], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } };
+  return {
+    ...command,
+    identity: [resolved?.source || 'none', resolved?.path || '', resolved?.version || '', resolved?.integrity || ''].join('|')
+  };
 }
 
 function parseJsonOutput(stdout) {
@@ -155,8 +161,8 @@ function parseJsonOutput(stdout) {
   throw new Error(`Could not parse tokscale JSON output: ${text.slice(0, 300)}`);
 }
 
-function spawnTokscaleJson(userArgs, commandTimeoutMs) {
-  const { bin, prefixArgs, env } = tokscaleCommand();
+function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand()) {
+  const { bin, prefixArgs, env } = command;
   return new Promise((resolve, reject) => {
     const child = spawn(bin, [...prefixArgs, ...userArgs], { env, windowsHide: true });
     let stdout = '';
@@ -167,11 +173,44 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs) {
     child.on('error', (error) => { clearTimeout(timeout); reject(error); });
     child.on('close', (code) => {
       clearTimeout(timeout);
-      if (code !== 0) return reject(new Error(`tokscale exited with code ${code}: ${stderr.trim() || stdout.trim()}`));
+      if (code !== 0) {
+        const error = new Error(`tokscale exited with code ${code}: ${stderr.trim() || stdout.trim()}`);
+        error.tokscaleExitCode = code;
+        return reject(error);
+      }
       try { resolve(parseJsonOutput(stdout)); } catch (error) { reject(error); }
     });
   });
 }
+
+const TOKSCALE_CAPABILITY_PROBE_TIMEOUT_MS = 10_000;
+// tokscale rejects an unknown --client value with this exact exit code (see
+// the TOKSCALE_CLIENT_ALIASES comment above) — verified on 4.7.0 and 4.8.0.
+const TOKSCALE_UNKNOWN_CLIENT_EXIT_CODE = 2;
+
+function spawnTokscaleHelp(command) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command.bin, [...command.prefixArgs, '--help'], { env: command.env, windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    const timeout = setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error(`tokscale capability probe timed out after ${TOKSCALE_CAPABILITY_PROBE_TIMEOUT_MS}ms`));
+    }, TOKSCALE_CAPABILITY_PROBE_TIMEOUT_MS);
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('error', (error) => { clearTimeout(timeout); reject(error); });
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code !== 0) return reject(new Error(`--help exited with code ${code}: ${stderr.trim() || stdout.trim()}`));
+      try { resolve(parseSupportedClients(`${stdout}\n${stderr}`)); } catch (error) { reject(error); }
+    });
+  });
+}
+
+const tokscaleCapabilityResolver = createTokscaleCapabilityResolver({
+  warn: (message) => console.warn(message)
+});
 
 // A few tools surface as one umbrella client in our tracked-client list but as
 // several client ids inside tokscale. Antigravity is the case today: tokscale 4.x
@@ -198,16 +237,65 @@ function tokscaleClientFilter(clients) {
   return ordered.join(',');
 }
 
+function resetTokscaleCapabilityCache() {
+  tokscaleCapabilityResolver.reset();
+}
+
+function isUnknownTokscaleClientError(error) {
+  return Boolean(error) && error.tokscaleExitCode === TOKSCALE_UNKNOWN_CLIENT_EXIT_CODE;
+}
+
+// Reactive, not proactive: a binary that recognizes every requested client
+// never pays for a capability probe. Only once tokscale has actually
+// rejected the CSV (exit 2) do we spend one `--help` probe to learn what the
+// resolved binary really supports, then retry with just those ids. A probe
+// success is cached per binary identity so a later tick on the same binary
+// filters proactively instead of failing first; a probe failure is cached
+// too (and warned once) so we don't re-probe on every subsequent failure —
+// the original tokscale error surfaces instead, same as before this filter
+// existed.
+function retryWithKnownCapabilities(error, requested, command, emptyResult, retry) {
+  if (!isUnknownTokscaleClientError(error)) return Promise.reject(error);
+  return tokscaleCapabilityResolver.probe(command.identity, () => spawnTokscaleHelp(command)).then((supported) => {
+    if (!supported) return Promise.reject(error);
+    const filtered = filterSupportedClients(requested, supported);
+    if (filtered === requested) return Promise.reject(error);
+    if (!filtered) return emptyResult;
+    return retry(filtered);
+  });
+}
+
+function applyKnownCapabilityFilter(clientFilter, identity) {
+  const supported = tokscaleCapabilityResolver.known(identity);
+  return supported ? filterSupportedClients(clientFilter, supported) : clientFilter;
+}
+
 function runTokscale({ clients, flags, commandTimeoutMs }) {
-  const clientFilter = tokscaleClientFilter(clients);
+  const command = tokscaleCommand();
+  const requested = tokscaleClientFilter(clients);
+  if (!requested) return Promise.resolve({ entries: [] });
+  const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
   if (!clientFilter) return Promise.resolve({ entries: [] });
-  return spawnTokscaleJson(['--json', '--client', clientFilter, '--group-by', 'client,session,model', ...flags], commandTimeoutMs);
+  const runArgs = (filter) => ['--json', '--client', filter, '--group-by', 'client,session,model', ...flags];
+  return spawnTokscaleJson(runArgs(clientFilter), commandTimeoutMs, command).catch((error) => (
+    retryWithKnownCapabilities(error, requested, command, { entries: [] }, (filtered) => (
+      spawnTokscaleJson(runArgs(filtered), commandTimeoutMs, command)
+    ))
+  ));
 }
 
 function runTokscaleGraph({ clients, commandTimeoutMs }) {
-  const clientFilter = tokscaleClientFilter(clients);
+  const command = tokscaleCommand();
+  const requested = tokscaleClientFilter(clients);
+  if (!requested) return Promise.resolve({ contributions: [] });
+  const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
   if (!clientFilter) return Promise.resolve({ contributions: [] });
-  return spawnTokscaleJson(['graph', '--client', clientFilter, '--no-spinner'], commandTimeoutMs);
+  const runArgs = (filter) => ['graph', '--client', filter, '--no-spinner'];
+  return spawnTokscaleJson(runArgs(clientFilter), commandTimeoutMs, command).catch((error) => (
+    retryWithKnownCapabilities(error, requested, command, { contributions: [] }, (filtered) => (
+      spawnTokscaleJson(runArgs(filtered), commandTimeoutMs, command)
+    ))
+  ));
 }
 
 function lookupModelPricing(modelId, commandTimeoutMs = 15000) {
@@ -3470,6 +3558,7 @@ module.exports = {
   resetPromaPricingCache,
   readTokscalePricingCatalog,
   resetTokscaleCatalogCache,
+  resetTokscaleCapabilityCache,
   tokscalePricingCatalog,
   resolveWatchUsePolling,
   selfSyncSourceRootsForClients,

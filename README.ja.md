@@ -224,6 +224,8 @@ npm run pack         # インストーラーなしのアプリディレクトリ
 
 出力は `dist/` に生成されます。Windows と Linux は対象 OS 上で上記の対応する `dist:*` スクリプトを使います。macOS リリース版をパッケージングするには、この Mac に Developer ID Application の署名 ID が必要です。ローカル開発または未対応プラットフォームでは `npm start` を使ってください。
 
+ランタイムとパッケージングのスクリプトは、4 つの vendored 対象で pinned tokscale binary を明示的に確保します。それ以外のソースプラットフォームでは npm binary を使い、対応していない client をフィルタリングします。`npm install`、lint、テストではダウンロードしません。
+
 ## 動作の仕組み
 
 ```text

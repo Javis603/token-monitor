@@ -64,8 +64,8 @@ jobs:
       # Must run before any platform packaging step (dist:*, dist:win:dir):
       # those bundle whatever bytes are on disk under node_modules/@tokscale
       # at the time they run.
-      - name: Install vendored tokscale (DSH bridge)
-        run: node scripts/install-vendored-tokscale.js
+      - name: Ensure vendored tokscale (DSH bridge)
+        run: node scripts/ensure-vendored-tokscale.js
       - name: Verify vendored tokscale (DSH bridge)
         run: node scripts/verify-vendored-tokscale.js
       - name: Select Linux Electron runtime

@@ -1,7 +1,7 @@
 name: Vendored tokscale
 
 # release.yml only runs on `v*` tag push, so regular PR/push CI never
-# exercises install-vendored-tokscale.js / verify-vendored-tokscale.js on any
+# exercises ensure-vendored-tokscale.js / verify-vendored-tokscale.js on any
 # platform before a real release. This gate runs those steps (no
 # electron-builder, no signing) on the same 4 targets release.yml packages,
 # so a broken asset, checksum, or DSH regression fails fast on a PR instead
@@ -21,10 +21,16 @@ on:
     branches: [main]
     paths: &vendor_tokscale_paths
       - 'vendor/tokscale.json'
-      - 'scripts/install-vendored-tokscale.js'
+      - 'scripts/ensure-vendored-tokscale.js'
       - 'scripts/verify-vendored-tokscale.js'
       - 'scripts/verify-vendored-tokscale-clients.js'
       - 'scripts/vendoredTokscale.js'
+      - 'src/shared/tokscaleCapabilities.js'
+      - 'src/shared/collector.js'
+      - 'tests/shared/tokscaleCapabilities.test.js'
+      - 'tests/shared/ensureVendoredTokscale.test.js'
+      - 'tests/shared/vendoredScriptContract.test.js'
+      - 'tests/shared/collectorCapabilityFallback.test.js'
       - '.github/workflows/release.yml'
       - '.github/workflows/vendor-tokscale.yml'
       - 'package.json'
@@ -58,8 +64,8 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - name: Install vendored tokscale (DSH bridge)
-        run: node scripts/install-vendored-tokscale.js
+      - name: Ensure vendored tokscale (DSH bridge)
+        run: node scripts/ensure-vendored-tokscale.js
       - name: Verify DEFAULT_CLIENTS against the vendored binary's real capabilities
         run: node scripts/verify-vendored-tokscale-clients.js
       - name: Verify DSH parsing semantics

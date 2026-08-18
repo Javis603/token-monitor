@@ -1,6 +1,6 @@
 'use strict';
 
-// Release gate for install-vendored-tokscale.js. Checking `--version` is not
+// Release gate for ensure-vendored-tokscale.js. Checking `--version` is not
 // enough to prove the swap worked: tokscale's Cargo.toml version stays at the
 // last tagged release (4.13.0) even on commits far past it, since DSH landed
 // without a version bump upstream. So this runs the swapped binary against a
@@ -141,7 +141,7 @@ function main() {
   const { key, entry } = resolveManifestEntry(manifest);
   const binPath = resolveTargetBinPath(entry);
   if (!fs.existsSync(binPath)) {
-    throw new Error(`No binary at ${binPath} for ${key} — run install-vendored-tokscale.js first`);
+    throw new Error(`No binary at ${binPath} for ${key} — run ensure-vendored-tokscale.js first`);
   }
 
   const home = writeFixtureHome();

@@ -7,11 +7,12 @@
 // tagged npm release (dsh, cherrystudio), so checking the plain
 // npm-installed binary would only prove something about an executable
 // packaged releases don't ship. This runs in vendor-tokscale.yml, after
-// install-vendored-tokscale.js has already swapped in the real binary.
+// ensure-vendored-tokscale.js has already swapped in the real binary.
 
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const { resolveManifestEntry, resolveTargetBinPath, loadManifest } = require('./vendoredTokscale');
+const { parseSupportedClients } = require('../src/shared/tokscaleCapabilities');
 const { DEFAULT_CLIENTS, PARSE_LOCAL_CLIENTS } = require(path.join(__dirname, '..', 'src', 'shared', 'clientTracking'));
 
 // Clients Token Monitor parses itself rather than through tokscale — see the
@@ -24,10 +25,7 @@ function supportedClients(binPath) {
   const result = spawnSync(binPath, ['--help'], { encoding: 'utf8', timeout: 10_000 });
   if (result.error) throw new Error(`--help failed to execute: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`--help exited ${result.status}: ${result.stderr || result.stdout}`);
-  const help = `${result.stdout || ''}\n${result.stderr || ''}`;
-  const possibleValues = help.match(/\[\s*possible\s+values\s*:\s*([^\]]+)\]/i);
-  if (!possibleValues) throw new Error('tokscale --help did not list --client possible values');
-  return new Set(possibleValues[1].split(',').map((client) => client.trim()).filter(Boolean));
+  return parseSupportedClients(`${result.stdout || ''}\n${result.stderr || ''}`);
 }
 
 function main() {
