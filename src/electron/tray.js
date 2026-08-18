@@ -17,9 +17,10 @@ const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 // its canvas — the artwork covers ~75% of the 1024px square and the Dock reads
 // the margin as spacing. The Windows notification area spaces the cells itself
 // and expects full-bleed artwork, so downscaling that padded canvas into the
-// small-icon metric leaves ~18px of visible mark in a 24px cell, a quarter
-// smaller than every neighbouring app (#314). icon-win.png is the full-bleed
-// variant electron-builder already ships to the Windows installer.
+// small-icon metric spends a quarter of the cell on nothing at every scale,
+// which is why #314 reads as undersized at 100% (12px of mark in a 16px cell)
+// as much as at 150% (18px in 24px). icon-win.png is the full-bleed variant
+// electron-builder already ships to the Windows installer.
 const WINDOWS_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-win.png');
 const TRAY_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icons', 'tray-token-monitor.png');
 

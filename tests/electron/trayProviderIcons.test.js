@@ -90,8 +90,9 @@ test('Claude Code keeps its intentional wide mark while other providers use the 
 });
 
 test('a standalone mark fills the Windows notification-area cell, everywhere else keeps the inset', () => {
-  // Windows gives each tray icon one square cell and spaces the cells itself,
-  // so the 0.78 optical inset drew 18px of mark in a 24px cell at 150% (#314).
+  // Windows gives each tray icon one square cell and spaces the cells itself, so
+  // the 0.78 optical inset left a quarter of that cell empty at every scale
+  // (#314): 12px of mark in the 16px cell at 100%, 18px in the 24px cell at 150%.
   assert.equal(trayProviderOpticalRatio('codex', { standalone: true, platform: 'win32' }), 1);
   assert.equal(trayProviderOpticalRatio('codex', { standalone: true, platform: 'darwin' }), 0.78);
   assert.equal(trayProviderOpticalRatio('codex', { standalone: true, platform: 'linux' }), 0.78);

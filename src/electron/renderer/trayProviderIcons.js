@@ -95,9 +95,10 @@
     // A mark that IS the whole tray icon is a different problem. Windows hands
     // each notification-area icon one square cell of the small-icon metric and
     // spaces the cells itself, so anything short of filling that cell reads
-    // smaller than every neighbouring app — 18px of mark in a 24px cell at 150%
-    // (#314). macOS keeps the inset: its menubar has no cell to fill, and the
-    // icon sits inline with text that the breathing room is measured against.
+    // smaller than every neighbouring app at every scale (#314): 0.78 leaves
+    // 12px of mark in the 16px cell at 100% and 18px in the 24px cell at 150%.
+    // macOS keeps the inset: its menubar has no cell to fill, and the icon sits
+    // inline with text that the breathing room is measured against.
     if (options.standalone === true && options.platform === 'win32') return 1;
     // Claude Code's intentionally wide mark already uses the full horizontal
     // viewBox with balanced vertical breathing room. Cropping it into the
