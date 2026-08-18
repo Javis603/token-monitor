@@ -317,10 +317,11 @@ const APP_NAME = 'Token Monitor';
 const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 const WINDOWS_APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-win.png');
 
-// Electron falls back to the executable's own icon when a window is given none,
-// and on Windows that executable carries the multi-resolution ICO
-// electron-builder generates from `win.icon` — a better source at 16-32px than
-// a 1024px PNG downscaled at runtime. So a packaged window deliberately sets
+// Electron's own documentation says a window given no icon falls back to the
+// executable's, and recommends ICO on Windows; electron-builder already
+// converts `win.icon` into the ICO embedded in that executable, which is the
+// icon built for this platform rather than one PNG scaled at runtime. So a
+// packaged window deliberately sets
 // nothing here: whatever it set could only override that, which is exactly what
 // naming the macOS artwork was doing to the taskbar button and Alt-Tab entry
 // (it carries the Dock's inset margin — see WINDOWS_ICON_PATH in tray.js). An

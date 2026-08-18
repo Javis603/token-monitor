@@ -252,9 +252,9 @@ test('the full-bleed Windows icon ships in the Windows package and nowhere else'
 
 test('Windows leaves the window icon to the executable that already carries an ICO', () => {
   // Electron falls back to the exe icon when a window names none, and
-  // electron-builder generates a multi-resolution ICO from win.icon. Naming a
-  // PNG here overrides that with a worse source at 16-32px, which is what the
-  // taskbar and Alt-Tab regression was (#314).
+  // electron-builder converts win.icon into the ICO embedded there. Naming a
+  // PNG here overrides the icon built for the platform, which is what reached
+  // the taskbar and Alt-Tab entry (#314).
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   assert.doesNotMatch(main, /\n\s*icon: APP_ICON_PATH,/, 'no window names the icon directly');
   assert.match(main, /function appWindowIcon\(\) \{[\s\S]*?return app\.isPackaged \? \{\} : \{ icon: WINDOWS_APP_ICON_PATH \};[\s\S]*?\}/);
