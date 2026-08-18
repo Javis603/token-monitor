@@ -8,7 +8,7 @@ const chokidar = require('chokidar');
 const semver = require('semver');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
-const { normalizeClientsCsv } = require('./clientTracking');
+const { normalizeClientsCsv, PARSE_LOCAL_CLIENTS } = require('./clientTracking');
 const {
   CLIENT_HEALTH_VERSION,
   MAX_SYNC_DETAIL_INPUT_LENGTH,
@@ -1013,7 +1013,7 @@ async function collectUsageOnce(options) {
   );
   // Proma and Qoder CN remain local compatibility adapters. Reasonix aggregate
   // usage is supplied by the same Tokscale path as every other tracked client.
-  const localClients = new Set(['proma', 'qodercn']);
+  const localClients = new Set(PARSE_LOCAL_CLIENTS);
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
