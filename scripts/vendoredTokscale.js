@@ -12,13 +12,19 @@ function loadManifest() {
 }
 
 // "override" (the default when the field is absent, for manifests written
-// before this toggle existed) applies the pinned fork build below and runs
-// the vendored-binary verification gates against it. "upstream" makes every
-// consumer of this manifest a no-op — no download, no verification — so the
-// plain npm-installed tokscale is authoritative. This is a data flip, not an
-// infrastructure change: the override fields stay in the manifest either way.
+// before this toggle existed) makes ensure-vendored-tokscale.js swap in the
+// pinned fork build below. "upstream" makes it a no-op instead, so the plain
+// npm-installed tokscale is authoritative for binary provenance — but both
+// verify-vendored-tokscale*.js gates still run either way, just against
+// whichever binary is actually authoritative for the current mode. This is a
+// data flip, not an infrastructure change: the override fields stay in the
+// manifest either way. An unrecognized mode fails closed rather than
+// silently falling back to "override" — a typo here must not go unnoticed.
 function manifestMode(manifest) {
-  return manifest.mode === 'upstream' ? 'upstream' : 'override';
+  const mode = manifest.mode;
+  if (mode === undefined || mode === null || mode === 'override') return 'override';
+  if (mode === 'upstream') return 'upstream';
+  throw new Error(`Invalid "mode" in scripts/vendor/tokscale.json: ${JSON.stringify(mode)} — expected "override", "upstream", or the field omitted.`);
 }
 
 function platformKey(platform = process.platform, arch = process.arch) {

@@ -16,6 +16,21 @@ test('parseSupportedClients accepts wrapped possible values output', () => {
   assert.deepEqual([...supported], ['claude', 'antigravity-cli', 'dsh', 'synthetic']);
 });
 
+test('parseSupportedClients ignores an unrelated flag\'s possible-values list that appears first', () => {
+  const help =
+    '  --format <FORMAT> [possible values: json, table]\n' +
+    '  --client <CLIENTS> [possible values: claude, dsh]\n';
+  const supported = parseSupportedClients(help);
+  assert.deepEqual([...supported], ['claude', 'dsh']);
+});
+
+test('parseSupportedClients rejects help text that never mentions --client', () => {
+  assert.throws(
+    () => parseSupportedClients('  --format <FORMAT> [possible values: json, table]\n'),
+    /did not mention --client/
+  );
+});
+
 test('filterSupportedClients preserves order and removes unsupported ids', () => {
   assert.equal(
     filterSupportedClients('claude,dsh,claude,unknown', new Set(['claude', 'dsh'])),

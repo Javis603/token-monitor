@@ -19,6 +19,13 @@
 // entry is a client the vendored binary recognizes at all is a separate,
 // generic concern — see verify-vendored-tokscale-clients.js.
 //
+// mode "override" (the default): this verifies the pinned fork build
+// ensure-vendored-tokscale.js has already swapped in. mode "upstream": no
+// swap happens, so this verifies the plain npm-installed binary instead —
+// deliberately NOT skipped, since switching to upstream is exactly the
+// moment this fixture most needs to prove the official release actually
+// carries the reasoning-accounting fix, not just the dsh client id.
+//
 // The child process must be hermetic: without pinning HOME/XDG_*/config dirs
 // and clearing scan-path env vars, a run on a machine (or CI runner) that
 // happens to have its own tokscale config, DSH_HOME, or TOKSCALE_EXTRA_DIRS
@@ -138,15 +145,15 @@ function assertExpected(parsed) {
 
 function main() {
   const manifest = loadManifest();
-  if (manifestMode(manifest) === 'upstream') {
-    console.log('scripts/vendor/tokscale.json mode is "upstream" — no override is active, skipping the DSH fixture check.');
-    return;
-  }
-
+  const isUpstream = manifestMode(manifest) === 'upstream';
   const { key, entry } = resolveManifestEntry(manifest);
   const binPath = resolveTargetBinPath(entry);
   if (!fs.existsSync(binPath)) {
-    throw new Error(`No binary at ${binPath} for ${key} — run ensure-vendored-tokscale.js first`);
+    throw new Error(
+      isUpstream
+        ? `No binary at ${binPath} for ${key} — is the tokscale npm dependency installed?`
+        : `No binary at ${binPath} for ${key} — run ensure-vendored-tokscale.js first`
+    );
   }
 
   const home = writeFixtureHome();
@@ -157,12 +164,16 @@ function main() {
     fs.rmSync(home, { recursive: true, force: true });
   }
 
-  console.log(`Verified vendored tokscale (${key}): DSH fixture parses with correct reasoning-corrected token buckets.`);
+  console.log(`Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): DSH fixture parses with correct reasoning-corrected token buckets.`);
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(`verify-vendored-tokscale failed: ${error.message}`);
-  process.exit(1);
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`verify-vendored-tokscale failed: ${error.message}`);
+    process.exit(1);
+  }
 }
+
+module.exports = { main };

@@ -11,9 +11,14 @@ const { manifestMode } = require('../../scripts/vendoredTokscale');
 
 test('manifestMode defaults to override and only "upstream" flips it', () => {
   assert.equal(manifestMode({}), 'override');
+  assert.equal(manifestMode({ mode: null }), 'override');
   assert.equal(manifestMode({ mode: 'override' }), 'override');
   assert.equal(manifestMode({ mode: 'upstream' }), 'upstream');
-  assert.equal(manifestMode({ mode: 'not-a-real-mode' }), 'override');
+});
+
+test('manifestMode fails closed on an unrecognized mode instead of silently defaulting', () => {
+  assert.throws(() => manifestMode({ mode: 'upsteam' }), /Invalid "mode"/);
+  assert.throws(() => manifestMode({ mode: 'Override' }), /Invalid "mode"/);
 });
 
 function manifestFor(payload, overrides = {}) {
