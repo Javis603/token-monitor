@@ -31,7 +31,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { loadManifest, resolveManifestEntry, resolveTargetBinPath } = require('./vendoredTokscale');
+const { loadManifest, manifestMode, resolveManifestEntry, resolveTargetBinPath } = require('./vendoredTokscale');
 
 const FIXTURE_CLIENT = 'dsh';
 const FIXTURE_SESSION_ID = '96cf59c9-b347-48b9-b234-a5200913ad05';
@@ -131,13 +131,18 @@ function assertExpected(parsed) {
   if (mismatches.length > 0) {
     throw new Error(
       `DSH fixture mismatch — expected ${JSON.stringify(EXPECTED)}, got ${JSON.stringify(entry)}. ` +
-        'If this is a legitimate upstream behavior change, update EXPECTED and vendor/tokscale.json together, do not just silence this check.'
+        'If this is a legitimate upstream behavior change, update EXPECTED and scripts/vendor/tokscale.json together, do not just silence this check.'
     );
   }
 }
 
 function main() {
   const manifest = loadManifest();
+  if (manifestMode(manifest) === 'upstream') {
+    console.log('scripts/vendor/tokscale.json mode is "upstream" — no override is active, skipping the DSH fixture check.');
+    return;
+  }
+
   const { key, entry } = resolveManifestEntry(manifest);
   const binPath = resolveTargetBinPath(entry);
   if (!fs.existsSync(binPath)) {

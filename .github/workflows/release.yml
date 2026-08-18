@@ -60,7 +60,8 @@ jobs:
         run: node -p "process.platform + '-' + process.arch"
       - run: npm ci
       # Bridges DeepSeek Harness (dsh) support merged upstream but not yet in
-      # a tagged tokscale npm release — see vendor/tokscale.json's "reason".
+      # a tagged tokscale npm release — see scripts/vendor/tokscale.json's
+      # "reason" (and "mode", once that release lands).
       # Must run before any platform packaging step (dist:*, dist:win:dir):
       # those bundle whatever bytes are on disk under node_modules/@tokscale
       # at the time they run.

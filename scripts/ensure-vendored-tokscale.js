@@ -1,14 +1,16 @@
 'use strict';
 
 // Ensures the npm-installed tokscale platform binary is replaced by the
-// pinned downstream build recorded in vendor/tokscale.json. This is explicit
-// rather than an npm lifecycle hook so install, lint, and test stay offline.
+// pinned downstream build recorded in scripts/vendor/tokscale.json. This is
+// explicit rather than an npm lifecycle hook so install, lint, and test stay
+// offline.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const {
   loadManifest,
+  manifestMode,
   resolveManifestEntry,
   resolveOptionalManifestEntry,
   resolveTargetBinPath,
@@ -81,6 +83,11 @@ async function ensureVendoredTokscale({
   smoke = smokeTest,
   log = console.log
 } = {}) {
+  if (manifestMode(manifest) === 'upstream') {
+    log('scripts/vendor/tokscale.json mode is "upstream" — no downstream override is active; the plain npm-installed tokscale is authoritative. Nothing to ensure.');
+    return { status: 'upstream' };
+  }
+
   const resolved = requestedKey
     ? resolveManifestEntry(manifest, requestedKey)
     : resolveOptional(manifest);
@@ -120,8 +127,8 @@ async function ensureVendoredTokscale({
   if (installedVersion !== manifest.baseVersion) {
     throw new Error(
       `Installed ${entry.package} is ${installedVersion}, but this vendor override was built against ` +
-        `${manifest.baseVersion}. The tokscale dependency has moved — update vendor/tokscale.json to a new ` +
-        `pinned build, or remove the vendor ensure step if the installed version already includes DSH support.`
+        `${manifest.baseVersion}. The tokscale dependency has moved — update scripts/vendor/tokscale.json to a ` +
+        'new pinned build, or set its "mode" to "upstream" if the installed version already includes DSH support.'
     );
   }
 

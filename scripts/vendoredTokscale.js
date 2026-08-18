@@ -7,8 +7,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 function loadManifest() {
-  const manifestPath = path.join(__dirname, '..', 'vendor', 'tokscale.json');
+  const manifestPath = path.join(__dirname, 'vendor', 'tokscale.json');
   return JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+}
+
+// "override" (the default when the field is absent, for manifests written
+// before this toggle existed) applies the pinned fork build below and runs
+// the vendored-binary verification gates against it. "upstream" makes every
+// consumer of this manifest a no-op — no download, no verification — so the
+// plain npm-installed tokscale is authoritative. This is a data flip, not an
+// infrastructure change: the override fields stay in the manifest either way.
+function manifestMode(manifest) {
+  return manifest.mode === 'upstream' ? 'upstream' : 'override';
 }
 
 function platformKey(platform = process.platform, arch = process.arch) {
@@ -37,7 +47,7 @@ function resolveManifestEntry(manifest, requestedKey = null) {
   const key = requestedKey || platformKey();
   const entry = manifest.platforms[key];
   if (!entry) {
-    throw new Error(`No vendored tokscale binary recorded for platform ${key} in vendor/tokscale.json`);
+    throw new Error(`No vendored tokscale binary recorded for platform ${key} in scripts/vendor/tokscale.json`);
   }
   return { key, entry };
 }
@@ -67,6 +77,7 @@ function resolveInstalledPackageVersion(entry) {
 
 module.exports = {
   loadManifest,
+  manifestMode,
   platformKey,
   runtimePlatformKey,
   binaryName,

@@ -18,7 +18,7 @@ Automated verification is `npm run verify` (= `npm run lint && npm test`); CI (`
 
 To dry-run the agent without posting: `npm run agent:once -- --dry-run`.
 
-The app, headless-agent, and packaging scripts explicitly run `ensure:tokscale` before execution. The four vendored targets use the pinned binary from `vendor/tokscale.json`; source platforms without a vendored asset keep the npm binary and cache a capability filter for unsupported clients. `npm install`, `npm ci`, `npm run hub`, lint, test, and verify do not download the vendored asset.
+The app, headless-agent, and packaging scripts explicitly run `ensure:tokscale` before execution. The four vendored targets use the pinned binary from `scripts/vendor/tokscale.json`; source platforms without a vendored asset keep the npm binary and cache a capability filter for unsupported clients. `npm install`, `npm ci`, `npm run hub`, lint, test, and verify do not download the vendored asset. Setting the manifest's `mode` to `"upstream"` (alongside bumping the `tokscale` npm dependency past the pinned commit) turns the ensure/verify scripts into no-ops without removing any of this wiring — flipping back to `"override"` for a future upstream lag needs no re-adding of scripts, package.json wiring, or workflow steps.
 
 ## Architecture
 

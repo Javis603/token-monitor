@@ -7,6 +7,14 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { ensureVendoredTokscale } = require('../../scripts/ensure-vendored-tokscale');
+const { manifestMode } = require('../../scripts/vendoredTokscale');
+
+test('manifestMode defaults to override and only "upstream" flips it', () => {
+  assert.equal(manifestMode({}), 'override');
+  assert.equal(manifestMode({ mode: 'override' }), 'override');
+  assert.equal(manifestMode({ mode: 'upstream' }), 'upstream');
+  assert.equal(manifestMode({ mode: 'not-a-real-mode' }), 'override');
+});
 
 function manifestFor(payload, overrides = {}) {
   const sha256 = crypto.createHash('sha256').update(payload).digest('hex');
@@ -208,4 +216,38 @@ test('a resolveTarget failure unrelated to a missing module still fails closed',
     }),
     /permission denied/
   );
+});
+
+test('mode "upstream" is a complete no-op regardless of platform/target', async () => {
+  const logs = [];
+  const result = await ensureVendoredTokscale({
+    manifest: { ...manifestFor(Buffer.from('vendored binary')), mode: 'upstream' },
+    requestedKey: 'darwin-arm64',
+    resolveTarget: () => { throw new Error('must not be called in upstream mode'); },
+    resolveVersion: () => { throw new Error('must not be called in upstream mode'); },
+    download: async () => { throw new Error('must not download in upstream mode'); },
+    log: (message) => logs.push(message)
+  });
+  assert.deepEqual(result, { status: 'upstream' });
+  assert.ok(logs.some((line) => line.includes('upstream')));
+});
+
+test('mode absent behaves exactly like mode "override" (backward compatible)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-ensure-'));
+  const target = path.join(dir, 'tokscale');
+  const payload = Buffer.from('vendored binary');
+  fs.writeFileSync(target, payload);
+  const manifest = manifestFor(payload);
+  assert.equal(manifest.mode, undefined);
+
+  try {
+    const result = await ensureVendoredTokscale({
+      manifest,
+      requestedKey: 'darwin-arm64',
+      ...dependencies(target)
+    });
+    assert.equal(result.status, 'matched');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -15,12 +15,16 @@ name: Vendored tokscale
 # packaged releases don't ship. General CI stays fast and networkless;
 # whether DEFAULT_CLIENTS is fully covered is a production-capability
 # question that belongs here instead.
+#
+# When scripts/vendor/tokscale.json's "mode" is "upstream" (no downstream
+# override active), all three steps below no-op and this job just passes
+# quickly — no scripts/workflow changes are needed to switch modes either way.
 
 on:
   push:
     branches: [main]
     paths: &vendor_tokscale_paths
-      - 'vendor/tokscale.json'
+      - 'scripts/vendor/tokscale.json'
       - 'scripts/ensure-vendored-tokscale.js'
       - 'scripts/verify-vendored-tokscale.js'
       - 'scripts/verify-vendored-tokscale-clients.js'

@@ -11,7 +11,7 @@
 
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
-const { resolveManifestEntry, resolveTargetBinPath, loadManifest } = require('./vendoredTokscale');
+const { resolveManifestEntry, resolveTargetBinPath, loadManifest, manifestMode } = require('./vendoredTokscale');
 const { parseSupportedClients } = require('../src/shared/tokscaleCapabilities');
 const { DEFAULT_CLIENTS, PARSE_LOCAL_CLIENTS } = require(path.join(__dirname, '..', 'src', 'shared', 'clientTracking'));
 
@@ -30,6 +30,11 @@ function supportedClients(binPath) {
 
 function main() {
   const manifest = loadManifest();
+  if (manifestMode(manifest) === 'upstream') {
+    console.log('scripts/vendor/tokscale.json mode is "upstream" — no override is active, skipping the vendored-binary capability gate.');
+    return;
+  }
+
   const { key, entry } = resolveManifestEntry(manifest);
   const binPath = resolveTargetBinPath(entry);
 
