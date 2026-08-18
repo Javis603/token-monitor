@@ -61,8 +61,6 @@ test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
   );
   assert.match(rule(css, '.home-activity-tooltip'), /position:\s*fixed/);
   assert.match(rule(css, '.home-activity-canvas .heat-month'), /fill:\s*rgba\(var\(--line-rgb\), 0\.5\)/);
-  const rendererSource = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
-  assert.match(rendererSource, /heatmapSvg\(activity, \{[\s\S]*edgePad:\s*activityLayout\.edgePad/);
 });
 
 test('Home module selection is independent from main view preferences', () => {

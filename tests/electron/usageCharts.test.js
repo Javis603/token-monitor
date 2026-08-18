@@ -174,10 +174,12 @@ test('heatmapSvg reserves an SVG edge pad for interactive overflow', () => {
     gap: 3,
     cells: [{ date: '2026-06-22', intensity: 4, x: 0, y: 0, size: 9 }],
     monthLabels: [{ col: 0, label: '2026-06' }]
-  }, { edgePad: 10 });
+  }, { edgePad: 10, spotlightId: 'testSpotlight' });
 
-  assert.match(svg, /viewBox="0 0 44 47"/);
-  assert.match(svg, /x="10" y="10" width="9" height="9"/);
+  assert.match(svg, /viewBox="0 0 44 47" width="44" height="47"/);
+  assert.match(svg, /class="heat lvl-4" data-d="2026-06-22"[^>]*x="10" y="10" width="9" height="9"/);
+  assert.match(svg, /class="heat heat-bright lvl-4" x="10" y="10" width="9" height="9"/);
+  assert.match(svg, /<mask id="testSpotlightMask"><rect x="0" y="0" width="44" height="31"/);
   assert.match(svg, /class="heat-month" x="10" y="43"/);
 });
 
