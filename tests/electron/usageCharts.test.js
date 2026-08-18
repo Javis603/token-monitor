@@ -166,6 +166,21 @@ test('heatmapSvg scales its corner radius for compact variants', () => {
   assert.match(svg, /rx="2"/);
 });
 
+test('heatmapSvg reserves an SVG edge pad for interactive overflow', () => {
+  const svg = heatmapSvg({
+    width: 24,
+    height: 21,
+    cell: 9,
+    gap: 3,
+    cells: [{ date: '2026-06-22', intensity: 4, x: 0, y: 0, size: 9 }],
+    monthLabels: [{ col: 0, label: '2026-06' }]
+  }, { edgePad: 10 });
+
+  assert.match(svg, /viewBox="0 0 44 47"/);
+  assert.match(svg, /x="10" y="10" width="9" height="9"/);
+  assert.match(svg, /class="heat-month" x="10" y="43"/);
+});
+
 test('heatmapSvg embeds escaped per-cell titles when supplied', () => {
   const svg = heatmapSvg({
     width: 9,

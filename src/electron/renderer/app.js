@@ -6832,6 +6832,7 @@ function renderHomeTrendsModule() {
   activityCanvas.innerHTML = charts.heatmapSvg(activity, {
     monthLabel: (month) => compactMonthLabel(month.label),
     radius: activityLayout.radius,
+    edgePad: activityLayout.edgePad,
     glowFilterId: 'homeActivityHeatGlow',
     spotlightId: 'homeActivitySpotlight',
     spotlightRadius: 82
