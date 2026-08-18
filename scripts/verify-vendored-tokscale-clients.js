@@ -25,7 +25,7 @@ function supportedClients(binPath) {
   if (result.error) throw new Error(`--help failed to execute: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`--help exited ${result.status}: ${result.stderr || result.stdout}`);
   const help = `${result.stdout || ''}\n${result.stderr || ''}`;
-  const possibleValues = help.match(/\[possible values: ([^\]]+)\]/);
+  const possibleValues = help.match(/\[\s*possible\s+values\s*:\s*([^\]]+)\]/i);
   if (!possibleValues) throw new Error('tokscale --help did not list --client possible values');
   return new Set(possibleValues[1].split(',').map((client) => client.trim()).filter(Boolean));
 }
