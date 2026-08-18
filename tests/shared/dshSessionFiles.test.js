@@ -29,6 +29,17 @@ test('resolveDshSessionsRoot honors DSH_HOME and falls back to ~/.dsh', () => {
   );
 });
 
+// Regression: dshPaths.js's joiner only inserts a separator between the
+// segments it joins itself — it does not normalize separators already
+// present in an input like DSH_HOME. Exercised with an explicit `platform`
+// override so this is caught on any host, not only a live Windows CI run.
+test('resolveDshSessionsRoot normalizes to native separators on win32 even with a forward-slash DSH_HOME', () => {
+  assert.equal(
+    resolveDshSessionsRoot({ env: { DSH_HOME: '/custom/dsh' }, homeDir: '/home/tester', platform: 'win32' }),
+    '\\custom\\dsh\\sessions'
+  );
+});
+
 test('dshSessionFiles finds session.jsonl and session.jsonl.zstd two levels deep, ignores other files', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-files-'));
   const dirA = path.join(root, 'projA', 'session-1');

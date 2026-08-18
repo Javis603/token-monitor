@@ -78,6 +78,24 @@ test('readDshSessionDetail groups a real prompt with its reply and extracts tool
   assert.equal(detail.totals.totalTokens, 170);
 });
 
+// DSH's outputTokens includes reasoning tokens as a subset (unlike
+// Codex/OpenAI, tokscale's own dsh parser subtracts reasoning back out of
+// output before it reaches a session total). Passing outputTokens through
+// unchanged would double the reasoning tokens into the total and diverge
+// from tokscale's own count for the same session.
+test('readDshSessionDetail subtracts reasoning tokens out of output, matching tokscale', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  writeFixture(root, 'session-reasoning', [
+    sessionHeader({ id: 'session-reasoning' }),
+    userMessage({ seq: 1, text: 'solve this' }),
+    assistantMessage({ seq: 2, usage: { inputTokens: 10, outputTokens: 100, reasoningTokens: 60 } })
+  ]);
+
+  const detail = readDshSessionDetail({ sessionId: 'session-reasoning', sessionsRoot: root, home: '/home/tester', env: {} });
+  // total = input(10) + output(100 - 60 = 40), reasoning excluded from the sum: 50, not 110.
+  assert.equal(detail.totals.totalTokens, 50);
+});
+
 // #419 (the PR this module's discovery/decode primitives were extracted from)
 // pushed a prompt bubble for every user/message with non-empty text, with no
 // check on data.source.kind. Real dsh transcripts inject AGENTS.md, runtime
@@ -101,15 +119,18 @@ test('readDshSessionDetail ignores harness-injected non-user messages', () => {
 // Tokscale's own dsh scanner credits a fork's seeded (copied) prefix to the
 // parent session only. Session Detail must match, or opening a forked
 // session shows more tokens than the session's own card/total.
-test('readDshSessionDetail drops events at or before seedLength on a forked session', () => {
+test('readDshSessionDetail drops events strictly before seedLength on a forked session', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
   writeFixture(root, 'session-fork', [
     sessionHeader({ id: 'session-fork', parentSession: 'session-parent', seedLength: 4 }),
     userMessage({ seq: 1, text: 'inherited from parent' }),
     assistantMessage({ seq: 2, usage: { inputTokens: 1000, outputTokens: 1000 } }),
     { type: 'session/end-seed', seq: 4, time: BASE_TIME + 4000, data: {} },
-    userMessage({ seq: 5, text: 'the forks own new question' }),
-    assistantMessage({ seq: 6, usage: { inputTokens: 10, outputTokens: 5 } })
+    // tokscale's own dsh parser skips strictly `seq < seedLength` (dsh.rs),
+    // so the event AT seq === seedLength is the fork's own first new event,
+    // not part of the inherited prefix, and must be counted.
+    userMessage({ seq: 4, text: 'the forks own new question' }),
+    assistantMessage({ seq: 5, usage: { inputTokens: 10, outputTokens: 5 } })
   ]);
 
   const detail = readDshSessionDetail({ sessionId: 'session-fork', sessionsRoot: root, home: '/home/tester', env: {} });
@@ -148,4 +169,38 @@ test('readDshSessionDetail skips an assistant/message with no usable usage', () 
   ]);
   const detail = readDshSessionDetail({ sessionId: 'session-zero', sessionsRoot: root, home: '/home/tester', env: {} });
   assert.equal(detail.totals.totalTokens, 0);
+});
+
+// tokscale requires a usable, positive `time` on assistant/message and drops
+// the record otherwise (dsh.rs `skips_zero_usage_and_missing_timestamp`);
+// without this, a timestamp-less record would default to epoch 0 here and
+// either sort out of order or vanish from every non-"total" period filter.
+test('readDshSessionDetail skips an assistant/message with a missing or non-positive time', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  writeFixture(root, 'session-no-time', [
+    sessionHeader({ id: 'session-no-time' }),
+    userMessage({ seq: 1, text: 'hi' }),
+    { type: 'assistant/message', seq: 2, data: { turn: 1, step: 1, message: { role: 'assistant', content: [] }, usage: { inputTokens: 10, outputTokens: 5 } } },
+    { type: 'assistant/message', seq: 3, time: 0, data: { turn: 1, step: 1, message: { role: 'assistant', content: [] }, usage: { inputTokens: 10, outputTokens: 5 } } }
+  ]);
+  const detail = readDshSessionDetail({ sessionId: 'session-no-time', sessionsRoot: root, home: '/home/tester', env: {} });
+  assert.equal(detail.totals.totalTokens, 0);
+});
+
+// dsh's own persistence layer can replay an already-flushed line back into
+// the file (crash/retry on the writer side); tokscale dedups identical
+// replayed rows within a file (dsh.rs `dedups_identical_replayed_rows_within_a_file`)
+// rather than counting each copy.
+test('readDshSessionDetail dedups an identical replayed assistant/message', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  const turn = assistantMessage({ seq: 2, usage: { inputTokens: 10, outputTokens: 5 } });
+  writeFixture(root, 'session-replay', [
+    sessionHeader({ id: 'session-replay' }),
+    userMessage({ seq: 1, text: 'hi' }),
+    turn,
+    turn // the exact same line, replayed
+  ]);
+  const detail = readDshSessionDetail({ sessionId: 'session-replay', sessionsRoot: root, home: '/home/tester', env: {} });
+  assert.equal(detail.exchanges.length, 1);
+  assert.equal(detail.totals.totalTokens, 15);
 });

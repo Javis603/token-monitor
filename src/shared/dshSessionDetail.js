@@ -24,7 +24,7 @@
 
 const fs = require('node:fs');
 const { makeTokens, groupEvents, filterExchangesByPeriod, distributeCost } = require('./sessionDetail');
-const { decodeFirstFrameText, decodeSessionText, dshSessionFiles, resolveDshSessionsRoot } = require('./dshSessionFiles');
+const { decodeSessionText, dshSessionFiles, readDshSessionHeader, resolveDshSessionsRoot } = require('./dshSessionFiles');
 
 function numberValue(value) {
   const parsed = Number(value || 0);
@@ -45,35 +45,44 @@ function textFromContent(content) {
 function findDshSessionFile(sessionId, options = {}) {
   const root = options.sessionsRoot || resolveDshSessionsRoot(options);
   for (const filePath of dshSessionFiles(root)) {
-    try {
-      const buffer = fs.readFileSync(filePath);
-      // The header we need to match on lives in the first zstd frame, so only
-      // that frame needs decompressing — not the whole (possibly long-lived)
-      // transcript — to rule a candidate in or out.
-      const text = decodeFirstFrameText(filePath, buffer);
-      const firstLine = text.split(/\r?\n/).find((line) => line.trim());
-      if (!firstLine) continue;
-      const header = JSON.parse(firstLine.trim());
-      if (header?.type === 'session' && header.id === sessionId) return filePath;
-    } catch (_) {
-      // unreadable, corrupt, or a torn first frame — try the next candidate
-    }
+    const header = readDshSessionHeader(filePath);
+    if (header?.id === sessionId) return filePath;
   }
   return null;
 }
 
 function usageTokens(usage) {
+  // DSH's `outputTokens` includes reasoning tokens as a subset
+  // (`completion_tokens_details.reasoning_tokens` within `completion_tokens`).
+  // Unlike Codex/OpenAI, where tokscale leaves output reasoning-inclusive and
+  // relies on makeTokens's total not adding reasoning on top, tokscale's dsh
+  // parser subtracts reasoning back out of `output` itself before it ever
+  // reaches a session total (`output.saturating_sub(reasoning)` in dsh.rs) —
+  // so DSH's own tokscale-reported `output` is already reasoning-exclusive.
+  // Match that here or a reasoning-heavy session's total exceeds tokscale's
+  // own count for it, the same class of drift the seedLength handling above
+  // guards against.
+  const rawOutput = numberValue(usage?.outputTokens);
+  const reasoning = numberValue(usage?.reasoningTokens);
   return makeTokens({
     input: numberValue(usage?.inputTokens),
-    output: numberValue(usage?.outputTokens),
+    output: Math.max(0, rawOutput - reasoning),
     cacheRead: numberValue(usage?.cacheReadTokens),
     cacheWrite: numberValue(usage?.cacheWriteTokens),
-    reasoning: numberValue(usage?.reasoningTokens)
+    reasoning
   });
 }
 
 function parseDshDetailEvents(text) {
   const events = [];
+  // dsh's own persistence layer can replay an already-flushed line back into
+  // the file (crash/retry on the writer side); tokscale's dsh parser guards
+  // against double-counting it with a dedup key of message identity + time +
+  // routing + token signature, not `seq` (dsh.rs) — port the same key so a
+  // replay isn't double counted here either. Scoped to assistant/message
+  // like tokscale's own dedup: user/message never carries usage, so a
+  // replayed prompt cannot skew the token total the way a replayed turn can.
+  const seenAssistantKeys = new Set();
   let header = null;
   let seedLength = null;
   for (const line of String(text || '').split(/\r?\n/)) {
@@ -94,20 +103,42 @@ function parseDshDetailEvents(text) {
     // A forked session's log is seeded with its parent's events verbatim.
     // Tokscale credits that shared prefix to the parent only, so Session
     // Detail must skip it too, or a fork's total exceeds its own card.
-    if (seedLength !== null && numberValue(record?.seq) <= seedLength) continue;
+    // seedLength counts the inherited events (seq is 0-indexed), so the
+    // event AT seq === seedLength is the fork's own first new event, not
+    // part of the copied prefix — tokscale itself skips strictly `seq <
+    // seed_length` (dsh.rs), and matching it here is a hard requirement,
+    // not a rounding choice.
+    if (seedLength !== null && numberValue(record?.seq) < seedLength) continue;
+    // An event without a usable time cannot be placed in the exchange
+    // timeline correctly — defaulting it to epoch 0 would either sort it out
+    // of order or drop it from every non-"total" period filter silently.
+    // tokscale applies the identical `timestamp <= 0` skip to assistant/message
+    // (dsh.rs); applying it to user/message too is a Session Detail-specific
+    // need tokscale itself doesn't have, since it never renders prompts.
+    const time = numberValue(record?.time);
+    if (time <= 0) continue;
     if (record?.type === 'user/message') {
       if (record.data?.source?.kind !== 'user') continue;
       const promptText = textFromContent(record.data?.content);
-      if (promptText) events.push({ kind: 'prompt', timestamp: new Date(numberValue(record.time)).toISOString(), text: promptText });
+      if (promptText) events.push({ kind: 'prompt', timestamp: new Date(time).toISOString(), text: promptText });
     } else if (record?.type === 'assistant/message') {
       const usage = record.data?.usage;
       if (!usage) continue;
       const tokens = usageTokens(usage);
       if (tokens.total === 0) continue;
+      const source = record.data?.message?.source;
+      const messageId = String(record.data?.message?.id || '').trim();
+      const identity = messageId || `sid:${header.id || ''}`;
+      const dedupKey = [
+        identity, time, source?.provider || '', source?.model || '',
+        tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite, tokens.reasoning
+      ].join(':');
+      if (seenAssistantKeys.has(dedupKey)) continue;
+      seenAssistantKeys.add(dedupKey);
       const tools = Array.isArray(record.data?.message?.content)
         ? record.data.message.content.filter((block) => block && block.type === 'tool-call' && typeof block.name === 'string').map((block) => block.name)
         : [];
-      events.push({ kind: 'turn', timestamp: new Date(numberValue(record.time)).toISOString(), tokens, tools });
+      events.push({ kind: 'turn', timestamp: new Date(time).toISOString(), tokens, tools });
     }
   }
   return events;

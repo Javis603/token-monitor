@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { applySessionTimestamps } = require('../../src/shared/collector');
+const { indexDshSessionHeaders } = require('../../src/shared/dshSessionFiles');
 
 test('applySessionTimestamps fills OpenCode session start/last from injected DB meta', () => {
   const periods = {
@@ -165,6 +166,43 @@ test('applySessionTimestamps retries a DSH session whose transcript is not yet o
     // resolvedSessionKeys for any client without a dedicated resolver).
     applySessionTimestamps(periods, home, { ...cache, retryMisses: true });
     assert.equal(periods.today.sessions['dsh:session-new'].startedAt, new Date(1750000000000).toISOString());
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// DSH sessions are deliberately excluded from resolvedSessionKeys (so
+// lastUsedAt keeps refreshing), which means every DSH id in scope is looked
+// up again on every tick. That is only affordable if the lookup is a single
+// walk over the DSH sessions tree shared by every id, not one walk per id —
+// the O(ids x files) shape this regression guards against.
+test('applySessionTimestamps walks the DSH sessions tree once per tick, not once per session id', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-index-'));
+  try {
+    const root = path.join(home, '.dsh', 'sessions');
+    for (const id of ['s1', 's2', 's3']) {
+      const dir = path.join(root, 'proj', id);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'session.jsonl'), `${JSON.stringify({ type: 'session', id, createdAt: 1750000000000 })}\n`);
+    }
+
+    let calls = 0;
+    const countingIndex = (options) => { calls += 1; return indexDshSessionHeaders(options); };
+    const periods = { today: { sessions: {
+      'dsh:s1': { client: 'dsh', sessionId: 's1' },
+      'dsh:s2': { client: 'dsh', sessionId: 's2' },
+      'dsh:s3': { client: 'dsh', sessionId: 's3' }
+    } } };
+
+    applySessionTimestamps(periods, home, {
+      metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set(),
+      indexDshSessionHeaders: countingIndex
+    });
+
+    assert.equal(calls, 1, 'the sessions tree must be walked once, not once per session id');
+    for (const id of ['s1', 's2', 's3']) {
+      assert.equal(periods.today.sessions[`dsh:${id}`].startedAt, new Date(1750000000000).toISOString());
+    }
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

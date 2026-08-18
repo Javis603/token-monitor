@@ -173,7 +173,7 @@ for (const client of ['claude', 'codex']) {
 }
 
 test('does not inspect WSL homes for non-Windows or SQLite-backed clients', () => {
-  for (const [platform, client] of [['linux', 'claude'], ['win32', 'opencode']]) {
+  for (const [platform, client] of [['linux', 'claude'], ['win32', 'opencode'], ['linux', 'dsh']]) {
     let enumerated = false;
     const detail = resolveSessionDetailForPlatform(
       { client, sessionId: 'missing' },
@@ -278,10 +278,11 @@ test('the public session detail resolver uses the worker boundary', async () => 
   assert.equal(workerArgs, args);
 });
 
-// dsh reads its own transcript format directly, so it must dispatch before
-// the tokscale-JSONL native/WSL fallback and honor deps injection the same
-// way the generic `deps.readSessionDetail` seam already does.
-test('dsh dispatches to readDshSessionDetail with home/platform/env/cwdDir and never touches the native/WSL path', () => {
+// dsh reads its own transcript format directly, so it always dispatches to
+// readDshSessionDetail rather than the tokscale-JSONL reader, and forwards
+// home/platform/env/cwdDir the same way the generic `deps.readSessionDetail`
+// seam already does.
+test('dsh dispatches to readDshSessionDetail with home/platform/env/cwdDir, never the generic JSONL reader', () => {
   let received;
   const detail = resolveSessionDetailForPlatform(
     { client: 'dsh', sessionId: 's1' },
@@ -299,4 +300,30 @@ test('dsh dispatches to readDshSessionDetail with home/platform/env/cwdDir and n
   assert.equal(received.platform, 'linux');
   assert.deepEqual(received.env, { DSH_HOME: '/custom/.dsh' });
   assert.equal(received.cwdDir, '/work');
+});
+
+// wslUsage.js scans `.dsh/sessions` (MARKER_CLIENTS), so a DSH session can
+// legitimately surface in the list from a WSL distro on Windows. Detail must
+// follow the same native-miss -> WSL-hit fallback claude/codex already get,
+// through readDshSessionDetail rather than the tokscale-JSONL reader.
+test('falls back to a WSL home for a dsh session not found in the native home', () => {
+  const attempts = [];
+  const detail = resolveSessionDetailForPlatform(
+    { client: 'dsh', sessionId: 's1' },
+    {
+      readDshSessionDetail: (args) => {
+        attempts.push(args.home);
+        return args.home === '/wsl/home/tester'
+          ? { found: true, client: 'dsh', sessionId: 's1', home: args.home }
+          : { found: false, client: 'dsh', sessionId: 's1' };
+      },
+      readSessionDetail: () => { throw new Error('must not call the generic reader for dsh'); },
+      homedir: () => 'C:\\Users\\me',
+      platform: 'win32',
+      wslUsageHomes: () => ['/wsl/home/tester']
+    }
+  );
+  assert.equal(detail.found, true);
+  assert.equal(detail.home, '/wsl/home/tester');
+  assert.deepEqual(attempts, ['C:\\Users\\me', '/wsl/home/tester']);
 });

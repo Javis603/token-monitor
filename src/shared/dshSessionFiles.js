@@ -27,16 +27,49 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 const { resolveDshSessionsDir } = require('./dshPaths');
 
+// The session header is a single small JSON record and always the first
+// thing written, so a bounded head-read is enough to reach it even on a
+// transcript that has grown large over a long-lived session — this is the
+// difference between header lookup costing O(header size) and O(file size).
+const HEADER_READ_BYTES = 64 * 1024;
+
+function readFileHead(filePath, bytes = HEADER_READ_BYTES) {
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const size = fs.fstatSync(fd).size;
+    const length = Math.min(bytes, size);
+    const buffer = Buffer.alloc(length);
+    fs.readSync(fd, buffer, 0, length, 0);
+    return buffer;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) {}
+    }
+  }
+}
+
 const DSH_SESSION_LOG_NAMES = new Set(['session.jsonl', 'session.jsonl.zstd']);
 const DSH_SESSION_DIR_DEPTH = 2; // <root>/<project>/<session>/<artifact>
 const ZSTD_MAGIC = 0xFD2FB528;
 
 function resolveDshSessionsRoot(options = {}) {
-  return resolveDshSessionsDir({
+  const platform = options.platform || process.platform;
+  // dshPaths.js's joiner only inserts a separator between the segments it
+  // joins itself; it does not normalize separators already present in an
+  // input like DSH_HOME (unlike the old path.join-based implementation this
+  // replaced). Normalizing the result restores that — a DSH_HOME using the
+  // "wrong" slash for the platform still resolves to a native-separator
+  // path. Select path.win32/path.posix explicitly by the resolved `platform`
+  // rather than using the ambient `path` module, so this stays a pure
+  // function of its arguments (testable for either platform on any host),
+  // matching how dshPaths.js itself treats `platform`.
+  const pathImpl = platform === 'win32' ? path.win32 : path.posix;
+  return pathImpl.normalize(resolveDshSessionsDir({
     env: options.env || process.env,
     homeDir: options.homeDir || os.homedir(),
-    platform: options.platform || process.platform
-  });
+    platform
+  }));
 }
 
 function dshSessionFiles(root) {
@@ -139,12 +172,44 @@ function decodeFirstFrameText(filePath, buffer) {
   return decodeZstdBuffer(buffer, [frame]);
 }
 
+// The `session` header (id, createdAt, ...) is always the first record, and
+// a bounded head-read (not the whole, possibly long-lived transcript) is
+// enough to reach it.
+function readDshSessionHeader(filePath) {
+  try {
+    const text = decodeFirstFrameText(filePath, readFileHead(filePath));
+    const firstLine = text.split(/\r?\n/).find((line) => line.trim());
+    if (!firstLine) return null;
+    const header = JSON.parse(firstLine.trim());
+    return header?.type === 'session' && typeof header.id === 'string' ? header : null;
+  } catch (_) {
+    return null; // unreadable, corrupt, or a torn first frame
+  }
+}
+
+// Single pass over every session file under root, keyed by session id. Used
+// whenever more than one session id needs resolving in the same tick: a
+// find-by-id loop that scans the whole tree and reads a header per candidate
+// for *each* wanted id degrades to O(ids x files), where this is O(files)
+// regardless of how many ids are being looked up.
+function indexDshSessionHeaders(options = {}) {
+  const root = options.sessionsRoot || resolveDshSessionsRoot(options);
+  const index = new Map();
+  for (const filePath of dshSessionFiles(root)) {
+    const header = readDshSessionHeader(filePath);
+    if (header) index.set(header.id, { filePath, createdAt: header.createdAt });
+  }
+  return index;
+}
+
 module.exports = {
   DSH_SESSION_DIR_DEPTH,
   DSH_SESSION_LOG_NAMES,
   decodeFirstFrameText,
   decodeSessionText,
   dshSessionFiles,
+  indexDshSessionHeaders,
+  readDshSessionHeader,
   resolveDshSessionsRoot,
   scanZstdFrames,
   zstdAvailable

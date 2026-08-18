@@ -45,8 +45,7 @@ const {
 } = require('./qoderCnUsage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./dshPaths');
-const { findDshSessionFile } = require('./dshSessionDetail');
-const { decodeFirstFrameText } = require('./dshSessionFiles');
+const { indexDshSessionHeaders } = require('./dshSessionFiles');
 const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
@@ -827,25 +826,21 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   // DSH session ids are random UUIDs (no embedded timestamp), so the generic
   // fallback below can never date them. The transcript itself has what we
   // need: the header's `createdAt` for startedAt, and the file's mtime (an
-  // append-only log, so mtime tracks the last flush) for lastUsedAt.
+  // append-only log, so mtime tracks the last flush) for lastUsedAt. DSH
+  // sessions are deliberately never added to resolvedSessionKeys (see below),
+  // so every id in scope this tick is looked up again on the next one too —
+  // a single tree walk here, rather than one findDshSessionFile() scan per
+  // id, is what keeps that affordable as the session count grows.
   const dshIds = byClient.get('dsh') || new Set();
   if (dshIds.size > 0) {
-    const findFile = deps.findDshSessionFile || findDshSessionFile;
-    const decodeHeader = deps.decodeFirstFrameText || decodeFirstFrameText;
+    const buildIndex = deps.indexDshSessionHeaders || indexDshSessionHeaders;
+    const index = buildIndex({ homeDir: home, env: deps.env, platform: deps.platform });
     for (const sessionId of dshIds) {
-      const filePath = findFile(sessionId, { homeDir: home, env: deps.env, platform: deps.platform });
-      if (!filePath) continue;
-      let startedAt = '';
-      try {
-        const headerText = decodeHeader(filePath, fs.readFileSync(filePath));
-        const firstLine = headerText.split(/\r?\n/).find((line) => line.trim());
-        const header = firstLine ? JSON.parse(firstLine.trim()) : null;
-        startedAt = isoFromDate(Number(header?.createdAt));
-      } catch (_) {
-        // unreadable, corrupt, or a torn first frame — fall back to mtime below
-      }
+      const entry = index.get(sessionId);
+      if (!entry) continue;
+      const startedAt = isoFromDate(Number(entry.createdAt));
       let lastUsedAt = '';
-      try { lastUsedAt = isoFromDate(fs.statSync(filePath).mtime); } catch (_) { /* file vanished mid-scan */ }
+      try { lastUsedAt = isoFromDate(fs.statSync(entry.filePath).mtime); } catch (_) { /* file vanished mid-scan */ }
       if (!startedAt && !lastUsedAt) continue;
       metadata.set(`dsh:${sessionId}`, { startedAt: startedAt || lastUsedAt, lastUsedAt: lastUsedAt || startedAt });
     }

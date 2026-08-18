@@ -7,22 +7,23 @@ const { readSessionDetail } = require('./sessionDetail');
 const { readDshSessionDetail } = require('./dshSessionDetail');
 const { wslUsageHomes } = require('./wslUsage');
 
-const WSL_JSONL_CLIENTS = new Set(['claude', 'codex']);
+// wslUsage.js's MARKER_CLIENTS also scans `.dsh/sessions`, so a DSH session
+// surfaced from a WSL distro on Windows is a real, reachable case, not just
+// claude/codex — dsh must get the same native-miss -> WSL-hit fallback, just
+// through its own reader (it parses zstd transcripts directly, not tokscale
+// JSONL).
+const WSL_FALLBACK_CLIENTS = new Set(['claude', 'codex', 'dsh']);
 const SESSION_DETAIL_WORKER_TIMEOUT_MS = 20_000;
 
-// dsh reads its own transcript format directly and is never WSL-scanned, so
-// it bypasses the tokscale-JSONL native/WSL fallback below entirely.
 function resolveSessionDetailForPlatform(args = {}, deps = {}) {
   const nativeHome = (deps.homedir || os.homedir)();
   const platform = deps.platform || process.platform;
-  if (args.client === 'dsh') {
-    const readDsh = deps.readDshSessionDetail || readDshSessionDetail;
-    return readDsh({ ...args, home: nativeHome, platform, env: deps.env, cwdDir: deps.cwdDir });
-  }
-  const readDetail = deps.readSessionDetail || readSessionDetail;
+  const readDetail = args.client === 'dsh'
+    ? (detailArgs) => (deps.readDshSessionDetail || readDshSessionDetail)({ ...detailArgs, platform, env: deps.env, cwdDir: deps.cwdDir })
+    : (deps.readSessionDetail || readSessionDetail);
   const nativeDetail = readDetail({ ...args, home: nativeHome });
 
-  if (nativeDetail.found || platform !== 'win32' || !WSL_JSONL_CLIENTS.has(args.client)) {
+  if (nativeDetail.found || platform !== 'win32' || !WSL_FALLBACK_CLIENTS.has(args.client)) {
     return nativeDetail;
   }
 
