@@ -52,24 +52,24 @@ function findDshSessionFile(sessionId, options = {}) {
 }
 
 function usageTokens(usage) {
-  // DSH's `outputTokens` includes reasoning tokens as a subset
-  // (`completion_tokens_details.reasoning_tokens` within `completion_tokens`).
-  // Unlike Codex/OpenAI, where tokscale leaves output reasoning-inclusive and
-  // relies on makeTokens's total not adding reasoning on top, tokscale's dsh
-  // parser subtracts reasoning back out of `output` itself before it ever
-  // reaches a session total (`output.saturating_sub(reasoning)` in dsh.rs) —
-  // so DSH's own tokscale-reported `output` is already reasoning-exclusive.
-  // Match that here or a reasoning-heavy session's total exceeds tokscale's
-  // own count for it, the same class of drift the seedLength handling above
-  // guards against.
-  const rawOutput = numberValue(usage?.outputTokens);
-  const reasoning = numberValue(usage?.reasoningTokens);
+  // DSH's `outputTokens` includes reasoning tokens as a subset. tokscale's
+  // dsh parser does subtract reasoning out of its internal `output` bucket
+  // (`output.saturating_sub(reasoning)` in dsh.rs) — but TokenBreakdown.total()
+  // then adds `reasoning` straight back on top of every bucket (lib.rs), so
+  // the subtraction and the re-add cancel out: tokscale's own reported total
+  // for a message is input + RAW inclusive output + cache, identical to never
+  // subtracting at all. makeTokens works the other way — output is expected
+  // reasoning-inclusive and its total deliberately excludes reasoning from the
+  // sum (see its own comment) — so passing outputTokens straight through,
+  // unmodified, is what actually matches tokscale's total. An earlier version
+  // of this function subtracted reasoning here, which under-counted every
+  // reasoning-heavy session's total by exactly its reasoning token count.
   return makeTokens({
     input: numberValue(usage?.inputTokens),
-    output: Math.max(0, rawOutput - reasoning),
+    output: numberValue(usage?.outputTokens),
     cacheRead: numberValue(usage?.cacheReadTokens),
     cacheWrite: numberValue(usage?.cacheWriteTokens),
-    reasoning
+    reasoning: numberValue(usage?.reasoningTokens)
   });
 }
 

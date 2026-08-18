@@ -834,7 +834,13 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   const dshIds = byClient.get('dsh') || new Set();
   if (dshIds.size > 0) {
     const buildIndex = deps.indexDshSessionHeaders || indexDshSessionHeaders;
-    const index = buildIndex({ homeDir: home, env: deps.env, platform: deps.platform });
+    // dshPaths.js checks env.DSH_HOME before the homeDir it's given, same as
+    // tokscale's own PathRoot::EnvVar — and tokscale's own scanner never lets
+    // that leak into an explicit --home lookup (use_env_roots: false, lib.rs).
+    // scopedHome means `home` is a specific WSL distro, not this machine's
+    // own profile, so a host-configured DSH_HOME must not redirect it back.
+    const dshEnv = deps.scopedHome ? {} : (deps.env || process.env);
+    const index = buildIndex({ homeDir: home, env: dshEnv, platform: deps.platform });
     for (const sessionId of dshIds) {
       const entry = index.get(sessionId);
       if (!entry) continue;

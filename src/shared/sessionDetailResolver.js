@@ -18,10 +18,16 @@ const SESSION_DETAIL_WORKER_TIMEOUT_MS = 20_000;
 function resolveSessionDetailForPlatform(args = {}, deps = {}) {
   const nativeHome = (deps.homedir || os.homedir)();
   const platform = deps.platform || process.platform;
+  // dshPaths.js's resolveDshHome checks env.DSH_HOME before the homeDir it's
+  // given, same as tokscale's own PathRoot::EnvVar. tokscale's own scanner
+  // never lets that leak into an explicit --home lookup (use_env_roots:
+  // false, lib.rs) — a WSL distro's session root must not silently resolve
+  // back to a host-configured DSH_HOME. Only the native attempt gets the
+  // real env; every WSL attempt gets none, forcing `home` to be authoritative.
   const readDetail = args.client === 'dsh'
-    ? (detailArgs) => (deps.readDshSessionDetail || readDshSessionDetail)({ ...detailArgs, platform, env: deps.env, cwdDir: deps.cwdDir })
-    : (deps.readSessionDetail || readSessionDetail);
-  const nativeDetail = readDetail({ ...args, home: nativeHome });
+    ? (detailArgs, scoped) => (deps.readDshSessionDetail || readDshSessionDetail)({ ...detailArgs, platform, env: scoped ? {} : deps.env, cwdDir: deps.cwdDir })
+    : (detailArgs) => (deps.readSessionDetail || readSessionDetail)(detailArgs);
+  const nativeDetail = readDetail({ ...args, home: nativeHome }, false);
 
   if (nativeDetail.found || platform !== 'win32' || !WSL_FALLBACK_CLIENTS.has(args.client)) {
     return nativeDetail;
@@ -38,7 +44,7 @@ function resolveSessionDetailForPlatform(args = {}, deps = {}) {
   for (const home of wslHomes || []) {
     if (!home || searched.has(home)) continue;
     searched.add(home);
-    const detail = readDetail({ ...args, home });
+    const detail = readDetail({ ...args, home }, true);
     if (detail.found) return detail;
   }
   return nativeDetail;

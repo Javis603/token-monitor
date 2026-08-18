@@ -78,12 +78,14 @@ test('readDshSessionDetail groups a real prompt with its reply and extracts tool
   assert.equal(detail.totals.totalTokens, 170);
 });
 
-// DSH's outputTokens includes reasoning tokens as a subset (unlike
-// Codex/OpenAI, tokscale's own dsh parser subtracts reasoning back out of
-// output before it reaches a session total). Passing outputTokens through
-// unchanged would double the reasoning tokens into the total and diverge
-// from tokscale's own count for the same session.
-test('readDshSessionDetail subtracts reasoning tokens out of output, matching tokscale', () => {
+// DSH's outputTokens includes reasoning tokens as a subset. tokscale's dsh
+// parser subtracts reasoning out of its internal `output` bucket, but its
+// TokenBreakdown.total() adds `reasoning` straight back on top — the two
+// cancel out, so tokscale's own reported total is input + RAW output + cache.
+// makeTokens works the other way (output already reasoning-inclusive, total
+// excludes reasoning), so passing outputTokens through unmodified is what
+// actually matches tokscale, not subtracting it.
+test('readDshSessionDetail counts reasoning tokens once, matching tokscale total()', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
   writeFixture(root, 'session-reasoning', [
     sessionHeader({ id: 'session-reasoning' }),
@@ -92,8 +94,8 @@ test('readDshSessionDetail subtracts reasoning tokens out of output, matching to
   ]);
 
   const detail = readDshSessionDetail({ sessionId: 'session-reasoning', sessionsRoot: root, home: '/home/tester', env: {} });
-  // total = input(10) + output(100 - 60 = 40), reasoning excluded from the sum: 50, not 110.
-  assert.equal(detail.totals.totalTokens, 50);
+  // tokscale: input(10) + output(100 - 60) + reasoning(60) = 110.
+  assert.equal(detail.totals.totalTokens, 110);
 });
 
 // #419 (the PR this module's discovery/decode primitives were extracted from)

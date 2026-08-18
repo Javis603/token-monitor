@@ -208,6 +208,38 @@ test('applySessionTimestamps walks the DSH sessions tree once per tick, not once
   }
 });
 
+// dshPaths.js's resolveDshHome checks env.DSH_HOME before the homeDir it is
+// given. `home` here is a scoped WSL distro, not this machine's own profile —
+// a host-configured DSH_HOME leaking in would silently redirect the lookup
+// back to the host path instead of the WSL one being decorated, the same
+// class of bug tokscale's own use_env_roots: false (lib.rs) exists to avoid.
+test('scopedHome DSH lookup ignores a host DSH_HOME override', () => {
+  const wslHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-wsl-'));
+  const hostDshHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-host-'));
+  try {
+    const dir = path.join(wslHome, '.dsh', 'sessions', 'proj', 'session-wsl');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'session.jsonl'), `${JSON.stringify({ type: 'session', id: 'session-wsl', createdAt: 1750000000000 })}\n`);
+    // hostDshHome deliberately has no matching session: if DSH_HOME leaked
+    // through, the lookup would resolve here instead and find nothing.
+
+    const periods = { today: { sessions: {
+      'dsh:session-wsl': { client: 'dsh', sessionId: 'session-wsl' }
+    } } };
+
+    applySessionTimestamps(periods, wslHome, {
+      metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set(),
+      scopedHome: true,
+      env: { DSH_HOME: hostDshHome }
+    });
+
+    assert.equal(periods.today.sessions['dsh:session-wsl'].startedAt, new Date(1750000000000).toISOString());
+  } finally {
+    fs.rmSync(wslHome, { recursive: true, force: true });
+    fs.rmSync(hostDshHome, { recursive: true, force: true });
+  }
+});
+
 test('applySessionTimestamps retries a progressive miss in the final pass', () => {
   const cache = { metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set() };
   const periods = { today: { sessions: {

@@ -327,3 +327,31 @@ test('falls back to a WSL home for a dsh session not found in the native home', 
   assert.equal(detail.home, '/wsl/home/tester');
   assert.deepEqual(attempts, ['C:\\Users\\me', '/wsl/home/tester']);
 });
+
+// dshPaths.js's resolveDshHome checks env.DSH_HOME before the homeDir it is
+// given. If the WSL fallback attempt got the host's real env, a host-side
+// DSH_HOME override would silently redirect the WSL lookup straight back to
+// the host path, making the fallback a no-op — tokscale's own scanner
+// deliberately disables env-based root lookup for an explicit --home
+// (use_env_roots: false, lib.rs) for exactly this reason.
+test('does not let a host DSH_HOME override leak into the WSL fallback attempt', () => {
+  const envSeen = [];
+  const detail = resolveSessionDetailForPlatform(
+    { client: 'dsh', sessionId: 's1' },
+    {
+      readDshSessionDetail: (args) => {
+        envSeen.push(args.env);
+        return args.home === '/wsl/home/tester'
+          ? { found: true, client: 'dsh', sessionId: 's1', home: args.home }
+          : { found: false, client: 'dsh', sessionId: 's1' };
+      },
+      homedir: () => 'C:\\Users\\me',
+      platform: 'win32',
+      env: { DSH_HOME: 'C:\\custom\\dsh' },
+      wslUsageHomes: () => ['/wsl/home/tester']
+    }
+  );
+  assert.equal(detail.found, true);
+  assert.deepEqual(envSeen[0], { DSH_HOME: 'C:\\custom\\dsh' }, 'the native attempt should still honor the host DSH_HOME');
+  assert.deepEqual(envSeen[1], {}, 'the WSL attempt must not inherit the host DSH_HOME');
+});
