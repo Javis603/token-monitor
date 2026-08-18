@@ -3,6 +3,8 @@
   "fork": "Javis603/tokscale",
   "commit": "59712ada85640b7aaa00d7da92ed1a15367e961b",
   "commitTitle": "feat(clients): add DeepSeek Harness support (#1126)",
+  "bridgesClient": "dsh",
+  "bridgesClientNote": "The tokscale --client id this override exists to unlock. tests/shared/clientTracking.test.js reads this instead of requiring the client to already appear in the plain npm-installed binary's --client list, since that binary is intentionally not the one packaged releases ship.",
   "baseVersion": "4.13.0",
   "baseVersionNote": "The npm-installed @tokscale/cli-<platform> package.json version this override was built against. install-vendored-tokscale.js refuses to run if the installed package reports a different version — that means the tokscale dependency already moved and this override needs to be updated or removed, not silently kept.",
   "releaseRepo": "Javis603/tokscale",

@@ -80,13 +80,25 @@ test('default tracked clients are supported by tokscale or a native adapter', ()
   // Proma and Qoder CN remain local compatibility adapters. Reasonix is supported by the
   // bundled Tokscale version and must be verified through its real client list.
   const locallyParsedClients = new Set(['proma', 'qodercn']);
+  // vendor/tokscale.json's swap only applies at release-packaging time (release.yml,
+  // vendor-tokscale.yml), not to the plain `npm ci` this test runs against — so a
+  // client that override exists specifically to unlock isn't yet in the installed
+  // binary's own --client list here, and that's expected, not a regression. Once the
+  // override is removed (an official tokscale release ships it), this file goes away
+  // too and the client falls back to needing genuine tokscale support like any other.
+  let vendorBridgedClients = new Set();
+  try {
+    const vendorManifest = JSON.parse(fs.readFileSync(path.join(rootDir, 'vendor', 'tokscale.json'), 'utf8'));
+    if (vendorManifest.bridgesClient) vendorBridgedClients = new Set([vendorManifest.bridgesClient]);
+  } catch (_) {}
   const result = spawnSync(process.execPath, [require.resolve('tokscale/bin.js'), '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const help = `${result.stdout || ''}\n${result.stderr || ''}`;
   const possibleValues = help.match(/\[possible values: ([^\]]+)\]/);
   assert.ok(possibleValues, 'tokscale --help should list --client possible values');
   const supported = new Set(possibleValues[1].split(',').map((client) => client.trim()).filter(Boolean));
-  const unsupported = DEFAULT_CLIENTS.split(',').filter((client) => !supported.has(client) && !locallyParsedClients.has(client));
+  const unsupported = DEFAULT_CLIENTS.split(',')
+    .filter((client) => !supported.has(client) && !locallyParsedClients.has(client) && !vendorBridgedClients.has(client));
   assert.deepEqual(unsupported, []);
 });
 
