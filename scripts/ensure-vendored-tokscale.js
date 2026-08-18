@@ -83,7 +83,25 @@ async function ensureVendoredTokscale({
   }
 
   log(`Ensuring vendored tokscale (${manifest.releaseTag}, source ${manifest.commit.slice(0, 12)}) for ${key}...`);
-  const targetBinPath = resolveTarget(entry, targetPlatformForKey(key));
+
+  // An explicitly requested target can be a real cross-arch/cross-OS build
+  // (e.g. packaging darwin-x64 for local testing on an Apple Silicon host):
+  // the platform is genuinely vendored, but npm's optionalDependencies never
+  // installed that platform's package on this host in the first place. That
+  // is a materially different condition from an unknown platform key (which
+  // resolveManifestEntry already rejected above) — degrade the same way an
+  // unsupported host does, rather than crashing a build that never had this
+  // binary to begin with.
+  let targetBinPath;
+  try {
+    targetBinPath = resolveTarget(entry, targetPlatformForKey(key));
+  } catch (error) {
+    if (error && error.code === 'MODULE_NOT_FOUND') {
+      log(`${entry.package} is not installed for ${key} on this host (likely a cross-arch/cross-OS build) — packaging will proceed without the pinned binary for this target.`);
+      return { status: 'unavailable', key };
+    }
+    throw error;
+  }
   if (!fsImpl.existsSync(targetBinPath)) {
     throw new Error(`Expected npm-installed binary not found at ${targetBinPath} — did npm ci run first?`);
   }
@@ -105,7 +123,13 @@ async function ensureVendoredTokscale({
   const buffer = await download(manifest, entry);
   verifySha256(buffer, entry.sha256);
 
-  const tempPath = `${targetBinPath}.vendor-tmp`;
+  // Unique per invocation: ensure now runs from several real entry points
+  // (start, agent, every packaging script), so two processes racing to
+  // ensure the same stale binary must not share one staging file — the
+  // final fs.renameSync is what actually needs to be atomic, and since both
+  // processes verify the identical pinned checksum first, whichever renames
+  // last is still correct.
+  const tempPath = `${targetBinPath}.vendor-tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
   try {
     fsImpl.writeFileSync(tempPath, buffer);
     if (process.platform !== 'win32') fsImpl.chmodSync(tempPath, 0o755);

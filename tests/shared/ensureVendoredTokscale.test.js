@@ -79,9 +79,9 @@ test('ensure downloads, smoke-tests, and atomically replaces a mismatched binary
     });
     assert.equal(result.status, 'installed');
     assert.equal(downloads, 1);
-    assert.match(smokePath, /\.vendor-tmp$/);
+    assert.match(smokePath, /\.vendor-tmp-\d+-[0-9a-f]{8}$/);
     assert.deepEqual(fs.readFileSync(target), newPayload);
-    assert.equal(fs.existsSync(`${target}.vendor-tmp`), false);
+    assert.equal(fs.readdirSync(dir).some((name) => name.includes('.vendor-tmp-')), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -129,7 +129,7 @@ test('ensure preserves the original binary when the replacement smoke test fails
       /bad executable/
     );
     assert.deepEqual(fs.readFileSync(target), oldPayload);
-    assert.equal(fs.existsSync(`${target}.vendor-tmp`), false);
+    assert.equal(fs.readdirSync(dir).some((name) => name.includes('.vendor-tmp-')), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -150,5 +150,41 @@ test('explicitly requested unsupported target remains fail-closed', async () => 
   await assert.rejects(
     ensureVendoredTokscale({ manifest: { platforms: {} }, requestedKey: 'linux-arm64-musl' }),
     /No vendored tokscale binary recorded/
+  );
+});
+
+test('a vendored target whose npm package is absent on this host degrades instead of crashing', async () => {
+  // Real case: packaging darwin-x64 on an Apple Silicon host (or vice versa)
+  // — the platform is genuinely in the manifest, but npm's optionalDependencies
+  // cpu/os gating means that platform's package was never installed here.
+  const notInstalled = new Error("Cannot find module '@tokscale/cli-darwin-x64/package.json'");
+  notInstalled.code = 'MODULE_NOT_FOUND';
+  const logs = [];
+  let downloads = 0;
+
+  const result = await ensureVendoredTokscale({
+    manifest: manifestFor(Buffer.from('vendored binary'), { package: '@tokscale/cli-darwin-x64' }),
+    requestedKey: 'darwin-arm64',
+    resolveTarget: () => { throw notInstalled; },
+    download: async () => { downloads += 1; return Buffer.from('vendored binary'); },
+    log: (message) => logs.push(message)
+  });
+
+  assert.deepEqual(result, { status: 'unavailable', key: 'darwin-arm64' });
+  assert.equal(downloads, 0);
+  assert.ok(logs.some((line) => line.includes('cross-arch')));
+});
+
+test('a resolveTarget failure unrelated to a missing module still fails closed', async () => {
+  const target = new Error('permission denied');
+  await assert.rejects(
+    ensureVendoredTokscale({
+      manifest: manifestFor(Buffer.from('vendored binary')),
+      requestedKey: 'darwin-arm64',
+      resolveTarget: () => { throw target; },
+      resolveVersion: () => '4.13.0',
+      log: () => {}
+    }),
+    /permission denied/
   );
 });

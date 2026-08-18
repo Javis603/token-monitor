@@ -131,6 +131,39 @@ test('an unknown-client rejection probes once, retries, then filters proactively
   }
 });
 
+test('an exit-2 failure unrelated to --client never triggers a probe', async () => {
+  // clap's exit code 2 is a generic argument-parsing failure, not specific to
+  // --client — e.g. a malformed --since date would exit the same way. Only a
+  // failure whose stderr actually names --client should spend a probe.
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  let helpProbes = 0;
+
+  childProcess.spawn = (_bin, args) => {
+    if (args.includes('--help')) { helpProbes += 1; return jsonChild({}); }
+    return exitChild(2, 'error: invalid value for --since');
+  };
+
+  try {
+    const { collectUsageOnce } = freshCollector();
+    await assert.rejects(
+      collectUsageOnce({
+        clients: 'claude',
+        allTimeSince: '2024-01-01',
+        commandTimeoutMs: 1000,
+        deviceId: 'test-device',
+        agentVersion: 'test',
+        limitsEnabled: false
+      }),
+      /tokscale exited with code 2/
+    );
+    assert.equal(helpProbes, 0, 'an unrelated usage error must not spend a capability probe');
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});
+
 test('a probe that itself fails surfaces the original tokscale error, not a silent empty result', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;

@@ -176,6 +176,7 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
       if (code !== 0) {
         const error = new Error(`tokscale exited with code ${code}: ${stderr.trim() || stdout.trim()}`);
         error.tokscaleExitCode = code;
+        error.tokscaleStderr = stderr;
         return reject(error);
       }
       try { resolve(parseJsonOutput(stdout)); } catch (error) { reject(error); }
@@ -241,8 +242,15 @@ function resetTokscaleCapabilityCache() {
   tokscaleCapabilityResolver.reset();
 }
 
+// Exit code 2 alone is clap's generic "argument parsing failed" code, not a
+// --client-specific one — a malformed value for some other flag would exit
+// the same way. Requiring stderr to actually mention --client keeps a real
+// probe+retry reserved for the one flag this call site varies by binary
+// identity; anything else still surfaces as-is.
 function isUnknownTokscaleClientError(error) {
-  return Boolean(error) && error.tokscaleExitCode === TOKSCALE_UNKNOWN_CLIENT_EXIT_CODE;
+  return Boolean(error)
+    && error.tokscaleExitCode === TOKSCALE_UNKNOWN_CLIENT_EXIT_CODE
+    && /--client/i.test(error.tokscaleStderr || '');
 }
 
 // Reactive, not proactive: a binary that recognizes every requested client
