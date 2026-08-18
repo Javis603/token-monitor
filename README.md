@@ -224,6 +224,8 @@ npm run pack         # unpacked app dir (no installer), for quick local testing
 
 Output lands in `dist/`. Windows and Linux use the matching `dist:*` script above on the target OS. Packaging the macOS release build requires a local Developer ID Application signing identity; use `npm start` for local development or unsupported platforms.
 
+Runtime and packaging scripts explicitly ensure the pinned tokscale binary on the four vendored targets. Other source platforms keep the npm binary and filter clients it does not support; `npm install`, lint, and tests do not download it.
+
 ## How it works
 
 ```text

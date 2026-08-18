@@ -520,8 +520,16 @@
   }
 
   function heatmapSvg(model, options) {
-    const o = Object.assign({ titleOf: () => '', monthLabel: (m) => m.label, radius: 3, glowFilterId: '', spotlightId: '', spotlightRadius: 86, initialHidden: false }, options || {});
+    const o = Object.assign({ titleOf: () => '', monthLabel: (m) => m.label, radius: 3, glowFilterId: '', spotlightId: '', spotlightRadius: 86, initialHidden: false, edgePad: 0 }, options || {});
     const botPad = 16;
+    // Interactive cells can scale and carry a glow filter beyond their source
+    // rect. Keep the padding in the SVG coordinate system so the scrollable
+    // width/height include the same safe area that the browser paints.
+    const edgePad = Math.max(0, Number(o.edgePad) || 0);
+    const modelWidth = Math.max(0, Number(model.width) || 0);
+    const modelHeight = Math.max(0, Number(model.height) || 0);
+    const svgWidth = modelWidth + edgePad * 2;
+    const svgHeight = modelHeight + botPad + edgePad;
     const pitch = (model.cell || 11) + (model.gap || 2);
     const glowFilterId = String(o.glowFilterId || '');
     const spotlightId = String(o.spotlightId || '');
@@ -533,17 +541,17 @@
       defsParts.push(`<filter id="${escapeXml(glowFilterId)}" x="-80%" y="-80%" width="260%" height="260%" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="0" stdDeviation="2.1" flood-color="rgb(120, 190, 255)" flood-opacity="0.95"></feDropShadow><feDropShadow dx="0" dy="0" stdDeviation="4.2" flood-color="rgb(120, 190, 255)" flood-opacity="0.42"></feDropShadow></filter>`);
     }
     if (spotlightId) {
-      defsParts.push(`<radialGradient id="${escapeXml(spotlightGradientId)}" gradientUnits="userSpaceOnUse" cx="-200" cy="-200" r="${radius}"><stop offset="0" stop-color="white" stop-opacity="1"></stop><stop offset="0.35" stop-color="white" stop-opacity="0.62"></stop><stop offset="0.75" stop-color="white" stop-opacity="0"></stop></radialGradient><mask id="${escapeXml(spotlightMaskId)}"><rect x="0" y="0" width="${svgRound(model.width)}" height="${svgRound(model.height)}" fill="url(#${escapeXml(spotlightGradientId)})"></rect></mask>`);
+      defsParts.push(`<radialGradient id="${escapeXml(spotlightGradientId)}" gradientUnits="userSpaceOnUse" cx="-200" cy="-200" r="${radius}"><stop offset="0" stop-color="white" stop-opacity="1"></stop><stop offset="0.35" stop-color="white" stop-opacity="0.62"></stop><stop offset="0.75" stop-color="white" stop-opacity="0"></stop></radialGradient><mask id="${escapeXml(spotlightMaskId)}"><rect x="0" y="0" width="${svgRound(svgWidth)}" height="${svgRound(svgHeight - botPad)}" fill="url(#${escapeXml(spotlightGradientId)})"></rect></mask>`);
     }
     const defs = defsParts.length ? `<defs>${defsParts.join('')}</defs>` : '';
     const initialVisibility = o.initialHidden ? ' data-motion-hidden="true" opacity="0"' : '';
-    const cellAttrs = (c) => `class="heat lvl-${c.intensity}" data-d="${escapeXml(c.date)}" data-t="${svgRound(c.tokens || 0)}" data-cost="${svgRound(c.cost || 0)}" x="${svgRound(c.x)}" y="${svgRound(c.y)}" width="${svgRound(c.size)}" height="${svgRound(c.size)}" rx="${svgRound(Math.max(0, Number(o.radius) || 0))}"${initialVisibility}`;
+    const cellAttrs = (c) => `class="heat lvl-${c.intensity}" data-d="${escapeXml(c.date)}" data-t="${svgRound(c.tokens || 0)}" data-cost="${svgRound(c.cost || 0)}" x="${svgRound(Number(c.x) + edgePad)}" y="${svgRound(Number(c.y) + edgePad)}" width="${svgRound(c.size)}" height="${svgRound(c.size)}" rx="${svgRound(Math.max(0, Number(o.radius) || 0))}"${initialVisibility}`;
     const cells = (model.cells || []).map((c) =>
       `<rect ${cellAttrs(c)}>${o.titleOf(c) ? `<title>${escapeXml(o.titleOf(c))}</title>` : ''}</rect>`
     ).join('');
     const brightCells = spotlightId
       ? (model.cells || []).map((c) =>
-        `<rect class="heat heat-bright lvl-${c.intensity}" x="${svgRound(c.x)}" y="${svgRound(c.y)}" width="${svgRound(c.size)}" height="${svgRound(c.size)}" rx="${svgRound(Math.max(0, Number(o.radius) || 0))}"></rect>`
+        `<rect class="heat heat-bright lvl-${c.intensity}" x="${svgRound(Number(c.x) + edgePad)}" y="${svgRound(Number(c.y) + edgePad)}" width="${svgRound(c.size)}" height="${svgRound(c.size)}" rx="${svgRound(Math.max(0, Number(o.radius) || 0))}"></rect>`
       ).join('')
       : '';
     const brightLayer = spotlightId
@@ -552,11 +560,11 @@
     // Month labels sit BELOW the grid, left-anchored at the column where each month
     // starts — so the current month naturally lands on whichever column its 1st falls in
     // (no special-casing), and the first month sits flush at the left edge.
-    const labelY = model.height + 12;
+    const labelY = edgePad + modelHeight + 12;
     const months = (model.monthLabels || []).map((m) =>
-      `<text class="heat-month" x="${svgRound(m.col * pitch)}" y="${svgRound(labelY)}" text-anchor="start">${escapeXml(o.monthLabel(m))}</text>`
+      `<text class="heat-month" x="${svgRound(edgePad + m.col * pitch)}" y="${svgRound(labelY)}" text-anchor="start">${escapeXml(o.monthLabel(m))}</text>`
     ).join('');
-    return `<svg class="dash-heatmap" viewBox="0 0 ${model.width} ${model.height + botPad}" width="${model.width}" height="${model.height + botPad}">${defs}<g class="heat-base-layer">${cells}</g>${brightLayer}${months}</svg>`;
+    return `<svg class="dash-heatmap" viewBox="0 0 ${svgRound(svgWidth)} ${svgRound(svgHeight)}" width="${svgRound(svgWidth)}" height="${svgRound(svgHeight)}">${defs}<g class="heat-base-layer">${cells}</g>${brightLayer}${months}</svg>`;
   }
 
   function statsCardsHtml(cards, options) {

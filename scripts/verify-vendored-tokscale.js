@@ -1,6 +1,6 @@
 'use strict';
 
-// Release gate for install-vendored-tokscale.js. Checking `--version` is not
+// Release gate for ensure-vendored-tokscale.js. Checking `--version` is not
 // enough to prove the swap worked: tokscale's Cargo.toml version stays at the
 // last tagged release (4.13.0) even on commits far past it, since DSH landed
 // without a version bump upstream. So this runs the swapped binary against a
@@ -15,6 +15,17 @@
 // once as "reasoning". Same fixture as tokscale's own
 // test_dsh_zstd_transcript_counts_identically_cold_and_warm_cache.
 //
+// This only checks DSH parsing semantics. Whether every DEFAULT_CLIENTS
+// entry is a client the vendored binary recognizes at all is a separate,
+// generic concern — see verify-vendored-tokscale-clients.js.
+//
+// mode "override" (the default): this verifies the pinned fork build
+// ensure-vendored-tokscale.js has already swapped in. mode "upstream": no
+// swap happens, so this verifies the plain npm-installed binary instead —
+// deliberately NOT skipped, since switching to upstream is exactly the
+// moment this fixture most needs to prove the official release actually
+// carries the reasoning-accounting fix, not just the dsh client id.
+//
 // The child process must be hermetic: without pinning HOME/XDG_*/config dirs
 // and clearing scan-path env vars, a run on a machine (or CI runner) that
 // happens to have its own tokscale config, DSH_HOME, or TOKSCALE_EXTRA_DIRS
@@ -27,15 +38,16 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { loadManifest, resolveManifestEntry, resolveTargetBinPath } = require('./vendoredTokscale');
+const { loadManifest, manifestMode, resolveManifestEntry, resolveTargetBinPath } = require('./vendoredTokscale');
 
+const FIXTURE_CLIENT = 'dsh';
 const FIXTURE_SESSION_ID = '96cf59c9-b347-48b9-b234-a5200913ad05';
 const FIXTURE_WORKSPACE_DIR = '-tmp-dsh-workspace';
 const FIXTURE_LINES = [
   '{"type":"session","version":0,"id":"96cf59c9-b347-48b9-b234-a5200913ad05","createdAt":1783352134832,"cwd":"/tmp/dsh-workspace","delegationDepth":0}',
   '{"type":"assistant/message","seq":39,"time":1785730448979,"data":{"turn":1,"message":{"id":"7ac2e3d7-d558-4b24-b71e-40fc2f42216d","source":{"kind":"model","provider":"deepseek","model":"deepseek-reasoner"}},"usage":{"inputTokens":2885,"outputTokens":25,"cacheReadTokens":0,"reasoningTokens":23}}}'
 ];
-const EXPECTED = { client: 'dsh', model: 'deepseek-reasoner', input: 2885, output: 2, reasoning: 23, cacheRead: 0 };
+const EXPECTED = { client: FIXTURE_CLIENT, model: 'deepseek-reasoner', input: 2885, output: 2, reasoning: 23, cacheRead: 0 };
 
 // Guaranteed-unreachable loopback port (nothing listens on 9/discard), used
 // as an offline guarantee for pricing lookups even if TOKSCALE_PRICING_CACHE_ONLY
@@ -100,7 +112,7 @@ function hermeticEnv(home) {
 }
 
 function runAgainstFixture(binPath, home) {
-  const result = spawnSync(binPath, ['--json', '--client', 'dsh', '--group-by', 'client,model', '--no-spinner'], {
+  const result = spawnSync(binPath, ['--json', '--client', FIXTURE_CLIENT, '--group-by', 'client,model', '--no-spinner'], {
     encoding: 'utf8',
     timeout: 15_000,
     env: hermeticEnv(home)
@@ -126,17 +138,22 @@ function assertExpected(parsed) {
   if (mismatches.length > 0) {
     throw new Error(
       `DSH fixture mismatch — expected ${JSON.stringify(EXPECTED)}, got ${JSON.stringify(entry)}. ` +
-        'If this is a legitimate upstream behavior change, update EXPECTED and vendor/tokscale.json together, do not just silence this check.'
+        'If this is a legitimate upstream behavior change, update EXPECTED and scripts/vendor/tokscale.json together, do not just silence this check.'
     );
   }
 }
 
 function main() {
   const manifest = loadManifest();
+  const isUpstream = manifestMode(manifest) === 'upstream';
   const { key, entry } = resolveManifestEntry(manifest);
   const binPath = resolveTargetBinPath(entry);
   if (!fs.existsSync(binPath)) {
-    throw new Error(`No binary at ${binPath} for ${key} — run install-vendored-tokscale.js first`);
+    throw new Error(
+      isUpstream
+        ? `No binary at ${binPath} for ${key} — is the tokscale npm dependency installed?`
+        : `No binary at ${binPath} for ${key} — run ensure-vendored-tokscale.js first`
+    );
   }
 
   const home = writeFixtureHome();
@@ -147,12 +164,16 @@ function main() {
     fs.rmSync(home, { recursive: true, force: true });
   }
 
-  console.log(`Verified vendored tokscale (${key}): DSH fixture parses with correct reasoning-corrected token buckets.`);
+  console.log(`Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): DSH fixture parses with correct reasoning-corrected token buckets.`);
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(`verify-vendored-tokscale failed: ${error.message}`);
-  process.exit(1);
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`verify-vendored-tokscale failed: ${error.message}`);
+    process.exit(1);
+  }
 }
+
+module.exports = { main };

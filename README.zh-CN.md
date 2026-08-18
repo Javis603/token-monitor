@@ -224,6 +224,8 @@ npm run pack         # 未打包的 app 目录（无安装包），方便本机�
 
 产物会放在 `dist/`。Windows 和 Linux 请在对应系统上使用上面的 `dist:*` 脚本。如果要打包 macOS 发布版，需要本机有 Developer ID Application 签名身份；本地开发或未列出的平台请用 `npm start` 运行。
 
+运行和打包脚本会在四个 vendored 目标上明确确保使用 pinned tokscale binary。其他源码平台会保留 npm binary，并过滤它不支持的 clients；`npm install`、lint 和测试不会下载它。
+
 ## 工作原理
 
 ```text
