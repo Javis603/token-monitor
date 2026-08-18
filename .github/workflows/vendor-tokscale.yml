@@ -17,6 +17,8 @@ on:
       - 'scripts/vendoredTokscale.js'
       - '.github/workflows/release.yml'
       - '.github/workflows/vendor-tokscale.yml'
+      - 'package.json'
+      - 'package-lock.json'
   pull_request:
     paths: *vendor_tokscale_paths
 

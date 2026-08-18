@@ -117,8 +117,11 @@ function runAgainstFixture(binPath, home) {
 }
 
 function assertExpected(parsed) {
-  const entry = Array.isArray(parsed.entries) ? parsed.entries[0] : null;
-  if (!entry) throw new Error(`Fixture run produced no entries: ${JSON.stringify(parsed)}`);
+  const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
+  if (entries.length !== 1) {
+    throw new Error(`Expected exactly 1 fixture entry, got ${entries.length}: ${JSON.stringify(parsed)}`);
+  }
+  const entry = entries[0];
   const mismatches = Object.entries(EXPECTED).filter(([key, value]) => entry[key] !== value);
   if (mismatches.length > 0) {
     throw new Error(

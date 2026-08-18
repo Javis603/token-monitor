@@ -3,6 +3,8 @@
   "fork": "Javis603/tokscale",
   "commit": "59712ada85640b7aaa00d7da92ed1a15367e961b",
   "commitTitle": "feat(clients): add DeepSeek Harness support (#1126)",
+  "baseVersion": "4.13.0",
+  "baseVersionNote": "The npm-installed @tokscale/cli-<platform> package.json version this override was built against. install-vendored-tokscale.js refuses to run if the installed package reports a different version — that means the tokscale dependency already moved and this override needs to be updated or removed, not silently kept.",
   "releaseRepo": "Javis603/tokscale",
   "releaseTag": "token-monitor-59712ada",
   "reason": "Bridges DeepSeek Harness (dsh) client support merged upstream but not yet in a tagged tokscale npm release. Once Token Monitor updates its npm lockfile to an official tokscale release containing commit 59712ada or later, remove this override so the official bundled binary becomes authoritative again — the bundled version is never faked, so tokscaleUpdater.js's existing semver comparison keeps working, but packaged builds themselves need that explicit lockfile bump and step removal, not just an upstream release existing.",

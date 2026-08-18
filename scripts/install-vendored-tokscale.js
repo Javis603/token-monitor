@@ -14,7 +14,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
-const { loadManifest, resolveManifestEntry, resolveTargetBinPath } = require('./vendoredTokscale');
+const { loadManifest, resolveManifestEntry, resolveTargetBinPath, resolveInstalledPackageVersion } = require('./vendoredTokscale');
 
 const MAX_BYTES = 50 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 60 * 1000;
@@ -58,6 +58,23 @@ async function main() {
   const targetBinPath = resolveTargetBinPath(entry);
   if (!fs.existsSync(targetBinPath)) {
     throw new Error(`Expected npm-installed binary not found at ${targetBinPath} — did npm ci run first?`);
+  }
+
+  // Refuse to overwrite a binary from a different npm-installed version than
+  // this override was built against. collector.js's locateBundledBinary()
+  // and tokscaleUpdater.js's update check both trust the platform package's
+  // package.json version as truth — silently overwriting its binary while
+  // that version has moved would ship stale vendor bytes under a newer
+  // version label, and the in-app updater would never notice the mismatch.
+  // A version drift here means the tokscale dependency was already bumped
+  // and this override needs to be updated or removed, not applied blindly.
+  const installedVersion = resolveInstalledPackageVersion(entry);
+  if (installedVersion !== manifest.baseVersion) {
+    throw new Error(
+      `Installed ${entry.package} is ${installedVersion}, but this vendor override was built against ` +
+        `${manifest.baseVersion}. The tokscale dependency has moved — update vendor/tokscale.json to a new ` +
+        `pinned build, or remove the vendor install step if the installed version already includes DSH support.`
+    );
   }
 
   const buffer = await downloadAsset(manifest, entry);

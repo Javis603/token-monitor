@@ -38,4 +38,26 @@ function resolveTargetBinPath(entry) {
   return path.join(binDir, 'bin', binaryName());
 }
 
-module.exports = { loadManifest, platformKey, binaryName, resolvePackageBinDir, resolveManifestEntry, resolveTargetBinPath };
+// The npm-installed platform package's own package.json version — the same
+// field collector.js's locateBundledBinary() reports as the "bundled"
+// version, and tokscaleUpdater.js's semver comparison uses as its baseline.
+// The vendor override must only ever apply on top of the exact version it
+// was built against: if package.json disagrees, some other change already
+// bumped the tokscale dependency, and overwriting its binary anyway would
+// silently ship stale vendor bytes under a newer version label — which also
+// blinds the in-app updater, since it trusts this same field.
+function resolveInstalledPackageVersion(entry) {
+  const binDir = resolvePackageBinDir(entry.package);
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(binDir, 'package.json'), 'utf8'));
+  return pkgJson.version;
+}
+
+module.exports = {
+  loadManifest,
+  platformKey,
+  binaryName,
+  resolvePackageBinDir,
+  resolveManifestEntry,
+  resolveTargetBinPath,
+  resolveInstalledPackageVersion
+};
