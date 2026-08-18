@@ -24,7 +24,7 @@
 
 const fs = require('node:fs');
 const { makeTokens, groupEvents, filterExchangesByPeriod, distributeCost } = require('./sessionDetail');
-const { decodeSessionText, dshSessionFiles, resolveDshSessionsRoot } = require('./dshSessionFiles');
+const { decodeFirstFrameText, decodeSessionText, dshSessionFiles, resolveDshSessionsRoot } = require('./dshSessionFiles');
 
 function numberValue(value) {
   const parsed = Number(value || 0);
@@ -47,7 +47,10 @@ function findDshSessionFile(sessionId, options = {}) {
   for (const filePath of dshSessionFiles(root)) {
     try {
       const buffer = fs.readFileSync(filePath);
-      const text = decodeSessionText(filePath, buffer);
+      // The header we need to match on lives in the first zstd frame, so only
+      // that frame needs decompressing — not the whole (possibly long-lived)
+      // transcript — to rule a candidate in or out.
+      const text = decodeFirstFrameText(filePath, buffer);
       const firstLine = text.split(/\r?\n/).find((line) => line.trim());
       if (!firstLine) continue;
       const header = JSON.parse(firstLine.trim());

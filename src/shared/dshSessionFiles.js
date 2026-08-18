@@ -12,30 +12,31 @@
  * transcript away. Ported from dsh's own session-persistence-jsonl backend
  * (MIT).
  *
- * Path resolution mirrors `dshPaths.js` (`DSH_HOME` env override, falling
- * back to `~/.dsh`). That module is Node-builtin-free so it can vendor into
- * the Worker; this one is Electron/agent-only (session detail is never
- * served by the Worker), so it uses `node:path`/`node:os` directly. Once the
- * usage-tracking PR that introduces `dshPaths.js` lands, this resolver should
- * be replaced with an import of its `resolveDshSessionsDir`.
+ * Path resolution delegates to `dshPaths.js` (`DSH_HOME` env override,
+ * falling back to `~/.dsh`) — the module `src/shared/collector.js` already
+ * uses to find DSH's source root for usage tracking. That module stays
+ * Node-builtin-free so it can vendor into the Worker; this one is
+ * Electron/agent-only (session detail is never served by the Worker), so it
+ * fills in the `os.homedir()`/`process.env`/`process.platform` defaults
+ * `dshPaths.js` leaves to its caller.
  */
 
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const zlib = require('node:zlib');
+const { resolveDshSessionsDir } = require('./dshPaths');
 
-const DSH_HOME_DIR_NAME = '.dsh';
 const DSH_SESSION_LOG_NAMES = new Set(['session.jsonl', 'session.jsonl.zstd']);
 const DSH_SESSION_DIR_DEPTH = 2; // <root>/<project>/<session>/<artifact>
 const ZSTD_MAGIC = 0xFD2FB528;
 
 function resolveDshSessionsRoot(options = {}) {
-  const env = options.env || process.env;
-  const homeDir = options.homeDir || os.homedir();
-  const dshHome = String(env.DSH_HOME || '').trim();
-  const base = dshHome ? dshHome : path.join(homeDir, DSH_HOME_DIR_NAME);
-  return path.join(base, 'sessions');
+  return resolveDshSessionsDir({
+    env: options.env || process.env,
+    homeDir: options.homeDir || os.homedir(),
+    platform: options.platform || process.platform
+  });
 }
 
 function dshSessionFiles(root) {
@@ -109,14 +110,14 @@ function zstdAvailable() {
   return typeof zlib.zstdDecompressSync === 'function';
 }
 
-function decodeZstdBuffer(buffer) {
+function decodeZstdBuffer(buffer, frames) {
   if (!zstdAvailable()) {
     const error = new Error('this Node.js build does not support Zstandard decompression');
     error.code = 'zstd-unsupported';
     throw error;
   }
   let text = '';
-  for (const frame of scanZstdFrames(buffer)) {
+  for (const frame of frames || scanZstdFrames(buffer)) {
     text += zlib.zstdDecompressSync(buffer.subarray(frame.start, frame.end)).toString('utf8');
   }
   return text;
@@ -126,9 +127,22 @@ function decodeSessionText(filePath, buffer) {
   return filePath.endsWith('.jsonl.zstd') ? decodeZstdBuffer(buffer) : buffer.toString('utf8');
 }
 
+// DSH appends one zstd frame per flush, and the leading `session` header is
+// always the first event written, so it lives entirely inside the first
+// frame. Decoding just that frame — instead of every frame in the file —
+// keeps session-id lookup cheap even once a transcript directory holds a
+// long history of unrelated sessions.
+function decodeFirstFrameText(filePath, buffer) {
+  if (!filePath.endsWith('.jsonl.zstd')) return buffer.toString('utf8');
+  const [frame] = scanZstdFrames(buffer);
+  if (!frame) return '';
+  return decodeZstdBuffer(buffer, [frame]);
+}
+
 module.exports = {
   DSH_SESSION_DIR_DEPTH,
   DSH_SESSION_LOG_NAMES,
+  decodeFirstFrameText,
   decodeSessionText,
   dshSessionFiles,
   resolveDshSessionsRoot,

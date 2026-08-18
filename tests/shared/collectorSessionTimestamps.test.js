@@ -114,6 +114,62 @@ test('applySessionTimestamps does not re-read an unchanged session file on the n
   }
 });
 
+test('applySessionTimestamps fills DSH session start/last from the transcript header and mtime', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-ts-'));
+  try {
+    const dir = path.join(home, '.dsh', 'sessions', 'proj', 'session-abc');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'session.jsonl');
+    fs.writeFileSync(file, `${JSON.stringify({ type: 'session', id: 'session-abc', createdAt: 1750000000000 })}\n`);
+    const mtime = new Date('2026-07-01T12:00:00.000Z');
+    fs.utimesSync(file, mtime, mtime);
+
+    const periods = { today: { sessions: {
+      'dsh:session-abc': { client: 'dsh', sessionId: 'session-abc' }
+    } } };
+    applySessionTimestamps(periods, home, {
+      metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set()
+    });
+
+    const session = periods.today.sessions['dsh:session-abc'];
+    assert.equal(session.startedAt, new Date(1750000000000).toISOString());
+    assert.equal(session.lastUsedAt, mtime.toISOString());
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('applySessionTimestamps retries a DSH session whose transcript is not yet on disk', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-miss-'));
+  try {
+    const cache = { metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set() };
+    const periods = { today: { sessions: {
+      'dsh:session-new': { client: 'dsh', sessionId: 'session-new' }
+    } } };
+
+    // First tick: the transcript has not been flushed to disk yet.
+    applySessionTimestamps(periods, home, { ...cache, retryMisses: true });
+    assert.equal(periods.today.sessions['dsh:session-new'].startedAt, undefined);
+
+    // The file lands before the next tick.
+    const dir = path.join(home, '.dsh', 'sessions', 'proj', 'session-new');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'session.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'session-new', createdAt: 1750000000000 })}\n`
+    );
+
+    // Real ticks always pass retryMisses: true (collector.js's decorateLocalPeriods),
+    // so a DSH session must not be permanently written off after one miss the
+    // way the pre-fix generic fallback used to (it unconditionally poisoned
+    // resolvedSessionKeys for any client without a dedicated resolver).
+    applySessionTimestamps(periods, home, { ...cache, retryMisses: true });
+    assert.equal(periods.today.sessions['dsh:session-new'].startedAt, new Date(1750000000000).toISOString());
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('applySessionTimestamps retries a progressive miss in the final pass', () => {
   const cache = { metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set() };
   const periods = { today: { sessions: {

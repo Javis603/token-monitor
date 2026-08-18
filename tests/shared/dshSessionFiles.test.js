@@ -8,6 +8,7 @@ const zlib = require('node:zlib');
 const test = require('node:test');
 
 const {
+  decodeFirstFrameText,
   decodeSessionText,
   dshSessionFiles,
   resolveDshSessionsRoot,
@@ -75,6 +76,27 @@ test('scanZstdFrames stops at a torn trailing frame instead of throwing', { skip
   const frames = scanZstdFrames(buffer);
   assert.equal(frames.length, 1);
   assert.equal(frames[0].end, complete.length);
+});
+
+// Session-id lookup only needs the header, which is always the first event
+// dsh writes. decodeFirstFrameText must not touch later frames, so a long
+// transcript's discovery cost stays O(one frame) even when a trailing frame
+// is corrupt or unrelated garbage.
+test('decodeFirstFrameText decodes only the first frame, ignoring a corrupt later one', { skip: !hasZstd }, () => {
+  const header = zlib.zstdCompressSync(Buffer.from('{"type":"session","id":"s1"}\n', 'utf8'));
+  const corruptTail = Buffer.from([0xff, 0xff, 0xff, 0xff, 0x00, 0x00]);
+  const buffer = Buffer.concat([header, corruptTail]);
+  assert.equal(decodeFirstFrameText('/tmp/session.jsonl.zstd', buffer), '{"type":"session","id":"s1"}\n');
+});
+
+test('decodeFirstFrameText returns empty text when even the first frame is torn', { skip: !hasZstd }, () => {
+  const torn = zlib.zstdCompressSync(Buffer.from('{"type":"session","id":"s1"}\n', 'utf8')).subarray(0, 4);
+  assert.equal(decodeFirstFrameText('/tmp/session.jsonl.zstd', torn), '');
+});
+
+test('decodeFirstFrameText reads raw .jsonl without decompression', () => {
+  const text = decodeFirstFrameText('/tmp/session.jsonl', Buffer.from('{"type":"session"}\n', 'utf8'));
+  assert.equal(text, '{"type":"session"}\n');
 });
 
 test('decodeSessionText reads raw .jsonl without decompression', () => {
