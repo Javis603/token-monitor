@@ -29,13 +29,14 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { loadManifest, resolveManifestEntry, resolveTargetBinPath } = require('./vendoredTokscale');
 
+const FIXTURE_CLIENT = 'dsh';
 const FIXTURE_SESSION_ID = '96cf59c9-b347-48b9-b234-a5200913ad05';
 const FIXTURE_WORKSPACE_DIR = '-tmp-dsh-workspace';
 const FIXTURE_LINES = [
   '{"type":"session","version":0,"id":"96cf59c9-b347-48b9-b234-a5200913ad05","createdAt":1783352134832,"cwd":"/tmp/dsh-workspace","delegationDepth":0}',
   '{"type":"assistant/message","seq":39,"time":1785730448979,"data":{"turn":1,"message":{"id":"7ac2e3d7-d558-4b24-b71e-40fc2f42216d","source":{"kind":"model","provider":"deepseek","model":"deepseek-reasoner"}},"usage":{"inputTokens":2885,"outputTokens":25,"cacheReadTokens":0,"reasoningTokens":23}}}'
 ];
-const EXPECTED = { client: 'dsh', model: 'deepseek-reasoner', input: 2885, output: 2, reasoning: 23, cacheRead: 0 };
+const EXPECTED = { client: FIXTURE_CLIENT, model: 'deepseek-reasoner', input: 2885, output: 2, reasoning: 23, cacheRead: 0 };
 
 // Guaranteed-unreachable loopback port (nothing listens on 9/discard), used
 // as an offline guarantee for pricing lookups even if TOKSCALE_PRICING_CACHE_ONLY
@@ -100,7 +101,7 @@ function hermeticEnv(home) {
 }
 
 function runAgainstFixture(binPath, home) {
-  const result = spawnSync(binPath, ['--json', '--client', 'dsh', '--group-by', 'client,model', '--no-spinner'], {
+  const result = spawnSync(binPath, ['--json', '--client', FIXTURE_CLIENT, '--group-by', 'client,model', '--no-spinner'], {
     encoding: 'utf8',
     timeout: 15_000,
     env: hermeticEnv(home)
@@ -131,8 +132,30 @@ function assertExpected(parsed) {
   }
 }
 
+// The DSH fixture below proves the swapped binary genuinely accepts
+// `--client dsh` and parses it correctly — a client id tokscale doesn't
+// recognize exits non-zero before any JSON is produced (see
+// runAgainstFixture), so this whole gate already fails if dsh weren't real.
+// What isn't otherwise guarded is the two constants staying in sync:
+// tests/shared/clientTracking.test.js trusts manifest.bridgesClient as an
+// exemption from needing to see that client in the plain npm-installed
+// binary's own --client list, without independently checking it against the
+// vendored binary. If bridgesClient were ever repointed at a different
+// client without updating this fixture (or vice versa), that guard test
+// would keep passing on the strength of a claim nothing here still tests.
+function assertManifestMatchesFixtureClient(manifest) {
+  if (manifest.bridgesClient && manifest.bridgesClient !== FIXTURE_CLIENT) {
+    throw new Error(
+      `vendor/tokscale.json bridgesClient is "${manifest.bridgesClient}" but this fixture only tests ` +
+        `"${FIXTURE_CLIENT}" — tests/shared/clientTracking.test.js would exempt a client this gate never verifies. ` +
+        'Update the fixture to match, or scope bridgesClient back down.'
+    );
+  }
+}
+
 function main() {
   const manifest = loadManifest();
+  assertManifestMatchesFixtureClient(manifest);
   const { key, entry } = resolveManifestEntry(manifest);
   const binPath = resolveTargetBinPath(entry);
   if (!fs.existsSync(binPath)) {

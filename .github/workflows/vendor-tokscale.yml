@@ -19,6 +19,8 @@ on:
       - '.github/workflows/vendor-tokscale.yml'
       - 'package.json'
       - 'package-lock.json'
+      - 'src/shared/clientTracking.js'
+      - 'tests/shared/clientTracking.test.js'
   pull_request:
     paths: *vendor_tokscale_paths
 
