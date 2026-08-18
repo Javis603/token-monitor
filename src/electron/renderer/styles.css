@@ -53,7 +53,7 @@ html, body {
   background: transparent;
   border-radius: 14px;
   color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-family: var(--ui-font, ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -2404,6 +2404,61 @@ span.settings-note.settings-item-desc {
 }
 
 /* Appearance: interface theme presets + colour pickers */
+.settings-font-controls {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 0;
+  padding-top: 9px;
+  padding-bottom: 9px;
+  border-top: 1px solid var(--line);
+}
+.settings-font-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.settings-font-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.settings-panel .settings-font-input-row select,
+.settings-panel .settings-font-input-row input {
+  width: 100%;
+  min-width: 0;
+}
+.settings-font-input-row .reset-appearance-button {
+  width: 18px;
+  height: 18px;
+}
+.settings-font-custom-row {
+  display: grid;
+  gap: 4px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.settings-font-custom-row.hidden { display: none; }
+.settings-font-preview {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
+}
+.settings-font-preview-label { color: var(--muted); font-size: 9px; }
+.settings-font-preview-sample { color: var(--text); font-size: 14px; line-height: 1.2; }
+.settings-font-controls > .settings-note {
+  margin: 0;
+  line-height: 1.45;
+}
 .theme-preset-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .theme-preset-chip {
   display: inline-flex;
@@ -2460,7 +2515,9 @@ span.settings-note.settings-item-desc {
   overflow-y: auto;
   padding-right: 4px;
 }
-.settings-panel input, .settings-panel select {
+.settings-panel input,
+.settings-panel select,
+.settings-panel textarea {
   width: 100%;
   min-width: 0;
   padding: 7px 8px;
@@ -2469,6 +2526,11 @@ span.settings-note.settings-item-desc {
   background: rgba(var(--sunken-rgb), 0.48);
   color: var(--text);
   outline: none;
+}
+.settings-panel textarea {
+  height: 54px;
+  min-height: 54px;
+  resize: vertical;
 }
 .settings-panel select {
   appearance: none;
@@ -2511,7 +2573,8 @@ html.is-windows .settings-panel select option {
   background: rgb(var(--accent-rgb));
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
-.settings-panel input:focus { border-color: rgba(115, 189, 245, 0.72); }
+.settings-panel input:focus,
+.settings-panel textarea:focus { border-color: rgba(115, 189, 245, 0.72); }
 .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .settings-actions button { min-height: 30px; padding: 0 10px; border-radius: 8px; font-size: 11px; white-space: nowrap; }
 .refresh-button {
@@ -2667,7 +2730,7 @@ html.is-windows .settings-panel select option {
   min-width: 0;
   margin-top: 8px;
   color: var(--number);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  font-family: var(--display-font, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif);
   font-weight: 500;
   font-size: clamp(30px, 11vw, 46px);
   line-height: 1.05;
@@ -5069,6 +5132,7 @@ html.is-windows .limit-live-badge {
 #mimoManualPanel input,
 #mimoManualPanel textarea,
 #kimiManualPanel input,
+#kimiManualPanel textarea,
 #copilotManualDetails input {
   width: 100%;
   font-size: 12px;
@@ -5098,6 +5162,7 @@ html.is-windows .limit-live-badge {
 #mimoManualPanel input,
 #mimoManualPanel textarea,
 #kimiManualPanel input,
+#kimiManualPanel textarea,
 #copilotManualDetails input {
   font-family: monospace;
 }
@@ -5967,7 +6032,7 @@ html.is-windows .limit-live-badge {
   min-width: 0;
   height: 30px;
   box-sizing: border-box;
-  font-size: 11px;
+  font-size: 12px;
 }
 .thirdparty-mode-hint {
   min-height: 30px;
@@ -6191,7 +6256,7 @@ html.is-windows .limit-live-badge {
 .tray-composer-menubar-title {
   overflow: hidden;
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  font-family: var(--display-font, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif);
   font-size: 13px;
   font-weight: 500;
   letter-spacing: -0.01em;

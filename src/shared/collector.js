@@ -29,7 +29,7 @@ const {
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles');
-const { mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
+const { localDayKey, mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const cursorAuth = require('./cursorAuth');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
@@ -512,12 +512,11 @@ function resetPromaPricingCache() {
   promaPricingCache.clear();
 }
 
-function localTodayKey(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
+// The collector's stamp and history.js's window/streak boundary have to be the same
+// calendar day or the aggregate re-keys what the collector wrote, so there is one
+// implementation rather than two formatters free to drift. Kept under the collector's
+// own name: it is exported and reads as the stamping side at its call sites.
+const localTodayKey = localDayKey;
 
 function collectionDate(now) {
   const value = typeof now === 'function' ? now() : now;

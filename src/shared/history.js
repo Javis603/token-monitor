@@ -212,6 +212,18 @@ function dayKeyAddDays(key, delta) {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+// Every day key reaching this module is a local calendar day: the collector stamps
+// contributions with `localTodayKey()` and `computePeriodWindows` ends each window at
+// the next *local* midnight. Resolving "today" from `toISOString()` instead keys the
+// boundary in UTC, which east of UTC drops the current local day out of the rolling
+// window and west of UTC starts the streak walk on a day that holds no data.
+function localDayKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 // A day is "active" when tokens > 0. currentStreak = consecutive active days ending at
 // todayKey (0 if today is inactive). longestStreak = longest run anywhere.
 function computeStreaks(days, todayKey) {
@@ -328,7 +340,7 @@ function favoriteModelOf(contributions) {
 // never affects lifetime totals.
 function normalizeHistory(graphData, options = {}) {
   const capDays = Number.isFinite(options.capDays) ? options.capDays : DEFAULT_CAP_DAYS;
-  const todayKey = String(options.todayKey || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const todayKey = String(options.todayKey || localDayKey()).slice(0, 10);
   const full = (graphData && Array.isArray(graphData.contributions) ? graphData.contributions : [])
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -402,7 +414,7 @@ function mergeMonthlyMaps(histories) {
 // stats (active days / peak / streaks) come from the merged daily window.
 function mergeHistories(histories, options = {}) {
   const list = Array.isArray(histories) ? histories : [];
-  const todayKey = String(options.todayKey || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const todayKey = String(options.todayKey || localDayKey()).slice(0, 10);
   const capDays = Number.isFinite(options.capDays) ? options.capDays : DEFAULT_CAP_DAYS;
 
   // Re-cap after merging: an offline device's persisted daily tier no longer
@@ -510,7 +522,7 @@ function deviceHistoryRevision(devices) {
 }
 
 module.exports = {
-  num, sumTokens, parseGraphResult, computeIntensities,
+  num, sumTokens, parseGraphResult, computeIntensities, localDayKey, dayKeyAddDays,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
   coerceHistory, historyPreview, historyRevision, deviceHistoryRevision
 };

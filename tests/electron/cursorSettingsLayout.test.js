@@ -132,7 +132,15 @@ test('Hub secret input stays masked and exposes an accessible paste button', () 
   // No standalone .hub-secret-field layout rule — settings-field handles it
   assert.doesNotMatch(css, /\.hub-secret-field\s*\{/);
 
-  const sharedInputRule = cssRule(css, '.settings-panel input, .settings-panel select');
+  const sharedInputRule = cssRulesForSelector(css, '.settings-panel input').find(rule => (
+    declaration(rule, 'width') === '100%'
+      && declaration(rule, 'min-width') === '0'
+      && declaration(rule, 'padding') === '7px 8px'
+      && declaration(rule, 'border') === '1px solid var(--line)'
+      && declaration(rule, 'border-radius') === '6px'
+      && declaration(rule, 'background') === 'rgba(var(--sunken-rgb), 0.48)'
+  ));
+  assert.ok(sharedInputRule, 'settings inputs should use the shared control styling');
   assert.equal(declaration(sharedInputRule, 'width'), '100%');
   assert.equal(declaration(sharedInputRule, 'min-width'), '0');
   assert.equal(declaration(sharedInputRule, 'padding'), '7px 8px');
@@ -155,7 +163,7 @@ test('Hub secret input stays masked and exposes an accessible paste button', () 
   const pasteBody = app.slice(start, end);
   assert.match(pasteBody, /const text = await navigator\.clipboard\.readText\(\);/);
   assert.match(pasteBody, /els\.secretInput\.value = text\.trim\(\);/);
-  assert.doesNotMatch(pasteBody, /dispatchEvent\(new Event\('input'/);
+  assert.match(pasteBody, /markHubDraftDirty\('secret'\);/);
 });
 
 test('Cursor account header omits plan and reset details', () => {
@@ -668,8 +676,9 @@ test('API key account entries share styling and Copilot uses the folded token en
   assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#commandcodeManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
   assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
+  assert.match(css, /\.thirdparty-field :is\(input, select\)\s*\{[\s\S]*?font-size: 12px;/);
 });
 
 test('Copilot account panel provides GitHub sign-in plus manual token fallback', () => {
@@ -891,6 +900,21 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
       && declaration(rule, 'font-size') === '12px'
   )));
   assert.ok(textareaRules.some(rule => declaration(rule, 'font-family') === 'monospace'));
+  const textareaControlRules = cssRulesForSelector(css, '.settings-panel textarea');
+  assert.ok(textareaControlRules.some(rule => (
+    declaration(rule, 'height') === '54px'
+      && declaration(rule, 'min-height') === '54px'
+      && declaration(rule, 'resize') === 'vertical'
+  )));
+  assert.ok(textareaControlRules.some(rule => (
+    declaration(rule, 'background') === 'rgba(var(--sunken-rgb), 0.48)'
+      && declaration(rule, 'color') === 'var(--text)'
+      && declaration(rule, 'border') === '1px solid var(--line)'
+  )));
+  const textareaFocusRules = cssRulesForSelector(css, '.settings-panel textarea:focus');
+  assert.ok(textareaFocusRules.some(rule => (
+    declaration(rule, 'border-color') === 'rgba(115, 189, 245, 0.72)'
+  )));
   const collapsedRules = cssRulesForSelector(css, '.accordion-animated-container.hidden');
   assert.ok(collapsedRules.some(rule => (
     declaration(rule, 'grid-template-rows') === '0fr'
@@ -1322,12 +1346,299 @@ test('sync upload interval setting is exposed in the Multi-device Sync panel', (
   assert.match(syncBody, /state\.settings\.syncUploadIntervalMs/);
   assert.match(syncBody, /Array\.from\(els\.syncUploadIntervalInput\.options/);
   assert.doesNotMatch(syncBody, /const allowed = \[0, 600000, 1200000, 1800000\]/);
+  const listenerStart = app.indexOf("els.syncUploadIntervalInput?.addEventListener('change'");
+  const listenerEnd = app.indexOf("els.collectionCadenceInput?.addEventListener('change'", listenerStart);
+  assert.notEqual(listenerStart, -1, 'sync upload interval listener should exist');
+  assert.notEqual(listenerEnd, -1, 'collection cadence listener should follow sync upload listener');
+  assert.match(app.slice(listenerStart, listenerEnd), /saveSettings\(\{\s*syncUploadIntervalMs:/);
+});
 
-  const listenerSlice = app.slice(
-    app.indexOf("els.syncUploadIntervalInput?.addEventListener('change'"),
-    app.indexOf("els.collectionCadenceInput?.addEventListener('change'")
+// Run the shipped event wiring against controls that model a settings push:
+// an auto-saved interval updates persisted state while the Hub fields keep
+// their local drafts until the explicit Hub Save commits them.
+function fakeHubControl(value = '') {
+  const listeners = new Map();
+  return {
+    value,
+    addEventListener(type, listener) {
+      const current = listeners.get(type) || [];
+      current.push(listener);
+      listeners.set(type, current);
+    },
+    async dispatch(type) {
+      for (const listener of listeners.get(type) || []) await listener({ target: this });
+    }
+  };
+}
+
+function loadHubSettingsWiring(els, context) {
+  const app = readRendererFile('app.js');
+  const modeStart = app.indexOf('function syncHubModeUi()');
+  const modeEnd = app.indexOf('function renderHubStatus()', modeStart);
+  const draftStart = app.indexOf('const HUB_DRAFT_FIELDS = [');
+  const draftEnd = app.indexOf('function syncSettingsForm()', draftStart);
+  const saveStart = app.indexOf("els.saveSettingsButton.addEventListener('click'");
+  const saveEnd = app.indexOf("els.hubModeOptions.addEventListener('change'", saveStart);
+  const intervalStart = app.indexOf('for (const input of els.showLimitUsedInputs || [])', saveEnd);
+  const intervalEnd = app.indexOf("els.collectionCadenceInput?.addEventListener('change'", intervalStart);
+  assert.notEqual(modeStart, -1, 'Hub mode UI sync should exist');
+  assert.notEqual(modeEnd, -1, 'Hub mode UI sync should precede Hub status rendering');
+  assert.notEqual(draftStart, -1, 'Hub draft tracking should exist');
+  assert.notEqual(draftEnd, -1, 'Hub draft tracking should precede settings sync');
+  assert.notEqual(saveStart, -1, 'Hub Save handler should exist');
+  assert.notEqual(saveEnd, -1, 'Hub mode handler should follow Hub Save');
+  assert.notEqual(intervalStart, -1, 'limits display wiring should precede sync upload wiring');
+  assert.notEqual(intervalEnd, -1, 'collection cadence wiring should follow sync upload wiring');
+  const vmContext = {
+    els,
+    ...context,
+    renderHubStatus: () => {},
+    renderSyncClientStatus: () => {},
+    renderHubBuildStatus: () => {}
+  };
+  vm.runInNewContext(
+    `${app.slice(modeStart, modeEnd)}\n${app.slice(draftStart, draftEnd)}\n${app.slice(saveStart, saveEnd)}\n${app.slice(intervalStart, intervalEnd)}`,
+    vmContext
   );
-  assert.match(listenerSlice, /saveSettings\(\{ syncUploadIntervalMs: Number\(els\.syncUploadIntervalInput\.value\) \}\)/);
+  return vmContext;
+}
+
+test('changing sync upload frequency auto-saves without replacing Hub drafts', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      Object.assign(state.settings, patch);
+      vmContext.syncHubDraftFields();
+      els.syncUploadIntervalInput.value = String(state.settings.syncUploadIntervalMs);
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  els.hubUrlInput.value = 'https://draft.example';
+  els.secretInput.value = 'draft-secret';
+  els.deviceIdInput.value = 'draft-device';
+  await els.hubUrlInput.dispatch('input');
+  await els.secretInput.dispatch('input');
+  await els.deviceIdInput.dispatch('input');
+  els.syncUploadIntervalInput.value = '1200000';
+
+  await els.syncUploadIntervalInput.dispatch('change');
+  assert.equal(els.hubUrlInput.value, 'https://draft.example');
+  assert.equal(els.secretInput.value, 'draft-secret');
+  assert.equal(els.deviceIdInput.value, 'draft-device');
+  assert.deepEqual(patches, [{ syncUploadIntervalMs: 1200000 }]);
+
+  await els.saveSettingsButton.dispatch('click');
+  assert.deepEqual(patches, [{
+    syncUploadIntervalMs: 1200000
+  }, {
+    hubUrl: 'https://draft.example',
+    secret: 'draft-secret',
+    deviceId: 'draft-device'
+  }]);
+  assert.equal(els.hubUrlInput.value, 'https://draft.example');
+  assert.equal(els.secretInput.value, 'draft-secret');
+  assert.equal(els.deviceIdInput.value, 'draft-device');
+});
+
+test('Hub Save keeps edits made while persistence is in flight', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let releaseSave;
+  let resolveSaveStarted;
+  const saveGate = new Promise((resolve) => { releaseSave = resolve; });
+  const saveStarted = new Promise((resolve) => { resolveSaveStarted = resolve; });
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      resolveSaveStarted();
+      await saveGate;
+      Object.assign(state.settings, patch);
+      vmContext.syncHubDraftFields();
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  els.hubUrlInput.value = 'https://draft-a.example';
+  els.secretInput.value = 'draft-secret';
+  els.deviceIdInput.value = 'draft-device';
+  await els.hubUrlInput.dispatch('input');
+  await els.secretInput.dispatch('input');
+  await els.deviceIdInput.dispatch('input');
+
+  const savePromise = els.saveSettingsButton.dispatch('click');
+  await saveStarted;
+  els.hubUrlInput.value = 'https://draft-b.example';
+  await els.hubUrlInput.dispatch('input');
+  releaseSave();
+  await savePromise;
+
+  assert.deepEqual(patches, [{
+    hubUrl: 'https://draft-a.example',
+    secret: 'draft-secret',
+    deviceId: 'draft-device'
+  }]);
+  assert.equal(els.hubUrlInput.value, 'https://draft-b.example');
+  assert.equal(els.secretInput.value, 'draft-secret');
+  assert.equal(els.deviceIdInput.value, 'draft-device');
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubUrlInput.value, 'https://draft-b.example');
+});
+
+test('Hub Save keeps an in-flight edit even when it returns to the persisted value', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  let releaseSave;
+  let resolveSaveStarted;
+  const saveGate = new Promise((resolve) => { releaseSave = resolve; });
+  const saveStarted = new Promise((resolve) => { resolveSaveStarted = resolve; });
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      resolveSaveStarted();
+      await saveGate;
+      Object.assign(state.settings, patch);
+      vmContext.syncHubDraftFields();
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  els.hubUrlInput.value = 'https://draft.example';
+  await els.hubUrlInput.dispatch('input');
+
+  const savePromise = els.saveSettingsButton.dispatch('click');
+  await saveStarted;
+  els.hubUrlInput.value = 'https://saved.example';
+  await els.hubUrlInput.dispatch('input');
+  releaseSave();
+  await savePromise;
+
+  assert.equal(els.hubUrlInput.value, 'https://saved.example');
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubUrlInput.value, 'https://saved.example');
+});
+
+test('Host Hub port draft survives settings rehydration and saves with Hub fields', async () => {
+  const classList = { toggle() {} };
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubModeOptions: { querySelectorAll: () => [] },
+    hubClientFields: { classList },
+    hubHostFields: { classList },
+    hubPortInput: fakeHubControl(),
+    hubSecretInput: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'host',
+      hubHostPort: 17321,
+      hubHostSecret: 'host-secret',
+      hubUrl: '',
+      secret: '',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      Object.assign(state.settings, patch);
+      vmContext.syncHubModeUi();
+      vmContext.syncHubDraftFields();
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubModeUi();
+  vmContext.syncHubDraftFields();
+
+  els.hubPortInput.value = '18000';
+  await els.hubPortInput.dispatch('input');
+  // Model the same renderer rehydration that follows any settings push.
+  vmContext.syncHubModeUi();
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubPortInput.value, '18000');
+
+  await els.saveSettingsButton.dispatch('click');
+  assert.deepEqual(patches, [{
+    hubUrl: '',
+    secret: '',
+    deviceId: 'saved-device',
+    hubHostPort: 18000
+  }]);
+  assert.equal(els.hubPortInput.value, '18000');
 });
 
 test('remote Hub build status is wired as a separate localized sync hint', () => {

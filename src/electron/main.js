@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, Notification, screen, session, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
 const {
@@ -21,7 +21,9 @@ const { appVersion } = require('../shared/appVersion');
 const { macWidgetRuntimeSupport } = require('../shared/macSystemRequirements');
 const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
+const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
+const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./claudeWebFetch');
 const { createElectronLimitsFetch } = require('./limitsFetch');
 const {
@@ -238,9 +240,12 @@ const {
   formatTrayText,
   isBarsTrayIconMode,
   pickUsageTrayIconId,
+  parseWindowsSystemUsesLightTheme,
   popoverBounds,
+  prepareTrayIconForPlatform,
   reconcileCodexAccountSelection,
   runTrayMenuAction,
+  watchSystemDarkUi,
   sortCodexAccountsForDisplay,
   shouldUseTemplateTrayIcon,
   trayShowsTitle
@@ -310,6 +315,22 @@ if (!app.isPackaged) loadDotEnv();
 
 const APP_NAME = 'Token Monitor';
 const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
+const WINDOWS_APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-win.png');
+
+// Electron's own documentation says a window given no icon falls back to the
+// executable's, and recommends ICO on Windows; electron-builder already
+// converts `win.icon` into the ICO embedded in that executable, which is the
+// icon built for this platform rather than one PNG scaled at runtime. So a
+// packaged window deliberately sets
+// nothing here: whatever it set could only override that, which is exactly what
+// naming the macOS artwork was doing to the taskbar button and Alt-Tab entry
+// (it carries the Dock's inset margin — see WINDOWS_ICON_PATH in tray.js). An
+// unpackaged run has no icon of ours inside electron.exe to inherit, so it names
+// the same full-bleed artwork the installer is built from.
+function appWindowIcon() {
+  if (process.platform !== 'win32') return { icon: APP_ICON_PATH };
+  return app.isPackaged ? {} : { icon: WINDOWS_APP_ICON_PATH };
+}
 
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
@@ -426,6 +447,8 @@ function defaultSettings() {
     periodMonthMode: 'month',
     themeColors: {},
     vendorColors: {},
+    interfaceFontFamily: '',
+    displayFontFamily: fontSettingsApi.DEFAULT_DISPLAY_FONT,
     floatingBubbleEnabled: false,
     floatingBubbleTrigger: 'click',
     floatingBubbleContent: 'icon',
@@ -2123,6 +2146,8 @@ function readSettings() {
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
+    merged.interfaceFontFamily = fontSettingsApi.normalizeFontFamily(merged.interfaceFontFamily);
+    merged.displayFontFamily = fontSettingsApi.normalizeFontFamily(merged.displayFontFamily);
     merged.tokenRateMode = normalizeTokenRateMode(merged.tokenRateMode);
     if (saved.serviceProviderDisplayOrder !== undefined) {
       merged.serviceProviderDisplayOrder = String(saved.serviceProviderDisplayOrder || '');
@@ -4313,6 +4338,75 @@ function settingsForRenderer() {
   };
 }
 
+// The tray sits in system-integrated UI (menubar / taskbar / panel), whose theme
+// is independent of the app's own: Windows lets the system be dark while apps
+// stay light, which is exactly the case a plain `shouldUseDarkColors` gets wrong.
+// That dedicated property only exists on darwin and win32, so elsewhere the app
+// theme is the closest signal available.
+function systemDarkTrayUi() {
+  try {
+    if (process.platform === 'darwin' || process.platform === 'win32') {
+      const systemIntegrated = nativeTheme.shouldUseDarkColorsForSystemIntegratedUI;
+      if (typeof systemIntegrated === 'boolean') return systemIntegrated;
+    }
+    return nativeTheme.shouldUseDarkColors === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+const WINDOWS_PERSONALIZE_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize';
+
+function readWindowsSystemDarkUi() {
+  return new Promise((resolve) => {
+    try {
+      require('node:child_process').execFile(
+        'reg',
+        ['query', WINDOWS_PERSONALIZE_KEY, '/v', 'SystemUsesLightTheme'],
+        { windowsHide: true, timeout: 5000 },
+        (error, stdout) => resolve(error ? null : parseWindowsSystemUsesLightTheme(stdout))
+      );
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+// The value the renderer last heard, so a settled reading can be told from a
+// repeat of the one we already published.
+let currentSystemDarkUi = null;
+
+function currentSystemDarkTrayUi() {
+  if (currentSystemDarkUi === null) currentSystemDarkUi = systemDarkTrayUi();
+  return currentSystemDarkUi;
+}
+
+function pushSystemUiThemeToRenderer(dark) {
+  const value = typeof dark === 'boolean' ? dark : currentSystemDarkTrayUi();
+  currentSystemDarkUi = value;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('theme:systemUi', { dark: value }); } catch (_) {}
+}
+
+// Windows cannot answer this at event time — see watchSystemDarkUi in tray.js
+// for what was measured. Everywhere else the event already carries the truth.
+let systemUiThemeRevision = 0;
+
+async function pushSystemUiThemeAfterChange() {
+  if (process.platform !== 'win32') {
+    pushSystemUiThemeToRenderer(systemDarkTrayUi());
+    return;
+  }
+  const revision = ++systemUiThemeRevision;
+  await watchSystemDarkUi({
+    read: readWindowsSystemDarkUi,
+    wait: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
+    isCurrent: () => revision === systemUiThemeRevision,
+    held: currentSystemDarkTrayUi(),
+    publish: (dark) => pushSystemUiThemeToRenderer(dark)
+  });
+}
+
 function pushSettingsToRenderer() {
   const payload = settingsForRenderer();
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -5507,7 +5601,7 @@ function createWindow(boundsOverride, options = {}) {
     resizable: !collapsedFloatingBubble,
     show: false,
     backgroundColor: '#00000000',
-    icon: APP_ICON_PATH,
+    ...appWindowIcon(),
     skipTaskbar: collapsedFloatingBubble || Boolean(settings?.trayMode),
     ...(collapsedFloatingBubble ? { fullscreenable: false, maximizable: false, minimizable: false } : {}),
     // Keeps a popover unmaximizable across rebuilds, which never re-run enterTrayMode().
@@ -5662,7 +5756,7 @@ function createDashboardWindow() {
     transparent: !(process.platform === 'win32' && glass),
     show: false,
     backgroundColor: '#00000000',
-    icon: APP_ICON_PATH,
+    ...appWindowIcon(),
     skipTaskbar: false,
     ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass ? { backgroundMaterial: 'acrylic' } : {}),
@@ -5757,6 +5851,10 @@ function rebuildWindow() {
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
+  // Switching the OS between light and dark repaints the taskbar underneath an
+  // icon we have already handed to the shell, so the renderer has to recompose
+  // it — nothing else in the app would notice the change.
+  nativeTheme.on('updated', () => { void pushSystemUiThemeAfterChange(); });
   const widgetRuntime = macWidgetRuntimeSupport({
     platform: process.platform,
     osRelease: process.platform === 'darwin' ? os.release() : ''
@@ -5939,6 +6037,12 @@ app.whenReady().then(() => {
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
       showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, false),
       compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
+      interfaceFontFamily: fontSettingsApi.normalizeFontFamily(
+        patch.interfaceFontFamily ?? settings.interfaceFontFamily
+      ),
+      displayFontFamily: fontSettingsApi.normalizeFontFamily(
+        patch.displayFontFamily ?? settings.displayFontFamily
+      ),
       tokenRateMode: normalizeTokenRateMode(patch.tokenRateMode ?? settings.tokenRateMode),
       floatingBubbleEnabled: parseBoolean(patch.floatingBubbleEnabled ?? settings.floatingBubbleEnabled, false),
       discordRpcEnabled: patch.discordRpcEnabled ?? settings.discordRpcEnabled ?? false,
@@ -6232,8 +6336,16 @@ app.whenReady().then(() => {
       const img = nativeImage.createFromDataURL(dataUrl);
       if (img.isEmpty()) continue;
       // Resize by height only; aspect ratio is preserved, so wide bar-style
-      // icons keep their width while square provider icons stay 20x20.
-      const sized = img.resize({ height: 20, quality: 'best' });
+      // icons keep their width while square provider icons stay square.
+      // Windows targets its own small-icon metric (16px x the display scale
+      // factor) rather than the macOS menubar height, so a single high-quality
+      // downscale of the 44px-tall renderer source stays crisp in the
+      // notification area instead of the old fixed 20px-for-all blur, and its
+      // square cell gets the bitmap trimmed to the pixels the renderer drew.
+      const sized = prepareTrayIconForPlatform(img, {
+        platform: process.platform,
+        scaleFactor: screen.getPrimaryDisplay().scaleFactor
+      });
       if (shouldUseTemplateTrayIcon(id, process.platform, settings?.showTrayProviderBadge)) sized.setTemplateImage(true);
       providerTrayIcons[id] = sized;
     }
@@ -6294,7 +6406,8 @@ app.whenReady().then(() => {
     homeDir: require('os').homedir(),
     sharedDataDir: sharedDataDir(),
     loginItemSupported: loginItemEnabledHere(),
-    loginItemOpenAtLogin: currentLoginItemState()
+    loginItemOpenAtLogin: currentLoginItemState(),
+    systemDarkUi: currentSystemDarkTrayUi()
   }));
   ipcMain.handle('diagnostics:generate', async () => {
     const report = await diagnosticReportGenerator.generate();
@@ -6314,63 +6427,29 @@ app.whenReady().then(() => {
       journalOmittedCount: report.journalOmittedCount
     };
   });
-  // Where each tracked tool's data is read from on THIS machine. The absolute
+  // Where each known tool's data is read from on THIS machine. The absolute
   // paths stay local by design — they carry the user's home directory and never
   // go on the wire — so the renderer asks the main process for them instead.
   //
   // Probe only the client whose detail panel is open. The renderer caches the
-  // result for the current health snapshot, avoiding both eager filesystem work
-  // and path flicker when a stats tick rebuilds the panel.
-  ipcMain.handle('usage:clientSources', (_event, clientId) => {
-    const client = String(clientId || '').trim().toLowerCase();
-    const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
-    if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return null;
-    try {
-      const seen = new Set();
-      const all = (visibleDiagnosticRoots(client)[client] || [])
-        .filter((root) => {
-          const key = `${root.id}\0${root.dir}`;
-          return !seen.has(key) && seen.add(key);
-        })
-        .map((root) => ({ id: root.id, dir: root.dir, exists: root.exists === true }));
-      const sources = all.slice(0, 32);
-      return { sources, omittedCount: all.length - sources.length };
-    } catch (_) {
-      return null;
-    }
+  // result for the current health snapshot, or for the current device/client
+  // pair when the tool is not tracked, avoiding eager filesystem work.
+  const clientSourceIpcHandlers = createClientSourceIpcHandlers({
+    knownClients: KNOWN_CLIENTS,
+    trackedClients: () => trackedClientSet(clientsCsvForSetting(settings?.clients)),
+    visibleDiagnosticRoots,
+    clientDiagnosticRoots,
+    showItemInFolder: (target) => shell.showItemInFolder(target),
+    openPath: (target) => shell.openPath(target),
+    canRunRescan: () => ownsUsageRuntime(),
+    rescanClient: (client) => refreshUsageClient(client, { forceSync: true }),
+    onRescanError: (error) => console.log(`[usage-runtime] rescan failed: ${error.message}`)
   });
-  // Reveals one of those paths. The renderer sends a client id, never a path:
-  // anything it could send would otherwise become an arbitrary filesystem open.
-  ipcMain.handle('usage:revealClientSource', async (_event, clientId) => {
-    const client = String(clientId || '').trim().toLowerCase();
-    const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
-    if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return false;
-    try {
-      const roots = clientDiagnosticRoots(client)[client] || [];
-      const target = roots.find((root) => root.exists);
-      if (!target) return false;
-      // An exact-file source would otherwise be handed to openPath, which opens
-      // the file in whatever app claims .db/.jsonl. Select it in its folder
-      // instead — the user asked where the data lives, not to open it.
-      if (target.sourcePath) {
-        shell.showItemInFolder(target.sourcePath);
-        return true;
-      }
-      return await shell.openPath(target.dir) === '';
-    } catch (_) {
-      return false;
-    }
-  });
-  ipcMain.handle('usage:rescanClient', async (_event, clientId) => {
-    const client = String(clientId || '').trim().toLowerCase();
-    if (!client || !ownsUsageRuntime()) return false;
-    try {
-      return await refreshUsageClient(client, { forceSync: true }) === true;
-    } catch (error) {
-      console.log(`[usage-runtime] rescan failed: ${error.message}`);
-      return false;
-    }
-  });
+  ipcMain.handle('usage:clientSources', (_event, clientId) => clientSourceIpcHandlers.clientSources(clientId));
+  // The renderer sends a client id, never a path: anything it could send would
+  // otherwise become an arbitrary filesystem open.
+  ipcMain.handle('usage:revealClientSource', (_event, clientId) => clientSourceIpcHandlers.revealClientSource(clientId));
+  ipcMain.handle('usage:rescanClient', (_event, clientId) => clientSourceIpcHandlers.rescanClient(clientId));
   ipcMain.handle('clipboard:write', (_event, text) => {
     clipboard.writeText(String(text || ''));
     return true;

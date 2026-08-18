@@ -17,11 +17,12 @@ test('homeHasData returns the client ids whose markers are present', () => {
   const present = new Set([
     `${home}\\.codex\\sessions`,
     `${home}\\.hermes`,
-    `${home}\\.local\\share\\opencode`
+    `${home}\\.local\\share\\opencode`,
+    `${home}\\.zcode\\cli\\db`
   ]);
   const existsSync = (p) => present.has(p);
   const ids = homeHasData(home, existsSync);
-  assert.deepEqual([...ids].sort(), ['codex', 'hermes', 'opencode']);
+  assert.deepEqual([...ids].sort(), ['codex', 'hermes', 'opencode', 'zcode']);
 });
 
 test('homeHasData maps an alternate-root marker to its client id', () => {
@@ -162,6 +163,7 @@ test('wslUsageHomes keeps a home whose only tracked-client data is pi, zed, kilo
   assert.deepEqual(homesFor('.dsh/sessions'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
   assert.deepEqual(homesFor('.local/share/mimocode/mimocode.db'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
   assert.deepEqual(homesFor('.zcode/projects'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.zcode/cli/db'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
   assert.deepEqual(homesFor('.kiro/sessions'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
   assert.deepEqual(homesFor('.local/share/kiro-cli/data.sqlite3'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
   assert.deepEqual(homesFor('.config/Kiro/User/globalStorage/kiro.kiroagent'), ['\\\\wsl$\\Ubuntu\\home\\alice']);

@@ -1,0 +1,52 @@
+name: Vendored tokscale
+
+# release.yml only runs on `v*` tag push, so regular PR/push CI never
+# exercises install-vendored-tokscale.js / verify-vendored-tokscale.js on any
+# platform before a real release. This gate runs just those two steps (no
+# electron-builder, no signing) on the same 4 targets release.yml packages,
+# so a broken asset, checksum, or DSH regression fails fast on a PR instead
+# of at release time.
+
+on:
+  push:
+    branches: [main]
+    paths: &vendor_tokscale_paths
+      - 'vendor/tokscale.json'
+      - 'scripts/install-vendored-tokscale.js'
+      - 'scripts/verify-vendored-tokscale.js'
+      - 'scripts/vendoredTokscale.js'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/vendor-tokscale.yml'
+      - 'package.json'
+      - 'package-lock.json'
+  pull_request:
+    paths: *vendor_tokscale_paths
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          - os: macos-15-intel
+            arch: x64
+          - os: windows-latest
+            arch: x64
+          - os: ubuntu-latest
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Install vendored tokscale (DSH bridge)
+        run: node scripts/install-vendored-tokscale.js
+      - name: Verify vendored tokscale (DSH bridge)
+        run: node scripts/verify-vendored-tokscale.js

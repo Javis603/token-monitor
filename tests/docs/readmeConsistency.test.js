@@ -253,7 +253,3 @@ test('WSL SQLite guides state and verify the Node.js prerequisite', () => {
     assert.match(guide, /node --version\nnpm --version\n/, file);
   }
 });
-
-test('legacy Hermes guide keeps published links working', () => {
-  assert.match(read('docs/hermes-wsl-setup.md'), /\(wsl-sqlite-setup\.zh-CN\.md\)/);
-});

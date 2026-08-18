@@ -6,6 +6,7 @@ const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
+const fontSettingsApi = window.TokenMonitorFontSettings;
 const wslStatusPresentationApi = window.TokenMonitorWslStatusPresentation;
 const statsRenderSchedulerApi = window.TokenMonitorStatsRenderScheduler;
 const tokenRateApi = window.TokenMonitorTokenRate;
@@ -305,7 +306,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
@@ -459,6 +460,16 @@ Object.assign(els, {
   themeAdvancedGroup: document.getElementById('themeAdvancedGroup'),
   themeAdvancedToggle: document.getElementById('themeAdvancedToggle'),
   themeAdvancedDetails: document.getElementById('themeAdvancedDetails'),
+  interfaceFontPreset: document.getElementById('interfaceFontPreset'),
+  interfaceFontInput: document.getElementById('interfaceFontInput'),
+  interfaceFontCustomRow: document.getElementById('interfaceFontCustomRow'),
+  interfaceFontPreview: document.getElementById('interfaceFontPreview'),
+  displayFontPreset: document.getElementById('displayFontPreset'),
+  displayFontInput: document.getElementById('displayFontInput'),
+  displayFontCustomRow: document.getElementById('displayFontCustomRow'),
+  displayFontPreview: document.getElementById('displayFontPreview'),
+  resetInterfaceFontButton: document.getElementById('resetInterfaceFontButton'),
+  resetDisplayFontButton: document.getElementById('resetDisplayFontButton'),
   themeVendorGroup: document.getElementById('themeVendorGroup'),
   themeVendorToggle: document.getElementById('themeVendorToggle'),
   themeVendorDetails: document.getElementById('themeVendorDetails'),
@@ -2088,11 +2099,17 @@ function attributionComponent(period, field, key) {
   );
 }
 
-function toolRowsForPeriod(period) {
-  const clientRows = usageAttributionRowsApi.attributionRows(period?.clients, period?.clientCosts, {
+function periodAttributionRows(period, values, costs) {
+  const rows = usageAttributionRowsApi.attributionRows(values, costs, {
     totalValue: period?.totalTokens,
     totalCost: period?.costUsd
-  }).map(({ key: client, value, cost }) => ({ key: client, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client) }));
+  });
+  return usageAttributionRowsApi.visibleAttributionRows(rows, formatCost);
+}
+
+function toolRowsForPeriod(period) {
+  const clientRows = periodAttributionRows(period, period?.clients, period?.clientCosts)
+    .map(({ key: client, value, cost }) => ({ key: client, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client) }));
   if (clientRows.length > 0) {
     const usageSortedRows = clientRows.sort((a, b) => b.value - a.value);
     return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, state.settings?.clientDisplayOrder, state.settings?.hiddenClients, KNOWN_CLIENTS, state.settings?.pinnedClients);
@@ -2102,10 +2119,7 @@ function toolRowsForPeriod(period) {
 }
 
 function modelRowsForPeriod(period) {
-  const modelRows = usageAttributionRowsApi.attributionRows(period?.models, period?.modelCosts, {
-    totalValue: period?.totalTokens,
-    totalCost: period?.costUsd
-  }).map(({ key: model, value, cost }) => ({
+  const modelRows = periodAttributionRows(period, period?.models, period?.modelCosts).map(({ key: model, value, cost }) => ({
     key: model,
     name: model === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : model,
     value,
@@ -6370,10 +6384,7 @@ function renderHomeModelModule(period) {
 }
 
 function homeToolSourceRows(period) {
-  return usageAttributionRowsApi.attributionRows(period?.clients, period?.clientCosts, {
-    totalValue: period?.totalTokens,
-    totalCost: period?.costUsd
-  }).map(({ key: client, value }) => ({
+  return periodAttributionRows(period, period?.clients, period?.clientCosts).map(({ key: client, value }) => ({
     key: client,
     name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client,
     value: Number(value || 0),
@@ -7325,6 +7336,14 @@ function applyControlLayout(swapSettingsAndRefresh) {
   }
 }
 
+function applyFontSettings(settings) {
+  const source = { ...(state.settings || {}), ...(settings || {}) };
+  const root = document.documentElement.style;
+  const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(source);
+  root.setProperty('--ui-font', interfaceFont);
+  root.setProperty('--display-font', displayFont);
+}
+
 function applyAppearanceSettings(settings) {
   const opacity = glassRenderingApi.renderedGlassOpacity(settings, {
     platform: state.appInfo?.platform,
@@ -7353,6 +7372,7 @@ function applyAppearanceSettings(settings) {
     els.windowsBackdropNote.classList.toggle('hidden', !windowsGlass.showAccentNote);
   }
   applyReduceMotionPreference(settings?.reduceMotion);
+  applyFontSettings(settings);
   // Only full settings objects carry themeColors; glass/zoom preview patches
   // omit it, so we must not wipe theme overrides mid-slider-drag.
   if (settings && 'themeColors' in settings) applyThemeColors(settings.themeColors);
@@ -7982,6 +8002,94 @@ function appearancePatchFromControls() {
   };
 }
 
+function fontControlsFor(role) {
+  return role === 'display'
+    ? { preset: els.displayFontPreset, input: els.displayFontInput, customRow: els.displayFontCustomRow }
+    : { preset: els.interfaceFontPreset, input: els.interfaceFontInput, customRow: els.interfaceFontCustomRow };
+}
+
+function syncFontCustomRow(role) {
+  const controls = fontControlsFor(role);
+  const isCustom = controls.preset?.value === 'custom';
+  controls.customRow?.classList.toggle('hidden', !isCustom);
+  if (controls.input) controls.input.disabled = !isCustom;
+  updateFontPreview(role);
+}
+
+function fontFamilyFromControls(role) {
+  const controls = fontControlsFor(role);
+  return fontSettingsApi.fontFamilyForPreset(controls.preset?.value || (role === 'display' ? 'follow' : 'app'), controls.input?.value, role);
+}
+
+function fontPreviewForControls(role) {
+  const resolved = fontSettingsApi.resolveEffectiveFontSettings({
+    interfaceFontFamily: fontFamilyFromControls('interface'),
+    displayFontFamily: fontFamilyFromControls('display')
+  });
+  return role === 'display' ? resolved.displayFont : resolved.interfaceFont;
+}
+
+function updateFontPreview(role) {
+  const preview = role === 'display' ? els.displayFontPreview : els.interfaceFontPreview;
+  if (preview) preview.style.fontFamily = fontPreviewForControls(role);
+}
+
+function fontPatchFromControls() {
+  return {
+    interfaceFontFamily: fontFamilyFromControls('interface'),
+    displayFontFamily: fontFamilyFromControls('display')
+  };
+}
+
+function previewFontSettings() {
+  syncFontCustomRow('interface');
+  syncFontCustomRow('display');
+  applyFontSettings(fontPatchFromControls());
+}
+
+async function saveFontSettingsFromControls() {
+  previewFontSettings();
+  await saveSettings(fontPatchFromControls());
+}
+
+function handleFontPresetChange(role) {
+  syncFontCustomRow(role);
+  const controls = fontControlsFor(role);
+  previewFontSettings();
+  if (controls.preset?.value === 'custom') {
+    controls.input?.focus();
+    if (!fontSettingsApi.normalizeFontFamily(controls.input?.value)) return;
+  }
+  void saveFontSettingsFromControls();
+}
+
+async function resetInterfaceFont() {
+  if (els.interfaceFontPreset) els.interfaceFontPreset.value = 'app';
+  if (els.interfaceFontInput) els.interfaceFontInput.value = '';
+  syncFontCustomRow('interface');
+  previewFontSettings();
+  await saveSettings({ interfaceFontFamily: '' });
+}
+
+async function resetDisplayFont() {
+  if (els.displayFontPreset) els.displayFontPreset.value = 'app';
+  if (els.displayFontInput) els.displayFontInput.value = '';
+  syncFontCustomRow('display');
+  previewFontSettings();
+  await saveSettings({ displayFontFamily: fontSettingsApi.DEFAULT_DISPLAY_FONT });
+}
+
+function syncFontSettingsControls() {
+  for (const [role, settingKey] of [['interface', 'interfaceFontFamily'], ['display', 'displayFontFamily']]) {
+    const controls = fontControlsFor(role);
+    const value = fontSettingsApi.normalizeFontFamily(state.settings?.[settingKey]);
+    const preset = fontSettingsApi.presetForFontFamily(value, role);
+    if (controls.preset) controls.preset.value = preset;
+    if (controls.input) controls.input.value = preset === 'custom' ? value : '';
+    syncFontCustomRow(role);
+  }
+}
+
 function syncSliderRow(input) {
   if (!input) return;
   const valueEl = input.closest('.settings-slider-item')?.querySelector('.slider-value');
@@ -8013,7 +8121,6 @@ function syncHubModeUi() {
   els.hubClientFields.classList.toggle('hidden', mode !== 'client');
   els.hubHostFields.classList.toggle('hidden', mode !== 'host');
   if (mode === 'host') {
-    els.hubPortInput.value = String(state.settings.hubHostPort || 17321);
     els.hubSecretInput.value = state.settings.hubHostSecret || '';
     renderHubStatus();
   }
@@ -8214,6 +8321,55 @@ function renderSessionUsageArchiveStatus() {
     : t('settings.collection.sessionArchiveEmpty');
 }
 
+const HUB_DRAFT_FIELDS = [
+  ['hubUrl', 'hubUrlInput'],
+  ['secret', 'secretInput'],
+  ['deviceId', 'deviceIdInput'],
+  ['hubHostPort', 'hubPortInput']
+];
+const hubDraftDirty = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [field, false]));
+const hubDraftRevisions = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [field, 0]));
+
+function markHubDraftDirty(field) {
+  const inputId = HUB_DRAFT_FIELDS.find(([name]) => name === field)?.[1];
+  const input = inputId ? els[inputId] : null;
+  if (!input) return;
+  hubDraftRevisions[field] += 1;
+  hubDraftDirty[field] = true;
+}
+
+function syncHubDraftFields() {
+  for (const [field, inputId] of HUB_DRAFT_FIELDS) {
+    const input = els[inputId];
+    if (!input || hubDraftDirty[field]) continue;
+    input.value = field === 'hubHostPort'
+      ? String(state.settings?.hubHostPort || 17321)
+      : state.settings?.[field] || '';
+  }
+}
+
+function normalizeHubDraftValue(field, value) {
+  if (field === 'hubHostPort') return String(Number(value) || 17321);
+  if (field === 'secret') return String(value ?? '');
+  return String(value ?? '').trim();
+}
+
+function reconcileHubDraftsAfterSave(submitted, submittedRevisions) {
+  for (const [field, inputId] of HUB_DRAFT_FIELDS) {
+    const input = els[inputId];
+    if (!input) continue;
+    if (!Object.prototype.hasOwnProperty.call(submitted, field)) continue;
+    const current = normalizeHubDraftValue(field, input.value);
+    if (
+      hubDraftRevisions[field] === submittedRevisions[field]
+      && current === submitted[field]
+    ) {
+      hubDraftDirty[field] = false;
+    }
+  }
+  syncHubDraftFields();
+}
+
 function syncSettingsForm() {
   applySettingsTranslations();
   applyInitialBreakdownPreference();
@@ -8225,9 +8381,7 @@ function syncSettingsForm() {
   }
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
   syncCurrencyRateControls();
-  els.hubUrlInput.value = state.settings.hubUrl || '';
-  els.secretInput.value = state.settings.secret || '';
-  els.deviceIdInput.value = state.settings.deviceId || '';
+  syncHubDraftFields();
   els.limitsRefreshInput.value = state.settings.limitsRefreshMode === 'adaptive'
     ? 'adaptive'
     : String(LIMIT_REFRESH_OPTIONS.includes(Number(state.settings.limitsRefreshMs)) ? state.settings.limitsRefreshMs : 300000);
@@ -8287,6 +8441,7 @@ function syncSettingsForm() {
   if (els.compactTokenUnitsInput) {
     els.compactTokenUnitsInput.value = state.settings.compactTokenUnits === 'localized' ? 'localized' : 'western';
   }
+  syncFontSettingsControls();
   els.compactTokenUnitsRow?.classList.toggle(
     'hidden',
     !supportsLocalizedCompactTokenUnits(currentLocale())
@@ -9257,10 +9412,10 @@ function localClientHealth() {
   return localDevice()?.clientHealth || null;
 }
 
-// Single entry point for the tracked-tool detail accordion, mirroring the limits
+// Single entry point for the tool detail accordion, mirroring the limits
 // list: the drag gesture collapses and restores it too, so the class and aria
 // bookkeeping cannot live inside the disclosure's own click handler.
-function setClientHealthExpanded(clientId) {
+function setClientHealthExpanded(clientId, options = {}) {
   state.clientHealthExpanded = clientId || '';
   const rows = els.clientDisplayList?.querySelectorAll('.tool-preference-row[data-client]') || [];
   for (const row of rows) {
@@ -9273,7 +9428,9 @@ function setClientHealthExpanded(clientId) {
     // rebuilt every stats tick — to render nothing. A panel already filled is
     // left alone so a collapse still has something to animate.
     if (open) {
-      loadClientSources(row.dataset.client);
+      const force = options.refreshPlaceholder === true
+        && !clientHealthPresentationApi.hasClientHealth(localClientHealth(), row.dataset.client);
+      loadClientSources(row.dataset.client, { force });
       if (container.childElementCount === 0) {
         fillClientHealthPanel(container, row.dataset.client);
       }
@@ -9301,11 +9458,19 @@ function clientPeriodUsage(clientId) {
 // per snapshot without spending IPC on progressive previews that carry the old
 // envelope.
 function clientSourcesIdentity(clientId) {
-  return {
-    deviceId: String(localDevice()?.deviceId || ''),
-    clientId: String(clientId || ''),
-    observedAt: String(localClientHealth()?.observedAt || '')
-  };
+  const id = String(clientId || '');
+  const health = localClientHealth();
+  const tracked = enabledClientSet().has(id);
+  return clientSourceCacheApi.clientSourceIdentity({
+    deviceId: localDevice()?.deviceId,
+    clientId: id,
+    observedAt: health?.observedAt,
+    tracked,
+    // The health envelope timestamp is shared by every client. Only use it
+    // when this client has its own health entry; otherwise unrelated client
+    // updates must not invalidate this client's source probe cache.
+    hasObservation: clientHealthPresentationApi.hasClientHealth(health, id)
+  });
 }
 
 function exactLocalClientSources(clientId) {
@@ -9370,10 +9535,14 @@ function refillOpenClientHealthPanel() {
 // Everything the panel draws beyond the health record itself: the numbers the
 // app already renders elsewhere, and this machine's own paths.
 function clientHealthDetailFor(clientId) {
-  return clientHealthPresentationApi.clientHealthDetail(localClientHealth(), clientId, {
+  const options = {
     usage: clientPeriodUsage(clientId),
-    sources: localClientSources(clientId)
-  });
+    sources: localClientSources(clientId),
+    collectionState: enabledClientSet().has(clientId) ? 'waiting' : 'notTracked'
+  };
+  const detail = clientHealthPresentationApi.clientHealthDetail(localClientHealth(), clientId, options);
+  if (detail) return detail;
+  return clientHealthPresentationApi.clientHealthPlaceholderDetail(options);
 }
 
 function sameRenderedNode(current, next) {
@@ -9565,7 +9734,9 @@ function clientHealthActions(clientId) {
   // The detail is already bound to the exact local device. Renderer mode is a
   // transport state (`local`/`sync`), not topology, so host and client collectors
   // expose the same targeted capability through preload.
-  if (localDevice() && typeof window.tokenMonitor?.rescanClient === 'function') {
+  if (enabledClientSet().has(clientId)
+    && localDevice()
+    && typeof window.tokenMonitor?.rescanClient === 'function') {
     const rescanState = state.clientRescans.snapshot(clientId);
     const feedback = document.createElement('span');
     feedback.className = 'tool-health-action-feedback';
@@ -9669,20 +9840,20 @@ function renderWslPanel() {
       row.append(name, tag);
       els.wslPanel.append(row);
     }
+  }
 
-    if (wslStatusPresentationApi.sqliteHelpClients(status).length > 0) {
-      const help = document.createElement('p');
-      help.className = 'settings-note wsl-panel-help';
-      const message = document.createElement('span');
-      message.textContent = t('settings.collection.wslPanel.sqliteHelp');
-      const guide = document.createElement('button');
-      guide.type = 'button';
-      guide.className = 'inline-link';
-      guide.textContent = t('settings.collection.wslPanel.setupGuide');
-      guide.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL));
-      help.append(message, ' ', guide);
-      els.wslPanel.append(help);
-    }
+  if (wslStatusPresentationApi.shouldShowSqliteHelp(status)) {
+    const help = document.createElement('p');
+    help.className = 'settings-note wsl-panel-help';
+    const message = document.createElement('span');
+    message.textContent = t('settings.collection.wslPanel.sqliteHelp');
+    const guide = document.createElement('button');
+    guide.type = 'button';
+    guide.className = 'inline-link';
+    guide.textContent = t('settings.collection.wslPanel.setupGuide');
+    guide.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL));
+    help.append(message, ' ', guide);
+    els.wslPanel.append(help);
   }
 }
 
@@ -9862,9 +10033,9 @@ function renderToolPreferencesNow() {
     const actions = document.createElement('div');
     actions.className = 'tool-preference-actions';
     actions.append(visibility, pin);
-    // A device whose agent predates the health field gets no chevron rather than
-    // one that opens onto an empty panel.
-    const detail = clientHealthPresentationApi.clientHealthDetail(health, id);
+    // Tracked tools use the health snapshot; untracked tools get an on-demand
+    // source view so every row keeps the same disclosure affordance.
+    const detail = clientHealthDetailFor(id);
     if (detail) {
       const expanded = state.clientHealthExpanded === id;
       row.classList.toggle('expanded', expanded);
@@ -9887,7 +10058,10 @@ function renderToolPreferencesNow() {
         loadClientSources(id);
         panel.append(clientHealthPanel(clientHealthDetailFor(id) || detail, id));
       }
-      main.addEventListener('click', () => setClientHealthExpanded(state.clientHealthExpanded === id ? '' : id));
+      main.addEventListener('click', () => {
+        const open = state.clientHealthExpanded !== id;
+        setClientHealthExpanded(open ? id : '', { refreshPlaceholder: open });
+      });
       // Last of the row's controls, where the eye and the pin already are —
       // the label stays plain text, exactly as it reads without this feature.
       actions.append(main);
@@ -10642,7 +10816,26 @@ window.addEventListener('blur', () => {
 });
 
 async function init() {
+  // Subscribed before the app-info round trip, not after: a theme flipped while
+  // that call is in flight would otherwise be missed until the next flip. The
+  // seeded value then only fills in when no push has already answered.
+  let systemUiThemeSeeded = false;
+  const applySystemUiTheme = (dark) => {
+    systemUiThemeSeeded = true;
+    if (dark === state.systemDarkUi) return;
+    state.systemDarkUi = dark;
+    // Two caches carry baked-in ink and both go stale here: the generated bitmap
+    // for the current mode, and the provider bitmaps main holds for the usage
+    // modes. Repainting only the first leaves a black provider icon sitting on a
+    // taskbar that just turned dark.
+    void maybeUpdateBarsIcon();
+    void deliverTrayProviderIcons();
+  };
+  window.tokenMonitor.onSystemUiThemePush?.((payload) => applySystemUiTheme(payload?.dark === true));
   try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
+  // Seeding assigns directly: the rest of init delivers both icon sets anyway,
+  // and settings have not loaded yet, so repainting from here would only churn.
+  if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
   applyEffectiveCurrencyRates();
@@ -10810,15 +11003,22 @@ els.settingsButton.addEventListener('click', (event) => {
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
 });
 els.saveSettingsButton.addEventListener('click', async () => {
-  const patch = {
+  const submittedHubFields = {
     hubUrl: els.hubUrlInput.value.trim(),
     secret: els.secretInput.value,
     deviceId: els.deviceIdInput.value.trim()
   };
+  const patch = { ...submittedHubFields };
   if (state.settings.hubMode === 'host') {
-    patch.hubHostPort = Number(els.hubPortInput.value) || 17321;
+    const hubHostPort = Number(els.hubPortInput.value) || 17321;
+    submittedHubFields.hubHostPort = String(hubHostPort);
+    patch.hubHostPort = hubHostPort;
   }
+  const submittedHubRevisions = Object.fromEntries(
+    Object.keys(submittedHubFields).map((field) => [field, hubDraftRevisions[field]])
+  );
   await saveSettings(patch);
+  reconcileHubDraftsAfterSave(submittedHubFields, submittedHubRevisions);
   await refreshHubInfo();
   void refreshHubBuildStatus();
   await refreshStats();
@@ -10907,6 +11107,7 @@ els.secretPasteButton?.addEventListener('click', async () => {
     const text = await navigator.clipboard.readText();
     if (text) {
       els.secretInput.value = text.trim();
+      markHubDraftDirty('secret');
     }
   } catch (_) {}
 });
@@ -10982,6 +11183,9 @@ for (const input of els.showLimitUsedInputs || []) {
   input.addEventListener('change', async () => {
     if (input.checked) await saveSettings({ showLimitUsed: input.value === 'used' });
   });
+}
+for (const [field, inputId] of HUB_DRAFT_FIELDS) {
+  els[inputId]?.addEventListener('input', () => markHubDraftDirty(field));
 }
 els.syncUploadIntervalInput?.addEventListener('change', async () => {
   await saveSettings({ syncUploadIntervalMs: Number(els.syncUploadIntervalInput.value) });
@@ -11063,6 +11267,14 @@ els.blurInput.addEventListener('input', applyAppearanceFromControls);
 els.zoomInput.addEventListener('input', applyAppearanceFromControls);
 els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}));
 els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
+els.interfaceFontPreset?.addEventListener('change', () => handleFontPresetChange('interface'));
+els.displayFontPreset?.addEventListener('change', () => handleFontPresetChange('display'));
+els.interfaceFontInput?.addEventListener('input', previewFontSettings);
+els.displayFontInput?.addEventListener('input', previewFontSettings);
+els.interfaceFontInput?.addEventListener('change', saveFontSettingsFromControls);
+els.displayFontInput?.addEventListener('change', saveFontSettingsFromControls);
+els.resetInterfaceFontButton?.addEventListener('click', () => resetInterfaceFont());
+els.resetDisplayFontButton?.addEventListener('click', () => resetDisplayFont());
 els.applyThemeCodeButton?.addEventListener('click', () => { void pasteAndApplyThemeCode(); });
 els.copyThemeCodeButton?.addEventListener('click', () => { void copyCurrentThemeCode(); });
 els.themeCodeInput?.addEventListener('keydown', (event) => {
@@ -11492,8 +11704,15 @@ function providerImageOpticalSample(image) {
   ctx.drawImage(image, 0, 0, sampleSize, sampleSize);
 
   let bounds = { x: 0, y: 0, width: sampleSize, height: sampleSize };
+  // Whether the mark is drawn in one flat ink, i.e. authored `fill="currentColor"`
+  // and meant to be re-inked, as opposed to brand artwork that must be left alone.
+  // The rule itself lives in isFlatInkPixels so it can be tested against pixels
+  // directly; pixels we cannot read back (a future non-local image) leave it
+  // false, which means untinted.
+  let flatInk = false;
   try {
     const pixels = ctx.getImageData(0, 0, sampleSize, sampleSize).data;
+    flatInk = window.TokenMonitorTrayProviderIcons.isFlatInkPixels(pixels);
     let minX = sampleSize;
     let minY = sampleSize;
     let maxX = -1;
@@ -11519,18 +11738,18 @@ function providerImageOpticalSample(image) {
     // Keep the original frame if a future non-local image cannot be inspected.
   }
 
-  const sample = { canvas, bounds };
+  const sample = { canvas, bounds, flatInk };
   trayProviderImageOpticalSamples.set(image, sample);
   return sample;
 }
 
-function paintProviderImage(ctx, image, x, y, size, templateColor = '') {
+function paintProviderImage(ctx, image, x, y, size, templateColor = '', optical = {}) {
   const {
     trayProviderOpticalLayout,
     trayProviderOpticalRatio
   } = window.TokenMonitorTrayProviderIcons;
   const sample = providerImageOpticalSample(image);
-  const opticalRatio = trayProviderOpticalRatio(trayProviderImageIds.get(image));
+  const opticalRatio = trayProviderOpticalRatio(trayProviderImageIds.get(image), optical);
   const layout = trayProviderOpticalLayout(sample.bounds, size, opticalRatio);
   const maskSize = Math.max(1, Math.round(size));
   const mask = document.createElement('canvas');
@@ -11556,16 +11775,31 @@ function paintProviderImage(ctx, image, x, y, size, templateColor = '') {
   ctx.drawImage(mask, x, y, size, size);
 }
 
-function drawProviderImage(ctx, image, x, y, size, contrastHalo = false, templateColor = '') {
+// Which ink a provider mark is drawn in. An explicit colour always wins — the
+// menubar previews and the floating bubble pass their own, and the bubble
+// deliberately passes none to keep the artwork in colour. `trayInk` is set only
+// by the two paths that hand a bitmap to the system tray, where a monochrome
+// mark has to be re-inked for a dark taskbar (see trayProviderGlyphInk).
+function trayGlyphInk(options, image) {
+  if (options?.templateIconColor) return options.templateIconColor;
+  if (options?.trayInk !== true || !image) return '';
+  return window.TokenMonitorTrayText.trayProviderGlyphInk(
+    state.appInfo?.platform,
+    state.systemDarkUi,
+    providerImageOpticalSample(image).flatInk
+  );
+}
+
+function drawProviderImage(ctx, image, x, y, size, contrastHalo = false, templateColor = '', optical = {}) {
   if (contrastHalo) {
     const lightSurface = themePresetsApi.isLightHex(resolvedThemeColor('bg'));
     ctx.save();
     ctx.shadowColor = lightSurface ? 'rgba(0, 0, 0, 0.58)' : 'rgba(255, 255, 255, 0.82)';
     ctx.shadowBlur = Math.max(2, Math.round(size * 0.1));
-    paintProviderImage(ctx, image, x, y, size, templateColor);
+    paintProviderImage(ctx, image, x, y, size, templateColor, optical);
     ctx.restore();
   }
-  paintProviderImage(ctx, image, x, y, size, templateColor);
+  paintProviderImage(ctx, image, x, y, size, templateColor, optical);
 }
 
 function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors = {}, options = {}) {
@@ -11592,7 +11826,7 @@ function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors =
       layout.iconY,
       layout.iconSize,
       options.providerContrastHalo === true,
-      options.templateIconColor || ''
+      trayGlyphInk(options, providerImage)
     );
   }
 
@@ -11728,7 +11962,7 @@ function renderLimitSessionsIcon(stats, height = 44, configOrder, colors = {}, o
     if (entry.image) {
       drawProviderImage(ctx, entry.image, x, layout.iconY, iconSize,
         options.providerContrastHalo === true,
-        options.templateIconColor || ''
+        trayGlyphInk(options, entry.image)
       );
       x += iconSize + gap;
     }
@@ -11916,7 +12150,7 @@ function drawCustomTrayProviderImage(ctx, img, provider, x, y, size, options = {
     y + inset,
     imageSize,
     options.providerContrastHalo === true,
-    options.templateIconColor || ''
+    trayGlyphInk(options, img)
   );
   if (showBadge) {
     drawCustomTrayProviderBadge(
@@ -12183,7 +12417,11 @@ async function maybeUpdateBarsIcon(options = {}) {
   const mode = state.settings?.trayContent;
   if (!window.TokenMonitorTrayText.isGeneratedTrayIconMode(mode)) return;
   if (!window.tokenMonitor.setTrayIcons) return;
-  const dataUrl = trayDataUrlForMode(mode, 44);
+  // Ink follows the surface the shell will draw this on, not the app's own theme
+  // (see trayGeneratedIconColors) — on a dark taskbar the historical black made
+  // the icon invisible.
+  const colors = window.TokenMonitorTrayText.trayGeneratedIconColors(state.appInfo?.platform, state.systemDarkUi);
+  const dataUrl = trayDataUrlForMode(mode, 44, colors, { trayInk: true });
   try { await window.tokenMonitor.setTrayIcons({ [mode]: dataUrl || null }); } catch (_) {}
 }
 
@@ -12507,11 +12745,15 @@ function providerImageToPngDataUrl(img, size, showBadge = false, options = {}) {
   const ctx = canvas.getContext('2d');
   const imageInset = showBadge ? Math.max(1, Math.round(layout.iconSize * 0.07)) : 0;
   const imageSize = layout.iconSize - imageInset * 2;
+  // Only the tray delivery marks itself standalone: there the mark is the whole
+  // icon and Windows expects it to fill its cell. The composer's provider picker
+  // renders previews through here too and keeps the composed optical inset.
+  const optical = { standalone: options.standalone === true, platform: state.appInfo?.platform };
   if (showBadge) {
     ctx.save();
     ctx.shadowColor = 'rgba(255, 255, 255, 0.95)';
     ctx.shadowBlur = Math.max(2, Math.round(layout.iconSize * 0.1));
-    paintProviderImage(ctx, img, imageInset, imageInset, imageSize);
+    paintProviderImage(ctx, img, imageInset, imageInset, imageSize, '', optical);
     ctx.restore();
   }
   drawProviderImage(
@@ -12521,7 +12763,8 @@ function providerImageToPngDataUrl(img, size, showBadge = false, options = {}) {
     imageInset,
     imageSize,
     false,
-    showBadge ? '' : options.templateColor || ''
+    trayGlyphInk({ templateIconColor: options.templateColor, trayInk: options.trayInk }, img),
+    optical
   );
 
   if (!showBadge) return canvas.toDataURL('image/png');
@@ -12565,7 +12808,7 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
       const img = await loadImage(path);
       trayProviderImages[id] = img;
       trayProviderImageIds.set(img, id);
-      icons[id] = providerImageToPngDataUrl(img, 44, showBadge);
+      icons[id] = providerImageToPngDataUrl(img, 44, showBadge, { trayInk: true, standalone: true });
     } catch (_) { /* skip missing */ }
   }
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;

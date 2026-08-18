@@ -49,6 +49,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     ipcRenderer.on('settings:push', listener);
     return () => ipcRenderer.removeListener('settings:push', listener);
   },
+  onSystemUiThemePush: (callback) => {
+    const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
+    ipcRenderer.on('theme:systemUi', listener);
+    return () => ipcRenderer.removeListener('theme:systemUi', listener);
+  },
   onOpenSettings: (callback) => {
     const listener = () => { try { callback(); } catch (_) {} };
     ipcRenderer.on('settings:open', listener);

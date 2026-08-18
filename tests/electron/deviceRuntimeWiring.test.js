@@ -22,10 +22,11 @@ function deferred() {
 
 test('targeted rescans stay strict while Cursor credential refresh is best effort', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  assert.match(main, /if \(!client \|\| !ownsUsageRuntime\(\)\) return false/);
-  assert.match(main, /return await refreshUsageClient\(client, \{ forceSync: true \}\) === true/);
+  const clientSourceIpc = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'clientSourceIpc.js'), 'utf8');
+  assert.match(clientSourceIpc, /if \(!canRescanClient\(client\) \|\| !canRunRescan\(\)\) return false/);
+  assert.match(main, /rescanClient: \(client\) => refreshUsageClient\(client, \{ forceSync: true \}\)/);
   assert.match(
-    main,
+    clientSourceIpc,
     /const key = `\$\{root\.id\}\\0\$\{root\.dir\}`;[\s\S]*!seen\.has\(key\) && seen\.add\(key\)/
   );
   // Login and logout must both request a refresh; future credential actions may

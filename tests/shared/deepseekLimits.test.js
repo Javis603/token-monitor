@@ -196,3 +196,25 @@ test('fetchDeepSeekLimits exposes the balance as a credits window', async () => 
   assert.equal(provider.balance.amount, 4);
   assert.equal(provider.balance.currency, 'CNY');
 });
+
+// fetchJson's abort timer has to outlive the body read. A head-then-stall response is
+// otherwise bounded only by the outer probe deadline, two orders of magnitude later.
+test('fetchDeepSeekLimits bounds a body that stalls after the headers', { timeout: 5000 }, async () => {
+  const r = await fetchDeepSeekLimits({}, {
+    env: { DEEPSEEK_API_KEY: 'sk-test' },
+    now: () => Date.parse('2026-06-25T00:00:00.000Z'),
+    fetchTimeoutMs: 10,
+    fetch: async (_url, init) => ({
+      ok: true,
+      status: 200,
+      json: () => new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      })
+    })
+  });
+  assert.equal(r.status, 'unavailable');
+});

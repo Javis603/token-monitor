@@ -235,3 +235,28 @@ test('fetchCopilotLimits surfaces unauthorized responses', async () => {
   );
   assert.equal(provider.status, 'unauthorized');
 });
+
+// The fetch timeout has to stay armed while the body is read, otherwise a response whose
+// head arrives and whose body never does is unbounded by it.
+test('fetchCopilotLimits bounds a body that stalls after the headers', { timeout: 5000 }, async () => {
+  const provider = await fetchCopilotLimits(
+    { copilotApiToken: 'gho-token' },
+    {
+      env: {},
+      now: () => Date.parse('2026-06-25T00:00:00.000Z'),
+      fetchTimeoutMs: 10,
+      fetch: async (_url, init) => ({
+        ok: true,
+        status: 200,
+        json: () => new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+          }, { once: true });
+        })
+      })
+    }
+  );
+  assert.equal(provider.status, 'unavailable');
+});
