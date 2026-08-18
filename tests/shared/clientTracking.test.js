@@ -1,7 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -75,19 +74,13 @@ test('tracked client defaults, renderer, and README share one display order', ()
   assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => !['micode', 'qodercn'].includes(client)));
 });
 
-test('default tracked clients are supported by tokscale or a native adapter', () => {
-  // Proma and Qoder CN remain local compatibility adapters. Reasonix is supported by the
-  // bundled Tokscale version and must be verified through its real client list.
-  const locallyParsedClients = new Set(['proma', 'qodercn']);
-  const result = spawnSync(process.execPath, [require.resolve('tokscale/bin.js'), '--help'], { encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  const help = `${result.stdout || ''}\n${result.stderr || ''}`;
-  const possibleValues = help.match(/\[possible values: ([^\]]+)\]/);
-  assert.ok(possibleValues, 'tokscale --help should list --client possible values');
-  const supported = new Set(possibleValues[1].split(',').map((client) => client.trim()).filter(Boolean));
-  const unsupported = DEFAULT_CLIENTS.split(',').filter((client) => !supported.has(client) && !locallyParsedClients.has(client));
-  assert.deepEqual(unsupported, []);
-});
+// "default tracked clients are supported by tokscale or a native adapter" —
+// this contract lives in scripts/verify-vendored-tokscale-clients.js instead
+// of here. It has to run against the real vendored tokscale binary
+// (vendor-tokscale.yml), not the plain npm-installed one: a client can be
+// merged upstream and pinned into the vendor build well before it's in a
+// tagged npm release (dsh, cherrystudio), so checking the npm binary here
+// would just be testing an executable packaged releases don't ship.
 
 test('clientsCsvForSetting preserves explicit empty tracked-tool selection', () => {
   assert.equal(clientsCsvForSetting(''), '');

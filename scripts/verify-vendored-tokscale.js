@@ -15,6 +15,10 @@
 // once as "reasoning". Same fixture as tokscale's own
 // test_dsh_zstd_transcript_counts_identically_cold_and_warm_cache.
 //
+// This only checks DSH parsing semantics. Whether every DEFAULT_CLIENTS
+// entry is a client the vendored binary recognizes at all is a separate,
+// generic concern — see verify-vendored-tokscale-clients.js.
+//
 // The child process must be hermetic: without pinning HOME/XDG_*/config dirs
 // and clearing scan-path env vars, a run on a machine (or CI runner) that
 // happens to have its own tokscale config, DSH_HOME, or TOKSCALE_EXTRA_DIRS
@@ -132,30 +136,8 @@ function assertExpected(parsed) {
   }
 }
 
-// The DSH fixture below proves the swapped binary genuinely accepts
-// `--client dsh` and parses it correctly — a client id tokscale doesn't
-// recognize exits non-zero before any JSON is produced (see
-// runAgainstFixture), so this whole gate already fails if dsh weren't real.
-// What isn't otherwise guarded is the two constants staying in sync:
-// tests/shared/clientTracking.test.js trusts manifest.bridgesClient as an
-// exemption from needing to see that client in the plain npm-installed
-// binary's own --client list, without independently checking it against the
-// vendored binary. If bridgesClient were ever repointed at a different
-// client without updating this fixture (or vice versa), that guard test
-// would keep passing on the strength of a claim nothing here still tests.
-function assertManifestMatchesFixtureClient(manifest) {
-  if (manifest.bridgesClient && manifest.bridgesClient !== FIXTURE_CLIENT) {
-    throw new Error(
-      `vendor/tokscale.json bridgesClient is "${manifest.bridgesClient}" but this fixture only tests ` +
-        `"${FIXTURE_CLIENT}" — tests/shared/clientTracking.test.js would exempt a client this gate never verifies. ` +
-        'Update the fixture to match, or scope bridgesClient back down.'
-    );
-  }
-}
-
 function main() {
   const manifest = loadManifest();
-  assertManifestMatchesFixtureClient(manifest);
   const { key, entry } = resolveManifestEntry(manifest);
   const binPath = resolveTargetBinPath(entry);
   if (!fs.existsSync(binPath)) {

@@ -2,10 +2,19 @@ name: Vendored tokscale
 
 # release.yml only runs on `v*` tag push, so regular PR/push CI never
 # exercises install-vendored-tokscale.js / verify-vendored-tokscale.js on any
-# platform before a real release. This gate runs just those two steps (no
+# platform before a real release. This gate runs those steps (no
 # electron-builder, no signing) on the same 4 targets release.yml packages,
 # so a broken asset, checksum, or DSH regression fails fast on a PR instead
 # of at release time.
+#
+# This is also the only place "does tokscale support client X" gets checked
+# against the binary Token Monitor actually ships. A client can be merged
+# upstream and pinned into the vendor build well before it's in a tagged npm
+# release (dsh, cherrystudio), so that check can't run against the plain
+# npm-installed binary in ci.yml — it would just be testing an executable
+# packaged releases don't ship. General CI stays fast and networkless;
+# whether DEFAULT_CLIENTS is fully covered is a production-capability
+# question that belongs here instead.
 
 on:
   push:
@@ -14,6 +23,7 @@ on:
       - 'vendor/tokscale.json'
       - 'scripts/install-vendored-tokscale.js'
       - 'scripts/verify-vendored-tokscale.js'
+      - 'scripts/verify-vendored-tokscale-clients.js'
       - 'scripts/vendoredTokscale.js'
       - '.github/workflows/release.yml'
       - '.github/workflows/vendor-tokscale.yml'
@@ -50,5 +60,7 @@ jobs:
       - run: npm ci
       - name: Install vendored tokscale (DSH bridge)
         run: node scripts/install-vendored-tokscale.js
-      - name: Verify vendored tokscale (DSH bridge)
+      - name: Verify DEFAULT_CLIENTS against the vendored binary's real capabilities
+        run: node scripts/verify-vendored-tokscale-clients.js
+      - name: Verify DSH parsing semantics
         run: node scripts/verify-vendored-tokscale.js
