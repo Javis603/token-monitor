@@ -41,6 +41,16 @@ test('parseSupportedClients does not borrow a later flag\'s possible-values list
   );
 });
 
+test('parseSupportedClients does not borrow a later short+long flag\'s possible-values list', () => {
+  const help =
+    '  --client <CLIENTS>\n' +
+    '  -f, --format <FORMAT> [possible values: json, table]\n';
+  assert.throws(
+    () => parseSupportedClients(help),
+    /did not list --client possible values/
+  );
+});
+
 test('filterSupportedClients preserves order and removes unsupported ids', () => {
   assert.equal(
     filterSupportedClients('claude,dsh,claude,unknown', new Set(['claude', 'dsh'])),

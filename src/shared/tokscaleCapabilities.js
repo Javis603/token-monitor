@@ -3,9 +3,10 @@
 // Anchored to --client's own stanza, not just the first "[possible values:
 // ...]" anywhere after it in the --help output: other clap-generated flags
 // (e.g. a future enum option) can carry the same annotation. The scan is cut
-// off at the next `--flag` that starts a line, so a later option's own list
-// can never be misread as --client's — if --client itself doesn't carry a
-// possible-values annotation, this fails loudly instead of borrowing one.
+// off at the next option line — either `--flag` alone or clap's common
+// `-f, --flag` short+long form — so a later option's own list can never be
+// misread as --client's; if --client itself doesn't carry a possible-values
+// annotation, this fails loudly instead of borrowing one.
 function parseSupportedClients(helpText) {
   const help = String(helpText || '');
   const clientFlagIndex = help.search(/--client\b/);
@@ -13,7 +14,10 @@ function parseSupportedClients(helpText) {
     throw new Error('tokscale --help did not mention --client');
   }
   const afterClient = help.slice(clientFlagIndex);
-  const nextFlagMatch = afterClient.slice(1).match(/\n\s*--[\w-]+\b/);
+  // clap commonly renders a later option as `-f, --format ...` rather than
+  // `--format ...` alone, so the boundary must recognize a leading short
+  // form too, not just a bare long flag.
+  const nextFlagMatch = afterClient.slice(1).match(/\n\s*-{1,2}[\w-]+\b/);
   const clientSection = nextFlagMatch
     ? afterClient.slice(0, nextFlagMatch.index + 1)
     : afterClient;
