@@ -70,6 +70,10 @@ function loadWin32Api() {
   try {
     const koffi = require('koffi');
     const user32 = koffi.load('user32.dll');
+    let shell32 = null;
+    try {
+      shell32 = koffi.load('shell32.dll');
+    } catch (_) {}
     const WinEventProc = koffi.proto(
       'void WinEventProc(void *hWinEventHook, uint event, uintptr_t hwnd, long idObject, long idChild, uint idEventThread, uint dwmsEventTime)'
     );
@@ -80,6 +84,10 @@ function loadWin32Api() {
       GetAncestor: user32.func('uintptr_t GetAncestor(uintptr_t hWnd, uint gaFlags)'),
       GetWindow: user32.func('uintptr_t GetWindow(uintptr_t hWnd, uint uCmd)'),
       GetWindowRect: user32.func('bool GetWindowRect(uintptr_t hWnd, void *rect)'),
+      GetForegroundWindow: user32.func('uintptr_t GetForegroundWindow()'),
+      GetClassNameW: user32.func('int GetClassNameW(uintptr_t hWnd, _Out_ char16_t *lpClassName, int nMaxCount)'),
+      GetWindowThreadProcessId: user32.func('uint32 GetWindowThreadProcessId(uintptr_t hWnd, _Out_ uint32 *lpdwProcessId)'),
+      IsIconic: user32.func('bool IsIconic(uintptr_t hWnd)'),
       IsWindowVisible: user32.func('bool IsWindowVisible(uintptr_t hWnd)'),
       SetWindowPos: user32.func(
         'bool SetWindowPos(uintptr_t hWnd, uintptr_t hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags)'
@@ -88,7 +96,8 @@ function loadWin32Api() {
       SetWinEventHook: user32.func(
         'uintptr_t SetWinEventHook(uint eventMin, uint eventMax, uintptr_t hmodWinEventProc, WinEventProc *pfnWinEventProc, uint idProcess, uint idThread, uint dwFlags)'
       ),
-      UnhookWinEvent: user32.func('bool UnhookWinEvent(uintptr_t hWinEventHook)')
+      UnhookWinEvent: user32.func('bool UnhookWinEvent(uintptr_t hWinEventHook)'),
+      SHQueryUserNotificationState: shell32 ? shell32.func('int SHQueryUserNotificationState(_Out_ int *pquns)') : null
     };
   } catch {
     win32Api = false;
@@ -196,6 +205,89 @@ function isTaskbarWidgetTopmost(win) {
   if (!api || !hwnd) return false;
   try {
     return isEffectiveTopmost(api, hwnd);
+  } catch {
+    return false;
+  }
+}
+
+// Fullscreen video, gaming, or presentation detection.
+// When a full-screen window covers the target display (or a DirectX exclusive
+// mode game is running), the taskbar is covered or hidden underneath. The
+// taskbar widget overlay must not stay topmost over games and full-screen video.
+function isForegroundFullscreen(display, widgetWin, customApi = null) {
+  const api = customApi || loadWin32Api();
+  if (!api) return false;
+  try {
+    // 1. Direct3D exclusive fullscreen query (games)
+    if (typeof api.SHQueryUserNotificationState === 'function') {
+      const quns = [0];
+      const hr = api.SHQueryUserNotificationState(quns);
+      // QUNS_RUNNING_D_D (3): exclusive Direct3D game running full screen
+      if (hr === 0 && quns[0] === 3) {
+        return true;
+      }
+    }
+
+    // 2. Foreground window check
+    if (typeof api.GetForegroundWindow !== 'function') return false;
+    const fg = api.GetForegroundWindow();
+    if (!fg) return false;
+
+    // Ignore if foreground is our own widget window
+    const widgetHwnd = widgetWin ? hwndOf(widgetWin) : 0n;
+    if (widgetHwnd && fg === widgetHwnd) return false;
+
+    if (typeof api.IsWindowVisible === 'function' && !api.IsWindowVisible(fg)) return false;
+    if (typeof api.IsIconic === 'function' && api.IsIconic(fg)) return false;
+
+    // Ignore if foreground window belongs to our own app process
+    if (typeof api.GetWindowThreadProcessId === 'function') {
+      const pidBuf = [0];
+      api.GetWindowThreadProcessId(fg, pidBuf);
+      if (pidBuf[0] === process.pid) return false;
+    }
+
+    // Ignore Windows Desktop and Taskbars
+    if (typeof api.GetClassNameW === 'function') {
+      const classBuf = Buffer.alloc(512);
+      const len = api.GetClassNameW(fg, classBuf, 256);
+      if (len > 0) {
+        const cls = Buffer.from(classBuf.buffer, 0, len * 2).toString('utf16le').replace(/\0.*$/, '');
+        if (
+          cls === 'Progman' ||
+          cls === 'WorkerW' ||
+          cls === 'Shell_TrayWnd' ||
+          cls === 'Shell_SecondaryTrayWnd'
+        ) {
+          return false;
+        }
+      }
+    }
+
+    // 3. Compare foreground window bounding rect against display bounds
+    if (typeof api.GetWindowRect !== 'function') return false;
+    const rectBuf = Buffer.alloc(16);
+    if (!api.GetWindowRect(fg, rectBuf)) return false;
+
+    const left = rectBuf.readInt32LE(0);
+    const top = rectBuf.readInt32LE(4);
+    const right = rectBuf.readInt32LE(8);
+    const bottom = rectBuf.readInt32LE(12);
+
+    const bounds = display?.bounds;
+    if (bounds) {
+      const monLeft = Number(bounds.x);
+      const monTop = Number(bounds.y);
+      const monRight = Number(bounds.x) + Number(bounds.width);
+      const monBottom = Number(bounds.y) + Number(bounds.height);
+
+      // Window covers the target display (fullscreen video / borderless game / media player)
+      if (left <= monLeft && top <= monTop && right >= monRight && bottom >= monBottom) {
+        return true;
+      }
+    }
+
+    return false;
   } catch {
     return false;
   }
@@ -328,6 +420,7 @@ module.exports = {
   REASSERT_THROTTLE_MS,
   VK_LBUTTON,
   isEffectiveTopmost,
+  isForegroundFullscreen,
   isPrimaryMouseButtonDown,
   isTaskbarWidgetTopmost,
   raiseTaskbarWidgetWindow,

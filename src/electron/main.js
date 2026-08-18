@@ -288,6 +288,7 @@ const {
   taskbarWidgetPagePath
 } = require('./taskbarWidget');
 const {
+  isForegroundFullscreen,
   isTaskbarWidgetTopmost,
   raiseTaskbarWidgetWindowSafe,
   watchTaskbarWidgetZOrder
@@ -2425,7 +2426,18 @@ let taskbarWidgetZOrderWatch = null;
 
 function positionTaskbarWidget(options = {}) {
   if (!taskbarWidgetWindow || taskbarWidgetWindow.isDestroyed()) return;
-  const bounds = taskbarWidgetBounds(screen.getPrimaryDisplay());
+  const primaryDisplay = screen.getPrimaryDisplay();
+  if (isForegroundFullscreen(primaryDisplay, taskbarWidgetWindow)) {
+    if (taskbarWidgetWindow.isVisible()) {
+      taskbarWidgetWindow.hide();
+    }
+    return;
+  }
+  if (!taskbarWidgetWindow.isVisible()) {
+    taskbarWidgetWindow.show();
+    raiseTaskbarWidgetWindowSafe(taskbarWidgetWindow);
+  }
+  const bounds = taskbarWidgetBounds(primaryDisplay);
   if (!bounds) return;
   // Only touch the bounds when they actually changed (or on display metric
   // changes); calling setBounds with the identical rect can itself reorder the
@@ -2499,6 +2511,17 @@ function createTaskbarWidget() {
   // hook fires on foreground switches and window reorders).
   taskbarWidgetZOrderWatch = watchTaskbarWidgetZOrder(() => {
     if (taskbarWidgetWindow && !taskbarWidgetWindow.isDestroyed()) {
+      const primaryDisplay = screen.getPrimaryDisplay();
+      if (isForegroundFullscreen(primaryDisplay, taskbarWidgetWindow)) {
+        if (taskbarWidgetWindow.isVisible()) {
+          taskbarWidgetWindow.hide();
+        }
+        return;
+      }
+      if (!taskbarWidgetWindow.isVisible()) {
+        taskbarWidgetWindow.show();
+        raiseTaskbarWidgetWindowSafe(taskbarWidgetWindow);
+      }
       // Same rule as the periodic pass: never re-assert while the overlay is
       // already the top window — a reorder between mousedown and mouseup would
       // eat the click-to-cycle.

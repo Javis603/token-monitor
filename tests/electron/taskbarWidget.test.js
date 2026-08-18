@@ -288,9 +288,12 @@ test('isEffectiveTopmost treats only visible real-size windows above the overlay
   assert.equal(isEffectiveTopmost(api, widget), false);
 });
 
-test('main process re-asserts the taskbar widget topmost only when it is buried', () => {
+test('main process re-asserts the taskbar widget topmost only when it is buried and hides during fullscreen', () => {
   const main = fs.readFileSync(mainPath, 'utf8');
   assert.match(main, /isTaskbarWidgetTopmost\(taskbarWidgetWindow\)/);
   assert.match(main, /raiseTaskbarWidgetWindowSafe\(taskbarWidgetWindow\)/);
   assert.match(main, /if \(!isTaskbarWidgetTopmost\(taskbarWidgetWindow\)\)/);
+  assert.match(main, /isForegroundFullscreen\(primaryDisplay, taskbarWidgetWindow\)/);
+  assert.match(main, /taskbarWidgetWindow\.hide\(\)/);
+  assert.match(main, /taskbarWidgetWindow\.show\(\)/);
 });
