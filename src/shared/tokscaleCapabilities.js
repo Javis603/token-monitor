@@ -1,17 +1,23 @@
 'use strict';
 
-// Anchored to --client specifically, not just the first "[possible values:
-// ...]" in the whole --help output: other clap-generated flags (e.g. a
-// future enum option) can carry the same annotation, and scanning from the
-// start of the text would silently pick up the wrong one's values instead of
-// failing loudly.
+// Anchored to --client's own stanza, not just the first "[possible values:
+// ...]" anywhere after it in the --help output: other clap-generated flags
+// (e.g. a future enum option) can carry the same annotation. The scan is cut
+// off at the next `--flag` that starts a line, so a later option's own list
+// can never be misread as --client's — if --client itself doesn't carry a
+// possible-values annotation, this fails loudly instead of borrowing one.
 function parseSupportedClients(helpText) {
   const help = String(helpText || '');
   const clientFlagIndex = help.search(/--client\b/);
   if (clientFlagIndex === -1) {
     throw new Error('tokscale --help did not mention --client');
   }
-  const possibleValues = help.slice(clientFlagIndex).match(/\[\s*possible\s+values\s*:\s*([^\]]+)\]/is);
+  const afterClient = help.slice(clientFlagIndex);
+  const nextFlagMatch = afterClient.slice(1).match(/\n\s*--[\w-]+\b/);
+  const clientSection = nextFlagMatch
+    ? afterClient.slice(0, nextFlagMatch.index + 1)
+    : afterClient;
+  const possibleValues = clientSection.match(/\[\s*possible\s+values\s*:\s*([^\]]+)\]/is);
   if (!possibleValues) {
     throw new Error('tokscale --help did not list --client possible values');
   }
