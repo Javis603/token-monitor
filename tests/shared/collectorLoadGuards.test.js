@@ -1356,6 +1356,88 @@ test('clientDataDirPresence detects Antigravity native source roots', () => {
   }
 });
 
+test('Kimi Work roots are shared by source checks and watcher attribution', () => {
+  // clientSourceRoots keys the Work root off process.platform, which tests cannot
+  // fake, so assert the darwin layout only where that layout is actually produced.
+  if (process.platform !== 'darwin') return;
+  const originalHomedir = os.homedir;
+  const tmp = withTmpHome([]);
+  os.homedir = () => tmp;
+  try {
+    const { clientSourceRoots, clientSourceChecks, clientsForWatchPath, kimiWorkSessionsRoot, watchPathsForClients } = freshCollector();
+    const kimiWorkRoot = kimiWorkSessionsRoot(tmp, 'darwin');
+    fs.mkdirSync(kimiWorkRoot, { recursive: true });
+    const kimiRoots = clientSourceRoots('kimi').kimi;
+    assert.deepEqual(kimiRoots.filter((root) => root.id === 'kimi-code-sessions').map((root) => root.dir), [
+      path.join(tmp, '.kimi-code', 'sessions'),
+      kimiWorkRoot
+    ]);
+    assert.equal(kimiRoots.at(-1).optional, true);
+    assert.ok(watchPathsForClients('kimi').includes(kimiWorkRoot));
+    assert.deepEqual(clientsForWatchPath(path.join(kimiWorkRoot, 'wd_workspace', 'conv-1', 'agents', 'main', 'wire.jsonl'), { kimi: [kimiWorkRoot] }), ['kimi']);
+    assert.deepEqual(clientSourceChecks('kimi').kimi, [{ id: 'kimi-sessions', exists: false }, { id: 'kimi-code-sessions', exists: true }]);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Kimi sessions gain project identity from sibling state.json', () => {
+  const originalHomedir = os.homedir;
+  const tmp = withTmpHome([]);
+  os.homedir = () => tmp;
+  const previousKimiCodeHome = process.env.KIMI_CODE_HOME;
+  const previousExtraDirs = process.env.TOKSCALE_EXTRA_DIRS;
+  try {
+    delete process.env.KIMI_CODE_HOME;
+    delete process.env.TOKSCALE_EXTRA_DIRS;
+    const { applySessionTimestamps } = freshCollector();
+    const period = { sessions: {} };
+    // Kimi Code CLI: ~/.kimi-code/sessions/<workspace>/<session_*>/state.json
+    const cliSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_xyz');
+    fs.mkdirSync(cliSess, { recursive: true });
+    fs.writeFileSync(path.join(cliSess, 'state.json'), JSON.stringify({ workDir: path.join(tmp, 'CliProj') }));
+    period.sessions['kimi:session_xyz'] = { client: 'kimi', sessionId: 'session_xyz', totalTokens: 200 };
+    // Kimi Work: <desktop runtime>/sessions/<workspace>/<conv-*>/state.json,
+    // only reachable on darwin because kimiWorkSessionsRoot follows process.platform.
+    if (process.platform === 'darwin') {
+      const workConv = path.join(tmp, 'Library', 'Application Support', 'kimi-desktop', 'daimon-share', 'daimon', 'runtime', 'kimi-code', 'home', 'sessions', 'wd_work_a', 'conv-abc');
+      fs.mkdirSync(workConv, { recursive: true });
+      fs.writeFileSync(path.join(workConv, 'state.json'), JSON.stringify({
+        workDir: path.join(tmp, 'WorkProj'),
+        custom: { workspacePath: path.join(tmp, 'WorkProj') },
+        createdAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T01:00:00.000Z'
+      }));
+      period.sessions['kimi:conv-abc'] = { client: 'kimi', sessionId: 'conv-abc', totalTokens: 100 };
+    }
+    period.sessions['kimi:conv-missing'] = { client: 'kimi', sessionId: 'conv-missing', totalTokens: 50 };
+
+    applySessionTimestamps({ today: period }, tmp, { resolveProjects: true });
+    assert.equal(period.sessions['kimi:session_xyz'].projectLabel, 'CliProj');
+    assert.ok(period.sessions['kimi:session_xyz'].projectId, 'CLI session_* session should resolve a projectId');
+    assert.equal(period.sessions['kimi:conv-missing'].projectId || '', '', 'sessions without state.json must stay project-less');
+    if (process.platform === 'darwin') {
+      assert.equal(period.sessions['kimi:conv-abc'].projectLabel, 'WorkProj');
+      assert.ok(period.sessions['kimi:conv-abc'].projectId, 'Kimi Work conv-* session should resolve a projectId');
+    }
+
+    // Projects opt-out must strip identity, not just skip it (issue #182).
+    const disabled = { sessions: { 'kimi:session_xyz': { client: 'kimi', sessionId: 'session_xyz', totalTokens: 100 } } };
+    applySessionTimestamps({ today: disabled }, tmp, { resolveProjects: false });
+    assert.equal(disabled.sessions['kimi:session_xyz'].projectId || '', '', 'resolveProjects=false must not attach a projectId');
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousKimiCodeHome === undefined) delete process.env.KIMI_CODE_HOME;
+    else process.env.KIMI_CODE_HOME = previousKimiCodeHome;
+    if (previousExtraDirs === undefined) delete process.env.TOKSCALE_EXTRA_DIRS;
+    else process.env.TOKSCALE_EXTRA_DIRS = previousExtraDirs;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('watchPathsForClients includes Kimi, Qwen, and Grok Build local roots', () => {
   const tmp = withTmpHome([
     path.join('.kimi', 'sessions'),

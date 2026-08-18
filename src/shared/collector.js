@@ -284,10 +284,12 @@ function runTokscale({ clients, flags, commandTimeoutMs }) {
   if (!requested) return Promise.resolve({ entries: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
   if (!clientFilter) return Promise.resolve({ entries: [] });
+  const envOverrides = kimiWorkScanEnv(clients, flags);
+  const scanCommand = envOverrides ? { ...command, env: { ...command.env, ...envOverrides } } : command;
   const runArgs = (filter) => ['--json', '--client', filter, '--group-by', 'client,session,model', ...flags];
-  return spawnTokscaleJson(runArgs(clientFilter), commandTimeoutMs, command).catch((error) => (
-    retryWithKnownCapabilities(error, requested, command, { entries: [] }, (filtered) => (
-      spawnTokscaleJson(runArgs(filtered), commandTimeoutMs, command)
+  return spawnTokscaleJson(runArgs(clientFilter), commandTimeoutMs, scanCommand).catch((error) => (
+    retryWithKnownCapabilities(error, requested, scanCommand, { entries: [] }, (filtered) => (
+      spawnTokscaleJson(runArgs(filtered), commandTimeoutMs, scanCommand)
     ))
   ));
 }
@@ -298,10 +300,12 @@ function runTokscaleGraph({ clients, commandTimeoutMs }) {
   if (!requested) return Promise.resolve({ contributions: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
   if (!clientFilter) return Promise.resolve({ contributions: [] });
+  const envOverrides = kimiWorkScanEnv(clients);
+  const scanCommand = envOverrides ? { ...command, env: { ...command.env, ...envOverrides } } : command;
   const runArgs = (filter) => ['graph', '--client', filter, '--no-spinner'];
-  return spawnTokscaleJson(runArgs(clientFilter), commandTimeoutMs, command).catch((error) => (
-    retryWithKnownCapabilities(error, requested, command, { contributions: [] }, (filtered) => (
-      spawnTokscaleJson(runArgs(filtered), commandTimeoutMs, command)
+  return spawnTokscaleJson(runArgs(clientFilter), commandTimeoutMs, scanCommand).catch((error) => (
+    retryWithKnownCapabilities(error, requested, scanCommand, { contributions: [] }, (filtered) => (
+      spawnTokscaleJson(runArgs(filtered), commandTimeoutMs, scanCommand)
     ))
   ));
 }
@@ -820,6 +824,29 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   }
   const codexFiles = findSessionFiles(path.join(home, '.codex', 'sessions'), missingCodexIds);
   for (const [sessionId, filePath] of codexFiles) applyFile('codex', sessionId, filePath);
+
+  // Kimi sessions get their workspace from a sibling state.json (CLI `session_*`,
+  // Work `conv-*`/`ctitle-*`). Project identity honours the Projects opt-out just
+  // like the branches above; timestamps are always backfilled when present.
+  const kimiIds = byClient.get('kimi') || new Set();
+  if (kimiIds.size > 0) {
+    const kimiRoots = [kimiWorkSessionsRoot(home), kimiCodeSessionsHome(home)].filter(Boolean);
+    for (const [sessionId, statePath] of readKimiSessionStateFiles(kimiRoots, kimiIds)) {
+      const raw = kimiStateMetadata(statePath);
+      const meta = {
+        ...(resolveProjects && raw.projectId
+          ? { projectId: raw.projectId, projectLabel: raw.projectLabel }
+          : {}),
+        ...(raw.startedAt ? { startedAt: raw.startedAt } : {}),
+        ...(raw.lastUsedAt ? { lastUsedAt: raw.lastUsedAt } : {})
+      };
+      const key = `kimi:${sessionId}`;
+      if (meta.projectId || meta.startedAt || meta.lastUsedAt) {
+        metadata.set(key, meta);
+        if (meta.projectId) resolvedSessionKeys.add(key);
+      }
+    }
+  }
 
   for (const ref of refs.values()) {
     const key = `${ref.client}:${ref.sessionId}`;
@@ -1540,6 +1567,90 @@ function xdgDataHome(home) {
   return nonBlankEnvPath('XDG_DATA_HOME', path.join(home, '.local', 'share'));
 }
 
+const KIMI_WORK_SESSIONS_SUFFIX = path.join(
+  'kimi-desktop',
+  'daimon-share',
+  'daimon',
+  'runtime',
+  'kimi-code',
+  'home',
+  'sessions'
+);
+
+function kimiWorkSessionsRoot(home = os.homedir(), platform = process.platform, env = process.env) {
+  if (platform === 'darwin') {
+    return path.join(home, 'Library', 'Application Support', KIMI_WORK_SESSIONS_SUFFIX);
+  }
+  if (platform === 'win32') {
+    const appData = typeof env.APPDATA === 'string' && env.APPDATA.trim()
+      ? env.APPDATA
+      : path.join(home, 'AppData', 'Roaming');
+    return path.join(appData, KIMI_WORK_SESSIONS_SUFFIX);
+  }
+  return null;
+}
+
+function kimiWorkScanEnv(clients, flags = [], options = {}) {
+  const env = options.env || process.env;
+  const enabled = new Set(String(clients || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
+  // tokscale ignores TOKSCALE_EXTRA_DIRS when scanning an explicit --home
+  // (scanner treats env roots as disabled there), so a WSL child must not carry
+  // a host Kimi Work path it will ignore anyway.
+  if (!enabled.has('kimi') || flags.includes('--home')) return null;
+  const root = kimiWorkSessionsRoot(options.home || os.homedir(), options.platform || process.platform, env);
+  if (!root) return null;
+  const extra = `kimi:${root}`;
+  const entries = String(env.TOKSCALE_EXTRA_DIRS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!entries.includes(extra)) entries.push(extra);
+  return { TOKSCALE_EXTRA_DIRS: entries.join(',') };
+}
+
+function kimiCodeSessionsHome(home = os.homedir()) {
+  return path.join(nonBlankEnvPath('KIMI_CODE_HOME', path.join(home, '.kimi-code')), 'sessions');
+}
+
+// Kimi sessions (CLI `session_*`, Work `conv-*`/`ctitle-*`) put their workspace
+// in a sibling state.json (`workDir` / `custom.workspacePath`), not in the wire
+// stream tokscale parses. The session id is the directory name directly under a
+// workspace dir, so a bounded one-level scan per root locates the metadata.
+function readKimiSessionStateFiles(roots, sessionIds) {
+  const wanted = new Set(sessionIds);
+  const found = new Map();
+  for (const root of roots) {
+    if (found.size >= wanted.size) break;
+    let workspaceDirs;
+    try { workspaceDirs = fs.readdirSync(root, { withFileTypes: true }); } catch (_) { continue; }
+    for (const entry of workspaceDirs) {
+      if (!entry.isDirectory()) continue;
+      for (const sessionId of wanted) {
+        if (found.has(sessionId)) continue;
+        const statePath = path.join(root, entry.name, sessionId, 'state.json');
+        if (fileExists(statePath)) found.set(sessionId, statePath);
+      }
+    }
+  }
+  return found;
+}
+
+function kimiStateMetadata(statePath) {
+  let state;
+  try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (_) { return {}; }
+  if (!state || typeof state !== 'object') return {};
+  const projectPath = String(state.workDir || state.custom?.workspacePath || '').trim();
+  const identity = projectIdentity(projectPath);
+  // Kimi writes valid ISO strings in state.json; pass them through as-is.
+  const startedAt = String(state.createdAt || '').trim();
+  const lastUsedAt = String(state.updatedAt || '').trim();
+  return {
+    ...(identity.projectId ? identity : {}),
+    ...(startedAt ? { startedAt } : {}),
+    ...(lastUsedAt ? { lastUsedAt } : {})
+  };
+}
+
 // Where tokscale looks for captured `codex exec --json` output. Both defaults
 // are scanned on every platform — upstream pushes them with no cfg gate, so the
 // Application Support one is not a macOS variant of the .config one — and
@@ -1665,7 +1776,13 @@ function clientSourceRoots(clientsCsv) {
   // joins `sessions` onto the raw value, so a blank export would resolve to the
   // root-level /sessions and hide the real one.
   const kimiCodeHome = nonBlankEnvPath('KIMI_CODE_HOME', path.join(home, '.kimi-code'));
-  add('kimi', ['kimi-sessions', path.join(home, '.kimi', 'sessions')], ['kimi-code-sessions', path.join(kimiCodeHome, 'sessions')]);
+  const kimiWorkRoot = kimiWorkSessionsRoot(home);
+  add(
+    'kimi',
+    ['kimi-sessions', path.join(home, '.kimi', 'sessions')],
+    ['kimi-code-sessions', path.join(kimiCodeHome, 'sessions')],
+    ...(kimiWorkRoot ? [['kimi-code-sessions', kimiWorkRoot, null, true]] : [])
+  );
   add('qwen', ['qwen-projects', path.join(home, '.qwen', 'projects')]);
   const grokHome = nonBlankEnvPath('GROK_HOME', path.join(home, '.grok'));
   add(
@@ -3568,6 +3685,8 @@ module.exports = {
   resetTokscaleCatalogCache,
   resetTokscaleCapabilityCache,
   tokscalePricingCatalog,
+  kimiWorkSessionsRoot,
+  kimiWorkScanEnv,
   resolveWatchUsePolling,
   selfSyncSourceRootsForClients,
   // The process-wide sync throttle this module drives. Exported so a test can
