@@ -83,10 +83,7 @@ async function ensureVendoredTokscale({
   smoke = smokeTest,
   log = console.log
 } = {}) {
-  if (manifestMode(manifest) === 'upstream') {
-    log('scripts/vendor/tokscale.json mode is "upstream" — no downstream override is active; the plain npm-installed tokscale is authoritative. Nothing to ensure.');
-    return { status: 'upstream' };
-  }
+  const isUpstream = manifestMode(manifest) === 'upstream';
 
   const resolved = requestedKey
     ? resolveManifestEntry(manifest, requestedKey)
@@ -98,8 +95,15 @@ async function ensureVendoredTokscale({
     return { status: 'fallback', key };
   }
 
-  log(`Ensuring vendored tokscale (${manifest.releaseTag}, source ${manifest.commit.slice(0, 12)}) for ${key}...`);
-
+  // Package-target existence is a packaging precondition, not a vendor-override
+  // concern: whether the npm optional package for `key` is actually installed
+  // on this host matters the same way whether or not a downstream binary gets
+  // swapped in afterward, since a missing package means there is nothing to
+  // ship for this target either way. Resolving it before the mode check keeps
+  // the cross-arch fail-closed guarantee (and its explicit
+  // --allow-missing-target-package escape hatch) in effect under "upstream"
+  // too — mode only ever decides binary provenance, never whether this
+  // packaging preflight runs.
   let targetBinPath;
   try {
     targetBinPath = resolveTarget(entry, targetPlatformForKey(key));
@@ -122,6 +126,13 @@ async function ensureVendoredTokscale({
   if (!fsImpl.existsSync(targetBinPath)) {
     throw new Error(`Expected npm-installed binary not found at ${targetBinPath} — did npm ci run first?`);
   }
+
+  if (isUpstream) {
+    log(`scripts/vendor/tokscale.json mode is "upstream" — no downstream override is active; the npm-installed tokscale at ${targetBinPath} is authoritative. Nothing to replace.`);
+    return { status: 'upstream', key, targetBinPath };
+  }
+
+  log(`Ensuring vendored tokscale (${manifest.releaseTag}, source ${manifest.commit.slice(0, 12)}) for ${key}...`);
 
   const installedVersion = resolveVersion(entry);
   if (installedVersion !== manifest.baseVersion) {

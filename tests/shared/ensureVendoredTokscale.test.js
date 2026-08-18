@@ -223,18 +223,64 @@ test('a resolveTarget failure unrelated to a missing module still fails closed',
   );
 });
 
-test('mode "upstream" is a complete no-op regardless of platform/target', async () => {
+test('mode "upstream" resolves and verifies the npm-installed target but never downloads or replaces it', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-ensure-'));
+  const target = path.join(dir, 'tokscale');
+  fs.writeFileSync(target, 'npm-installed binary');
   const logs = [];
+
+  try {
+    const result = await ensureVendoredTokscale({
+      manifest: { ...manifestFor(Buffer.from('vendored binary')), mode: 'upstream' },
+      requestedKey: 'darwin-arm64',
+      resolveTarget: () => target,
+      resolveVersion: () => { throw new Error('must not be called in upstream mode'); },
+      download: async () => { throw new Error('must not download in upstream mode'); },
+      log: (message) => logs.push(message)
+    });
+    assert.deepEqual(result, { status: 'upstream', key: 'darwin-arm64', targetBinPath: target });
+    assert.ok(logs.some((line) => line.includes('upstream')));
+    assert.equal(fs.readFileSync(target, 'utf8'), 'npm-installed binary');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('mode "upstream" still fails closed when an explicitly requested target\'s npm package is missing', async () => {
+  // The cross-arch guarantee ensure-vendored-tokscale.js gives every other
+  // mode must not quietly disappear once mode flips to "upstream" — a
+  // missing npm optional package means there is nothing to ship for this
+  // target regardless of whether a downstream binary would have been swapped
+  // in afterward.
+  const notInstalled = new Error("Cannot find module '@tokscale/cli-darwin-x64/package.json'");
+  notInstalled.code = 'MODULE_NOT_FOUND';
+
+  await assert.rejects(
+    ensureVendoredTokscale({
+      manifest: { ...manifestFor(Buffer.from('vendored binary'), { package: '@tokscale/cli-darwin-x64' }), mode: 'upstream' },
+      requestedKey: 'darwin-arm64',
+      resolveTarget: () => { throw notInstalled; },
+      log: () => {}
+    }),
+    /is not installed for darwin-arm64/
+  );
+});
+
+test('mode "upstream" + --allow-missing-target-package still degrades a structural cross-arch build instead of crashing', async () => {
+  const notInstalled = new Error("Cannot find module '@tokscale/cli-darwin-x64/package.json'");
+  notInstalled.code = 'MODULE_NOT_FOUND';
+  const logs = [];
+
   const result = await ensureVendoredTokscale({
-    manifest: { ...manifestFor(Buffer.from('vendored binary')), mode: 'upstream' },
+    manifest: { ...manifestFor(Buffer.from('vendored binary'), { package: '@tokscale/cli-darwin-x64' }), mode: 'upstream' },
     requestedKey: 'darwin-arm64',
-    resolveTarget: () => { throw new Error('must not be called in upstream mode'); },
-    resolveVersion: () => { throw new Error('must not be called in upstream mode'); },
-    download: async () => { throw new Error('must not download in upstream mode'); },
+    allowMissingTargetPackage: true,
+    resolveTarget: () => { throw notInstalled; },
     log: (message) => logs.push(message)
   });
-  assert.deepEqual(result, { status: 'upstream' });
-  assert.ok(logs.some((line) => line.includes('upstream')));
+
+  assert.deepEqual(result, { status: 'unavailable', key: 'darwin-arm64' });
+  assert.ok(logs.some((line) => line.includes('explicitly allowed')));
 });
 
 test('mode absent behaves exactly like mode "override" (backward compatible)', async () => {
