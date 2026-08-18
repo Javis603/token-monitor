@@ -48,8 +48,10 @@ test('watchTaskbarWidgetZOrder requires a callback', () => {
   assert.equal(watchTaskbarWidgetZOrder('nope'), null);
 });
 
-test('isForegroundFullscreen returns true when a foreground window covers the display', () => {
+test('isForegroundFullscreen hides only when the taskbar is actually covered', () => {
   const display = { bounds: { x: 0, y: 0, width: 1920, height: 1080 } };
+  const trayHwnd = 0x100n;
+  const fgHwnd = 0x200n;
   const rect = (l, t, r, b) => {
     const buf = Buffer.alloc(16);
     buf.writeInt32LE(l, 0);
@@ -59,40 +61,47 @@ test('isForegroundFullscreen returns true when a foreground window covers the di
     return buf;
   };
 
-  const fgHwnd = 0x200n;
+  const trayVisible = { value: true };
+  const fgRects = { value: null };
   const mockApi = {
     GetForegroundWindow: () => fgHwnd,
-    IsWindowVisible: (hwnd) => hwnd === fgHwnd,
+    FindWindowW: (clsName) =>
+      clsName.includes(Buffer.from('Shell_TrayWnd', 'utf16le')) ? trayHwnd : 0n,
+    IsWindowVisible: (hwnd) => (hwnd === trayHwnd ? trayVisible.value : hwnd === fgHwnd),
     IsIconic: () => false,
     GetWindowThreadProcessId: (_hwnd, outPid) => { outPid[0] = process.pid + 1; return 1; },
     GetClassNameW: (_hwnd, buf) => {
       Buffer.from('Chrome_WidgetWin_1\0', 'utf16le').copy(buf);
       return 18;
     },
-    GetWindowRect: (_hwnd, buf) => {
-      // Covers full 1920x1080 screen (video/game)
-      rect(0, 0, 1920, 1080).copy(buf);
-      return true;
+    GetWindowRect: (hwnd, buf) => {
+      if (hwnd === trayHwnd) { rect(0, 1032, 1920, 1080).copy(buf); return true; }
+      if (hwnd === fgHwnd && fgRects.value) { fgRects.value.copy(buf); return true; }
+      return false;
     }
   };
 
-  assert.equal(isForegroundFullscreen(display, null, mockApi), true, 'fullscreen window covering display returns true');
+  // Fullscreen video: foreground covers the taskbar strip -> hide
+  fgRects.value = rect(0, 0, 1920, 1080);
+  assert.equal(isForegroundFullscreen(display, null, mockApi), true, 'fullscreen video covering the taskbar hides the widget');
 
-  // Maximized window: bottom stops before taskbar (e.g. 1032 < 1080)
-  mockApi.GetWindowRect = (_hwnd, buf) => {
-    rect(0, 0, 1920, 1032).copy(buf);
-    return true;
-  };
-  assert.equal(isForegroundFullscreen(display, null, mockApi), false, 'maximized window leaving taskbar returns false');
+  // Maximized editor: covers the work area but leaves the taskbar visible -> keep shown
+  fgRects.value = rect(0, 0, 1920, 1032);
+  assert.equal(isForegroundFullscreen(display, null, mockApi), false, 'maximized window leaving the taskbar visible keeps the widget');
+
+  // Borderless window covering the display but not the whole taskbar strip -> keep shown
+  fgRects.value = rect(0, 0, 1920, 1079);
+  assert.equal(isForegroundFullscreen(display, null, mockApi), false, 'window not covering the full taskbar strip keeps the widget');
+
+  // Taskbar hidden (auto-hide / exclusive fullscreen) -> hide
+  trayVisible.value = false;
+  assert.equal(isForegroundFullscreen(display, null, mockApi), true, 'hidden taskbar hides the widget');
+  trayVisible.value = true;
 
   // Desktop window (Progman/WorkerW) in foreground: returns false
   mockApi.GetClassNameW = (_hwnd, buf) => {
     Buffer.from('Progman\0', 'utf16le').copy(buf);
     return 7;
-  };
-  mockApi.GetWindowRect = (_hwnd, buf) => {
-    rect(0, 0, 1920, 1080).copy(buf);
-    return true;
   };
   assert.equal(isForegroundFullscreen(display, null, mockApi), false, 'desktop foreground returns false');
 

@@ -211,10 +211,14 @@ function isTaskbarWidgetTopmost(win) {
 }
 
 // Fullscreen video, gaming, or presentation detection.
-// When a full-screen window covers the target display (or a DirectX exclusive
-// mode game is running), the taskbar is covered or hidden underneath. The
-// taskbar widget overlay must not stay topmost over games and full-screen video.
-function isForegroundFullscreen(display, widgetWin, customApi = null) {
+// The widget hides only when the primary taskbar is actually invisible: when
+// an exclusive Direct3D game is running (the taskbar disappears), when the
+// taskbar window is hidden, or when the foreground window physically covers
+// the taskbar strip (fullscreen video / borderless game). Foreground and
+// taskbar rects both come from GetWindowRect in the same native-pixel space,
+// so DPI scaling never skews the decision: a maximized window that leaves the
+// taskbar visible (e.g. a maximized editor) keeps the widget shown.
+function isForegroundFullscreen(_display, widgetWin, customApi = null) {
   const api = customApi || loadWin32Api();
   if (!api) return false;
   try {
@@ -264,30 +268,32 @@ function isForegroundFullscreen(display, widgetWin, customApi = null) {
       }
     }
 
-    // 3. Compare foreground window bounding rect against display bounds
+    // 3. The taskbar is the widget's anchor: hide only when it is actually
+    // invisible. Locate the primary taskbar and compare rects natively.
     if (typeof api.GetWindowRect !== 'function') return false;
-    const rectBuf = Buffer.alloc(16);
-    if (!api.GetWindowRect(fg, rectBuf)) return false;
-
-    const left = rectBuf.readInt32LE(0);
-    const top = rectBuf.readInt32LE(4);
-    const right = rectBuf.readInt32LE(8);
-    const bottom = rectBuf.readInt32LE(12);
-
-    const bounds = display?.bounds;
-    if (bounds) {
-      const monLeft = Number(bounds.x);
-      const monTop = Number(bounds.y);
-      const monRight = Number(bounds.x) + Number(bounds.width);
-      const monBottom = Number(bounds.y) + Number(bounds.height);
-
-      // Window covers the target display (fullscreen video / borderless game / media player)
-      if (left <= monLeft && top <= monTop && right >= monRight && bottom >= monBottom) {
-        return true;
-      }
+    if (typeof api.FindWindowW !== 'function') return false;
+    const trayName = Buffer.from('Shell_TrayWnd\0', 'utf16le');
+    const tray = api.FindWindowW(trayName, null);
+    if (!tray) return false; // no taskbar found; leave the widget as-is
+    if (typeof api.IsWindowVisible === 'function' && !api.IsWindowVisible(tray)) {
+      return true; // taskbar hidden (auto-hide or exclusive fullscreen)
     }
+    const trayRect = Buffer.alloc(16);
+    if (!api.GetWindowRect(tray, trayRect)) return false;
+    const fgRect = Buffer.alloc(16);
+    if (!api.GetWindowRect(fg, fgRect)) return false;
 
-    return false;
+    const tLeft = trayRect.readInt32LE(0);
+    const tTop = trayRect.readInt32LE(4);
+    const tRight = trayRect.readInt32LE(8);
+    const tBottom = trayRect.readInt32LE(12);
+    const fLeft = fgRect.readInt32LE(0);
+    const fTop = fgRect.readInt32LE(4);
+    const fRight = fgRect.readInt32LE(8);
+    const fBottom = fgRect.readInt32LE(12);
+
+    // Foreground window completely covers the taskbar strip.
+    return fLeft <= tLeft && fTop <= tTop && fRight >= tRight && fBottom >= tBottom;
   } catch {
     return false;
   }
