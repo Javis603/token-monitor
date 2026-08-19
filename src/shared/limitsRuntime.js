@@ -33,6 +33,7 @@ const {
 } = require('./limitsRetryPolicy');
 
 const DEFAULT_LIMITS_MAX_CONCURRENCY = 3;
+const DEFAULT_UNCONFIGURED_RECHECK_MS = 60 * 60 * 1000;
 
 const TRANSIENT_STATUSES = new Set([
   'timeout',
@@ -185,6 +186,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
   let refreshMs = refreshMode === 'adaptive'
     ? LIMITS_ADAPTIVE_BASE_MS
     : normalizeLimitsRefreshMs(config.limitsRefreshMs ?? config.refreshMs);
+  const unconfiguredRecheckMs = Number.isFinite(Number(deps.unconfiguredRecheckMs))
+    ? Math.max(refreshMs, Number(deps.unconfiguredRecheckMs))
+    : DEFAULT_UNCONFIGURED_RECHECK_MS;
   let configuredProviders = new Set(parseLimitProviders(config.limitProviders ?? config.providers));
   let runtimeEpoch = 1;
   let stopped = false;
@@ -477,7 +481,19 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
   function runScheduledFullRefresh() {
     if (!started || stopped || !enabled) return;
     lastScheduledFullAt = now();
-    void refresh({}, 'interval');
+    const currentMs = now();
+    const dueProviders = [...configuredProviders].filter((provider) => {
+      const rows = providerRows(provider);
+      if (rows.length === 0 || rows.some((row) => row.status !== 'notConfigured' && row.status !== 'disabled')) {
+        return true;
+      }
+      const lane = lanes.get(provider);
+      const lastAttemptMs = Math.max(0, ...[...(lane?.identities.values() || [])]
+        .map((state) => Date.parse(state.lastAttempt?.at || ''))
+        .filter(Number.isFinite));
+      return currentMs - lastAttemptMs >= unconfiguredRecheckMs;
+    });
+    void Promise.all(dueProviders.map((provider) => queueScope({ provider }, 'interval')));
     scheduleInterval(refreshMs);
   }
 
@@ -945,6 +961,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
 
 module.exports = {
   DEFAULT_LIMITS_MAX_CONCURRENCY,
+  DEFAULT_UNCONFIGURED_RECHECK_MS,
   TRANSIENT_STATUSES,
   accountIdentityPart,
   createLimitsRuntime,

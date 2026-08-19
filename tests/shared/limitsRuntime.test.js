@@ -595,6 +595,39 @@ test('limitsRefreshMs reconfigures only one runtime timer using elapsed cadence'
   runtime.stop();
 });
 
+test('scheduled refresh slows providers that remain unconfigured', async () => {
+  const clock = fakeClock(1_000);
+  const calls = [];
+  const runtime = createLimitsRuntime({
+    limitProviders: ['claude', 'codex'],
+    limitsRefreshMs: 300_000
+  }, runtimeDeps({
+    autoStart: true,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    unconfiguredRecheckMs: 600_000,
+    probeProvider: async (provider, _config, context) => {
+      calls.push({ provider, reason: context.reason });
+      return [providerRow(provider, provider, provider, {
+        status: provider === 'claude' ? 'notConfigured' : 'ok',
+        updatedAt: new Date(clock.now()).toISOString(),
+        windows: provider === 'claude' ? [] : undefined
+      })];
+    }
+  }));
+
+  await waitFor(() => calls.length === 2, 'startup refresh');
+  clock.advance(300_000);
+  await waitFor(() => calls.length === 3, 'first interval refresh');
+  assert.deepEqual(calls.slice(2), [{ provider: 'codex', reason: 'interval' }]);
+
+  clock.advance(300_000);
+  await waitFor(() => calls.length === 5, 'unconfigured recheck');
+  assert.deepEqual(calls.slice(3).map((call) => call.provider).sort(), ['claude', 'codex']);
+  runtime.stop();
+});
+
 function burnRateRuntime(clock, usedPercent, overrides = {}, config = {}) {
   const calls = [];
   const runtime = createLimitsRuntime(
