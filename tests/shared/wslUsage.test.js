@@ -9,8 +9,28 @@ const {
   emptyWslBundle,
   wslUsageHomes,
   homeHasData,
-  collectWslUsage
+  collectWslUsage,
+  parseRunningWslDistrosFromRegistry,
+  probeWslState
 } = require('../../src/shared/wslUsage');
+
+function registryOutput(distros = []) {
+  const children = distros.map(({ name, state = 2 }, index) => String.raw`
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Lxss\{distro-${index}}
+    State    REG_DWORD    0x${state.toString(16)}
+    DistributionName    REG_SZ    ${name}
+`).join('');
+  return String.raw`HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Lxss
+    DefaultDistribution    REG_SZ    {distro-0}
+${children}`;
+}
+
+function runningWslExec(...names) {
+  return (command, args = []) => {
+    if (command === 'reg' && !args.includes('/s')) return 'Lxss';
+    return registryOutput(names.map((name) => ({ name })));
+  };
+}
 
 test('homeHasData returns the client ids whose markers are present', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
@@ -87,12 +107,32 @@ test('listRunningWslDistros never calls wsl.exe when WSL not installed', () => {
 test('listRunningWslDistros parses running names when installed', () => {
   const out = listRunningWslDistros({
     platform: 'win32',
-    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\nDebian\n')
+    exec: runningWslExec('Ubuntu', 'Debian')
   });
   assert.deepEqual(out, ['Ubuntu', 'Debian']);
 });
 
-test('listRunningWslDistros returns [] when wsl.exe throws', () => {
+test('registry parsing excludes stopped and transitional WSL distributions', () => {
+  const output = registryOutput([
+    { name: 'Ubuntu', state: 1 },
+    { name: 'Debian Dev', state: 2 },
+    { name: 'Alpine', state: 3 }
+  ]);
+  assert.deepEqual(parseRunningWslDistrosFromRegistry(output), ['Debian Dev']);
+});
+
+test('stopped WSL detection never invokes wsl.exe', () => {
+  const commands = [];
+  const exec = (command, args = []) => {
+    commands.push(command);
+    if (command === 'reg' && !args.includes('/s')) return 'Lxss';
+    return registryOutput([{ name: 'Ubuntu', state: 1 }]);
+  };
+  assert.equal(probeWslState({ platform: 'win32', exec }), 'not-running');
+  assert.equal(commands.some((command) => /^wsl(?:\.exe)?$/i.test(command)), false);
+});
+
+test('listRunningWslDistros returns [] when registry enumeration throws', () => {
   const out = listRunningWslDistros({
     platform: 'win32',
     exec: (cmd) => { if (cmd === 'reg') return 'Lxss'; throw new Error('boom'); }
@@ -110,7 +150,7 @@ test('emptyWslBundle has three empty periods', () => {
 test('wslUsageHomes keeps homes with a data marker, drops empty ones', () => {
   const homes = wslUsageHomes({
     platform: 'win32',
-    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    exec: runningWslExec('Ubuntu'),
     readdirSync: (dir) => {
       if (dir === '\\\\wsl$\\Ubuntu\\home') return ['alice', 'bob'];
       throw new Error('unreadable');
@@ -123,7 +163,7 @@ test('wslUsageHomes keeps homes with a data marker, drops empty ones', () => {
 test('wslUsageHomes checks the root home too', () => {
   const homes = wslUsageHomes({
     platform: 'win32',
-    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Debian\n'),
+    exec: runningWslExec('Debian'),
     readdirSync: () => [],
     existsSync: (p) => p === '\\\\wsl$\\Debian\\root\\.codex\\sessions'
   });
@@ -133,7 +173,7 @@ test('wslUsageHomes checks the root home too', () => {
 test('wslUsageHomes returns [] when no distro is running', () => {
   const homes = wslUsageHomes({
     platform: 'win32',
-    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : ''),
+    exec: runningWslExec(),
     readdirSync: () => [],
     existsSync: () => true
   });
@@ -149,7 +189,7 @@ test('wslUsageHomes keeps a home whose only tracked-client data is pi, zed, kilo
   function homesFor(markerRel) {
     return wslUsageHomes({
       platform: 'win32',
-      exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+      exec: runningWslExec('Ubuntu'),
       readdirSync: () => ['alice'],
       existsSync: (p) => p === `\\\\wsl$\\Ubuntu\\home\\alice\\${markerRel.replace(/\//g, '\\')}`
     });
@@ -178,7 +218,7 @@ test('wslUsageHomes keeps a home whose only data is VS Code Copilot Chat', () =>
   const workspaceRoot = `${home}\\.config\\Code\\User\\workspaceStorage`;
   const homes = wslUsageHomes({
     platform: 'win32',
-    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    exec: runningWslExec('Ubuntu'),
     readdirSync: (dir) => {
       if (dir === '\\\\wsl$\\Ubuntu\\home') return ['alice'];
       if (dir === workspaceRoot) return ['abc'];
@@ -205,7 +245,7 @@ test('wslUsageHomes keeps a home whose only data is an alternate root', () => {
   function homesFor(markerRel) {
     return wslUsageHomes({
       platform: 'win32',
-      exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+      exec: runningWslExec('Ubuntu'),
       readdirSync: () => ['alice'],
       existsSync: (p) => p === `\\\\wsl$\\Ubuntu\\home\\alice\\${markerRel.replace(/\//g, '\\')}`
     });
@@ -236,7 +276,7 @@ test('collectWslUsage passes every requested client to each discovered home', as
   };
   const deps = {
     platform: 'win32',
-    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    exec: runningWslExec('Ubuntu'),
     readdirSync: () => ['alice', 'carol'],
     existsSync: (p) =>
       p.endsWith('\\alice\\.claude\\projects') ||
@@ -254,7 +294,7 @@ test('collectWslUsage passes every requested client to each discovered home', as
 test('collectWslUsage sums two homes per period', async () => {
   const deps = {
     platform: 'win32',
-    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    exec: runningWslExec('Ubuntu'),
     readdirSync: () => ['alice', 'bob'],
     existsSync: (p) => p.endsWith('\\.claude\\projects')
   };
@@ -285,7 +325,7 @@ test('collectWslUsage decorates each home before merging periods', async () => {
       }
     }
   }, {
-    platform: 'win32', exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    platform: 'win32', exec: runningWslExec('Ubuntu'),
     readdirSync: () => ['alice'], existsSync: (value) => value.startsWith(homes[0]) && value.endsWith('\\.claude\\projects')
   });
   assert.deepEqual(decorated, homes);
@@ -298,7 +338,7 @@ test('collectWslUsage reports detected clients separate from those with data', a
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const deps = {
     platform: 'win32',
-    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    exec: runningWslExec('Ubuntu'),
     readdirSync: () => ['u'],
     existsSync: (p) => p.startsWith(`${home}\\.codex`) || p.startsWith(`${home}\\.hermes`)
   };
@@ -315,7 +355,7 @@ test('collectWslUsage does not report detected clients the user is not tracking'
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const deps = {
     platform: 'win32',
-    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    exec: runningWslExec('Ubuntu'),
     readdirSync: () => ['u'],
     // Home holds BOTH codex and openclaw markers, but only codex is tracked.
     existsSync: (p) => p.startsWith(`${home}\\.codex`) || p.startsWith(`${home}\\.openclaw`)
@@ -350,7 +390,7 @@ test('collectWslUsage parses Proma-only WSL homes without calling tokscale', asy
     },
     {
       platform: 'win32',
-      exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+      exec: runningWslExec('Ubuntu'),
       readdirSync: () => ['u'],
       existsSync: (p) => p === `${home}\\.proma\\agent-sessions`
     }
@@ -384,7 +424,7 @@ test('collectWslUsage applies the cached Proma price to WSL rows', async () => {
       }
     },
     {
-      platform: 'win32', exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'), readdirSync: () => ['u'],
+      platform: 'win32', exec: runningWslExec('Ubuntu'), readdirSync: () => ['u'],
       existsSync: (p) => p === `${home}\\.proma\\agent-sessions`
     }
   );
@@ -405,7 +445,7 @@ test('collectWslUsage logs and skips a home that throws, keeps others', async ()
   const logs = [];
   const deps = {
     platform: 'win32',
-    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\nDebian\n'),
+    exec: runningWslExec('Ubuntu', 'Debian'),
     readdirSync: () => [],
     existsSync: (p) => p.endsWith('\\root\\.claude\\projects')
   };

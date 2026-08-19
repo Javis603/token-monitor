@@ -94,18 +94,16 @@ const MARKER_CLIENTS = {
   '.proma/agent-sessions': 'proma'
 };
 
-// Default command runner. reg output is ANSI/utf8; wsl.exe output is UTF-16LE.
-// stdin is NUL ('ignore') so a non-WSL wsl.exe stub cannot block on "press any
-// key to install"; a timeout backstops any hang.
+// Default command runner. Every runtime call in this module is now a read-only
+// registry query; WSL itself is never launched merely to discover its state.
 function defaultExec(cmd, args) {
-  const isWsl = /wsl(\.exe)?$/i.test(cmd);
   const out = execFileSync(cmd, args, {
     stdio: ['ignore', 'pipe', 'ignore'],
     timeout: 5000,
     windowsHide: true,
     encoding: 'buffer'
   });
-  return Buffer.from(out).toString(isWsl ? 'utf16le' : 'utf8');
+  return Buffer.from(out).toString('utf8');
 }
 
 function emptyWslBundle() {
@@ -126,19 +124,53 @@ function isWslInstalled(deps = {}) {
   }
 }
 
+// WSL persists each registered distribution's LxssDistributionState under its
+// Lxss child key. Reading that state through reg.exe avoids invoking wsl.exe
+// merely to implement `--list --running`: on some WSL2 hosts even that read-only
+// CLI command starts a transient utility VM and renegotiates Hyper-V networking.
+// State 2 is LxssDistributionStateRunning; every other state is intentionally
+// excluded, matching WSL's own --running filter.
+function parseRunningWslDistrosFromRegistry(output) {
+  const running = [];
+  let current = null;
+
+  function finishCurrent() {
+    if (current?.state === 2 && current.name) running.push(current.name);
+  }
+
+  for (const rawLine of String(output || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (/^HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\/i.test(line)) {
+      finishCurrent();
+      current = { name: '', state: null };
+      continue;
+    }
+    if (!current) continue;
+    const value = /^([^\s]+)\s+REG_(?:DWORD|SZ)\s+(.+)$/i.exec(line);
+    if (!value) continue;
+    const key = value[1].toLowerCase();
+    const rawValue = value[2].trim();
+    if (key === 'distributionname') current.name = rawValue;
+    else if (key === 'state') {
+      current.state = /^0x/i.test(rawValue)
+        ? Number.parseInt(rawValue.slice(2), 16)
+        : Number.parseInt(rawValue, 10);
+    }
+  }
+  finishCurrent();
+  return [...new Set(running)];
+}
+
 function listRunningWslDistros(deps = {}) {
   if (!isWslInstalled(deps)) return [];
   const exec = deps.exec || defaultExec;
   let out;
   try {
-    out = exec('wsl.exe', ['--list', '--quiet', '--running']);
+    out = exec('reg.exe', ['query', LXSS_KEY, '/s']);
   } catch (_) {
     return [];
   }
-  return String(out)
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\u0000/g, '').trim())
-    .filter(Boolean);
+  return parseRunningWslDistrosFromRegistry(out);
 }
 
 // Returns the tracked-client ids whose marker is present in this home (deduped).
@@ -281,6 +313,7 @@ module.exports = {
   homeHasData,
   isWslInstalled,
   listRunningWslDistros,
+  parseRunningWslDistrosFromRegistry,
   probeWslState,
   wslUsageHomes
 };
