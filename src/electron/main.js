@@ -235,7 +235,6 @@ const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServicesRecovery');
 const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
 const { createCodexWeeklyQuotaEstimateStore } = require('../shared/codexWeeklyQuotaEstimateStore');
-const { extractCodexWeeklyObservation } = require('../shared/codexWeeklyQuotaEstimate');
 const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
 const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidgetDemand');
@@ -2513,35 +2512,6 @@ let trayRefreshInFlight = false;
 let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
 const codexWeeklyQuotaEstimateStore = createCodexWeeklyQuotaEstimateStore();
-const CODEX_QUOTA_ACTIVE_PROBE_MS = 15 * 1000;
-const codexQuotaProbeTokens = new Map();
-let codexQuotaProbeAt = 0;
-let codexQuotaProbeInFlight = false;
-
-function scheduleCodexQuotaBoundaryProbe(stats) {
-  let extracted;
-  try {
-    extracted = extractCodexWeeklyObservation(stats, Date.now(), {
-      localDeviceId: settings?.deviceId
-    });
-  } catch (_) {
-    return;
-  }
-  const observation = extracted?.observation;
-  if (!observation || observation.usedPercent >= 100 || !Number.isFinite(observation.tokens)) return;
-  const previousTokens = codexQuotaProbeTokens.get(extracted.accountKey);
-  codexQuotaProbeTokens.set(extracted.accountKey, observation.tokens);
-  if (previousTokens === undefined || observation.tokens <= previousTokens) return;
-  const now = Date.now();
-  if (codexQuotaProbeInFlight || now - codexQuotaProbeAt < CODEX_QUOTA_ACTIVE_PROBE_MS) return;
-  const runtime = deviceRuntimeHandle;
-  if (!runtime?.refreshLimits) return;
-  codexQuotaProbeAt = now;
-  codexQuotaProbeInFlight = true;
-  void Promise.resolve(runtime.refreshLimits({ provider: 'codex' }, 'quota-boundary-probe'))
-    .catch((error) => console.log(`[limits-runtime] Codex quota boundary probe failed: ${error.message}`))
-    .finally(() => { codexQuotaProbeInFlight = false; });
-}
 
 function electronPresentationStats(stats) {
   const visibleStats = projectLimitStatsForDisplay(stats, {
@@ -3480,7 +3450,6 @@ function startSyncCollector() {
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
       if (displayStats) {
-        scheduleCodexQuotaBoundaryProbe(displayStats);
         updateDiscordRpcDisplay(displayStats);
         sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats: displayStats, at: new Date().toISOString() } }, { widgetProducerOwner });
       }
@@ -3514,7 +3483,6 @@ function startHostCollector() {
       if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
       const visibleSummary = summary;
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
-      scheduleCodexQuotaBoundaryProbe(visibleSummary);
       if (!embeddedHub) return;
       try {
         const stale = settings.lastPostedDeviceId;
@@ -4075,7 +4043,6 @@ function startLocalCollector() {
       localDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       lastCollectedDevice = localDevice;
       localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
-      scheduleCodexQuotaBoundaryProbe(localStats);
       attachLocalNativeViews(localStats, localDevice);
       updateDiscordRpcDisplay(localStats);
       sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } }, { widgetProducerOwner });

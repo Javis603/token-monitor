@@ -22,10 +22,10 @@ test('Codex panel renders the endpoint-net weekly estimate directly', () => {
   assert.ok(collectingHelp.every((line) => line.includes('{span}')));
 });
 
-test('active local Codex usage triggers a throttled boundary refresh', () => {
+test('weekly estimates reuse the normal limits refresh cadence', () => {
   const main = fs.readFileSync(path.join(root, 'src', 'electron', 'main.js'), 'utf8');
-  assert.match(main, /CODEX_QUOTA_ACTIVE_PROBE_MS = 15 \* 1000/);
-  assert.match(main, /refreshLimits\(\{ provider: 'codex' \}, 'quota-boundary-probe'\)/);
+  assert.doesNotMatch(main, /CODEX_QUOTA_ACTIVE_PROBE_MS/);
+  assert.doesNotMatch(main, /quota-boundary-probe/);
 });
 
 test('every identified Codex weekly account receives its own stored estimate', () => {
