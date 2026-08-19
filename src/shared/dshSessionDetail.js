@@ -31,15 +31,24 @@ function numberValue(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function textFromContent(content) {
+function promptFromContent(content) {
   const blocks = Array.isArray(content) ? content : [];
-  return blocks
+  const text = blocks
     .filter((block) => block && block.type === 'text' && typeof block.text === 'string')
     .map((block) => block.text.trim())
     .filter(Boolean)
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
+  // DSH carries a user-pasted image as a top-level `image` content block (not
+  // inline in the text), so a text-only scan would drop an image-only prompt
+  // entirely and leave its reply stranded as an empty exchange. Mirror the
+  // Codex/Claude detail convention: [image] for one, [N images] for several,
+  // prepended to whatever was typed.
+  const imageCount = blocks.filter((block) => block && block.type === 'image').length;
+  const marker = imageCount === 1 ? '[image]' : imageCount > 1 ? `[${imageCount} images]` : '';
+  if (!marker) return text;
+  return text ? `${marker} ${text}` : marker;
 }
 
 function findDshSessionFile(sessionId, options = {}) {
@@ -125,7 +134,7 @@ function parseDshDetailEvents(text) {
     if (time <= 0) continue;
     if (record?.type === 'user/message') {
       if (record.data?.source?.kind !== 'user') continue;
-      const promptText = textFromContent(record.data?.content);
+      const promptText = promptFromContent(record.data?.content);
       if (promptText) events.push({ kind: 'prompt', timestamp: new Date(time).toISOString(), text: promptText });
     } else if (record?.type === 'assistant/message') {
       const usage = record.data?.usage;

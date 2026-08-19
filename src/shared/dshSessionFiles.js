@@ -157,7 +157,31 @@ function decodeZstdBuffer(buffer, frames) {
 }
 
 function decodeSessionText(filePath, buffer) {
-  return filePath.endsWith('.jsonl.zstd') ? decodeZstdBuffer(buffer) : buffer.toString('utf8');
+  if (!filePath.endsWith('.jsonl.zstd')) return buffer.toString('utf8');
+  const frames = scanZstdFrames(buffer);
+  let text = decodeZstdBuffer(buffer, frames);
+  // A live transcript is scanned mid-write routinely, so the trailing frame is
+  // often torn. dsh's own reader (decompressZstdPrefix with ZSTD_e_flush) and
+  // tokscale's streaming zstd decoder both keep the records a torn final frame
+  // managed to write out completely, dropping only the fragment at the cut.
+  // zlib's finishFlush reproduces that at block granularity: it emits every
+  // fully-decoded block in the torn tail, and the per-line JSON parse
+  // downstream skips the remainder. Scoped to decodeSessionText (not the
+  // header-only decodeFirstFrameText), which already returns '' for a torn
+  // first frame.
+  const tailStart = frames.length ? frames[frames.length - 1].end : 0;
+  if (tailStart < buffer.length) {
+    const tail = buffer.subarray(tailStart);
+    if (tail.length >= 4 && tail.readUInt32LE(0) === ZSTD_MAGIC) {
+      try {
+        text += zlib.zstdDecompressSync(tail, { finishFlush: zlib.constants.ZSTD_e_flush }).toString('utf8');
+      } catch (_) {
+        // The torn prefix could not be partially recovered; the complete frames
+        // above are still valid, so keep them and drop only this tail.
+      }
+    }
+  }
+  return text;
 }
 
 // DSH appends one zstd frame per flush, and the leading `session` header is

@@ -91,6 +91,49 @@ test('scanZstdFrames stops at a torn trailing frame instead of throwing', { skip
   assert.equal(frames[0].end, complete.length);
 });
 
+// dsh flushes one zstd frame per append batch, and a live scan reads that
+// batch mid-write: the final frame is often torn. dsh's own reader
+// (decompressZstdPrefix, ZSTD_e_flush) and tokscale's streaming decoder keep
+// the newline-complete records a torn final frame managed to write, dropping
+// only the fragment at the cut — so decodeSessionText must recover them too,
+// at zstd's block granularity. A large high-entropy final record forces the
+// frame to span multiple blocks so a mid-tail cut leaves the earlier complete
+// records recoverable, mirroring dsh's own zstd.spec.ts fixture.
+test('decodeSessionText recovers complete records inside a torn final frame', { skip: !hasZstd }, () => {
+  const header = zlib.zstdCompressSync(Buffer.from('{"type":"session","id":"s1"}\n', 'utf8'));
+  const lineA = '{"type":"user/message","seq":1}\n';
+  const lineB = '{"type":"assistant/message","seq":2}\n';
+  const sentinel = 'TORN_SENTINEL_NEVER_RECOVERED';
+  // High-entropy third record (no trailing newline) so the compressed frame is
+  // large enough to span multiple zstd blocks; the sentinel sits deep in the
+  // record so a partial recovery of it still cannot reach it.
+  const noise = crypto.randomBytes(200 * 1024).toString('base64');
+  const partial = JSON.stringify({ type: 'assistant/message', seq: 3, pad: noise + sentinel });
+  const fullFrame = zlib.zstdCompressSync(Buffer.from(lineA + lineB + partial, 'utf8'));
+
+  // Find a cut that leaves the two complete records recoverable but the third
+  // truncated — the way a crash or a mid-write scan actually tears the file.
+  let torn = null;
+  for (const frac of [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]) {
+    const candidate = fullFrame.subarray(0, Math.floor(fullFrame.length * frac));
+    let out;
+    try { out = zlib.zstdDecompressSync(candidate, { finishFlush: zlib.constants.ZSTD_e_flush }).toString('utf8'); } catch (_) { continue; }
+    if (out.includes(lineA) && out.includes(lineB) && !out.includes(sentinel)) { torn = candidate; break; }
+  }
+  assert.ok(torn, 'a mid-tail cut that keeps the two complete records recoverable must exist');
+
+  const buffer = Buffer.concat([header, torn]);
+  // Anti-vacuous: the torn frame is not a complete frame, so the scanner alone
+  // only sees the header — without partial recovery, the two records inside the
+  // torn frame would be invisible.
+  assert.equal(scanZstdFrames(buffer).length, 1);
+
+  const text = decodeSessionText('/tmp/session.jsonl.zstd', buffer);
+  assert.ok(text.includes(lineA), 'the first complete record inside the torn frame must survive');
+  assert.ok(text.includes(lineB), 'the second complete record inside the torn frame must survive');
+  assert.ok(!text.includes(sentinel), 'the truncated third record must be dropped');
+});
+
 // Session-id lookup only needs the header, which is always the first event
 // dsh writes. decodeFirstFrameText must not touch later frames, so a long
 // transcript's discovery cost stays O(one frame) even when a trailing frame

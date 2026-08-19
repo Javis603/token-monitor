@@ -45,7 +45,7 @@ const {
 } = require('./qoderCnUsage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./dshPaths');
-const { indexDshSessionHeaders } = require('./dshSessionFiles');
+const { indexDshSessionHeaders, readDshSessionHeader, resolveDshSessionsRoot } = require('./dshSessionFiles');
 const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
@@ -739,13 +739,17 @@ function projectIdentity(value) {
 // stutter once project tracking made this run on every session each tick).
 const jsonlTimestampCache = new Map();
 
-// Keyed by DSH session id -> { filePath, createdAt }. DSH sessions are
-// deliberately excluded from sessionTimestampMap's resolvedSessionKeys (so
-// lastUsedAt keeps refreshing), so every known id is looked up again on
-// every tick; this is what turns that into a stat() on an already-known
-// path instead of a fresh walk of the whole DSH sessions tree each time —
-// the same perceived-UI-stutter class jsonlTimestampCache above exists to
-// avoid. Module-level (not threaded through collectUsageOnce's per-call
+// Keyed by `sessionsRoot\0sessionId` -> { filePath, createdAt, statFingerprint }.
+// DSH sessions are deliberately excluded from sessionTimestampMap's
+// resolvedSessionKeys (so lastUsedAt keeps refreshing), so every known id is
+// looked up again on every tick; this is what turns that into a stat() on an
+// already-known path instead of a fresh walk of the whole DSH sessions tree
+// each time — the same perceived-UI-stutter class jsonlTimestampCache above
+// exists to avoid. The root is part of the key because one collector process
+// decorates both the native home and every running WSL distro's home, and the
+// same session id can exist under more than one root (a cloned/migrated home);
+// a bare-id key would let the second root reuse the first root's file path and
+// timestamps. Module-level (not threaded through collectUsageOnce's per-call
 // deps) so it survives across ticks: collectUsageOnce reconstructs its
 // session-metadata deps fresh on every call, same as jsonlTimestampCache and
 // projectPathCache already rely on being module-level rather than deps-held.
@@ -852,26 +856,58 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     // persist across collectUsageOnce calls to do anything, and every
     // caller that wants test isolation already passes its own Map explicitly.
     const dshFileCache = deps.dshSessionFileCache || dshSessionFileCache;
-    const unresolvedDshIds = [...dshIds].filter((id) => !dshFileCache.has(id));
+    // dshPaths.js checks env.DSH_HOME before the homeDir it's given, same as
+    // tokscale's own PathRoot::EnvVar — and tokscale's own scanner never lets
+    // that leak into an explicit --home lookup (use_env_roots: false, lib.rs).
+    // scopedHome means `home` is a specific WSL distro, not this machine's
+    // own profile, so a host-configured DSH_HOME must not redirect it back.
+    // The resolved root namespaces the cache key (see dshSessionFileCache).
+    const dshEnv = deps.scopedHome ? {} : (deps.env || process.env);
+    const dshRoot = resolveDshSessionsRoot({ homeDir: home, env: dshEnv, platform: deps.platform });
+    const dshKey = (id) => `${dshRoot} ${id}`;
+    const unresolvedDshIds = [...dshIds].filter((id) => !dshFileCache.has(dshKey(id)));
     if (unresolvedDshIds.length > 0) {
       const buildIndex = deps.indexDshSessionHeaders || indexDshSessionHeaders;
-      // dshPaths.js checks env.DSH_HOME before the homeDir it's given, same as
-      // tokscale's own PathRoot::EnvVar — and tokscale's own scanner never lets
-      // that leak into an explicit --home lookup (use_env_roots: false, lib.rs).
-      // scopedHome means `home` is a specific WSL distro, not this machine's
-      // own profile, so a host-configured DSH_HOME must not redirect it back.
-      const dshEnv = deps.scopedHome ? {} : (deps.env || process.env);
       const index = buildIndex({ homeDir: home, env: dshEnv, platform: deps.platform });
       for (const [sessionId, entry] of index) {
-        if (!dshFileCache.has(sessionId)) dshFileCache.set(sessionId, entry);
+        const key = dshKey(sessionId);
+        if (dshFileCache.has(key)) continue;
+        // A stat fingerprint lets an entry whose header was unreadable at
+        // index time (createdAt undefined, directory-name fallback) be re-read
+        // later, once the file actually changes, instead of being stuck on
+        // mtime forever.
+        let statFingerprint = '';
+        try { const st = fs.statSync(entry.filePath); statFingerprint = `${st.size}:${st.mtimeMs}`; } catch (_) { /* file vanished mid-scan */ }
+        dshFileCache.set(key, { ...entry, statFingerprint });
       }
     }
     for (const sessionId of dshIds) {
-      const entry = dshFileCache.get(sessionId);
+      const key = dshKey(sessionId);
+      let entry = dshFileCache.get(key);
       if (!entry) continue;
-      const startedAt = isoFromDate(Number(entry.createdAt));
       let lastUsedAt = '';
-      try { lastUsedAt = isoFromDate(fs.statSync(entry.filePath).mtime); } catch (_) { /* file vanished mid-scan */ }
+      let statFingerprint = '';
+      try {
+        const st = fs.statSync(entry.filePath);
+        lastUsedAt = isoFromDate(st.mtime);
+        statFingerprint = `${st.size}:${st.mtimeMs}`;
+      } catch (_) { /* file vanished mid-scan */ }
+      // A header read earlier may have fallen back to the directory name (no
+      // createdAt) because the file was mid-write or torn. If it has since
+      // grown or been rewritten, re-read the header once to recover the real
+      // createdAt before falling back to mtime. Entries with a known createdAt
+      // are left alone: the header is the first thing written to an
+      // append-only log and never changes, so re-reading it is pure waste.
+      if (entry.createdAt === undefined && statFingerprint && statFingerprint !== entry.statFingerprint) {
+        const refreshed = readDshSessionHeader(entry.filePath);
+        if (refreshed) {
+          entry = { filePath: entry.filePath, createdAt: refreshed.createdAt, statFingerprint };
+        } else {
+          entry.statFingerprint = statFingerprint;
+        }
+        dshFileCache.set(key, entry);
+      }
+      const startedAt = isoFromDate(Number(entry.createdAt));
       if (!startedAt && !lastUsedAt) continue;
       metadata.set(`dsh:${sessionId}`, { startedAt: startedAt || lastUsedAt, lastUsedAt: lastUsedAt || startedAt });
     }

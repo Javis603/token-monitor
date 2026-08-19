@@ -33,6 +33,19 @@ function userMessage({ seq, text, kind = 'user' }) {
   };
 }
 
+function imageBlock(index = 0) {
+  return { type: 'image', attachment: { attachmentId: `att_${index}`, mediaType: 'image/png', bytes: 10, width: 1, height: 1, name: `img${index}.png` } };
+}
+
+function userMessageWithBlocks({ seq, blocks, kind = 'user' }) {
+  return {
+    type: 'user/message',
+    seq,
+    time: BASE_TIME + seq * 1000,
+    data: { content: blocks, source: { kind }, role: 'user' }
+  };
+}
+
 function assistantMessage({ seq, usage, tools = [] }) {
   return {
     type: 'assistant/message',
@@ -76,6 +89,45 @@ test('readDshSessionDetail groups a real prompt with its reply and extracts tool
   assert.equal(detail.exchanges[0].promptPreview, 'Read package.json and run lint.');
   assert.deepEqual(detail.exchanges[0].tools, ['read', 'bash']);
   assert.equal(detail.totals.totalTokens, 170);
+});
+
+// DSH carries a user-pasted image as a top-level `image` content block, not
+// inline in the text. Without an image marker an image-only prompt produces no
+// text, so its reply gets stranded as an empty exchange — mirror the
+// Codex/Claude convention so the prompt survives.
+test('readDshSessionDetail keeps an image-only prompt as [image]', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  writeFixture(root, 'session-image', [
+    sessionHeader({ id: 'session-image' }),
+    userMessageWithBlocks({ seq: 1, blocks: [imageBlock()] }),
+    assistantMessage({ seq: 2, usage: { inputTokens: 10, outputTokens: 5 } })
+  ]);
+  const detail = readDshSessionDetail({ sessionId: 'session-image', sessionsRoot: root, home: '/home/tester', env: {} });
+  assert.equal(detail.exchanges.length, 1);
+  assert.equal(detail.exchanges[0].promptPreview, '[image]');
+  assert.equal(detail.totals.totalTokens, 15);
+});
+
+test('readDshSessionDetail prepends [image] to an image-plus-text prompt', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  writeFixture(root, 'session-image-text', [
+    sessionHeader({ id: 'session-image-text' }),
+    userMessageWithBlocks({ seq: 1, blocks: [imageBlock(), { type: 'text', text: 'describe this' }] }),
+    assistantMessage({ seq: 2, usage: { inputTokens: 10, outputTokens: 5 } })
+  ]);
+  const detail = readDshSessionDetail({ sessionId: 'session-image-text', sessionsRoot: root, home: '/home/tester', env: {} });
+  assert.equal(detail.exchanges[0].promptPreview, '[image] describe this');
+});
+
+test('readDshSessionDetail counts multiple images as [N images]', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  writeFixture(root, 'session-images', [
+    sessionHeader({ id: 'session-images' }),
+    userMessageWithBlocks({ seq: 1, blocks: [imageBlock(0), imageBlock(1), imageBlock(2)] }),
+    assistantMessage({ seq: 2, usage: { inputTokens: 10, outputTokens: 5 } })
+  ]);
+  const detail = readDshSessionDetail({ sessionId: 'session-images', sessionsRoot: root, home: '/home/tester', env: {} });
+  assert.equal(detail.exchanges[0].promptPreview, '[3 images]');
 });
 
 // DSH's outputTokens includes reasoning tokens as a subset. tokscale's dsh

@@ -343,6 +343,83 @@ test('scopedHome DSH lookup ignores a host DSH_HOME override', () => {
   }
 });
 
+// One collector process decorates both the native home and every running WSL
+// distro's home, and a cloned/migrated home can carry the same session id with
+// a different header (and therefore a different createdAt). The DSH cache key
+// must include the resolved sessions root, not just the session id — a bare-id
+// key would let the second root reuse the first root's file path and
+// timestamps.
+test('applySessionTimestamps scopes the DSH cache by sessions root, not just session id', () => {
+  const { applySessionTimestamps: applyFresh } = freshCollector();
+  const nativeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-native-'));
+  const wslHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-wsl2-'));
+  try {
+    const id = 'session-shared';
+    const nativeCreatedAt = 1750000000000;
+    const wslCreatedAt = 1759999999999;
+    for (const [home, createdAt] of [[nativeHome, nativeCreatedAt], [wslHome, wslCreatedAt]]) {
+      const dir = path.join(home, '.dsh', 'sessions', 'proj', id);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'session.jsonl'), `${JSON.stringify({ type: 'session', id, createdAt })}\n`);
+    }
+
+    // No dshSessionFileCache injected on purpose: both calls share the
+    // process-wide module cache, so the composite key is what keeps them apart.
+    const nativePeriods = { today: { sessions: { [`dsh:${id}`]: { client: 'dsh', sessionId: id } } } };
+    applyFresh(nativePeriods, nativeHome, { env: {} });
+    assert.equal(nativePeriods.today.sessions[`dsh:${id}`].startedAt, new Date(nativeCreatedAt).toISOString());
+
+    const wslPeriods = { today: { sessions: { [`dsh:${id}`]: { client: 'dsh', sessionId: id } } } };
+    applyFresh(wslPeriods, wslHome, { scopedHome: true, env: {} });
+    assert.equal(wslPeriods.today.sessions[`dsh:${id}`].startedAt, new Date(wslCreatedAt).toISOString());
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(nativeHome, { recursive: true, force: true });
+    fs.rmSync(wslHome, { recursive: true, force: true });
+  }
+});
+
+// An entry whose header was unreadable at index time falls back to the
+// directory name, so it carries no createdAt and startedAt degrades to mtime.
+// The header can later be rewritten (a torn first write followed by a complete
+// one), so once the file's stat fingerprint changes the known path must be
+// re-read to recover the real createdAt rather than staying pinned to that
+// stale mtime forever.
+test('applySessionTimestamps recovers createdAt once a torn header becomes readable', () => {
+  const { applySessionTimestamps: applyFresh } = freshCollector();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-recover-'));
+  try {
+    const id = 'session-recover';
+    const dir = path.join(home, '.dsh', 'sessions', 'proj', id);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'session.jsonl');
+
+    fs.writeFileSync(file, 'this is not a session header at all\n');
+    const mtime1 = new Date('2026-07-01T10:00:00.000Z');
+    fs.utimesSync(file, mtime1, mtime1);
+
+    const tick = () => {
+      const periods = { today: { sessions: { [`dsh:${id}`]: { client: 'dsh', sessionId: id } } } };
+      applyFresh(periods, home, { env: {} });
+      return periods.today.sessions[`dsh:${id}`];
+    };
+
+    const first = tick();
+    assert.equal(first.startedAt, mtime1.toISOString(), 'no readable header yet, so startedAt falls back to mtime');
+
+    const createdAt = 1750000000000;
+    fs.writeFileSync(file, `${JSON.stringify({ type: 'session', id, createdAt })}\n`);
+    const mtime2 = new Date('2026-07-01T11:00:00.000Z');
+    fs.utimesSync(file, mtime2, mtime2);
+
+    const second = tick();
+    assert.equal(second.startedAt, new Date(createdAt).toISOString(), 'the rewritten header must be re-read to recover createdAt');
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('applySessionTimestamps retries a progressive miss in the final pass', () => {
   const cache = { metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set() };
   const periods = { today: { sessions: {
