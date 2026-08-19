@@ -2749,6 +2749,36 @@ html.is-windows .settings-panel select option {
   white-space: nowrap;
 }
 .total-compact.hidden { display: none; }
+.token-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 8px;
+}
+.token-breakdown.hidden { display: none; }
+.token-breakdown-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.token-breakdown-k {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.2;
+}
+.token-breakdown-v {
+  color: var(--text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  line-height: 1.2;
+}
+.token-breakdown-c {
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
 .cost { margin-top: 6px; color: var(--muted); font-size: 12px; }
 .view-back-row {
   position: relative;
@@ -3303,6 +3333,14 @@ html.is-windows .settings-panel select option {
   color: var(--muted);
   font-weight: 500;
 }
+.home-activity-tooltip-rate {
+  color: var(--muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.home-activity-tooltip-rate:empty {
+  display: none;
+}
 .home-activity-tooltip-date {
   font-size: 9px;
 }
@@ -3396,8 +3434,8 @@ html.is-windows .settings-panel select option {
 .row-icon-codebuddy  { -webkit-mask-image: url(../../../assets/icons/codebuddy.svg);     mask-image: url(../../../assets/icons/codebuddy.svg); }
 .row-icon-workbuddy  { -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);     mask-image: url(../../../assets/icons/workbuddy.svg); }
 .row-icon-proma      { -webkit-mask-image: url(../../../assets/icons/proma.svg);         mask-image: url(../../../assets/icons/proma.svg); }
-.row-icon-reasonix   { -webkit-mask-image: url(../../../assets/icons/reasonix.svg);      mask-image: url(../../../assets/icons/reasonix.svg); }
 .row-icon-dsh        { -webkit-mask-image: url(../../../assets/icons/dsh.svg);            mask-image: url(../../../assets/icons/dsh.svg); }
+.row-icon-reasonix   { -webkit-mask-image: url(../../../assets/icons/reasonix.svg);      mask-image: url(../../../assets/icons/reasonix.svg); }
 .row-icon-opencode   { -webkit-mask-image: url(../../../assets/icons/opencode.svg);      mask-image: url(../../../assets/icons/opencode.svg); }
 .row-icon-openrouter { -webkit-mask-image: url(../../../assets/icons/openrouter.svg);    mask-image: url(../../../assets/icons/openrouter.svg); }
 .row-icon-openclaw   { -webkit-mask-image: url(../../../assets/icons/openclaw.svg);      mask-image: url(../../../assets/icons/openclaw.svg); }
@@ -5420,6 +5458,18 @@ html.is-windows .limit-live-badge {
   align-items: baseline;
   gap: 12px;
   font-size: 11px;
+}
+.accordion-metrics {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  text-align: right;
+}
+.accordion-cost {
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 .accordion-label {
   color: var(--muted);

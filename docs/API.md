@@ -72,9 +72,14 @@ Example payload:
     },
     "totalTokens": 1234,
     "costUsd": 0.01,
+    "inputTokens": 100,
     "cacheReadTokens": 1100,
     "cacheWriteTokens": 0,
     "outputTokens": 34,
+    "inputCostUsd": 0.002,
+    "cacheReadCostUsd": 0.001,
+    "cacheWriteCostUsd": 0,
+    "outputCostUsd": 0.007,
     "timedTokens": 1230,
     "timedOutputTokens": 34,
     "timedDurationMs": 4200,
@@ -226,7 +231,9 @@ Each native period may include `capabilities.tokenComponents`. Current producers
 
 `historyAvailable` is an explicit boolean capability for retained History. Current producers send it on every usage snapshot: `true` means History collection is enabled, while `false` means disabled. Fixed-range readers require both `historyAvailable: true` and a retained `history` object; a missing capability (including records passed through an older Hub) is unavailable rather than an inferred zero. The `history` field itself remains interval-gated: omission means "no History update this tick", explicit `null` means unavailable, and an object replaces the retained History.
 
-Current History daily rows may also carry `cacheReadTokens`, `cacheWriteTokens`, `outputTokens`, `unclassifiedTokens`, and the same fields inside each `perClient` / `perModel` entry. `tokenComponentsAvailable: true` means the entire row has exact component provenance. Missing provenance does not change the exact total tokens, cost, Tool, or Model attribution: fixed ranges retain every known cache/output component and place only the unsupported remainder in `unclassifiedTokens` instead of treating it as zero or cache miss. The local daily archive keeps component provenance permanently, while sync payloads keep detailed components only for the latest 30 days because WEEK / 7D / 30D never need older detail and `/api/ingest` has a 1 MiB ceiling. If even that additive detail would push a device payload over its budget, serialization drops the component fields before any existing project or session detail.
+Current History daily rows may also carry `cacheReadTokens`, `cacheWriteTokens`, `outputTokens`, `unclassifiedTokens`, `timedOutputTokens`, `timedDurationMs`, and the same fields inside each `perClient` / `perModel` entry. Daily rows also include `perClientModel` (tool → model → `{tokens, cost, messages}`) so dashboards can drill from a tool into its models without re-deriving the graph. `tokenComponentsAvailable: true` means the entire row has exact component provenance. Missing provenance does not change the exact total tokens, cost, Tool, or Model attribution: fixed ranges retain every known cache/output component and place only the unsupported remainder in `unclassifiedTokens` instead of treating it as zero or cache miss. The local daily archive keeps component provenance permanently, while sync payloads keep detailed components only for the latest 30 days because WEEK / 7D / 30D never need older detail and `/api/ingest` has a 1 MiB ceiling. If even that additive detail would push a device payload over its budget, serialization drops the component fields before any existing project or session detail.
+
+When collect-time pricing is available, the collector also splits `costUsd` into `inputCostUsd` / `cacheReadCostUsd` / `cacheWriteCostUsd` / `outputCostUsd`. The split fails closed: a non-zero token component without a known rate leaves the whole row in `unclassifiedCostUsd` instead of guessing. Component costs are then scaled so they sum to tokscale's `costUsd`. Older payloads without these fields normalize to `0`. Display-layer output tok/s is always `timedOutputTokens / timedDurationMs` divided at the point of display, never stored as a ratio.
 
 Current agents and widgets include `osName` and, when known, `osVersion` so device details can show a user-facing operating-system release. macOS uses the product version from Electron or `sw_vers`; Windows uses the product family and display version from the registry; Linux uses the distribution name and version from `os-release`. Detection failures fall back to an explicitly labelled Windows build or Linux kernel release. The hub continues to accept older payloads without these fields.
 

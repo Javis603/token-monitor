@@ -180,11 +180,27 @@ test('heatmapSvg keeps normal geometry without directional hover scaling', () =>
   }, { spotlightId: 'testSpotlight' });
 
   assert.match(svg, /viewBox="0 0 24 37" width="24" height="37"/);
-  assert.match(svg, /class="heat lvl-4" data-d="2026-06-22"[^>]*x="0" y="0" width="9" height="9"/);
-  assert.match(svg, /class="heat lvl-3" data-d="2026-06-30"[^>]*x="15" y="12" width="9" height="9"/);
+  assert.match(svg, /class="heat lvl-4"[^>]*x="0" y="0" width="9" height="9"/);
+  assert.match(svg, /class="heat lvl-4"[^>]*data-d="2026-06-22"[^>]*data-out="/);
+  assert.match(svg, /class="heat lvl-3"[^>]*x="15" y="12" width="9" height="9"/);
+  assert.match(svg, /class="heat lvl-3"[^>]*data-d="2026-06-30"/);
   assert.match(svg, /class="heat heat-bright lvl-4" x="0" y="0" width="9" height="9"/);
   assert.match(svg, /<mask id="testSpotlightMask"><rect x="0" y="0" width="24" height="21"/);
   assert.match(svg, /class="heat-month" x="0" y="33"/);
+});
+
+test('heatmapSvg can draw intensity-scaled dots instead of squares', () => {
+  const svg = heatmapSvg({
+    width: 10,
+    height: 10,
+    cell: 10,
+    gap: 2,
+    cells: [{ date: '2026-06-22', intensity: 4, tokens: 9, x: 0, y: 0, size: 10 }],
+    monthLabels: []
+  }, { shape: 'dot' });
+  assert.match(svg, /<circle class="heat lvl-4"/);
+  assert.match(svg, /cx="5"/);
+  assert.doesNotMatch(svg, /<rect class="heat/);
 });
 
 test('heatmapSvg embeds escaped per-cell titles when supplied', () => {
@@ -220,7 +236,7 @@ test('heatmapSvg can include a spotlight layer with cell data attributes', () =>
     height: 9,
     cell: 9,
     gap: 3,
-    cells: [{ date: '2026-06-22', intensity: 4, tokens: 1234, cost: 0.25, x: 0, y: 0, size: 9 }],
+    cells: [{ date: '2026-06-22', intensity: 4, tokens: 1234, cost: 0.25, timedOutputTokens: 80, timedDurationMs: 2000, x: 0, y: 0, size: 9 }],
     monthLabels: []
   }, { spotlightId: 'homeActivitySpotlight' });
 
@@ -230,6 +246,8 @@ test('heatmapSvg can include a spotlight layer with cell data attributes', () =>
   assert.match(svg, /class="heat-bright-layer"/);
   assert.match(svg, /data-d="2026-06-22"/);
   assert.match(svg, /data-t="1234"/);
+  assert.match(svg, /data-out="80"/);
+  assert.match(svg, /data-ms="2000"/);
 });
 
 test('statsCards returns ordered descriptors with kinds and coerced values', () => {
@@ -238,7 +256,7 @@ test('statsCards returns ordered descriptors with kinds and coerced values', () 
     activeTimeMs: 3600000, longestStreak: 5, peakDayTokens: 40, favoriteModel: 'opus', messages: 12
   });
   assert.deepEqual(cards.map((c) => c.key),
-    ['totalTokens', 'totalCost', 'activeDays', 'currentStreak', 'activeTimeMs', 'peakDayTokens', 'favoriteModel', 'messages']);
+    ['totalTokens', 'totalCost', 'activeDays', 'currentStreak', 'activeTimeMs', 'peakDayTokens', 'outputTokens', 'favoriteModel', 'messages']);
   assert.deepEqual(cards[0], { key: 'totalTokens', kind: 'tokens', value: 100 });
   assert.deepEqual(cards.find((c) => c.key === 'activeTimeMs'), { key: 'activeTimeMs', kind: 'duration', value: 3600000 });
   assert.equal(cards.find((c) => c.key === 'longestStreak'), undefined);

@@ -82,6 +82,7 @@ function parseGraphResult(raw) {
     if (!date) continue;
     const perClient = {};
     const perModel = {};
+    const perClientModel = {};
     let tokens = 0;
     let cost = 0;
     let messages = 0;
@@ -135,6 +136,11 @@ function parseGraphResult(raw) {
       if (cacheWrite > 0) pm.cacheWriteTokens = num(pm.cacheWriteTokens) + cacheWrite;
       if (output > 0) pm.outputTokens = num(pm.outputTokens) + output;
       pm.unclassifiedTokens += unclassified;
+      // Cross-tab cells stay tokens/cost/messages only — component fields already
+      // live on the 1D stacks, and repeating them here would inflate History.
+      const pcm = perClientModel[client] || (perClientModel[client] = {});
+      const cell = pcm[model] || (pcm[model] = { tokens: 0, cost: 0, messages: 0 });
+      cell.tokens += t; cell.cost += cst; cell.messages += msg;
     }
     const componentSummary = applyComponentSummary(
       row.tokenComponentSummary,
@@ -174,8 +180,11 @@ function parseGraphResult(raw) {
       unclassifiedTokens,
       tokenComponentsAvailable,
       activeTimeMs: num(row.activeTimeMs ?? row.active_time_ms),
+      timedOutputTokens: num(row.timedOutputTokens ?? row.timed_output_tokens),
+      timedDurationMs: num(row.timedDurationMs ?? row.timed_duration_ms),
       perClient,
-      perModel
+      perModel,
+      perClientModel
     });
   }
   const timeMetrics = normalizeTimeMetrics(raw?.timeMetrics ?? raw?.time_metrics);
@@ -279,6 +288,18 @@ function addPerModel(target, source, includeTokenComponents = false) {
   }
 }
 
+function addPerClientModel(target, source) {
+  for (const [client, models] of Object.entries(source || {})) {
+    const dest = target[client] || (target[client] = {});
+    for (const [model, v] of Object.entries(models || {})) {
+      const cell = dest[model] || (dest[model] = { tokens: 0, cost: 0, messages: 0 });
+      cell.tokens += num(v.tokens);
+      cell.cost += num(v.cost);
+      cell.messages += num(v.messages);
+    }
+  }
+}
+
 function unclassifiedTokensFor(value) {
   if (!value || typeof value !== 'object') return 0;
   if (Object.prototype.hasOwnProperty.call(value, 'unclassifiedTokens')) {
@@ -354,6 +375,8 @@ function normalizeHistory(graphData, options = {}) {
   const messages = full.reduce((s, d) => s + num(d.messages), 0);
   const activeDays = full.reduce((s, d) => s + (num(d.tokens) > 0 ? 1 : 0), 0);
   const peakDayTokens = full.reduce((m, d) => Math.max(m, num(d.tokens)), 0);
+  const timedOutputTokens = full.reduce((s, d) => s + num(d.timedOutputTokens), 0);
+  const timedDurationMs = full.reduce((s, d) => s + num(d.timedDurationMs), 0);
   const { currentStreak, longestStreak } = computeStreaks(full, todayKey);
   const timeMetrics = normalizeTimeMetrics(graphData?.timeMetrics);
   const activeTimeMs = timeMetrics ? timeMetrics.totalActiveTimeMs : activeTimeTotal(full);
@@ -365,6 +388,8 @@ function normalizeHistory(graphData, options = {}) {
       totalTokens, totalCost, activeDays, currentStreak, longestStreak,
       peakDayTokens, favoriteModel: favoriteModelOf(full), messages,
       activeTimeMs,
+      timedOutputTokens,
+      timedDurationMs,
       ...(timeMetrics ? { timeMetrics } : {})
     }
   };
@@ -378,17 +403,21 @@ function mergeDailyMaps(histories) {
         || {
           date: d.date, tokens: 0, cost: 0, messages: 0, activeTimeMs: 0,
           cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0,
+          timedOutputTokens: 0, timedDurationMs: 0,
           tokenComponentsAvailable: true,
-          perClient: {}, perModel: {}
+          perClient: {}, perModel: {}, perClientModel: {}
         };
       cur.tokens += num(d.tokens); cur.cost += num(d.cost); cur.messages += num(d.messages); cur.activeTimeMs += num(d.activeTimeMs);
       cur.cacheReadTokens += num(d.cacheReadTokens);
       cur.cacheWriteTokens += num(d.cacheWriteTokens);
       cur.outputTokens += num(d.outputTokens);
       cur.unclassifiedTokens += unclassifiedTokensFor(d);
+      cur.timedOutputTokens += num(d.timedOutputTokens);
+      cur.timedDurationMs += num(d.timedDurationMs);
       cur.tokenComponentsAvailable = cur.tokenComponentsAvailable && d.tokenComponentsAvailable === true;
       addPerClient(cur.perClient, d.perClient, true);
       addPerModel(cur.perModel, d.perModel, true);
+      addPerClientModel(cur.perClientModel, d.perClientModel);
       byDate.set(d.date, cur);
     }
   }
@@ -461,7 +490,14 @@ function historyPreview(history, options = {}) {
   const dailyDays = Number.isFinite(options.dailyDays) ? options.dailyDays : 30;
   const monthlyMonths = Number.isFinite(options.monthlyMonths) ? options.monthlyMonths : 12;
   const h = coerceHistory(history);
-  const daily = h.daily.slice(-dailyDays).map((d) => ({ date: d.date, tokens: num(d.tokens), cost: num(d.cost), activeTimeMs: num(d.activeTimeMs) }));
+  const daily = h.daily.slice(-dailyDays).map((d) => ({
+    date: d.date,
+    tokens: num(d.tokens),
+    cost: num(d.cost),
+    activeTimeMs: num(d.activeTimeMs),
+    timedOutputTokens: num(d.timedOutputTokens),
+    timedDurationMs: num(d.timedDurationMs)
+  }));
   const monthly = h.monthly.slice(-monthlyMonths).map((m) => ({ month: m.month, tokens: num(m.tokens), cost: num(m.cost), activeTimeMs: num(m.activeTimeMs) }));
   return { daily, monthly, summary: h.summary };
 }

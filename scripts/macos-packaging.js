@@ -1,5 +1,6 @@
 'use strict';
 
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
@@ -86,6 +87,51 @@ function resolveWidgetUrlScheme(env = process.env, root = path.resolve(__dirname
   return normalizeWidgetURLScheme(value, DEFAULT_WIDGET_URL_SCHEME);
 }
 
+function envFlag(env, key) {
+  const value = String(env?.[key] || '').trim();
+  return value !== '' && value !== '0' && value.toLowerCase() !== 'false';
+}
+
+function parseCodesigningIdentities(output) {
+  const text = String(output || '');
+  const validSection = text.split(/Valid identities only/i)[1] || text;
+  return [...validSection.matchAll(/^\s*\d+\)\s+[0-9A-F]+\s+"([^"]+)"/gim)].map((match) => match[1]);
+}
+
+function listCodesigningIdentities() {
+  try {
+    return parseCodesigningIdentities(execFileSync('security', ['find-identity', '-v', '-p', 'codesigning'], {
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'pipe']
+    }));
+  } catch (_) {
+    return [];
+  }
+}
+
+function hasDeveloperIdApplication(identities) {
+  return (Array.isArray(identities) ? identities : []).some((name) => (
+    /Developer ID Application\b/i.test(String(name || ''))
+  ));
+}
+
+// forceCodeSigning is on so an unsigned .app never ships. electron-builder treats
+// "no identity found" as a hard error; local `dist:mac` on a machine without a
+// Developer ID would otherwise abort after packaging. Ad-hoc (`-`) is the same
+// identity the Widget local preview already uses. CI and CSC_* stay fail-closed
+// so a missing release certificate cannot silently produce an ad-hoc artifact.
+function resolveMacSigningIdentity(baseMac = {}, env = process.env, options = {}) {
+  if (baseMac.identity != null && String(baseMac.identity).trim() !== '') return String(baseMac.identity).trim();
+  if (envFlag(env, 'TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING')) return '-';
+  if (String(env.CSC_LINK || '').trim() || String(env.CSC_NAME || '').trim()) return undefined;
+  if (envFlag(env, 'CI')) return undefined;
+  const platform = options.platform || process.platform;
+  const list = options.listCodesigningIdentities || (platform === 'darwin' ? listCodesigningIdentities : null);
+  if (typeof list !== 'function') return undefined;
+  return hasDeveloperIdApplication(list()) ? undefined : '-';
+}
+
 function widgetMacBuildConfig(baseMac = {}, options = {}) {
   const env = options.env || process.env;
   const root = options.root || path.resolve(__dirname, '..');
@@ -144,11 +190,22 @@ function widgetMacBuildConfig(baseMac = {}, options = {}) {
   };
 }
 
-function createBuilderConfig({ baseConfig, env = process.env, root = path.resolve(__dirname, '..') } = {}) {
+function createBuilderConfig({
+  baseConfig,
+  env = process.env,
+  root = path.resolve(__dirname, '..'),
+  platform,
+  listCodesigningIdentities: listIdentities
+} = {}) {
   const source = baseConfig || {};
+  const mac = widgetMacBuildConfig(source.mac, { env, root });
+  const identity = resolveMacSigningIdentity(mac, env, {
+    platform,
+    listCodesigningIdentities: listIdentities
+  });
   return {
     ...source,
-    mac: widgetMacBuildConfig(source.mac, { env, root })
+    mac: identity === undefined ? mac : { ...mac, identity }
   };
 }
 
@@ -160,6 +217,8 @@ module.exports = {
   DEFAULT_WIDGET_URL_SCHEME,
   assertWidgetArtifacts,
   createBuilderConfig,
+  parseCodesigningIdentities,
+  resolveMacSigningIdentity,
   resolveWidgetUrlScheme,
   widgetArtifactPaths,
   widgetEnabled,

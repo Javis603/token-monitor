@@ -99,6 +99,17 @@
     };
   }
 
+  function sessionSplitLabel(session) {
+    const input = finiteNumber(session?.inputTokens);
+    const output = finiteNumber(session?.outputTokens);
+    const cache = finiteNumber(session?.cacheReadTokens) + finiteNumber(session?.cacheWriteTokens);
+    const parts = [];
+    if (input > 0) parts.push(`in ${formatNumber(input)}`);
+    if (output > 0) parts.push(`out ${formatNumber(output)}`);
+    if (cache > 0) parts.push(`cache ${formatNumber(cache)}`);
+    return parts.join(' · ');
+  }
+
   function messageLabel(session) {
     const count = finiteNumber(session?.messageCount);
     return count > 0 ? `${formatNumber(count)} msg${count === 1 ? '' : 's'}` : '';
@@ -169,7 +180,8 @@
         const subtitleParts = [
           archived ? archivedLabel : '',
           sessionActivityLabel(session, now),
-          messageLabel(session)
+          messageLabel(session),
+          sessionSplitLabel(session)
         ].filter(Boolean);
         return {
           key: `session:${key}`,

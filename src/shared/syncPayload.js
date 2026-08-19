@@ -48,6 +48,7 @@ function historyForSync(history, periodWindows) {
         .map(([key, value]) => [key, stripTokenComponents(value)]));
       stripped.perModel = Object.fromEntries(Object.entries(row?.perModel || {})
         .map(([key, value]) => [key, stripTokenComponents(value)]));
+      if (row?.perClientModel) stripped.perClientModel = row.perClientModel;
       return stripped;
     })
   };
@@ -63,6 +64,7 @@ function historyWithoutTokenComponents(history) {
         .map(([key, value]) => [key, stripTokenComponents(value)]));
       stripped.perModel = Object.fromEntries(Object.entries(row?.perModel || {})
         .map(([key, value]) => [key, stripTokenComponents(value)]));
+      if (row?.perClientModel) stripped.perClientModel = row.perClientModel;
       return stripped;
     })
   };

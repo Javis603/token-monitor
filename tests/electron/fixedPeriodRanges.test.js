@@ -60,11 +60,30 @@ test('token component breakdown preserves known values and isolates the unknown 
     unclassifiedTokens: 50
   }), {
     cacheRead: 60,
+    cacheWrite: 0,
     cacheMiss: 20,
     output: 20,
     unclassified: 50,
     hitPct: 75,
     missPct: 25
+  });
+});
+
+test('exact token components fold leftover unclassified into cache-miss input', () => {
+  assert.deepEqual(ranges.tokenComponentBreakdown({
+    totalTokens: 150,
+    cacheReadTokens: 60,
+    outputTokens: 20,
+    unclassifiedTokens: 50,
+    tokenComponentsAvailable: true
+  }), {
+    cacheRead: 60,
+    cacheWrite: 0,
+    cacheMiss: 70,
+    output: 20,
+    unclassified: 0,
+    hitPct: 46,
+    missPct: 54
   });
 });
 
@@ -636,7 +655,9 @@ test('covered sparse days remain exact zero rows for Trends', () => {
     activeDays: 0,
     currentStreak: 0,
     activeTimeMs: 0,
-    peakDayTokens: 0
+    peakDayTokens: 0,
+    timedOutputTokens: 0,
+    timedDurationMs: 0
   });
 });
 

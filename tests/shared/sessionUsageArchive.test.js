@@ -198,10 +198,11 @@ test('captures and reapplies missing sessions for any client without double-coun
   assert.equal(visible.today.clientOutputs.opencode, 30);
   assert.equal(visible.today.models['claude-3-5-sonnet'], 100);
   assert.equal(visible.today.modelCacheReads['claude-3-5-sonnet'], 50);
-  assert.equal(visible.today.capabilities.tokenComponents, false);
-  assert.equal(visible.today.unclassifiedTokens, 10);
-  assert.equal(visible.today.clientUnclassifiedTokens.opencode, 10);
-  assert.equal(visible.today.modelUnclassifiedTokens['claude-3-5-sonnet'], 10);
+  assert.equal(visible.today.capabilities.tokenComponents, true);
+  assert.equal(visible.today.unclassifiedTokens, 0);
+  assert.equal(visible.today.inputTokens, 10);
+  assert.equal(visible.today.clientInputs.opencode, 10);
+  assert.equal(visible.today.modelInputs['claude-3-5-sonnet'], 10);
   assert.equal(visible.today.sessions['opencode:o1'].archived, true);
   assert.equal(visible.today.sessions['opencode:o1'].totalTokens, 100);
   assert.equal(visible.today.sessions['codex:c1'].archived, undefined);

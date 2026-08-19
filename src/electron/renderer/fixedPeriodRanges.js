@@ -110,15 +110,27 @@
     const unclassified = Math.min(total, Math.max(0, finiteNumber(value.unclassifiedTokens)));
     const classified = total - unclassified;
     const cacheRead = Math.min(classified, Math.max(0, finiteNumber(value.cacheReadTokens)));
-    const output = Math.min(classified - cacheRead, Math.max(0, finiteNumber(value.outputTokens)));
-    const cacheMiss = Math.max(0, classified - cacheRead - output);
+    const cacheWrite = Math.min(
+      classified - cacheRead,
+      Math.max(0, finiteNumber(value.cacheWriteTokens))
+    );
+    const output = Math.min(
+      classified - cacheRead - cacheWrite,
+      Math.max(0, finiteNumber(value.outputTokens))
+    );
+    const classifiedMiss = Math.max(0, classified - cacheRead - cacheWrite - output);
+    const exact = value.tokenComponentsAvailable === true
+      || value.capabilities?.tokenComponents === true;
+    const cacheMiss = classifiedMiss + (exact ? unclassified : 0);
+    const unclassifiedOut = exact ? 0 : unclassified;
     const input = cacheRead + cacheMiss;
     const hitPct = input > 0 ? Math.round((cacheRead / input) * 100) : 0;
     return {
       cacheRead,
+      cacheWrite,
       cacheMiss,
       output,
-      unclassified,
+      unclassified: unclassifiedOut,
       hitPct,
       missPct: input > 0 ? 100 - hitPct : 0
     };
@@ -229,6 +241,8 @@
       cost: finiteNumber(period?.costUsd),
       ...totalComponents,
       tokenComponentsAvailable,
+      timedOutputTokens: finiteNumber(period?.timedOutputTokens),
+      timedDurationMs: finiteNumber(period?.timedDurationMs),
       perClient,
       perModel
     };
@@ -262,6 +276,7 @@
         date, tokens: 0, cost: 0,
         cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0,
         unclassifiedTokens: 0,
+        timedOutputTokens: 0, timedDurationMs: 0,
         tokenComponentsAvailable: true,
         perClient: {}, perModel: {}
       });
@@ -281,7 +296,9 @@
       activeDays: active.length,
       currentStreak,
       activeTimeMs: daily.reduce((sum, row) => sum + finiteNumber(row?.activeTimeMs), 0),
-      peakDayTokens
+      peakDayTokens,
+      timedOutputTokens: daily.reduce((sum, row) => sum + finiteNumber(row?.timedOutputTokens), 0),
+      timedDurationMs: daily.reduce((sum, row) => sum + finiteNumber(row?.timedDurationMs), 0)
     };
   }
 
@@ -469,6 +486,8 @@
             cacheWriteTokens: 0,
             outputTokens: 0,
             unclassifiedTokens: 0,
+            timedOutputTokens: 0,
+            timedDurationMs: 0,
             tokenComponentsAvailable: true,
             perClient: {},
             perModel: {}
@@ -482,6 +501,8 @@
         target.cacheWriteTokens += finiteNumber(row?.cacheWriteTokens);
         target.outputTokens += finiteNumber(row?.outputTokens);
         target.unclassifiedTokens += unclassifiedTokensFor(row);
+        target.timedOutputTokens += finiteNumber(row?.timedOutputTokens);
+        target.timedDurationMs += finiteNumber(row?.timedDurationMs);
         target.tokenComponentsAvailable = target.tokenComponentsAvailable
           && row?.tokenComponentsAvailable === true;
         addDailyAttribution(target, 'perClient', row?.perClient);
@@ -578,6 +599,8 @@
       cacheWriteTokens: 0,
       outputTokens: 0,
       unclassifiedTokens: 0,
+      timedOutputTokens: 0,
+      timedDurationMs: 0,
       sessions: {},
       projects: {},
       capabilities: { tokenComponents: false, attribution: true, clientModels: false },
@@ -592,6 +615,8 @@
       period.cacheWriteTokens += finiteNumber(row?.cacheWriteTokens);
       period.outputTokens += finiteNumber(row?.outputTokens);
       period.unclassifiedTokens += unclassifiedTokensFor(row);
+      period.timedOutputTokens += finiteNumber(row?.timedOutputTokens);
+      period.timedDurationMs += finiteNumber(row?.timedDurationMs);
       for (const [client, value] of Object.entries(row?.perClient || {})) {
         addMap(period.clients, client, value?.tokens);
         addMap(period.clientCosts, client, value?.cost);

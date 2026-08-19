@@ -16,7 +16,13 @@ const { normalizeHistory, parseGraphResult } = require('../../src/shared/history
 
 function graph(date, clients, extra = {}) {
   return {
-    contributions: [{ date, activeTimeMs: extra.activeTimeMs || 0, clients }],
+    contributions: [{
+      date,
+      activeTimeMs: extra.activeTimeMs || 0,
+      timedOutputTokens: extra.timedOutputTokens || 0,
+      timedDurationMs: extra.timedDurationMs || 0,
+      clients
+    }],
     ...(extra.timeMetrics ? { timeMetrics: extra.timeMetrics } : {})
   };
 }
@@ -54,6 +60,19 @@ test('normalizeDailyHistoryArchive rejects malformed days and observations', () 
     version: 1,
     days: {}
   });
+});
+
+test('capture keeps timed output/duration when a later graph omits them', () => {
+  const first = captureDailyHistoryArchive({}, graph('2026-07-17', [
+    client('claude', 'opus', 100, 4, 5)
+  ], { timedOutputTokens: 40, timedDurationMs: 1000 }), { todayKey: '2026-07-18' });
+  assert.equal(first.days['2026-07-17'].timedOutputTokens, 40);
+  assert.equal(first.days['2026-07-17'].timedDurationMs, 1000);
+  const next = captureDailyHistoryArchive(first, graph('2026-07-17', [
+    client('claude', 'opus', 100, 4, 5)
+  ]), { todayKey: '2026-07-18' });
+  assert.equal(next.days['2026-07-17'].timedOutputTokens, 40);
+  assert.equal(next.days['2026-07-17'].timedDurationMs, 1000);
 });
 
 test('capture preserves a larger prior observation as one coherent record', () => {

@@ -9,7 +9,8 @@ const charts = require('../../src/electron/renderer/usageCharts');
 const {
   clientColors, modelVendorFor, modelColor, clampDaily,
   dailyBarsChart, candleChart, contribHeatmap, statsCards,
-  barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths
+  barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths,
+  donutChart, donutChartSvg, areaLineSvg, areaLineChart
 } = charts;
 
 test('usageCharts exports every symbol app.js destructures from it', () => {
@@ -137,7 +138,44 @@ test('statsCardsHtml renders a card per descriptor with label + formatted value'
   const html = statsCardsHtml(cards, { label: (k) => k.toUpperCase(), format: (c) => String(c.value) });
   assert.match(html, /TOTALTOKENS/);
   assert.match(html, /class="dash-card"/);
+  assert.match(html, /class="dash-card-head"/);
   assert.equal((html.match(/dash-card"/g) || []).length, cards.length);
+  const withDelta = statsCardsHtml([{ key: 'totalTokens', kind: 'tokens', value: 10 }], {
+    label: (k) => k,
+    format: (c) => String(c.value),
+    delta: () => ({ text: '+12%', tone: 'up' })
+  });
+  assert.match(withDelta, /dash-card-delta is-up/);
+  assert.match(withDelta, /\+12%/);
+});
+
+test('donutChart buckets leftover slices and draws a full ring', () => {
+  const model = donutChart([
+    { key: 'a', value: 50 },
+    { key: 'b', value: 30 },
+    { key: 'c', value: 10 },
+    { key: 'd', value: 5 },
+    { key: 'e', value: 4 },
+    { key: 'f', value: 1 }
+  ], { maxSlices: 3, otherKey: '__other' });
+  assert.deepEqual(model.slices.map((slice) => [slice.key, slice.value]), [
+    ['a', 50], ['b', 30], ['c', 10], ['__other', 10]
+  ]);
+  assert.equal(model.total, 100);
+  const svg = donutChartSvg(model, { colorFor: () => '#6ab4f0', center: '100' });
+  assert.match(svg, /class="dash-donut"/);
+  assert.match(svg, /data-key="a"/);
+  assert.match(svg, />100</);
+  const full = donutChart([{ key: 'only', value: 8 }], { maxSlices: 6 });
+  assert.equal(full.slices.length, 1);
+  assert.match(donutChartSvg(full, { colorFor: () => '#fff' }), / A/);
+});
+
+test('areaLineSvg can use a unique gradient id', () => {
+  const model = areaLineChart([{ date: '2026-06-01', tokens: 10 }, { date: '2026-06-02', tokens: 20 }], { metric: 'tokens' });
+  const svg = areaLineSvg(model, { gradientId: 'dash-area-grad' });
+  assert.match(svg, /id="dash-area-grad"/);
+  assert.match(svg, /url\(#dash-area-grad\)/);
 });
 
 test('statCardColumnWidths keeps stat cards equal when content fits', () => {
