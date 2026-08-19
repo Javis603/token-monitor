@@ -9,6 +9,12 @@ const test = require('node:test');
 const { applySessionTimestamps } = require('../../src/shared/collector');
 const { indexDshSessionHeaders } = require('../../src/shared/dshSessionFiles');
 
+const collectorPath = require.resolve('../../src/shared/collector');
+function freshCollector() {
+  delete require.cache[collectorPath];
+  return require(collectorPath);
+}
+
 test('applySessionTimestamps fills OpenCode session start/last from injected DB meta', () => {
   const periods = {
     today: {
@@ -129,7 +135,8 @@ test('applySessionTimestamps fills DSH session start/last from the transcript he
       'dsh:session-abc': { client: 'dsh', sessionId: 'session-abc' }
     } } };
     applySessionTimestamps(periods, home, {
-      metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set()
+      metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set(),
+      dshSessionFileCache: new Map()
     });
 
     const session = periods.today.sessions['dsh:session-abc'];
@@ -143,7 +150,10 @@ test('applySessionTimestamps fills DSH session start/last from the transcript he
 test('applySessionTimestamps retries a DSH session whose transcript is not yet on disk', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-miss-'));
   try {
-    const cache = { metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set() };
+    const cache = {
+      metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set(),
+      dshSessionFileCache: new Map()
+    };
     const periods = { today: { sessions: {
       'dsh:session-new': { client: 'dsh', sessionId: 'session-new' }
     } } };
@@ -196,6 +206,7 @@ test('applySessionTimestamps walks the DSH sessions tree once per tick, not once
 
     applySessionTimestamps(periods, home, {
       metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set(),
+      dshSessionFileCache: new Map(),
       indexDshSessionHeaders: countingIndex
     });
 
@@ -240,6 +251,65 @@ test('applySessionTimestamps does not re-walk the DSH tree for already-known ses
   }
 });
 
+// The test above proves sessionTimestampMap's own caching logic works when a
+// caller shares one deps object across calls — but collectUsageOnce (what a
+// real collector tick actually calls) used to rebuild dshSessionFileCache
+// fresh every time, which would have made that caching a no-op in production
+// regardless of how correct the logic above is. This drives two real
+// collectUsageOnce() calls, the way startCollector's tick loop does, with
+// nothing shared between them except process-wide module state, and asserts
+// the DSH sessions tree is only ever walked on the first one.
+test('collectUsageOnce does not re-walk the DSH sessions tree on a second real tick', async () => {
+  const { collectUsageOnce } = freshCollector();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-e2e-'));
+  const sessionsRoot = path.join(home, '.dsh', 'sessions');
+  const realReaddirSync = fs.readdirSync;
+  try {
+    const dir = path.join(sessionsRoot, 'proj', 'session-e2e');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'session.jsonl'), `${JSON.stringify({ type: 'session', id: 'session-e2e', createdAt: 1750000000000 })}\n`);
+
+    // dshSessionFiles() walks the tree via fs.readdirSync(dir, {withFileTypes}).
+    // Counting only calls rooted under the DSH sessions dir isolates "the
+    // tree was walked" from every other readdirSync call a full tick makes
+    // (tokscale client discovery, WSL probing, etc).
+    let walks = 0;
+    fs.readdirSync = (target, ...rest) => {
+      if (typeof target === 'string' && target.startsWith(sessionsRoot)) walks += 1;
+      return realReaddirSync(target, ...rest);
+    };
+
+    const stubTokscale = async () => ({
+      entries: [{ client: 'dsh', sessionId: 'session-e2e', model: 'deepseek-v4-flash', input: 10, output: 5, cost: 0.001 }]
+    });
+    const baseOptions = {
+      clients: 'dsh',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false,
+      historyEnabled: false,
+      homeDir: home,
+      runTokscale: stubTokscale,
+      collectWslUsage: async () => ({ bundle: { today: {}, month: {}, allTime: {} }, detected: [] })
+    };
+
+    const first = await collectUsageOnce(baseOptions);
+    assert.equal(first.today.sessions['dsh:session-e2e'].startedAt, new Date(1750000000000).toISOString());
+    const walksAfterFirstTick = walks;
+    assert.ok(walksAfterFirstTick > 0, 'the first real tick must discover the session via the tree walk');
+
+    const second = await collectUsageOnce(baseOptions);
+    assert.equal(second.today.sessions['dsh:session-e2e'].startedAt, new Date(1750000000000).toISOString());
+    assert.equal(walks, walksAfterFirstTick, 'a second collectUsageOnce() call must not rebuild and re-walk the DSH tree');
+  } finally {
+    fs.readdirSync = realReaddirSync;
+    delete require.cache[collectorPath];
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 // dshPaths.js's resolveDshHome checks env.DSH_HOME before the homeDir it is
 // given. `home` here is a scoped WSL distro, not this machine's own profile —
 // a host-configured DSH_HOME leaking in would silently redirect the lookup
@@ -261,6 +331,7 @@ test('scopedHome DSH lookup ignores a host DSH_HOME override', () => {
 
     applySessionTimestamps(periods, wslHome, {
       metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set(),
+      dshSessionFileCache: new Map(),
       scopedHome: true,
       env: { DSH_HOME: hostDshHome }
     });

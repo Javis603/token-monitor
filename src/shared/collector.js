@@ -739,6 +739,18 @@ function projectIdentity(value) {
 // stutter once project tracking made this run on every session each tick).
 const jsonlTimestampCache = new Map();
 
+// Keyed by DSH session id -> { filePath, createdAt }. DSH sessions are
+// deliberately excluded from sessionTimestampMap's resolvedSessionKeys (so
+// lastUsedAt keeps refreshing), so every known id is looked up again on
+// every tick; this is what turns that into a stat() on an already-known
+// path instead of a fresh walk of the whole DSH sessions tree each time —
+// the same perceived-UI-stutter class jsonlTimestampCache above exists to
+// avoid. Module-level (not threaded through collectUsageOnce's per-call
+// deps) so it survives across ticks: collectUsageOnce reconstructs its
+// session-metadata deps fresh on every call, same as jsonlTimestampCache and
+// projectPathCache already rely on being module-level rather than deps-held.
+const dshSessionFileCache = new Map();
+
 function lastJsonlTimestamp(filePath) {
   let stat;
   try { stat = fs.statSync(filePath); } catch (_) { return ''; }
@@ -836,7 +848,10 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   // that walk, and it resolves every unknown id in the tick at once.
   const dshIds = byClient.get('dsh') || new Set();
   if (dshIds.size > 0) {
-    const dshFileCache = deps.dshSessionFileCache || new Map();
+    // Falls back to the module-level cache, not a fresh Map: this must
+    // persist across collectUsageOnce calls to do anything, and every
+    // caller that wants test isolation already passes its own Map explicitly.
+    const dshFileCache = deps.dshSessionFileCache || dshSessionFileCache;
     const unresolvedDshIds = [...dshIds].filter((id) => !dshFileCache.has(id));
     if (unresolvedDshIds.length > 0) {
       const buildIndex = deps.indexDshSessionHeaders || indexDshSessionHeaders;
@@ -1141,13 +1156,11 @@ async function collectUsageOnce(options) {
     ...(options.sessionMetadataDeps || {}),
     metadataCache: new Map(),
     resolvedSessionKeys: new Set(),
-    attemptedSessionKeys: new Set(),
-    // DSH sessions are deliberately excluded from resolvedSessionKeys (so
-    // lastUsedAt keeps refreshing), so every DSH id in scope gets looked up
-    // again on every tick. Once a session's file has been found, this cache
-    // lets that lookup become a single stat() on the known path instead of
-    // a fresh walk of the whole DSH sessions tree.
-    dshSessionFileCache: new Map()
+    attemptedSessionKeys: new Set()
+    // dshSessionFileCache is deliberately NOT reset here: it's module-level
+    // (declared with jsonlTimestampCache above) precisely so it survives
+    // across collectUsageOnce calls — every field in this object, unlike
+    // that one, is intentionally rebuilt fresh on every call.
   };
   const decorateLocalPeriods = (periods, { retryMisses = false } = {}) => applySessionTimestamps(
     periods,

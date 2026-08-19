@@ -150,6 +150,29 @@ test('readDshSessionDetail counts every event when the session was never forked'
   assert.equal(events.length, 2);
 });
 
+// tokscale's own loop never gates event processing on having seen the
+// session header first — every line is matched by its own `type`
+// independently (dsh.rs). A torn or corrupt header must not turn an
+// otherwise-parseable transcript into a reported zero: findDshSessionFile
+// falls back to the directory name to still locate the file, and
+// parseDshDetailEvents must still count the real events it finds in it.
+test('readDshSessionDetail still counts events when the header itself is unreadable', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  const dir = path.join(root, 'proj', 'session-no-header');
+  fs.mkdirSync(dir, { recursive: true });
+  const lines = [
+    'this is not a session header at all',
+    userMessage({ seq: 1, text: 'hi anyway' }),
+    assistantMessage({ seq: 2, usage: { inputTokens: 10, outputTokens: 5 } })
+  ].map((line) => (typeof line === 'string' ? line : JSON.stringify(line)));
+  fs.writeFileSync(path.join(dir, 'session.jsonl'), `${lines.join('\n')}\n`);
+
+  const detail = readDshSessionDetail({ sessionId: 'session-no-header', sessionsRoot: root, home: '/home/tester', env: {} });
+  assert.equal(detail.found, true);
+  assert.equal(detail.exchanges.length, 1);
+  assert.equal(detail.totals.totalTokens, 15);
+});
+
 test('readDshSessionDetail returns not-found for an unknown session id', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
   writeFixture(root, 'session-basic', [

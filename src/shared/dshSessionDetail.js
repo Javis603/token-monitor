@@ -94,12 +94,18 @@ function parseDshDetailEvents(text) {
     } catch (_) {
       continue;
     }
-    if (!header) {
-      if (record?.type !== 'session') continue;
+    if (record?.type === 'session') {
       header = record;
       seedLength = Number.isFinite(Number(record.seedLength)) ? Number(record.seedLength) : null;
       continue;
     }
+    // tokscale's own loop never gates user/assistant processing on having
+    // seen the header first (dsh.rs): every line is matched by its own
+    // `type` independently, and seed_length simply stays its 0 default until
+    // (if ever) a session record sets it. A torn or unreadable header must
+    // not make an otherwise-parseable transcript report zero tokens — this
+    // is what findDshSessionFile's directory-name fallback is for.
+    //
     // A forked session's log is seeded with its parent's events verbatim.
     // Tokscale credits that shared prefix to the parent only, so Session
     // Detail must skip it too, or a fork's total exceeds its own card.
@@ -128,7 +134,7 @@ function parseDshDetailEvents(text) {
       if (tokens.total === 0) continue;
       const source = record.data?.message?.source;
       const messageId = String(record.data?.message?.id || '').trim();
-      const identity = messageId || `sid:${header.id || ''}`;
+      const identity = messageId || `sid:${header?.id || ''}`;
       const dedupKey = [
         identity, time, source?.provider || '', source?.model || '',
         tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite, tokens.reasoning
