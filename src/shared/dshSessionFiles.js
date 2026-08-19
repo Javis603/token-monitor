@@ -143,6 +143,17 @@ function zstdAvailable() {
   return typeof zlib.zstdDecompressSync === 'function';
 }
 
+// Decodes complete frames in order and reports where it stopped, so the caller
+// can tell "every frame decoded cleanly, end of file" from "decoding stopped
+// at a corrupt frame". A frame whose framing is complete but whose content is
+// corrupt (a checksum mismatch, say) cannot be decoded. Stopping there and
+// keeping the valid prefix — instead of throwing the whole transcript away —
+// matches tokscale's streaming decoder, which emits every record it
+// successfully read before the error, and dsh's own reader. `stoppedOnError`
+// also marks the recovery boundary for the caller: nothing after the first
+// undecodable frame is trusted, so torn-tail recovery must not run past it.
+// (The torn-tail recovery in decodeSessionText below handles the other
+// failure mode — a frame that was cut off mid-write.)
 function decodeZstdBuffer(buffer, frames) {
   if (!zstdAvailable()) {
     const error = new Error('this Node.js build does not support Zstandard decompression');
@@ -150,30 +161,31 @@ function decodeZstdBuffer(buffer, frames) {
     throw error;
   }
   let text = '';
+  let decodedEnd = 0;
   for (const frame of frames || scanZstdFrames(buffer)) {
-    // A frame whose framing is complete but whose content is corrupt (a
-    // checksum mismatch, say) cannot be decoded. Stop here and keep the valid
-    // prefix instead of throwing the whole transcript away: tokscale's
-    // streaming decoder emits every record it successfully read before the
-    // error, and dsh's own reader behaves the same way, so a corrupt tail must
-    // not retroactively discard the header and turns that decoded cleanly
-    // before it. (The torn-tail recovery in decodeSessionText below handles
-    // the other failure mode — a frame that was cut off mid-write.)
     let decoded;
     try {
       decoded = zlib.zstdDecompressSync(buffer.subarray(frame.start, frame.end));
     } catch (_) {
-      break;
+      return { text, decodedEnd, stoppedOnError: true };
     }
     text += decoded.toString('utf8');
+    decodedEnd = frame.end;
   }
-  return text;
+  return { text, decodedEnd, stoppedOnError: false };
 }
 
 function decodeSessionText(filePath, buffer) {
   if (!filePath.endsWith('.jsonl.zstd')) return buffer.toString('utf8');
   const frames = scanZstdFrames(buffer);
-  let text = decodeZstdBuffer(buffer, frames);
+  const decoded = decodeZstdBuffer(buffer, frames);
+  // The first content-corrupt complete frame is the recovery boundary: nothing
+  // after it is trusted, not even a torn tail whose complete records a partial
+  // recovery could still read — tokscale's streaming decoder stops at the same
+  // first decode error, so records past the corruption must not be resurrected
+  // through tail recovery.
+  if (decoded.stoppedOnError) return decoded.text;
+  let text = decoded.text;
   // A live transcript is scanned mid-write routinely, so the trailing frame is
   // often torn. dsh's own reader (decompressZstdPrefix with ZSTD_e_flush) and
   // tokscale's streaming zstd decoder both keep the records a torn final frame
@@ -183,7 +195,7 @@ function decodeSessionText(filePath, buffer) {
   // downstream skips the remainder. Scoped to decodeSessionText (not the
   // header-only decodeFirstFrameText), which already returns '' for a torn
   // first frame.
-  const tailStart = frames.length ? frames[frames.length - 1].end : 0;
+  const tailStart = decoded.decodedEnd;
   if (tailStart < buffer.length) {
     const tail = buffer.subarray(tailStart);
     if (tail.length >= 4 && tail.readUInt32LE(0) === ZSTD_MAGIC) {
@@ -207,7 +219,7 @@ function decodeFirstFrameText(filePath, buffer) {
   if (!filePath.endsWith('.jsonl.zstd')) return buffer.toString('utf8');
   const [frame] = scanZstdFrames(buffer);
   if (!frame) return '';
-  return decodeZstdBuffer(buffer, [frame]);
+  return decodeZstdBuffer(buffer, [frame]).text;
 }
 
 function parseDshSessionHeader(text) {

@@ -162,6 +162,56 @@ test('decodeSessionText keeps the valid prefix when a complete frame is content-
   assert.ok(!text.includes('"seq":3'), 'the corrupt frame must be dropped');
 });
 
+// The two failure modes combine: a content-corrupt complete frame followed by
+// a torn tail. The corruption boundary must win — once a complete frame fails
+// to decode, nothing after it is trusted, not even a torn tail whose complete
+// records a ZSTD_e_flush recovery could still read. (Before this was fixed,
+// tailStart came from the last *scanned* frame, so the decoder leapt the
+// corrupt frame and resurrected records from beyond the boundary.)
+test('decodeSessionText does not recover a torn tail past a content-corrupt frame', { skip: !hasZstd }, () => {
+  const header = zlib.zstdCompressSync(Buffer.from('{"type":"session","id":"s1"}\n', 'utf8'));
+  const goodTurn = zlib.zstdCompressSync(Buffer.from('{"type":"assistant/message","seq":2}\n', 'utf8'));
+  // Framing-complete, content-corrupt frame — the same checksum fixture as the
+  // prefix test above.
+  const badTurn = zlib.zstdCompressSync(Buffer.from('{"type":"assistant/message","seq":3}\n', 'utf8'));
+  badTurn[4] |= 0x04;
+  const corrupt = Buffer.concat([badTurn, Buffer.from([0xde, 0xad, 0xbe, 0xef])]);
+
+  // A torn tail whose complete prefix is recoverable with ZSTD_e_flush, built
+  // the same way as the torn-frame test: a large multi-block frame cut
+  // mid-stream so the leading record survives a partial recovery.
+  const lineA = '{"type":"user/message","seq":4}\n';
+  const tailSentinel = 'TAIL_SENTINEL_MUST_NOT_SURVIVE';
+  const noise = crypto.randomBytes(200 * 1024).toString('base64');
+  const partial = JSON.stringify({ type: 'assistant/message', seq: 5, pad: noise + tailSentinel });
+  const fullTail = zlib.zstdCompressSync(Buffer.from(lineA + partial, 'utf8'));
+  let torn = null;
+  for (const frac of [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]) {
+    const candidate = fullTail.subarray(0, Math.floor(fullTail.length * frac));
+    let out;
+    try { out = zlib.zstdDecompressSync(candidate, { finishFlush: zlib.constants.ZSTD_e_flush }).toString('utf8'); } catch (_) { continue; }
+    if (out.includes(lineA) && !out.includes(tailSentinel)) { torn = candidate; break; }
+  }
+  assert.ok(torn, 'a torn tail whose complete prefix is recoverable must exist');
+
+  const buffer = Buffer.concat([header, goodTurn, corrupt, torn]);
+
+  // Anti-vacuous in both directions: the scanner sees the corrupt frame as a
+  // complete frame (its corruption is invisible to framing), and a partial
+  // recovery of the torn tail alone reaches the record past the boundary — so
+  // a decoder that kept using the last scanned frame as tailStart would
+  // resurrect it.
+  assert.equal(scanZstdFrames(buffer).length, 3);
+  const tailAlone = zlib.zstdDecompressSync(torn, { finishFlush: zlib.constants.ZSTD_e_flush }).toString('utf8');
+  assert.ok(tailAlone.includes(lineA), 'the torn tail alone must be partially recoverable');
+
+  const text = decodeSessionText('/tmp/session.jsonl.zstd', buffer);
+  assert.ok(text.includes('{"type":"session","id":"s1"}'), 'the header frame must survive');
+  assert.ok(text.includes('{"type":"assistant/message","seq":2}'), 'the good turn before the corrupt frame must survive');
+  assert.ok(!text.includes('"seq":3'), 'the corrupt frame must be dropped');
+  assert.ok(!text.includes('"seq":4'), 'the recoverable record past the corruption boundary must be dropped');
+});
+
 // Session-id lookup only needs the header, which is always the first event
 // dsh writes. decodeFirstFrameText must not touch later frames, so a long
 // transcript's discovery cost stays O(one frame) even when a trailing frame
