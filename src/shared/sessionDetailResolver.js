@@ -4,18 +4,37 @@ const os = require('node:os');
 const { Worker } = require('node:worker_threads');
 
 const { readSessionDetail } = require('./sessionDetail');
+const { readDshSessionDetail } = require('./dshSessionDetail');
 const { wslUsageHomes } = require('./wslUsage');
 
-const WSL_JSONL_CLIENTS = new Set(['claude', 'codex']);
+// wslUsage.js's MARKER_CLIENTS also scans `.dsh/sessions`, so a DSH session
+// surfaced from a WSL distro on Windows is a real, reachable case, not just
+// claude/codex — dsh must get the same native-miss -> WSL-hit fallback, just
+// through its own reader (it parses zstd transcripts directly, not tokscale
+// JSONL).
+const WSL_FALLBACK_CLIENTS = new Set(['claude', 'codex', 'dsh']);
 const SESSION_DETAIL_WORKER_TIMEOUT_MS = 20_000;
 
 function resolveSessionDetailForPlatform(args = {}, deps = {}) {
-  const readDetail = deps.readSessionDetail || readSessionDetail;
   const nativeHome = (deps.homedir || os.homedir)();
-  const nativeDetail = readDetail({ ...args, home: nativeHome });
   const platform = deps.platform || process.platform;
+  // dshPaths.js's resolveDshHome checks env.DSH_HOME before the homeDir it's
+  // given, same as tokscale's own PathRoot::EnvVar. tokscale's own scanner
+  // never lets that leak into an explicit --home lookup (use_env_roots:
+  // false, lib.rs) — a WSL distro's session root must not silently resolve
+  // back to a host-configured DSH_HOME. Only the native attempt gets the
+  // real env; every WSL attempt gets none, forcing `home` to be authoritative.
+  const readDetail = args.client === 'dsh'
+    ? (detailArgs, scoped) => (deps.readDshSessionDetail || readDshSessionDetail)({ ...detailArgs, platform, env: scoped ? {} : deps.env, cwdDir: deps.cwdDir })
+    : (detailArgs, scoped) => (deps.readSessionDetail || readSessionDetail)({
+      ...detailArgs,
+      ...(scoped
+        ? { env: {}, useEnvRoots: false }
+        : (deps.env === undefined ? {} : { env: deps.env }))
+    });
+  const nativeDetail = readDetail({ ...args, home: nativeHome }, false);
 
-  if (nativeDetail.found || platform !== 'win32' || !WSL_JSONL_CLIENTS.has(args.client)) {
+  if (nativeDetail.found || platform !== 'win32' || !WSL_FALLBACK_CLIENTS.has(args.client)) {
     return nativeDetail;
   }
 
@@ -30,7 +49,7 @@ function resolveSessionDetailForPlatform(args = {}, deps = {}) {
   for (const home of wslHomes || []) {
     if (!home || searched.has(home)) continue;
     searched.add(home);
-    const detail = readDetail({ ...args, home });
+    const detail = readDetail({ ...args, home }, true);
     if (detail.found) return detail;
   }
   return nativeDetail;

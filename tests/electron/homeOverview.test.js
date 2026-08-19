@@ -31,7 +31,7 @@ const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], 
 const emptyHistory = { daily: [], monthly: [], summary: {} };
 
 test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
-  assert.deepEqual(homeActivityHeatmapLayout(), { cell: 9, gap: 3, radius: 2, edgePad: 10 });
+  assert.deepEqual(homeActivityHeatmapLayout(), { cell: 9, gap: 3, radius: 2 });
 
   const rendererDir = path.join(__dirname, '../../src/electron/renderer');
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
@@ -55,11 +55,18 @@ test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
   }
   assert.doesNotMatch(rule(css, '.home-activity-scroll'), /padding-block/);
   assert.match(rule(css, '.home-activity-canvas .heat-bright-layer'), /pointer-events:\s*none/);
+  const homeActivityHoverRule = css.match(
+    /\.home-activity-canvas \.heat\[data-active="true"\],\s*\.home-activity-canvas \.heat:hover\s*\{([^}]*)\}/
+  );
+  assert.ok(homeActivityHoverRule, 'Home activity hover rule exists');
+  assert.doesNotMatch(homeActivityHoverRule[1], /transform\s*:\s*scale/);
   assert.match(
     css,
     /\.home-activity-scroll\.is-restoring-hover \.heat,\s*\.home-activity-scroll\.is-restoring-hover \.heat-bright-layer\s*\{[^}]*transition:\s*none/
   );
   assert.match(rule(css, '.home-activity-tooltip'), /position:\s*fixed/);
+  assert.match(rule(css, '.home-activity-tooltip'), /background:\s*rgba\(var\(--panel-rgb\), 0\.58\)/);
+  assert.match(rule(css, '.home-activity-tooltip'), /backdrop-filter:\s*blur\(10px\) saturate\(120%\)/);
   assert.match(rule(css, '.home-activity-canvas .heat-month'), /fill:\s*rgba\(var\(--line-rgb\), 0\.5\)/);
 });
 

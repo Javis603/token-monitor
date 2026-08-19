@@ -26,6 +26,7 @@
 // `npm run sync:worker`.
 
 const { REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
+const { DSH_SOURCE_CHECK_ID } = require('./dshPaths');
 
 const CLIENT_HEALTH_VERSION = 1;
 
@@ -177,6 +178,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'copilot-data',
   'copilot-otel',
   'copilot-otel-exporter',
+  DSH_SOURCE_CHECK_ID,
   'grok-sessions',
   'grok-unified-log',
   'hermes-home',

@@ -33,6 +33,7 @@ const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles'
 const { localDayKey, mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const cursorAuth = require('./cursorAuth');
+const { claudeSessionRoots } = require('./claudePaths');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
@@ -44,6 +45,8 @@ const {
   resolveQoderCnPricing
 } = require('./qoderCnUsage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
+const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./dshPaths');
+const { indexDshSessionHeaders, readDshSessionHeader, resolveDshSessionsRoot } = require('./dshSessionFiles');
 const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
@@ -741,6 +744,22 @@ function projectIdentity(value) {
 // stutter once project tracking made this run on every session each tick).
 const jsonlTimestampCache = new Map();
 
+// Keyed by `sessionsRoot\0sessionId` -> { filePath, createdAt, statFingerprint }.
+// DSH sessions are deliberately excluded from sessionTimestampMap's
+// resolvedSessionKeys (so lastUsedAt keeps refreshing), so every known id is
+// looked up again on every tick; this is what turns that into a stat() on an
+// already-known path instead of a fresh walk of the whole DSH sessions tree
+// each time — the same perceived-UI-stutter class jsonlTimestampCache above
+// exists to avoid. The root is part of the key because one collector process
+// decorates both the native home and every running WSL distro's home, and the
+// same session id can exist under more than one root (a cloned/migrated home);
+// a bare-id key would let the second root reuse the first root's file path and
+// timestamps. Module-level (not threaded through collectUsageOnce's per-call
+// deps) so it survives across ticks: collectUsageOnce reconstructs its
+// session-metadata deps fresh on every call, same as jsonlTimestampCache and
+// projectPathCache already rely on being module-level rather than deps-held.
+const dshSessionFileCache = new Map();
+
 function lastJsonlTimestamp(filePath) {
   let stat;
   try { stat = fs.statSync(filePath); } catch (_) { return ''; }
@@ -812,8 +831,17 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     }
   }
 
-  const claudeFiles = findSessionFiles(path.join(home, '.claude', 'projects'), byClient.get('claude') || []);
-  for (const [sessionId, filePath] of claudeFiles) applyFile('claude', sessionId, filePath);
+  const claudeRoots = claudeSessionRoots({
+    homeDir: home,
+    env: deps.env,
+    useEnvRoots: !deps.scopedHome
+  });
+  const claudeIds = byClient.get('claude') || new Set();
+  const projectFiles = findSessionFiles(claudeRoots.projects, claudeIds);
+  for (const [sessionId, filePath] of projectFiles) applyFile('claude', sessionId, filePath);
+  const missingClaudeIds = new Set([...claudeIds].filter((sessionId) => !projectFiles.has(sessionId)));
+  const transcriptFiles = findSessionFiles(claudeRoots.transcripts, missingClaudeIds);
+  for (const [sessionId, filePath] of transcriptFiles) applyFile('claude', sessionId, filePath);
 
   const codexIds = byClient.get('codex') || new Set();
   const missingCodexIds = new Set();
@@ -825,9 +853,6 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   const codexFiles = findSessionFiles(path.join(home, '.codex', 'sessions'), missingCodexIds);
   for (const [sessionId, filePath] of codexFiles) applyFile('codex', sessionId, filePath);
 
-  // Kimi sessions get their workspace from a sibling state.json (CLI `session_*`,
-  // Work `conv-*`/`ctitle-*`). Project identity honours the Projects opt-out just
-  // like the branches above; timestamps are always backfilled when present.
   const kimiIds = byClient.get('kimi') || new Set();
   if (kimiIds.size > 0) {
     const kimiRoots = [kimiWorkSessionsRoot(home), kimiCodeSessionsHome(home)].filter(Boolean);
@@ -848,13 +873,87 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     }
   }
 
+  // DSH session ids are random UUIDs (no embedded timestamp), so the generic
+  // fallback below can never date them. The transcript itself has what we
+  // need: the header's `createdAt` for startedAt, and the file's mtime (an
+  // append-only log, so mtime tracks the last flush) for lastUsedAt. DSH
+  // sessions are deliberately never added to resolvedSessionKeys (see below),
+  // so every id in scope this tick is looked up again on the next one too.
+  // A session, once found, has a file path that never changes — dshFileCache
+  // (persisted across ticks by the caller, like metadataCache) lets a known
+  // id skip straight to statting its own file instead of re-walking the
+  // whole DSH sessions tree; only an id this cache has never seen triggers
+  // that walk, and it resolves every unknown id in the tick at once.
+  const dshIds = byClient.get('dsh') || new Set();
+  if (dshIds.size > 0) {
+    // Falls back to the module-level cache, not a fresh Map: this must
+    // persist across collectUsageOnce calls to do anything, and every
+    // caller that wants test isolation already passes its own Map explicitly.
+    const dshFileCache = deps.dshSessionFileCache || dshSessionFileCache;
+    // dshPaths.js checks env.DSH_HOME before the homeDir it's given, same as
+    // tokscale's own PathRoot::EnvVar — and tokscale's own scanner never lets
+    // that leak into an explicit --home lookup (use_env_roots: false, lib.rs).
+    // scopedHome means `home` is a specific WSL distro, not this machine's
+    // own profile, so a host-configured DSH_HOME must not redirect it back.
+    // The resolved root namespaces the cache key (see dshSessionFileCache).
+    const dshEnv = deps.scopedHome ? {} : (deps.env || process.env);
+    const dshRoot = resolveDshSessionsRoot({ homeDir: home, env: dshEnv, platform: deps.platform });
+    const dshKey = (id) => `${dshRoot}\u0000${id}`;
+    const unresolvedDshIds = [...dshIds].filter((id) => !dshFileCache.has(dshKey(id)));
+    if (unresolvedDshIds.length > 0) {
+      const buildIndex = deps.indexDshSessionHeaders || indexDshSessionHeaders;
+      const index = buildIndex({ homeDir: home, env: dshEnv, platform: deps.platform });
+      for (const [sessionId, entry] of index) {
+        const key = dshKey(sessionId);
+        if (dshFileCache.has(key)) continue;
+        // A stat fingerprint lets an entry whose header was unreadable at
+        // index time (createdAt undefined, directory-name fallback) be re-read
+        // later, once the file actually changes, instead of being stuck on
+        // mtime forever.
+        let statFingerprint = '';
+        try { const st = fs.statSync(entry.filePath); statFingerprint = `${st.size}:${st.mtimeMs}`; } catch (_) { /* file vanished mid-scan */ }
+        dshFileCache.set(key, { ...entry, statFingerprint });
+      }
+    }
+    for (const sessionId of dshIds) {
+      const key = dshKey(sessionId);
+      let entry = dshFileCache.get(key);
+      if (!entry) continue;
+      let lastUsedAt = '';
+      let statFingerprint = '';
+      try {
+        const st = fs.statSync(entry.filePath);
+        lastUsedAt = isoFromDate(st.mtime);
+        statFingerprint = `${st.size}:${st.mtimeMs}`;
+      } catch (_) { /* file vanished mid-scan */ }
+      // A header read earlier may have fallen back to the directory name (no
+      // createdAt) because the file was mid-write or torn. If it has since
+      // grown or been rewritten, re-read the header once to recover the real
+      // createdAt before falling back to mtime. Entries with a known createdAt
+      // are left alone: the header is the first thing written to an
+      // append-only log and never changes, so re-reading it is pure waste.
+      if (entry.createdAt === undefined && statFingerprint && statFingerprint !== entry.statFingerprint) {
+        const refreshed = readDshSessionHeader(entry.filePath);
+        if (refreshed) {
+          entry = { filePath: entry.filePath, createdAt: refreshed.createdAt, statFingerprint };
+        } else {
+          entry.statFingerprint = statFingerprint;
+        }
+        dshFileCache.set(key, entry);
+      }
+      const startedAt = isoFromDate(Number(entry.createdAt));
+      if (!startedAt && !lastUsedAt) continue;
+      metadata.set(`dsh:${sessionId}`, { startedAt: startedAt || lastUsedAt, lastUsedAt: lastUsedAt || startedAt });
+    }
+  }
+
   for (const ref of refs.values()) {
     const key = `${ref.client}:${ref.sessionId}`;
     if (resolvedSessionKeys.has(key)) continue;
     if (metadata.has(key)) continue;
     const timestamp = timestampFromSessionId(ref.sessionId);
     if (timestamp) metadata.set(key, { startedAt: timestamp, lastUsedAt: timestamp });
-    if (!['claude', 'codex', 'opencode'].includes(ref.client)) resolvedSessionKeys.add(key);
+    if (!['claude', 'codex', 'opencode', 'dsh'].includes(ref.client)) resolvedSessionKeys.add(key);
   }
   for (const ref of refs.values()) attemptedSessionKeys.add(`${ref.client}:${ref.sessionId}`);
 
@@ -1128,6 +1227,10 @@ async function collectUsageOnce(options) {
     metadataCache: new Map(),
     resolvedSessionKeys: new Set(),
     attemptedSessionKeys: new Set()
+    // dshSessionFileCache is deliberately NOT reset here: it's module-level
+    // (declared with jsonlTimestampCache above) precisely so it survives
+    // across collectUsageOnce calls — every field in this object, unlike
+    // that one, is intentionally rebuilt fresh on every call.
   };
   const decorateLocalPeriods = (periods, { retryMisses = false } = {}) => applySessionTimestamps(
     periods,
@@ -1743,7 +1846,8 @@ function clientSourceRoots(clientsCsv) {
       }));
     }
   };
-  add('claude', ['claude-projects', path.join(home, '.claude', 'projects')], ['claude-transcripts', path.join(home, '.claude', 'transcripts')]);
+  const claudeRoots = claudeSessionRoots({ homeDir: home });
+  add('claude', ['claude-projects', claudeRoots.projects], ['claude-transcripts', claudeRoots.transcripts]);
   const codexHome = nonBlankEnvPath('CODEX_HOME', path.join(home, '.codex'));
   add(
     'codex',
@@ -1898,6 +2002,12 @@ function clientSourceRoots(clientsCsv) {
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
     resolveReasonixStatsDir({ env: process.env, homeDir: home, platform: process.platform, cwdDir: process.cwd() })
+  ]);
+  // DeepSeek Harness (DSH) — zstd JSONL session transcripts at
+  // `<dshHome>/sessions/` (default `~/.dsh`, overridable via `DSH_HOME`).
+  add('dsh', [
+    DSH_SOURCE_CHECK_ID,
+    resolveDshSessionsDir({ env: process.env, homeDir: home, platform: process.platform })
   ]);
   // Kiro (AWS): tokscale reads home-relative roots — the sessions tree used by
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /

@@ -21,6 +21,7 @@ function rendererClientIds() {
 
 function readmeTrackedClientIds() {
   const iconToClient = {
+    deepseek: 'dsh',
     'hermes-agent': 'hermes',
     xai: 'grok',
     'mimo-code': 'micode',
@@ -45,7 +46,7 @@ test('clientsCsvForSetting uses defaults only for missing settings', () => {
 
 test('default tracked clients include current tokscale-supported tools', () => {
   const clients = DEFAULT_CLIENTS.split(',');
-  for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix']) {
+  for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh']) {
     assert.ok(clients.includes(client), `${client} should be tracked by default`);
   }
 });

@@ -332,6 +332,23 @@ test('every source-root id the collector emits is in the allowlist', () => {
   }
 });
 
+test('Claude source roots follow CLAUDE_CONFIG_DIR like tokscale', () => {
+  const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  const originalHomedir = os.homedir;
+  os.homedir = () => path.join(path.sep, 'home', 'alice');
+  process.env.CLAUDE_CONFIG_DIR = path.join(path.sep, 'srv', 'claude-config');
+  try {
+    assert.deepEqual(clientSourceRoots('claude').claude, [
+      { id: 'claude-projects', dir: path.join(path.sep, 'srv', 'claude-config', 'projects') },
+      { id: 'claude-transcripts', dir: path.join(path.sep, 'srv', 'claude-config', 'transcripts') }
+    ]);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+  }
+});
+
 test('labelling roots keeps diagnostics separate from watcher roots', () => {
   const roots = clientSourceRoots(KNOWN_CLIENTS);
   const candidates = clientWatchCandidates(KNOWN_CLIENTS);

@@ -269,10 +269,7 @@
   }
 
   function homeActivityHeatmapLayout() {
-    // Reserve room for the hover scale and glow on the first/last columns and
-    // first row. The chart renderer applies this in SVG coordinates so it also
-    // becomes real scrollable space rather than paint outside the viewport.
-    return { cell: 9, gap: 3, radius: 2, edgePad: 10 };
+    return { cell: 9, gap: 3, radius: 2 };
   }
 
   function historyHasDays(history) {
