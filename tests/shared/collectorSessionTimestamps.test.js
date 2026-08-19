@@ -82,6 +82,33 @@ test('applySessionTimestamps resolves Claude metadata from CLAUDE_CONFIG_DIR', (
   }
 });
 
+test('applySessionTimestamps resolves Claude metadata from configured transcripts', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-claude-transcripts-'));
+  const configDir = path.join(home, 'relocated-claude');
+  try {
+    const dir = path.join(configDir, 'transcripts', '-transcript-app');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'transcript-session.jsonl');
+    fs.writeFileSync(file, `${JSON.stringify({ cwd: '/work/transcript-app', timestamp: '2026-07-13T10:00:00.000Z' })}\n`);
+
+    const periods = { today: { sessions: {
+      'claude:transcript-session': { client: 'claude', sessionId: 'transcript-session' }
+    } } };
+    applySessionTimestamps(periods, home, {
+      env: { CLAUDE_CONFIG_DIR: configDir },
+      metadataCache: new Map(),
+      resolvedSessionKeys: new Set(),
+      attemptedSessionKeys: new Set()
+    });
+
+    const session = periods.today.sessions['claude:transcript-session'];
+    assert.equal(session.projectLabel, 'transcript-app');
+    assert.equal(session.lastUsedAt, '2026-07-13T10:00:00.000Z');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('scopedHome Claude metadata ignores a host CLAUDE_CONFIG_DIR override', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-claude-scoped-'));
   const hostConfigDir = path.join(home, 'host-claude');

@@ -832,8 +832,12 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     env: deps.env,
     useEnvRoots: !deps.scopedHome
   });
-  const claudeFiles = findSessionFiles(claudeRoots.projects, byClient.get('claude') || []);
-  for (const [sessionId, filePath] of claudeFiles) applyFile('claude', sessionId, filePath);
+  const claudeIds = byClient.get('claude') || new Set();
+  const projectFiles = findSessionFiles(claudeRoots.projects, claudeIds);
+  for (const [sessionId, filePath] of projectFiles) applyFile('claude', sessionId, filePath);
+  const missingClaudeIds = new Set([...claudeIds].filter((sessionId) => !projectFiles.has(sessionId)));
+  const transcriptFiles = findSessionFiles(claudeRoots.transcripts, missingClaudeIds);
+  for (const [sessionId, filePath] of transcriptFiles) applyFile('claude', sessionId, filePath);
 
   const codexIds = byClient.get('codex') || new Set();
   const missingCodexIds = new Set();

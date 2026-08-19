@@ -230,7 +230,7 @@ test('readSessionDetail resolves Claude transcripts from CLAUDE_CONFIG_DIR', () 
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-detail-config-'));
   const configDir = path.join(home, 'relocated-claude');
   const id = 'configured-detail';
-  const dir = path.join(configDir, 'projects', '-proj');
+  const dir = path.join(configDir, 'transcripts', '-proj');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `${id}.jsonl`), [
     JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: 'configured' } }),
