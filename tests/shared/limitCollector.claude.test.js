@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
-const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider, normalizeClaudeWebCookieInput } = require('../../src/shared/limitCollector');
+const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider, normalizeClaudeWebCookieInput, rankClaudeCredentialFiles } = require('../../src/shared/limitCollector');
 
 function fakeSpawnForClaudeUsage(expectedCommand = 'claude.cmd') {
   return (command, args) => {
@@ -39,6 +39,24 @@ const DEFAULT_CLAUDE_PROFILE = {
     name: 'Example Workspace'
   }
 };
+
+test('Claude credential discovery does not enumerate \\wsl$ when no distro is running', async () => {
+  let uncReads = 0;
+  const files = await rankClaudeCredentialFiles({
+    platform: 'win32',
+    env: {},
+    claudeCredentialPath: 'C:\\Users\\Javis\\.claude\\.credentials.json',
+    listRunningWslDistros: () => [],
+    readdirSync: () => {
+      uncReads += 1;
+      throw new Error('must not enumerate WSL');
+    },
+    stat: async () => ({ mtimeMs: 1 })
+  });
+
+  assert.equal(uncReads, 0);
+  assert.deepEqual(files.map((entry) => entry.path), ['C:\\Users\\Javis\\.claude\\.credentials.json']);
+});
 
 function fakeClaudeOauthFetch(usage, profile = DEFAULT_CLAUDE_PROFILE) {
   return async (url) => ({

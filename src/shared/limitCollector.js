@@ -26,6 +26,7 @@ const thirdPartyLimits = require('./thirdPartyLimits');
 const { sharedDataDir } = require('./config');
 const { recordConsumption } = require('./deepseekBalanceHistory');
 const { codexAccountKey, codexAuthIdentity } = require('./codexAuth');
+const { listRunningWslDistros } = require('./wslUsage');
 const minimaxLimits = require('./minimaxLimits');
 const { minimaxToken, minimaxBaseUrl, parseMinimaxTiers, fetchMinimaxLimits } = minimaxLimits;
 const mimoLimits = require('./mimoLimits');
@@ -191,12 +192,8 @@ function normalizeExpiresAt(value) {
 }
 
 function listWslDistros(deps = {}) {
-  const readdirSync = deps.readdirSync || fs.readdirSync;
-  try {
-    return readdirSync('\\\\wsl$').filter((name) => name && !name.startsWith('.') && !name.includes('$'));
-  } catch (_) {
-    return [];
-  }
+  const listRunning = deps.listRunningWslDistros || listRunningWslDistros;
+  return listRunning(deps);
 }
 
 function wslClaudeCredentialPaths(deps = {}) {
