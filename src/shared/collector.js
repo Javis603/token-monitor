@@ -1593,9 +1593,6 @@ function kimiWorkSessionsRoot(home = os.homedir(), platform = process.platform, 
 function kimiWorkScanEnv(clients, flags = [], options = {}) {
   const env = options.env || process.env;
   const enabled = new Set(String(clients || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
-  // tokscale ignores TOKSCALE_EXTRA_DIRS when scanning an explicit --home
-  // (scanner treats env roots as disabled there), so a WSL child must not carry
-  // a host Kimi Work path it will ignore anyway.
   if (!enabled.has('kimi') || flags.includes('--home')) return null;
   const root = kimiWorkSessionsRoot(options.home || os.homedir(), options.platform || process.platform, env);
   if (!root) return null;

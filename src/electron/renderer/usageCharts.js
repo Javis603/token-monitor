@@ -383,7 +383,6 @@
     if (/llama|meta/.test(name)) return 'meta';
     if (/mistral|mixtral|codestral/.test(name)) return 'mistral';
     if (/qwen|qwq|qvq/.test(name)) return 'qwen';
-    // Kimi Work ids carry no kimi/moonshot token — classify them explicitly.
     if (/kimi|moonshot|k2d6-agent|k3-agent/.test(name)) return 'kimi';
     if (/chatglm|\bglm-|\bzai\b|z\.ai|zhipu/.test(name)) return 'zai';
     if (/cohere|command-r/.test(name)) return 'cohere';
