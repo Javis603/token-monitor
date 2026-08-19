@@ -226,6 +226,32 @@ test('readSessionDetail resolves, parses, groups, and distributes cost', () => {
   assert.ok(Math.abs(detail.exchanges[0].costEstimate - 0.5) < 1e-9);
 });
 
+test('readSessionDetail resolves Claude transcripts from CLAUDE_CONFIG_DIR', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-detail-config-'));
+  const configDir = path.join(home, 'relocated-claude');
+  const id = 'configured-detail';
+  const dir = path.join(configDir, 'projects', '-proj');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${id}.jsonl`), [
+    JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: 'configured' } }),
+    JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(), message: { role: 'assistant', usage: { input_tokens: 3, output_tokens: 2 }, content: [] } })
+  ].join('\n'));
+
+  try {
+    const detail = readSessionDetail({
+      client: 'claude',
+      sessionId: id,
+      period: 'total',
+      home,
+      env: { CLAUDE_CONFIG_DIR: configDir }
+    });
+    assert.equal(detail.found, true);
+    assert.equal(detail.totals.totalTokens, 5);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('readSessionDetail reports not found instead of throwing', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-detail-'));
   const detail = readSessionDetail({ client: 'claude', sessionId: 'nope', period: 'total', sessionCost: 0, home });

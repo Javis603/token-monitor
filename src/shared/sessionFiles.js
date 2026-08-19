@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { claudeSessionRoots } = require('./claudePaths');
 
 function findSessionFiles(root, sessionIds) {
   const wanted = new Set(Array.from(sessionIds).map((id) => `${id}.jsonl`));
@@ -34,13 +35,18 @@ function codexSessionFile(home, sessionId) {
   try { return fs.statSync(filePath).isFile() ? filePath : ''; } catch (_) { return ''; }
 }
 
-function resolveSessionFile(client, sessionId, home) {
+function resolveSessionFile(client, sessionId, home, options = {}) {
   const id = String(sessionId || '');
   if (!id) return '';
   if (client === 'claude') {
-    const projectFile = findSessionFiles(path.join(home, '.claude', 'projects'), [id]).get(id);
+    const { projects, transcripts } = claudeSessionRoots({
+      homeDir: home,
+      env: options.env,
+      useEnvRoots: options.useEnvRoots
+    });
+    const projectFile = findSessionFiles(projects, [id]).get(id);
     if (projectFile) return projectFile;
-    return findSessionFiles(path.join(home, '.claude', 'transcripts'), [id]).get(id) || '';
+    return findSessionFiles(transcripts, [id]).get(id) || '';
   }
   if (client === 'codex') {
     const direct = codexSessionFile(home, id);

@@ -38,6 +38,35 @@ test('resolves a claude session file from the alternate transcripts root', () =>
   } finally { cleanup(home); }
 });
 
+test('resolves Claude sessions from CLAUDE_CONFIG_DIR', () => {
+  const home = tmpHome();
+  const configDir = path.join(home, 'relocated-claude');
+  try {
+    const dir = path.join(configDir, 'projects', '-some-project');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'configured-123.jsonl');
+    fs.writeFileSync(file, '{}\n');
+    assert.equal(resolveSessionFile('claude', 'configured-123', home, {
+      env: { CLAUDE_CONFIG_DIR: configDir }
+    }), file);
+  } finally { cleanup(home); }
+});
+
+test('an explicit scoped home ignores the host CLAUDE_CONFIG_DIR', () => {
+  const home = tmpHome();
+  const hostConfigDir = path.join(home, 'host-claude');
+  try {
+    const dir = path.join(home, '.claude', 'projects', '-scoped-home');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'scoped-123.jsonl');
+    fs.writeFileSync(file, '{}\n');
+    assert.equal(resolveSessionFile('claude', 'scoped-123', home, {
+      env: { CLAUDE_CONFIG_DIR: hostConfigDir },
+      useEnvRoots: false
+    }), file);
+  } finally { cleanup(home); }
+});
+
 test('resolves a codex rollout via the dated path', () => {
   const home = tmpHome();
   try {

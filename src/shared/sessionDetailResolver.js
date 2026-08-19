@@ -26,7 +26,12 @@ function resolveSessionDetailForPlatform(args = {}, deps = {}) {
   // real env; every WSL attempt gets none, forcing `home` to be authoritative.
   const readDetail = args.client === 'dsh'
     ? (detailArgs, scoped) => (deps.readDshSessionDetail || readDshSessionDetail)({ ...detailArgs, platform, env: scoped ? {} : deps.env, cwdDir: deps.cwdDir })
-    : (detailArgs) => (deps.readSessionDetail || readSessionDetail)(detailArgs);
+    : (detailArgs, scoped) => (deps.readSessionDetail || readSessionDetail)({
+      ...detailArgs,
+      ...(scoped
+        ? { env: {}, useEnvRoots: false }
+        : (deps.env === undefined ? {} : { env: deps.env }))
+    });
   const nativeDetail = readDetail({ ...args, home: nativeHome }, false);
 
   if (nativeDetail.found || platform !== 'win32' || !WSL_FALLBACK_CLIENTS.has(args.client)) {

@@ -55,6 +55,61 @@ test('applySessionTimestamps leaves non-opencode sessions to the file path (no D
   assert.strictEqual(called, false, 'opencode reader must not run when there are no opencode sessions');
 });
 
+test('applySessionTimestamps resolves Claude metadata from CLAUDE_CONFIG_DIR', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-claude-config-'));
+  const configDir = path.join(home, 'relocated-claude');
+  try {
+    const dir = path.join(configDir, 'projects', '-work-app');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'configured-session.jsonl');
+    fs.writeFileSync(file, `${JSON.stringify({ cwd: '/work/app', timestamp: '2026-07-13T10:00:00.000Z' })}\n`);
+
+    const periods = { today: { sessions: {
+      'claude:configured-session': { client: 'claude', sessionId: 'configured-session' }
+    } } };
+    applySessionTimestamps(periods, home, {
+      env: { CLAUDE_CONFIG_DIR: configDir },
+      metadataCache: new Map(),
+      resolvedSessionKeys: new Set(),
+      attemptedSessionKeys: new Set()
+    });
+
+    const session = periods.today.sessions['claude:configured-session'];
+    assert.equal(session.projectLabel, 'app');
+    assert.equal(session.lastUsedAt, '2026-07-13T10:00:00.000Z');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('scopedHome Claude metadata ignores a host CLAUDE_CONFIG_DIR override', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-claude-scoped-'));
+  const hostConfigDir = path.join(home, 'host-claude');
+  try {
+    const dir = path.join(home, '.claude', 'projects', '-scoped-home');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'scoped-session.jsonl');
+    fs.writeFileSync(file, `${JSON.stringify({ cwd: '/work/scoped', timestamp: '2026-07-13T10:00:00.000Z' })}\n`);
+
+    const periods = { today: { sessions: {
+      'claude:scoped-session': { client: 'claude', sessionId: 'scoped-session' }
+    } } };
+    applySessionTimestamps(periods, home, {
+      scopedHome: true,
+      env: { CLAUDE_CONFIG_DIR: hostConfigDir },
+      metadataCache: new Map(),
+      resolvedSessionKeys: new Set(),
+      attemptedSessionKeys: new Set()
+    });
+
+    const session = periods.today.sessions['claude:scoped-session'];
+    assert.equal(session.projectLabel, 'scoped');
+    assert.equal(session.lastUsedAt, '2026-07-13T10:00:00.000Z');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('applySessionTimestamps reuses resolved metadata across progressive periods', () => {
   const cache = { metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set() };
   const calls = [];

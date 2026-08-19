@@ -52,6 +52,36 @@ test('reads a Claude transcript from a discovered WSL home', (t) => {
   assert.equal(detail.totals.costUsd, 0.25);
 });
 
+test('WSL Claude detail ignores the host CLAUDE_CONFIG_DIR override', (t) => {
+  const nativeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-detail-'));
+  const wslHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-wsl-detail-'));
+  const hostConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-host-claude-'));
+  t.after(() => fs.rmSync(nativeHome, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(wslHome, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(hostConfigDir, { recursive: true, force: true }));
+  const sessionId = 'wsl-scoped-config';
+  const transcriptDir = path.join(wslHome, '.claude', 'projects', '-workspace');
+  fs.mkdirSync(transcriptDir, { recursive: true });
+  fs.writeFileSync(path.join(transcriptDir, `${sessionId}.jsonl`), [
+    JSON.stringify({ type: 'user', timestamp: '2026-07-31T00:00:00.000Z', message: { content: 'from scoped WSL' } }),
+    JSON.stringify({ type: 'assistant', timestamp: '2026-07-31T00:00:01.000Z', message: { usage: { input_tokens: 2, output_tokens: 1 }, content: [] } })
+  ].join('\n'));
+
+  const detail = resolveSessionDetailForPlatform(
+    { client: 'claude', sessionId, period: 'total' },
+    {
+      platform: 'win32',
+      homedir: () => nativeHome,
+      env: { CLAUDE_CONFIG_DIR: hostConfigDir },
+      wslUsageHomes: () => [wslHome]
+    }
+  );
+
+  assert.equal(detail.found, true);
+  assert.equal(detail.exchanges[0].promptPreview, 'from scoped WSL');
+  assert.equal(detail.totals.totalTokens, 3);
+});
+
 test('reads a Claude transcript from the alternate root in a discovered WSL home', (t) => {
   const nativeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-detail-'));
   const wslHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-wsl-detail-'));
