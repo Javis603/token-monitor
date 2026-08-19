@@ -151,7 +151,21 @@ function decodeZstdBuffer(buffer, frames) {
   }
   let text = '';
   for (const frame of frames || scanZstdFrames(buffer)) {
-    text += zlib.zstdDecompressSync(buffer.subarray(frame.start, frame.end)).toString('utf8');
+    // A frame whose framing is complete but whose content is corrupt (a
+    // checksum mismatch, say) cannot be decoded. Stop here and keep the valid
+    // prefix instead of throwing the whole transcript away: tokscale's
+    // streaming decoder emits every record it successfully read before the
+    // error, and dsh's own reader behaves the same way, so a corrupt tail must
+    // not retroactively discard the header and turns that decoded cleanly
+    // before it. (The torn-tail recovery in decodeSessionText below handles
+    // the other failure mode — a frame that was cut off mid-write.)
+    let decoded;
+    try {
+      decoded = zlib.zstdDecompressSync(buffer.subarray(frame.start, frame.end));
+    } catch (_) {
+      break;
+    }
+    text += decoded.toString('utf8');
   }
   return text;
 }

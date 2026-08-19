@@ -134,6 +134,34 @@ test('decodeSessionText recovers complete records inside a torn final frame', { 
   assert.ok(!text.includes(sentinel), 'the truncated third record must be dropped');
 });
 
+// The torn-frame case above is a frame cut off mid-write. The other failure
+// mode is a frame whose framing is complete but whose content is corrupt — a
+// checksum mismatch, say — which scanZstdFrames cannot see (it only walks the
+// frame/block structure). tokscale's streaming decoder keeps every record it
+// read before hitting that error, so decodeSessionText must do the same: stop
+// at the first undecodable frame and keep the valid prefix, instead of letting
+// the error throw the header and earlier turns away with it.
+test('decodeSessionText keeps the valid prefix when a complete frame is content-corrupt', { skip: !hasZstd }, () => {
+  const header = zlib.zstdCompressSync(Buffer.from('{"type":"session","id":"s1"}\n', 'utf8'));
+  const goodTurn = zlib.zstdCompressSync(Buffer.from('{"type":"assistant/message","seq":2}\n', 'utf8'));
+  // Set the frame-descriptor checksum flag and append a wrong checksum: the
+  // frame stays framing-complete (so scanZstdFrames sees it) but
+  // zstdDecompressSync rejects it as ZSTD_error_checksum_wrong.
+  const badTurn = zlib.zstdCompressSync(Buffer.from('{"type":"assistant/message","seq":3}\n', 'utf8'));
+  badTurn[4] |= 0x04;
+  const corrupt = Buffer.concat([badTurn, Buffer.from([0xde, 0xad, 0xbe, 0xef])]);
+  const buffer = Buffer.concat([header, goodTurn, corrupt]);
+
+  // Anti-vacuous: the corrupt frame is structurally complete, so the scanner
+  // alone sees all three frames — its corruption is invisible to framing.
+  assert.equal(scanZstdFrames(buffer).length, 3);
+
+  const text = decodeSessionText('/tmp/session.jsonl.zstd', buffer);
+  assert.ok(text.includes('{"type":"session","id":"s1"}'), 'the header frame must survive');
+  assert.ok(text.includes('{"type":"assistant/message","seq":2}'), 'the good turn before the corrupt frame must survive');
+  assert.ok(!text.includes('"seq":3'), 'the corrupt frame must be dropped');
+});
+
 // Session-id lookup only needs the header, which is always the first event
 // dsh writes. decodeFirstFrameText must not touch later frames, so a long
 // transcript's discovery cost stays O(one frame) even when a trailing frame
