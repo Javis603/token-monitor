@@ -864,7 +864,7 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     // The resolved root namespaces the cache key (see dshSessionFileCache).
     const dshEnv = deps.scopedHome ? {} : (deps.env || process.env);
     const dshRoot = resolveDshSessionsRoot({ homeDir: home, env: dshEnv, platform: deps.platform });
-    const dshKey = (id) => `${dshRoot} ${id}`;
+    const dshKey = (id) => `${dshRoot}\u0000${id}`;
     const unresolvedDshIds = [...dshIds].filter((id) => !dshFileCache.has(dshKey(id)));
     if (unresolvedDshIds.length > 0) {
       const buildIndex = deps.indexDshSessionHeaders || indexDshSessionHeaders;
