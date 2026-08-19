@@ -211,7 +211,7 @@ App 狀態存在 OS 使用者資料目錄——解除安裝時一併刪除該資
 
 ## 從原始碼建置
 
-如需自己從原始碼打包安裝檔，請在**對應的**作業系統上使用 Node.js 22.13+（electron-builder 無法在 Windows 上交叉建置 macOS 的 `.dmg`，反之亦然）。
+如需自己從原始碼打包安裝檔，請在**對應的**作業系統上使用 Node.js 22.15+（electron-builder 無法在 Windows 上交叉建置 macOS 的 `.dmg`，反之亦然）。
 
 ```bash
 npm install

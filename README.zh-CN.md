@@ -211,7 +211,7 @@ App 状态保存在系统的用户数据目录——卸载时一并删除该目�
 
 ## 从源码构建
 
-如需自己从源码打包安装包，请在**对应的**操作系统上使用 Node.js 22.13+（electron-builder 无法在 Windows 上交叉构建 macOS 的 `.dmg`，反之亦然）。
+如需自己从源码打包安装包，请在**对应的**操作系统上使用 Node.js 22.15+（electron-builder 无法在 Windows 上交叉构建 macOS 的 `.dmg`，反之亦然）。
 
 ```bash
 npm install

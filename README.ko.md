@@ -211,7 +211,7 @@ npx wrangler deploy
 
 ## 소스에서 빌드
 
-직접 설치 파일을 빌드하려면 **대상 OS**에서 Node.js 22.13+를 사용하세요(electron-builder는 macOS `.dmg`와 Windows `.exe` 교차 빌드 불가).
+직접 설치 파일을 빌드하려면 **대상 OS**에서 Node.js 22.15+를 사용하세요(electron-builder는 macOS `.dmg`와 Windows `.exe` 교차 빌드 불가).
 
 ```bash
 npm install

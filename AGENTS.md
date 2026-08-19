@@ -14,7 +14,7 @@ npm run lint       # ESLint flat config (eslint.config.js)
 npm run verify     # lint + test (single local entry point)
 ```
 
-Automated verification is `npm run verify` (= `npm run lint && npm test`); CI (`.github/workflows/ci.yml`) runs lint + test on push/PR across Node 22 & 24. The toolchain (ESLint 10 + the node:test glob) needs Node 22.13+, which is why `engines.node` is `>=22.13.0` (Node 18 & 20 are both EOL as of 2026-06).
+Automated verification is `npm run verify` (= `npm run lint && npm test`); CI (`.github/workflows/ci.yml`) runs lint + test on push/PR across Node 22 & 24. The toolchain (ESLint 10 + the node:test glob) needs Node 22.13+ and DSH session decoding needs `zlib.zstdDecompressSync` (Node 22.15+), which is why `engines.node` is `>=22.15.0` (Node 18 & 20 are both EOL as of 2026-06).
 
 To dry-run the agent without posting: `npm run agent:once -- --dry-run`.
 

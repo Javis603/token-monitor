@@ -211,7 +211,7 @@ npx wrangler deploy
 
 ## ソースからビルド
 
-自分でインストーラーをビルドする場合は、**対象 OS** 上で Node.js 22.13+ を使用してください（electron-builder は macOS `.dmg` と Windows `.exe` のクロスビルド不可）。
+自分でインストーラーをビルドする場合は、**対象 OS** 上で Node.js 22.15+ を使用してください（electron-builder は macOS `.dmg` と Windows `.exe` のクロスビルド不可）。
 
 ```bash
 npm install

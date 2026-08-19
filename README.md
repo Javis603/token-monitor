@@ -211,7 +211,7 @@ App state lives in the OS user-data dir — delete it along with the app to full
 
 ## Build from source
 
-To build your own installer, use Node.js 22.13+ on the **target** OS (electron-builder can't cross-build a macOS `.dmg` on Windows, or vice-versa).
+To build your own installer, use Node.js 22.15+ on the **target** OS (electron-builder can't cross-build a macOS `.dmg` on Windows, or vice-versa).
 
 ```bash
 npm install
