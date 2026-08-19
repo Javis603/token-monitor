@@ -318,7 +318,11 @@ test('WSL Reasonix is neither discovered nor passed to the WSL Tokscale scan', a
     }
   }, {
     platform: 'win32',
-    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    exec: (cmd, args) => (cmd === 'reg' && !args.includes('/s') ? 'Lxss' : String.raw`
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Lxss\{ubuntu}
+    State    REG_DWORD    0x2
+    DistributionName    REG_SZ    Ubuntu
+`),
     readdirSync: () => ['alice'],
     existsSync: (value) => value === `${home}\\.claude\\projects`
   });
