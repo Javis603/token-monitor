@@ -1222,6 +1222,7 @@ async function collectUsageOnce(options) {
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
+  const targetClientSet = new Set(targetClients);
   const targetTokscaleClients = targetClients.filter((client) => !localClients.has(client)).join(',');
   const qoderCnReadState = options.qoderCnReadState;
   if (qoderCnReadState) {
@@ -1319,9 +1320,14 @@ async function collectUsageOnce(options) {
         const bundle = extractUsageBundleFromTokscale(todayJson);
         freshPartitions = bundle.byClient;
         const unattributed = freshPartitions[UNATTRIBUTED_USAGE_CLIENT];
-        if (targetRequested && periodHasUsage(unattributed)) {
-          // A row without a client cannot be replaced safely inside one client
-          // partition. Fall back to one all-client today scan for correctness.
+        const hasUnexpectedClientPartition = Object.keys(freshPartitions).some((client) => (
+          client !== UNATTRIBUTED_USAGE_CLIENT && !targetClientSet.has(client)
+        ));
+        if (targetRequested && (periodHasUsage(unattributed) || hasUnexpectedClientPartition)) {
+          // Every attributed row from a targeted scan must normalize back into
+          // the requested set. An unattributed row or an unexpected client would
+          // otherwise clear the target while partially overwriting an unrelated
+          // anchor partition. Rebuild the complete today snapshot instead.
           const fullTodayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs });
           freshPartitions = extractUsageBundleFromTokscale(fullTodayJson).byClient;
           useTargetedPartitions = false;
