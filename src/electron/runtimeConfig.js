@@ -177,6 +177,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
       || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_LOCALE
       || workbuddyEnv.WORKBUDDY_LOCALE
       || '',
+    workbuddyDesktopSessionSupported: context.workbuddyDesktopSessionSupported !== false,
     workbuddyDesktopSessionEnabled: context.workbuddyDesktopSessionEnabled === true,
     kimiApiKey: settings.kimiApiKey || '',
     kimiWebAccessToken: settings.kimiWebAccessToken || '',

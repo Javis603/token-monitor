@@ -176,6 +176,7 @@ test('fetchWorkbuddyLimits sends the private personal billing request without ex
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, `${WORKBUDDY_DEFAULT_ENDPOINT}/v2/billing/meter/get-user-resource`);
   assert.equal(requests[0].init.method, 'POST');
+  assert.equal(requests[0].init.redirect, 'error');
   assert.equal(requests[0].init.headers.Authorization, 'Bearer fixture-access-token');
   assert.equal(requests[0].init.headers['X-User-Id'], 'user-123');
   assert.equal(requests[0].init.headers['X-Domain'], 'copilot.tencent.com');
@@ -242,6 +243,7 @@ test('fetchWorkbuddyLimits uses the WorkBuddy app session without asking users f
 
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, 'https://copilot.tencent.com/v2/billing/meter/get-user-resource');
+  assert.equal(requests[0].init.redirect, 'error');
   assert.equal(requests[0].init.headers.Authorization, undefined);
   assert.equal(requests[0].init.headers.Cookie, undefined);
   assert.equal(requests[0].init.headers['X-User-Id'], undefined);
@@ -298,6 +300,13 @@ test('parseEnterpriseUsage rejects a limit without a reported usage value', () =
   assert.throws(
     () => parseEnterpriseUsage({ data: { limitNum: 100 } }),
     /no usage value/
+  );
+});
+
+test('parseEnterpriseUsage rejects unknown negative limit sentinels', () => {
+  assert.throws(
+    () => parseEnterpriseUsage({ data: { limitNum: -2, credit: 0 } }),
+    /invalid limitNum/
   );
 });
 
@@ -404,6 +413,25 @@ test('WorkBuddy Local App is disabled outside the desktop provider lane and does
     }
   });
   assert.equal(provider.status, 'notConfigured');
+  assert.equal(called, false);
+});
+
+test('WorkBuddy Local App reports unsupported desktop platforms without reading a session or requesting billing', async () => {
+  let called = false;
+  const provider = await fetchWorkbuddyLimits({
+    workbuddyDesktopSessionSupported: false,
+    workbuddyDesktopSessionEnabled: false
+  }, {
+    env: {},
+    workbuddyFetch: async () => {
+      called = true;
+      return response({});
+    }
+  });
+
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'local');
+  assert.equal(provider.sourceDetail, 'app');
   assert.equal(called, false);
 });
 

@@ -159,6 +159,29 @@ test('shares the complete provider allowlist and preserves credit window display
   assert.equal(byProvider.get('thirdparty').windows[0].showMeter, true);
 });
 
+test('preserves WorkBuddy finite credits and unlimited detail for the native widget', () => {
+  const finite = buildSnapshot({
+    limits: { providers: [{
+      provider: 'workbuddy',
+      status: 'ok',
+      balance: { amount: 63, currency: 'CREDITS' },
+      windows: [{ kind: 'billing', metric: 'credits', remaining: 63, currency: 'CREDITS', showMeter: false }]
+    }] }
+  }, { now: NOW });
+  assert.deepEqual(finite.quota[0].balance, { amount: 63, currency: 'CREDITS' });
+  assert.equal(finite.quota[0].windows[0].currency, 'CREDITS');
+
+  const unlimited = buildSnapshot({
+    limits: { providers: [{
+      provider: 'workbuddy',
+      status: 'ok',
+      windows: [{ kind: 'billing', metric: 'credits', remaining: null, detail: 'unlimited', showMeter: false }]
+    }] }
+  }, { now: NOW });
+  assert.equal(unlimited.quota[0].windows[0].detail, 'unlimited');
+  assert.equal(Object.hasOwn(unlimited.quota[0].windows[0], 'remaining'), false);
+});
+
 test('keeps multi-account provider identities stable without exporting account details', () => {
   const stats = {
     limits: { providers: [

@@ -135,9 +135,22 @@ test('limits config resolves managed credentials at dispatch time through contex
 
 test('desktop WorkBuddy Local App monitoring stays inactive outside the selected provider lane', () => {
   const limits = limitsConfigFromSettings({}, { env: {}, workbuddyDesktopSessionOnly: true });
+  assert.equal(limits.workbuddyDesktopSessionSupported, true);
   assert.equal(limits.workbuddyDesktopSessionEnabled, false);
   assert.equal(limits.workbuddyAccessToken, '');
   assert.equal(Object.hasOwn(limits, 'workbuddyEndpoint'), false);
+});
+
+test('desktop WorkBuddy Local App monitoring preserves an unsupported platform capability', () => {
+  const limits = limitsConfigFromSettings({}, {
+    env: {},
+    workbuddyDesktopSessionOnly: true,
+    workbuddyDesktopSessionSupported: false,
+    workbuddyDesktopSessionEnabled: false
+  });
+  assert.equal(limits.workbuddyDesktopSessionSupported, false);
+  assert.equal(limits.workbuddyDesktopSessionEnabled, false);
+  assert.equal(limits.workbuddyAccessToken, '');
 });
 
 test('desktop WorkBuddy Local App monitoring resolves session metadata when its provider lane is enabled', () => {

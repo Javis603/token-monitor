@@ -1212,8 +1212,11 @@ test('WorkBuddy auth is resolved only when its enabled local provider is active'
   const limitsConfig = functionBody(main, 'electronLimitsConfig', 'defaultLimitProviders');
   assert.match(limitsConfig, /settings\?\.limitsEnabled !== false/);
   assert.match(limitsConfig, /parseLimitProviders\(settings\?\.limitProviders\)\.includes\('workbuddy'\)/);
-  assert.match(limitsConfig, /workbuddyDesktopSessionEnabled: workbuddyEnabled/);
-  assert.match(limitsConfig, /workbuddyLocalSession: workbuddyEnabled \? electronWorkbuddyLocalAuth\.getSessionInfo\(\) : \{\}/);
+  assert.match(limitsConfig, /const workbuddyDesktopSessionSupported = isSupportedWorkbuddyLocalAppPlatform\(\)/);
+  assert.match(limitsConfig, /const workbuddyDesktopSessionEnabled = workbuddyEnabled && workbuddyDesktopSessionSupported/);
+  assert.match(limitsConfig, /workbuddyDesktopSessionSupported,/);
+  assert.match(limitsConfig, /workbuddyDesktopSessionEnabled,/);
+  assert.match(limitsConfig, /workbuddyLocalSession: workbuddyDesktopSessionEnabled \? electronWorkbuddyLocalAuth\.getSessionInfo\(\) : \{\}/);
   assert.doesNotMatch(limitsConfig, /settings\?\.workbuddyLocalAppEnabled/);
 });
 

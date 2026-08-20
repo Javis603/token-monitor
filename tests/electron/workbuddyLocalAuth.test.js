@@ -246,10 +246,44 @@ test('WorkBuddy local auth injects app headers only for the allowlisted billing 
     });
 
     assert.equal(requests.length, 1);
+    assert.equal(requests[0].init.redirect, 'error');
     assert.equal(requests[0].init.headers.Authorization, 'Bearer fixture-access-token');
     assert.equal(requests[0].init.headers['X-User-Id'], 'local-user');
     assert.equal(requests[0].init.headers.Cookie, undefined);
     assert.equal(requests[0].init.headers['X-Refresh-Token'], undefined);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('WorkBuddy local auth distinguishes missing and expired app sessions', async () => {
+  const fixture = createFixture();
+  let requests = 0;
+  try {
+    fs.rmSync(fixture.authPath);
+    const missing = createWorkbuddyLocalAuth({
+      authDirectory: fixture.root,
+      platform: 'darwin',
+      fetch: async () => { requests += 1; return { ok: true, status: 200 }; }
+    });
+    await assert.rejects(
+      () => missing.request('https://copilot.tencent.com/v2/billing/meter/get-user-resource', { method: 'POST' }),
+      (error) => error?.status === 'notConfigured'
+    );
+
+    fs.writeFileSync(fixture.authPath, JSON.stringify(sessionDocument({
+      auth: { expiresAt: Date.now() - 60 * 1000 }
+    })), 'utf8');
+    const expired = createWorkbuddyLocalAuth({
+      authDirectory: fixture.root,
+      platform: 'darwin',
+      fetch: async () => { requests += 1; return { ok: true, status: 200 }; }
+    });
+    await assert.rejects(
+      () => expired.request('https://copilot.tencent.com/v2/billing/meter/get-user-resource', { method: 'POST' }),
+      (error) => error?.status === 'unauthorized'
+    );
+    assert.equal(requests, 0);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -353,6 +387,7 @@ test('WorkBuddy request sanitization never forwards caller authentication materi
   assert.deepEqual(init, {
     method: 'POST',
     headers: { Accept: 'application/json' },
+    redirect: 'error',
     body: '{}'
   });
 });

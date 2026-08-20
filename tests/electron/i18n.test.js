@@ -45,6 +45,12 @@ test('WSL SQLite recovery guidance is localized without English fallback', () =>
   }
 });
 
+test('Unlimited remains a provider quota value token in every locale', () => {
+  for (const locale of LANGUAGE_OPTIONS.map((option) => option.value).filter((value) => value !== 'auto')) {
+    assert.equal(MESSAGES[locale]['settings.thirdparty.unlimited'], 'Unlimited', locale);
+  }
+});
+
 test('resolveLocale maps auto to Chinese variants from browser languages', () => {
   assert.equal(resolveLocale('auto', ['zh-HK', 'en-US']), 'zh-TW');
   assert.equal(resolveLocale('auto', ['zh-Hans-CN', 'en-US']), 'zh-CN');

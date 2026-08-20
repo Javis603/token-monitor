@@ -142,6 +142,8 @@ function buildLimitWindow(window) {
   const remaining = optionalFiniteNumber(window.remaining);
   const rawCurrency = String(window.currency || '').trim().toUpperCase();
   const currency = /^[A-Z]{3,8}$/.test(rawCurrency) ? rawCurrency : null;
+  const rawDetail = String(window.detail || '').trim().toLowerCase();
+  const detail = rawDetail === 'unlimited' ? rawDetail : null;
   return {
     kind,
     metric,
@@ -153,7 +155,8 @@ function buildLimitWindow(window) {
       ? null
       : nonNegativeNumber(window.windowMinutes),
     ...(remaining === null ? {} : { remaining }),
-    ...(currency ? { currency } : {})
+    ...(currency ? { currency } : {}),
+    ...(detail ? { detail } : {})
   };
 }
 
@@ -162,7 +165,7 @@ function buildProviderBalance(provider) {
   if (!source || typeof source !== 'object') return null;
   const amount = optionalFiniteNumber(source.amount);
   const currency = String(source.currency || '').trim().toUpperCase();
-  if (amount === null || !Object.hasOwn(CURRENCIES, currency)) return null;
+  if (amount === null || (!Object.hasOwn(CURRENCIES, currency) && currency !== 'CREDITS')) return null;
   return { amount, currency };
 }
 

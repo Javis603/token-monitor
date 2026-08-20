@@ -214,6 +214,9 @@ function parseEnterpriseUsage(body) {
   const rawLimit = pickValue(usage, ['limitNum', 'limit_num']);
   const limit = numberOrNull(rawLimit);
   if (limit === null) throw new Error('WorkBuddy enterprise billing response has no limitNum');
+  if (limit < 0 && limit !== -1) {
+    throw new Error('WorkBuddy enterprise billing response has an invalid limitNum');
+  }
   const rawUsed = numberOrNull(pickValue(usage, [
     'credit', 'used', 'usedNum', 'used_num'
   ]));
@@ -326,7 +329,7 @@ function requestHeaders(token, userId, enterpriseId, locale, domain, departmentI
 }
 
 function workbuddyStatus(error) {
-  if (['unauthorized', 'sourceRateLimited', 'unavailable', 'error'].includes(error?.status)) return error.status;
+  if (['notConfigured', 'unauthorized', 'sourceRateLimited', 'unavailable', 'error'].includes(error?.status)) return error.status;
   if (error?.status === 'timeout' || error?.name === 'AbortError') return 'unavailable';
   return 'unavailable';
 }
@@ -348,20 +351,23 @@ async function fetchWorkbuddyLimits(options = {}, deps = {}) {
   const domain = workbuddyDomain(env, options);
   const departmentInfo = workbuddyDepartmentInfo(env, options);
   const accountType = cleanSecret(options.workbuddyAccountType);
+  const localAppUnsupported = !token && options.workbuddyDesktopSessionSupported === false;
   // The desktop widget reads the session owned by the installed WorkBuddy
   // app. If an advanced/headless token is present, keep the explicit token
   // path deterministic rather than mixing its metadata with the app session.
-  const useLocalApp = !token
+  const useLocalApp = !localAppUnsupported
+    && !token
     && options.workbuddyDesktopSessionEnabled === true
     && typeof deps.workbuddyFetch === 'function';
   const source = {
     provider: 'workbuddy',
-    source: useLocalApp ? 'local' : 'api',
-    sourceDetail: useLocalApp ? 'app' : 'unknown',
+    source: useLocalApp || localAppUnsupported ? 'local' : 'api',
+    sourceDetail: useLocalApp || localAppUnsupported ? 'app' : 'unknown',
     updatedAt,
     windows: []
   };
 
+  if (localAppUnsupported) return normalizeLimitProvider({ ...source, status: 'unavailable' });
   if (!token && !useLocalApp) return normalizeLimitProvider({ ...source, status: 'notConfigured' });
 
   const endpoint = WORKBUDDY_DEFAULT_ENDPOINT;
@@ -390,11 +396,13 @@ async function fetchWorkbuddyLimits(options = {}, deps = {}) {
     const body = isEnterprise
       ? await fetchJson(`${endpoint}${WORKBUDDY_ENTERPRISE_PATH}`, {
         method: 'POST',
+        redirect: 'error',
         headers,
         body: '{}'
       }, requestDeps)
       : await fetchJson(`${endpoint}${WORKBUDDY_PERSONAL_PATH}`, {
         method: 'POST',
+        redirect: 'error',
         headers,
         body: JSON.stringify({
           PageNumber: 1,

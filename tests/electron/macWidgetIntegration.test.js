@@ -718,6 +718,9 @@ test('Widget user-facing strings are localized in five languages', () => {
       localization.stringUnit?.state === 'translated' && localization.stringUnit.value
     )), `incomplete localization for ${key}`);
   }
+  assert.ok(Object.values(widgetLocalization.strings.Unlimited.localizations).every((localization) => (
+    localization.stringUnit.value === 'Unlimited'
+  )));
 });
 
 test('Widget layout uses system margins and fixed scaffold metrics without changing kind', () => {

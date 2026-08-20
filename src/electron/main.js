@@ -25,7 +25,10 @@ const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./claudeWebFetch');
-const { createWorkbuddyLocalAuth } = require('./workbuddyLocalAuth');
+const {
+  createWorkbuddyLocalAuth,
+  isSupportedWorkbuddyLocalAppPlatform
+} = require('./workbuddyLocalAuth');
 const { createElectronLimitsFetch } = require('./limitsFetch');
 const {
   expandedBoundsForCollapse,
@@ -650,11 +653,14 @@ function electronUsageConfig(errorPrefix) {
 function electronLimitsConfig() {
   const workbuddyEnabled = settings?.limitsEnabled !== false
     && parseLimitProviders(settings?.limitProviders).includes('workbuddy');
+  const workbuddyDesktopSessionSupported = isSupportedWorkbuddyLocalAppPlatform();
+  const workbuddyDesktopSessionEnabled = workbuddyEnabled && workbuddyDesktopSessionSupported;
   return limitsConfigFromSettings(settings, {
     env: process.env,
     workbuddyDesktopSessionOnly: true,
-    workbuddyDesktopSessionEnabled: workbuddyEnabled,
-    workbuddyLocalSession: workbuddyEnabled ? electronWorkbuddyLocalAuth.getSessionInfo() : {},
+    workbuddyDesktopSessionSupported,
+    workbuddyDesktopSessionEnabled,
+    workbuddyLocalSession: workbuddyDesktopSessionEnabled ? electronWorkbuddyLocalAuth.getSessionInfo() : {},
     defaultLimitProviders: defaultLimitProviders(),
     codexManagedAccounts: codexManagedAccountsForCollector(),
     mimoManagedAccounts: mimoManagedAccountsForCollector()

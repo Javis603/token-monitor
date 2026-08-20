@@ -267,6 +267,7 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
     let windowMinutes: Double?
     let remaining: Double?
     let currency: String?
+    let detail: String?
     var id: String { kind }
 
     init(
@@ -278,7 +279,8 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
         metric: String? = nil,
         showMeter: Bool = true,
         remaining: Double? = nil,
-        currency: String? = nil
+        currency: String? = nil,
+        detail: String? = nil
     ) {
         self.kind = kind
         self.metric = metric
@@ -289,6 +291,7 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
         self.windowMinutes = windowMinutes
         self.remaining = remaining
         self.currency = currency
+        self.detail = detail
     }
 }
 
@@ -495,7 +498,7 @@ extension WidgetOverview {
 }
 
 extension WidgetLimitWindow {
-    private enum CodingKeys: String, CodingKey { case kind, metric, showMeter, usedPercent, remainingPercent, resetsAt, windowMinutes, remaining, currency }
+    private enum CodingKeys: String, CodingKey { case kind, metric, showMeter, usedPercent, remainingPercent, resetsAt, windowMinutes, remaining, currency, detail }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         kind = c.string(.kind)
@@ -508,6 +511,8 @@ extension WidgetLimitWindow {
         windowMinutes = try? c.decodeIfPresent(Double.self, forKey: .windowMinutes)
         remaining = try? c.decodeIfPresent(Double.self, forKey: .remaining)
         currency = try? c.decodeIfPresent(String.self, forKey: .currency)
+        let rawDetail = c.string(.detail).lowercased()
+        detail = rawDetail == "unlimited" ? rawDetail : nil
     }
 }
 

@@ -74,6 +74,9 @@ function sanitizeRequestInit(init = {}) {
   return {
     method: String(init.method || 'GET').toUpperCase(),
     headers,
+    // Authentication is injected only after the exact billing URL has been
+    // allowlisted. Never let the transport carry it to a redirect target.
+    redirect: 'error',
     ...(body === undefined ? {} : { body }),
     ...(init.signal ? { signal: init.signal } : {})
   };
@@ -227,7 +230,8 @@ function createWorkbuddyLocalAuth(deps = {}) {
       throw authError('unavailable', 'WorkBuddy billing endpoint is not allowed');
     }
     const session = locateSession();
-    if (!session || session.expired) throw authError('unauthorized', 'WorkBuddy app sign-in is required');
+    if (!session) throw authError('notConfigured', 'WorkBuddy app sign-in is required');
+    if (session.expired) throw authError('unauthorized', 'WorkBuddy app session has expired');
     if (!matchesExpectedSession(expectedSession, session)) {
       throw authError('unauthorized', 'WorkBuddy app session changed during the billing request');
     }
