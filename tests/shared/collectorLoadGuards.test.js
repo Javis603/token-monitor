@@ -2834,7 +2834,7 @@ test('collector publishes live periods when only Qoder CN history read fails', a
   }
 });
 
-test('smart collection coalesces watch events into one targeted interval scan', async () => {
+test('smart collection coalesces watch events into one targeted interval tick', async () => {
   const tmp = withTmpHome([
     path.join('.claude', 'projects'),
     path.join('.codex', 'sessions')
@@ -2885,10 +2885,11 @@ test('smart collection coalesces watch events into one targeted interval scan', 
     assert.equal(calls.length, 3, 'watch events never scan immediately in smart mode');
 
     await waitForCondition(() => updates.length === 2);
-    assert.equal(calls.length, 4, 'one today-only scan acknowledges the event batch');
+    assert.equal(calls.length, 5, 'one targeted tick acknowledges the event batch');
     assert.equal(calls[3][calls[3].indexOf('--client') + 1], 'claude,cursor');
+    assert.equal(calls[4][calls[4].indexOf('--client') + 1], 'claude,codex,cursor');
     await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.equal(calls.length, 4, 'the acknowledged batch does not repeat');
+    assert.equal(calls.length, 5, 'the acknowledged batch does not repeat');
   } finally {
     if (handle) handle.stop();
     childProcess.spawn = originalSpawn;

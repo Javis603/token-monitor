@@ -1323,33 +1323,20 @@ async function collectUsageOnce(options) {
         freshPartitions = bundle.byClient;
         const unattributed = freshPartitions[UNATTRIBUTED_USAGE_CLIENT];
         const attributedClients = Object.keys(freshPartitions).filter((client) => client !== UNATTRIBUTED_USAGE_CLIENT);
-        let hasUnsafeTargetedResult = (
+        const hasMissingTargetPartition = (
+          targetTokscaleClientList.length > 1
+          && targetTokscaleClientList.some((client) => !Object.prototype.hasOwnProperty.call(freshPartitions, client))
+        );
+        const hasUnsafeTargetedResult = (
           periodHasUsage(unattributed)
           || attributedClients.some((client) => !targetTokscaleClientSet.has(client))
+          || hasMissingTargetPartition
         );
 
         // A unioned watch scan can hide cross-attribution inside its own target
-        // set (for example Hermes missing while its rows land under WorkBuddy).
-        // Confirm only whether each missing member is genuinely empty. Any usage
-        // proves the union result was incomplete, but cannot prove that its
-        // existing partitions are unpolluted, so rebuild the full snapshot.
-        if (targetTokscaleClientList.length > 1 && attributedClients.length > 0 && !hasUnsafeTargetedResult) {
-          const missingClients = targetTokscaleClientList.filter((client) => !Object.prototype.hasOwnProperty.call(freshPartitions, client));
-          for (const client of missingClients) {
-            const confirmationJson = await runTokscaleFn({ clients: client, flags: ['--today'], commandTimeoutMs });
-            const confirmationPartitions = extractUsageBundleFromTokscale(confirmationJson).byClient;
-            const confirmationUnattributed = confirmationPartitions[UNATTRIBUTED_USAGE_CLIENT];
-            const confirmationClients = Object.keys(confirmationPartitions).filter((key) => key !== UNATTRIBUTED_USAGE_CLIENT);
-            if (
-              periodHasUsage(confirmationUnattributed)
-              || confirmationClients.length > 0
-            ) {
-              hasUnsafeTargetedResult = true;
-              break;
-            }
-          }
-        }
-
+        // set, and a missing partition cannot distinguish deletion from an
+        // incomplete or polluted union. Rebuild one authoritative full snapshot
+        // rather than trying to repair a partial result client by client.
         if (targetRequested && hasUnsafeTargetedResult) {
           // Every attributed row from a targeted scan must normalize back into
           // the requested set. An unattributed row or an unexpected client would
