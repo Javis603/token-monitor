@@ -1,12 +1,13 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const test = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { readActiveAccount, runCursorLogin, runCursorLogout } = require('../../src/shared/cursorAuth');
+const { readActiveAccount, runCursorLogin, runCursorLogout, runCursorSync } = require('../../src/shared/cursorAuth');
 
 function withTempHome(payload) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cursorauth-'));
@@ -113,4 +114,29 @@ test('runCursorLogin throws on empty token', async () => {
   try {
     await assert.rejects(() => runCursorLogin('', { home }), /token/i);
   } finally { cleanup(); }
+});
+
+test('runCursorSync rejects when the tokscale stdin pipe breaks', async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {};
+  let killed = false;
+  child.kill = () => { killed = true; };
+  const pending = runCursorSync({
+    spawn: () => child,
+    tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
+    timeoutMs: 60_000
+  });
+  const error = Object.assign(new Error('write EPIPE'), { code: 'EPIPE' });
+
+  child.stdin.emit('error', error);
+
+  await assert.rejects(pending, (caught) => {
+    assert.match(caught.message, /write EPIPE/);
+    assert.equal(caught.syncFailureStage, 'process-exit');
+    return true;
+  });
+  assert.equal(killed, true);
 });

@@ -13,7 +13,8 @@ function fakeChild() {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
-  child.stdin = { write() {} };
+  child.stdin = new EventEmitter();
+  child.stdin.write = () => {};
   child.kills = 0;
   child.kill = () => { child.kills += 1; };
   return child;
@@ -58,6 +59,21 @@ test('Codex RPC terminates its app-server child when its parent signal aborts', 
   await new Promise((resolve) => setImmediate(resolve));
   controller.abort(new Error('runtime stopped'));
   await assert.rejects(pending, /runtime stopped/);
+  assert.equal(child.kills, 1);
+});
+
+test('Codex RPC rejects a pending request when app-server stdin breaks', async () => {
+  const child = fakeChild();
+  const pending = readCodexRpcWithCommand('codex', {
+    spawn: () => child,
+    platform: 'win32',
+    codexRpcTimeoutMs: 60_000
+  });
+  const error = Object.assign(new Error('write EPIPE'), { code: 'EPIPE' });
+
+  child.stdin.emit('error', error);
+
+  await assert.rejects(pending, /write EPIPE/);
   assert.equal(child.kills, 1);
 });
 

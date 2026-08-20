@@ -371,6 +371,26 @@ test('fetchGrokRpcBilling kills the CLI when the parent signal aborts', async ()
   assert.equal(killed, true);
 });
 
+test('fetchGrokRpcBilling rejects when the CLI stdin pipe breaks', async () => {
+  let killed = false;
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.stdin = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+  child.kill = () => { killed = true; };
+  const pending = fetchGrokRpcBilling({}, {
+    env: {},
+    spawn: () => child,
+    rpcTimeoutMs: 60_000
+  });
+  const error = Object.assign(new Error('write EPIPE'), { code: 'EPIPE' });
+
+  child.stdin.emit('error', error);
+
+  await assert.rejects(pending, /write EPIPE/);
+  assert.equal(killed, true);
+});
+
 test('fetchGrokLimits does not start web fallback after the RPC parent signal aborts', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-abort-'));
   writeAuthJson(home, { 'https://auth.x.ai::client': { key: 'eyJsecret.signature' } });

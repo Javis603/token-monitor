@@ -2712,9 +2712,14 @@ function createJsonRpcClient(child, timeoutMs) {
     pending.clear();
   }
 
-  function abort(error) {
+  function failTransport(error) {
+    if (closed) return;
     closed = true;
     rejectAll(error);
+  }
+
+  function abort(error) {
+    failTransport(error);
   }
 
   function handleMessage(message) {
@@ -2736,14 +2741,20 @@ function createJsonRpcClient(child, timeoutMs) {
       try { handleMessage(JSON.parse(line)); } catch (_) {}
     }
   });
-  child.on('error', (error) => {
-    closed = true;
-    rejectAll(error);
-  });
-  child.on('close', (code) => {
-    closed = true;
-    rejectAll(new Error(`codex app-server exited ${code}`));
-  });
+  child.on('error', failTransport);
+  child.on('close', (code) => failTransport(new Error(`codex app-server exited ${code}`)));
+  child.stdin.on?.('error', failTransport);
+
+  function writeLine(line) {
+    if (closed) return;
+    try {
+      child.stdin.write(line, (error) => {
+        if (error) failTransport(error);
+      });
+    } catch (error) {
+      failTransport(error);
+    }
+  }
 
   function send(method, params) {
     if (closed) return Promise.reject(new Error('codex app-server is closed'));
@@ -2755,12 +2766,12 @@ function createJsonRpcClient(child, timeoutMs) {
         reject(new Error(`${method} timed out`));
       }, timeoutMs);
       pending.set(id, { resolve, reject, timer });
-      child.stdin.write(`${JSON.stringify(message)}\n`);
+      writeLine(`${JSON.stringify(message)}\n`);
     });
   }
 
   function notify(method, params) {
-    if (!closed) child.stdin.write(`${JSON.stringify(params === undefined ? { method } : { method, params })}\n`);
+    writeLine(`${JSON.stringify(params === undefined ? { method } : { method, params })}\n`);
   }
 
   return { abort, send, notify, rejectAll };

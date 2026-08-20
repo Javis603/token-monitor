@@ -89,36 +89,55 @@ function readActiveAccount({ home = os.homedir() } = {}) {
   };
 }
 
-function runTokscaleSubcommand(args, { stdin = null, timeoutMs = 30000 } = {}) {
+function runTokscaleSubcommand(args, {
+  stdin = null,
+  timeoutMs = 30000,
+  spawn: spawnFn = spawn,
+  tokscaleCommand: resolveTokscaleCommand
+} = {}) {
   return new Promise((resolve, reject) => {
-    const { tokscaleCommand } = require('./collector');
+    const tokscaleCommand = resolveTokscaleCommand || require('./collector').tokscaleCommand;
     const { bin, prefixArgs, env } = tokscaleCommand();
-    const child = spawn(bin, [...prefixArgs, 'cursor', ...args], { env, windowsHide: true });
+    const child = spawnFn(bin, [...prefixArgs, 'cursor', ...args], { env, windowsHide: true });
     let stdout = '';
     let stderr = '';
-    const timer = setTimeout(() => {
+    let settled = false;
+    let timer;
+
+    function finish(error, value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(value);
+    }
+
+    timer = setTimeout(() => {
       child.kill('SIGTERM');
-      reject(annotateSyncError(new Error(`tokscale cursor ${args[0]} timed out after ${timeoutMs}ms`), 'timeout'));
+      finish(annotateSyncError(new Error(`tokscale cursor ${args[0]} timed out after ${timeoutMs}ms`), 'timeout'));
     }, timeoutMs);
     child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', (err) => { clearTimeout(timer); reject(annotateSyncError(err, 'spawn')); });
+    child.on('error', (error) => finish(annotateSyncError(error, 'spawn')));
+    child.stdin.on('error', (error) => {
+      try { child.kill('SIGTERM'); } catch (_) {}
+      finish(annotateSyncError(error, 'process-exit'));
+    });
     child.on('close', (code) => {
-      clearTimeout(timer);
       if (code !== 0) {
-        return reject(annotateSyncError(
+        return finish(annotateSyncError(
           new Error(`tokscale cursor ${args[0]} exited ${code}: ${(stderr || stdout).trim()}`),
           'process-exit',
           code
         ));
       }
-      resolve(stdout);
+      finish(null, stdout);
     });
-    if (stdin) {
-      child.stdin.write(stdin);
-      child.stdin.end();
-    } else {
-      child.stdin.end();
+    try {
+      child.stdin.end(stdin || undefined);
+    } catch (error) {
+      try { child.kill('SIGTERM'); } catch (_) {}
+      finish(annotateSyncError(error, 'process-exit'));
     }
   });
 }
@@ -203,12 +222,12 @@ async function runCursorLogout({ label = '', home = os.homedir() } = {}) {
   writeCredentialsStoreAtomic(file, store);
 }
 
-async function runCursorSync({ timeoutMs = 60000 } = {}) {
-  return runTokscaleSubcommand(['sync', '--json'], { timeoutMs });
+async function runCursorSync(options = {}) {
+  return runTokscaleSubcommand(['sync', '--json'], { ...options, timeoutMs: options.timeoutMs ?? 60000 });
 }
 
-function runCursorStatus({ timeoutMs = 15000 } = {}) {
-  return runTokscaleSubcommand(['status'], { timeoutMs });
+function runCursorStatus(options = {}) {
+  return runTokscaleSubcommand(['status'], { ...options, timeoutMs: options.timeoutMs ?? 15000 });
 }
 
 module.exports = {
