@@ -310,6 +310,13 @@ test('parseEnterpriseUsage rejects unknown negative limit sentinels', () => {
   );
 });
 
+test('parseEnterpriseUsage rejects negative reported usage', () => {
+  assert.throws(
+    () => parseEnterpriseUsage({ data: { limitNum: 100, credit: -1 } }),
+    /invalid usage value/
+  );
+});
+
 test('fetchWorkbuddyLimits fails closed when an enterprise response omits usage', async () => {
   const provider = await fetchWorkbuddyLimits({}, {
     env: {

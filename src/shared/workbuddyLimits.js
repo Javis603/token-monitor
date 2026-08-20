@@ -221,7 +221,10 @@ function parseEnterpriseUsage(body) {
     'credit', 'used', 'usedNum', 'used_num'
   ]));
   if (rawUsed === null) throw new Error('WorkBuddy enterprise billing response has no usage value');
-  const used = Math.max(0, rawUsed);
+  if (rawUsed < 0) {
+    throw new Error('WorkBuddy enterprise billing response has an invalid usage value');
+  }
+  const used = rawUsed;
   const resetsAt = toIso(pickValue(usage, ['cycleResetTime', 'cycle_reset_time']));
   const accountId = accountIdentity(usage);
 
