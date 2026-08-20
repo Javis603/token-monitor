@@ -1223,7 +1223,9 @@ async function collectUsageOnce(options) {
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
   const targetClientSet = new Set(targetClients);
-  const targetTokscaleClients = targetClients.filter((client) => !localClients.has(client)).join(',');
+  const targetTokscaleClientList = targetClients.filter((client) => !localClients.has(client));
+  const targetTokscaleClientSet = new Set(targetTokscaleClientList);
+  const targetTokscaleClients = targetTokscaleClientList.join(',');
   const qoderCnReadState = options.qoderCnReadState;
   if (qoderCnReadState) {
     qoderCnReadState.periodFailed = false;
@@ -1320,10 +1322,35 @@ async function collectUsageOnce(options) {
         const bundle = extractUsageBundleFromTokscale(todayJson);
         freshPartitions = bundle.byClient;
         const unattributed = freshPartitions[UNATTRIBUTED_USAGE_CLIENT];
-        const hasUnexpectedClientPartition = Object.keys(freshPartitions).some((client) => (
-          client !== UNATTRIBUTED_USAGE_CLIENT && !targetClientSet.has(client)
-        ));
-        if (targetRequested && (periodHasUsage(unattributed) || hasUnexpectedClientPartition)) {
+        const attributedClients = Object.keys(freshPartitions).filter((client) => client !== UNATTRIBUTED_USAGE_CLIENT);
+        let hasUnsafeTargetedResult = attributedClients.some((client) => !targetTokscaleClientSet.has(client));
+
+        // A unioned watch scan can hide cross-attribution inside its own target
+        // set (for example Hermes missing while its rows land under WorkBuddy).
+        // Confirm only the missing members individually; an empty confirmation
+        // remains a valid deletion, while a differently attributed row proves
+        // that the union result cannot safely replace the anchor partitions.
+        if (targetTokscaleClientList.length > 1 && attributedClients.length > 0 && !hasUnsafeTargetedResult) {
+          const missingClients = targetTokscaleClientList.filter((client) => !Object.prototype.hasOwnProperty.call(freshPartitions, client));
+          for (const client of missingClients) {
+            const confirmationJson = await runTokscaleFn({ clients: client, flags: ['--today'], commandTimeoutMs });
+            const confirmationPartitions = extractUsageBundleFromTokscale(confirmationJson).byClient;
+            const confirmationUnattributed = confirmationPartitions[UNATTRIBUTED_USAGE_CLIENT];
+            const confirmationClients = Object.keys(confirmationPartitions).filter((key) => key !== UNATTRIBUTED_USAGE_CLIENT);
+            if (
+              periodHasUsage(confirmationUnattributed)
+              || confirmationClients.some((key) => key !== client)
+            ) {
+              hasUnsafeTargetedResult = true;
+              break;
+            }
+            if (Object.prototype.hasOwnProperty.call(confirmationPartitions, client)) {
+              freshPartitions[client] = confirmationPartitions[client];
+            }
+          }
+        }
+
+        if (targetRequested && (periodHasUsage(unattributed) || hasUnsafeTargetedResult)) {
           // Every attributed row from a targeted scan must normalize back into
           // the requested set. An unattributed row or an unexpected client would
           // otherwise clear the target while partially overwriting an unrelated
@@ -1343,6 +1370,20 @@ async function collectUsageOnce(options) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
         freshPartitions.qodercn = anchor.todayPartitions.qodercn;
+      }
+      if (!useTargetedPartitions) {
+        // The fallback rebuilds every Tokscale partition, but parse-local
+        // adapters do not participate in that scan. Preserve any adapter that
+        // this tick did not refresh instead of treating its absence as empty.
+        for (const client of localClients) {
+          if (
+            !targetClientSet.has(client)
+            && !Object.prototype.hasOwnProperty.call(freshPartitions, client)
+            && anchor.todayPartitions?.[client]
+          ) {
+            freshPartitions[client] = anchor.todayPartitions[client];
+          }
+        }
       }
       todayPartitions = useTargetedPartitions
         ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
