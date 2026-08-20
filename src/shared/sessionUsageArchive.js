@@ -169,10 +169,12 @@ function targetPeriod(summary, periodName) {
 
 function addSessionBreakdown(period, session) {
   const client = session.client;
+  const input = Math.max(0, Math.round(numberValue(session.inputTokens)));
   const cacheRead = Math.max(0, Math.round(numberValue(session.cacheReadTokens)));
   const cacheWrite = Math.max(0, Math.round(numberValue(session.cacheWriteTokens)));
   const output = Math.max(0, Math.round(numberValue(session.outputTokens)));
 
+  if (input > 0) period.clientInputs[client] = (period.clientInputs[client] || 0) + input;
   if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
   if (cacheWrite > 0) period.clientCacheWrites[client] = (period.clientCacheWrites[client] || 0) + cacheWrite;
   if (output > 0) period.clientOutputs[client] = (period.clientOutputs[client] || 0) + output;
@@ -191,13 +193,15 @@ function addSessionBreakdown(period, session) {
   }
 
   for (const [model, tokens] of modelTokens) {
-    const cr = Math.min(tokens, cacheRead);
-    const cw = Math.min(tokens - cr, cacheWrite);
-    const ou = Math.min(tokens - cr - cw, output);
+    const inp = Math.min(tokens, input);
+    const cr = Math.min(tokens - inp, cacheRead);
+    const cw = Math.min(tokens - inp - cr, cacheWrite);
+    const ou = Math.min(tokens - inp - cr - cw, output);
+    if (inp > 0) period.modelInputs[model] = (period.modelInputs[model] || 0) + inp;
     if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
     if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
     if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
-    const unclassified = Math.max(0, tokens - cr - cw - ou);
+    const unclassified = Math.max(0, tokens - inp - cr - cw - ou);
     if (unclassified > 0) {
       period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + unclassified;
       period.capabilities.tokenComponents = false;
@@ -214,16 +218,18 @@ function addArchivedSession(period, session) {
   period.sessions[key] = archived;
   const tokens = Math.max(0, Math.round(numberValue(archived.totalTokens)));
   const cost = numberValue(archived.costUsd);
+  const input = Math.max(0, Math.round(numberValue(archived.inputTokens)));
   const cacheRead = Math.max(0, Math.round(numberValue(archived.cacheReadTokens)));
   const cacheWrite = Math.max(0, Math.round(numberValue(archived.cacheWriteTokens)));
   const output = Math.max(0, Math.round(numberValue(archived.outputTokens)));
 
   period.totalTokens += tokens;
   period.costUsd += cost;
+  period.inputTokens += input;
   period.cacheReadTokens += cacheRead;
   period.cacheWriteTokens += cacheWrite;
   period.outputTokens += output;
-  const unclassified = Math.max(0, tokens - cacheRead - cacheWrite - output);
+  const unclassified = Math.max(0, tokens - input - cacheRead - cacheWrite - output);
   if (unclassified > 0) {
     period.unclassifiedTokens += unclassified;
     period.clientUnclassifiedTokens[archived.client] = (period.clientUnclassifiedTokens[archived.client] || 0) + unclassified;

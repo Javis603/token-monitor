@@ -347,7 +347,7 @@ let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), tokenBreakdown: document.getElementById('tokenBreakdown'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
@@ -773,6 +773,10 @@ function formatCompact(value, unitSystem, locale) {
     unitSystem === undefined ? effectiveCompactTokenUnits() : unitSystem,
     locale === undefined ? currentLocale() : locale
   );
+}
+function formatOutputTokPerSec(source) {
+  const rate = tokenRatePerSecond(source);
+  return rate > 0 ? `${formatCompact(rate)}/s` : '—';
 }
 function updateTotalCompact(value) {
   if (!els.totalTokensCompact) return;
@@ -1777,7 +1781,22 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
   accordionInner.dataset.signature = signature;
 }
 
-function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, tokenDataUnavailable, sessionDetailAvailable }) {
+function accordionCost(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? formatCost(amount) : '';
+}
+
+function tokenBreakdownRows(parts) {
+  return parts.filter((part) => part.tokens > 0 || (part.always && part.tokens >= 0)).map((part) => {
+    const cost = accordionCost(part.cost);
+    return `<div class="accordion-row">
+          <div class="accordion-label">${part.label}${part.pct != null ? ` <span class="accordion-pct">${part.pct}%</span>` : ''}</div>
+          <div class="accordion-metrics"><div class="accordion-value">${formatNumber(part.tokens)}</div>${cost ? `<div class="accordion-cost">${cost}</div>` : ''}</div>
+        </div>`;
+  }).join('');
+}
+
+function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, cacheWriteTokens, outputTokens, unclassifiedTokens, inputCostUsd, cacheReadCostUsd, cacheWriteCostUsd, outputCostUsd, unclassifiedCostUsd, tokenComponentsAvailable, tokenDataUnavailable, sessionDetailAvailable }) {
   const width = rowWidth(value, max);
   const isExpanded = row.classList.contains('expanded');
   row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}`;
@@ -1868,6 +1887,7 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBa
   } else if ((cacheReadTokens !== undefined || outputTokens !== undefined || unclassifiedTokens !== undefined) && value > 0 && kind !== 'session') {
     const {
       cacheRead,
+      cacheWrite,
       cacheMiss,
       output,
       unclassified,
@@ -1876,30 +1896,22 @@ function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBa
     } = fixedPeriodRangesApi.tokenComponentBreakdown({
       totalTokens: value,
       cacheReadTokens,
+      cacheWriteTokens,
       outputTokens,
-      unclassifiedTokens
+      unclassifiedTokens,
+      tokenComponentsAvailable
     });
     
     delete accordionInner.dataset.signature;
     accordionInner.innerHTML = `
       <div class="accordion-content">
-        <div class="accordion-row">
-          <div class="accordion-label">${t('dashboard.tooltip.inputCacheHit')} <span class="accordion-pct">${hitPct}%</span></div>
-          <div class="accordion-value">${formatNumber(cacheRead)}</div>
-        </div>
-        <div class="accordion-row">
-          <div class="accordion-label">${t('dashboard.tooltip.inputCacheMiss')} <span class="accordion-pct">${missPct}%</span></div>
-          <div class="accordion-value">${formatNumber(cacheMiss)}</div>
-        </div>
-        <div class="accordion-row">
-          <div class="accordion-label">${t('dashboard.tooltip.output')}</div>
-          <div class="accordion-value">${formatNumber(output)}</div>
-        </div>
-        ${unclassified > 0 ? `
-        <div class="accordion-row">
-          <div class="accordion-label">${t('dashboard.tooltip.unclassified')}</div>
-          <div class="accordion-value">${formatNumber(unclassified)}</div>
-        </div>` : ''}
+        ${tokenBreakdownRows([
+          { label: t('dashboard.tooltip.inputCacheHit'), tokens: cacheRead, pct: hitPct, cost: cacheReadCostUsd },
+          { label: t('dashboard.tooltip.inputCacheMiss'), tokens: cacheMiss, pct: missPct, cost: inputCostUsd },
+          { label: t('dashboard.tooltip.cacheWrite'), tokens: cacheWrite, cost: cacheWriteCostUsd },
+          { label: t('dashboard.tooltip.output'), tokens: output, cost: outputCostUsd },
+          { label: t('dashboard.tooltip.unclassified'), tokens: unclassified, cost: unclassifiedCostUsd }
+        ])}
       </div>
     `;
     row.classList.add('has-accordion');
@@ -2090,7 +2102,17 @@ function attributionComponent(period, field, key) {
     clientOutputs: 'outputTokens',
     modelOutputs: 'outputTokens',
     clientUnclassifiedTokens: 'unclassifiedTokens',
-    modelUnclassifiedTokens: 'unclassifiedTokens'
+    modelUnclassifiedTokens: 'unclassifiedTokens',
+    clientInputs: 'inputTokens',
+    modelInputs: 'inputTokens',
+    clientInputCosts: 'inputCostUsd',
+    modelInputCosts: 'inputCostUsd',
+    clientCacheReadCosts: 'cacheReadCostUsd',
+    modelCacheReadCosts: 'cacheReadCostUsd',
+    clientCacheWriteCosts: 'cacheWriteCostUsd',
+    modelCacheWriteCosts: 'cacheWriteCostUsd',
+    clientOutputCosts: 'outputCostUsd',
+    modelOutputCosts: 'outputCostUsd'
   }[field];
   return usageAttributionRowsApi.attributionValue(
     period?.[field],
@@ -2109,7 +2131,7 @@ function periodAttributionRows(period, values, costs) {
 
 function toolRowsForPeriod(period) {
   const clientRows = periodAttributionRows(period, period?.clients, period?.clientCosts)
-    .map(({ key: client, value, cost }) => ({ key: client, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client) }));
+    .map(({ key: client, value, cost }) => ({ key: client, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client), inputCostUsd: attributionComponent(period, 'clientInputCosts', client), cacheReadCostUsd: attributionComponent(period, 'clientCacheReadCosts', client), cacheWriteCostUsd: attributionComponent(period, 'clientCacheWriteCosts', client), outputCostUsd: attributionComponent(period, 'clientOutputCosts', client), tokenComponentsAvailable: period?.capabilities?.tokenComponents === true }));
   if (clientRows.length > 0) {
     const usageSortedRows = clientRows.sort((a, b) => b.value - a.value);
     return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, state.settings?.clientDisplayOrder, state.settings?.hiddenClients, KNOWN_CLIENTS, state.settings?.pinnedClients);
@@ -2129,7 +2151,12 @@ function modelRowsForPeriod(period) {
     cacheReadTokens: attributionComponent(period, 'modelCacheReads', model),
     cacheWriteTokens: attributionComponent(period, 'modelCacheWrites', model),
     outputTokens: attributionComponent(period, 'modelOutputs', model),
-    unclassifiedTokens: attributionComponent(period, 'modelUnclassifiedTokens', model)
+    unclassifiedTokens: attributionComponent(period, 'modelUnclassifiedTokens', model),
+    inputCostUsd: attributionComponent(period, 'modelInputCosts', model),
+    cacheReadCostUsd: attributionComponent(period, 'modelCacheReadCosts', model),
+    cacheWriteCostUsd: attributionComponent(period, 'modelCacheWriteCosts', model),
+    outputCostUsd: attributionComponent(period, 'modelOutputCosts', model),
+    tokenComponentsAvailable: period?.capabilities?.tokenComponents === true
   }));
   if (modelRows.length > 0) return modelRows.sort((a, b) => b.value - a.value);
   if (Number(period?.totalTokens || 0) === 0) return [];
@@ -5642,7 +5669,10 @@ function renderTrends() {
     [t('trends.activeDays'), formatNumber(summary.activeDays)],
     [t('trends.currentStreak'), formatNumber(summary.currentStreak)],
     [t('trends.activeTime'), formatActiveDuration(summary.activeTimeMs)],
-    [t('trends.peakDay'), formatCompact(summary.peakDayTokens)]
+    [t('trends.peakDay'), formatCompact(summary.peakDayTokens)],
+    [t('trends.outputRate'), formatOutputTokPerSec(
+      state.period === 'today' ? (state.stats?.periods?.today || summary) : summary
+    )]
   ];
   const statsHtml = stats
     .map(([k, v]) => `<div class="trends-stat"><span class="trends-stat-v">${v}</span><span class="trends-stat-k">${k}</span></div>`)
@@ -6547,30 +6577,40 @@ function setupHomeActivityScroller(scroller, onReady = null) {
 
 function homeActivityTooltipEl() {
   let tooltip = document.querySelector('.home-activity-tooltip');
-  if (tooltip) return tooltip;
-  tooltip = document.createElement('div');
-  tooltip.className = 'home-activity-tooltip';
-  tooltip.setAttribute('role', 'tooltip');
-  tooltip.setAttribute('aria-hidden', 'true');
-
-  const count = document.createElement('span');
-  count.className = 'home-activity-tooltip-count';
-  count.dataset.homeActivityTooltipCount = 'true';
-
-  const label = document.createElement('span');
-  label.className = 'home-activity-tooltip-label';
-  label.dataset.homeActivityTooltipLabel = 'true';
-  label.textContent = 'tokens';
-
-  const date = document.createElement('span');
-  date.className = 'home-activity-tooltip-date';
-  date.dataset.homeActivityTooltipDate = 'true';
-
-  const row = document.createElement('span');
-  row.className = 'home-activity-tooltip-row';
-  row.append(count, label);
-  tooltip.append(row, date);
-  document.body.append(tooltip);
+  if (!tooltip) {
+    tooltip = document.createElement('div');
+    tooltip.className = 'home-activity-tooltip';
+    tooltip.setAttribute('role', 'tooltip');
+    tooltip.setAttribute('aria-hidden', 'true');
+    document.body.append(tooltip);
+  }
+  if (!tooltip.querySelector('[data-home-activity-tooltip-count]')) {
+    const count = document.createElement('span');
+    count.className = 'home-activity-tooltip-count';
+    count.dataset.homeActivityTooltipCount = 'true';
+    const label = document.createElement('span');
+    label.className = 'home-activity-tooltip-label';
+    label.dataset.homeActivityTooltipLabel = 'true';
+    label.textContent = 'tokens';
+    const row = document.createElement('span');
+    row.className = 'home-activity-tooltip-row';
+    row.append(count, label);
+    tooltip.append(row);
+  }
+  if (!tooltip.querySelector('[data-home-activity-tooltip-rate]')) {
+    const rate = document.createElement('span');
+    rate.className = 'home-activity-tooltip-rate';
+    rate.dataset.homeActivityTooltipRate = 'true';
+    const date = tooltip.querySelector('[data-home-activity-tooltip-date]');
+    if (date) tooltip.insertBefore(rate, date);
+    else tooltip.append(rate);
+  }
+  if (!tooltip.querySelector('[data-home-activity-tooltip-date]')) {
+    const date = document.createElement('span');
+    date.className = 'home-activity-tooltip-date';
+    date.dataset.homeActivityTooltipDate = 'true';
+    tooltip.append(date);
+  }
   return tooltip;
 }
 
@@ -6681,6 +6721,12 @@ function setupHomeActivityHover(scroller) {
       activeCell.setAttribute('data-active', 'true');
       tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatCompact(Number(cell.dataset.t || 0));
       tooltip.querySelector('[data-home-activity-tooltip-label]').textContent = 'tokens';
+      const rate = tokenRatePerSecond({
+        timedOutputTokens: Number(cell.dataset.out || 0),
+        timedDurationMs: Number(cell.dataset.ms || 0)
+      });
+      const rateEl = tooltip.querySelector('[data-home-activity-tooltip-rate]');
+      if (rateEl) rateEl.textContent = rate > 0 ? `${formatCompact(rate)}/s` : '';
       tooltip.querySelector('[data-home-activity-tooltip-date]').textContent = cell.dataset.d || '';
     }
     tooltip.dataset.visible = 'true';
@@ -6793,7 +6839,11 @@ function renderHomeTrendsModule() {
     rawDaily,
     today,
     Number(todayPeriod?.totalTokens || 0),
-    Number(todayPeriod?.costUsd || 0)
+    Number(todayPeriod?.costUsd || 0),
+    {
+      timedOutputTokens: Number(todayPeriod?.timedOutputTokens || 0),
+      timedDurationMs: Number(todayPeriod?.timedDurationMs || 0)
+    }
   );
   const activityLayout = homeOverviewApi.homeActivityHeatmapLayout();
   const heatMetric = state.settings?.heatmapMetric || 'cost';
@@ -6930,6 +6980,49 @@ function renderHome() {
   // ResizeObserver repeats the scroll + hover restoration once layout fully settles.
 }
 
+function renderTokenBreakdown(period) {
+  const el = els.tokenBreakdown;
+  if (!el) return;
+  const breakdown = fixedPeriodRangesApi.tokenComponentBreakdown({
+    totalTokens: Number(period?.totalTokens || 0),
+    cacheReadTokens: period?.cacheReadTokens,
+    cacheWriteTokens: period?.cacheWriteTokens,
+    outputTokens: period?.outputTokens,
+    unclassifiedTokens: period?.unclassifiedTokens,
+    tokenComponentsAvailable: period?.capabilities?.tokenComponents === true
+  });
+  const items = [
+    { label: t('dashboard.headline.input'), tokens: breakdown.cacheMiss, cost: period?.inputCostUsd },
+    { label: t('dashboard.headline.cacheHit'), tokens: breakdown.cacheRead, cost: period?.cacheReadCostUsd },
+    { label: t('dashboard.headline.output'), tokens: breakdown.output, cost: period?.outputCostUsd }
+  ].filter((item) => item.tokens > 0);
+  if (items.length === 0) {
+    el.classList.add('hidden');
+    el.replaceChildren();
+    return;
+  }
+  el.classList.remove('hidden');
+  el.replaceChildren(...items.map((item) => {
+    const node = document.createElement('div');
+    node.className = 'token-breakdown-item';
+    const key = document.createElement('span');
+    key.className = 'token-breakdown-k';
+    key.textContent = item.label;
+    const value = document.createElement('span');
+    value.className = 'token-breakdown-v';
+    value.textContent = formatNumber(item.tokens);
+    node.append(key, value);
+    const cost = accordionCost(item.cost);
+    if (cost) {
+      const costEl = document.createElement('span');
+      costEl.className = 'token-breakdown-c';
+      costEl.textContent = cost;
+      node.append(costEl);
+    }
+    return node;
+  }));
+}
+
 function render() {
   if (!state.stats) return;
   renderSessionUsageArchiveStatus();
@@ -6965,6 +7058,8 @@ function render() {
     els.totalTokens.textContent = fixedUnavailable ? '—' : formatNumber(Number(period.totalTokens || 0));
     updateTotalCompact(fixedUnavailable ? 0 : Number(period.totalTokens || 0));
     els.cost.textContent = fixedUnavailable ? '' : formatCost(period.costUsd || 0);
+    if (fixedUnavailable) els.tokenBreakdown?.classList.add('hidden');
+    else renderTokenBreakdown(period);
     state.currentTotal = fixedUnavailable ? 0 : Number(period.totalTokens || 0);
     hidePeriodContentForMessage(fixedPeriodMessage(state.fixedPeriodSnapshot, detailUnavailable ? state.breakdown : ''));
     renderFloatingBubbleContent();
@@ -7002,6 +7097,7 @@ function render() {
   }
   state.currentTotal = nextTotal;
   els.cost.textContent = formatCost(period.costUsd || 0);
+  renderTokenBreakdown(period);
   renderTokenRate();
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');

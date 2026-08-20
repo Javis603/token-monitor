@@ -60,6 +60,8 @@ test('getDashboardHistory reads local history directly without a blocking collec
   // quick close/reopen the response outlived the renderer and the dashboard
   // stuck on the empty state. The local branch must read localDevice directly.
   assert.doesNotMatch(fn[1], /localCollectorHandle\.tick/);
+  assert.match(main, /compactDashboardSessions/);
+  assert.match(main, /function dashboardSessionSources/);
 });
 
 test('fixed ranges request existing per-device History without changing ingest', () => {
@@ -101,6 +103,7 @@ test('dashboard.html wires the shared modules and the two panels', () => {
   assert.match(html, /<link rel="stylesheet" href="styles\.css" \/>/);
   assert.match(html, /<link rel="stylesheet" href="dashboard\.css" \/>/);
   assert.match(html, /<script src="usageCharts\.js"><\/script>/);
+  assert.match(html, /<script src="dashboardDimensions\.js"><\/script>/);
   assert.match(html, /<script src="i18n\.js"><\/script>/);
   assert.match(html, /<script src="\.\.\/\.\.\/shared\/currency\.js"><\/script>/);
   assert.match(html, /<script src="\.\.\/\.\.\/shared\/compactMoney\.js"><\/script>/);
@@ -121,9 +124,23 @@ test('dashboard.html wires the shared modules and the two panels', () => {
   assert.match(html, /id="dashChart"/);
   assert.match(html, /id="dashHeatmap"/);
   assert.match(html, /id="dashCards"/);
+  assert.match(html, /id="dashPortrait"/);
+  assert.match(html, /data-modal="portrait"/);
   assert.match(html, /data-control="mode"/);
   assert.match(html, /data-control="stack"/);
-  assert.match(html, /id="rangeSelect"/);
+  assert.match(html, /data-control="breakdownView"/);
+  assert.match(html, /data-control="trendMetric"/);
+  assert.match(html, /id="dashWeekdays"/);
+  assert.match(html, /id="dashHours"/);
+  assert.match(html, /id="dashTrend"/);
+  assert.match(html, /id="dashShare"/);
+  assert.match(html, /id="dashModal"/);
+  assert.match(html, /data-modal="trend"/);
+  assert.match(html, /data-modal="hours"/);
+  assert.match(html, /id="dashFilter"/);
+  assert.match(html, /class="js-range-select/);
+  assert.match(html, /data-control="groupBy"/);
+  assert.match(html, /class="dash-custom-range js-custom-range/);
 });
 
 test('dashboard.css declares chart classes and a flat theme override', () => {
@@ -131,6 +148,21 @@ test('dashboard.css declares chart classes and a flat theme override', () => {
   assert.match(css, /\.candle-up/);
   assert.match(css, /\.candle-down/);
   assert.match(css, /\.heat\.lvl-4/);
+  assert.match(css, /\.dash-cross/);
+  assert.match(css, /\.dash-custom-range/);
+  assert.match(css, /\.dash-weekdays/);
+  assert.match(css, /\.dash-hour-sq/);
+  assert.match(css, /--hour-cell/);
+  assert.match(css, /--hour-gap: 8px/);
+  assert.match(css, /\.dash-portrait-mark/);
+  assert.match(css, /\.dash-modal-hours-bars \.dash-weekday-val \{ display: none/);
+  assert.match(css, /\.dash-card-delta/);
+  assert.match(css, /\.dash-cards\s*\{[^}]*repeat\(auto-fit,\s*minmax\(168px,\s*1fr\)\)/);
+  assert.doesNotMatch(css, /--stat-count/);
+  assert.match(css, /\.dash-modal/);
+  assert.match(css, /\.dash-widget/);
+  assert.match(css, /\.dash-donut/);
+  assert.match(css, /\.dash-modal-share\s*\{[^}]*justify-content:\s*center/);
   assert.match(css, /body\.flat/);
   // The empty-state overlay spans the whole window (inset: 0); it must let clicks
   // through so the header buttons still work when there is no history.
@@ -143,10 +175,45 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(js, /charts\.barsChartSvg/);
   assert.match(js, /charts\.candleChartSvg/);
   assert.match(js, /charts\.heatmapSvg/);
+  assert.match(js, /dimensions\.crossMatrix/);
+  assert.match(js, /dimensions\.resolveRange/);
+  assert.match(js, /dimensions\.groupDaily/);
+  assert.match(js, /dimensions\.windowSummary/);
+  assert.match(js, /dimensions\.previousRange/);
+  assert.match(js, /dimensions\.weekdayTotals/);
+  assert.match(js, /dimensions\.hourTotals/);
+  assert.match(js, /dimensions\.slotTotals/);
+  assert.match(js, /function renderModalHours/);
+  assert.match(js, /function renderPortrait/);
+  assert.match(js, /function renderModalPortrait/);
+  assert.match(js, /dimensions\.usagePortrait/);
+  assert.match(js, /portrait\.tagKeys/);
+  assert.doesNotMatch(js, /shape: 'dot'/);
+  assert.match(js, /renderHours\(hours, \{ root: document\.getElementById\('dashModalHours'\), slots: false \}\)/);
+  assert.doesNotMatch(js, /dashModalHours[\s\S]{0,120}showValue:\s*true/);
+  assert.match(js, /charts\.donutChart/);
+  assert.match(js, /function renderModalShare[\s\S]*?dash-modal-share[\s\S]*?Math\.min\(280,/);
+  assert.match(js, /charts\.areaLineSvg/);
+  assert.match(js, /function openModal/);
+  assert.match(js, /function renderModal/);
+  assert.match(js, /heatmap\.addEventListener\('click'/);
   assert.match(js, /updateSettings\(\{ dashboardFlat: state\.flat \}\)/);
   assert.match(js, /dashboard\.minimize\(\)/);
   assert.match(js, /dashboard\.ready\(\)/);
+  assert.match(js, /outputTokens: 'dashboard.stat.outputTokens'/);
   assert.match(js, /onDashboardHistoryChanged\?\.\(\(\) => \{ void refresh\(\); \}\)/);
+  assert.match(js, /outputTokens: 'dashboard.stat.outputTokens'/);
+  assert.doesNotMatch(js, /function balanceStatCards/);
+  assert.doesNotMatch(js, /statCardColumnWidths/);
+});
+
+test('heatmap tooltip writes the DOM date as text, not HTML', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const fn = /function showHeatTooltip\(date, day, ev\) \{([\s\S]*?)\nfunction showShareTooltip/.exec(js);
+  assert.ok(fn, 'showHeatTooltip should exist');
+  assert.match(fn[1], /tooltipEl\('div', 'tt-head', longDate\(date\)\)/);
+  assert.match(fn[1], /els\.tooltip\.replaceChildren/);
+  assert.doesNotMatch(fn[1], /innerHTML/);
 });
 
 test('heatmap metric preserves the legacy cost default and normalizes settings', () => {

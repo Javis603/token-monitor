@@ -286,30 +286,54 @@
 
   // The full-year homeHistory is fetched once per session and then frozen, so its today
   // bucket lags the live headline total as usage accrues within the day (the trends
-  // sparkline avoids this via patchTodayBar). Overwrite today's tokens AND cost with the
-  // live period totals so the home heatmap/trend agree with the number shown above them
-  // — cost matters because dailyWithHeatIntensity colours cells by cost when any exists,
-  // so an appended today with cost 0 would render as an empty cell. Append a today row
-  // when the frozen snapshot predates today (app opened before midnight). Returns a new
-  // array; the input is never mutated.
-  function patchDailyToday(daily, todayDate, todayTotal, todayCost) {
+  // sparkline avoids this via patchTodayBar). Overwrite today's tokens, cost, and timed
+  // output/duration with the live period totals so the home heatmap/trend agree with the
+  // number shown above them — cost matters because dailyWithHeatIntensity colours cells
+  // by cost when any exists, so an appended today with cost 0 would render as an empty
+  // cell, and the timed counters are what the per-day tok/s tooltip divides. Append a
+  // today row when the frozen snapshot predates today (app opened before midnight).
+  // Returns a new array; the input is never mutated.
+  function patchDailyToday(daily, todayDate, todayTotal, todayCost, extras = {}) {
     const rows = Array.isArray(daily) ? daily.slice() : [];
     const date = String(todayDate || '').slice(0, 10);
     if (!date) return rows;
     const tokens = finiteNumber(todayTotal) || 0;
     const cost = finiteNumber(todayCost) || 0;
+    const patch = { tokens, cost };
+    if (extras && typeof extras === 'object') {
+      if (extras.timedOutputTokens != null) {
+        patch.timedOutputTokens = finiteNumber(extras.timedOutputTokens) || 0;
+      }
+      if (extras.timedDurationMs != null) {
+        patch.timedDurationMs = finiteNumber(extras.timedDurationMs) || 0;
+      }
+    }
     const idx = rows.findIndex((row) => String(row?.date).slice(0, 10) === date);
     if (idx === -1) {
-      rows.push({ date, tokens, cost });
+      rows.push({ date, ...patch });
       return rows;
     }
-    rows[idx] = Object.assign({}, rows[idx], { tokens, cost });
+    rows[idx] = Object.assign({}, rows[idx], patch);
     return rows;
   }
 
   // The standalone Trends page keeps active time and peak aligned with the selected
   // period. Home uses longRangePeakDayTokens instead, matching its long-range chart;
   // active days and current streak remain the retained-history values users know.
+  function timedTotalsFrom(source) {
+    return {
+      timedOutputTokens: finiteNumber(source?.timedOutputTokens) || 0,
+      timedDurationMs: finiteNumber(source?.timedDurationMs) || 0
+    };
+  }
+
+  function timedTotalsFromRows(rows) {
+    return (Array.isArray(rows) ? rows : []).reduce((sum, row) => ({
+      timedOutputTokens: sum.timedOutputTokens + (finiteNumber(row?.timedOutputTokens) || 0),
+      timedDurationMs: sum.timedDurationMs + (finiteNumber(row?.timedDurationMs) || 0)
+    }), { timedOutputTokens: 0, timedDurationMs: 0 });
+  }
+
   function activityStatsForPeriod({ period, fixedSnapshot, daily, historySummary, todayKey } = {}) {
     const history = historySummary && typeof historySummary === 'object' ? historySummary : {};
     if (fixedSnapshot?.status === 'ready') {
@@ -317,7 +341,8 @@
         activeDays: finiteNumber(history.activeDays) || 0,
         currentStreak: finiteNumber(history.currentStreak) || 0,
         activeTimeMs: finiteNumber(fixedSnapshot.summary?.activeTimeMs) || 0,
-        peakDayTokens: finiteNumber(fixedSnapshot.summary?.peakDayTokens) || 0
+        peakDayTokens: finiteNumber(fixedSnapshot.summary?.peakDayTokens) || 0,
+        ...timedTotalsFrom(fixedSnapshot.summary)
       };
     }
     if (period === 'allTime') {
@@ -325,7 +350,8 @@
         activeDays: finiteNumber(history.activeDays) || 0,
         currentStreak: finiteNumber(history.currentStreak) || 0,
         activeTimeMs: finiteNumber(history.activeTimeMs) || 0,
-        peakDayTokens: finiteNumber(history.peakDayTokens) || 0
+        peakDayTokens: finiteNumber(history.peakDayTokens) || 0,
+        ...timedTotalsFrom(history)
       };
     }
     const day = String(todayKey || '').slice(0, 10);
@@ -338,7 +364,8 @@
       activeDays: finiteNumber(history.activeDays) || 0,
       currentStreak: finiteNumber(history.currentStreak) || 0,
       activeTimeMs: selected.reduce((sum, row) => sum + (finiteNumber(row?.activeTimeMs) || 0), 0),
-      peakDayTokens: selected.reduce((peak, row) => Math.max(peak, finiteNumber(row?.tokens) || 0), 0)
+      peakDayTokens: selected.reduce((peak, row) => Math.max(peak, finiteNumber(row?.tokens) || 0), 0),
+      ...timedTotalsFromRows(selected)
     };
   }
 

@@ -103,6 +103,97 @@ function costValue(obj) {
   return firstNumber(obj, COST_KEYS);
 }
 
+function unitRate(value) {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
+  return undefined;
+}
+
+function pricingRatesFrom(pricing) {
+  if (!pricing || typeof pricing !== 'object') return null;
+  const input = unitRate(pricing.inputCostPerToken);
+  const output = unitRate(pricing.outputCostPerToken);
+  const cacheRead = unitRate(pricing.cacheReadInputTokenCost);
+  const cacheWrite = unitRate(pricing.cacheCreationInputTokenCost);
+  if (input === undefined && output === undefined && cacheRead === undefined && cacheWrite === undefined) {
+    return null;
+  }
+  return { input, output, cacheRead, cacheWrite };
+}
+
+function lookupRowPricing(row, client, options = {}) {
+  if (!options || typeof options !== 'object') return null;
+  const model = detectModel(row, client);
+  if (typeof options.pricingForModel === 'function') {
+    return options.pricingForModel(model, row) || null;
+  }
+  const map = options.pricingByModel;
+  if (!map || typeof map !== 'object' || !model) return null;
+  return map[model] || map[String(row?.model || '').trim().toLowerCase()] || null;
+}
+
+function emptyCostSplit() {
+  return {
+    inputCostUsd: 0,
+    cacheReadCostUsd: 0,
+    cacheWriteCostUsd: 0,
+    outputCostUsd: 0,
+    unclassifiedCostUsd: 0
+  };
+}
+
+function splitCostUsd(components, costUsd, pricing) {
+  const total = asNumber(costUsd);
+  const empty = emptyCostSplit();
+  if (!(total > 0)) return empty;
+  const rates = pricingRatesFrom(pricing);
+  const parts = [
+    ['inputCostUsd', Math.max(0, asNumber(components?.inputTokens)), rates?.input],
+    ['cacheReadCostUsd', Math.max(0, asNumber(components?.cacheReadTokens)), rates?.cacheRead],
+    ['cacheWriteCostUsd', Math.max(0, asNumber(components?.cacheWriteTokens)), rates?.cacheWrite],
+    ['outputCostUsd', Math.max(0, asNumber(components?.outputTokens)), rates?.output]
+  ];
+  for (const [, tokens, rate] of parts) {
+    if (tokens > 0 && rate === undefined) return { ...empty, unclassifiedCostUsd: total };
+  }
+  let raw = 0;
+  const split = emptyCostSplit();
+  for (const [key, tokens, rate] of parts) {
+    if (!(tokens > 0) || rate === undefined) continue;
+    const part = tokens * rate;
+    split[key] = part;
+    raw += part;
+  }
+  if (!(raw > 0)) return { ...empty, unclassifiedCostUsd: total };
+  const scale = total / raw;
+  split.inputCostUsd *= scale;
+  split.cacheReadCostUsd *= scale;
+  split.cacheWriteCostUsd *= scale;
+  split.outputCostUsd *= scale;
+  return split;
+}
+
+function addCostSplit(target, split, client, model, options = {}) {
+  if (options.totals !== false) {
+    target.inputCostUsd += split.inputCostUsd;
+    target.cacheReadCostUsd += split.cacheReadCostUsd;
+    target.cacheWriteCostUsd += split.cacheWriteCostUsd;
+    target.outputCostUsd += split.outputCostUsd;
+    target.unclassifiedCostUsd += split.unclassifiedCostUsd;
+  }
+  if (client) {
+    if (split.inputCostUsd > 0) target.clientInputCosts[client] = (target.clientInputCosts[client] || 0) + split.inputCostUsd;
+    if (split.cacheReadCostUsd > 0) target.clientCacheReadCosts[client] = (target.clientCacheReadCosts[client] || 0) + split.cacheReadCostUsd;
+    if (split.cacheWriteCostUsd > 0) target.clientCacheWriteCosts[client] = (target.clientCacheWriteCosts[client] || 0) + split.cacheWriteCostUsd;
+    if (split.outputCostUsd > 0) target.clientOutputCosts[client] = (target.clientOutputCosts[client] || 0) + split.outputCostUsd;
+  }
+  if (model) {
+    if (split.inputCostUsd > 0) target.modelInputCosts[model] = (target.modelInputCosts[model] || 0) + split.inputCostUsd;
+    if (split.cacheReadCostUsd > 0) target.modelCacheReadCosts[model] = (target.modelCacheReadCosts[model] || 0) + split.cacheReadCostUsd;
+    if (split.cacheWriteCostUsd > 0) target.modelCacheWriteCosts[model] = (target.modelCacheWriteCosts[model] || 0) + split.cacheWriteCostUsd;
+    if (split.outputCostUsd > 0) target.modelOutputCosts[model] = (target.modelOutputCosts[model] || 0) + split.outputCostUsd;
+  }
+}
+
 function timestampMs(value) {
   const date = value ? new Date(value) : null;
   return date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
@@ -118,10 +209,16 @@ function emptyPeriod() {
     capabilities: { tokenComponents: true },
     totalTokens: 0,
     costUsd: 0,
+    inputTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     outputTokens: 0,
     unclassifiedTokens: 0,
+    inputCostUsd: 0,
+    cacheReadCostUsd: 0,
+    cacheWriteCostUsd: 0,
+    outputCostUsd: 0,
+    unclassifiedCostUsd: 0,
     // tokscale's per-entry `performance` block, summed. `timedDurationMs` is the sum of
     // per-message durations (NOT a wall-clock span — concurrent sessions count twice), and
     // `timedTokens` covers only the messages that carried a duration, and `timedOutputTokens`
@@ -145,16 +242,26 @@ function emptyPeriod() {
     timedDurationMs: 0,
     clients: {},
     clientCosts: {},
+    clientInputs: {},
     clientCacheReads: {},
     clientCacheWrites: {},
     clientOutputs: {},
     clientUnclassifiedTokens: {},
+    clientInputCosts: {},
+    clientCacheReadCosts: {},
+    clientCacheWriteCosts: {},
+    clientOutputCosts: {},
     models: {},
     modelCosts: {},
+    modelInputs: {},
     modelCacheReads: {},
     modelCacheWrites: {},
     modelOutputs: {},
     modelUnclassifiedTokens: {},
+    modelInputCosts: {},
+    modelCacheReadCosts: {},
+    modelCacheWriteCosts: {},
+    modelOutputCosts: {},
     clientModels: {},
     clientModelCosts: {},
     projects: Object.create(null),
@@ -420,6 +527,11 @@ function emptySession(client, id) {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     reasoningTokens: 0,
+    inputCostUsd: 0,
+    cacheReadCostUsd: 0,
+    cacheWriteCostUsd: 0,
+    outputCostUsd: 0,
+    unclassifiedCostUsd: 0,
     startedAt: '',
     lastUsedAt: '',
     projectId: '',
@@ -441,6 +553,11 @@ function mergeSession(target, source) {
   target.cacheReadTokens += Math.max(0, Math.round(asNumber(source.cacheReadTokens)));
   target.cacheWriteTokens += Math.max(0, Math.round(asNumber(source.cacheWriteTokens)));
   target.reasoningTokens += Math.max(0, Math.round(asNumber(source.reasoningTokens)));
+  target.inputCostUsd += asNumber(source.inputCostUsd);
+  target.cacheReadCostUsd += asNumber(source.cacheReadCostUsd);
+  target.cacheWriteCostUsd += asNumber(source.cacheWriteCostUsd);
+  target.outputCostUsd += asNumber(source.outputCostUsd);
+  target.unclassifiedCostUsd += asNumber(source.unclassifiedCostUsd);
   const sourceStarted = timestampMs(source.startedAt);
   const targetStarted = timestampMs(target.startedAt);
   if (sourceStarted && (!targetStarted || sourceStarted < targetStarted)) target.startedAt = new Date(sourceStarted).toISOString();
@@ -484,7 +601,7 @@ function addSession(period, session) {
   mergeSession(period.sessions[key], session);
 }
 
-function sessionFromRow(row) {
+function sessionFromRow(row, options = {}) {
   const client = detectClient(row);
   if (!client || client === REASONIX_CLIENT || isReasonixSyntheticSession(row)) return null;
   const id = detectSessionId(row);
@@ -494,6 +611,7 @@ function sessionFromRow(row) {
   session.costUsd = costValue(row);
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
   Object.assign(session, sessionTokenComponents(row));
+  Object.assign(session, splitCostUsd(session, session.costUsd, lookupRowPricing(row, client, options)));
   session.startedAt = normalizeIsoTimestamp(firstString(row, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(row, LAST_USED_AT_KEYS));
   session.projectId = String(row.projectId || row.project_id || '').trim();
@@ -519,6 +637,11 @@ function normalizeSession(input, fallbackKey) {
   const componentTotal = components.inputTokens + components.outputTokens + components.cacheReadTokens + components.cacheWriteTokens; // reasoning is a subset of output — see TOKEN_COMPONENT_KEYS
   session.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? input.tokens ?? componentTotal)));
   session.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
+  session.inputCostUsd = asNumber(input.inputCostUsd ?? input.input_cost_usd);
+  session.cacheReadCostUsd = asNumber(input.cacheReadCostUsd ?? input.cache_read_cost_usd);
+  session.cacheWriteCostUsd = asNumber(input.cacheWriteCostUsd ?? input.cache_write_cost_usd);
+  session.outputCostUsd = asNumber(input.outputCostUsd ?? input.output_cost_usd);
+  session.unclassifiedCostUsd = asNumber(input.unclassifiedCostUsd ?? input.unclassified_cost_usd);
   session.messageCount = Math.max(0, Math.round(firstNumber(input, MESSAGE_COUNT_KEYS)));
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
@@ -567,12 +690,15 @@ function normalizePeriod(input, options = {}) {
   period.capabilities.tokenComponents = componentCapability === true
     || (componentCapability !== false && (period.totalTokens === 0 || hasLegacyComponentShape));
   period.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
+  period.inputTokens = Math.max(0, Math.round(asNumber(input.inputTokens ?? input.input_tokens ?? 0)));
   period.cacheReadTokens = Math.max(0, Math.round(asNumber(input.cacheReadTokens ?? input.cache_read_tokens ?? 0)));
   period.cacheWriteTokens = Math.max(0, Math.round(asNumber(input.cacheWriteTokens ?? input.cache_write_tokens ?? 0)));
   period.outputTokens = Math.max(0, Math.round(asNumber(input.outputTokens ?? input.output_tokens ?? 0)));
+  const hasExplicitInput = hasOwn(input, 'inputTokens') || hasOwn(input, 'input_tokens');
   const knownComponentTokens = Math.min(
     period.totalTokens,
     period.cacheReadTokens + period.cacheWriteTokens + period.outputTokens
+      + (hasExplicitInput ? period.inputTokens : 0)
   );
   period.unclassifiedTokens = Math.min(
     period.totalTokens - knownComponentTokens,
@@ -582,6 +708,11 @@ function normalizePeriod(input, options = {}) {
       ?? (period.capabilities.tokenComponents ? 0 : period.totalTokens - knownComponentTokens)
     )))
   );
+  period.inputCostUsd = asNumber(input.inputCostUsd ?? input.input_cost_usd);
+  period.cacheReadCostUsd = asNumber(input.cacheReadCostUsd ?? input.cache_read_cost_usd);
+  period.cacheWriteCostUsd = asNumber(input.cacheWriteCostUsd ?? input.cache_write_cost_usd);
+  period.outputCostUsd = asNumber(input.outputCostUsd ?? input.output_cost_usd);
+  period.unclassifiedCostUsd = asNumber(input.unclassifiedCostUsd ?? input.unclassified_cost_usd);
   period.timedTokens = Math.max(0, Math.round(asNumber(input.timedTokens ?? input.timed_tokens ?? 0)));
   // Capped at outputTokens because the gate makes that a physical bound: output is counted
   // whole or not at all, so a period cannot have timed more output than it produced. The
@@ -597,12 +728,14 @@ function normalizePeriod(input, options = {}) {
       const key = normalizeClientName(client);
       if (key) {
         period.clients[key] = (period.clients[key] || 0) + Math.max(0, Math.round(asNumber(value)));
+        if (input.clientInputs?.[client]) period.clientInputs[key] = (period.clientInputs[key] || 0) + Math.max(0, Math.round(asNumber(input.clientInputs[client])));
         if (input.clientCacheReads?.[client]) period.clientCacheReads[key] = (period.clientCacheReads[key] || 0) + Math.max(0, Math.round(asNumber(input.clientCacheReads[client])));
         if (input.clientCacheWrites?.[client]) period.clientCacheWrites[key] = (period.clientCacheWrites[key] || 0) + Math.max(0, Math.round(asNumber(input.clientCacheWrites[client])));
         if (input.clientOutputs?.[client]) period.clientOutputs[key] = (period.clientOutputs[key] || 0) + Math.max(0, Math.round(asNumber(input.clientOutputs[client])));
         const known = Math.min(
           period.clients[key],
-          asNumber(period.clientCacheReads[key])
+          asNumber(period.clientInputs[key])
+            + asNumber(period.clientCacheReads[key])
             + asNumber(period.clientCacheWrites[key])
             + asNumber(period.clientOutputs[key])
         );
@@ -623,17 +756,31 @@ function normalizePeriod(input, options = {}) {
       if (key) period.clientCosts[key] = (period.clientCosts[key] || 0) + asNumber(value);
     }
   }
+  for (const [field, target] of [
+    ['clientInputCosts', period.clientInputCosts],
+    ['clientCacheReadCosts', period.clientCacheReadCosts],
+    ['clientCacheWriteCosts', period.clientCacheWriteCosts],
+    ['clientOutputCosts', period.clientOutputCosts]
+  ]) {
+    if (!input[field] || typeof input[field] !== 'object') continue;
+    for (const [client, value] of Object.entries(input[field])) {
+      const key = normalizeClientName(client);
+      if (key && asNumber(value) > 0) target[key] = (target[key] || 0) + asNumber(value);
+    }
+  }
   if (input.models && typeof input.models === 'object') {
     for (const [model, value] of Object.entries(input.models)) {
       const key = normalizeModelName(model);
       if (key) {
         period.models[key] = (period.models[key] || 0) + Math.max(0, Math.round(asNumber(value)));
+        if (input.modelInputs?.[model]) period.modelInputs[key] = (period.modelInputs[key] || 0) + Math.max(0, Math.round(asNumber(input.modelInputs[model])));
         if (input.modelCacheReads?.[model]) period.modelCacheReads[key] = (period.modelCacheReads[key] || 0) + Math.max(0, Math.round(asNumber(input.modelCacheReads[model])));
         if (input.modelCacheWrites?.[model]) period.modelCacheWrites[key] = (period.modelCacheWrites[key] || 0) + Math.max(0, Math.round(asNumber(input.modelCacheWrites[model])));
         if (input.modelOutputs?.[model]) period.modelOutputs[key] = (period.modelOutputs[key] || 0) + Math.max(0, Math.round(asNumber(input.modelOutputs[model])));
         const known = Math.min(
           period.models[key],
-          asNumber(period.modelCacheReads[key])
+          asNumber(period.modelInputs[key])
+            + asNumber(period.modelCacheReads[key])
             + asNumber(period.modelCacheWrites[key])
             + asNumber(period.modelOutputs[key])
         );
@@ -652,6 +799,18 @@ function normalizePeriod(input, options = {}) {
     for (const [model, value] of Object.entries(input.modelCosts)) {
       const key = normalizeModelName(model);
       if (key) period.modelCosts[key] = (period.modelCosts[key] || 0) + asNumber(value);
+    }
+  }
+  for (const [field, target] of [
+    ['modelInputCosts', period.modelInputCosts],
+    ['modelCacheReadCosts', period.modelCacheReadCosts],
+    ['modelCacheWriteCosts', period.modelCacheWriteCosts],
+    ['modelOutputCosts', period.modelOutputCosts]
+  ]) {
+    if (!input[field] || typeof input[field] !== 'object') continue;
+    for (const [model, value] of Object.entries(input[field])) {
+      const key = normalizeModelName(model);
+      if (key && asNumber(value) > 0) target[key] = (target[key] || 0) + asNumber(value);
     }
   }
   if (input.clientModels && typeof input.clientModels === 'object') {
@@ -705,10 +864,11 @@ function normalizePeriod(input, options = {}) {
 const UNATTRIBUTED_USAGE_CLIENT = '__unattributed';
 
 
-function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
+function addUsageRowToPeriod(period, row, detectedClient = detectClient(row), options = {}) {
   const client = detectedClient;
   const tokens = tokenValueForClient(row, client);
   const cost = costValue(row);
+  const input = Math.max(0, Math.round(firstNumber(row, INPUT_TOKEN_KEYS)));
   const cacheRead = Math.max(0, Math.round(firstNumber(row, CACHE_READ_TOKEN_KEYS)));
   const cacheWrite = Math.max(0, Math.round(firstNumber(row, CACHE_WRITE_TOKEN_KEYS)));
   const output = Math.max(0, Math.round(outputValueForClient(row, client)));
@@ -723,14 +883,26 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;
+  period.inputTokens += input;
   period.cacheReadTokens += cacheRead;
   period.cacheWriteTokens += cacheWrite;
   period.outputTokens += output;
+  addCostSplit(
+    period,
+    splitCostUsd(
+      { inputTokens: input, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite, outputTokens: output },
+      cost,
+      lookupRowPricing(row, client, options)
+    ),
+    client,
+    model
+  );
   period.timedTokens += timedTokens;
   period.timedOutputTokens += timedOutputTokens;
   period.timedDurationMs += timedDurationMs;
   if (client && tokens > 0) {
     period.clients[client] = (period.clients[client] || 0) + Math.round(tokens);
+    if (input > 0) period.clientInputs[client] = (period.clientInputs[client] || 0) + input;
     if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
     if (cacheWrite > 0) period.clientCacheWrites[client] = (period.clientCacheWrites[client] || 0) + cacheWrite;
     if (output > 0) period.clientOutputs[client] = (period.clientOutputs[client] || 0) + output;
@@ -738,6 +910,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   if (client && cost > 0) period.clientCosts[client] = (period.clientCosts[client] || 0) + cost;
   if (model && tokens > 0) {
     period.models[model] = (period.models[model] || 0) + Math.round(tokens);
+    if (input > 0) period.modelInputs[model] = (period.modelInputs[model] || 0) + input;
     if (cacheRead > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cacheRead;
     if (cacheWrite > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cacheWrite;
     if (output > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + output;
@@ -751,7 +924,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
     if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
     period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + cost;
   }
-  const session = sessionFromRow(row);
+  const session = sessionFromRow(row, options);
   if (session) addSession(period, session);
 }
 
@@ -764,6 +937,7 @@ function fallbackUsagePeriod(json) {
   // hub instead of letting normalizePeriod's zero defaults imply a cache miss.
   period.capabilities.tokenComponents = period.totalTokens === 0;
   period.unclassifiedTokens = period.totalTokens;
+  period.unclassifiedCostUsd = period.costUsd;
   return period;
 }
 
@@ -771,7 +945,7 @@ function fallbackUsagePeriod(json) {
 // pass. The partitions stay collector-internal; they let a watch tick replace
 // only the client whose files changed without reconstructing model/cache/project
 // attribution from the already-aggregated public period.
-function extractUsageBundleFromTokscale(json) {
+function extractUsageBundleFromTokscale(json, options = {}) {
   const rows = [];
   collectUsageRows(json, rows);
   if (rows.length === 0 && json && typeof json === 'object') {
@@ -787,18 +961,18 @@ function extractUsageBundleFromTokscale(json) {
     const client = detectClient(row);
     const partitionKey = client || UNATTRIBUTED_USAGE_CLIENT;
     if (!byClient[partitionKey]) byClient[partitionKey] = emptyPeriod();
-    addUsageRowToPeriod(period, row, client);
-    addUsageRowToPeriod(byClient[partitionKey], row, client);
+    addUsageRowToPeriod(period, row, client, options);
+    addUsageRowToPeriod(byClient[partitionKey], row, client, options);
   }
   return { period, byClient };
 }
 
-function extractUsageFromTokscale(json) {
+function extractUsageFromTokscale(json, options = {}) {
   const rows = [];
   collectUsageRows(json, rows);
   if (rows.length === 0 && json && typeof json === 'object') return fallbackUsagePeriod(json);
   const period = emptyPeriod();
-  for (const row of rows) addUsageRowToPeriod(period, row);
+  for (const row of rows) addUsageRowToPeriod(period, row, detectClient(row), options);
   return period;
 }
 
@@ -888,17 +1062,26 @@ function addClientModelUsage(target, source, client) {
     // when this preserved client owns the whole source model bucket; otherwise
     // retain the model total and mark just that contribution unknown.
     if (asNumber(source.models?.[model]) === asNumber(tokens)) {
-      const cacheRead = Math.min(tokens, asNumber(source.modelCacheReads?.[model]));
-      const cacheWrite = Math.min(tokens - cacheRead, asNumber(source.modelCacheWrites?.[model]));
-      const output = Math.min(tokens - cacheRead - cacheWrite, asNumber(source.modelOutputs?.[model]));
+      const inputTok = Math.min(tokens, asNumber(source.modelInputs?.[model]));
+      const cacheRead = Math.min(tokens - inputTok, asNumber(source.modelCacheReads?.[model]));
+      const cacheWrite = Math.min(tokens - inputTok - cacheRead, asNumber(source.modelCacheWrites?.[model]));
+      const output = Math.min(tokens - inputTok - cacheRead - cacheWrite, asNumber(source.modelOutputs?.[model]));
       const unclassified = Math.min(
-        tokens - cacheRead - cacheWrite - output,
+        tokens - inputTok - cacheRead - cacheWrite - output,
         asNumber(source.modelUnclassifiedTokens?.[model])
       );
+      if (inputTok > 0) target.modelInputs[model] = (target.modelInputs[model] || 0) + inputTok;
       if (cacheRead > 0) target.modelCacheReads[model] = (target.modelCacheReads[model] || 0) + cacheRead;
       if (cacheWrite > 0) target.modelCacheWrites[model] = (target.modelCacheWrites[model] || 0) + cacheWrite;
       if (output > 0) target.modelOutputs[model] = (target.modelOutputs[model] || 0) + output;
       if (unclassified > 0) target.modelUnclassifiedTokens[model] = (target.modelUnclassifiedTokens[model] || 0) + unclassified;
+      addCostSplit(target, {
+        inputCostUsd: asNumber(source.modelInputCosts?.[model]),
+        cacheReadCostUsd: asNumber(source.modelCacheReadCosts?.[model]),
+        cacheWriteCostUsd: asNumber(source.modelCacheWriteCosts?.[model]),
+        outputCostUsd: asNumber(source.modelOutputCosts?.[model]),
+        unclassifiedCostUsd: 0
+      }, null, model, { totals: false });
       if (unclassified > 0) target.capabilities.tokenComponents = false;
     } else if (tokens > 0) {
       target.modelUnclassifiedTokens[model] = (target.modelUnclassifiedTokens[model] || 0) + tokens;
@@ -962,21 +1145,31 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
       target.clients[client] = tokens;
       preservedClients.add(client);
       if (cost > 0) target.clientCosts[client] = cost;
-      const cacheRead = Math.min(tokens, asNumber(source.clientCacheReads?.[client]));
-      const cacheWrite = Math.min(tokens - cacheRead, asNumber(source.clientCacheWrites?.[client]));
-      const output = Math.min(tokens - cacheRead - cacheWrite, asNumber(source.clientOutputs?.[client]));
+      const inputTok = Math.min(tokens, asNumber(source.clientInputs?.[client]));
+      const cacheRead = Math.min(tokens - inputTok, asNumber(source.clientCacheReads?.[client]));
+      const cacheWrite = Math.min(tokens - inputTok - cacheRead, asNumber(source.clientCacheWrites?.[client]));
+      const output = Math.min(tokens - inputTok - cacheRead - cacheWrite, asNumber(source.clientOutputs?.[client]));
       const unclassified = Math.min(
-        tokens - cacheRead - cacheWrite - output,
+        tokens - inputTok - cacheRead - cacheWrite - output,
         asNumber(source.clientUnclassifiedTokens?.[client])
       );
+      target.inputTokens += inputTok;
       target.cacheReadTokens += cacheRead;
       target.cacheWriteTokens += cacheWrite;
       target.outputTokens += output;
       target.unclassifiedTokens += unclassified;
+      if (inputTok > 0) target.clientInputs[client] = inputTok;
       if (cacheRead > 0) target.clientCacheReads[client] = cacheRead;
       if (cacheWrite > 0) target.clientCacheWrites[client] = cacheWrite;
       if (output > 0) target.clientOutputs[client] = output;
       if (unclassified > 0) target.clientUnclassifiedTokens[client] = unclassified;
+      addCostSplit(target, {
+        inputCostUsd: asNumber(source.clientInputCosts?.[client]),
+        cacheReadCostUsd: asNumber(source.clientCacheReadCosts?.[client]),
+        cacheWriteCostUsd: asNumber(source.clientCacheWriteCosts?.[client]),
+        outputCostUsd: asNumber(source.clientOutputCosts?.[client]),
+        unclassifiedCostUsd: 0
+      }, client, null);
       if (unclassified > 0) target.capabilities.tokenComponents = false;
       addClientModelUsage(target, source, client);
       addClientSessionUsage(target, client, source.sessions, restoredSessions, projectsEnabled);
@@ -1215,29 +1408,45 @@ function addPeriodInto(target, source) {
     && source.capabilities?.tokenComponents === true;
   target.totalTokens += source.totalTokens;
   target.costUsd += source.costUsd;
+  target.inputTokens += source.inputTokens;
   target.cacheReadTokens += source.cacheReadTokens;
   target.cacheWriteTokens += source.cacheWriteTokens;
   target.outputTokens += source.outputTokens;
   target.unclassifiedTokens += source.unclassifiedTokens;
+  target.inputCostUsd += source.inputCostUsd;
+  target.cacheReadCostUsd += source.cacheReadCostUsd;
+  target.cacheWriteCostUsd += source.cacheWriteCostUsd;
+  target.outputCostUsd += source.outputCostUsd;
+  target.unclassifiedCostUsd += source.unclassifiedCostUsd;
   target.timedTokens += source.timedTokens;
   target.timedOutputTokens += source.timedOutputTokens;
   target.timedDurationMs += source.timedDurationMs;
   for (const [client, tokens] of Object.entries(source.clients)) {
     target.clients[client] = (target.clients[client] || 0) + tokens;
+    if (source.clientInputs?.[client]) target.clientInputs[client] = (target.clientInputs[client] || 0) + source.clientInputs[client];
     if (source.clientCacheReads?.[client]) target.clientCacheReads[client] = (target.clientCacheReads[client] || 0) + source.clientCacheReads[client];
     if (source.clientCacheWrites?.[client]) target.clientCacheWrites[client] = (target.clientCacheWrites[client] || 0) + source.clientCacheWrites[client];
     if (source.clientOutputs?.[client]) target.clientOutputs[client] = (target.clientOutputs[client] || 0) + source.clientOutputs[client];
     if (source.clientUnclassifiedTokens?.[client]) target.clientUnclassifiedTokens[client] = (target.clientUnclassifiedTokens[client] || 0) + source.clientUnclassifiedTokens[client];
   }
   for (const [client, cost] of Object.entries(source.clientCosts)) target.clientCosts[client] = (target.clientCosts[client] || 0) + cost;
+  for (const [client, cost] of Object.entries(source.clientInputCosts || {})) target.clientInputCosts[client] = (target.clientInputCosts[client] || 0) + cost;
+  for (const [client, cost] of Object.entries(source.clientCacheReadCosts || {})) target.clientCacheReadCosts[client] = (target.clientCacheReadCosts[client] || 0) + cost;
+  for (const [client, cost] of Object.entries(source.clientCacheWriteCosts || {})) target.clientCacheWriteCosts[client] = (target.clientCacheWriteCosts[client] || 0) + cost;
+  for (const [client, cost] of Object.entries(source.clientOutputCosts || {})) target.clientOutputCosts[client] = (target.clientOutputCosts[client] || 0) + cost;
   for (const [model, tokens] of Object.entries(source.models)) {
     target.models[model] = (target.models[model] || 0) + tokens;
+    if (source.modelInputs?.[model]) target.modelInputs[model] = (target.modelInputs[model] || 0) + source.modelInputs[model];
     if (source.modelCacheReads?.[model]) target.modelCacheReads[model] = (target.modelCacheReads[model] || 0) + source.modelCacheReads[model];
     if (source.modelCacheWrites?.[model]) target.modelCacheWrites[model] = (target.modelCacheWrites[model] || 0) + source.modelCacheWrites[model];
     if (source.modelOutputs?.[model]) target.modelOutputs[model] = (target.modelOutputs[model] || 0) + source.modelOutputs[model];
     if (source.modelUnclassifiedTokens?.[model]) target.modelUnclassifiedTokens[model] = (target.modelUnclassifiedTokens[model] || 0) + source.modelUnclassifiedTokens[model];
   }
   for (const [model, cost] of Object.entries(source.modelCosts)) target.modelCosts[model] = (target.modelCosts[model] || 0) + cost;
+  for (const [model, cost] of Object.entries(source.modelInputCosts || {})) target.modelInputCosts[model] = (target.modelInputCosts[model] || 0) + cost;
+  for (const [model, cost] of Object.entries(source.modelCacheReadCosts || {})) target.modelCacheReadCosts[model] = (target.modelCacheReadCosts[model] || 0) + cost;
+  for (const [model, cost] of Object.entries(source.modelCacheWriteCosts || {})) target.modelCacheWriteCosts[model] = (target.modelCacheWriteCosts[model] || 0) + cost;
+  for (const [model, cost] of Object.entries(source.modelOutputCosts || {})) target.modelOutputCosts[model] = (target.modelOutputCosts[model] || 0) + cost;
   for (const [client, models] of Object.entries(source.clientModels)) {
     if (!target.clientModels[client]) target.clientModels[client] = {};
     for (const [model, tokens] of Object.entries(models)) {
@@ -1351,11 +1560,24 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
   for (const periodName of PERIODS) {
     aggregate.periods[periodName].totalTokens = Math.round(aggregate.periods[periodName].totalTokens);
     aggregate.periods[periodName].costUsd = Number(aggregate.periods[periodName].costUsd.toFixed(6));
+    for (const field of ['inputCostUsd', 'cacheReadCostUsd', 'cacheWriteCostUsd', 'outputCostUsd', 'unclassifiedCostUsd']) {
+      aggregate.periods[periodName][field] = Number(asNumber(aggregate.periods[periodName][field]).toFixed(6));
+    }
     for (const [client, cost] of Object.entries(aggregate.periods[periodName].clientCosts)) {
       aggregate.periods[periodName].clientCosts[client] = Number(cost.toFixed(6));
     }
+    for (const field of ['clientInputCosts', 'clientCacheReadCosts', 'clientCacheWriteCosts', 'clientOutputCosts']) {
+      for (const [client, cost] of Object.entries(aggregate.periods[periodName][field] || {})) {
+        aggregate.periods[periodName][field][client] = Number(cost.toFixed(6));
+      }
+    }
     for (const [model, cost] of Object.entries(aggregate.periods[periodName].modelCosts)) {
       aggregate.periods[periodName].modelCosts[model] = Number(cost.toFixed(6));
+    }
+    for (const field of ['modelInputCosts', 'modelCacheReadCosts', 'modelCacheWriteCosts', 'modelOutputCosts']) {
+      for (const [model, cost] of Object.entries(aggregate.periods[periodName][field] || {})) {
+        aggregate.periods[periodName][field][model] = Number(cost.toFixed(6));
+      }
     }
     for (const models of Object.values(aggregate.periods[periodName].clientModelCosts)) {
       for (const [model, cost] of Object.entries(models)) {
@@ -1367,6 +1589,9 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
     }
     for (const session of Object.values(aggregate.periods[periodName].sessions)) {
       session.costUsd = Number(session.costUsd.toFixed(6));
+      for (const field of ['inputCostUsd', 'cacheReadCostUsd', 'cacheWriteCostUsd', 'outputCostUsd', 'unclassifiedCostUsd']) {
+        session[field] = Number(asNumber(session[field]).toFixed(6));
+      }
       for (const [model, cost] of Object.entries(session.modelCosts)) {
         session.modelCosts[model] = Number(cost.toFixed(6));
       }
@@ -1451,5 +1676,6 @@ module.exports = {
   normalizeModelNameForClient,
   normalizeDeviceRecord,
   normalizePeriod,
-  projectRollupFromSessions
+  projectRollupFromSessions,
+  splitCostUsd
 };

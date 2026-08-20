@@ -208,7 +208,8 @@ const {
   normalizeMimoCookieHeader
 } = require('../shared/mimoLimits');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
-const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
+const { completeHistorySource, devicesWithLocalHistory, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
+const { compactDashboardSessions } = require('./renderer/dashboardDimensions');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
 const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
@@ -5795,6 +5796,27 @@ function createDashboardWindow() {
   return win;
 }
 
+function dashboardSessionSources() {
+  const opts = historyResolverOptions();
+  const source = completeHistorySource(opts);
+  if (source === 'local' && opts.localDevice) {
+    return { devices: [opts.localDevice], extraPeriods: [] };
+  }
+  if (source === 'embedded' && opts.embeddedHub) {
+    return {
+      devices: devicesWithLocalHistory(opts.embeddedHub.hub.getDevices(), opts.localDevice),
+      extraPeriods: []
+    };
+  }
+  // Client/remote: reuse the in-memory hub aggregate (month sessions + the
+  // local all-time overlay) rather than an extra /api/devices round trip.
+  const extraPeriods = [];
+  if (latestStats?.periods) extraPeriods.push(latestStats.periods);
+  if (latestStats?.allTimeSessionsView) extraPeriods.push({ allTime: { sessions: latestStats.allTimeSessionsView } });
+  if (extraPeriods.length) return { devices: [], extraPeriods };
+  return { devices: opts.localDevice ? [opts.localDevice] : [], extraPeriods: [] };
+}
+
 async function getDashboardHistory(options = {}) {
   const includeDevices = options?.includeDevices === true;
   const resolved = includeDevices
@@ -5802,8 +5824,13 @@ async function getDashboardHistory(options = {}) {
     : { history: await getCompleteHistory(), deviceHistories: undefined };
   const history = resolved.history;
   const source = completeHistorySource(historyResolverOptions());
+  const sessionSources = dashboardSessionSources();
   return {
     ...history,
+    sessions: compactDashboardSessions(sessionSources.devices, {
+      extraPeriods: sessionSources.extraPeriods,
+      limit: 4000
+    }),
     ...(includeDevices ? { deviceHistories: resolved.deviceHistories } : {}),
     fixedPeriods: fixedPeriodHistoryMeta({
       source

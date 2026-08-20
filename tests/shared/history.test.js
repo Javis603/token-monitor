@@ -95,6 +95,10 @@ test('parseGraphResult folds client rows into perClient/perModel and derives day
     unclassifiedTokens: 0,
     cacheReadTokens: 2, cacheWriteTokens: 1, outputTokens: 5
   });
+  assert.deepEqual(day.perClientModel, {
+    claude: { opus: { tokens: 30, cost: 1.0, messages: 3 } },
+    codex: { gpt: { tokens: 10, cost: 0.5, messages: 1 } }
+  });
 });
 
 test('parseGraphResult is defensive about missing/garbage input', () => {
@@ -106,7 +110,37 @@ test('parseGraphResult is defensive about missing/garbage input', () => {
     date: '2026-01-01', tokens: 0, cost: 0, messages: 0,
     cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0,
     tokenComponentsAvailable: true,
-    activeTimeMs: 0, perClient: {}, perModel: {}
+    activeTimeMs: 0, timedOutputTokens: 0, timedDurationMs: 0,
+    perClient: {}, perModel: {}, perClientModel: {}
+  });
+});
+
+test('mergeHistories sums perClientModel cells across devices', () => {
+  const merged = mergeHistories([
+    {
+      daily: [{
+        date: '2026-06-07', tokens: 30, cost: 3,
+        perClient: { claude: { tokens: 30, cost: 3 } },
+        perModel: { opus: { tokens: 30, cost: 3 } },
+        perClientModel: { claude: { opus: { tokens: 30, cost: 3, messages: 2 } } }
+      }],
+      monthly: [],
+      summary: {}
+    },
+    {
+      daily: [{
+        date: '2026-06-07', tokens: 10, cost: 1,
+        perClient: { claude: { tokens: 10, cost: 1 } },
+        perModel: { sonnet: { tokens: 10, cost: 1 } },
+        perClientModel: { claude: { sonnet: { tokens: 10, cost: 1, messages: 1 } } }
+      }],
+      monthly: [],
+      summary: {}
+    }
+  ], { todayKey: '2026-06-07' });
+  assert.deepEqual(merged.daily[0].perClientModel.claude, {
+    opus: { tokens: 30, cost: 3, messages: 2 },
+    sonnet: { tokens: 10, cost: 1, messages: 1 }
   });
 });
 
@@ -425,7 +459,7 @@ test('historyPreview keeps recent totals only (no per-client)', () => {
   const p = historyPreview(history, { dailyDays: 30, monthlyMonths: 12 });
   assert.equal(p.daily.length, 30);                 // last 30 of 40
   assert.equal(p.daily[0].date, '2026-06-11');      // 40 - 30 + 1 = 11th
-  assert.deepEqual(p.daily[29], { date: '2026-06-40', tokens: 40, cost: 4, activeTimeMs: 40000 });
+  assert.deepEqual(p.daily[29], { date: '2026-06-40', tokens: 40, cost: 4, activeTimeMs: 40000, timedOutputTokens: 0, timedDurationMs: 0 });
   assert.equal(p.daily[0].perClient, undefined);    // stripped
   assert.deepEqual(p.monthly[0], { month: '2026-05', tokens: 9, cost: 1, activeTimeMs: 0 });
   assert.deepEqual(p.summary, { totalTokens: 100 });

@@ -193,7 +193,12 @@
     for (const d of (Array.isArray(daily) ? daily : [])) {
       const key = String(d.date).slice(0, 10);
       intensities.set(key, n(d[o.intensityKey]));
-      values.set(key, { tokens: n(d.tokens), cost: n(d.cost) });
+      values.set(key, {
+        tokens: n(d.tokens),
+        cost: n(d.cost),
+        timedOutputTokens: n(d.timedOutputTokens),
+        timedDurationMs: n(d.timedDurationMs)
+      });
       if (!o.startDate && (!minDate || key < minDate)) minDate = key;
       if (!o.endDate && (!maxDate || key > maxDate)) maxDate = key;
     }
@@ -211,8 +216,16 @@
       // Label the column that contains the 1st of a month — this puts the first
       // month flush at the left edge (the leading week always spans a month's 1st).
       if (key.slice(8, 10) === '01') monthLabels.push({ col, label: key.slice(0, 7) });
-      const value = values.get(key) || { tokens: 0, cost: 0 };
-      cells.push({ date: key, intensity: intensities.get(key) || 0, tokens: value.tokens, cost: value.cost, col, row, x: col * (o.cell + o.gap), y: row * (o.cell + o.gap), size: o.cell });
+      const value = values.get(key) || { tokens: 0, cost: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+      cells.push({
+        date: key,
+        intensity: intensities.get(key) || 0,
+        tokens: value.tokens,
+        cost: value.cost,
+        timedOutputTokens: value.timedOutputTokens,
+        timedDurationMs: value.timedDurationMs,
+        col, row, x: col * (o.cell + o.gap), y: row * (o.cell + o.gap), size: o.cell
+      });
     }
     const weeks = cells.length ? cells[cells.length - 1].col + 1 : 0;
     return {
@@ -237,6 +250,7 @@
     { key: 'currentStreak', kind: 'days' },
     { key: 'activeTimeMs', kind: 'duration' },
     { key: 'peakDayTokens', kind: 'tokens' },
+    { key: 'outputTokens', kind: 'tokens' },
     { key: 'favoriteModel', kind: 'model' },
     { key: 'messages', kind: 'count' }
   ];
@@ -436,16 +450,17 @@
     return `<svg class="sparkline" viewBox="0 0 ${model.width} ${model.height}" preserveAspectRatio="none" width="100%" height="${model.height}" aria-hidden="true">${zeroMarkers}${rects}</svg>`;
   }
 
-  function areaLineSvg(model) {
-    // Top-to-bottom blue fade (stop colours live in styles.css so they track the
+  function areaLineSvg(model, options) {
+    // Top-to-bottom blue fade (stop colours live in CSS so they track the
     // theme). objectBoundingBox keeps the fade vertical regardless of the path bbox.
+    const gradId = escapeXml((options && options.gradientId) || 'area-line-grad');
     const defs = model.areaPath
-      ? '<defs><linearGradient id="area-line-grad" x1="0" y1="0" x2="0" y2="1">'
+      ? `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">`
         + '<stop class="area-line-grad-top" offset="0"></stop>'
         + '<stop class="area-line-grad-bottom" offset="1"></stop>'
         + '</linearGradient></defs>'
       : '';
-    const fill = model.areaPath ? `<path class="area-line-fill" d="${model.areaPath}"></path>` : '';
+    const fill = model.areaPath ? `<path class="area-line-fill" fill="url(#${gradId})" d="${model.areaPath}"></path>` : '';
     const line = model.linePath ? `<path class="area-line-stroke" d="${model.linePath}"></path>` : '';
     return `<svg class="area-line" viewBox="0 0 ${model.width} ${model.height}" preserveAspectRatio="none" width="100%" height="100%" aria-hidden="true">${defs}${fill}${line}</svg>`;
   }
@@ -541,14 +556,28 @@
     }
     const defs = defsParts.length ? `<defs>${defsParts.join('')}</defs>` : '';
     const initialVisibility = o.initialHidden ? ' data-motion-hidden="true" opacity="0"' : '';
-    const cellAttrs = (c) => `class="heat lvl-${c.intensity}" data-d="${escapeXml(c.date)}" data-t="${svgRound(c.tokens || 0)}" data-cost="${svgRound(c.cost || 0)}" x="${svgRound(c.x)}" y="${svgRound(c.y)}" width="${svgRound(c.size)}" height="${svgRound(c.size)}" rx="${svgRound(Math.max(0, Number(o.radius) || 0))}"${initialVisibility}`;
-    const cells = (model.cells || []).map((c) =>
-      `<rect ${cellAttrs(c)}>${o.titleOf(c) ? `<title>${escapeXml(o.titleOf(c))}</title>` : ''}</rect>`
-    ).join('');
+    const shape = o.shape === 'dot' ? 'dot' : 'square';
+    const DOT_SCALES = [0.22, 0.4, 0.58, 0.76, 0.94];
+    function heatShape(c, { bright = false } = {}) {
+      const intensity = Math.max(0, Math.min(4, Number(c.intensity) || 0));
+      const cls = bright ? `heat heat-bright lvl-${intensity}` : `heat lvl-${intensity}`;
+      const data = bright ? '' : ` data-d="${escapeXml(c.date)}" data-t="${svgRound(c.tokens || 0)}" data-cost="${svgRound(c.cost || 0)}" data-out="${svgRound(c.timedOutputTokens || 0)}" data-ms="${svgRound(c.timedDurationMs || 0)}"`;
+      const vis = bright ? '' : initialVisibility;
+      const title = !bright && o.titleOf(c) ? `<title>${escapeXml(o.titleOf(c))}</title>` : '';
+      if (shape === 'dot') {
+        const cx = n(c.x) + n(c.size) / 2;
+        const cy = n(c.y) + n(c.size) / 2;
+        const r = Math.max(0.8, (n(c.size) / 2) * (DOT_SCALES[intensity] || 0.22));
+        return `<circle class="${cls}"${data} cx="${svgRound(cx)}" cy="${svgRound(cy)}" r="${svgRound(r)}"${vis}>${title}</circle>`;
+      }
+      const rx = svgRound(Math.max(0, Number(o.radius) || 0));
+      const box = `x="${svgRound(c.x)}" y="${svgRound(c.y)}" width="${svgRound(c.size)}" height="${svgRound(c.size)}" rx="${rx}"`;
+      const extra = bright ? '' : data + vis;
+      return `<rect class="${cls}" ${box}${extra}>${title}</rect>`;
+    }
+    const cells = (model.cells || []).map((c) => heatShape(c)).join('');
     const brightCells = spotlightId
-      ? (model.cells || []).map((c) =>
-        `<rect class="heat heat-bright lvl-${c.intensity}" x="${svgRound(c.x)}" y="${svgRound(c.y)}" width="${svgRound(c.size)}" height="${svgRound(c.size)}" rx="${svgRound(Math.max(0, Number(o.radius) || 0))}"></rect>`
-      ).join('')
+      ? (model.cells || []).map((c) => heatShape(c, { bright: true })).join('')
       : '';
     const brightLayer = spotlightId
       ? `<g class="heat-bright-layer" mask="url(#${escapeXml(spotlightMaskId)})" aria-hidden="true">${brightCells}</g>`
@@ -564,10 +593,19 @@
   }
 
   function statsCardsHtml(cards, options) {
-    const o = Object.assign({ label: (k) => k, format: (c) => String(c.value) }, options || {});
-    return (Array.isArray(cards) ? cards : []).map((c) =>
-      `<div class="dash-card"><span class="dash-card-v">${escapeXml(o.format(c))}</span><span class="dash-card-k">${escapeXml(o.label(c.key))}</span></div>`
-    ).join('');
+    const o = Object.assign({
+      label: (k) => k,
+      format: (c) => String(c.value),
+      delta: (c) => c.delta || null
+    }, options || {});
+    return (Array.isArray(cards) ? cards : []).map((c) => {
+      const change = o.delta(c);
+      const tone = change && change.tone ? String(change.tone) : '';
+      const deltaHtml = change && change.text
+        ? `<span class="dash-card-delta${tone ? ` is-${escapeXml(tone)}` : ''}">${escapeXml(change.text)}</span>`
+        : '';
+      return `<div class="dash-card"><span class="dash-card-head"><span class="dash-card-v">${escapeXml(o.format(c))}</span>${deltaHtml}</span><span class="dash-card-k">${escapeXml(o.label(c.key))}</span></div>`;
+    }).join('');
   }
 
   function statCardColumnWidths(contentWidths, options) {
@@ -611,9 +649,71 @@
     return rounded;
   }
 
+  function polar(cx, cy, r, angle) {
+    const a = angle - Math.PI / 2;
+    return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  }
+
+  function donutSlicePath(cx, cy, inner, outer, start, end) {
+    const sweep = end - start;
+    if (sweep <= 1e-6) return '';
+    if (sweep >= Math.PI * 2 - 1e-6) {
+      return `${donutSlicePath(cx, cy, inner, outer, 0, Math.PI)} ${donutSlicePath(cx, cy, inner, outer, Math.PI, Math.PI * 2)}`;
+    }
+    const large = sweep > Math.PI ? 1 : 0;
+    const [x0, y0] = polar(cx, cy, outer, start);
+    const [x1, y1] = polar(cx, cy, outer, end);
+    const [x2, y2] = polar(cx, cy, inner, end);
+    const [x3, y3] = polar(cx, cy, inner, start);
+    return `M${svgRound(x0)},${svgRound(y0)} A${svgRound(outer)},${svgRound(outer)} 0 ${large} 1 ${svgRound(x1)},${svgRound(y1)} `
+      + `L${svgRound(x2)},${svgRound(y2)} A${svgRound(inner)},${svgRound(inner)} 0 ${large} 0 ${svgRound(x3)},${svgRound(y3)} Z`;
+  }
+
+  function donutChart(rows, options) {
+    const o = Object.assign({ width: 160, height: 160, thickness: 22, maxSlices: 6, otherKey: 'other' }, options || {});
+    const ranked = (Array.isArray(rows) ? rows : [])
+      .map((row) => ({ key: String(row?.key || ''), value: n(row?.value) }))
+      .filter((row) => row.key && row.value > 0)
+      .sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
+    const cap = Math.max(1, Math.floor(Number(o.maxSlices) || 6));
+    const top = ranked.slice(0, cap);
+    const rest = ranked.slice(cap).reduce((sum, row) => sum + row.value, 0);
+    if (rest > 0) top.push({ key: String(o.otherKey || 'other'), value: rest });
+    const total = top.reduce((sum, row) => sum + row.value, 0);
+    const cx = o.width / 2;
+    const cy = o.height / 2;
+    const outer = Math.max(8, Math.min(cx, cy) - 2);
+    const inner = Math.max(0, outer - Math.max(6, n(o.thickness)));
+    let angle = 0;
+    const tau = Math.PI * 2;
+    const slices = top.map((row) => {
+      const frac = total > 0 ? row.value / total : 0;
+      const start = angle;
+      const end = angle + frac * tau;
+      angle = end;
+      return { key: row.key, value: row.value, frac, start, end, path: donutSlicePath(cx, cy, inner, outer, start, end) };
+    });
+    return { width: o.width, height: o.height, cx, cy, inner, outer, total, slices };
+  }
+
+  function donutChartSvg(model, options) {
+    const o = Object.assign({ colorFor: () => '#6ab4f0', center: '', sub: '' }, options || {});
+    const slices = (model?.slices || []).map((slice) =>
+      `<path class="dash-donut-slice" data-key="${escapeXml(slice.key)}" data-v="${svgRound(slice.value)}" fill="${escapeXml(o.colorFor(slice.key))}" d="${slice.path}"></path>`
+    ).join('');
+    const center = o.center
+      ? `<text class="dash-donut-center" x="${svgRound(model.cx)}" y="${svgRound(o.sub ? model.cy - 7 : model.cy)}" text-anchor="middle">${escapeXml(o.center)}</text>`
+      : '';
+    const sub = o.sub
+      ? `<text class="dash-donut-sub" x="${svgRound(model.cx)}" y="${svgRound(model.cy + 10)}" text-anchor="middle">${escapeXml(o.sub)}</text>`
+      : '';
+    return `<svg class="dash-donut" viewBox="0 0 ${model.width} ${model.height}" width="${model.width}" height="${model.height}">${slices}${center}${sub}</svg>`;
+  }
+
   return {
     localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
     areaLineChart, areaLineSvg,
+    donutChart, donutChartSvg,
     selectPreviewSeries, patchTodayBar, sparklineSvg,
     clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
     barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths

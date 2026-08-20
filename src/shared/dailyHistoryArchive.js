@@ -147,6 +147,8 @@ function normalizeDay(value, fallbackDate = '') {
   return {
     date,
     activeTimeMs: Math.max(0, Math.round(num(value?.activeTimeMs))),
+    timedOutputTokens: Math.max(0, Math.round(num(value?.timedOutputTokens))),
+    timedDurationMs: Math.max(0, Math.round(num(value?.timedDurationMs))),
     observations,
     ...(componentSummary ? { componentSummary } : {})
   };
@@ -179,8 +181,10 @@ function observationsFromGraphs(graphs) {
     for (const row of (Array.isArray(graph.contributions) ? graph.contributions : [])) {
       const date = String(row?.date || '').slice(0, 10);
       if (!DAY_KEY_RE.test(date)) continue;
-      const day = days.get(date) || { date, activeTimeMs: 0, observations: {} };
+      const day = days.get(date) || { date, activeTimeMs: 0, timedOutputTokens: 0, timedDurationMs: 0, observations: {} };
       day.activeTimeMs += Math.max(0, Math.round(num(row.activeTimeMs ?? row.active_time_ms)));
+      day.timedOutputTokens += Math.max(0, Math.round(num(row.timedOutputTokens ?? row.timed_output_tokens)));
+      day.timedDurationMs += Math.max(0, Math.round(num(row.timedDurationMs ?? row.timed_duration_ms)));
       for (const raw of (Array.isArray(row?.clients) ? row.clients : [])) {
         const candidate = normalizeObservation({
           ...raw,
@@ -243,6 +247,8 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
     const next = {
       date,
       activeTimeMs: Math.max(previous.activeTimeMs, incoming.activeTimeMs),
+      timedOutputTokens: Math.max(num(previous.timedOutputTokens), incoming.timedOutputTokens),
+      timedDurationMs: Math.max(num(previous.timedDurationMs), incoming.timedDurationMs),
       observations: { ...previous.observations }
     };
     for (const [key, observation] of Object.entries(incoming.observations)) {
@@ -360,6 +366,8 @@ function periodLiveDay(period, date) {
   const day = normalizeDay({
     date,
     activeTimeMs: 0,
+    timedOutputTokens: num(period.timedOutputTokens),
+    timedDurationMs: num(period.timedDurationMs),
     observations: [...observations.values()],
     ...(componentSummary ? { componentSummary } : {})
   }, date);
@@ -436,6 +444,8 @@ function mergeLiveDayMetadata(liveDay, previousDay) {
   return {
     ...liveDay,
     activeTimeMs: Math.max(liveDay.activeTimeMs, previousDay.activeTimeMs),
+    timedOutputTokens: Math.max(num(liveDay.timedOutputTokens), num(previousDay.timedOutputTokens)),
+    timedDurationMs: Math.max(num(liveDay.timedDurationMs), num(previousDay.timedDurationMs)),
     observations
   };
 }
@@ -494,6 +504,8 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
     .map((day) => ({
       date: day.date,
       activeTimeMs: day.activeTimeMs,
+      timedOutputTokens: num(day.timedOutputTokens),
+      timedDurationMs: num(day.timedDurationMs),
       ...(day.componentSummary ? { tokenComponentSummary: day.componentSummary } : {}),
       clients: Object.values(day.observations)
         .sort((left, right) => observationKey(left).localeCompare(observationKey(right)))

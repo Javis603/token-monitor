@@ -518,6 +518,7 @@ test('patchDailyToday overwrites the frozen today bucket with the live headline 
   const patchedToday = patched.find((d) => d.date === '2026-07-07');
   assert.equal(patchedToday.tokens, 61_700_000);
   assert.equal(patchedToday.cost, 492.5); // cost drives the heatmap intensity, patch it too
+  assert.equal(patchedToday.timedOutputTokens, undefined);
   assert.equal(patched.find((d) => d.date === '2026-07-06').tokens, 200); // past days untouched
   assert.equal(patched.length, 2);
   assert.equal(daily[1].tokens, 61_500_000); // input not mutated
@@ -565,6 +566,7 @@ test('Trends preserves its long-range chart while selecting range stats', () => 
   assert.ok(match, 'renderTrends exists');
   assert.match(match[1], /selectPreviewSeries\(preview, fixed\?\.status === 'ready' \? 'allTime' : state\.period\)/);
   assert.match(match[1], /activityStatsForPeriod\(/);
+  assert.match(match[1], /trends\.outputRate/);
 });
 
 test('Activity keeps long-term day and streak stats while range-shaping time and peak', () => {
@@ -580,7 +582,48 @@ test('Activity keeps long-term day and streak stats while range-shaping time and
     activeDays: 119,
     currentStreak: 87,
     activeTimeMs: 3600000,
-    peakDayTokens: 80
+    peakDayTokens: 80,
+    timedOutputTokens: 0,
+    timedDurationMs: 0
+  });
+});
+
+test("patchDailyToday copies live timed output so today's tok/s cell is not frozen", () => {
+  const daily = [{ date: '2026-07-07', tokens: 100, cost: 1, timedOutputTokens: 10, timedDurationMs: 1000 }];
+  const patched = patchDailyToday(daily, '2026-07-07', 200, 2, {
+    timedOutputTokens: 80,
+    timedDurationMs: 4000
+  });
+  assert.equal(patched[0].tokens, 200);
+  assert.equal(patched[0].timedOutputTokens, 80);
+  assert.equal(patched[0].timedDurationMs, 4000);
+  assert.equal(daily[0].timedOutputTokens, 10); // input not mutated
+});
+
+test('activityStatsForPeriod sums timed output so range tok/s is duration-weighted', () => {
+  const daily = [
+    { date: '2026-08-11', tokens: 40, timedOutputTokens: 20, timedDurationMs: 1000 },
+    { date: '2026-08-12', tokens: 70, timedOutputTokens: 40, timedDurationMs: 1000 }
+  ];
+  assert.deepEqual(activityStatsForPeriod({
+    period: 'today', daily, historySummary: { activeDays: 2, currentStreak: 2 }, todayKey: '2026-08-12'
+  }), {
+    activeDays: 2,
+    currentStreak: 2,
+    activeTimeMs: 0,
+    peakDayTokens: 70,
+    timedOutputTokens: 40,
+    timedDurationMs: 1000
+  });
+  assert.deepEqual(activityStatsForPeriod({
+    period: 'month', daily, historySummary: { activeDays: 2, currentStreak: 2 }, todayKey: '2026-08-12'
+  }), {
+    activeDays: 2,
+    currentStreak: 2,
+    activeTimeMs: 0,
+    peakDayTokens: 70,
+    timedOutputTokens: 60,
+    timedDurationMs: 2000
   });
 });
 
@@ -593,10 +636,10 @@ test('native DAY and MONTH activity time and peak follow their calendar range', 
   const historySummary = { activeDays: 120, currentStreak: 8, activeTimeMs: 20000, peakDayTokens: 90 };
   assert.deepEqual(activityStatsForPeriod({
     period: 'today', daily, historySummary, todayKey: '2026-08-12'
-  }), { activeDays: 120, currentStreak: 8, activeTimeMs: 7000, peakDayTokens: 70 });
+  }), { activeDays: 120, currentStreak: 8, activeTimeMs: 7000, peakDayTokens: 70, timedOutputTokens: 0, timedDurationMs: 0 });
   assert.deepEqual(activityStatsForPeriod({
     period: 'month', daily, historySummary, todayKey: '2026-08-12'
-  }), { activeDays: 120, currentStreak: 8, activeTimeMs: 11000, peakDayTokens: 70 });
+  }), { activeDays: 120, currentStreak: 8, activeTimeMs: 11000, peakDayTokens: 70, timedOutputTokens: 0, timedDurationMs: 0 });
 });
 
 test('loadHomeHistory wires the bounded retry through a timer, not a render', () => {

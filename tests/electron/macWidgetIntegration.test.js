@@ -523,7 +523,9 @@ test('preserves generic macOS packaging config and fails fast on signing ownersh
   const disabled = createBuilderConfig({
     baseConfig: { mac: baseMac },
     env: { TOKEN_MONITOR_WIDGET_ENABLED: '0' },
-    root
+    root,
+    platform: 'darwin',
+    listCodesigningIdentities: () => ['Developer ID Application: Example (TEAMID)']
   }).mac;
   assert.deepEqual(disabled, baseMac);
 

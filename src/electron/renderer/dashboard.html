@@ -34,7 +34,25 @@
             <button class="seg-btn active" data-mode="bars" data-i18n="dashboard.mode.bars">Bars</button>
             <button class="seg-btn" data-mode="kline" data-i18n="dashboard.mode.kline">K-line</button>
           </div>
-          <div id="rangeSelect" class="dash-range-group"></div>
+          <div class="seg" data-control="groupBy">
+            <button class="seg-btn active" data-val="day" data-i18n="dashboard.group.day">Day</button>
+            <button class="seg-btn" data-val="week" data-i18n="dashboard.group.week">Week</button>
+            <button class="seg-btn" data-val="month" data-i18n="dashboard.group.month">Month</button>
+          </div>
+          <div class="seg" data-control="trendMetric">
+            <button class="seg-btn" data-val="tokens" data-i18n="dashboard.heatmap.tokens">Tokens</button>
+            <button class="seg-btn active" data-val="cost" data-i18n="dashboard.heatmap.cost">Cost</button>
+          </div>
+          <div class="js-range-select dash-range-group"></div>
+        </div>
+        <div class="dash-custom-range js-custom-range hidden">
+          <label class="dash-date-label"><span data-i18n="dashboard.range.from">From</span>
+            <input type="date" class="dash-date js-range-start" />
+          </label>
+          <span class="dash-date-sep">–</span>
+          <label class="dash-date-label"><span data-i18n="dashboard.range.to">To</span>
+            <input type="date" class="dash-date js-range-end" />
+          </label>
         </div>
       </div>
       <div id="dashChart" class="dash-chart-wrap"></div>
@@ -42,24 +60,116 @@
     </section>
 
     <section id="activityPane" class="dash-pane">
+      <div class="dash-controls">
+        <div class="dash-control-row">
+          <div class="js-range-select dash-range-group dash-range-group--inline"></div>
+        </div>
+        <div class="dash-custom-range js-custom-range hidden">
+          <label class="dash-date-label"><span data-i18n="dashboard.range.from">From</span>
+            <input type="date" class="dash-date js-range-start" />
+          </label>
+          <span class="dash-date-sep">–</span>
+          <label class="dash-date-label"><span data-i18n="dashboard.range.to">To</span>
+            <input type="date" class="dash-date js-range-end" />
+          </label>
+        </div>
+      </div>
+      <div id="dashFilter" class="dash-filter hidden"></div>
       <div id="dashCards" class="dash-cards"></div>
+      <article class="dash-widget dash-portrait-block" data-widget="portrait">
+        <div class="dash-widget-head">
+          <div class="dash-heatmap-title" data-i18n="dashboard.portrait.title">Usage portrait</div>
+          <button type="button" class="icon-button dash-expand" data-modal="portrait" aria-label="Expand">↗</button>
+        </div>
+        <div id="dashPortrait" class="dash-portrait"></div>
+      </article>
+      <div class="dash-grid">
+        <article class="dash-widget" data-widget="trend">
+          <div class="dash-widget-head">
+            <div class="dash-heatmap-title" data-i18n="dashboard.widget.trend">Trend</div>
+            <button type="button" class="icon-button dash-expand" data-modal="trend" aria-label="Expand">↗</button>
+          </div>
+          <div id="dashTrend" class="dash-widget-body"></div>
+        </article>
+        <article class="dash-widget" data-widget="share">
+          <div class="dash-widget-head">
+            <div class="dash-heatmap-title" data-i18n="dashboard.widget.share">Share</div>
+            <div class="dash-widget-actions">
+              <div class="seg seg--sm" data-control="shareBy">
+                <button class="seg-btn active" data-val="client" data-i18n="dashboard.stack.client">By tool</button>
+                <button class="seg-btn" data-val="model" data-i18n="dashboard.stack.model">By model</button>
+              </div>
+              <button type="button" class="icon-button dash-expand" data-modal="share" aria-label="Expand">↗</button>
+            </div>
+          </div>
+          <div id="dashShare" class="dash-widget-body dash-widget-body--split"></div>
+        </article>
+      </div>
       <div class="dash-heatmap-block">
         <div class="dash-heatmap-title-row">
           <div class="dash-heatmap-title" data-i18n="dashboard.heatmap.title">Token Activity</div>
-          <div class="seg seg--sm" data-control="heatmapMetric">
-            <button class="seg-btn" data-val="tokens" aria-pressed="false" data-i18n="dashboard.heatmap.tokens">Tokens</button>
-            <button class="seg-btn active" data-val="cost" aria-pressed="true" data-i18n="dashboard.heatmap.cost">Cost</button>
+          <div class="dash-widget-actions">
+            <div class="seg seg--sm" data-control="heatmapMetric">
+              <button class="seg-btn" data-val="tokens" aria-pressed="false" data-i18n="dashboard.heatmap.tokens">Tokens</button>
+              <button class="seg-btn active" data-val="cost" aria-pressed="true" data-i18n="dashboard.heatmap.cost">Cost</button>
+            </div>
+            <button type="button" class="icon-button dash-expand" data-modal="heatmap" aria-label="Expand">↗</button>
           </div>
         </div>
         <div id="dashHeatmap" class="dash-heatmap-wrap"></div>
       </div>
-      <div id="dashBreakdown" class="dash-breakdown"></div>
+      <div class="dash-grid">
+        <div class="dash-weekday-block dash-widget">
+          <div class="dash-widget-head">
+            <div class="dash-heatmap-title" data-i18n="dashboard.weekday.title">By weekday</div>
+            <button type="button" class="icon-button dash-expand" data-modal="weekday" aria-label="Expand">↗</button>
+          </div>
+          <div id="dashWeekdays" class="dash-weekdays"></div>
+        </div>
+        <div class="dash-hours-block dash-widget">
+          <div class="dash-widget-head">
+            <div class="dash-heatmap-title" data-i18n="dashboard.hours.title">By time of day</div>
+            <button type="button" class="icon-button dash-expand" data-modal="hours" aria-label="Expand">↗</button>
+          </div>
+          <div id="dashHours" class="dash-hours"></div>
+        </div>
+      </div>
+      <div class="dash-breakdown-block">
+        <div class="dash-heatmap-title-row">
+          <div class="dash-heatmap-title" data-i18n="dashboard.breakdown.title">Breakdown</div>
+          <div class="dash-widget-actions">
+            <div class="dash-breakdown-controls">
+              <div class="seg seg--sm" data-control="breakdownView">
+                <button class="seg-btn active" data-val="split" data-i18n="dashboard.breakdown.split">Lists</button>
+                <button class="seg-btn" data-val="cross" data-i18n="dashboard.stack.cross">Tool × Model</button>
+              </div>
+              <div class="seg seg--sm" data-control="breakdownMetric">
+                <button class="seg-btn" data-val="tokens" aria-pressed="false" data-i18n="dashboard.heatmap.tokens">Tokens</button>
+                <button class="seg-btn active" data-val="cost" aria-pressed="true" data-i18n="dashboard.heatmap.cost">Cost</button>
+              </div>
+            </div>
+            <button type="button" class="icon-button dash-expand" data-modal="breakdown" aria-label="Expand">↗</button>
+          </div>
+        </div>
+        <div id="dashBreakdown" class="dash-breakdown"></div>
+      </div>
     </section>
 
     <div id="dashEmpty" class="dash-empty hidden" data-i18n="dashboard.empty">No usage history yet</div>
     <div id="dashTooltip" class="dash-tooltip hidden"></div>
+    <div id="dashModal" class="dash-modal hidden" role="dialog" aria-modal="true" aria-labelledby="dashModalTitle">
+      <div class="dash-modal-backdrop" data-modal-close="1"></div>
+      <div class="dash-modal-panel">
+        <header class="dash-modal-head">
+          <div id="dashModalTitle" class="dash-modal-title"></div>
+          <button type="button" id="dashModalClose" class="icon-button" data-modal-close="1" aria-label="Close">×</button>
+        </header>
+        <div id="dashModalBody" class="dash-modal-body"></div>
+      </div>
+    </div>
 
     <script src="usageCharts.js"></script>
+    <script src="dashboardDimensions.js"></script>
     <script src="themePresets.js"></script>
     <script src="i18n.js"></script>
     <script src="../../shared/compactTokens.js"></script>
