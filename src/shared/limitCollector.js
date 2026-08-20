@@ -2702,6 +2702,7 @@ function createJsonRpcClient(child, timeoutMs) {
   let nextId = 1;
   let buffer = '';
   let closed = false;
+  let transportError = null;
   const pending = new Map();
 
   function rejectAll(error) {
@@ -2715,11 +2716,12 @@ function createJsonRpcClient(child, timeoutMs) {
   function failTransport(error) {
     if (closed) return;
     closed = true;
+    transportError = error;
     rejectAll(error);
   }
 
-  function failStdinTransport(error) {
-    const target = error instanceof Error ? error : new Error(String(error || 'codex app-server stdin failed'));
+  function failRetryableTransport(error) {
+    const target = error instanceof Error ? error : new Error(String(error || 'codex app-server transport failed'));
     target.codexTransportFailure = true;
     failTransport(target);
   }
@@ -2747,23 +2749,23 @@ function createJsonRpcClient(child, timeoutMs) {
       try { handleMessage(JSON.parse(line)); } catch (_) {}
     }
   });
-  child.on('error', failTransport);
-  child.on('close', (code) => failTransport(new Error(`codex app-server exited ${code}`)));
-  child.stdin.on?.('error', failStdinTransport);
+  child.on('error', failRetryableTransport);
+  child.on('close', (code) => failRetryableTransport(new Error(`codex app-server exited ${code}`)));
+  child.stdin.on?.('error', failRetryableTransport);
 
   function writeLine(line) {
     if (closed) return;
     try {
       child.stdin.write(line, (error) => {
-        if (error) failStdinTransport(error);
+        if (error) failRetryableTransport(error);
       });
     } catch (error) {
-      failStdinTransport(error);
+      failRetryableTransport(error);
     }
   }
 
   function send(method, params) {
-    if (closed) return Promise.reject(new Error('codex app-server is closed'));
+    if (closed) return Promise.reject(transportError || new Error('codex app-server is closed'));
     const id = nextId++;
     const message = params === undefined ? { method, id } : { method, id, params };
     return new Promise((resolve, reject) => {
@@ -2827,12 +2829,21 @@ async function readCodexRpcWithCommand(command, deps = {}) {
     });
     rpc.notify('initialized', {});
     let rateLimitResult = await rpc.send('account/rateLimits/read');
-    const accountResult = await rpc.send('account/read').catch(() => {
+    let accountReadError = null;
+    const accountResult = await rpc.send('account/read').catch((error) => {
       if (signal?.aborted) throw abortError(signal);
+      accountReadError = error;
       return null;
     });
     const account = accountResult?.account || null;
     let payload = codexRpcPayload(rateLimitResult, account, command, deps);
+    if (
+      accountReadError &&
+      !hasCodexRateLimitWindows(codexRateLimitSnapshot(payload)) &&
+      accountReadError.codexTransportFailure
+    ) {
+      throw accountReadError;
+    }
     if (deps.codexEmptyQuotaRetry !== false && shouldRetryCodexEmptyQuotaPayload(payload)) {
       await waitForCodexEmptyQuotaRetry(deps);
       try {
@@ -2844,8 +2855,9 @@ async function readCodexRpcWithCommand(command, deps = {}) {
             rateLimitResetCredits: retryPayload.rateLimitResetCredits || payload.rateLimitResetCredits
           };
         }
-      } catch (_) {
+      } catch (error) {
         if (signal?.aborted) throw abortError(signal);
+        if (error?.codexTransportFailure) throw error;
       }
     }
     if (!account && !hasCodexRateLimitWindows(codexRateLimitSnapshot(payload))) {

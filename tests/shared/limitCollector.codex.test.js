@@ -994,6 +994,68 @@ test('fetchCodexLimits retries the next command after a Codex stdin transport fa
   assert.equal(providers.windows[0].remainingPercent, 96);
 });
 
+test('fetchCodexLimits retries another command when optional account read loses its stdin transport', async () => {
+  const { EventEmitter } = require('node:events');
+  const commands = [];
+  const providers = await fetchCodexLimits({}, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    platform: 'darwin',
+    existsSync: () => true,
+    codexEmptyQuotaRetryDelayMs: 0,
+    ...noLiveAuth,
+    spawn: (command) => {
+      commands.push(command);
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.stdin = new EventEmitter();
+      child.kill = () => {};
+      child.stdin.write = (line) => {
+        const message = JSON.parse(String(line));
+        const respond = (result) => {
+          queueMicrotask(() => child.stdout.emit('data', `${JSON.stringify({ id: message.id, result })}\n`));
+        };
+        if (commands.length === 1) {
+          if (message.method === 'initialize') respond({});
+          if (message.method === 'account/rateLimits/read') {
+            respond({ rateLimits: { planType: 'plus' }, rateLimitsByLimitId: {} });
+          }
+          if (message.method === 'account/read') {
+            const error = Object.assign(new Error('write EPIPE'), { code: 'EPIPE' });
+            queueMicrotask(() => child.stdin.emit('error', error));
+          }
+          return;
+        }
+        if (message.method === 'initialize') respond({});
+        if (message.method === 'account/rateLimits/read') {
+          respond({
+            rateLimits: {
+              primary: {
+                usedPercent: 7,
+                resetsAt: '2026-06-01T05:00:00Z',
+                windowDurationMins: 300
+              }
+            }
+          });
+        }
+        if (message.method === 'account/read') {
+          respond({ account: { email: 'fallback@example.com', planType: 'plus' } });
+        }
+      };
+      return child;
+    }
+  });
+
+  assert.deepEqual(commands, [
+    '/Applications/Codex.app/Contents/Resources/codex',
+    '/Applications/ChatGPT.app/Contents/Resources/codex'
+  ]);
+  assert.equal(providers.status, 'ok');
+  assert.equal(providers.accountEmail, 'fallback@example.com');
+  assert.equal(providers.windows[0].remainingPercent, 93);
+});
+
 test('fetchCodexLimits retries empty Codex quota reads on the same RPC session', async () => {
   const { EventEmitter } = require('node:events');
   let spawns = 0;
