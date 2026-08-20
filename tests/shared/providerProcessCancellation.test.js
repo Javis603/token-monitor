@@ -77,6 +77,20 @@ test('Codex RPC rejects a pending request when app-server stdin breaks', async (
   assert.equal(child.kills, 1);
 });
 
+test('Codex RPC rejects a pending request when the stdin write callback fails', async () => {
+  const child = fakeChild();
+  const error = Object.assign(new Error('stream destroyed'), { code: 'ERR_STREAM_DESTROYED' });
+  child.stdin.write = (_line, callback) => queueMicrotask(() => callback(error));
+  const pending = readCodexRpcWithCommand('codex', {
+    spawn: () => child,
+    platform: 'win32',
+    codexRpcTimeoutMs: 60_000
+  });
+
+  await assert.rejects(pending, /stream destroyed/);
+  assert.equal(child.kills, 1);
+});
+
 test('Codex RPC preserves cancellation from the optional account read', async () => {
   const controller = new AbortController();
   const child = fakeRpcChild((request, respond) => {

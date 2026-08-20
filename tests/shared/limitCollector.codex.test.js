@@ -940,6 +940,60 @@ test('fetchCodexLimits fills the live account email from auth.json when the RPC 
   assert.match(live.accountKey, /^sha256:[0-9a-f]{64}$/);
 });
 
+test('fetchCodexLimits retries the next command after a Codex stdin transport failure', async () => {
+  const { EventEmitter } = require('node:events');
+  const commands = [];
+  const providers = await fetchCodexLimits({}, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    platform: 'darwin',
+    existsSync: () => true,
+    ...noLiveAuth,
+    spawn: (command) => {
+      commands.push(command);
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.stdin = new EventEmitter();
+      child.kill = () => {};
+      child.stdin.write = (line) => {
+        if (commands.length === 1) {
+          const error = Object.assign(new Error('write EPIPE'), { code: 'EPIPE' });
+          queueMicrotask(() => child.stdin.emit('error', error));
+          return;
+        }
+        const message = JSON.parse(String(line));
+        const respond = (result) => {
+          queueMicrotask(() => child.stdout.emit('data', `${JSON.stringify({ id: message.id, result })}\n`));
+        };
+        if (message.method === 'initialize') respond({});
+        if (message.method === 'account/rateLimits/read') {
+          respond({
+            rateLimits: {
+              primary: {
+                usedPercent: 4,
+                resetsAt: '2026-06-01T05:00:00Z',
+                windowDurationMins: 300
+              }
+            }
+          });
+        }
+        if (message.method === 'account/read') {
+          respond({ account: { email: 'live@example.com', planType: 'plus' } });
+        }
+      };
+      return child;
+    }
+  });
+
+  assert.deepEqual(commands, [
+    '/Applications/Codex.app/Contents/Resources/codex',
+    '/Applications/ChatGPT.app/Contents/Resources/codex'
+  ]);
+  assert.equal(providers.status, 'ok');
+  assert.equal(providers.windows[0].remainingPercent, 96);
+});
+
 test('fetchCodexLimits retries empty Codex quota reads on the same RPC session', async () => {
   const { EventEmitter } = require('node:events');
   let spawns = 0;

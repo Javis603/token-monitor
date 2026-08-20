@@ -2718,6 +2718,12 @@ function createJsonRpcClient(child, timeoutMs) {
     rejectAll(error);
   }
 
+  function failStdinTransport(error) {
+    const target = error instanceof Error ? error : new Error(String(error || 'codex app-server stdin failed'));
+    target.codexTransportFailure = true;
+    failTransport(target);
+  }
+
   function abort(error) {
     failTransport(error);
   }
@@ -2743,16 +2749,16 @@ function createJsonRpcClient(child, timeoutMs) {
   });
   child.on('error', failTransport);
   child.on('close', (code) => failTransport(new Error(`codex app-server exited ${code}`)));
-  child.stdin.on?.('error', failTransport);
+  child.stdin.on?.('error', failStdinTransport);
 
   function writeLine(line) {
     if (closed) return;
     try {
       child.stdin.write(line, (error) => {
-        if (error) failTransport(error);
+        if (error) failStdinTransport(error);
       });
     } catch (error) {
-      failTransport(error);
+      failStdinTransport(error);
     }
   }
 
@@ -2778,6 +2784,7 @@ function createJsonRpcClient(child, timeoutMs) {
 }
 
 function shouldTryNextCodexCommand(error) {
+  if (error?.codexTransportFailure) return true;
   if (error?.code === 'ENOENT') return true;
   const message = String(error?.message || '').toLowerCase();
   return (
