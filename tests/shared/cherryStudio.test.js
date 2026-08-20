@@ -17,7 +17,9 @@ const { normalizeClientName } = require('../../src/shared/usage');
 
 test('normalizeClientName maps Cherry Studio sources to cherrystudio', () => {
   assert.equal(normalizeClientName('cherrystudio'), 'cherrystudio');
-  assert.equal(normalizeClientName('Cherry Studio'), 'cherry-studio');
+  assert.equal(normalizeClientName('Cherry Studio'), 'cherrystudio');
+  assert.equal(normalizeClientName('cherry-studio'), 'cherrystudio');
+  assert.equal(normalizeClientName('cherry_studio'), 'cherrystudio');
 });
 
 test('Cherry Studio V1 and V2 roots feed watches and source health', () => {
