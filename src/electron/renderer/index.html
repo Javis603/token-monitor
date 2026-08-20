@@ -1020,6 +1020,43 @@
                 <div id="qoderErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="traeAccountGroup" class="settings-group cursor-account-group">
+              <button id="traeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="traeSettingsDetails">
+                <span data-i18n="settings.trae.title">Trae CN Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="traeAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="traeSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="traeOpenBrowser" data-i18n="settings.trae.openBrowser">Open Trae CN</button>
+                  <button id="traeLogoutButton" class="hidden" data-i18n="settings.trae.clearToken">Clear token</button>
+                  <button id="traeRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="traeManualPanel">
+                  <p class="settings-note" data-i18n="settings.trae.note">Trae CN and SOLO credits are read from the trae.cn API. Local sessions are not detected; enter a token manually.</p>
+                  <p class="settings-note">
+                    <strong>1.</strong> <span data-i18n="settings.trae.step1">Sign in at trae.cn in your browser.</span><br>
+                    <strong>2.</strong> <span data-i18n="settings.trae.step2">Open DevTools (F12 or Cmd+Opt+I) → Network, then select the ide_user_ent_usage request.</span><br>
+                    <strong>3.</strong> <span data-i18n="settings.trae.step3">Under Request Headers, copy Authorization or its value. The Cloud-IDE-JWT prefix is accepted.</span><br>
+                    <strong>4.</strong> <span data-i18n="settings.trae.step4">Optionally copy X-Device-Id, then save the token.</span>
+                  </p>
+                  <div class="settings-row">
+                    <label for="traeTokenInput" data-i18n="settings.trae.token">Access token</label>
+                    <input id="traeTokenInput" type="password" spellcheck="false" autocomplete="off" placeholder="Cloud-IDE-JWT ..." data-i18n-placeholder="settings.trae.tokenPlaceholder" />
+                  </div>
+                  <div class="settings-row">
+                    <label for="traeDeviceIdInput" data-i18n="settings.trae.deviceId">Device ID (optional)</label>
+                    <input id="traeDeviceIdInput" type="text" spellcheck="false" autocomplete="off" placeholder="X-Device-Id" data-i18n-placeholder="settings.trae.deviceIdPlaceholder" />
+                  </div>
+                  <div class="settings-actions">
+                    <button id="traeTokenSubmit" data-i18n="settings.trae.saveToken">Save token</button>
+                  </div>
+                </div>
+                <div id="traeErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
             <div id="commandcodeAccountGroup" class="settings-group cursor-account-group">
               <button id="commandcodeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="commandcodeSettingsDetails">
                 <span data-i18n="settings.commandcode.title">Command Code Account</span>

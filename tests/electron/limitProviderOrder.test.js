@@ -48,6 +48,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'kiro',
     'workbuddy',
     'qoder',
+    'trae',
     'deepseek',
     'openrouter',
     'minimax',

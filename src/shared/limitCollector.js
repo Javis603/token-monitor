@@ -57,6 +57,7 @@ const { ollamaSessionCookie, fetchOllamaLimits } = ollamaLimits;
 const kimiLimits = require('./kimiLimits');
 const { kimiToken, kimiWebToken, fetchKimiLimits } = kimiLimits;
 const workbuddyLimits = require('./workbuddyLimits');
+const traeLimits = require('./traeLimits');
 const {
   grokCredential,
   readAuthJson,
@@ -3932,6 +3933,7 @@ function providerFetchers(deps = {}) {
     volcengine: (providerOptions, probeDeps) => volcengineLimits.fetchVolcengineLimits(providerOptions, probeDeps),
     commandcode: (providerOptions, probeDeps) => commandcodeLimits.fetchCommandcodeLimits(providerOptions, probeDeps),
     qoder: (providerOptions, probeDeps) => qoderLimits.fetchQoderLimits(providerOptions, probeDeps),
+    trae: (providerOptions, probeDeps) => traeLimits.fetchTraeLimits(providerOptions, probeDeps),
     workbuddy: (providerOptions, probeDeps) => workbuddyLimits.fetchWorkbuddyLimits(providerOptions, probeDeps),
     ollama: (providerOptions, probeDeps) => ollamaLimits.fetchOllamaLimits(providerOptions, probeDeps),
     kimi: (providerOptions, probeDeps) => kimiLimits.fetchKimiLimits(providerOptions, probeDeps),
@@ -4284,6 +4286,9 @@ module.exports = {
   fetchVolcengineLimits,
   qoderCookie,
   fetchQoderLimits,
+  traeAccessToken: traeLimits.traeAccessToken,
+  traeDeviceId: traeLimits.traeDeviceId,
+  fetchTraeLimits: traeLimits.fetchTraeLimits,
   fetchWorkbuddyLimits: workbuddyLimits.fetchWorkbuddyLimits,
   commandcodeCookie,
   fetchCommandcodeLimits,

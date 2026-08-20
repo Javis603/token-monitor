@@ -123,6 +123,24 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
   });
 });
 
+test('runtime config scopes Trae credentials and prefers saved settings over env', () => {
+  const settings = { traeAccessToken: 'saved-token', traeDeviceId: 'saved-device' };
+  const limits = limitsConfigFromSettings(settings, {
+    env: {
+      TRAE_ACCESS_TOKEN: 'env-token',
+      TRAE_DEVICE_ID: 'env-device'
+    }
+  });
+  assert.equal(limits.traeAccessToken, 'saved-token');
+  assert.equal(limits.traeDeviceId, 'saved-device');
+
+  const classification = classifySettingsChange(settings, {
+    ...settings,
+    traeDeviceId: 'next-device'
+  });
+  assert.deepEqual(classification.limitScopes, [{ provider: 'trae' }]);
+});
+
 test('limits config resolves managed credentials at dispatch time through context', () => {
   const limits = limitsConfigFromSettings({ codexManagedAccounts: [{ id: 'stale' }] }, {
     env: {},
