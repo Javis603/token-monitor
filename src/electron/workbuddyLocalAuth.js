@@ -5,6 +5,10 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { readRegularFileNoFollow } = require('../shared/credentialStore');
+const {
+  WORKBUDDY_ENTERPRISE_PATH,
+  WORKBUDDY_PERSONAL_PATH
+} = require('../shared/workbuddyLimits');
 
 const WORKBUDDY_AUTH_FILE_NAME = 'workbuddy-desktop.info';
 const WORKBUDDY_LOGOUT_MARKER_SUFFIX = '.logged-out';
@@ -12,6 +16,10 @@ const WORKBUDDY_AUTH_FILE_MAX_BYTES = 1024 * 1024;
 const WORKBUDDY_SESSION_EXPIRY_SKEW_MS = 30 * 1000;
 const WORKBUDDY_API_HOSTS = new Set([
   'copilot.tencent.com'
+]);
+const WORKBUDDY_API_PATHS = new Set([
+  WORKBUDDY_PERSONAL_PATH,
+  WORKBUDDY_ENTERPRISE_PATH
 ]);
 const WORKBUDDY_PROTECTED_HEADERS = new Set([
   'authorization',
@@ -39,10 +47,18 @@ function numberOrNull(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function isAllowedWorkbuddyApiUrl(value) {
+function isAllowedWorkbuddyApiUrl(value, method = 'GET') {
   try {
     const url = new URL(String(value || ''));
-    return url.protocol === 'https:' && WORKBUDDY_API_HOSTS.has(url.hostname.toLowerCase());
+    return String(method || '').toUpperCase() === 'POST'
+      && url.protocol === 'https:'
+      && WORKBUDDY_API_HOSTS.has(url.hostname.toLowerCase())
+      && WORKBUDDY_API_PATHS.has(url.pathname)
+      && !url.username
+      && !url.password
+      && !url.port
+      && !url.search
+      && !url.hash;
   } catch (_) {
     return false;
   }
@@ -67,25 +83,21 @@ function isSupportedWorkbuddyLocalAppPlatform(platform = process.platform) {
   return platform === 'darwin' || platform === 'win32';
 }
 
-function authDirectoryForPlatform(platform = process.platform, homeDir = os.homedir(), env = process.env) {
+function authDirectoriesForPlatform(platform = process.platform, homeDir = os.homedir(), env = process.env) {
   if (platform === 'darwin') {
-    return path.join(homeDir, 'Library', 'Application Support', 'CodeBuddyExtension', 'Data', 'Public', 'auth');
+    return [path.join(homeDir, 'Library', 'Application Support', 'CodeBuddyExtension', 'Data', 'Public', 'auth')];
   }
   if (platform === 'win32') {
-    const appData = cleanText(env?.APPDATA) || path.join(homeDir, 'AppData', 'Roaming');
-    return path.join(appData, 'CodeBuddyExtension', 'Data', 'Public', 'auth');
-  }
-  return null;
-}
-
-function appCandidatesForPlatform(platform = process.platform, homeDir = os.homedir()) {
-  if (platform === 'darwin') {
-    return [
-      '/Applications/WorkBuddy.app',
-      path.join(homeDir, 'Applications', 'WorkBuddy.app')
-    ];
+    const localAppData = cleanText(env?.LOCALAPPDATA) || path.join(homeDir, 'AppData', 'Local');
+    const roamingAppData = cleanText(env?.APPDATA) || path.join(homeDir, 'AppData', 'Roaming');
+    return [...new Set([localAppData, roamingAppData])]
+      .map((root) => path.join(root, 'CodeBuddyExtension', 'Data', 'Public', 'auth'));
   }
   return [];
+}
+
+function authDirectoryForPlatform(platform = process.platform, homeDir = os.homedir(), env = process.env) {
+  return authDirectoriesForPlatform(platform, homeDir, env)[0] || null;
 }
 
 function authPathCandidates(authDirectory) {
@@ -176,56 +188,44 @@ function createWorkbuddyLocalAuth(deps = {}) {
   const homeDir = deps.homeDir || os.homedir();
   const env = deps.env || process.env;
   const supported = isSupportedWorkbuddyLocalAppPlatform(platform);
-  const authDirectory = supported
-    ? deps.authDirectory || authDirectoryForPlatform(platform, homeDir, env)
-    : null;
+  const authDirectories = supported
+    ? deps.authDirectory
+      ? [deps.authDirectory]
+      : authDirectoriesForPlatform(platform, homeDir, env)
+    : [];
   const fetcher = typeof deps.fetch === 'function'
     ? deps.fetch
     : typeof globalThis.fetch === 'function'
       ? globalThis.fetch.bind(globalThis)
       : null;
   const now = typeof deps.now === 'function' ? deps.now : Date.now;
-  const openPath = typeof deps.openPath === 'function' ? deps.openPath : null;
-  const openExternal = typeof deps.openExternal === 'function' ? deps.openExternal : null;
-  let lastCheckedAt = 0;
 
   function locateSession() {
-    lastCheckedAt = now();
+    const checkedAt = now();
     if (!supported) return null;
-    for (const filePath of authPathCandidates(authDirectory)) {
-      const session = readSessionFile(filePath, fsApi, lastCheckedAt);
-      if (session) return session;
+    for (const authDirectory of authDirectories) {
+      for (const filePath of authPathCandidates(authDirectory)) {
+        const hasCanonicalState = fsApi.existsSync(filePath)
+          || fsApi.existsSync(`${filePath}${WORKBUDDY_LOGOUT_MARKER_SUFFIX}`);
+        if (!hasCanonicalState) continue;
+        // Once the preferred location has a canonical file or logout marker,
+        // do not revive a stale session from a legacy fallback directory.
+        return readSessionFile(filePath, fsApi, checkedAt);
+      }
     }
     return null;
   }
 
-  function status() {
-    if (!supported) {
-      lastCheckedAt = now();
-      return {
-        appInstalled: false,
-        authenticated: false,
-        status: 'unsupported',
-        checkedAt: lastCheckedAt
-      };
-    }
-    const appInstalled = fsApi.existsSync(authDirectory)
-      || appCandidatesForPlatform(platform, homeDir).some((candidate) => fsApi.existsSync(candidate));
-    const session = locateSession();
-    return {
-      appInstalled,
-      authenticated: Boolean(session && !session.expired),
-      status: !appInstalled ? 'notDetected' : session && !session.expired ? 'connected' : 'signInRequired',
-      checkedAt: lastCheckedAt
-    };
-  }
-
   function getSessionInfo() {
-    return sessionInfo(locateSession());
+    const session = locateSession();
+    return sessionInfo(session?.expired ? null : session);
   }
 
   async function request(url, init = {}, expectedSession = null) {
-    if (!isAllowedWorkbuddyApiUrl(url)) throw authError('unavailable', 'WorkBuddy billing endpoint is not allowed');
+    const requestInit = sanitizeRequestInit(init);
+    if (!isAllowedWorkbuddyApiUrl(url, requestInit.method)) {
+      throw authError('unavailable', 'WorkBuddy billing endpoint is not allowed');
+    }
     const session = locateSession();
     if (!session || session.expired) throw authError('unauthorized', 'WorkBuddy app sign-in is required');
     if (!matchesExpectedSession(expectedSession, session)) {
@@ -233,7 +233,6 @@ function createWorkbuddyLocalAuth(deps = {}) {
     }
     if (!fetcher) throw authError('unavailable', 'WorkBuddy billing transport is unavailable');
 
-    const requestInit = sanitizeRequestInit(init);
     const headers = {
       ...requestInit.headers,
       Accept: requestInit.headers.Accept || 'application/json',
@@ -257,27 +256,9 @@ function createWorkbuddyLocalAuth(deps = {}) {
     return response;
   }
 
-  async function openApp() {
-    if (!supported) throw new Error('WorkBuddy local app balance monitoring is not supported on this platform');
-    const candidates = appCandidatesForPlatform(platform, homeDir);
-    const appPath = candidates.find((candidate) => fsApi.existsSync(candidate));
-    if (appPath && openPath) {
-      const error = await openPath(appPath);
-      if (error) throw new Error(String(error));
-      return { ok: true };
-    }
-    if (openExternal) {
-      await openExternal('workbuddy://');
-      return { ok: true };
-    }
-    throw new Error('WorkBuddy app cannot be opened on this device');
-  }
-
   return {
     getSessionInfo,
-    openApp,
     request,
-    status,
     dispose() {}
   };
 }
@@ -287,7 +268,7 @@ module.exports = {
   WORKBUDDY_AUTH_FILE_MAX_BYTES,
   WORKBUDDY_LOGOUT_MARKER_SUFFIX,
   WORKBUDDY_SESSION_EXPIRY_SKEW_MS,
-  appCandidatesForPlatform,
+  authDirectoriesForPlatform,
   authDirectoryForPlatform,
   createWorkbuddyLocalAuth,
   isAllowedWorkbuddyApiUrl,

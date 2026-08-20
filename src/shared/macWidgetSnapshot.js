@@ -139,16 +139,12 @@ function buildLimitWindow(window) {
   );
   const metricValue = String(window.metric || '').trim().toLowerCase();
   const metric = VALID_LIMIT_WINDOW_METRICS.has(metricValue) ? metricValue : null;
-  const displayRole = String(window.displayRole || '').trim().toLowerCase() === 'balance' ? 'balance' : null;
-  const unit = String(window.unit || '').trim().toLowerCase() === 'credits' ? 'credits' : null;
   const remaining = optionalFiniteNumber(window.remaining);
   const rawCurrency = String(window.currency || '').trim().toUpperCase();
   const currency = /^[A-Z]{3,8}$/.test(rawCurrency) ? rawCurrency : null;
   return {
     kind,
     metric,
-    ...(displayRole ? { displayRole } : {}),
-    ...(unit ? { unit } : {}),
     showMeter: window.showMeter !== false,
     usedPercent,
     remainingPercent,
@@ -165,8 +161,6 @@ function buildProviderBalance(provider) {
   const source = provider?.balance;
   if (!source || typeof source !== 'object') return null;
   const amount = optionalFiniteNumber(source.amount);
-  const unit = String(source.unit || '').trim().toLowerCase();
-  if (amount !== null && unit === 'credits') return { amount, unit };
   const currency = String(source.currency || '').trim().toUpperCase();
   if (amount === null || !Object.hasOwn(CURRENCIES, currency)) return null;
   return { amount, currency };

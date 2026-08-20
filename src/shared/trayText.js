@@ -169,11 +169,11 @@
     return Number.isFinite(number) ? `${Math.round(Math.max(0, Math.min(100, number)))}%` : '';
   }
 
-  // Balance windows may carry money or provider units. Resolve their meter
-  // percentage through the shared display semantics instead of a provider list.
+  // Credits windows carry money, not a wire percentage; derive one so a
+  // balance-only provider can still be picked and metered.
   function remainingPercent(window, provider = null) {
-    return balanceDisplay.isBalanceWindow(window)
-      ? balanceDisplay.balanceMeterPercent(provider, window)
+    return balanceDisplay.isCreditsWindow(window)
+      ? balanceDisplay.creditsMeterPercent(provider, window)
       : limitFillPercent(window?.remainingPercent, window?.usedPercent, false);
   }
 

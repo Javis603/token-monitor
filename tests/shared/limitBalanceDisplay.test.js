@@ -69,6 +69,7 @@ test('formatMoney uses a symbol for known currencies and a prefix otherwise', ()
   assert.equal(formatMoney(7.006, 'USD'), '$7.01');
   assert.equal(formatMoney(4, 'CNY'), '¥4.00');
   assert.equal(formatMoney(12.5, 'EUR'), 'EUR 12.50');
+  assert.equal(formatMoney(680, 'CREDITS'), '680.00');
   assert.equal(formatMoney(0, 'USD'), '$0.00');
   assert.equal(formatMoney(null, 'USD'), '');
 });
@@ -77,6 +78,7 @@ test('formatCompactMoney only abbreviates at or above 100k', () => {
   assert.equal(formatCompactMoney(12.5, 'USD'), '$12.50');
   assert.equal(formatCompactMoney(99_999.99, 'USD'), '$99999.99');
   assert.equal(formatCompactMoney(1_250_000, 'USD'), '$1.25M');
+  assert.equal(formatCompactMoney(1_250_000, 'CREDITS'), '1.25M');
   assert.equal(formatCompactMoney(null, 'USD'), '');
 });
 

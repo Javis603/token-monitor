@@ -88,25 +88,20 @@
         const providerId = String(account?.providerId || '').trim().toLowerCase();
         const windows = accountWindows(account)
           .map((window, windowIndex) => {
-            const balance = balanceDisplay.isBalanceWindow(window);
+            const credits = balanceDisplay.isCreditsWindow(window);
             return {
               kind: String(window.kind || '').trim().toLowerCase(),
               metric: window.metric || '',
-              displayRole: window.displayRole || '',
-              unit: window.unit || '',
               label: window.label || window.kind || '',
-              // Balance windows keep an absolute headline value. Their meter
-              // remains secondary and uses an explicit provider percentage
-              // when one exists.
-              remainingPercent: balance
-                ? balanceDisplay.balanceMeterPercent(account, window)
+              // Credits windows carry money; their meter percentage is derived
+              // here rather than read off the wire.
+              remainingPercent: credits
+                ? balanceDisplay.creditsMeterPercent(account, window)
                 : remainingPercent(window),
-              remaining: balance
-                ? balanceDisplay.balanceAmount(account, window)
+              remaining: credits
+                ? balanceDisplay.creditsAmount(account, window)
                 : finiteNumber(window.remaining),
-              currency: balance && balanceDisplay.isCreditsWindow(window)
-                ? balanceDisplay.creditsCurrency(account, window)
-                : '',
+              currency: credits ? balanceDisplay.creditsCurrency(account, window) : '',
               resetsAt: window.resetsAt,
               resetDescription: window.resetDescription || '',
               value: window.value || '',
@@ -119,8 +114,7 @@
           .filter((window) => window.remainingPercent != null
             || window.planStatus === 'expired'
             || window.value
-            || ((window.displayRole === 'balance' || window.metric === 'credits')
-              && (window.remaining != null || window.detail)))
+            || (window.metric === 'credits' && (window.remaining != null || window.detail)))
           .sort((a, b) => {
             if (providerId === 'antigravity') return a.index - b.index;
             const aPriority = windowPriority.get(a.kind) ?? 10;

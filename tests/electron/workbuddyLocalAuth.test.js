@@ -10,6 +10,7 @@ const {
   WORKBUDDY_AUTH_FILE_NAME,
   WORKBUDDY_LOGOUT_MARKER_SUFFIX,
   WORKBUDDY_SESSION_EXPIRY_SKEW_MS,
+  authDirectoriesForPlatform,
   authDirectoryForPlatform,
   createWorkbuddyLocalAuth,
   isAllowedWorkbuddyApiUrl,
@@ -51,17 +52,58 @@ test('WorkBuddy local auth resolves only supported platform paths', () => {
     path.join(homeDir, 'Library', 'Application Support', 'CodeBuddyExtension', 'Data', 'Public', 'auth')
   );
   assert.equal(
-    authDirectoryForPlatform('win32', homeDir, { APPDATA: '/Users/fixture/Roaming' }),
-    path.join('/Users/fixture/Roaming', 'CodeBuddyExtension', 'Data', 'Public', 'auth')
+    authDirectoryForPlatform('win32', homeDir, {
+      LOCALAPPDATA: '/Users/fixture/Local',
+      APPDATA: '/Users/fixture/Roaming'
+    }),
+    path.join('/Users/fixture/Local', 'CodeBuddyExtension', 'Data', 'Public', 'auth')
   );
   assert.equal(
     authDirectoryForPlatform('win32', homeDir, {}),
-    path.join(homeDir, 'AppData', 'Roaming', 'CodeBuddyExtension', 'Data', 'Public', 'auth')
+    path.join(homeDir, 'AppData', 'Local', 'CodeBuddyExtension', 'Data', 'Public', 'auth')
   );
+  assert.deepEqual(authDirectoriesForPlatform('win32', homeDir, {
+    LOCALAPPDATA: '/Users/fixture/Local',
+    APPDATA: '/Users/fixture/Roaming'
+  }), [
+    path.join('/Users/fixture/Local', 'CodeBuddyExtension', 'Data', 'Public', 'auth'),
+    path.join('/Users/fixture/Roaming', 'CodeBuddyExtension', 'Data', 'Public', 'auth')
+  ]);
   assert.equal(authDirectoryForPlatform('linux', homeDir, {}), null);
 });
 
-test('WorkBuddy local auth is unsupported on Linux and never reads an injected session path', async () => {
+test('WorkBuddy Windows auth prefers LocalAppData and only falls back when it has no canonical state', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-workbuddy-windows-'));
+  const localRoot = path.join(root, 'Local');
+  const roamingRoot = path.join(root, 'Roaming');
+  const suffix = path.join('CodeBuddyExtension', 'Data', 'Public', 'auth');
+  const localAuth = path.join(localRoot, suffix);
+  const roamingAuth = path.join(roamingRoot, suffix);
+  fs.mkdirSync(localAuth, { recursive: true });
+  fs.mkdirSync(roamingAuth, { recursive: true });
+  fs.writeFileSync(path.join(roamingAuth, WORKBUDDY_AUTH_FILE_NAME), JSON.stringify(sessionDocument({
+    account: { uid: 'roaming-user' }
+  })), 'utf8');
+  try {
+    const deps = {
+      platform: 'win32',
+      homeDir: root,
+      env: { LOCALAPPDATA: localRoot, APPDATA: roamingRoot }
+    };
+    assert.equal(createWorkbuddyLocalAuth(deps).getSessionInfo().userId, 'roaming-user');
+
+    const localPath = path.join(localAuth, WORKBUDDY_AUTH_FILE_NAME);
+    fs.writeFileSync(localPath, JSON.stringify(sessionDocument({ account: { uid: 'local-user' } })), 'utf8');
+    assert.equal(createWorkbuddyLocalAuth(deps).getSessionInfo().userId, 'local-user');
+
+    fs.writeFileSync(`${localPath}${WORKBUDDY_LOGOUT_MARKER_SUFFIX}`, 'logged-out', 'utf8');
+    assert.equal(createWorkbuddyLocalAuth(deps).getSessionInfo().authenticated, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('WorkBuddy local auth is unsupported on Linux and never reads an injected session path', () => {
   const fixture = createFixture();
   let fileSystemCalls = 0;
   const fsApi = Object.create(fs);
@@ -74,17 +116,14 @@ test('WorkBuddy local auth is unsupported on Linux and never reads an injected s
       authDirectory: fixture.root,
       fs: fsApi
     });
-    assert.equal(auth.status().status, 'unsupported');
-    assert.equal(auth.status().authenticated, false);
     assert.equal(auth.getSessionInfo().authenticated, false);
-    await assert.rejects(auth.openApp(), /not supported on this platform/);
     assert.equal(fileSystemCalls, 0);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
 });
 
-test('WorkBuddy local auth reads the app-owned session without exposing it in status', () => {
+test('WorkBuddy local auth reads only non-secret session metadata for the collector', () => {
   const fixture = createFixture();
   try {
     fs.writeFileSync(fixture.authPath, JSON.stringify(sessionDocument({
@@ -98,16 +137,6 @@ test('WorkBuddy local auth reads the app-owned session without exposing it in st
       platform: 'darwin',
       homeDir: fixture.root
     });
-    const status = auth.status();
-    assert.deepEqual(Object.keys(status).sort(), ['appInstalled', 'authenticated', 'checkedAt', 'status']);
-    assert.equal(status.appInstalled, true);
-    assert.equal(status.authenticated, true);
-    assert.equal(status.status, 'connected');
-    for (const field of ['userId', 'enterpriseId', 'departmentInfo', 'domain', 'accessToken', 'accountType']) {
-      assert.equal(Object.hasOwn(status, field), false, `${field} must stay in the main process`);
-    }
-    assert.doesNotMatch(JSON.stringify(status), /fixture-access-token|local-user|enterprise-123|Engineering/);
-
     const sessionInfo = auth.getSessionInfo();
     assert.equal(sessionInfo.userId, 'local-user');
     assert.equal(sessionInfo.enterpriseId, 'enterprise-123');
@@ -132,10 +161,6 @@ test('WorkBuddy local auth ignores oversized app session files without leaking t
       platform: 'darwin',
       homeDir: fixture.root
     });
-    const status = auth.status();
-    assert.equal(status.authenticated, false);
-    assert.equal(status.status, 'signInRequired');
-    assert.doesNotMatch(JSON.stringify(status), /oversized-user|oversized-access-token/);
     assert.equal(auth.getSessionInfo().authenticated, false);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
@@ -152,8 +177,6 @@ test('WorkBuddy local auth trusts only the canonical app session filename', () =
       platform: 'darwin',
       homeDir: fixture.root
     });
-    assert.equal(auth.status().authenticated, false);
-    assert.equal(auth.status().status, 'signInRequired');
     assert.equal(auth.getSessionInfo().authenticated, false);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
@@ -176,10 +199,6 @@ test('WorkBuddy local auth refuses a symlinked canonical app session', { skip: p
       platform: 'darwin',
       homeDir: fixture.root
     });
-    const status = auth.status();
-    assert.equal(status.authenticated, false);
-    assert.equal(status.status, 'signInRequired');
-    assert.doesNotMatch(JSON.stringify(status), /symlink-user|symlink-access-token/);
     assert.equal(auth.getSessionInfo().authenticated, false);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
@@ -196,8 +215,7 @@ test('WorkBuddy logout marker on the canonical file cannot be bypassed by a sibl
       platform: 'darwin',
       homeDir: fixture.root
     });
-    assert.equal(auth.status().authenticated, false);
-    assert.equal(auth.status().status, 'signInRequired');
+    assert.equal(auth.getSessionInfo().authenticated, false);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -242,15 +260,14 @@ test('WorkBuddy logout marker and expired app sessions require sign-in again', (
   try {
     fs.writeFileSync(`${fixture.authPath}${WORKBUDDY_LOGOUT_MARKER_SUFFIX}`, 'logged-out', 'utf8');
     const loggedOut = createWorkbuddyLocalAuth({ authDirectory: fixture.root, platform: 'darwin' });
-    assert.equal(loggedOut.status().status, 'signInRequired');
+    assert.equal(loggedOut.getSessionInfo().authenticated, false);
 
     fs.rmSync(`${fixture.authPath}${WORKBUDDY_LOGOUT_MARKER_SUFFIX}`);
     fs.writeFileSync(fixture.authPath, JSON.stringify(sessionDocument({
       auth: { expiresAt: Date.now() - 60 * 1000 }
     })), 'utf8');
     const expired = createWorkbuddyLocalAuth({ authDirectory: fixture.root, platform: 'darwin' });
-    assert.equal(expired.status().authenticated, false);
-    assert.equal(expired.status().status, 'signInRequired');
+    assert.equal(expired.getSessionInfo().authenticated, false);
     assert.deepEqual(normalizeStoredSession(null), null);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
@@ -309,10 +326,16 @@ test('WorkBuddy local auth rejects an app session switch during a billing reques
 });
 
 test('WorkBuddy local auth accepts only the exact production billing host', () => {
-  assert.equal(isAllowedWorkbuddyApiUrl('https://copilot.tencent.com/v2/billing/meter/get-user-resource'), true);
-  assert.equal(isAllowedWorkbuddyApiUrl('https://staging-copilot.tencent.com/v2/billing/meter/get-user-resource'), false);
-  assert.equal(isAllowedWorkbuddyApiUrl('https://billing.copilot.tencent.com/v2/billing/meter/get-user-resource'), false);
-  assert.equal(isAllowedWorkbuddyApiUrl('http://copilot.tencent.com/v2/billing/meter/get-user-resource'), false);
+  const personal = 'https://copilot.tencent.com/v2/billing/meter/get-user-resource';
+  const enterprise = 'https://copilot.tencent.com/v2/billing/meter/get-enterprise-user-usage';
+  assert.equal(isAllowedWorkbuddyApiUrl(personal, 'POST'), true);
+  assert.equal(isAllowedWorkbuddyApiUrl(enterprise, 'post'), true);
+  assert.equal(isAllowedWorkbuddyApiUrl(personal, 'GET'), false);
+  assert.equal(isAllowedWorkbuddyApiUrl('https://copilot.tencent.com/v2/billing/meter/other', 'POST'), false);
+  assert.equal(isAllowedWorkbuddyApiUrl(`${personal}?next=other`, 'POST'), false);
+  assert.equal(isAllowedWorkbuddyApiUrl('https://staging-copilot.tencent.com/v2/billing/meter/get-user-resource', 'POST'), false);
+  assert.equal(isAllowedWorkbuddyApiUrl('https://billing.copilot.tencent.com/v2/billing/meter/get-user-resource', 'POST'), false);
+  assert.equal(isAllowedWorkbuddyApiUrl('http://copilot.tencent.com/v2/billing/meter/get-user-resource', 'POST'), false);
 });
 
 test('WorkBuddy request sanitization never forwards caller authentication material', () => {

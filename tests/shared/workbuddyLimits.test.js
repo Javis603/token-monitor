@@ -59,8 +59,8 @@ test('parsePersonalUsage aggregates valid WorkBuddy resource packages', () => {
   assert.equal(usage.resetsAt, null);
   assert.equal(usage.window.kind, 'billing');
   assert.equal(usage.window.label, 'Credits');
-  assert.equal(usage.window.displayRole, 'balance');
-  assert.equal(usage.window.unit, 'credits');
+  assert.equal(usage.window.metric, 'credits');
+  assert.equal(usage.window.currency, 'CREDITS');
   assert.equal(usage.window.usedPercent, 40);
 });
 
@@ -149,10 +149,10 @@ test('fetchWorkbuddyLimits sends the private personal billing request without ex
   assert.match(provider.accountKey, /^sha256:/);
   assert.equal(provider.windows[0].remaining, 76);
   assert.equal(provider.windows[0].limit, 100);
-  assert.equal(provider.windows[0].displayRole, 'balance');
-  assert.equal(provider.windows[0].unit, 'credits');
+  assert.equal(provider.windows[0].metric, 'credits');
+  assert.equal(provider.windows[0].currency, 'CREDITS');
   assert.equal(provider.balance.amount, 76);
-  assert.equal(provider.balance.unit, 'credits');
+  assert.equal(provider.balance.currency, 'CREDITS');
   assert.equal(provider.balance.todaySpend, null);
   assert.equal(provider.balance.weekSpend, null);
   assert.equal(provider.balance.monthSpend, null);
@@ -168,7 +168,7 @@ test('fetchWorkbuddyLimits sends the private personal billing request without ex
 test('fetchWorkbuddyLimits uses the WorkBuddy app session without asking users for a token', async () => {
   const requests = [];
   const provider = await fetchWorkbuddyLimits(
-    { workbuddyLocalAppEnabled: true },
+    { workbuddyDesktopSessionEnabled: true },
     {
       env: {},
       now: () => NOW,
@@ -203,7 +203,7 @@ test('fetchWorkbuddyLimits uses the WorkBuddy app session without asking users f
   assert.equal(provider.sourceDetail, 'app');
   assert.equal(provider.accountLabel, 'Personal');
   assert.equal(provider.windows[0].remaining, 125);
-  assert.equal(provider.balance.unit, 'credits');
+  assert.equal(provider.balance.currency, 'CREDITS');
   assert.match(provider.accountKey, /^sha256:/);
   assert.doesNotMatch(JSON.stringify(provider), /browser-account-1|copilot\.tencent\.com/);
 });
@@ -231,8 +231,8 @@ test('fetchWorkbuddyLimits reads explicit environment credentials and supports e
   assert.equal(provider.windows[0].used, 37);
   assert.equal(provider.windows[0].remaining, 63);
   assert.equal(provider.windows[0].limit, 100);
-  assert.equal(provider.windows[0].displayRole, 'balance');
-  assert.equal(provider.windows[0].unit, 'credits');
+  assert.equal(provider.windows[0].metric, 'credits');
+  assert.equal(provider.windows[0].currency, 'CREDITS');
   assert.equal(provider.balance.amount, 63);
 });
 
@@ -262,6 +262,25 @@ test('fetchWorkbuddyLimits fails closed for missing credentials and private endp
   });
   assert.equal(unauthorized.status, 'unauthorized');
   assert.equal(JSON.stringify(unauthorized).includes('private detail'), false);
+});
+
+test('fetchWorkbuddyLimits rejects unsuccessful application codes without exposing response details', async () => {
+  const provider = await fetchWorkbuddyLimits({ workbuddyAccessToken: 'fixture-token' }, {
+    env: {},
+    now: () => NOW,
+    fetch: async () => response({ code: 401, message: 'private session detail' })
+  });
+  assert.equal(provider.status, 'unauthorized');
+  assert.doesNotMatch(JSON.stringify(provider), /private session detail/);
+
+  for (const code of [0, 200, '0', '200']) {
+    const accepted = await fetchWorkbuddyLimits({ workbuddyAccessToken: 'fixture-token' }, {
+      env: {},
+      now: () => NOW,
+      fetch: async () => response({ code, data: { Response: { Data: { Accounts: [] } } } })
+    });
+    assert.equal(accepted.status, 'ok');
+  }
 });
 
 test('WorkBuddy always uses the official production billing endpoint', async () => {
@@ -304,11 +323,11 @@ test('WorkBuddy account identity falls back deterministically from response acco
   assert.equal(workbuddyAccountKey('', '', '', ''), workbuddyAccountKey('', '', '', ''));
 });
 
-test('WorkBuddy Local App is disabled without explicit opt-in and does not call its transport', async () => {
+test('WorkBuddy Local App is disabled outside the desktop provider lane and does not call its transport', async () => {
   let called = false;
   const provider = await fetchWorkbuddyLimits({}, {
     env: {},
-    workbuddyLocalAppEnabled: false,
+    workbuddyDesktopSessionEnabled: false,
     workbuddyFetch: async () => {
       called = true;
       return response({});
@@ -332,5 +351,5 @@ test('limitCollector dispatches the WorkBuddy provider through the shared provid
 
   assert.deepEqual(summary.providers.map((provider) => provider.provider), ['workbuddy']);
   assert.equal(summary.providers[0].windows[0].remaining, 15);
-  assert.equal(summary.providers[0].balance.unit, 'credits');
+  assert.equal(summary.providers[0].balance.currency, 'CREDITS');
 });

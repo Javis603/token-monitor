@@ -173,8 +173,8 @@ function parsePersonalUsage(body) {
     window: {
       kind: 'billing',
       label: 'Credits',
-      displayRole: 'balance',
-      unit: 'credits',
+      metric: 'credits',
+      currency: 'CREDITS',
       used,
       limit,
       remaining,
@@ -218,8 +218,8 @@ function parseEnterpriseUsage(body) {
       window: {
         kind: 'billing',
         label: 'Credits',
-        displayRole: 'balance',
-        unit: 'credits',
+        metric: 'credits',
+        currency: 'CREDITS',
         used,
         detail: 'unlimited',
         resetsAt,
@@ -239,8 +239,8 @@ function parseEnterpriseUsage(body) {
     window: {
       kind: 'billing',
       label: 'Credits',
-      displayRole: 'balance',
-      unit: 'credits',
+      metric: 'credits',
+      currency: 'CREDITS',
       used,
       limit: safeLimit,
       remaining,
@@ -263,6 +263,16 @@ function httpError(status) {
   return error;
 }
 
+function applicationError(code) {
+  const error = new Error(`WorkBuddy billing response returned application code ${code}`);
+  error.status = code === 401 || code === 403
+    ? 'unauthorized'
+    : code === 429
+      ? 'sourceRateLimited'
+      : 'error';
+  return error;
+}
+
 async function fetchJson(url, init, deps = {}) {
   const deadlineMs = Number(deps.workbuddyFetchTimeoutMs || deps.fetchTimeoutMs || WORKBUDDY_FETCH_TIMEOUT_MS);
   return runWithProbeDeadline(
@@ -274,6 +284,10 @@ async function fetchJson(url, init, deps = {}) {
         try { body = await response.json(); } catch (_) { body = null; }
       }
       if (response?.ok === false || status >= 400) throw httpError(status);
+      if (body && typeof body === 'object' && Object.hasOwn(body, 'code')) {
+        const code = numberOrNull(body.code);
+        if (code !== 0 && code !== 200) throw applicationError(code ?? 'invalid');
+      }
       return body;
     },
     { signal: deps.signal, deadlineMs }
@@ -324,7 +338,7 @@ async function fetchWorkbuddyLimits(options = {}, deps = {}) {
   // app. If an advanced/headless token is present, keep the explicit token
   // path deterministic rather than mixing its metadata with the app session.
   const useLocalApp = !token
-    && options.workbuddyLocalAppEnabled === true
+    && options.workbuddyDesktopSessionEnabled === true
     && typeof deps.workbuddyFetch === 'function';
   const source = {
     provider: 'workbuddy',
@@ -382,7 +396,7 @@ async function fetchWorkbuddyLimits(options = {}, deps = {}) {
     const usage = isEnterprise ? parseEnterpriseUsage(body) : parsePersonalUsage(body);
     const resolvedAccountKey = workbuddyAccountKey(token, userId, enterpriseId, usage.accountId);
     const balance = usage.window
-      ? { amount: usage.remaining, unit: 'credits' }
+      ? { amount: usage.remaining, currency: 'CREDITS' }
       : null;
     return normalizeLimitProvider({
       ...source,

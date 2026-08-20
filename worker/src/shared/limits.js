@@ -114,14 +114,6 @@ function normalizeWindowDetail(value) {
   return raw.slice(0, 96);
 }
 
-function normalizeWindowDisplayRole(value) {
-  return String(value || '').trim().toLowerCase() === 'balance' ? 'balance' : null;
-}
-
-function normalizeWindowUnit(value) {
-  return String(value || '').trim().toLowerCase() === 'credits' ? 'credits' : null;
-}
-
 function normalizeWindowCurrency(value) {
   return String(value || '').trim().toUpperCase().slice(0, 8) || null;
 }
@@ -166,8 +158,6 @@ function normalizeLimitWindow(input) {
   const metric = VALID_LIMIT_WINDOW_METRICS.has(metricValue) ? metricValue : null;
   const sourceValue = String(input.source || '').trim().toLowerCase();
   const source = VALID_LIMIT_WINDOW_SOURCES.has(sourceValue) ? sourceValue : null;
-  const displayRole = normalizeWindowDisplayRole(input.displayRole ?? input.display_role);
-  const unit = normalizeWindowUnit(input.unit);
   const used = numberOrNull(input.used);
   const limit = numberOrNull(input.limit);
   const remaining = numberOrNull(input.remaining);
@@ -176,8 +166,6 @@ function normalizeLimitWindow(input) {
     kind,
     ...(metric ? { metric } : {}),
     ...(source ? { source } : {}),
-    ...(displayRole ? { displayRole } : {}),
-    ...(unit ? { unit } : {}),
     label: normalizeWindowLabel(input.label || input.displayLabel || input.title),
     used,
     limit,
@@ -229,7 +217,6 @@ function normalizeProviderBalance(input) {
     || input.account_currency
     || ''
   ).trim().toUpperCase().slice(0, 8) || null;
-  const unit = normalizeWindowUnit(input.unit ?? input.balanceUnit ?? input.balance_unit);
   const todaySpend = numberOrNull(input.todaySpend ?? input.today_spend);
   const weekSpend = numberOrNull(input.weekSpend ?? input.week_spend);
   const monthSpend = numberOrNull(input.monthSpend ?? input.month_spend);
@@ -257,7 +244,6 @@ function normalizeProviderBalance(input) {
   if (
     amount === null
     && !currency
-    && !unit
     && todaySpend === null
     && weekSpend === null
     && monthSpend === null
@@ -283,7 +269,6 @@ function normalizeProviderBalance(input) {
   return {
     amount,
     currency,
-    ...(unit ? { unit } : {}),
     todaySpend,
     weekSpend,
     monthSpend,
@@ -412,9 +397,7 @@ function normalizeLimitProvider(input) {
   // hub ingest pass through — so no surface has to remember to do it. Only the
   // amount is restored; the meter percentage stays a display-layer derivation.
   // Removable once no supported device predates that change.
-  if (balance && balance.amount !== null && !windows.some((window) => (
-    window.metric === 'credits' || window.displayRole === 'balance'
-  ))) {
+  if (balance && balance.amount !== null && !windows.some((window) => window.metric === 'credits')) {
     windows.push(normalizeLimitWindow({
       kind: 'billing',
       metric: 'credits',
@@ -621,13 +604,9 @@ function mergeCodexTransientWindows(previousInput, currentInput, nowMs = Date.no
 // is not carried forward, so an offline device cannot pin an old balance.
 function carryProviderBalance(winner, loser) {
   if (!loser || winner.balance || !loser.balance || loser.stale) return winner;
-  const balanceWindow = (loser.windows || []).find((window) => (
-    window?.metric === 'credits' || window?.displayRole === 'balance'
-  ));
-  const windows = balanceWindow && !(winner.windows || []).some((window) => (
-    window?.metric === 'credits' || window?.displayRole === 'balance'
-  ))
-    ? [...(winner.windows || []), balanceWindow]
+  const creditsWindow = (loser.windows || []).find((window) => window?.metric === 'credits');
+  const windows = creditsWindow && !(winner.windows || []).some((window) => window?.metric === 'credits')
+    ? [...(winner.windows || []), creditsWindow]
     : winner.windows;
   return { ...winner, balance: loser.balance, windows };
 }

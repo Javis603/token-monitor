@@ -1165,19 +1165,19 @@ test('normalizeLimitWindow preserves only documented component sources', () => {
   assert.equal('source' in normalizeLimitWindow({ kind: 'session' }), false);
 });
 
-test('normalizeLimitWindow preserves non-currency balance display semantics', () => {
+test('normalizeLimitWindow preserves WorkBuddy credits on the shared credits contract', () => {
   const window = normalizeLimitWindow({
     kind: 'billing',
     label: 'Credits',
-    displayRole: 'balance',
-    unit: 'credits',
+    metric: 'credits',
+    currency: 'CREDITS',
     used: 580.41,
     limit: 1650,
     remaining: 1069.59
   });
 
-  assert.equal(window.displayRole, 'balance');
-  assert.equal(window.unit, 'credits');
+  assert.equal(window.metric, 'credits');
+  assert.equal(window.currency, 'CREDITS');
   assert.equal(window.remaining, 1069.59);
   assert.equal(window.remainingPercent, 64.824);
 });
@@ -1227,19 +1227,19 @@ test('normalizeLimitProvider never duplicates a WorkBuddy balance window', () =>
     windows: [{
       kind: 'billing',
       label: 'Credits',
-      displayRole: 'balance',
-      unit: 'credits',
+      metric: 'credits',
+      currency: 'CREDITS',
       remaining: 1069.59,
       limit: 1650,
       used: 580.41
     }],
-    balance: { amount: 1069.59, unit: 'credits' }
+    balance: { amount: 1069.59, currency: 'CREDITS' }
   });
 
   assert.equal(current.windows.length, 1);
-  assert.equal(current.windows[0].displayRole, 'balance');
-  assert.equal(current.windows[0].unit, 'credits');
-  assert.equal(current.balance.unit, 'credits');
+  assert.equal(current.windows[0].metric, 'credits');
+  assert.equal(current.windows[0].currency, 'CREDITS');
+  assert.equal(current.balance.currency, 'CREDITS');
 });
 
 test('normalizeLimitProvider leaves percentage-only providers alone', () => {

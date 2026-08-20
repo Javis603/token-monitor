@@ -49,10 +49,9 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   zaiteam: ['zaiTeamApiKey', 'zaiTeamOrganizationId', 'zaiTeamProjectId'],
   volcengine: ['volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion'],
   qoder: ['qoderCookie', 'qoderSite'],
-  // WorkBuddy's desktop widget reads the session owned by the WorkBuddy app
-  // only after the user explicitly enables local-app monitoring. Token and
-  // metadata fields remain available to headless/CLI deployments.
-  workbuddy: ['workbuddyLocalAppEnabled', 'workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo'],
+  // The desktop widget auto-detects WorkBuddy when the provider itself is
+  // enabled. Token and metadata fields remain available to headless/CLI deployments.
+  workbuddy: ['workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo'],
   commandcode: ['commandcodeCookie'],
   kimi: ['kimiApiKey', 'kimiWebAccessToken'],
   ollama: ['ollamaCookie'],
@@ -154,31 +153,31 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     workbuddyUserId: workbuddySettings.workbuddyUserId
       || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_USER_ID
       || workbuddyEnv.WORKBUDDY_USER_ID
-      || (context.workbuddyLocalAppEnabled === true ? workbuddyLocalSession.userId : '')
+      || (context.workbuddyDesktopSessionEnabled === true ? workbuddyLocalSession.userId : '')
       || '',
     workbuddyEnterpriseId: workbuddySettings.workbuddyEnterpriseId
       || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_ENTERPRISE_ID
       || workbuddyEnv.WORKBUDDY_ENTERPRISE_ID
-      || (context.workbuddyLocalAppEnabled === true ? workbuddyLocalSession.enterpriseId : '')
+      || (context.workbuddyDesktopSessionEnabled === true ? workbuddyLocalSession.enterpriseId : '')
       || '',
     workbuddyDomain: workbuddySettings.workbuddyDomain
       || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_DOMAIN
       || workbuddyEnv.WORKBUDDY_DOMAIN
-      || (context.workbuddyLocalAppEnabled === true ? workbuddyLocalSession.domain : '')
+      || (context.workbuddyDesktopSessionEnabled === true ? workbuddyLocalSession.domain : '')
       || '',
     workbuddyDepartmentInfo: workbuddySettings.workbuddyDepartmentInfo
       || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_DEPARTMENT_INFO
       || workbuddyEnv.WORKBUDDY_DEPARTMENT_INFO
-      || (context.workbuddyLocalAppEnabled === true ? workbuddyLocalSession.departmentInfo : '')
+      || (context.workbuddyDesktopSessionEnabled === true ? workbuddyLocalSession.departmentInfo : '')
       || '',
-    workbuddyAccountType: context.workbuddyLocalAppEnabled === true
+    workbuddyAccountType: context.workbuddyDesktopSessionEnabled === true
       ? workbuddyLocalSession.accountType || ''
       : '',
     workbuddyLocale: workbuddySettings.workbuddyLocale
       || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_LOCALE
       || workbuddyEnv.WORKBUDDY_LOCALE
       || '',
-    workbuddyLocalAppEnabled: context.workbuddyLocalAppEnabled === true,
+    workbuddyDesktopSessionEnabled: context.workbuddyDesktopSessionEnabled === true,
     kimiApiKey: settings.kimiApiKey || '',
     kimiWebAccessToken: settings.kimiWebAccessToken || '',
     ollamaCookie: settings.ollamaCookie || '',

@@ -780,7 +780,7 @@ test('Home no longer synthesizes a balance window for DeepSeek', () => {
   assert.equal(row.windows[0].remaining, 4);
 });
 
-test('Home shows WorkBuddy credits as an absolute balance with its points unit', () => {
+test('Home shows WorkBuddy credits through the shared credits contract', () => {
   const [row] = homeLimitAccounts([{
     key: 'workbuddy',
     providerId: 'workbuddy',
@@ -788,27 +788,25 @@ test('Home shows WorkBuddy credits as an absolute balance with its points unit',
     windows: [{
       kind: 'billing',
       label: 'Credits',
-      displayRole: 'balance',
-      unit: 'credits',
+      metric: 'credits',
+      currency: 'CREDITS',
       remaining: 1069.59,
       limit: 1650,
       used: 580.41,
       usedPercent: 35.176,
       remainingPercent: 64.824
     }],
-    balance: { amount: 1069.59, unit: 'credits' }
+    balance: { amount: 1069.59, currency: 'CREDITS' }
   }]);
 
   assert.equal(row.windows.length, 1);
   assert.deepEqual(row.windows[0], {
     kind: 'billing',
-    metric: '',
-    displayRole: 'balance',
-    unit: 'credits',
+    metric: 'credits',
     label: 'Credits',
     remainingPercent: 64.824,
     remaining: 1069.59,
-    currency: '',
+    currency: 'CREDITS',
     resetsAt: undefined,
     resetDescription: '',
     value: '',
