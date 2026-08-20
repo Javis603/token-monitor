@@ -1642,13 +1642,18 @@ function nonBlankEnvPath(name, fallback, env = process.env) {
   return typeof value === 'string' && value.trim() ? value : fallback;
 }
 
+function absoluteEnvPath(name, fallback, env = process.env) {
+  const value = env[name];
+  return typeof value === 'string' && path.isAbsolute(value) ? value : fallback;
+}
+
 function cherryStudioTranscriptRoots({ homeDir, platform = process.platform, env = process.env } = {}) {
   const home = homeDir || os.homedir();
   const appDataRoot = platform === 'win32'
     ? nonBlankEnvPath('APPDATA', path.join(home, 'AppData', 'Roaming'), env)
     : platform === 'darwin'
       ? path.join(home, 'Library', 'Application Support')
-      : nonBlankEnvPath('XDG_CONFIG_HOME', path.join(home, '.config'), env);
+      : absoluteEnvPath('XDG_CONFIG_HOME', path.join(home, '.config'), env);
   return [
     ['cherrystudio-transcripts', path.join(appDataRoot, 'CherryStudio', 'Data', 'Agents', '.claude', 'projects')],
     ['cherrystudio-transcripts', path.join(appDataRoot, 'CherryStudio', '.claude', 'projects')]

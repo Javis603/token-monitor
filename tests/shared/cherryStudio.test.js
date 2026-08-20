@@ -24,7 +24,7 @@ test('normalizeClientName maps Cherry Studio sources to cherrystudio', () => {
 });
 
 test('Cherry Studio roots mirror tokscale AppData resolution per platform', () => {
-  const home = path.join('test-home', 'alice');
+  const home = path.join(os.tmpdir(), 'cherrystudio-path-home');
   const cases = [
     {
       platform: 'win32',
@@ -40,6 +40,11 @@ test('Cherry Studio roots mirror tokscale AppData resolution per platform', () =
       platform: 'linux',
       env: { XDG_CONFIG_HOME: path.join(home, 'custom-xdg') },
       base: path.join(home, 'custom-xdg')
+    },
+    {
+      platform: 'linux',
+      env: { XDG_CONFIG_HOME: path.join('relative', 'custom-xdg') },
+      base: path.join(home, '.config')
     }
   ];
 
