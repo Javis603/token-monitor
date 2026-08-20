@@ -43,6 +43,8 @@ TOKEN_MONITOR_HISTORY_ENABLED=       # optional — defaults on; 0 skips trend h
 TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # optional — defaults on; 0 stops archiving deleted-session usage
 TOKEN_MONITOR_LIMITS_ENABLED=        # optional — defaults on; 0 skips CLI probing
 TOKEN_MONITOR_LIMIT_PROVIDERS=       # optional — defaults to all supported providers
+TOKEN_MONITOR_LIMITS_REFRESH_MODE=   # optional — fixed (default) or adaptive
+TOKEN_MONITOR_LIMITS_REFRESH_MS=     # optional — interval for fixed mode; defaults to 300000
 # WorkBuddy: desktop users explicitly enable Local App monitoring in Settings,
 # sign in inside the local WorkBuddy app, then use Refresh when needed.
 # The following are an advanced/headless-agent fallback, not normal widget setup.
@@ -57,7 +59,7 @@ TOKEN_MONITOR_WORKBUDDY_DEPARTMENT_INFO= # headless only — enterprise metadata
 TOKEN_MONITOR_WORKBUDDY_LOCALE=       # headless only — en or zh
 ```
 
-Provider credentials (Grok, DeepSeek, Minimax, Copilot, GLM / GLM Team, Volcengine, Qoder, WorkBuddy, Ollama, Kimi, …) and proxy settings live in the same file. **`.env.example` is the complete, authoritative list** — start from it rather than copying keys by hand, since it stays in sync with the code. The desktop widget reads the session owned by the local WorkBuddy app only after Local App monitoring is explicitly enabled; the WorkBuddy token fields above remain only for headless/CLI deployments.
+Provider credentials (Grok, DeepSeek, Minimax, Copilot, GLM / GLM Team, Volcengine, Qoder, Command Code, WorkBuddy, Ollama, Kimi, …) and proxy settings live in the same file. **`.env.example` is the complete, authoritative list** — start from it rather than copying keys by hand, since it stays in sync with the code. The desktop widget reads the session owned by the local WorkBuddy app only after Local App monitoring is explicitly enabled; the WorkBuddy token fields above remain only for headless/CLI deployments.
 
 The widget reads most settings as first-run defaults. WorkBuddy Local App monitoring defaults to disabled and supports explicit opt-in on macOS and Windows; Linux local-app monitoring is unsupported. Desktop users do not copy a token, and the WorkBuddy token fields above apply only to the headless agent/CLI. The agent and hub take a CLI flag over an env var over the built-in default.
 

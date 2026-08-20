@@ -1,7 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -22,9 +21,11 @@ function rendererClientIds() {
 
 function readmeTrackedClientIds() {
   const iconToClient = {
+    deepseek: 'dsh',
     'hermes-agent': 'hermes',
     xai: 'grok',
-    'mimo-code': 'micode'
+    'mimo-code': 'micode',
+    qoder: 'qodercn'
   };
   return fs.readFileSync(path.join(rootDir, 'README.md'), 'utf8')
     .split('\n')
@@ -45,7 +46,7 @@ test('clientsCsvForSetting uses defaults only for missing settings', () => {
 
 test('default tracked clients include current tokscale-supported tools', () => {
   const clients = DEFAULT_CLIENTS.split(',');
-  for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'zcode', 'kiro', 'codebuddy', 'workbuddy']) {
+  for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh', 'cherrystudio']) {
     assert.ok(clients.includes(client), `${client} should be tracked by default`);
   }
 });
@@ -61,6 +62,7 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in m
   // prefs get silently dropped on save/read.
   const known = KNOWN_CLIENTS.split(',');
   assert.ok(known.includes('micode'), 'micode must remain a known client');
+  assert.ok(known.includes('qodercn'), 'qodercn must remain a known client');
   for (const client of DEFAULT_CLIENTS.split(',')) {
     assert.ok(known.includes(client), `${client} (default-tracked) must also be known`);
   }
@@ -70,20 +72,16 @@ test('tracked client defaults, renderer, and README share one display order', ()
   const known = KNOWN_CLIENTS.split(',');
   assert.deepEqual(rendererClientIds(), known);
   assert.deepEqual(readmeTrackedClientIds(), known);
-  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => client !== 'micode'));
+  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => !['micode', 'qodercn'].includes(client)));
 });
 
-test('default tracked clients are accepted by bundled tokscale', () => {
-  const locallyParsedClients = new Set(['proma']);
-  const result = spawnSync(process.execPath, [require.resolve('tokscale/bin.js'), '--help'], { encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  const help = `${result.stdout || ''}\n${result.stderr || ''}`;
-  const possibleValues = help.match(/\[possible values: ([^\]]+)\]/);
-  assert.ok(possibleValues, 'tokscale --help should list --client possible values');
-  const supported = new Set(possibleValues[1].split(',').map((client) => client.trim()).filter(Boolean));
-  const unsupported = DEFAULT_CLIENTS.split(',').filter((client) => !supported.has(client) && !locallyParsedClients.has(client));
-  assert.deepEqual(unsupported, []);
-});
+// "default tracked clients are supported by tokscale or a native adapter" —
+// this contract lives in scripts/verify-vendored-tokscale-clients.js instead
+// of here. It has to run against the real vendored tokscale binary
+// (vendor-tokscale.yml), not the plain npm-installed one: a client can be
+// merged upstream and pinned into the vendor build well before it's in a
+// tagged npm release (dsh, cherrystudio), so checking the npm binary here
+// would just be testing an executable packaged releases don't ship.
 
 test('clientsCsvForSetting preserves explicit empty tracked-tool selection', () => {
   assert.equal(clientsCsvForSetting(''), '');

@@ -81,7 +81,8 @@ function collectSessionRows(filePath, options = {}) {
       if (obj.type !== 'assistant') continue;
       const msg = obj.message;
       if (!msg || !msg.usage) continue;
-      const msgId = msg.id;
+      // Message ID: some tools set msg.id, Proma uses obj.uuid instead.
+      const msgId = msg?.id || obj.uuid;
       if (!msgId) continue;
 
       const model = msg.model || obj._channelModelId || 'unknown';

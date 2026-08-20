@@ -28,6 +28,9 @@
 // Node-builtin-free: this module is vendored into worker/src/shared/ by
 // `npm run sync:worker`.
 
+const { REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
+const { DSH_SOURCE_CHECK_ID } = require('./dshPaths');
+
 const CLIENT_HEALTH_VERSION = 1;
 
 // healthy      — usage was observed for this client
@@ -167,6 +170,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'wsl-home',
   'antigravity-cli-data',
   'antigravity-ide-source',
+  'cherrystudio-transcripts',
   'claude-projects',
   'claude-transcripts',
   'cline-cli-sessions',
@@ -174,9 +178,11 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'codebuddy-extension-logs',
   'codebuddy-projects',
   'codex-sessions',
+  'commandcode-projects',
   'copilot-data',
   'copilot-otel',
   'copilot-otel-exporter',
+  DSH_SOURCE_CHECK_ID,
   'grok-sessions',
   'grok-unified-log',
   'hermes-home',
@@ -194,6 +200,8 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'openclaw-agents',
   'pi-sessions',
   'proma-sessions',
+  'qodercn-db',
+  REASONIX_SOURCE_CHECK_ID,
   'qwen-projects',
   'tokscale-antigravity-cache',
   'tokscale-cursor-cache',

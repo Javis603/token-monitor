@@ -10,6 +10,7 @@ const test = require('node:test');
 
 const { deviceRecordFromAnchor } = require('../../src/shared/anchorSeed');
 const { configFingerprint } = require('../../src/shared/collector');
+const { qoderCnDataPaths } = require('../../src/shared/qoderCnUsage');
 const { aggregateDevices, emptyPeriod } = require('../../src/shared/usage');
 
 const CLIENTS = 'claude,codex';
@@ -102,6 +103,39 @@ test('the seed reports the project setting it was built under', () => {
     seedOptions({ projectsEnabled: false })
   );
   assert.equal(off.projectsEnabled, false);
+});
+
+test('the cold-start seed accepts an anchor configured for Qoder CN', () => {
+  const homeDir = '/tmp/token-monitor-qodercn-home';
+  const qoderCnDbPath = qoderCnDataPaths({ homeDir }).dbPaths[0];
+  const clients = 'claude,qodercn';
+  const anchor = anchorFixture({
+    configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, qoderCnDbPath)
+  });
+
+  const record = deviceRecordFromAnchor(anchor, seedOptions({ clients, homeDir }));
+  assert.equal(record.today.totalTokens, 1_000);
+  assert.deepEqual(record.trackedClients, ['claude', 'qodercn']);
+});
+
+test('the seed carries local-only native Reasonix views when the anchor has them', () => {
+  const nativeSessions = { today: { 'reasonix:session': { client: 'reasonix', totalTokens: 12 } }, month: {}, allTime: {} };
+  const nativeProjects = { today: { 'token monitor': { label: 'Token Monitor', tokens: 12, clients: { reasonix: 12 } } }, month: {}, allTime: {} };
+  const record = deviceRecordFromAnchor(anchorFixture({ nativeSessions, nativeProjects }), seedOptions());
+
+  assert.deepEqual(record.nativeSessions, nativeSessions);
+  assert.deepEqual(record.nativeProjects, nativeProjects);
+});
+
+test('the seed removes legacy Reasonix stats paths from ordinary period sessions', () => {
+  const leaked = 'reasonix:reasonix-stats:/Users/test/.reasonix/stats/2026-08-09.jsonl';
+  const month = periodWith(10);
+  month.sessions = {
+    [leaked]: { client: 'reasonix', sessionId: leaked, totalTokens: 10 }
+  };
+  const record = deviceRecordFromAnchor(anchorFixture({ month }), seedOptions());
+
+  assert.deepEqual(record.month.sessions, {});
 });
 
 test('an anchor from another local day is refused', () => {

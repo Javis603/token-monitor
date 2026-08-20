@@ -22,7 +22,7 @@
     codex: { rpc: 'RPC' },
     cursor: { web: 'Web' },
     antigravity: { rpc: 'RPC' },
-    opencode: { local: 'Local', web: 'Web' },
+    opencode: { local: 'Local', web: 'Web', api: 'API' },
     openrouter: { api: 'API' },
     deepseek: { api: 'API' },
     minimax: { api: 'API' },
@@ -35,6 +35,7 @@
     volcengine: { api: 'API' },
     qoder: { web: 'Web' },
     workbuddy: { local: 'Local', api: 'API' },
+    commandcode: { web: 'Web' },
     kimi: { api: 'API', web: 'Web' },
     ollama: { web: 'Web' },
     thirdparty: { api: 'API' }
@@ -52,7 +53,7 @@
     codex: ['Auto', 'App/CLI RPC'],
     cursor: ['Manual login', 'Web'],
     antigravity: ['App/CLI must be open', 'RPC'],
-    opencode: ['Local/Web', 'Manual login'],
+    opencode: ['Auto', 'API/Web'],
     openrouter: ['Pay-as-you-go', 'API key'],
     deepseek: ['Pay-as-you-go', 'API key'],
     minimax: ['Token Plan', 'API key'],
@@ -65,6 +66,7 @@
     volcengine: ['Coding Plan', 'API key'],
     qoder: ['Manual login', 'Web'],
     workbuddy: ['Desktop app', 'Local'],
+    commandcode: ['Manual login', 'Web'],
     kimi: ['Coding Plan', 'Web/API'],
     ollama: ['Manual login', 'Web'],
     thirdparty: ['Relay', 'API']
@@ -274,7 +276,7 @@
       if (providerName === 'kimi') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'antigravity') return { label: 'Open app or CLI', tone: 'setup' };
       if (providerName === 'workbuddy') return { label: 'Sign in', tone: 'setup' };
-      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'qoder' || providerName === 'ollama') return { label: 'Sign in', tone: 'setup' };
+      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'qoder' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi') return { label: 'Add API key', tone: 'setup' };
       if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };

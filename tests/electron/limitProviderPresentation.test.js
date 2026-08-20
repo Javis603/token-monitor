@@ -277,7 +277,7 @@ test('capability tags explain how each provider is collected in settings', () =>
   assert.deepEqual(limitProviderCapabilityTags('codex'), ['Auto', 'App/CLI RPC']);
   assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Manual login', 'Web']);
   assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['App/CLI must be open', 'RPC']);
-  assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Local/Web', 'Manual login']);
+  assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Auto', 'API/Web']);
   assert.deepEqual(limitProviderCapabilityTags('minimax'), ['Token Plan', 'API key']);
   assert.deepEqual(limitProviderCapabilityTags('grok'), ['Auto', 'CLI/Web']);
   assert.deepEqual(limitProviderCapabilityTags('copilot'), ['Manual login', 'API']);
@@ -696,7 +696,14 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.doesNotMatch(renderLimitSessionsIcon, /limitFillPercent/);
   assert.match(renderLimitSessionsIcon, /·/);
   assert.match(maybeUpdateBarsIcon, /TokenMonitorTrayText\.isGeneratedTrayIconMode\(mode\)/);
-  assert.match(maybeUpdateBarsIcon, /trayDataUrlForMode\(mode, 44\)/);
+  assert.match(maybeUpdateBarsIcon, /trayDataUrlForMode\(mode, 44, colors, \{ trayInk: true \}\)/);
+  // The tray ink must come from the platform-aware helper, not the app theme:
+  // macOS needs the black its template inversion expects, while a dark Windows
+  // taskbar needs light ink or the icon disappears into it.
+  assert.match(
+    maybeUpdateBarsIcon,
+    /const colors = window\.TokenMonitorTrayText\.trayGeneratedIconColors\(state\.appInfo\?\.platform, state\.systemDarkUi\)/
+  );
   assert.match(maybeUpdateBarsIcon, /\{ \[mode\]: dataUrl \|\| null \}/);
   assert.match(updateTrayDisplay, /mode === 'limitsAllSessions'/);
   assert.match(updateTrayDisplay, /const barsImageMode = isBarsTrayIconMode\(mode\) && !limitText && providerTrayIcons\[mode\]/);
@@ -721,8 +728,30 @@ test('provider tray badges are opt-in and keep monochrome assets visible', () =>
   assert.match(app, /showTrayProviderBadgeInput: document\.getElementById\('showTrayProviderBadgeInput'\)/);
   assert.match(app, /saveSettings\(\{ showTrayProviderBadge: els\.showTrayProviderBadgeInput\.checked \}\)/);
   assert.match(app, /deliverTrayProviderIcons\(patch\.showTrayProviderBadge === true\)/);
-  assert.match(app, /providerImageToPngDataUrl\(img, 44, showBadge\)/);
+  // `trayInk` is what lets a flat-ink mark be re-inked for the taskbar it will sit
+  // on; `standalone` is what lets it fill the Windows cell instead of carrying the
+  // optical inset a composed icon needs (#314).
+  assert.match(app, /providerImageToPngDataUrl\(img, 44, showBadge, \{ trayInk: true, standalone: true \}\)/);
+  // A system-theme flip invalidates BOTH tray bitmap caches. Repainting only the
+  // generated one leaves the usage modes showing the provider icon main cached
+  // under the old ink, which is the whole bug on a taskbar that just went dark.
+  assert.match(
+    app,
+    /const applySystemUiTheme = \(dark\) => \{[\s\S]*?void maybeUpdateBarsIcon\(\);[\s\S]*?void deliverTrayProviderIcons\(\);[\s\S]*?\};/
+  );
+  // Subscribing before the app-info round trip is what keeps a theme flipped
+  // mid-call from being lost until the next flip.
+  assert.match(
+    app,
+    /onSystemUiThemePush\?\.\(\(payload\) => applySystemUiTheme\(payload\?\.dark === true\)\);\n\s*try \{ state\.appInfo = await/
+  );
   assert.match(app, /if \(!trayProviderIconDeliveryGuard\.isCurrent\(deliveryId\)\) return;/);
+  // The badge must not decide the ink. Full-colour artwork is already protected
+  // by the classifier, which answers '' for it, so the old showBadge bypass only
+  // ever kept a white-authored mark white on a light taskbar — where its white
+  // contrast halo cannot save it either.
+  assert.match(providerImage, /trayGlyphInk\(\{ templateIconColor: options\.templateColor, trayInk: options\.trayInk \}, img\)/);
+  assert.doesNotMatch(providerImage, /showBadge\s*\?\s*''\s*:\s*trayGlyphInk/);
   assert.match(providerImage, /if \(!showBadge\) return canvas\.toDataURL\('image\/png'\)/);
   assert.match(providerImage, /shadowColor = 'rgba\(255, 255, 255, 0\.95\)'/);
   assert.match(providerImage, /shadowBlur = Math\.max/);
@@ -812,6 +841,26 @@ test('Kimi renders 5-hour and Weekly above one full-width Monthly window', () =>
   assert.match(renderProviderWindows, /node\.classList\.add\('limit-window-wide'\);/);
 });
 
+test('Command Code renders 5-hour and Weekly above full-width credit windows', () => {
+  const app = readRendererFile('app.js');
+  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+
+  assert.match(renderProviderWindows, /provider\.provider === 'commandcode'/);
+  assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
+  assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
+  // The monthly grant and any rollover top-up are both billing windows, so the
+  // branch loops rather than picking one.
+  assert.match(renderProviderWindows, /for \(const credits of windowsForKind\(provider, 'billing'\)\)/);
+  assert.match(renderProviderWindows, /formatCommandcodeCreditsDetail\(credits\)/);
+  assert.match(renderProviderWindows, /if \(credits\.showMeter === false\) node\.classList\.add\('limit-window-no-reset'\);/);
+
+  // Money, not raw credit counts: the detail under the bar is currency-formatted.
+  const detail = functionBody(app, 'formatCommandcodeCreditsDetail', 'formatKiroOverageValue');
+  assert.match(detail, /formatMoney\(value, window\?\.currency\)/);
+  assert.match(detail, /formatMoney\(limit, window\?\.currency\)/);
+  assert.match(detail, /state\.settings\?\.showLimitUsed/);
+});
+
 test('Ollama renders Session and Weekly usage windows', () => {
   const app = readRendererFile('app.js');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
@@ -861,7 +910,7 @@ test('Copilot renders monthly Premium and Chat quotas as billing windows', () =>
   assert.match(renderProviderWindows, /limitWindowNode\(billing\?\.label \|\| 'Monthly', billing, color, 0\.68\)/);
 });
 
-test('Codex renders manual reset credits below session and weekly windows', () => {
+test('Codex renders Monthly quota and manual reset credits below rolling windows', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
@@ -878,8 +927,11 @@ test('Codex renders manual reset credits below session and weekly windows', () =
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
 
   assert.match(renderProviderWindows, /provider\.provider === 'codex'/);
-  assert.match(renderProviderWindows, /if \(!weekly\) sessionNode\.classList\.add\('limit-window-wide'\);/);
-  assert.match(renderProviderWindows, /if \(!session\) weeklyNode\.classList\.add\('limit-window-wide'\);/);
+  assert.match(renderProviderWindows, /const monthly = windowForKind\(provider, 'billing'\);/);
+  assert.match(renderProviderWindows, /if \(!weekly && !monthly\) sessionNode\.classList\.add\('limit-window-wide'\);/);
+  assert.match(renderProviderWindows, /if \(!session && !monthly\) weeklyNode\.classList\.add\('limit-window-wide'\);/);
+  assert.match(renderProviderWindows, /limitWindowNode\(monthly\.label \|\| 'Monthly', monthly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /monthlyNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(renderProviderWindows, /const resetNode = codexResetCreditsNode\(provider\.resetCredits\);/);
   assert.doesNotMatch(renderProviderWindows, /limitWindowNode\('Reset credits'/);
   assert.match(resetCreditsValue, /if \(count <= 0\) return '';/);
@@ -1207,6 +1259,7 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   assert.match(statsPush, /applyCodexActiveAccountFromStats\(\);/);
   assert.match(statsPush, /statsRenderScheduler\.request\(\);/);
   assert.match(statsRender, /renderLimitProviderCheckboxes\(\);/);
+  assert.match(statsRender, /renderCodexAccounts\(\);/);
   // Account cards read state.stats, so every path that refreshes stats must
   // re-render them. Grok is automatic and belongs only to the generic provider
   // list, so it must not retain a separate account-card renderer.
@@ -1217,7 +1270,7 @@ test('settings provider status waits for stats and refreshes when stats arrive',
     assert.match(statsRender, new RegExp(`${fn}\\(\\);`), `${fn} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
   }
-  for (const provider of ['claude', 'zai', 'volcengine', 'qoder', 'kimi', 'ollama']) {
+  for (const provider of ['claude', 'zai', 'volcengine', 'qoder', 'commandcode', 'kimi', 'ollama']) {
     assert.match(statsRender, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
   }

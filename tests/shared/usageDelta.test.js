@@ -147,6 +147,27 @@ test('applyPeriodDelta carries sessions: new today sessions appear, cross-day se
   assert.equal(result.sessions['claude:new'].client, 'claude');
 });
 
+test('applyPeriodDelta removes legacy Reasonix stats-path sessions without changing aggregate usage', () => {
+  const baseMonth = period({
+    totalTokens: 100,
+    clients: { reasonix: 40, codex: 60 },
+    sessions: {
+      'reasonix:reasonix-stats:/Users/test/.reasonix/stats/2026-08-09.jsonl': {
+        client: 'reasonix',
+        sessionId: 'reasonix-stats:/Users/test/.reasonix/stats/2026-08-09.jsonl',
+        totalTokens: 40
+      },
+      'codex:keep': { client: 'codex', sessionId: 'keep', totalTokens: 60 }
+    }
+  });
+  const result = applyPeriodDelta(baseMonth, period({ totalTokens: 120, clients: { reasonix: 50, codex: 70 } }), period({ totalTokens: 100, clients: { reasonix: 40, codex: 60 } }));
+
+  assert.equal(result.totalTokens, 120);
+  assert.deepEqual(result.clients, { reasonix: 50, codex: 70 });
+  assert.equal(Object.hasOwn(result.sessions, 'reasonix:reasonix-stats:/Users/test/.reasonix/stats/2026-08-09.jsonl'), false);
+  assert.equal(result.sessions['codex:keep'].totalTokens, 60);
+});
+
 test('applyPeriodDelta clamps float residue at zero and never mutates its inputs', () => {
   const baseMonth = period({ costUsd: 0.1, clients: { claude: 10 }, totalTokens: 10 });
   const anchorToday = period({ costUsd: 0.1 + 1e-15, clients: { claude: 10 }, totalTokens: 10 });

@@ -13,10 +13,19 @@ This file documents the stable Markdown shape of that release body.
 - Keep the existing divider between the English and Simplified Chinese
   sections. After the Simplified Chinese section, put one final `---` divider
   before the additional-language area.
-- Put exactly one `**Full Changelog:**` compare link immediately below the
-  divider.
-- Put the additional-language area after that link inside one collapsed outer
-  `<details>` block with the plain summary `繁體中文 · 한국어 · 日本語`.
+- Put one collapsed `Full Changelog` details block immediately below the
+  divider. Its summary contains the single version compare link; clicking the
+  summary label expands the generated details, while clicking the version
+  opens GitHub's comparison. Keep the `<!-- github-generated-release-notes -->`
+  marker as the only content inside the disclosure. The release workflow
+  replaces it with GitHub's merged-PR, author, and new-contributor notes for the
+  tag. Direct commits that are not associated with a merged pull request are
+  added to `What's Changed` with their author and commit link; the release
+  commit itself is omitted. Do not add a Markdown `Contributors` list: GitHub
+  renders its own contributor section with avatars outside the release body.
+- Put the additional-language area after that details block inside one
+  collapsed outer `<details>` block with the plain summary
+  `繁體中文 · 한국어 · 日本語`.
 - Put Traditional Chinese, Korean, and Japanese in three separate nested
   collapsed `<details>` blocks. Each block has its own language heading and
   translated update heading.
@@ -68,7 +77,12 @@ each language block.
 
 ---
 
-**Full Changelog:** [vPREVIOUS...vCURRENT](https://github.com/Javis603/token-monitor/compare/vPREVIOUS...vCURRENT)
+<details>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/vPREVIOUS...vCURRENT">vPREVIOUS...vCURRENT</a></summary>
+
+<!-- github-generated-release-notes -->
+
+</details>
 
 <details>
 <summary>繁體中文 · 한국어 · 日本語</summary>

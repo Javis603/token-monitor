@@ -38,6 +38,17 @@ function request(method, body) {
   });
 }
 
+test('the Worker health response exposes its content-derived build identity', async () => {
+  const { hub } = await hubDO();
+  const response = await hub.fetch(new Request('https://hub.example/api/health'));
+  const health = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(health.runtime, 'cloudflare-worker');
+  assert.equal(health.hubBuild.runtime, 'cloudflare-worker');
+  assert.match(health.hubBuild.coreBuildId, /^sha256:[a-f0-9]{64}$/);
+  assert.match(health.hubBuild.runtimeBuildId, /^sha256:[a-f0-9]{64}$/);
+});
+
 const RECORD = {
   id: 'sub_1', provider: 'codex', planName: 'Plus',
   amountMinor: 9000, currency: 'HKD', startDate: '2026-05-31'

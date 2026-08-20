@@ -59,6 +59,20 @@ test('configFingerprint handles undefined and empty clients', () => {
   assert.match(c, /\|undefined\|projects:on$/, 'undefined allTimeSince produces string "undefined"');
 });
 
+test('configFingerprint labels the Qoder CN database path explicitly', () => {
+  const dbPath = path.join(os.tmpdir(), 'QoderCN', 'SharedClientCache', 'cache', 'db', 'local.db');
+  const fingerprint = configFingerprint(
+    'claude,qodercn',
+    '2024-01-01',
+    true,
+    dbPath
+  );
+  assert.equal(
+    fingerprint,
+    `claude,qodercn|2024-01-01|projects:on|qodercn:${path.resolve(dbPath)}`
+  );
+});
+
 test('anchored tick with valid anchor runs todayOnly scan and derives month/allTime', async () => {
   const dateKey = localTodayKey();
 
@@ -108,6 +122,46 @@ test('anchored tick with valid anchor runs todayOnly scan and derives month/allT
 
   // allTime = anchor allTime 5000 + (today 80 - anchor today 50) = 5030
   assert.equal(summary.allTime.totalTokens, 5030, 'allTime should be derived via applyPeriodDelta');
+});
+
+test('full anchors persist local-only Reasonix native views alongside aggregate periods', async () => {
+  const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-anchor-'));
+  const nativeView = {
+    sessions: { today: { 'reasonix:session': { client: 'reasonix', totalTokens: 12 } }, month: {}, allTime: {} },
+    projects: { today: { 'token monitor': { label: 'token-monitor', tokens: 12, clients: { reasonix: 12 } } }, month: {}, allTime: {} }
+  };
+  const nativeCache = { getView: () => nativeView };
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
+  let handle;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      ...baseOptions,
+      clients: 'reasonix',
+      projectsEnabled: true,
+      platform: 'linux',
+      wslScanEnabled: false,
+      reasonixNativeSessionsEnabled: true,
+      reasonixNativeSessionCache: nativeCache,
+      runTokscale: async () => ({ entries: [] }),
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: false,
+      onUpdate: (summary) => updates.push(summary)
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    const saved = JSON.parse(fs.readFileSync(path.join(tmpShared, 'collector-anchor.json'), 'utf8'));
+    assert.deepEqual(saved.nativeSessions, nativeView.sessions);
+    assert.deepEqual(saved.nativeProjects, nativeView.projects);
+  } finally {
+    if (handle) try { handle.stop(); } catch (_) {}
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmpShared, { recursive: true, force: true });
+  }
 });
 
 function emptyWslBundle() {

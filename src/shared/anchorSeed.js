@@ -1,7 +1,8 @@
 'use strict';
 
-const { collectorAnchorTrust, computePeriodWindows } = require('./collector');
+const { collectorAnchorTrust, computePeriodWindows, qoderCnDbPathForClients } = require('./collector');
 const { mergePeriods } = require('./usage');
+const { filterReasonixSyntheticSessions } = require('./reasonixSessionGuard');
 
 // The collector persists every full scan to collector-anchor.json so it can
 // derive month/allTime from a `--today` scan after a restart. A widget cold
@@ -22,13 +23,18 @@ function deviceRecordFromAnchor(saved, options = {}) {
     clients = '',
     allTimeSince = '',
     projectsEnabled = true,
+    qoderCnDbPath: qoderCnDbPathOption,
+    homeDir,
     wslScanEnabled = true,
     wslSupported = false,
     hostname = '',
     platform = '',
     now = new Date()
   } = options;
-  const trust = collectorAnchorTrust(saved, { clients, allTimeSince, projectsEnabled, now });
+  const qoderCnDbPath = qoderCnDbPathOption === undefined
+    ? qoderCnDbPathForClients(clients, { homeDir })
+    : qoderCnDbPathOption;
+  const trust = collectorAnchorTrust(saved, { clients, allTimeSince, projectsEnabled, qoderCnDbPath, now });
   if (!trust) return null;
   // The seed's own rule, and the one place it is stricter than the collector.
   // A capture time the collector cannot trust only costs it a full scan, but
@@ -40,7 +46,12 @@ function deviceRecordFromAnchor(saved, options = {}) {
   // collectUsageOnce does before summing them. Same local day is established
   // above, so all three windows are safe to merge.
   const wsl = wslScanEnabled !== false ? saved.wslBundle : null;
-  const withWsl = (period, wslPeriod) => (wslPeriod ? mergePeriods(period, wslPeriod) : period);
+  const cleanPeriod = (period) => {
+    if (!period || typeof period !== 'object' || !Object.prototype.hasOwnProperty.call(period, 'sessions')) return period;
+    const sessions = filterReasonixSyntheticSessions(period.sessions);
+    return sessions === period.sessions ? period : { ...period, sessions };
+  };
+  const withWsl = (period, wslPeriod) => cleanPeriod(wslPeriod ? mergePeriods(period, wslPeriod) : period);
   // Mirrors collectUsageOnce: a non-Windows host reports no WSL status at all,
   // a Windows host with scanning off reports it as disabled rather than absent,
   // and otherwise the anchor's own snapshot stands until the first scan. Absent
@@ -71,7 +82,9 @@ function deviceRecordFromAnchor(saved, options = {}) {
     periodWindows: computePeriodWindows(now),
     today: withWsl(saved.today, wsl?.today),
     month: withWsl(saved.month, wsl?.month),
-    allTime: withWsl(saved.allTime, wsl?.allTime)
+    allTime: withWsl(saved.allTime, wsl?.allTime),
+    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeSessions') ? { nativeSessions: saved.nativeSessions } : {}),
+    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeProjects') ? { nativeProjects: saved.nativeProjects } : {})
   };
 }
 

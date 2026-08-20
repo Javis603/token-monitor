@@ -100,6 +100,7 @@ function scheduleTrailingReload(request, minIntervalMs, now, scheduler) {
 function requestMacWidgetReload(options = {}) {
   const platform = options.platform || process.platform;
   if (platform !== 'darwin') return { ok: false, reason: 'unsupported-platform' };
+  if (options.runtimeSupported === false) return { ok: false, reason: 'unsupported-os' };
   const scheduler = schedulerFor(options);
   const schedulerNow = Number(scheduler.now());
   const now = Number.isFinite(options.now) ? options.now : schedulerNow;

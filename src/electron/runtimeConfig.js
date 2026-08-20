@@ -2,7 +2,11 @@
 
 const { clientsCsvForSetting } = require('../shared/clientTracking');
 const { normalizeHistoryIntervalMs } = require('../shared/collector');
-const { normalizeLimitsRefreshMs, parseLimitProviders } = require('../shared/limitCollector');
+const {
+  normalizeLimitsRefreshMode,
+  normalizeLimitsRefreshMs,
+  parseLimitProviders
+} = require('../shared/limitCollector');
 const { normalizeSyncUploadIntervalMs } = require('../shared/syncUploadInterval');
 
 const DEFAULT_ALL_TIME_SINCE = '2024-01-01';
@@ -29,6 +33,7 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
 const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsEnabled',
   'limitProviders',
+  'limitsRefreshMode',
   'limitsRefreshMs',
   'opencodeLocalLimitsEnabled'
 ]);
@@ -48,6 +53,7 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   // only after the user explicitly enables local-app monitoring. Token and
   // metadata fields remain available to headless/CLI deployments.
   workbuddy: ['workbuddyLocalAppEnabled', 'workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo'],
+  commandcode: ['commandcodeCookie'],
   kimi: ['kimiApiKey', 'kimiWebAccessToken'],
   ollama: ['ollamaCookie'],
   codex: ['codexManagedAccounts'],
@@ -86,6 +92,7 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
     dailyHistoryArchiveWriteEnabled: context.dailyHistoryArchiveWriteEnabled,
     projectsEnabled: settings.projectsEnabled !== false,
+    reasonixNativeSessionsEnabled: context.reasonixNativeSessionsEnabled === true,
     historyIntervalMs: context.historyIntervalMs ?? settings.historyIntervalMs,
     watchEnabled: context.watchEnabled,
     // Deliberately passed through as a tri-state rather than coerced: undefined
@@ -114,12 +121,14 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
   return {
     limitsEnabled: settings.limitsEnabled !== false,
     limitProviders: settings.limitProviders ?? context.defaultLimitProviders,
+    limitsRefreshMode: normalizeLimitsRefreshMode(settings.limitsRefreshMode),
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
     claudeWebCookie: settings.claudeWebCookie
       || env.CLAUDE_WEB_COOKIE
       || '',
     claudePrepaidBalanceEnabled: settings.claudePrepaidBalanceEnabled !== false,
     opencodeLocalLimitsEnabled: settings.opencodeLocalLimitsEnabled === true,
+    opencodeAmbientEnabled: settings.opencodeAmbientEnabled !== false,
     opencodeCookie: settings.opencodeCookie || env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
     opencodeProfiles: settings.opencodeProfiles || {},
     openrouterProfiles: settings.openrouterProfiles || {},
@@ -137,6 +146,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     volcengineRegion: settings.volcengineRegion || '',
     qoderCookie: settings.qoderCookie || '',
     qoderSite: settings.qoderSite || 'global',
+    commandcodeCookie: settings.commandcodeCookie || '',
     workbuddyAccessToken: workbuddySettings.workbuddyAccessToken
       || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN
       || workbuddyEnv.WORKBUDDY_ACCESS_TOKEN
@@ -191,6 +201,7 @@ function diagnosticConfigurationFromSettings(settings = {}, context = {}) {
     syncUploadIntervalMs: normalizeSyncUploadIntervalMs(
       context.syncUploadIntervalMs ?? settings.syncUploadIntervalMs
     ),
+    limitsRefreshMode: limits.limitsRefreshMode,
     limitsRefreshMs: limits.limitsRefreshMs
   };
 }

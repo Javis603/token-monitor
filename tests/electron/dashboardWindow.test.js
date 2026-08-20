@@ -12,7 +12,7 @@ const { usageConfigFromSettings } = require('../../src/electron/runtimeConfig');
 test('preload exposes the dashboard IPC surface', () => {
   const preload = read('src', 'electron', 'preload.js');
   assert.match(preload, /openDashboard: \(\) => ipcRenderer\.invoke\('dashboard:open'\)/);
-  assert.match(preload, /getDashboardHistory: \(\) => ipcRenderer\.invoke\('dashboard:getHistory'\)/);
+  assert.match(preload, /getDashboardHistory: \(options\) => ipcRenderer\.invoke\('dashboard:getHistory', options\)/);
   assert.match(preload, /ipcRenderer\.on\('dashboard:historyChanged', listener\)/);
   assert.match(preload, /dashboard: \{/);
   assert.match(preload, /ready: \(\) => ipcRenderer\.send\('dashboard:ready'\)/);
@@ -54,12 +54,21 @@ test('Dashboard and Widget share the complete local/host/client history resolver
 
 test('getDashboardHistory reads local history directly without a blocking collection tick', () => {
   const main = read('src', 'electron', 'main.js');
-  const fn = /async function getDashboardHistory\(\)\s*\{([\s\S]*?)\n\}/.exec(main);
+  const fn = /async function getDashboardHistory\(options = \{\}\)\s*\{([\s\S]*?)\n\}/.exec(main);
   assert.ok(fn, 'getDashboardHistory should be defined');
   // Awaiting a full collection tick here delayed the fetch for seconds; on a
   // quick close/reopen the response outlived the renderer and the dashboard
   // stuck on the empty state. The local branch must read localDevice directly.
   assert.doesNotMatch(fn[1], /localCollectorHandle\.tick/);
+});
+
+test('fixed ranges request existing per-device History without changing ingest', () => {
+  const main = read('src', 'electron', 'main.js');
+  const historySource = read('src', 'electron', 'historySource.js');
+  assert.match(main, /includeDevices[\s\S]*?resolveCompleteHistoryWithDevices/);
+  assert.match(main, /ipcMain\.handle\('dashboard:getHistory', \(_event, options\) => getDashboardHistory\(options\)\)/);
+  assert.match(historySource, /\/api\/devices/);
+  assert.match(historySource, /deviceHistories: parseDeviceHistories\(devices\)/);
 });
 
 test('dashboard history is gated by the historyEnabled setting', () => {

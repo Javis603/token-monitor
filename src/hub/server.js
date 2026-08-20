@@ -5,13 +5,14 @@ const path = require('node:path');
 const { URL } = require('node:url');
 const { aggregateDevices, mergeDeviceRecord, aggregateHistory } = require('../shared/usage');
 const { DEFAULT_STALE_AFTER_MS } = require('../shared/syncUploadInterval');
-const { historyPreview, historyRevision } = require('../shared/history');
+const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const {
   emptySubscriptionDocument,
   isStaleSubscriptionWrite,
   subscriptionDocument
 } = require('../shared/subscriptionDisplay');
 const { CURRENCY_CODES, normalizeCurrency } = require('../shared/currency');
+const { currentHubBuild } = require('../shared/hubBuildIdentity');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
 
@@ -56,6 +57,7 @@ function createHub({
     const history = aggregateHistory(Object.values(store.devices));
     stats.historyPreview = historyPreview(history);
     stats.historyRevision = historyRevision(history);
+    stats.deviceHistoryRevision = deviceHistoryRevision(Object.values(store.devices));
     // The version of the shared subscription list, never the list itself. A
     // device compares it against the copy it holds and re-reads only when it has
     // been overtaken, so learning about another device's edit costs nothing in
@@ -66,6 +68,10 @@ function createHub({
 
   function getHistory() {
     return aggregateHistory(Object.values(store.devices));
+  }
+
+  function getDevices() {
+    return Object.values(store.devices);
   }
 
   const sseClients = new Set();
@@ -178,7 +184,9 @@ function createHub({
       return sendJson(res, 200, {
         ok: true,
         role: 'hub',
+        runtime: 'node-hub',
         version: store.version || 1,
+        hubBuild: currentHubBuild('node-hub'),
         deviceCount: Object.keys(store.devices).length,
         secretRequired: Boolean(secret),
         now: new Date().toISOString()
@@ -188,7 +196,7 @@ function createHub({
     if (!isAuthorized(req, secret)) return sendJson(res, 401, { error: 'unauthorized' });
 
     if (req.method === 'GET' && url.pathname === '/api/stats') return sendJson(res, 200, getStats());
-    if (req.method === 'GET' && url.pathname === '/api/devices') return sendJson(res, 200, { devices: Object.values(store.devices) });
+    if (req.method === 'GET' && url.pathname === '/api/devices') return sendJson(res, 200, { devices: getDevices() });
     if (req.method === 'GET' && url.pathname === '/api/history') return sendJson(res, 200, getHistory());
 
     if (req.method === 'GET' && url.pathname === '/api/stats/stream') {
@@ -283,7 +291,7 @@ function createHub({
   }
 
   return {
-    start, stop, server, getStats, getHistory, ingest, deleteDevice, onStats, bindHost,
+    start, stop, server, getStats, getHistory, getDevices, ingest, deleteDevice, onStats, bindHost,
     getSubscriptions, setSubscriptions
   };
 }

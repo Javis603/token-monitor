@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
+const { REASONIX_CLIENT } = require('./reasonixPaths');
 const { buildPromaPeriods, collectPromaRows } = require('./promaUsage');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
@@ -36,8 +37,11 @@ const WSL_DATA_MARKERS = [
   '.local/share/zed/threads/threads.db',
   '.config/Code/User/globalStorage/kilocode.kilo-code/tasks',
   '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks',
+  '.commandcode/projects',
+  '.dsh/sessions',
   '.local/share/mimocode/mimocode.db',
   '.zcode/projects',
+  '.zcode/cli/db',
   '.kiro/sessions',
   '.local/share/kiro-cli/data.sqlite3',
   '.config/Kiro/User/globalStorage/kiro.kiroagent',
@@ -76,8 +80,11 @@ const MARKER_CLIENTS = {
   '.local/share/zed/threads/threads.db': 'zed',
   '.config/Code/User/globalStorage/kilocode.kilo-code/tasks': 'kilocode',
   '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks': 'kilocode',
+  '.commandcode/projects': 'commandcode',
+  '.dsh/sessions': 'dsh',
   '.local/share/mimocode/mimocode.db': 'micode',
   '.zcode/projects': 'zcode',
+  '.zcode/cli/db': 'zcode',
   '.kiro/sessions': 'kiro',
   '.local/share/kiro-cli/data.sqlite3': 'kiro',
   '.config/Kiro/User/globalStorage/kiro.kiroagent': 'kiro',
@@ -201,8 +208,14 @@ async function collectWslUsage(options = {}, deps = {}) {
   if (!trackedClients) return { bundle, detected: [] };
   // Only attribute markers for clients the user is actually tracking — a marker
   // for an untracked client must not surface in the panel.
+  // Reasonix aggregate usage is supported on the host, but remains excluded
+  // from WSL scans: Tokscale's Windows PathRoot::ReasonixHome conflicts with
+  // the Linux-default `.reasonix/stats` path inside WSL. Native session files
+  // are local-only as well.
   const tracked = new Set(String(trackedClients).split(',').map((c) => c.trim()).filter(Boolean));
-  const clientsCsv = String(clients || '').split(',').map((c) => c.trim()).filter(Boolean).join(',');
+  const clientsCsv = String(clients || '').split(',').map((c) => c.trim()).filter(Boolean)
+    .filter((client) => client !== REASONIX_CLIENT)
+    .join(',');
   for (const home of wslUsageHomes(deps)) {
     // Attribution is marker-based, independent of whether a parser returns data.
     const homeDataClients = homeHasData(home, existsSync, readdirSync);

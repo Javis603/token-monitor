@@ -70,6 +70,7 @@ test('Worker public stats strip every account identity and plan field', async ()
     assert.equal(Object.hasOwn(provider, field), false, `${field} should stay private`);
   }
   assert.equal(Object.hasOwn(payload, 'devices'), false);
+  assert.equal(Object.hasOwn(payload, 'deviceHistoryRevision'), false);
 });
 
 // clientHealth says which of a machine's directories exist and whether a

@@ -724,6 +724,7 @@ enum WidgetFormat {
         case "zai": "GLM"
         case "zaiteam": "GLM Team"
         case "kiro": "Kiro"
+        case "commandcode": "Command Code"
         case "deepseek": "DeepSeek"
         case "openrouter": "OpenRouter"
         case "minimax": "Minimax"

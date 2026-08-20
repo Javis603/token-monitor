@@ -14,15 +14,17 @@
 // Passing a null/absent localDevice yields just the month baseline, which is exactly the
 // desired startup placeholder.
 
+const { filterReasonixSyntheticSessions } = require('./reasonixSessionGuard');
+
 function asSessions(value) {
   return value && typeof value === 'object' ? value : null;
 }
 
 function mergedLocalAllTimeSessions(periods, localDevice) {
   return {
-    ...asSessions(periods?.month?.sessions),
-    ...asSessions(periods?.allTime?.sessions),
-    ...asSessions(localDevice?.allTime?.sessions)
+    ...filterReasonixSyntheticSessions(asSessions(periods?.month?.sessions) || {}),
+    ...filterReasonixSyntheticSessions(asSessions(periods?.allTime?.sessions) || {}),
+    ...filterReasonixSyntheticSessions(asSessions(localDevice?.allTime?.sessions) || {})
   };
 }
 

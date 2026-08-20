@@ -99,6 +99,9 @@ test('renderer applies the policy before touching breakdown rows', () => {
   assert.ok(html.indexOf('<script src="breakdownRenderPolicy.js"></script>') < html.indexOf('<script src="app.js"></script>'));
   assert.match(app, /shouldAnimateBreakdownRows\(rows\.length, \{ reducedMotion: prefersReducedMotion\(\) \}\)/);
   assert.match(app, /if \(rowRenderFingerprints\.get\(row\) === fingerprint\) continue;/);
+  assert.match(app, /row\.dataset\.tokenDataUnavailable === 'true'/);
+  assert.match(app, /cancelRowNumberAnimation\(row\.querySelector\('\.row-value'\)\)/);
+  assert.match(app, /row\.dataset\.tokenDataUnavailable = 'true'/);
   assert.match(app, /showToolIcons:\s*toolIconsEnabled\(state\.settings\?\.showToolIcons\)/);
   assert.match(app, /updateLargeSessionContainment\(largeSessionList, \{ remeasure: structureChanged \}\)/);
   assert.match(app, /largeSessionContainmentScheduler\.schedule\(\(\) => \{/);

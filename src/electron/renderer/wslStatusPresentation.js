@@ -5,23 +5,28 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorWslStatusPresentation = api;
 })(typeof window !== 'undefined' ? window : null, function createWslStatusPresentationApi() {
-  // These clients are known to store their current usage in SQLite. Windows-side
-  // scans can find their WSL markers while still receiving no rows from tokscale
-  // over \\wsl$. Keep the wording in the renderer advisory, rather than claiming
-  // every empty result is a confirmed SQLite failure here.
-  const SQLITE_WSL_CLIENTS = new Set(['hermes', 'opencode']);
+  // The client list is deliberately not hardcoded here: the WSL scan cannot know
+  // every SQLite-backed tool. Show the architecture guidance only when a
+  // detected source has no usage rows.
+  const SQLITE_HELP_STATES = new Set(['active', 'no-data']);
 
-  function sqliteHelpClients(status) {
-    const withData = new Set((status?.withData || []).map((id) => String(id || '').toLowerCase()));
-    const seen = new Set();
-    return (status?.detected || [])
-      .map((id) => String(id || '').toLowerCase())
-      .filter((id) => {
-        if (!SQLITE_WSL_CLIENTS.has(id) || withData.has(id) || seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      });
+  function normalizeClientId(id) {
+    return String(id || '').trim().toLowerCase();
   }
 
-  return { sqliteHelpClients };
+  function shouldShowSqliteHelp(status) {
+    if (!SQLITE_HELP_STATES.has(String(status?.state || '').toLowerCase())) return false;
+    const detected = Array.isArray(status?.detected) ? status.detected : [];
+    const withData = new Set(
+      (Array.isArray(status?.withData) ? status.withData : [])
+        .map(normalizeClientId)
+        .filter(Boolean)
+    );
+    return detected.some((id) => {
+      const clientId = normalizeClientId(id);
+      return clientId && !withData.has(clientId);
+    });
+  }
+
+  return { shouldShowSqliteHelp };
 });

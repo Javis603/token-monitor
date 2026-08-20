@@ -105,11 +105,47 @@ function withTmpDir() {
   return fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-watch-'));
 }
 
+function samePath(left, right) {
+  return Boolean(left) && path.resolve(left) === path.resolve(right);
+}
+
 // `act` receives a helper that writes the target file and keeps re-touching it
 // until its event is observed, so callers never depend on the scan/stream gap.
 async function watchAndCollect(dir, act) {
   const events = [];
-  const watcher = chokidar.watch(dir, watcherOptions(false));
+  const options = watcherOptions(false);
+  assert.strictEqual(options.usePolling, false, 'native watcher test must not opt into polling');
+  const watcher = chokidar.watch(dir, options);
+
+  function waitForEvent(predicate, description) {
+    return new Promise((resolve, reject) => {
+      let timer = null;
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        watcher.off('all', onAll);
+        watcher.off('error', onError);
+      };
+      const onAll = (event, filePath) => {
+        const entry = { event, filePath };
+        events.push(entry);
+        if (!predicate(event, filePath)) return;
+        cleanup();
+        resolve(entry);
+      };
+      const onError = (error) => {
+        cleanup();
+        reject(error);
+      };
+      timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`no ${description} within ${EVENT_TIMEOUT_MS}ms on ${process.platform}`));
+      }, EVENT_TIMEOUT_MS);
+      timer.unref();
+      watcher.on('all', onAll);
+      watcher.on('error', onError);
+    });
+  }
+
   try {
     await new Promise((resolve, reject) => {
       watcher.once('ready', resolve);
@@ -122,8 +158,11 @@ async function watchAndCollect(dir, act) {
       });
     });
     watcher.on('all', (event, filePath) => events.push({ event, filePath }));
-    await act(async (filePath, contents) => {
-      await writeUntilObserved(filePath, contents, observedFor(filePath), path.basename(filePath));
+    await act({
+      writeAndAwait: async (filePath, contents) => {
+        await writeUntilObserved(filePath, contents, observedFor(filePath), path.basename(filePath));
+      },
+      waitForEvent
     });
   } finally {
     await watcher.close();
@@ -134,7 +173,7 @@ async function watchAndCollect(dir, act) {
 test('native file events reach a watcher on this platform', async () => {
   const dir = withTmpDir();
   try {
-    const events = await watchAndCollect(dir, async (writeAndAwait) => {
+    const events = await watchAndCollect(dir, async ({ writeAndAwait }) => {
       await writeAndAwait(path.join(dir, 'session.jsonl'), '{"tokens":1}\n');
     });
     assert.ok(
@@ -155,14 +194,33 @@ test('native file events reach a subdirectory created after the watch started', 
   const dir = withTmpDir();
   try {
     const projectDir = path.join(dir, 'a-new-project');
-    const events = await watchAndCollect(dir, async (writeAndAwait) => {
+    const sessionPath = path.join(projectDir, 'session.jsonl');
+    const events = await watchAndCollect(dir, async ({ waitForEvent }) => {
+      // addDir reports discovery, not completion of the child watcher setup.
+      // Create the first file synchronously right after mkdir — before the
+      // event loop runs — so chokidar's directory scan finds it already
+      // present and emits its add event. Waiting for addDir first (then
+      // writing) lands in the scan-done/sub-watcher-pending window and loses
+      // the add event on platforms with slower watcher setup (Linux/Windows).
+      const projectEvent = waitForEvent(
+        (event, filePath) => event === 'addDir' && samePath(filePath, projectDir),
+        'an addDir event for the new project directory'
+      );
+      const sessionAddedEvent = waitForEvent(
+        (event, filePath) => event === 'add' && samePath(filePath, sessionPath),
+        'an add event for session.jsonl inside the new directory'
+      );
       fs.mkdirSync(projectDir);
-      // Give chokidar a moment to watch the directory it just discovered,
-      // otherwise the write races the addDir handler and the assertion would
-      // pass on the mkdir event alone. The retry inside writeAndAwait covers
-      // the rest: a new directory has its own scan/stream gap.
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      await writeAndAwait(path.join(projectDir, 'session.jsonl'), '{"tokens":1}\n');
+      fs.writeFileSync(sessionPath, '{"tokens":1}\n');
+      await projectEvent;
+      await sessionAddedEvent;
+
+      const sessionChangedEvent = waitForEvent(
+        (event, filePath) => event === 'change' && samePath(filePath, sessionPath),
+        'a change event for session.jsonl inside the new directory'
+      );
+      fs.appendFileSync(sessionPath, '{"tokens":2}\n');
+      await sessionChangedEvent;
     });
     assert.ok(
       events.some((entry) => path.basename(entry.filePath) === 'session.jsonl'),

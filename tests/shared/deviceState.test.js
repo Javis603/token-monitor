@@ -93,6 +93,7 @@ test('partial usage previews carry broader periods and optional usage state', ()
   const state = createDeviceState();
   state.updateUsage(usage('2026-07-21T01:00:00.000Z', {
     periodWindows: { today: { startsAt: '2026-07-21T00:00:00.000Z', endsAt: '2026-07-22T00:00:00.000Z' } },
+    historyAvailable: true,
     allTimeProjectsIncomplete: true
   }), 'interval');
 
@@ -105,6 +106,7 @@ test('partial usage previews carry broader periods and optional usage state', ()
   assert.equal(preview.month.totalTokens, 20);
   assert.equal(preview.allTime.totalTokens, 30);
   assert.equal(preview.history.daily[0].tokens, 10);
+  assert.equal(preview.historyAvailable, true);
   assert.equal(preview.clientStatus.codex, 'active');
   // Status and health carry together. They are what the tool rows and the
   // diagnostics panel are drawn from, and a preview that kept one but dropped

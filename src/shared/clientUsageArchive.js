@@ -161,6 +161,16 @@ function targetPeriod(summary, periodName) {
 function addClientUsage(period, client, usage) {
   const tokens = Math.max(0, Math.round(numberValue(usage?.totalTokens)));
   const cost = numberValue(usage?.costUsd);
+  const beforeComponents = {
+    cacheRead: period.cacheReadTokens,
+    cacheWrite: period.cacheWriteTokens,
+    output: period.outputTokens,
+    models: Object.fromEntries(Object.keys(usage?.models || {}).map((model) => [model, {
+      cacheRead: numberValue(period.modelCacheReads?.[model]),
+      cacheWrite: numberValue(period.modelCacheWrites?.[model]),
+      output: numberValue(period.modelOutputs?.[model])
+    }]))
+  };
   period.totalTokens += tokens;
   period.costUsd += cost;
   if (tokens > 0) period.clients[client] = (period.clients[client] || 0) + tokens;
@@ -180,6 +190,28 @@ function addClientUsage(period, client, usage) {
     period.sessions[key] = session;
     addSessionBreakdown(period, client, session);
   }
+  const known = Math.min(tokens,
+    period.cacheReadTokens - beforeComponents.cacheRead
+    + period.cacheWriteTokens - beforeComponents.cacheWrite
+    + period.outputTokens - beforeComponents.output);
+  const unclassified = Math.max(0, tokens - known);
+  if (unclassified > 0) {
+    period.unclassifiedTokens += unclassified;
+    period.clientUnclassifiedTokens[client] = (period.clientUnclassifiedTokens[client] || 0) + unclassified;
+    period.capabilities.tokenComponents = false;
+  }
+  for (const [model, modelTokens] of Object.entries(usage?.models || {})) {
+    const before = beforeComponents.models[model] || {};
+    const modelKnown = Math.min(Math.max(0, Math.round(numberValue(modelTokens))),
+      numberValue(period.modelCacheReads?.[model]) - numberValue(before.cacheRead)
+      + numberValue(period.modelCacheWrites?.[model]) - numberValue(before.cacheWrite)
+      + numberValue(period.modelOutputs?.[model]) - numberValue(before.output));
+    const modelUnclassified = Math.max(0, Math.round(numberValue(modelTokens)) - modelKnown);
+    if (modelUnclassified > 0) {
+      period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + modelUnclassified;
+      period.capabilities.tokenComponents = false;
+    }
+  }
 }
 
 // The archived period keeps only token/cost totals, but its sessions still carry
@@ -195,23 +227,25 @@ function addSessionBreakdown(period, client, session) {
   if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
   if (cacheWrite > 0) period.clientCacheWrites[client] = (period.clientCacheWrites[client] || 0) + cacheWrite;
   if (output > 0) period.clientOutputs[client] = (period.clientOutputs[client] || 0) + output;
+  period.cacheReadTokens += cacheRead;
+  period.cacheWriteTokens += cacheWrite;
+  period.outputTokens += output;
 
   const modelTokens = Object.entries(session?.models || {})
     .map(([model, tokens]) => [model, numberValue(tokens)])
     .filter(([, tokens]) => tokens > 0);
   const totalModelTokens = modelTokens.reduce((sum, [, tokens]) => sum + tokens, 0);
   if (totalModelTokens === 0) return;
-
-  // A session is almost always one model; split proportionally for the rare mix.
-  for (const [model, tokens] of modelTokens) {
-    const share = modelTokens.length === 1 ? 1 : tokens / totalModelTokens;
-    const cr = Math.round(cacheRead * share);
-    const cw = Math.round(cacheWrite * share);
-    const ou = Math.round(output * share);
-    if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
-    if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
-    if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
-  }
+  // Session-level components have no client×model provenance. They are exact
+  // only when the session has one model; a multi-model split would be a guess.
+  if (modelTokens.length > 1) return;
+  const [[model, tokens]] = modelTokens;
+  const cr = Math.min(tokens, cacheRead);
+  const cw = Math.min(tokens - cr, cacheWrite);
+  const ou = Math.min(tokens - cr - cw, output);
+  if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
+  if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
+  if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
 }
 
 function shouldApplyPeriod(periodName, entry, now) {

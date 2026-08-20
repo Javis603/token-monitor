@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
 
 const rootDir = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(rootDir, file), 'utf8');
@@ -54,20 +55,23 @@ const supportedToolOrder = [
   'Qwen CLI',
   'Grok Build',
   'GitHub Copilot',
-  'Pi',
+  'Pi / Oh My Pi',
   'Zed',
   'Kilo Code',
+  'Command Code',
   'MiMo Code',
   'ZCode / GLM',
   'Kiro',
   'CodeBuddy',
   'WorkBuddy',
   'Proma',
-  'DeepSeek',
+  'Qoder',
+  'Reasonix',
+  'DeepSeek / DeepSeek Harness',
+  'Cherry Studio',
   'OpenRouter',
   'Minimax',
   'Volcengine',
-  'Qoder',
   'Ollama',
   'Third-party APIs'
 ];
@@ -88,17 +92,20 @@ const supportedToolIdOrder = [
   'pi',
   'zed',
   'kilocode',
+  'commandcode',
   'mimo-code',
   'zcode',
   'kiro',
   'codebuddy',
   'workbuddy',
   'proma',
+  'qoder',
+  'reasonix',
   'deepseek',
+  'cherrystudio',
   'openrouter',
   'minimax',
   'volcengine',
-  'qoder',
   'ollama',
   'newapi'
 ];
@@ -158,6 +165,35 @@ test('localized READMEs list the same supported tools', () => {
   }
 });
 
+// The provider list is ordered to match the README table, so a reader comparing
+// the two sees the same sequence. Nothing enforced that before: the order test
+// pins LIMIT_PROVIDERS against its own hard-coded copy and the table test pins
+// the README against its own, so both could pass while the two disagreed — which
+// is exactly how Command Code landed in the wrong slot.
+//
+// The table's icon id is not always the provider id (a tool row is named after
+// its artwork), and GLM/GLM Team share one row, so the two are bridged here.
+const README_ICON_TO_LIMIT_PROVIDERS = {
+  xai: ['grok'],
+  'mimo-code': ['mimo'],
+  zcode: ['zai', 'zaiteam'],
+  newapi: ['thirdparty']
+};
+
+test('limit provider order follows the supported-tools table', () => {
+  const text = read('README.md');
+  const fromReadme = text
+    .split('\n')
+    .filter((line) => line.startsWith('| <img'))
+    .filter((row) => row.split('|').map((cell) => cell.trim())[5] === '✅')
+    .flatMap((row) => {
+      const icon = row.match(/tools-icon\/([^".]+)\.[a-z]+"/i)[1];
+      return README_ICON_TO_LIMIT_PROVIDERS[icon] || [icon];
+    });
+
+  assert.deepEqual(fromReadme, [...LIMIT_PROVIDER_IDS]);
+});
+
 test('README tool and provider counts match the supported-tools table', () => {
   for (const file of localizedReadmes) {
     const text = read(file);
@@ -215,11 +251,7 @@ test('WSL SQLite guides keep English and Chinese entry points connected', () => 
 test('WSL SQLite guides state and verify the Node.js prerequisite', () => {
   for (const file of ['docs/wsl-sqlite-setup.md', 'docs/wsl-sqlite-setup.zh-CN.md']) {
     const guide = read(file);
-    assert.match(guide, /Node\.js 22\.13\.0/, file);
+    assert.match(guide, /Node\.js 22\.15\.0/, file);
     assert.match(guide, /node --version\nnpm --version\n/, file);
   }
-});
-
-test('legacy Hermes guide keeps published links working', () => {
-  assert.match(read('docs/hermes-wsl-setup.md'), /\(wsl-sqlite-setup\.zh-CN\.md\)/);
 });

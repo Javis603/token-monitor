@@ -637,6 +637,24 @@ function openCodeWindowKey(window) {
     .join(':');
 }
 
+// Authority of one quota observation: a server reading outranks a local
+// estimate, and nothing finer than that. Deliberately.
+//
+// Go quota reaches the wire from three places, but only the estimate is a
+// different *kind* of answer: the usage API and the go-page scrape read the same
+// server-side counters and emit the same window kinds, so two of them differ
+// only in when they were read. Freshness below is what separates those.
+//
+// A finer api tier does not belong here. It could only be read off the provider
+// — an API window is tagged `web` on the wire, since that field is a two-value
+// enum a Hub predating it would strip and then rank below a local estimate — and
+// the provider does not describe every window under it: a provider whose Go
+// quota came from the API still carries Zen windows that were scraped. Ranking
+// on it therefore promotes a scraped window on the strength of a key that read
+// something else. The collector's own api → web precedence is a fallback chain
+// for choosing between two credentials on one machine at one moment; it is not
+// a claim that an older API reading beats a newer scraped one, and generalizing
+// it that way pinned readings up to the full staleness threshold old.
 function openCodeWindowSourceRank(window) {
   if (window?.source === 'web') return 2;
   if (window?.source === 'local') return 1;
@@ -744,6 +762,30 @@ function mergeOpenCodeProviderComponents(candidates) {
   const balanceUsd = balanceProvider ? balanceProvider.balanceUsd : winner.balanceUsd;
   const hasWebComponent = windows.some((window) => window.source === 'web')
     || balanceUsd !== null && balanceUsd !== undefined;
+  // Provenance describes the components that actually won, not whichever
+  // device's snapshot ranked highest. Read off `winner` the two could disagree:
+  // a device whose every window lost still named the merged row's source, so a
+  // cookie poll arriving a second after an API one relabelled the whole row.
+  //
+  // The envelope rule is the collector's, and the merge has to keep it: this
+  // field is what a Hub predating windows[].source ranks on, so it may not
+  // claim a server reading while a local estimate is in the row. One local
+  // window makes the row an estimate however fresh the Web observation beside
+  // it is. Above that line 'api' and 'web' say which server source produced the
+  // Go quota, in the collector's own sense of the words rather than a stronger
+  // one — an `api` provider can carry scraped Zen windows too — so 'api' holds
+  // only while every winning component came from a collector that read the
+  // usage endpoint. A Zen balance does not weaken either claim, because both
+  // are about the quota windows.
+  const anyLocalWindow = windows.some((window) => window.source === 'local');
+  const componentProviders = Array.from(entries.values()).map((entry) => entry.provider);
+  const everyWindowFromApi = componentProviders.length > 0
+    && componentProviders.every((provider) => provider.source === 'api');
+  const mergedSource = anyLocalWindow
+    ? 'local'
+    : everyWindowFromApi
+      ? 'api'
+      : hasWebComponent ? 'web' : winner.source;
   const canonicalWebAccountKey = [...new Set(candidates
     .map((provider) => String(provider.webAccountKey || '').trim())
     .filter(Boolean))].sort()[0] || '';
@@ -757,7 +799,7 @@ function mergeOpenCodeProviderComponents(candidates) {
     accountKey,
     ...(canonicalWebAccountKey ? { webAccountKey: canonicalWebAccountKey } : {}),
     ...(accountKeyAliases.length > 0 ? { accountKeyAliases } : {}),
-    source: hasWebComponent ? 'web' : winner.source,
+    source: mergedSource,
     windows,
     balanceUsd
   };

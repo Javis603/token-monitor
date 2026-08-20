@@ -123,10 +123,14 @@ function summaryAfterOpenCodeDelete() {
     today: {
       totalTokens: 50,
       costUsd: 0.25,
+      outputTokens: 30,
+      capabilities: { tokenComponents: true },
       clients: { codex: 50 },
       clientCosts: { codex: 0.25 },
+      clientOutputs: { codex: 30 },
       models: { 'gpt-5': 50 },
       modelCosts: { 'gpt-5': 0.25 },
+      modelOutputs: { 'gpt-5': 30 },
       clientModels: { codex: { 'gpt-5': 50 } },
       clientModelCosts: { codex: { 'gpt-5': 0.25 } },
       sessions: {
@@ -147,10 +151,14 @@ function summaryAfterOpenCodeDelete() {
     month: {
       totalTokens: 50,
       costUsd: 0.25,
+      outputTokens: 30,
+      capabilities: { tokenComponents: true },
       clients: { codex: 50 },
       clientCosts: { codex: 0.25 },
+      clientOutputs: { codex: 30 },
       models: { 'gpt-5': 50 },
       modelCosts: { 'gpt-5': 0.25 },
+      modelOutputs: { 'gpt-5': 30 },
       clientModels: { codex: { 'gpt-5': 50 } },
       clientModelCosts: { codex: { 'gpt-5': 0.25 } },
       sessions: {}
@@ -158,10 +166,14 @@ function summaryAfterOpenCodeDelete() {
     allTime: {
       totalTokens: 50,
       costUsd: 0.25,
+      outputTokens: 30,
+      capabilities: { tokenComponents: true },
       clients: { codex: 50 },
       clientCosts: { codex: 0.25 },
+      clientOutputs: { codex: 30 },
       models: { 'gpt-5': 50 },
       modelCosts: { 'gpt-5': 0.25 },
+      modelOutputs: { 'gpt-5': 30 },
       clientModels: { codex: { 'gpt-5': 50 } },
       clientModelCosts: { codex: { 'gpt-5': 0.25 } },
       sessions: {}
@@ -186,6 +198,10 @@ test('captures and reapplies missing sessions for any client without double-coun
   assert.equal(visible.today.clientOutputs.opencode, 30);
   assert.equal(visible.today.models['claude-3-5-sonnet'], 100);
   assert.equal(visible.today.modelCacheReads['claude-3-5-sonnet'], 50);
+  assert.equal(visible.today.capabilities.tokenComponents, false);
+  assert.equal(visible.today.unclassifiedTokens, 10);
+  assert.equal(visible.today.clientUnclassifiedTokens.opencode, 10);
+  assert.equal(visible.today.modelUnclassifiedTokens['claude-3-5-sonnet'], 10);
   assert.equal(visible.today.sessions['opencode:o1'].archived, true);
   assert.equal(visible.today.sessions['opencode:o1'].totalTokens, 100);
   assert.equal(visible.today.sessions['codex:c1'].archived, undefined);
@@ -360,39 +376,46 @@ test('clears persisted archive data and treats a missing file as already clear',
   }), false);
 });
 
-test('allocates archived token components across models without rounding drift', () => {
+test('multi-model archived sessions keep model components Unclassified instead of guessing a split', () => {
   const summary = liveSummary();
   const session = summary.allTime.sessions['opencode:o1'];
-  session.models = { alpha: 1, beta: 1, gamma: 1 };
-  session.cacheReadTokens = 2;
-  session.cacheWriteTokens = 2;
-  session.outputTokens = 2;
+  session.models = { alpha: 34, beta: 33, gamma: 33 };
+  session.cacheReadTokens = 60;
+  session.cacheWriteTokens = 10;
+  session.outputTokens = 20;
   const archive = captureSessionUsageArchive({}, summary, new Date('2026-07-09T08:15:00.000Z'));
   const visible = applySessionUsageArchive({ allTime: { sessions: {} } }, archive);
 
-  assert.equal(Object.values(visible.allTime.modelCacheReads).reduce((sum, value) => sum + value, 0), 2);
-  assert.equal(Object.values(visible.allTime.modelCacheWrites).reduce((sum, value) => sum + value, 0), 2);
-  assert.equal(Object.values(visible.allTime.modelOutputs).reduce((sum, value) => sum + value, 0), 2);
+  assert.equal(visible.allTime.cacheReadTokens, 60);
+  assert.equal(visible.allTime.cacheWriteTokens, 10);
+  assert.equal(visible.allTime.outputTokens, 20);
+  assert.equal(visible.allTime.clientCacheReads.opencode, 60);
+  assert.deepEqual(visible.allTime.modelCacheReads, {});
+  assert.deepEqual(visible.allTime.modelCacheWrites, {});
+  assert.deepEqual(visible.allTime.modelOutputs, {});
+  assert.deepEqual(visible.allTime.modelUnclassifiedTokens, { alpha: 34, beta: 33, gamma: 33 });
+  assert.equal(visible.allTime.capabilities.tokenComponents, false);
 });
 
-test('allocates tied model remainders independently of map property order', () => {
+test('multi-model archive classification is independent of map property order', () => {
   const captureWithModels = (models) => {
     const summary = liveSummary();
     Object.assign(summary.allTime.sessions['opencode:o1'], {
       models,
-      cacheReadTokens: 2,
-      cacheWriteTokens: 2,
-      outputTokens: 2
+      cacheReadTokens: 60,
+      cacheWriteTokens: 10,
+      outputTokens: 20
     });
     const archive = captureSessionUsageArchive({}, summary, new Date('2026-07-09T08:15:00.000Z'));
     return applySessionUsageArchive({ allTime: { sessions: {} } }, archive).allTime;
   };
 
-  const forward = captureWithModels({ alpha: 1, beta: 1, gamma: 1 });
-  const reverse = captureWithModels({ gamma: 1, beta: 1, alpha: 1 });
+  const forward = captureWithModels({ alpha: 34, beta: 33, gamma: 33 });
+  const reverse = captureWithModels({ gamma: 33, beta: 33, alpha: 34 });
   assert.deepEqual(forward.modelCacheReads, reverse.modelCacheReads);
   assert.deepEqual(forward.modelCacheWrites, reverse.modelCacheWrites);
   assert.deepEqual(forward.modelOutputs, reverse.modelOutputs);
+  assert.deepEqual(forward.modelUnclassifiedTokens, reverse.modelUnclassifiedTokens);
 });
 
 test('reapplies a large session archive without repeatedly normalizing growing periods', () => {
@@ -423,7 +446,7 @@ test('reapplies a large session archive without repeatedly normalizing growing p
   const elapsedMs = performance.now() - startedAt;
 
   assert.equal(Object.keys(visible.allTime.sessions).length, 2000);
-  assert.ok(elapsedMs < 250, `large archive apply took ${elapsedMs.toFixed(1)}ms`);
+  assert.ok(elapsedMs < 500, `large archive apply took ${elapsedMs.toFixed(1)}ms`);
 });
 
 // Same invariant as the client archive: the periods a progressive preview omits

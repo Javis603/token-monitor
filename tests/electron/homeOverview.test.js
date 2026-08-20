@@ -7,10 +7,12 @@ const test = require('node:test');
 
 const {
   homeActivityHeatmapLayout,
+  activityStatsForPeriod,
   homeDeviceRows,
   homeLimitAccounts,
   homeLimitAccountsForProviders,
   homeModelRows,
+  longRangePeakDayTokens,
   homeToolRows,
   homeActivityWheelRoute,
   homeActivityScrollTarget,
@@ -53,11 +55,18 @@ test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
   }
   assert.doesNotMatch(rule(css, '.home-activity-scroll'), /padding-block/);
   assert.match(rule(css, '.home-activity-canvas .heat-bright-layer'), /pointer-events:\s*none/);
+  const homeActivityHoverRule = css.match(
+    /\.home-activity-canvas \.heat\[data-active="true"\],\s*\.home-activity-canvas \.heat:hover\s*\{([^}]*)\}/
+  );
+  assert.ok(homeActivityHoverRule, 'Home activity hover rule exists');
+  assert.doesNotMatch(homeActivityHoverRule[1], /transform\s*:\s*scale/);
   assert.match(
     css,
     /\.home-activity-scroll\.is-restoring-hover \.heat,\s*\.home-activity-scroll\.is-restoring-hover \.heat-bright-layer\s*\{[^}]*transition:\s*none/
   );
   assert.match(rule(css, '.home-activity-tooltip'), /position:\s*fixed/);
+  assert.match(rule(css, '.home-activity-tooltip'), /background:\s*rgba\(var\(--panel-rgb\), 0\.58\)/);
+  assert.match(rule(css, '.home-activity-tooltip'), /backdrop-filter:\s*blur\(10px\) saturate\(120%\)/);
   assert.match(rule(css, '.home-activity-canvas .heat-month'), /fill:\s*rgba\(var\(--line-rgb\), 0\.5\)/);
 });
 
@@ -347,7 +356,8 @@ test('home limit windows ignore missing percentage values', () => {
 test('homeModelRows returns one-line token shares without cost fields', () => {
   const rows = homeModelRows([
     { name: 'claude-opus-4-8', value: 34_000_000, cost: 21.96, color: '#cc7c5e' },
-    { name: 'gpt-5.5', value: 29_800_000, cost: 25.88, color: '#49a3b0' }
+    { name: 'gpt-5.5', value: 29_800_000, cost: 25.88, color: '#49a3b0' },
+    { name: 'cost-only', value: 0, cost: 3.25, color: '#9aa0aa' }
   ], 63_800_000);
 
   assert.deepEqual(rows, [
@@ -523,11 +533,70 @@ test('patchDailyToday appends today with live cost so its heatmap cell is not em
   assert.equal(appended.cost, 492.5); // intensity uses cost — a 0 here renders today as empty
 });
 
-test('renderHomeTrendsModule patches the activity today cell with the live period total', () => {
+test('renderHomeTrendsModule preserves long-range Activity and peak', () => {
   const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const match = rendererSource.match(/function renderHomeTrendsModule\(\) \{([\s\S]*?)\n\}\n\nfunction renderHome/);
   assert.ok(match, 'renderHomeTrendsModule exists');
-  assert.match(match[1], /patchDailyToday\([\s\S]*?totalTokens/);
+  assert.match(match[1], /patchDailyToday\(/);
+  assert.match(match[1], /rollingYearHeatmap\(/);
+  assert.match(match[1], /clampDaily\(points, 45\)/);
+  assert.match(match[1], /longRangePeakDayTokens\(/);
+  assert.doesNotMatch(match[1], /activityStatsForPeriod\(/);
+});
+
+test('Home peak uses the freshest maximum across retained and live daily data', () => {
+  assert.equal(longRangePeakDayTokens({
+    historySummary: { peakDayTokens: 999 },
+    daily: [{ tokens: 100 }, { tokens: 200 }]
+  }), 999);
+  assert.equal(longRangePeakDayTokens({
+    historySummary: { peakDayTokens: 100 },
+    daily: [{ tokens: 200 }]
+  }), 200);
+  assert.equal(longRangePeakDayTokens({
+    historySummary: {},
+    daily: [{ tokens: 100 }, { tokens: 200 }]
+  }), 200);
+});
+
+test('Trends preserves its long-range chart while selecting range stats', () => {
+  const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const match = rendererSource.match(/function renderTrends\(\) \{([\s\S]*?)\n\}\n\nfunction viewLabelById/);
+  assert.ok(match, 'renderTrends exists');
+  assert.match(match[1], /selectPreviewSeries\(preview, fixed\?\.status === 'ready' \? 'allTime' : state\.period\)/);
+  assert.match(match[1], /activityStatsForPeriod\(/);
+});
+
+test('Activity keeps long-term day and streak stats while range-shaping time and peak', () => {
+  const fixedSnapshot = {
+    status: 'ready',
+    summary: { activeDays: 4, currentStreak: 4, activeTimeMs: 3600000, peakDayTokens: 80 }
+  };
+  assert.deepEqual(activityStatsForPeriod({
+    period: 'last7',
+    fixedSnapshot,
+    historySummary: { activeDays: 119, currentStreak: 87, activeTimeMs: 999, peakDayTokens: 999 }
+  }), {
+    activeDays: 119,
+    currentStreak: 87,
+    activeTimeMs: 3600000,
+    peakDayTokens: 80
+  });
+});
+
+test('native DAY and MONTH activity time and peak follow their calendar range', () => {
+  const daily = [
+    { date: '2026-07-31', tokens: 90, activeTimeMs: 9000 },
+    { date: '2026-08-11', tokens: 40, activeTimeMs: 4000 },
+    { date: '2026-08-12', tokens: 70, activeTimeMs: 7000 }
+  ];
+  const historySummary = { activeDays: 120, currentStreak: 8, activeTimeMs: 20000, peakDayTokens: 90 };
+  assert.deepEqual(activityStatsForPeriod({
+    period: 'today', daily, historySummary, todayKey: '2026-08-12'
+  }), { activeDays: 120, currentStreak: 8, activeTimeMs: 7000, peakDayTokens: 70 });
+  assert.deepEqual(activityStatsForPeriod({
+    period: 'month', daily, historySummary, todayKey: '2026-08-12'
+  }), { activeDays: 120, currentStreak: 8, activeTimeMs: 11000, peakDayTokens: 70 });
 });
 
 test('loadHomeHistory wires the bounded retry through a timer, not a render', () => {

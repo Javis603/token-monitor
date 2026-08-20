@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -44,6 +46,7 @@ test('diagnostic configuration projects effective normalized values without cred
     projectsEnabled: false,
     wslScanEnabled: false,
     syncUploadIntervalMs: 20 * 60 * 1000,
+    limitsRefreshMode: 'fixed',
     limitsRefreshMs: 5 * 60 * 1000
   });
   assert.equal(JSON.stringify(configuration).includes('secret'), false);
@@ -267,6 +270,36 @@ test('OpenCode local limits are explicit and invalidate the OpenCode lane', () =
   );
   assert.equal(classification.limitsReconfigure, true);
   assert.deepEqual(classification.limitScopes, [{ provider: 'opencode' }]);
+});
+
+// The widget and the headless agent are two entry points onto one collector, so
+// a setting that only one of them resolves is a documented switch that silently
+// does nothing on the other. That is what happened to the auto-detected OpenCode
+// account: `.env.example` offered the opt-out, the widget honoured it, and the
+// agent passed nothing, so an unattended machine kept reporting the account.
+test('every OpenCode limits switch the widget honours reaches the headless agent', () => {
+  const root = path.resolve(__dirname, '../..');
+  const agent = fs.readFileSync(path.join(root, 'src/agent/agent.js'), 'utf8');
+  const start = agent.indexOf('const limitsOptions = {');
+  assert.ok(start >= 0, 'agent.js should build a limitsOptions object');
+  const limitsOptions = agent.slice(start, agent.indexOf('\n};', start));
+
+  // Saved GUI accounts, which the agent has no equivalent of: its credentials
+  // come from the environment, and `opencodeCookie` is how they arrive.
+  const guiOnly = new Set(['opencodeProfiles']);
+  const keys = Object.keys(limitsConfigFromSettings({}, { env: {} }))
+    .filter((key) => key.startsWith('opencode') && !guiOnly.has(key));
+  assert.ok(keys.length >= 3, 'expected the OpenCode limits options to be discoverable');
+  for (const key of keys) {
+    assert.match(limitsOptions, new RegExp(`\\b${key}\\b`), `${key} never reaches the agent`);
+  }
+
+  // Resolved from the variable `.env.example` documents, with the same default
+  // as the widget: on, because the key needs no configuration.
+  assert.match(agent, /process\.env\.TOKEN_MONITOR_OPENCODE_AMBIENT/);
+  const envExample = fs.readFileSync(path.join(root, '.env.example'), 'utf8');
+  assert.match(envExample, /^TOKEN_MONITOR_OPENCODE_AMBIENT=/m);
+  assert.equal(limitsConfigFromSettings({}, { env: {} }).opencodeAmbientEnabled, true);
 });
 
 test('third-party profile changes invalidate only the third-party limits lane', () => {

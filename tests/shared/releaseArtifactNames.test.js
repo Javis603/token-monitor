@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -13,7 +14,9 @@ const {
   verifyUpdaterArtifactNames
 } = require('../../scripts/verify-updater-artifact-names');
 const { mergeMacUpdaterMetadata } = require('../../scripts/merge-mac-updater-metadata');
+const { resolveElectronVersionOverride } = require('../../scripts/electron-builder-version');
 const { extractReleaseNotes } = require('../../src/shared/appUpdater');
+const { MAC_APP_MIN_DARWIN_VERSION } = require('../../src/shared/macSystemRequirements');
 
 function macUpdaterMetadata(version, arch) {
   return [
@@ -84,15 +87,77 @@ test('mac release scripts build native Apple Silicon and Intel artifacts', () =>
   assert.equal(intelBullets.length, 5);
   assert.ok(intelBullets.every((line) => line.split(intelDmg).length === 3));
   assert.ok(intelBullets.every((line) => line.includes(`/download/v${rootPackage.version}/`)));
-  const fullChangelogLines = releaseTemplate.split('\n').filter((line) => line.startsWith('**Full Changelog:**'));
-  assert.equal(fullChangelogLines.length, 1);
-  assert.match(fullChangelogLines[0], /\[v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+\]/);
-  assert.match(fullChangelogLines[0], /https:\/\/github\.com\/Javis603\/token-monitor\/compare\/v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+/);
-  assert.ok(fullChangelogLines[0].includes(`v${rootPackage.version}`));
+  const fullChangelogSummaries = releaseTemplate
+    .split('\n')
+    .filter((line) => line.startsWith('<summary><strong>Full Changelog:</strong>'));
+  assert.equal(fullChangelogSummaries.length, 1);
+  assert.match(fullChangelogSummaries[0], />v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+<\/a>/);
+  assert.match(fullChangelogSummaries[0], /https:\/\/github\.com\/Javis603\/token-monitor\/compare\/v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+/);
+  assert.ok(fullChangelogSummaries[0].includes(`v${rootPackage.version}`));
   assert.match(
     releaseTemplate,
-    /---\s*\*\*Full Changelog:\*\*[\s\S]*<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>/
+    /---\s*<details>\s*<summary><strong>Full Changelog:<\/strong> <a href="[^"]+">v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+<\/a><\/summary>\s*<!-- github-generated-release-notes -->\s*<\/details>\s*<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>/
   );
+});
+
+test('release workflow pins Electron only for the Linux artifact', () => {
+  assert.equal(rootPackage.devDependencies.electron, '43.4.0');
+  assert.match(
+    rootPackage.scripts['dist:linux'],
+    /^npm run ensure:tokscale -- --platform=linux-x64 && electron-builder --config scripts\/electron-builder\.config\.js --linux --x64 --publish never$/
+  );
+  assert.equal(resolveElectronVersionOverride({}), undefined);
+  assert.equal(
+    resolveElectronVersionOverride({
+      TOKEN_MONITOR_ELECTRON_TARGET: 'linux',
+      TOKEN_MONITOR_LINUX_ELECTRON_VERSION: '43.2.0'
+    }),
+    '43.2.0'
+  );
+  assert.throws(
+    () => resolveElectronVersionOverride({ TOKEN_MONITOR_LINUX_ELECTRON_VERSION: '43.2.0' }),
+    /only valid for a Linux build/
+  );
+  const defaultConfig = execFileSync(
+    process.execPath,
+    ['-e', "process.stdout.write(String(require('./scripts/electron-builder.config.js').electronVersion || ''))"],
+    {
+      cwd: path.join(__dirname, '..', '..'),
+      env: {
+        ...process.env,
+        TOKEN_MONITOR_ELECTRON_TARGET: '',
+        TOKEN_MONITOR_LINUX_ELECTRON_VERSION: ''
+      }
+    }
+  ).toString();
+  assert.equal(defaultConfig, '');
+  const configWithLinuxOverride = execFileSync(
+    process.execPath,
+    ['-e', "process.stdout.write(String(require('./scripts/electron-builder.config.js').electronVersion || ''))"],
+    {
+      cwd: path.join(__dirname, '..', '..'),
+      env: {
+        ...process.env,
+        TOKEN_MONITOR_ELECTRON_TARGET: 'linux',
+        TOKEN_MONITOR_LINUX_ELECTRON_VERSION: '43.2.0'
+      }
+    }
+  ).toString();
+  assert.equal(configWithLinuxOverride, '43.2.0');
+  assert.throws(
+    () => resolveElectronVersionOverride({
+      TOKEN_MONITOR_ELECTRON_TARGET: 'linux',
+      TOKEN_MONITOR_LINUX_ELECTRON_VERSION: '43.2'
+    }),
+    /must be an exact semver version/
+  );
+
+  const workflow = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'release.yml'), 'utf8');
+  assert.match(workflow, /if: matrix\.target == 'linux'\s+run: \|\s+echo "TOKEN_MONITOR_ELECTRON_TARGET=linux" >> "\$GITHUB_ENV"/);
+  assert.match(workflow, /echo "TOKEN_MONITOR_LINUX_ELECTRON_VERSION=43\.2\.0" >> "\$GITHUB_ENV"/);
+  assert.match(workflow, /- name: Verify Electron packaging version\s+run: \|\s+node -e /);
+  assert.match(workflow, /require\('\.\/scripts\/electron-builder\.config\.js'\)/);
+  assert.match(workflow, /npm run \$\{\{ matrix\.dist_script \}\}/);
 });
 
 test('release icons use source assets without the legacy generator', () => {
@@ -157,6 +222,8 @@ test('merges arm64 and x64 mac updater files into one architecture-aware feed', 
     `Token-Monitor-${version}-x64.dmg`
   ]);
   assert.match(merged, new RegExp(`^path: Token-Monitor-${version}-arm64\\.zip$`, 'm'));
+  assert.match(merged, new RegExp(`^minimumSystemVersion: ${MAC_APP_MIN_DARWIN_VERSION.replaceAll('.', '\\.')}$`, 'm'));
+  assert.equal((merged.match(/^minimumSystemVersion:/gm) || []).length, 1);
   assert.match(merged, /arm64 release notes survive metadata processing/);
   assert.doesNotMatch(merged, /x64 release notes survive metadata processing/);
 
@@ -198,6 +265,26 @@ test('rejects mismatched or mislabelled mac updater metadata', () => {
       macUpdaterMetadata('0.33.0', 'arm64')
     ),
     /expected only arm64 artifacts/
+  );
+  assert.throws(
+    () => mergeMacUpdaterMetadata(
+      macUpdaterMetadata('0.33.0', 'arm64').replace(
+        'files:',
+        'minimumSystemVersion: 23.0.0\nfiles:'
+      ),
+      macUpdaterMetadata('0.33.0', 'x64')
+    ),
+    /does not match release policy/
+  );
+  assert.throws(
+    () => mergeMacUpdaterMetadata(
+      macUpdaterMetadata('0.33.0', 'arm64').replace(
+        'files:',
+        'minimumSystemVersion:\nfiles:'
+      ),
+      macUpdaterMetadata('0.33.0', 'x64')
+    ),
+    /empty top-level minimumSystemVersion/
   );
 });
 

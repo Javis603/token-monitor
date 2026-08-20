@@ -696,6 +696,7 @@ function sanitizeDiagnosticSnapshot(input = {}) {
       projectsEnabled: booleanOrUnknown(configuration.projectsEnabled),
       wslScanEnabled: booleanOrUnknown(configuration.wslScanEnabled),
       syncUploadIntervalMs: integer(configuration.syncUploadIntervalMs, null),
+      limitsRefreshMode: text(configuration.limitsRefreshMode, 'unknown', 16),
       limitsRefreshMs: integer(configuration.limitsRefreshMs, null)
     },
     topology: {

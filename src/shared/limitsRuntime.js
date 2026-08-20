@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const {
   PROVIDER_CLEANUP_GRACE_MS,
+  normalizeLimitsRefreshMode,
   normalizeLimitsRefreshMs,
   parseBoolean,
   parseLimitProviders,
@@ -14,6 +15,15 @@ const {
   nextLimitsResetBoundary,
   pruneAttemptedResetBoundaries
 } = require('./limitResetBoundary');
+const {
+  LIMITS_ADAPTIVE_BASE_MS,
+  createLimitsBurnState,
+  markLimitsProbeSuccess,
+  nextLimitsUrgencyRefresh,
+  pruneLimitsBurnState,
+  recordLimitsSample,
+  recordLimitsUrgencyAttempt
+} = require('./limitsBurnRate');
 const { runWithProbeDeadline } = require('./probeDeadline');
 const {
   DEFAULT_LIMITS_RETRY_BASE_MS,
@@ -167,7 +177,14 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
 
   let config = cloneValue(initialOptions);
   let enabled = parseBoolean(config.limitsEnabled ?? config.enabled, true);
-  let refreshMs = normalizeLimitsRefreshMs(config.limitsRefreshMs ?? config.refreshMs);
+  let refreshMode = normalizeLimitsRefreshMode(config.limitsRefreshMode);
+  // Adaptive replaces the chosen interval with its own baseline rather than
+  // modifying it, so the stored limitsRefreshMs survives a round trip through
+  // adaptive and back. Everything downstream, including the refreshMs published
+  // on the wire, then describes the cadence actually in effect.
+  let refreshMs = refreshMode === 'adaptive'
+    ? LIMITS_ADAPTIVE_BASE_MS
+    : normalizeLimitsRefreshMs(config.limitsRefreshMs ?? config.refreshMs);
   let configuredProviders = new Set(parseLimitProviders(config.limitProviders ?? config.providers));
   let runtimeEpoch = 1;
   let stopped = false;
@@ -177,7 +194,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
   let pumpQueued = false;
   let intervalTimer = null;
   let resetTimer = null;
+  let urgencyTimer = null;
   let lastScheduledFullAt = 0;
+  const burnState = createLimitsBurnState();
   const listeners = new Set();
   const lanes = new Map();
   const providerQueue = [];
@@ -323,7 +342,16 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       providers
     });
     pruneAttemptedResetBoundaries(snapshot, attemptedResetBoundaries);
+    // Only sample once this runtime is actually polling. The constructor seeds
+    // rows from previousLimits that can be arbitrarily old, and pairing that
+    // seed with the first live probe would read a whole offline session's
+    // consumption as having happened in the milliseconds between the two.
+    if (started && !stopped) {
+      recordLimitsSample(burnState, snapshot, now());
+      pruneLimitsBurnState(burnState, snapshot);
+    }
     scheduleResetTimer();
+    scheduleUrgencyTimer();
     const published = cloneValue(snapshot);
     deps.onUpdate?.(published);
     for (const listener of listeners) listener(published);
@@ -350,6 +378,86 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       }
       scheduleResetTimer();
     }, next.delayMs);
+  }
+
+  // An urgency probe must stand down only when the lane is already doing work
+  // that covers this exact scope. A lane serialises probes, but account-scoped
+  // work queues behind other accounts without cancelling them, so an account
+  // close to exhaustion has to be allowed to take its place in that queue rather
+  // than forfeit its turn and wait another floor for a probe that was never
+  // about it.
+  function urgencyScopeCovered(lane, scope) {
+    if (!lane) return false;
+    const active = lane.active?.intent;
+    const pending = [...lane.pending.values()];
+    // A provider-wide dispatch aborts whatever is running and empties the queue,
+    // so anything in progress makes it destructive rather than merely redundant.
+    if (!isAccountScope(scope)) return Boolean(active) || pending.length > 0;
+    // A provider-wide refresh, running or queued, answers for every account.
+    if (active && !active.accountScoped) return true;
+    if (lane.pending.has(`${lane.provider}:*`)) return true;
+    // Work already aimed at this same account, which dispatching would supersede.
+    if (active?.accountScoped && rowMatchesScope(scope, active.scope)) return true;
+    return pending.some((intent) => rowMatchesScope(scope, intent.scope));
+  }
+
+  function clearUrgencyTimer() {
+    if (urgencyTimer !== null) clearTimer(urgencyTimer);
+    urgencyTimer = null;
+  }
+
+  // A second data-driven timer alongside scheduleResetTimer(), active only in
+  // adaptive mode. The 5-minute baseline still applies to every provider; this
+  // inserts an earlier, provider-scoped probe for a quota whose burn rate says
+  // it is close to running out, never faster than the floor in limitsBurnRate.
+  // 'burn-rate' is deliberately absent from COOLDOWN_BYPASS_REASONS, so
+  // queueScope defers it whenever the lane is already backing off.
+  function scheduleUrgencyTimer() {
+    clearUrgencyTimer();
+    if (!started || stopped || !enabled || refreshMode !== 'adaptive') return;
+    const due = nextLimitsUrgencyRefresh(snapshot, burnState, now(), { baseRefreshMs: refreshMs });
+    if (!due) return;
+    urgencyTimer = setTimer(() => {
+      urgencyTimer = null;
+      // Recorded for every key rather than only the dispatched ones, so a scope
+      // skipped below still consumes its deadline instead of re-firing at once.
+      recordLimitsUrgencyAttempt(burnState, due.keys, now());
+      for (const [index, scope] of (due.scopes || []).entries()) {
+        const provider = providerId(scope.provider);
+        const rows = snapshot.providers.filter((row) => row.provider === provider);
+        const strongIdentity = clean(scope.accountKey || scope.accountEmail || scope.accountName);
+        if (!configuredProviders.has(provider) || (rows.length > 1 && !strongIdentity)) continue;
+        // A lane already running a probe is skipped whatever queued it: an
+        // intent superseded by another refresh resolves its promise at once
+        // while the physical probe keeps running, so inFlight alone would let an
+        // urgency tick disturb work the lane is already doing. The attempt above
+        // was already recorded for this key, so a scope that stands down waits a
+        // floor rather than retrying against a lane that already covers it.
+        //
+        // urgencyScopeCovered compares through rowMatchesScope rather than by
+        // identity key, because an account is addressable by several aliases and
+        // callers enqueue whichever one they hold: a row carrying both
+        // accountKey and accountName yields the accountKey form here, while a
+        // profile refresh enqueues the name form.
+        if (urgencyScopeCovered(lanes.get(provider), scope)) continue;
+        // Held until the probe settles, not merely until it is dispatched. The
+        // lane is latest-wins, so re-scheduling a scope whose probe is still
+        // running aborts that probe: a provider slower than the floor would
+        // otherwise never publish a reading, only cancelled requests.
+        const key = due.keys[index];
+        burnState.inFlight.add(key);
+        void refresh(scope, 'burn-rate').finally(() => {
+          burnState.inFlight.delete(key);
+          scheduleUrgencyTimer();
+        });
+      }
+      // Re-armed unconditionally: whatever was just dispatched is now in
+      // inFlight and skipped, so this picks up the next provider due rather than
+      // leaving it to wait behind a probe that can legitimately run for two
+      // minutes. Lanes are per provider and the executor is concurrent, so there
+      // is nothing to serialise across them.
+      scheduleUrgencyTimer();
+    }, due.delayMs);
   }
 
   function clearIntervalTimer() {
@@ -476,6 +584,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
 
       represented.add(identityKey);
       applyAttempt(lane, identityKey, row, row.status, attemptAt);
+      // Marks the row as measurable by this runtime, so a persisted seed for a
+      // provider that has not answered yet can never become a burn baseline.
+      if (row.status === 'ok') markLimitsProbeSuccess(burnState, row);
     }
 
     if (!dispatch.accountScoped && !genericTerminal) {
@@ -659,7 +770,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     const previousProviders = configuredProviders;
     config = { ...config, ...cloneValue(nextOptions) };
     enabled = parseBoolean(config.limitsEnabled ?? config.enabled, true);
-    refreshMs = normalizeLimitsRefreshMs(config.limitsRefreshMs ?? config.refreshMs);
+    refreshMode = normalizeLimitsRefreshMode(config.limitsRefreshMode);
+    refreshMs = refreshMode === 'adaptive'
+      ? LIMITS_ADAPTIVE_BASE_MS
+      : normalizeLimitsRefreshMs(config.limitsRefreshMs ?? config.refreshMs);
     configuredProviders = new Set(parseLimitProviders(config.limitProviders ?? config.providers));
 
     for (const provider of previousProviders) {
@@ -675,6 +789,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
 
     if (!enabled) {
       clearIntervalTimer();
+      clearUrgencyTimer();
       if (resetTimer !== null) clearTimer(resetTimer);
       resetTimer = null;
       for (const lane of lanes.values()) {
@@ -778,6 +893,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     void refresh({}, 'startup');
     scheduleInterval(refreshMs);
     scheduleResetTimer();
+    scheduleUrgencyTimer();
   }
 
   function stop() {
@@ -785,6 +901,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     stopped = true;
     runtimeEpoch += 1;
     clearIntervalTimer();
+    clearUrgencyTimer();
     if (resetTimer !== null) clearTimer(resetTimer);
     resetTimer = null;
     for (const lane of lanes.values()) {

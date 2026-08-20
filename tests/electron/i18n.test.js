@@ -9,6 +9,7 @@ const {
   MESSAGES,
   normalizeLanguage,
   resolveLocale,
+  resolveRegionalLocale,
   translate
 } = require('../../src/electron/renderer/i18n');
 
@@ -51,6 +52,13 @@ test('resolveLocale maps auto to Chinese variants from browser languages', () =>
   assert.equal(resolveLocale('zh-CN', ['zh-TW']), 'zh-CN');
 });
 
+test('regional locale preserves the OS region for calendar rules', () => {
+  assert.equal(resolveRegionalLocale(['en-GB', 'en-US']), 'en-GB');
+  assert.equal(resolveRegionalLocale(['en_AU']), 'en-AU');
+  assert.equal(resolveRegionalLocale(['invalid locale', 'en-NZ']), 'en-NZ');
+  assert.equal(resolveRegionalLocale(['auto', '']), 'en');
+});
+
 test('translate falls back to English and interpolates values', () => {
   assert.equal(translate('zh-TW', 'settings.sync.title'), '多裝置同步');
   assert.equal(translate('zh-TW', 'settings.codex.personalWorkspace'), '個人');
@@ -74,6 +82,42 @@ test('automatic app update copy describes background downloads, not update check
     translate('zh-TW', 'settings.appUpdate.automaticUnsupportedWindowsPortable'),
     'Portable 版本不支援自動下載，請透過「查看 release」手動更新。'
   );
+});
+
+test('Hub deployment copy describes the whole build instead of only its shared core', () => {
+  assert.equal(translate('en', 'settings.sync.hubBuild.current', { target: 'Worker' }), 'Worker is up to date');
+  assert.equal(
+    translate('en', 'settings.sync.hubBuild.updateAvailable', { target: 'Worker' }),
+    'Worker update available — redeploy to get the latest Hub build'
+  );
+  assert.equal(translate('zh-TW', 'settings.sync.hubBuild.current', { target: 'Worker' }), 'Worker 已是最新版本');
+  assert.equal(
+    translate('zh-TW', 'settings.sync.hubBuild.updateAvailable', { target: 'Worker' }),
+    'Worker 有更新可用，重新部署即可取得最新 Hub build'
+  );
+  assert.equal(
+    translate('zh-TW', 'settings.sync.hubBuild.unknown', { target: 'Worker' }),
+    'Worker 的部署版本無法識別'
+  );
+  assert.equal(
+    translate('en', 'settings.sync.hubBuild.remoteNewer', { target: 'Worker' }),
+    'This Worker was deployed by a newer version of Token Monitor'
+  );
+  assert.equal(
+    translate('zh-TW', 'settings.sync.hubBuild.remoteNewer', { target: 'Worker' }),
+    '此 Worker 由較新的 Token Monitor 版本部署'
+  );
+  for (const locale of Object.keys(MESSAGES)) {
+    assert.doesNotMatch(MESSAGES[locale]['settings.sync.hubBuild.current'], /core|核心|코어|コア/i, locale);
+    assert.doesNotMatch(MESSAGES[locale]['settings.sync.hubBuild.updateAvailable'], /core|核心|코어|コア/i, locale);
+    assert.doesNotMatch(MESSAGES[locale]['settings.sync.hubBuild.unknown'], /custom|自訂|自定义|사용자 지정|カスタム/i, locale);
+    assert.doesNotMatch(
+      MESSAGES[locale]['settings.sync.hubBuild.remoteNewer'],
+      /redeploy|重新部署|재배포|再デプロイ/i,
+      locale
+    );
+    assert.match(MESSAGES[locale]['settings.sync.hubBuild.remoteNewer'], /Token Monitor/, locale);
+  }
 });
 
 test('tool health copy stays compact and describes snapshots, not liveness', () => {

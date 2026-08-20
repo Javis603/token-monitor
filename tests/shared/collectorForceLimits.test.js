@@ -29,6 +29,20 @@ function fakeTokscaleSpawn() {
   };
 }
 
+async function withQoderCollectorMock(mocks, callback) {
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const qoderCnUsage = require('../../src/shared/qoderCnUsage');
+  const originals = Object.fromEntries(Object.keys(mocks).map((key) => [key, qoderCnUsage[key]]));
+  Object.assign(qoderCnUsage, mocks);
+  delete require.cache[collectorPath];
+  try {
+    return await callback(require(collectorPath));
+  } finally {
+    Object.assign(qoderCnUsage, originals);
+    delete require.cache[collectorPath];
+  }
+}
+
 test('reset boundary scheduling caps timers that exceed the Node timeout range', () => {
   const collectorPath = require.resolve('../../src/shared/collector');
   delete require.cache[collectorPath];
@@ -154,6 +168,38 @@ test('collectUsageOnce handles proma-only tracking without spawning tokscale', a
     promaUsage.buildPromaPeriods = originalBuildPromaPeriods;
     delete require.cache[collectorPath];
   }
+});
+
+test('collectUsageOnce handles qodercn-only tracking without spawning tokscale', async () => {
+  let tokscaleCalls = 0;
+
+  await withQoderCollectorMock({
+    collectQoderCnRows: async () => [],
+    buildQoderCnPeriods: () => ({
+      today: { entries: [{ client: 'qodercn', model: 'qmodel', input: 12, output: 3 }] },
+      month: { entries: [{ client: 'qodercn', model: 'qmodel', input: 20 }] },
+      allTime: { entries: [{ client: 'qodercn', model: 'qmodel', input: 30 }] }
+    })
+  }, async ({ collectUsageOnce }) => {
+    const summary = await collectUsageOnce({
+      clients: 'qodercn',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false,
+      runTokscale: async () => {
+        tokscaleCalls += 1;
+        throw new Error('tokscale should not run for qodercn-only tracking');
+      }
+    });
+
+    assert.equal(tokscaleCalls, 0);
+    assert.deepEqual(summary.trackedClients, ['qodercn']);
+    assert.equal(summary.today.clients['qodercn'], 15);
+    assert.equal(summary.month.clients['qodercn'], 20);
+    assert.equal(summary.allTime.clients['qodercn'], 30);
+  });
 });
 
 test('anchored Proma refresh derives broader windows from the combined fresh today period', async () => {

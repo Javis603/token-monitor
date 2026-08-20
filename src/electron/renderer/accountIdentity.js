@@ -156,6 +156,13 @@
     return (accounts || []).find((account) => codexAccountMatchesProvider(account, provider))?.id || '';
   }
 
+  function codexManagedAccountPlanLabel(account, providers = []) {
+    const provider = (providers || []).find((candidate) => (
+      candidate?.status === 'ok' && codexAccountMatchesProvider(account, candidate)
+    ));
+    return String(provider?.accountLabel || account?.accountLabel || '').trim();
+  }
+
   function isCodexLiveAccount(provider) {
     return String(provider?.provider || '').trim().toLowerCase() === 'codex'
       && String(provider?.status || '').trim() === 'ok'
@@ -183,6 +190,7 @@
     codexAccountDisplayLabel,
     codexAccountIdForProvider,
     codexAccountMatchesProvider,
+    codexManagedAccountPlanLabel,
     isCodexLiveAccount,
     localDeviceLimitsProviders,
     localLiveCodexProvider,

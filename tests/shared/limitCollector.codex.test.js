@@ -317,6 +317,47 @@ test('Codex provider supports managed-account source detail', () => {
   assert.equal(provider.accountEmail, 'managed@example.com');
 });
 
+test('Codex provider classifies a 30-day primary window as a Monthly billing lane', () => {
+  const provider = mapCodexRateLimitsToProvider({
+    rateLimits: {
+      planType: 'free',
+      primary: {
+        usedPercent: 0,
+        resetsAt: '2026-07-01T00:00:00Z',
+        windowDurationMins: 30 * 24 * 60
+      }
+    }
+  }, {
+    source: 'rpc',
+    sourceDetail: 'managed',
+    updatedAt: '2026-06-01T00:00:00Z'
+  });
+
+  assert.equal(provider.accountLabel, 'Free');
+  assert.equal(provider.windows[0].kind, 'billing');
+  assert.equal(provider.windows[0].label, 'Monthly');
+  assert.equal(provider.windows[0].windowMinutes, 30 * 24 * 60);
+});
+
+test('Codex provider keeps an unknown long primary window in the weekly lane', () => {
+  const provider = mapCodexRateLimitsToProvider({
+    rateLimits: {
+      primary: {
+        usedPercent: 25,
+        resetsAt: '2026-06-15T00:00:00Z',
+        windowDurationMins: 14 * 24 * 60
+      }
+    }
+  }, {
+    source: 'rpc',
+    sourceDetail: 'managed',
+    updatedAt: '2026-06-01T00:00:00Z'
+  });
+
+  assert.equal(provider.windows[0].kind, 'weekly');
+  assert.equal(provider.windows[0].windowMinutes, 14 * 24 * 60);
+});
+
 function codexPayload(email, sourceDetail) {
   return {
     account: { email, planType: 'plus' },
@@ -354,6 +395,37 @@ function makeIdToken(payload) {
 
 // The live account's auth.json is never read in tests unless a test opts in.
 const noLiveAuth = { readFileSync: () => { throw new Error('no auth.json'); } };
+
+test('fetchCodexLimits replaces a saved managed plan with the latest RPC plan', async () => {
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: [{
+      id: 'downgraded',
+      email: 'downgraded@example.com',
+      homePath: '/tmp/token-monitor-codex/downgraded',
+      accountLabel: 'plus'
+    }]
+  }, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    ...noLiveAuth,
+    readCodexRpc: async () => ({
+      rateLimits: {
+        planType: 'free',
+        primary: {
+          usedPercent: 0,
+          resetsAt: '2026-07-01T00:00:00Z',
+          windowDurationMins: 30 * 24 * 60
+        }
+      }
+    })
+  });
+
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].accountLabel, 'Free');
+  assert.equal(providers[0].windows[0].kind, 'billing');
+  assert.equal(providers[0].windows[0].label, 'Monthly');
+});
 
 test('fetchCodexLimits returns one provider per managed Codex account', async () => {
   const seenHomes = [];

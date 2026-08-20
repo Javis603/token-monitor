@@ -4,8 +4,9 @@
 // Saved user ordering is parsed separately and must not be overwritten.
 const LIMIT_PROVIDER_IDS = Object.freeze([
   'claude', 'codex', 'opencode', 'cursor', 'antigravity', 'kimi', 'grok',
-  'copilot', 'mimo', 'zai', 'zaiteam', 'kiro', 'deepseek', 'openrouter',
-  'minimax', 'volcengine', 'qoder', 'workbuddy', 'ollama', 'thirdparty'
+  'copilot', 'commandcode', 'mimo', 'zai', 'zaiteam', 'kiro', 'workbuddy',
+  'qoder', 'deepseek', 'openrouter', 'minimax', 'volcengine', 'ollama',
+  'thirdparty'
 ]);
 
 // These are the only window metrics that cross the shared limits schema.

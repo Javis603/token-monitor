@@ -607,6 +607,11 @@ test('release template exposes marked summaries for every bundled locale', () =>
     /<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>[\s\S]*<details>\s*<summary><strong>繁體中文<\/strong><\/summary>[\s\S]*<details>\s*<summary><strong>한국어<\/strong><\/summary>[\s\S]*<details>\s*<summary><strong>日本語<\/strong><\/summary>/
   );
   assert.doesNotMatch(template, /其他語言|user-content-release-notes-/);
+  assert.doesNotMatch(
+    template,
+    /^- \*\*[^*\n]+\*\*\S/gm,
+    'bold release-note labels should be separated from their body text'
+  );
   assert.match(template, /## 繁體中文[\s\S]*## 下載/);
   assert.match(template, /## 한국어[\s\S]*## 다운로드/);
   assert.match(template, /## 日本語[\s\S]*## ダウンロード/);

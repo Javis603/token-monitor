@@ -31,6 +31,7 @@
       key: `turn:${index}`,
       label: `Reply #${index + 1}`,
       value: finiteNumber(turn.tokens && turn.tokens.total),
+      tokensAvailable: turn.tokensAvailable !== false,
       cost: finiteNumber(turn.costEstimate),
       tokens: turn.tokens || {},
       tools: formatToolList(turn.tools)
@@ -60,6 +61,7 @@
         title: ex.promptPreview ? ex.promptPreview : '(session start)',
         subtitle: subtitleParts.join(' · '),
         value: finiteNumber(ex.tokens && ex.tokens.total),
+        tokensAvailable: ex.tokensAvailable !== false,
         cost: finiteNumber(ex.costEstimate),
         startTime: timeValue(ex.startedAt),
         turnCount,

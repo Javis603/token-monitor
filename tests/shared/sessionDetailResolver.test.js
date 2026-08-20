@@ -11,6 +11,7 @@ const {
   resolveSessionDetailForPlatform,
   runSessionDetailWorker
 } = require('../../src/shared/sessionDetailResolver');
+const { readSessionDetail: readNativeDetail } = require('../../src/shared/sessionDetail');
 
 function missing(args) {
   return { found: false, client: args.client, sessionId: args.sessionId, exchanges: [] };
@@ -49,6 +50,36 @@ test('reads a Claude transcript from a discovered WSL home', (t) => {
   assert.equal(detail.exchanges[0].promptPreview, 'from WSL');
   assert.equal(detail.totals.totalTokens, 18);
   assert.equal(detail.totals.costUsd, 0.25);
+});
+
+test('WSL Claude detail ignores the host CLAUDE_CONFIG_DIR override', (t) => {
+  const nativeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-detail-'));
+  const wslHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-wsl-detail-'));
+  const hostConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-host-claude-'));
+  t.after(() => fs.rmSync(nativeHome, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(wslHome, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(hostConfigDir, { recursive: true, force: true }));
+  const sessionId = 'wsl-scoped-config';
+  const transcriptDir = path.join(wslHome, '.claude', 'projects', '-workspace');
+  fs.mkdirSync(transcriptDir, { recursive: true });
+  fs.writeFileSync(path.join(transcriptDir, `${sessionId}.jsonl`), [
+    JSON.stringify({ type: 'user', timestamp: '2026-07-31T00:00:00.000Z', message: { content: 'from scoped WSL' } }),
+    JSON.stringify({ type: 'assistant', timestamp: '2026-07-31T00:00:01.000Z', message: { usage: { input_tokens: 2, output_tokens: 1 }, content: [] } })
+  ].join('\n'));
+
+  const detail = resolveSessionDetailForPlatform(
+    { client: 'claude', sessionId, period: 'total' },
+    {
+      platform: 'win32',
+      homedir: () => nativeHome,
+      env: { CLAUDE_CONFIG_DIR: hostConfigDir },
+      wslUsageHomes: () => [wslHome]
+    }
+  );
+
+  assert.equal(detail.found, true);
+  assert.equal(detail.exchanges[0].promptPreview, 'from scoped WSL');
+  assert.equal(detail.totals.totalTokens, 3);
 });
 
 test('reads a Claude transcript from the alternate root in a discovered WSL home', (t) => {
@@ -115,6 +146,36 @@ test('returns a native Claude detail without enumerating WSL homes', () => {
   assert.equal(enumerated, false);
 });
 
+test('resolves a Reasonix native detail through the same platform resolver', () => {
+  const nativeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-reasonix-detail-'));
+  const stateHome = path.join(nativeHome, 'state');
+  const sessions = path.join(stateHome, 'projects', 'opaque', 'sessions');
+  fs.mkdirSync(sessions, { recursive: true });
+  fs.writeFileSync(path.join(sessions, 'branch.jsonl.meta'), JSON.stringify({ id: 'resolver-id' }));
+  fs.writeFileSync(path.join(sessions, 'branch.events.jsonl'), [
+    JSON.stringify({ type: 'user.message', ts: '2026-08-08T00:00:00.000Z', text: 'resolver prompt' }),
+    JSON.stringify({ type: 'model.final', ts: '2026-08-08T00:00:01.000Z', usage: { prompt_tokens: 3, completion_tokens: 2 } })
+  ].join('\n'));
+  try {
+    const detail = resolveSessionDetailForPlatform(
+      { client: 'reasonix', sessionId: 'reasonix:resolver-id', period: 'total' },
+      {
+        platform: process.platform,
+        homedir: () => nativeHome,
+        readSessionDetail: (args) => readNativeDetail({
+          ...args,
+          deps: { platform: process.platform, env: { REASONIX_STATE_HOME: stateHome } }
+        })
+      }
+    );
+    assert.equal(detail.found, true);
+    assert.equal(detail.exchanges[0].promptPreview, 'resolver prompt');
+    assert.equal(detail.totals.totalTokens, 5);
+  } finally {
+    fs.rmSync(nativeHome, { recursive: true, force: true });
+  }
+});
+
 for (const client of ['claude', 'codex']) {
   test(`falls back to running WSL homes for ${client} JSONL details on Windows`, () => {
     const homes = [];
@@ -142,7 +203,7 @@ for (const client of ['claude', 'codex']) {
 }
 
 test('does not inspect WSL homes for non-Windows or SQLite-backed clients', () => {
-  for (const [platform, client] of [['linux', 'claude'], ['win32', 'opencode']]) {
+  for (const [platform, client] of [['linux', 'claude'], ['win32', 'opencode'], ['linux', 'dsh']]) {
     let enumerated = false;
     const detail = resolveSessionDetailForPlatform(
       { client, sessionId: 'missing' },
@@ -245,4 +306,82 @@ test('the public session detail resolver uses the worker boundary', async () => 
   assert.ok(result instanceof Promise);
   assert.deepEqual(await result, { found: false });
   assert.equal(workerArgs, args);
+});
+
+// dsh reads its own transcript format directly, so it always dispatches to
+// readDshSessionDetail rather than the tokscale-JSONL reader, and forwards
+// home/platform/env/cwdDir the same way the generic `deps.readSessionDetail`
+// seam already does.
+test('dsh dispatches to readDshSessionDetail with home/platform/env/cwdDir, never the generic JSONL reader', () => {
+  let received;
+  const detail = resolveSessionDetailForPlatform(
+    { client: 'dsh', sessionId: 's1' },
+    {
+      readDshSessionDetail: (args) => { received = args; return { found: true, client: 'dsh', sessionId: 's1' }; },
+      readSessionDetail: () => { throw new Error('must not call the generic reader for dsh'); },
+      homedir: () => '/home/dsh-tester',
+      platform: 'linux',
+      env: { DSH_HOME: '/custom/.dsh' },
+      cwdDir: '/work'
+    }
+  );
+  assert.deepEqual(detail, { found: true, client: 'dsh', sessionId: 's1' });
+  assert.equal(received.home, '/home/dsh-tester');
+  assert.equal(received.platform, 'linux');
+  assert.deepEqual(received.env, { DSH_HOME: '/custom/.dsh' });
+  assert.equal(received.cwdDir, '/work');
+});
+
+// wslUsage.js scans `.dsh/sessions` (MARKER_CLIENTS), so a DSH session can
+// legitimately surface in the list from a WSL distro on Windows. Detail must
+// follow the same native-miss -> WSL-hit fallback claude/codex already get,
+// through readDshSessionDetail rather than the tokscale-JSONL reader.
+test('falls back to a WSL home for a dsh session not found in the native home', () => {
+  const attempts = [];
+  const detail = resolveSessionDetailForPlatform(
+    { client: 'dsh', sessionId: 's1' },
+    {
+      readDshSessionDetail: (args) => {
+        attempts.push(args.home);
+        return args.home === '/wsl/home/tester'
+          ? { found: true, client: 'dsh', sessionId: 's1', home: args.home }
+          : { found: false, client: 'dsh', sessionId: 's1' };
+      },
+      readSessionDetail: () => { throw new Error('must not call the generic reader for dsh'); },
+      homedir: () => 'C:\\Users\\me',
+      platform: 'win32',
+      wslUsageHomes: () => ['/wsl/home/tester']
+    }
+  );
+  assert.equal(detail.found, true);
+  assert.equal(detail.home, '/wsl/home/tester');
+  assert.deepEqual(attempts, ['C:\\Users\\me', '/wsl/home/tester']);
+});
+
+// dshPaths.js's resolveDshHome checks env.DSH_HOME before the homeDir it is
+// given. If the WSL fallback attempt got the host's real env, a host-side
+// DSH_HOME override would silently redirect the WSL lookup straight back to
+// the host path, making the fallback a no-op — tokscale's own scanner
+// deliberately disables env-based root lookup for an explicit --home
+// (use_env_roots: false, lib.rs) for exactly this reason.
+test('does not let a host DSH_HOME override leak into the WSL fallback attempt', () => {
+  const envSeen = [];
+  const detail = resolveSessionDetailForPlatform(
+    { client: 'dsh', sessionId: 's1' },
+    {
+      readDshSessionDetail: (args) => {
+        envSeen.push(args.env);
+        return args.home === '/wsl/home/tester'
+          ? { found: true, client: 'dsh', sessionId: 's1', home: args.home }
+          : { found: false, client: 'dsh', sessionId: 's1' };
+      },
+      homedir: () => 'C:\\Users\\me',
+      platform: 'win32',
+      env: { DSH_HOME: 'C:\\custom\\dsh' },
+      wslUsageHomes: () => ['/wsl/home/tester']
+    }
+  );
+  assert.equal(detail.found, true);
+  assert.deepEqual(envSeen[0], { DSH_HOME: 'C:\\custom\\dsh' }, 'the native attempt should still honor the host DSH_HOME');
+  assert.deepEqual(envSeen[1], {}, 'the WSL attempt must not inherit the host DSH_HOME');
 });
