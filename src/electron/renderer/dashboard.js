@@ -1383,19 +1383,33 @@ function outputTokPerSec(value) {
   return duration > 0 && output > 0 ? output * 1000 / duration : 0;
 }
 
+function tooltipEl(tag, className, text) {
+  const el = document.createElement(tag);
+  el.className = className;
+  if (text != null) el.textContent = text;
+  return el;
+}
+
+function tooltipRow(name, value) {
+  const row = tooltipEl('div', 'tt-row');
+  row.append(tooltipEl('span', 'tt-name', name), tooltipEl('span', 'tt-val', value));
+  return row;
+}
+
 function showHeatTooltip(date, day, ev) {
   const tokens = day ? day.tokens : 0;
   const cost = day ? day.cost : 0;
   const rate = outputTokPerSec(day);
   const tokLabel = state.locale.startsWith('zh') ? 'Token' : 'Tokens';
   const costLabel = state.locale.startsWith('zh') ? '花費' : 'Cost';
-  let html = `<div class="tt-head">${longDate(date)}</div>`;
-  html += `<div class="tt-row"><span class="tt-name">${tokLabel}</span><span class="tt-val">${formatCompact(tokens)}</span></div>`;
-  if (cost > 0) html += `<div class="tt-row"><span class="tt-name">${costLabel}</span><span class="tt-val">${formatCost(cost)}</span></div>`;
-  if (rate > 0) {
-    html += `<div class="tt-row"><span class="tt-name">${escapeHtml(t('trends.outputRate'))}</span><span class="tt-val">${formatCompact(rate)}/s</span></div>`;
-  }
-  els.tooltip.innerHTML = html;
+  // Dates come from heatmap data-d attributes — write them as text, not HTML.
+  const nodes = [
+    tooltipEl('div', 'tt-head', longDate(date)),
+    tooltipRow(tokLabel, formatCompact(tokens))
+  ];
+  if (cost > 0) nodes.push(tooltipRow(costLabel, formatCost(cost)));
+  if (rate > 0) nodes.push(tooltipRow(t('trends.outputRate'), `${formatCompact(rate)}/s`));
+  els.tooltip.replaceChildren(...nodes);
   positionTooltip(ev);
 }
 

@@ -207,6 +207,15 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.doesNotMatch(js, /statCardColumnWidths/);
 });
 
+test('heatmap tooltip writes the DOM date as text, not HTML', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const fn = /function showHeatTooltip\(date, day, ev\) \{([\s\S]*?)\nfunction showShareTooltip/.exec(js);
+  assert.ok(fn, 'showHeatTooltip should exist');
+  assert.match(fn[1], /tooltipEl\('div', 'tt-head', longDate\(date\)\)/);
+  assert.match(fn[1], /els\.tooltip\.replaceChildren/);
+  assert.doesNotMatch(fn[1], /innerHTML/);
+});
+
 test('heatmap metric preserves the legacy cost default and normalizes settings', () => {
   const main = read('src', 'electron', 'main.js');
   const js = read('src', 'electron', 'renderer', 'dashboard.js');
