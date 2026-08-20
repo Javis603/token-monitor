@@ -338,17 +338,18 @@ function readReasonixSessionDetail({ sessionId, period = 'total', home, deps = {
   };
 }
 
-function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, deps = {} }) {
+function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, env, useEnvRoots, deps = {} }) {
   if (client === 'opencode') return readOpenCodeSessionDetail({ sessionId, period, deps });
   if (client === 'reasonix') return readReasonixSessionDetail({ sessionId, period, home, deps });
-  const filePath = resolveSessionFile(client, sessionId, home);
+  const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots });
   if (!filePath) return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
   let text;
   try { text = fs.readFileSync(filePath, 'utf8'); } catch (_) {
     return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
   }
   const events = parseByClient(client, text);
-  const grouped = filterExchangesByPeriod(groupEvents(events), period, new Date());
+  const now = new Date((deps.now || Date.now)());
+  const grouped = filterExchangesByPeriod(groupEvents(events), period, now);
   distributeCost(grouped, sessionCost);
   return { found: true, client, sessionId, period, exchanges: grouped, totals: totalsOf(grouped, sessionCost) };
 }

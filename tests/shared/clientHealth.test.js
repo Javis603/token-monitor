@@ -2,6 +2,9 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 
 const {
@@ -329,6 +332,23 @@ test('every source-root id the collector emits is in the allowlist', () => {
   }
 });
 
+test('Claude source roots follow CLAUDE_CONFIG_DIR like tokscale', () => {
+  const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  const originalHomedir = os.homedir;
+  os.homedir = () => path.join(path.sep, 'home', 'alice');
+  process.env.CLAUDE_CONFIG_DIR = path.join(path.sep, 'srv', 'claude-config');
+  try {
+    assert.deepEqual(clientSourceRoots('claude').claude, [
+      { id: 'claude-projects', dir: path.join(path.sep, 'srv', 'claude-config', 'projects') },
+      { id: 'claude-transcripts', dir: path.join(path.sep, 'srv', 'claude-config', 'transcripts') }
+    ]);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+  }
+});
+
 test('labelling roots keeps diagnostics separate from watcher roots', () => {
   const roots = clientSourceRoots(KNOWN_CLIENTS);
   const candidates = clientWatchCandidates(KNOWN_CLIENTS);
@@ -358,6 +378,24 @@ test('clientSourceChecks collapses same-kind roots into one entry', () => {
   assert.deepEqual(ids('antigravity'), ['tokscale-antigravity-cache', 'antigravity-ide-source', 'antigravity-cli-data']);
   for (const list of Object.values(checks)) {
     for (const check of list) assert.equal(typeof check.exists, 'boolean');
+  }
+});
+
+test('Qoder CN source health requires local.db, not only its watch parent', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-qodercn-health-'));
+  const dbPath = path.join(tempRoot, 'cache', 'db', 'local.db');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const previous = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+  process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = dbPath;
+  try {
+    const roots = clientSourceRoots('qodercn').qodercn;
+    assert.equal(roots[0].dir, path.dirname(dbPath));
+    assert.equal(roots[0].sourcePath, dbPath);
+    assert.deepEqual(clientSourceChecks('qodercn').qodercn, [{ id: 'qodercn-db', exists: false }]);
+  } finally {
+    if (previous === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+    else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = previous;
+    fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 

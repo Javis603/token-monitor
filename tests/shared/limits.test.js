@@ -1348,3 +1348,153 @@ test('window metric accepts only the documented machine-readable roles', () => {
   // Anything else is dropped rather than carried onto the wire as a free-form tag.
   assert.equal('metric' in normalizeLimitWindow({ kind: 'billing', metric: 'whatever' }), false);
 });
+
+// Two devices reading the same account, one through the usage API and one
+// through the go-page scrape. Both read the same server-side counters, so the
+// newer reading is the better one and the merged row's provenance follows
+// whichever it was.
+function openCodeServerObservationDevices({ apiAt, webAt }) {
+  const window = (percent, source) => ({ kind: 'weekly', source, usedPercent: percent });
+  return [
+    {
+      deviceId: 'api-device',
+      limits: {
+        updatedAt: apiAt,
+        providers: [{
+          provider: 'opencode',
+          accountKey: 'sha256:shared',
+          webAccountKey: 'sha256:shared',
+          status: 'ok',
+          // API windows are tagged `web` on the wire so a Hub predating that
+          // value cannot rank them below a local estimate; the provider-level
+          // field is the only thing that says which server source produced them.
+          source: 'api',
+          updatedAt: apiAt,
+          windows: [window(57, 'web')],
+          balanceUsd: null
+        }]
+      }
+    },
+    {
+      deviceId: 'cookie-device',
+      limits: {
+        updatedAt: webAt,
+        providers: [{
+          provider: 'opencode',
+          accountKey: 'sha256:shared',
+          webAccountKey: 'sha256:shared',
+          status: 'ok',
+          source: 'web',
+          updatedAt: webAt,
+          windows: [window(11, 'web')],
+          balanceUsd: 4
+        }]
+      }
+    }
+  ];
+}
+
+test('aggregateLimits shows the freshest OpenCode server reading whichever source took it', () => {
+  const apiNewer = aggregateLimits(openCodeServerObservationDevices({
+    apiAt: '2026-08-09T08:00:01.000Z',
+    webAt: '2026-08-09T08:00:00.000Z'
+  }), 0, Date.parse('2026-08-09T08:00:10.000Z'));
+  const fromApi = apiNewer.providers.find((entry) => entry.provider === 'opencode');
+  assert.equal(fromApi.windows.find((window) => window.kind === 'weekly').remainingPercent, 43);
+  assert.equal(fromApi.source, 'api');
+  // The cookie is still the only source for the balance.
+  assert.equal(fromApi.balanceUsd, 4);
+
+  const cookieNewer = aggregateLimits(openCodeServerObservationDevices({
+    apiAt: '2026-08-09T08:00:00.000Z',
+    webAt: '2026-08-09T08:00:01.000Z'
+  }), 0, Date.parse('2026-08-09T08:00:10.000Z'));
+  const fromWeb = cookieNewer.providers.find((entry) => entry.provider === 'opencode');
+  assert.equal(fromWeb.windows.find((window) => window.kind === 'weekly').remainingPercent, 89);
+  assert.equal(fromWeb.source, 'web');
+});
+
+// A device is live until the staleness threshold, which reaches an hour on the
+// longest refresh interval. Preferring the API within that whole span would show
+// an hour-old reading beside a current one, so the skew has to lose to freshness
+// well before the API device goes stale.
+test('aggregateLimits prefers a current OpenCode cookie reading over a much older live API one', () => {
+  const devices = openCodeServerObservationDevices({
+    apiAt: '2026-08-09T07:32:00.000Z',
+    webAt: '2026-08-09T08:00:00.000Z'
+  });
+  for (const device of devices) device.limits.refreshMs = 30 * 60 * 1000;
+  devices[0].receivedAt = Date.parse('2026-08-09T07:32:00.000Z');
+  devices[1].receivedAt = Date.parse('2026-08-09T08:00:00.000Z');
+  const aggregate = aggregateLimits(devices, 10 * 60 * 1000, Date.parse('2026-08-09T08:00:10.000Z'));
+  const provider = aggregate.providers.find((entry) => entry.provider === 'opencode');
+  assert.equal(provider.windows.find((window) => window.kind === 'weekly').remainingPercent, 89);
+  assert.equal(provider.source, 'web');
+});
+
+test('aggregateLimits resolves the OpenCode merge independently of device order', () => {
+  const forward = openCodeServerObservationDevices({
+    apiAt: '2026-08-09T08:00:01.000Z',
+    webAt: '2026-08-09T08:00:00.000Z'
+  });
+  const aggregate = aggregateLimits(forward, 0, Date.parse('2026-08-09T08:00:10.000Z'));
+  const provider = aggregate.providers.find((entry) => entry.provider === 'opencode');
+  assert.equal(provider.windows.find((window) => window.kind === 'weekly').remainingPercent, 43);
+  assert.equal(provider.source, 'api');
+
+  const reversed = aggregateLimits([...forward].reverse(), 0, Date.parse('2026-08-09T08:00:10.000Z'));
+  const reversedProvider = reversed.providers.find((entry) => entry.provider === 'opencode');
+  assert.equal(reversedProvider.windows.find((window) => window.kind === 'weekly').remainingPercent, 43);
+  assert.equal(reversedProvider.source, 'api');
+});
+
+// Freshness decides between two server readings, but only among devices still
+// reporting: the merge drops stale providers first, so an API device that went
+// away cannot hold the row against a live cookie one.
+test('aggregateLimits lets a live OpenCode cookie observation beat a stale API one', () => {
+  const devices = openCodeServerObservationDevices({
+    apiAt: '2026-08-09T07:00:00.000Z',
+    webAt: '2026-08-09T08:00:00.000Z'
+  });
+  devices[0].receivedAt = Date.parse('2026-08-09T07:00:00.000Z');
+  devices[1].receivedAt = Date.parse('2026-08-09T08:00:00.000Z');
+  const aggregate = aggregateLimits(devices, 10 * 60 * 1000, Date.parse('2026-08-09T08:00:10.000Z'));
+  const provider = aggregate.providers.find((entry) => entry.provider === 'opencode');
+  assert.equal(provider.windows.find((window) => window.kind === 'weekly').remainingPercent, 89);
+  assert.equal(provider.source, 'web');
+});
+
+// The provider-level source is the envelope a Hub predating windows[].source
+// ranks on, so it may not claim a server reading while an estimate is in the
+// row. One local window makes the whole row an estimate, however fresh the Web
+// observation beside it is — the collector already states that rule for a
+// single device, and the merge has to keep it.
+test('aggregateLimits never labels a merged OpenCode row Web while a local window is in it', () => {
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'web-device',
+      limits: {
+        updatedAt: '2026-08-09T08:00:00.000Z',
+        providers: [{
+          provider: 'opencode', accountKey: 'sha256:shared', webAccountKey: 'sha256:shared',
+          status: 'ok', source: 'web', updatedAt: '2026-08-09T08:00:00.000Z',
+          windows: [{ kind: 'weekly', source: 'web', usedPercent: 20 }], balanceUsd: null
+        }]
+      }
+    },
+    {
+      deviceId: 'local-device',
+      limits: {
+        updatedAt: '2026-08-09T08:00:01.000Z',
+        providers: [{
+          provider: 'opencode', accountKey: 'sha256:shared', webAccountKey: 'sha256:shared',
+          status: 'ok', source: 'local', updatedAt: '2026-08-09T08:00:01.000Z',
+          windows: [{ kind: 'session', source: 'local', usedPercent: 90 }], balanceUsd: null
+        }]
+      }
+    }
+  ], 0, Date.parse('2026-08-09T08:00:10.000Z'));
+  const provider = aggregate.providers.find((entry) => entry.provider === 'opencode');
+  assert.equal(provider.windows.length, 2);
+  assert.equal(provider.source, 'local');
+});

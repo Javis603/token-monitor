@@ -11,6 +11,7 @@ const { fetchClaudeLimits } = require('../../src/shared/limitCollector');
 const { fetchMimoLimits } = require('../../src/shared/mimoLimits');
 const { fetchOllamaLimits } = require('../../src/shared/ollamaLimits');
 const { fetchQoderLimits } = require('../../src/shared/qoderLimits');
+const { fetchCommandcodeLimits } = require('../../src/shared/commandcodeLimits');
 const cursorProbe = require('../../src/shared/cursorProbe');
 const opencodeWeb = require('../../src/shared/opencodeWeb');
 
@@ -174,6 +175,14 @@ test('Cursor sends the shared agent on the wire', async () => {
 test('Qoder sends the shared agent on the wire', async () => {
   const sent = await outboundUserAgent((fetch) => fetchQoderLimits(
     { qoderCookie: 'session=probe', qoderSite: 'cn' },
+    { env: {}, fetch }
+  ));
+  assert.deepEqual([...new Set(sent)], [BROWSER_USER_AGENT]);
+});
+
+test('Command Code sends the shared agent on the wire', async () => {
+  const sent = await outboundUserAgent((fetch) => fetchCommandcodeLimits(
+    { commandcodeCookie: '__Secure-commandcode_prod_.session_token=probe' },
     { env: {}, fetch }
   ));
   assert.deepEqual([...new Set(sent)], [BROWSER_USER_AGENT]);

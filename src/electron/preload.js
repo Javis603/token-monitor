@@ -49,6 +49,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     ipcRenderer.on('settings:push', listener);
     return () => ipcRenderer.removeListener('settings:push', listener);
   },
+  onSystemUiThemePush: (callback) => {
+    const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
+    ipcRenderer.on('theme:systemUi', listener);
+    return () => ipcRenderer.removeListener('theme:systemUi', listener);
+  },
   onOpenSettings: (callback) => {
     const listener = () => { try { callback(); } catch (_) {} };
     ipcRenderer.on('settings:open', listener);
@@ -129,10 +134,13 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     logout: () => ipcRenderer.invoke('opencode:logout'),
     status: () => ipcRenderer.invoke('opencode:status'),
     getProfiles: () => ipcRenderer.invoke('opencode:getProfiles'),
-    saveProfile: (name, cookie) => ipcRenderer.invoke('opencode:saveProfile', name, cookie),
+    saveProfile: (name, credential, kind, options) => ipcRenderer.invoke('opencode:saveProfile', name, credential, kind, options),
     deleteProfile: (name) => ipcRenderer.invoke('opencode:deleteProfile', name),
-    renameProfile: (oldName, newName) => ipcRenderer.invoke('opencode:renameProfile', oldName, newName),
-    setProfileEnabled: (name, enabled) => ipcRenderer.invoke('opencode:setProfileEnabled', name, enabled)
+    renameProfile: (oldName, newName, options) => ipcRenderer.invoke('opencode:renameProfile', oldName, newName, options),
+    removeCredential: (name, kind) => ipcRenderer.invoke('opencode:removeCredential', name, kind),
+    moveCredential: (name, kind, targetName, options) => ipcRenderer.invoke('opencode:moveCredential', name, kind, targetName, options),
+    setProfileEnabled: (name, enabled) => ipcRenderer.invoke('opencode:setProfileEnabled', name, enabled),
+    setAmbientEnabled: (enabled) => ipcRenderer.invoke('opencode:setAmbientEnabled', enabled)
   },
   openrouter: {
     getProfiles: () => ipcRenderer.invoke('openrouter:getProfiles'),

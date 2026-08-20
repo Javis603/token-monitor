@@ -226,9 +226,65 @@ test('readSessionDetail resolves, parses, groups, and distributes cost', () => {
   assert.ok(Math.abs(detail.exchanges[0].costEstimate - 0.5) < 1e-9);
 });
 
+test('readSessionDetail resolves Claude transcripts from CLAUDE_CONFIG_DIR', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-detail-config-'));
+  const configDir = path.join(home, 'relocated-claude');
+  const id = 'configured-detail';
+  const dir = path.join(configDir, 'transcripts', '-proj');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${id}.jsonl`), [
+    JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: 'configured' } }),
+    JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(), message: { role: 'assistant', usage: { input_tokens: 3, output_tokens: 2 }, content: [] } })
+  ].join('\n'));
+
+  try {
+    const detail = readSessionDetail({
+      client: 'claude',
+      sessionId: id,
+      period: 'total',
+      home,
+      env: { CLAUDE_CONFIG_DIR: configDir }
+    });
+    assert.equal(detail.found, true);
+    assert.equal(detail.totals.totalTokens, 5);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('readSessionDetail reports not found instead of throwing', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-detail-'));
   const detail = readSessionDetail({ client: 'claude', sessionId: 'nope', period: 'total', sessionCost: 0, home });
   assert.equal(detail.found, false);
   assert.deepEqual(detail.exchanges, []);
+});
+
+test('readSessionDetail filters by the injected clock and passes the period cost through', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-detail-'));
+  const id = 'injected-clock';
+  // Freeze "now" at YESTERDAY noon (local time). One exchange sits on that injected
+  // "today", the other on the wall clock's today. Which one survives the 'today'
+  // filter therefore proves whether the injected clock (not new Date()) drove it.
+  const now = new Date();
+  const nowMs = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12, 0, 0).getTime();
+  const injectedTodayTs = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 1, 0, 0).toISOString();
+  const wallTodayTs = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 1, 0, 0).toISOString();
+  writeClaudeSession(home, id, [
+    JSON.stringify({ type: 'user', timestamp: injectedTodayTs, message: { role: 'user', content: 'injected today' } }),
+    JSON.stringify({ type: 'assistant', timestamp: injectedTodayTs, message: { role: 'assistant', usage: { input_tokens: 80, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, content: [] } }),
+    JSON.stringify({ type: 'user', timestamp: wallTodayTs, message: { role: 'user', content: 'wall today' } }),
+    JSON.stringify({ type: 'assistant', timestamp: wallTodayTs, message: { role: 'assistant', usage: { input_tokens: 40, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, content: [] } })
+  ]);
+
+  // The renderer reads sessionCost from the period-scoped row (tokscale applies the
+  // date filter before grouping messages into sessions), so it must pass through
+  // untouched — no rescaling in readSessionDetail.
+  const todayDetail = readSessionDetail({ client: 'claude', sessionId: id, period: 'today', sessionCost: 0.75, home, deps: { now: () => nowMs } });
+  assert.equal(todayDetail.exchanges.length, 1);
+  assert.equal(todayDetail.totals.totalTokens, 100); // the injected-today exchange, not the wall-today one
+  assert.ok(Math.abs(todayDetail.totals.costUsd - 0.75) < 1e-9);
+
+  const totalDetail = readSessionDetail({ client: 'claude', sessionId: id, period: 'total', sessionCost: 1.5, home, deps: { now: () => nowMs } });
+  assert.equal(totalDetail.totals.totalTokens, 150);
+  assert.ok(Math.abs(totalDetail.totals.costUsd - 1.5) < 1e-9);
 });

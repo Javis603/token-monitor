@@ -41,15 +41,16 @@ test('default provider order follows tracked tools, named services, then third-p
     'kimi',
     'grok',
     'copilot',
+    'commandcode',
     'mimo',
     'zai',
     'zaiteam',
     'kiro',
+    'qoder',
     'deepseek',
     'openrouter',
     'minimax',
     'volcengine',
-    'qoder',
     'ollama',
     'thirdparty'
   ]);

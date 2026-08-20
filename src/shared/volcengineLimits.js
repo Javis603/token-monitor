@@ -333,12 +333,15 @@ function signVolcengineRequest({
   const serviceKey = hmac(regionKey, VOLCENGINE_SERVICE);
   const signingKey = hmac(serviceKey, 'request');
   const signature = hmacHex(signingKey, stringToSign);
+  // `host` stays in the canonical request and in SignedHeaders, but must not be
+  // sent as a wire header: every transport derives Host from the URL itself, so
+  // it was already redundant under undici (which overrides it), and Chromium
+  // rejects the request outright with net::ERR_INVALID_ARGUMENT.
   return {
     body: payload,
     headers: {
       Accept: 'application/json',
       'Content-Type': contentType,
-      Host: host,
       'X-Date': timestamp,
       'X-Content-Sha256': payloadHash,
       Authorization: `HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${VOLCENGINE_SIGNED_HEADERS}, Signature=${signature}`

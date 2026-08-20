@@ -375,6 +375,50 @@
                 </button>
                 <div id="themeAdvancedDetails" class="cursor-settings-details hidden" inert>
                   <div id="themeColorGrid" class="color-picker-grid"></div>
+                  <div class="settings-font-controls">
+                    <div class="settings-font-field">
+                      <label class="settings-item-title" for="interfaceFontPreset" data-i18n="settings.appearance.fontInterface">Interface font</label>
+                      <span class="settings-font-input-row">
+                        <select id="interfaceFontPreset" aria-describedby="fontSettingsNote">
+                          <option value="app" data-i18n="settings.appearance.fontPresetApp">App default</option>
+                          <option value="system" data-i18n="settings.appearance.fontPresetSystem">System UI</option>
+                          <option value="mono" data-i18n="settings.appearance.fontPresetMono">Monospace</option>
+                          <option value="custom" data-i18n="settings.appearance.fontPresetCustom">Custom…</option>
+                        </select>
+                        <button id="resetInterfaceFontButton" class="reset-appearance-button reset-inline" type="button" title="Reset font" data-i18n-title="settings.appearance.resetFont" aria-label="Reset interface font" data-i18n-aria-label="settings.appearance.resetInterfaceFont">↺</button>
+                      </span>
+                      <div id="interfaceFontCustomRow" class="settings-font-custom-row hidden">
+                        <label for="interfaceFontInput" data-i18n="settings.appearance.fontCustomLabel">Custom font family</label>
+                        <input id="interfaceFontInput" type="text" maxlength="160" autocomplete="off" spellcheck="false" placeholder="Enter a font family" data-i18n-placeholder="settings.appearance.fontPlaceholder" aria-describedby="fontSettingsNote" />
+                        <div class="settings-font-preview">
+                          <span class="settings-font-preview-label" data-i18n="settings.appearance.fontPreview">Preview</span>
+                          <span id="interfaceFontPreview" class="settings-font-preview-sample">Aa 中文 0123</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="settings-font-field">
+                      <label class="settings-item-title" for="displayFontPreset" data-i18n="settings.appearance.fontDisplay">Display font</label>
+                      <span class="settings-font-input-row">
+                        <select id="displayFontPreset" aria-describedby="fontSettingsNote">
+                          <option value="follow" data-i18n="settings.appearance.fontPresetFollow">Follow interface</option>
+                          <option value="app" data-i18n="settings.appearance.fontPresetApp">App default</option>
+                          <option value="system" data-i18n="settings.appearance.fontPresetSystem">System UI</option>
+                          <option value="mono" data-i18n="settings.appearance.fontPresetMono">Monospace</option>
+                          <option value="custom" data-i18n="settings.appearance.fontPresetCustom">Custom…</option>
+                        </select>
+                        <button id="resetDisplayFontButton" class="reset-appearance-button reset-inline" type="button" title="Reset font" data-i18n-title="settings.appearance.resetFont" aria-label="Reset display font" data-i18n-aria-label="settings.appearance.resetDisplayFont">↺</button>
+                      </span>
+                      <div id="displayFontCustomRow" class="settings-font-custom-row hidden">
+                        <label for="displayFontInput" data-i18n="settings.appearance.fontCustomLabel">Custom font family</label>
+                        <input id="displayFontInput" type="text" maxlength="160" autocomplete="off" spellcheck="false" placeholder="Enter a font family" data-i18n-placeholder="settings.appearance.fontPlaceholder" aria-describedby="fontSettingsNote" />
+                        <div class="settings-font-preview">
+                          <span class="settings-font-preview-label" data-i18n="settings.appearance.fontPreview">Preview</span>
+                          <span id="displayFontPreview" class="settings-font-preview-sample">Aa 中文 0123</span>
+                        </div>
+                      </div>
+                    </div>
+                    <p id="fontSettingsNote" class="settings-note" data-i18n="settings.appearance.fontNote">App default uses Token Monitor's built-in typography. System UI uses your operating system's interface font. Choose Custom… to enter a font family.</p>
+                  </div>
                 </div>
               </div>
               <div id="themeVendorGroup" class="settings-group cursor-account-group theme-color-accordion settings-vendor-color-group">
@@ -668,8 +712,29 @@
                 </span>
               </button>
               <div id="opencodeSettingsDetails" class="cursor-settings-details hidden">
+                <p class="settings-note" data-i18n="settings.opencode.accountsNote">Go quota is detected automatically. Save a credential under an existing account's name to say they are the same OpenCode account: quota then comes from the API, with the Zen balance and cross-device identity still coming from the cookie.</p>
+
                 <!-- Profile list -->
                 <div id="opencodeProfileList" class="opencode-profile-list"></div>
+
+                <!-- Local DB fallback: an advanced, off-by-default estimate, so
+                     it collapses below the accounts instead of sitting above
+                     them where it reads as the first thing to configure. -->
+                <div id="opencodeLocalFallbackAccountGroup" class="settings-group cursor-account-group">
+                  <button id="opencodeLocalFallbackSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="opencodeLocalFallbackSettingsDetails">
+                    <span data-i18n="settings.limits.opencodeLocalLimits">Use local DB fallback</span>
+                    <span class="cursor-settings-summary">
+                      <span id="opencodeLocalFallbackStatus" class="cursor-status-pill"></span>
+                      <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                    </span>
+                  </button>
+                  <!-- The collapse animates by squeezing a single inner wrapper,
+                       so the moved setting has to land inside it rather than
+                       directly on the container, which cannot shrink. -->
+                  <div id="opencodeLocalFallbackSettingsDetails" class="cursor-settings-details hidden">
+                    <div id="opencodeLocalFallbackInner" class="accordion-animation-inner"></div>
+                  </div>
+                </div>
 
                 <!-- Add new account -->
                 <div id="opencodeAddForm" class="opencode-add-form">
@@ -682,21 +747,42 @@
                   <div id="opencodeAddDetails" class="opencode-add-details accordion-animated-container hidden">
                     <div class="accordion-animation-inner opencode-add-body">
                       <div class="settings-actions">
-                        <button id="opencodeOpenBrowser" data-i18n="settings.opencode.openBrowser">Open OpenCode auth in browser</button>
+                        <button id="opencodeOpenBrowser" data-i18n="settings.opencode.openBrowserKeys">Open OpenCode keys in browser</button>
                       </div>
-                      <p class="settings-note">
-                        <strong>1.</strong> <span data-i18n="settings.opencode.step1Before">Open</span> <code>opencode.ai/auth</code> <span data-i18n="settings.opencode.step1After">in your browser and sign in.</span><br>
-                        <strong>2.</strong> <span data-i18n="settings.opencode.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -> opencode.ai.</span><br>
-                        <strong>3.</strong> <span data-i18n="settings.opencode.step3Before">Copy the</span> <code>auth</code> <span data-i18n="settings.opencode.step3After">value.</span><br>
-                        <strong>4.</strong> <span data-i18n="settings.opencode.step4">Paste it below and click Save.</span>
-                      </p>
+                      <div class="settings-row">
+                        <label for="opencodeCredentialKind" data-i18n="settings.opencode.credentialKind">Credential</label>
+                        <select id="opencodeCredentialKind">
+                          <option value="api" data-i18n="settings.opencode.kindApi">API key</option>
+                          <option value="cookie" data-i18n="settings.opencode.kindCookie">Cookie</option>
+                        </select>
+                      </div>
                       <div class="settings-row">
                         <label for="opencodeProfileName" data-i18n="settings.opencode.profileName">账号名称</label>
                         <input id="opencodeProfileName" type="text" data-i18n-placeholder="settings.opencode.profileNamePlaceholder" placeholder="例如: work、personal">
                       </div>
-                      <textarea id="opencodeCookieInput" rows="3" spellcheck="false" placeholder="auth=..."></textarea>
+                      <div id="opencodeApiFields" class="opencode-credential-fields">
+                        <p class="settings-note" data-i18n="settings.opencode.apiHint">Paste an OpenCode Go API key. Go quota only.</p>
+                        <!-- The nearest `<label for>` names the credential-type
+                             select, not this field, so a screen reader reaches an
+                             unnamed password box. Named after the credential kind
+                             it holds, which is what the select calls it too. -->
+                        <input id="opencodeApiKeyInput" type="password" spellcheck="false" placeholder="opencode-go-..." data-i18n-placeholder="settings.opencode.apiKeyPlaceholder" aria-label="API key" data-i18n-aria-label="settings.opencode.kindApi" />
+                      </div>
+                      <div id="opencodeCookieFields" class="opencode-credential-fields hidden">
+                        <p class="settings-note">
+                          <strong>1.</strong> <span data-i18n="settings.opencode.step1Before">Open</span> <code>opencode.ai/auth</code> <span data-i18n="settings.opencode.step1After">in your browser and sign in.</span><br>
+                          <strong>2.</strong> <span data-i18n="settings.opencode.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -> opencode.ai.</span><br>
+                          <strong>3.</strong> <span data-i18n="settings.opencode.step3Before">Copy the</span> <code>auth</code> <span data-i18n="settings.opencode.step3After">value.</span><br>
+                          <strong>4.</strong> <span data-i18n="settings.opencode.step4">Paste it below and click Save.</span>
+                        </p>
+                        <textarea id="opencodeCookieInput" rows="3" spellcheck="false" placeholder="auth=..." data-i18n-placeholder="settings.opencode.cookiePlaceholder" aria-label="Cookie" data-i18n-aria-label="settings.opencode.kindCookie"></textarea>
+                      </div>
                       <div class="settings-actions">
                         <button id="opencodeCookieSubmit" data-i18n="settings.opencode.saveProfile">保存</button>
+                        <!-- Shown only when the typed name already holds a
+                             different credential, so binding the two into one
+                             account is a separate, deliberate click. -->
+                        <button id="opencodeCredentialMerge" class="credential-merge-btn hidden" type="button"></button>
                       </div>
                     </div>
                   </div>
@@ -932,6 +1018,35 @@
                   </div>
                 </div>
                 <div id="qoderErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
+            <div id="commandcodeAccountGroup" class="settings-group cursor-account-group">
+              <button id="commandcodeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="commandcodeSettingsDetails">
+                <span data-i18n="settings.commandcode.title">Command Code Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="commandcodeAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="commandcodeSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="commandcodeOpenBrowser" data-i18n="settings.commandcode.openBrowser">Open Command Code usage</button>
+                  <button id="commandcodeLogoutButton" class="hidden" data-i18n="settings.commandcode.clearCookie">Clear cookie</button>
+                  <button id="commandcodeRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="commandcodeManualPanel">
+                  <p class="settings-note">
+                    <strong>1.</strong> <span data-i18n="settings.commandcode.step1">Open the Command Code usage page in your browser (button above) and sign in.</span><br>
+                    <strong>2.</strong> <span data-i18n="settings.commandcode.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the credits request.</span><br>
+                    <strong>3.</strong> <span data-i18n="settings.commandcode.step3">In Headers -> Request Headers, copy the full Cookie value.</span><br>
+                    <strong>4.</strong> <span data-i18n="settings.commandcode.step4">Paste it below and click Save cookie.</span>
+                  </p>
+                  <textarea id="commandcodeCookieInput" rows="3" spellcheck="false" placeholder="__Secure-commandcode_prod_.session_token=..." data-i18n-placeholder="settings.commandcode.cookiePlaceholder"></textarea>
+                  <div class="settings-actions">
+                    <button id="commandcodeCookieSubmit" data-i18n="settings.commandcode.saveCookie">Save cookie</button>
+                  </div>
+                </div>
+                <div id="commandcodeErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
             <div id="ollamaAccountGroup" class="settings-group cursor-account-group">
@@ -1476,6 +1591,7 @@
     <script src="../../shared/subscriptionDisplay.js"></script>
     <script src="../../shared/compactTokens.js"></script>
     <script src="../../shared/compactMoney.js"></script>
+    <script src="../../shared/fontSettings.js"></script>
     <script src="../../shared/trayText.js"></script>
     <script src="../../shared/trayLayout.js"></script>
     <script src="tokenRatePresentation.js"></script>
