@@ -233,6 +233,7 @@ test('fetchWorkbuddyLimits reads explicit environment credentials and supports e
   assert.equal(provider.windows[0].limit, 100);
   assert.equal(provider.windows[0].metric, 'credits');
   assert.equal(provider.windows[0].currency, 'CREDITS');
+  assert.equal(provider.windows[0].resetsAt, '2026-09-01T00:00:00.000Z');
   assert.equal(provider.balance.amount, 63);
 });
 

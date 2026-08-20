@@ -4873,9 +4873,7 @@ function renderProviderWindows(provider, color) {
     if (credits && value) {
       const displayWindow = {
         ...credits,
-        label: credits.label || 'Credits',
-        resetsAt: null,
-        resetDescription: ''
+        label: credits.label || 'Credits'
       };
       const node = limitWindowNode(
         displayWindow.label,
@@ -4884,7 +4882,10 @@ function renderProviderWindows(provider, color) {
         0.95,
         value
       );
-      node.classList.add('limit-window-wide', 'limit-window-no-reset');
+      node.classList.add('limit-window-wide');
+      if (!displayWindow.resetsAt && !displayWindow.resetDescription) {
+        node.classList.add('limit-window-no-reset');
+      }
       windows.append(node);
       const spendNode = providerSpendNode(balance);
       if (spendNode) windows.append(spendNode);

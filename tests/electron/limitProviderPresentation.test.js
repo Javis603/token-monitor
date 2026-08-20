@@ -788,6 +788,14 @@ test('WorkBuddy renders unlimited enterprise credits without requiring a numeric
   assert.match(renderProviderWindows, /const value = workbuddyCreditsValue\(provider, credits\);/);
   assert.match(renderProviderWindows, /if \(credits && value\)/);
   assert.doesNotMatch(renderProviderWindows, /if \(credits && amount !== null\)/);
+  assert.match(
+    renderProviderWindows,
+    /const displayWindow = \{\s*\.\.\.credits,\s*label: credits\.label \|\| 'Credits'\s*\};/
+  );
+  assert.match(
+    renderProviderWindows,
+    /if \(!displayWindow\.resetsAt && !displayWindow\.resetDescription\) \{\s*node\.classList\.add\('limit-window-no-reset'\);\s*\}/
+  );
 });
 
 test('Antigravity groups returned quota windows under dynamic model-family headings', () => {
