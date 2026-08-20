@@ -230,7 +230,7 @@ test('an all-client fallback preserves parse-local partitions that were not refr
   assert.equal(summary.allTime.clients.proma, 5);
 });
 
-test('a partial multi-target result confirms missing clients before replacing partitions', async () => {
+test('a non-empty multi-target confirmation falls back from a polluted union result', async () => {
   const { collectUsageOnce, localTodayKey } = freshCollector();
   const calls = [];
   const anchorClients = { claude: 10, codex: 20 };
@@ -246,8 +246,8 @@ test('a partial multi-target result confirms missing clients before replacing pa
   };
   const runTokscale = async ({ clients }) => {
     calls.push(clients);
-    if (clients === 'claude') return tokscaleRows({ codex: 99 });
-    if (calls.length === 1) return tokscaleRows({ codex: 20 });
+    if (clients === 'claude') return tokscaleRows({ claude: 10 });
+    if (calls.length === 1) return tokscaleRows({ codex: 30 });
     return tokscaleRows({ claude: 10, codex: 20 });
   };
 
@@ -266,6 +266,43 @@ test('a partial multi-target result confirms missing clients before replacing pa
   assert.deepEqual(summary.today.clients, anchorClients);
   assert.deepEqual(summary.month.clients, anchorClients);
   assert.deepEqual(summary.allTime.clients, anchorClients);
+});
+
+test('an unsafe unattributed union skips missing-client confirmations', async () => {
+  const { collectUsageOnce, localTodayKey } = freshCollector();
+  const calls = [];
+  const anchorClients = { claude: 10, codex: 20 };
+  const anchor = {
+    dateKey: localTodayKey(),
+    today: combinedPeriod(anchorClients),
+    month: combinedPeriod(anchorClients),
+    allTime: combinedPeriod(anchorClients),
+    todayPartitions: {
+      claude: clientPeriod('claude', 10),
+      codex: clientPeriod('codex', 20)
+    }
+  };
+  const runTokscale = async ({ clients }) => {
+    calls.push(clients);
+    if (calls.length > 1) return tokscaleRows({ claude: 10, codex: 20 });
+    const partial = tokscaleRows({ codex: 20 });
+    partial.entries.push({ model: 'unknown-model', input: 99, output: 0, cost: 0 });
+    return partial;
+  };
+
+  const summary = await collectUsageOnce({
+    ...baseOptions,
+    clients: 'claude,codex',
+    targetClients: ['claude', 'codex'],
+    todayOnlyAnchor: anchor,
+    runTokscale,
+    historyEnabled: false,
+    projectsEnabled: false
+  });
+
+  assert.deepEqual(calls, ['claude,codex', 'claude,codex']);
+  assert.equal(summary.today.totalTokens, 30);
+  assert.deepEqual(summary.today.clients, anchorClients);
 });
 
 test('an empty multi-target confirmation still clears genuinely deleted usage', async () => {

@@ -1323,13 +1323,16 @@ async function collectUsageOnce(options) {
         freshPartitions = bundle.byClient;
         const unattributed = freshPartitions[UNATTRIBUTED_USAGE_CLIENT];
         const attributedClients = Object.keys(freshPartitions).filter((client) => client !== UNATTRIBUTED_USAGE_CLIENT);
-        let hasUnsafeTargetedResult = attributedClients.some((client) => !targetTokscaleClientSet.has(client));
+        let hasUnsafeTargetedResult = (
+          periodHasUsage(unattributed)
+          || attributedClients.some((client) => !targetTokscaleClientSet.has(client))
+        );
 
         // A unioned watch scan can hide cross-attribution inside its own target
         // set (for example Hermes missing while its rows land under WorkBuddy).
-        // Confirm only the missing members individually; an empty confirmation
-        // remains a valid deletion, while a differently attributed row proves
-        // that the union result cannot safely replace the anchor partitions.
+        // Confirm only whether each missing member is genuinely empty. Any usage
+        // proves the union result was incomplete, but cannot prove that its
+        // existing partitions are unpolluted, so rebuild the full snapshot.
         if (targetTokscaleClientList.length > 1 && attributedClients.length > 0 && !hasUnsafeTargetedResult) {
           const missingClients = targetTokscaleClientList.filter((client) => !Object.prototype.hasOwnProperty.call(freshPartitions, client));
           for (const client of missingClients) {
@@ -1339,18 +1342,15 @@ async function collectUsageOnce(options) {
             const confirmationClients = Object.keys(confirmationPartitions).filter((key) => key !== UNATTRIBUTED_USAGE_CLIENT);
             if (
               periodHasUsage(confirmationUnattributed)
-              || confirmationClients.some((key) => key !== client)
+              || confirmationClients.length > 0
             ) {
               hasUnsafeTargetedResult = true;
               break;
             }
-            if (Object.prototype.hasOwnProperty.call(confirmationPartitions, client)) {
-              freshPartitions[client] = confirmationPartitions[client];
-            }
           }
         }
 
-        if (targetRequested && (periodHasUsage(unattributed) || hasUnsafeTargetedResult)) {
+        if (targetRequested && hasUnsafeTargetedResult) {
           // Every attributed row from a targeted scan must normalize back into
           // the requested set. An unattributed row or an unexpected client would
           // otherwise clear the target while partially overwriting an unrelated
