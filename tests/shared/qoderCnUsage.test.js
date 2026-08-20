@@ -27,11 +27,13 @@ const QODER_CN_DB_FIXTURE = path.join(__dirname, '..', 'fixtures', 'qoder-cn-loc
 test('QODER_CN_MODEL_DISPLAY_NAMES covers every official model code and the retired preview', () => {
   // Official codes from Qoder CN.app i18n `modelSelector.item.*` plus the
   // retired qmodel_preview found in real databases; custom codes pass through.
-  for (const code of ['qmodel', 'qmodel_38max', 'qmodel_latest', 'qmodel_preview', 'gm51model', 'kmodel', 'dmodel', 'mmodel']) {
+  for (const code of ['qmodel', 'qmodel_38max', 'qmodel_latest', 'qmodel_preview', 'q37fmodel', 'gm51model', 'kmodel', 'kmodel_latest', 'dmodel', 'mmodel']) {
     assert.ok(QODER_CN_MODEL_DISPLAY_NAMES[code], `${code} must be mapped`);
   }
   assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.qmodel_latest, 'Qwen3.7-Max');
   assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.qmodel_38max, 'Qwen3.8-Max');
+  assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.q37fmodel, 'Qwen3.7-Flash');
+  assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.kmodel_latest, 'Kimi-K2.7-Code');
   assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.gm51model, 'GLM-5.2');
   assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.qmodel_preview, 'Qwen3.8-Max-Preview');
   assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.q35model_preview, 'Qwen3.8-Max-Preview');
