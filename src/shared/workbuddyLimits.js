@@ -134,15 +134,20 @@ function parsePersonalUsage(body) {
   let limit = 0;
   let remaining = 0;
   let validResources = 0;
+  let candidateResources = 0;
   const accountId = resources.map(accountIdentity).find(Boolean) || '';
 
   for (const resource of resources) {
-    if (!resource || typeof resource !== 'object') continue;
+    if (!resource || typeof resource !== 'object') {
+      candidateResources += 1;
+      continue;
+    }
     const status = numberOrNull(pickValue(resource, ['Status', 'status']));
     // Status 3 is an exhausted/expired resource package. It is returned by
     // the endpoint even with OnlyValidPeriod=true, but it is not part of the
     // currently spendable balance shown by WorkBuddy's website.
     if (status !== null && status !== 0) continue;
+    candidateResources += 1;
     const total = numberOrNull(pickValue(resource, ['CycleCapacitySizePrecise', 'cycleCapacitySizePrecise']));
     const left = numberOrNull(pickValue(resource, ['CycleCapacityRemainPrecise', 'cycleCapacityRemainPrecise']));
     if (total === null || left === null || total < 0 || left < 0) continue;
@@ -156,6 +161,13 @@ function parsePersonalUsage(body) {
     remaining += safeRemaining;
     used += safeUsed;
     validResources += 1;
+  }
+
+  // Returning a partial aggregate is worse than returning no snapshot: the
+  // omitted active package would make a plausible-looking balance incorrect.
+  // Explicitly inactive rows were excluded before candidateResources increased.
+  if (candidateResources > validResources) {
+    throw new Error('WorkBuddy personal billing response contains unusable active resource packages');
   }
 
   if (validResources === 0) {
@@ -202,9 +214,11 @@ function parseEnterpriseUsage(body) {
   const rawLimit = pickValue(usage, ['limitNum', 'limit_num']);
   const limit = numberOrNull(rawLimit);
   if (limit === null) throw new Error('WorkBuddy enterprise billing response has no limitNum');
-  const used = Math.max(0, numberOrNull(pickValue(usage, [
+  const rawUsed = numberOrNull(pickValue(usage, [
     'credit', 'used', 'usedNum', 'used_num'
-  ])) || 0);
+  ]));
+  if (rawUsed === null) throw new Error('WorkBuddy enterprise billing response has no usage value');
+  const used = Math.max(0, rawUsed);
   const resetsAt = toIso(pickValue(usage, ['cycleResetTime', 'cycle_reset_time']));
   const accountId = accountIdentity(usage);
 

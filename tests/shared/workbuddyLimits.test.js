@@ -44,8 +44,7 @@ test('parsePersonalUsage aggregates valid WorkBuddy resource packages', () => {
               Status: 3,
               CycleCapacitySizePrecise: 900,
               CycleCapacityRemainPrecise: 0
-            },
-            { CycleCapacitySizePrecise: 'invalid', CycleCapacityRemainPrecise: 10 }
+            }
           ]
         }
       }
@@ -92,6 +91,54 @@ test('parsePersonalUsage accepts the daemon response wrapper and keeps zero-reso
   const usage = parsePersonalUsage({ data: { data: { Response: { Data: { Accounts: [] } } } } });
   assert.equal(usage.resourceCount, 0);
   assert.equal(usage.window, null);
+});
+
+test('parsePersonalUsage distinguishes inactive packages from an unreadable active schema', () => {
+  const inactive = parsePersonalUsage({
+    data: { Response: { Data: { Accounts: [{
+      Status: 3,
+      CycleCapacitySizePrecise: 100,
+      CycleCapacityRemainPrecise: 0
+    }] } } }
+  });
+  assert.equal(inactive.resourceCount, 0);
+  assert.equal(inactive.window, null);
+
+  assert.throws(
+    () => parsePersonalUsage({
+      data: { Response: { Data: { Accounts: [{
+        Status: 0,
+        RenamedCapacity: 100,
+        RenamedRemaining: 75
+      }] } } }
+    }),
+    /unusable active resource packages/
+  );
+});
+
+test('parsePersonalUsage fails closed when any active resource package has unusable quota data', () => {
+  assert.throws(
+    () => parsePersonalUsage({
+      data: { Response: { Data: { Accounts: [
+        {
+          Status: 0,
+          CycleCapacitySizePrecise: 100,
+          CycleCapacityRemainPrecise: 60
+        },
+        {
+          Status: 0,
+          CycleCapacitySizePrecise: 'invalid',
+          CycleCapacityRemainPrecise: 20
+        },
+        {
+          Status: 3,
+          CycleCapacitySizePrecise: 500,
+          CycleCapacityRemainPrecise: 0
+        }
+      ] } } }
+    }),
+    /unusable active resource packages/
+  );
 });
 
 test('fetchWorkbuddyLimits sends the private personal billing request without exposing credentials', async () => {
@@ -245,6 +292,28 @@ test('parseEnterpriseUsage preserves unlimited enterprise plans without inventin
   assert.equal(usage.window.detail, 'unlimited');
   assert.equal(usage.window.used, 999);
   assert.equal(usage.window.resetsAt, '2026-06-01T00:00:00.000Z');
+});
+
+test('parseEnterpriseUsage rejects a limit without a reported usage value', () => {
+  assert.throws(
+    () => parseEnterpriseUsage({ data: { limitNum: 100 } }),
+    /no usage value/
+  );
+});
+
+test('fetchWorkbuddyLimits fails closed when an enterprise response omits usage', async () => {
+  const provider = await fetchWorkbuddyLimits({}, {
+    env: {
+      TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN: 'env-token',
+      TOKEN_MONITOR_WORKBUDDY_ENTERPRISE_ID: 'enterprise-456'
+    },
+    now: () => NOW,
+    fetch: async () => response({ data: { limitNum: 100 } })
+  });
+
+  assert.equal(provider.status, 'unavailable');
+  assert.deepEqual(provider.windows, []);
+  assert.equal(provider.balance, null);
 });
 
 test('fetchWorkbuddyLimits fails closed for missing credentials and private endpoint errors', async () => {
