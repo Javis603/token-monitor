@@ -27,10 +27,11 @@ const QODER_CN_DB_FIXTURE = path.join(__dirname, '..', 'fixtures', 'qoder-cn-loc
 test('QODER_CN_MODEL_DISPLAY_NAMES covers every official model code and the retired preview', () => {
   // Official codes from Qoder CN.app i18n `modelSelector.item.*` plus the
   // retired qmodel_preview found in real databases; custom codes pass through.
-  for (const code of ['qmodel', 'qmodel_latest', 'qmodel_preview', 'gm51model', 'kmodel', 'dmodel', 'mmodel']) {
+  for (const code of ['qmodel', 'qmodel_38max', 'qmodel_latest', 'qmodel_preview', 'gm51model', 'kmodel', 'dmodel', 'mmodel']) {
     assert.ok(QODER_CN_MODEL_DISPLAY_NAMES[code], `${code} must be mapped`);
   }
   assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.qmodel_latest, 'Qwen3.7-Max');
+  assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.qmodel_38max, 'Qwen3.8-Max');
   assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.gm51model, 'GLM-5.2');
   assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.qmodel_preview, 'Qwen3.8-Max-Preview');
   assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.q35model_preview, 'Qwen3.8-Max-Preview');
@@ -194,17 +195,26 @@ test('undated Qoder CN rows count for allTime only, mirroring the proma includeU
   assert.equal(graph.contributions[0].clients[0].tokens.input, 20);
 });
 
-test('qoderCnDataPaths resolves QoderCN DB path per platform', () => {
-  const suffix = path.join('QoderCN', 'SharedClientCache', 'cache', 'db', 'local.db');
+test('qoderCnDataPaths resolves QoderCN and Qoder DB paths per platform', () => {
+  const suffix = path.join('SharedClientCache', 'cache', 'db', 'local.db');
 
   const darwin = qoderCnDataPaths({ homeDir: '/Users/test', platform: 'darwin', env: {} });
-  assert.deepEqual(darwin.dbPaths, [path.join('/Users/test', 'Library', 'Application Support', suffix)]);
+  assert.deepEqual(darwin.dbPaths, [
+    path.join('/Users/test', 'Library', 'Application Support', 'QoderCN', suffix),
+    path.join('/Users/test', 'Library', 'Application Support', 'Qoder', suffix)
+  ]);
 
   const win = qoderCnDataPaths({ homeDir: '/home/test', platform: 'win32', env: { APPDATA: '/home/test/AppData/Roaming' } });
-  assert.deepEqual(win.dbPaths, [path.join('/home/test/AppData/Roaming', suffix)]);
+  assert.deepEqual(win.dbPaths, [
+    path.join('/home/test/AppData/Roaming', 'QoderCN', suffix),
+    path.join('/home/test/AppData/Roaming', 'Qoder', suffix)
+  ]);
 
   const linux = qoderCnDataPaths({ homeDir: '/home/test', platform: 'linux', env: {} });
-  assert.deepEqual(linux.dbPaths, [path.join('/home/test/.config', suffix)]);
+  assert.deepEqual(linux.dbPaths, [
+    path.join('/home/test/.config', 'QoderCN', suffix),
+    path.join('/home/test/.config', 'Qoder', suffix)
+  ]);
 });
 
 test('collectQoderCnRows reads DB rows and deduplicates by messageId', async (t) => {
