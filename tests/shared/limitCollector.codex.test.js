@@ -456,7 +456,7 @@ test('fetchCodexLimits prefers read-only OAuth usage and maps wham windows', asy
   assert.deepEqual(providers[0].windows.map((window) => window.windowMinutes), [300, 10080]);
 });
 
-test('fetchCodexLimits uses the Codex API usage path for a non-ChatGPT base URL', async () => {
+test('fetchCodexLimits uses Codex API paths for a non-ChatGPT base URL', async () => {
   const urls = [];
   const provider = await fetchCodexLimits({}, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
@@ -466,12 +466,19 @@ test('fetchCodexLimits uses the Codex API usage path for a non-ChatGPT base URL'
         return JSON.stringify({ tokens: { access_token: 'access-token' } });
       }
       if (String(file).endsWith('config.toml')) {
-        return 'chatgpt_base_url = "https://api.openai.com/"\n';
+        return 'chatgpt_base_url = "https://codex.example.com/"\n';
       }
       throw new Error(`unexpected read ${file}`);
     },
     fetch: async (url) => {
       urls.push(url);
+      if (url.endsWith('/rate-limit-reset-credits')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ available_count: 1, credits: [] })
+        };
+      }
       return {
         ok: true,
         status: 200,
@@ -482,13 +489,16 @@ test('fetchCodexLimits uses the Codex API usage path for a non-ChatGPT base URL'
           }
         })
       };
-    },
-    readCodexResetCredits: async () => null
+    }
   });
 
-  assert.deepEqual(urls, ['https://api.openai.com/api/codex/usage']);
+  assert.deepEqual(urls, [
+    'https://codex.example.com/api/codex/usage',
+    'https://codex.example.com/api/codex/rate-limit-reset-credits'
+  ]);
   assert.equal(provider.source, 'oauth');
   assert.equal(provider.windows[0].remainingPercent, 96);
+  assert.equal(provider.resetCredits.availableCount, 1);
 });
 
 test('fetchCodexLimits rejects an unscoped RPC result for a selected managed workspace', async () => {

@@ -83,9 +83,16 @@ const CLAUDE_PREPAID_CACHE_STATE_KEY = 'claude.prepaid-cache';
 const CLAUDE_SESSION_WINDOW_MINUTES = 5 * 60;
 const CLAUDE_WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
 const CODEX_CHATGPT_BASE_URL = 'https://chatgpt.com/backend-api';
-const CODEX_USAGE_PATH = '/wham/usage';
-const CODEX_API_USAGE_PATH = '/api/codex/usage';
-const CODEX_RESET_CREDITS_PATH = '/wham/rate-limit-reset-credits';
+const CODEX_BACKEND_PATHS = Object.freeze({
+  chatgpt: Object.freeze({
+    usage: '/wham/usage',
+    resetCredits: '/wham/rate-limit-reset-credits'
+  }),
+  codex: Object.freeze({
+    usage: '/api/codex/usage',
+    resetCredits: '/api/codex/rate-limit-reset-credits'
+  })
+});
 const CODEX_EMPTY_QUOTA_RETRY_DELAY_MS = 300;
 const CODEX_RPC_TIMEOUT_MS = 20_000;
 const TOKEN_MONITOR_USER_AGENT = `token-monitor/${appVersion()} (+https://github.com/Javis603/token-monitor)`;
@@ -2138,7 +2145,7 @@ async function fetchCodexUsage(deps = {}) {
   if (accountId) headers['chatgpt-account-id'] = accountId;
   try {
     const baseUrl = codexChatGptBaseUrl(deps);
-    const usagePath = baseUrl.includes('/backend-api') ? CODEX_USAGE_PATH : CODEX_API_USAGE_PATH;
+    const usagePath = codexBackendPaths(baseUrl).usage;
     return await fetchJson(
       `${baseUrl}${usagePath}`,
       headers,
@@ -2169,6 +2176,14 @@ function normalizeCodexChatGptBaseUrl(value) {
     normalized += '/backend-api';
   }
   return normalized;
+}
+
+function codexBackendPathStyle(baseUrl) {
+  return String(baseUrl || '').includes('/backend-api') ? 'chatgpt' : 'codex';
+}
+
+function codexBackendPaths(baseUrl) {
+  return CODEX_BACKEND_PATHS[codexBackendPathStyle(baseUrl)];
 }
 
 function codexChatGptBaseUrl(deps = {}) {
@@ -2212,7 +2227,8 @@ async function fetchCodexResetCredits(deps = {}) {
   const timeoutMs = Number(deps.codexResetCreditsTimeoutMs || 4000);
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
-  const url = `${codexChatGptBaseUrl(deps)}${CODEX_RESET_CREDITS_PATH}`;
+  const baseUrl = codexChatGptBaseUrl(deps);
+  const url = `${baseUrl}${codexBackendPaths(baseUrl).resetCredits}`;
   const accountId = deps.codexAccountId || codexProviderAccountIdFromAuth(auth);
   try {
     const headers = {
