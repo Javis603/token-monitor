@@ -72,12 +72,18 @@ test('managed Codex accounts keep same-email workspaces distinct', () => {
   })?.id, 'team');
 });
 
-test('system switching applies the selected workspace without mutating managed auth material', () => {
+test('system switching applies a JWT-proven workspace without mutating managed auth material', () => {
   const auth = {
     tokens: {
       access_token: 'access-token',
       account_id: 'workspace-default',
-      id_token: makeIdToken({ email: 'member@example.com' })
+      id_token: makeIdToken({
+        email: 'member@example.com',
+        'https://api.openai.com/auth': {
+          chatgpt_account_id: 'workspace-team',
+          chatgpt_account_is_fedramp: true
+        }
+      })
     }
   };
   const material = {
@@ -87,9 +93,7 @@ test('system switching applies the selected workspace without mutating managed a
     authPath: '/managed/auth.json'
   };
 
-  const selected = codexAuthMaterialForWorkspace(material, ' WORKSPACE-TEAM ', {
-    isFedrampAccount: false
-  });
+  const selected = codexAuthMaterialForWorkspace(material, ' WORKSPACE-TEAM ');
 
   assert.equal(codexAuthMaterialForWorkspace(material, ''), material);
   assert.equal(auth.tokens.account_id, 'workspace-default');
@@ -98,10 +102,11 @@ test('system switching applies the selected workspace without mutating managed a
   assert.equal(JSON.parse(selected.data).tokens.account_id, 'workspace-team');
   assert.equal(selected.identity.email, 'member@example.com');
   assert.equal(selected.identity.workspaceAccountId, 'workspace-team');
+  assert.equal(selected.identity.isFedrampAccount, true);
   assert.equal(selected.authPath, '/managed/auth.json');
 });
 
-test('system switching refuses a cross-workspace FedRAMP routing mismatch', () => {
+test('system switching refuses a workspace not proven by the auth snapshot', () => {
   const auth = {
     tokens: {
       access_token: 'access-token',
@@ -122,41 +127,10 @@ test('system switching refuses a cross-workspace FedRAMP routing mismatch', () =
   };
 
   assert.throws(
-    () => codexAuthMaterialForWorkspace(material, 'workspace-gov', { isFedrampAccount: true }),
-    /different FedRAMP routing/
-  );
-  assert.throws(
-    () => codexAuthMaterialForWorkspace(material, 'workspace-unknown'),
+    () => codexAuthMaterialForWorkspace(material, 'workspace-gov'),
     /routing could not be verified/
   );
-  assert.throws(
-    () => codexAuthMaterialForWorkspace(material, 'workspace-default', { isFedrampAccount: true }),
-    /different FedRAMP routing/
-  );
   assert.equal(auth.tokens.account_id, 'workspace-default');
-});
-
-test('system switching permits a cross-workspace selection only when routing is known and consistent', () => {
-  const auth = {
-    tokens: {
-      access_token: 'access-token',
-      account_id: 'workspace-default',
-      id_token: makeIdToken({
-        email: 'member@example.com',
-        'https://api.openai.com/auth': {
-          chatgpt_account_id: 'workspace-default',
-          chatgpt_account_is_fedramp: true
-        }
-      })
-    }
-  };
-  const selected = codexAuthMaterialForWorkspace({ auth }, 'workspace-gov', {
-    isFedrampAccount: true
-  });
-
-  assert.equal(selected.auth.tokens.account_id, 'workspace-gov');
-  assert.equal(selected.identity.claimedWorkspaceAccountId, 'workspace-default');
-  assert.equal(selected.identity.isFedrampAccount, true);
 });
 
 test('Codex auth files are written atomically with private permissions and readable identity', async () => {

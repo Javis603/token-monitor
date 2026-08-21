@@ -44,7 +44,6 @@ test('codexAuthIdentity reads modern auth.json with top-level claims', () => {
   assert.equal(identity.email, 'user@example.com');
   assert.equal(identity.accountLabel, 'plus');
   assert.equal(identity.providerAccountId, 'acct_123');
-  assert.equal(identity.claimedWorkspaceAccountId, 'acct_123');
   assert.match(identity.accountKey, /^sha256:[0-9a-f]{64}$/);
 });
 
@@ -63,7 +62,6 @@ test('codexAuthIdentity reads nested OpenAI auth claims', () => {
   assert.equal(identity.email, 'nested@example.com');
   assert.equal(identity.accountLabel, 'pro');
   assert.equal(identity.providerAccountId, 'acct_nested');
-  assert.equal(identity.claimedWorkspaceAccountId, 'acct_nested');
 });
 
 test('codexAuthIdentity and OAuth request context preserve workspace-scoped FedRAMP routing', () => {
@@ -85,17 +83,24 @@ test('codexAuthIdentity and OAuth request context preserve workspace-scoped FedR
   assert.deepEqual(codexOAuthRequestContext(auth), {
     accessToken: 'access-token',
     accountId: 'workspace-current',
+    claimedAccountId: 'workspace-current',
+    storedAccountId: 'workspace-current',
+    workspaceRoutingVerified: true,
     isFedrampAccount: true
   });
-  assert.equal(codexOAuthRequestContext(auth, { accountId: 'workspace-other' }).isFedrampAccount, false);
-  assert.equal(codexOAuthRequestContext({
+  const requestedOther = codexOAuthRequestContext(auth, { accountId: 'workspace-other' });
+  assert.equal(requestedOther.workspaceRoutingVerified, false);
+  assert.equal(requestedOther.isFedrampAccount, false);
+  const storedOther = codexOAuthRequestContext({
     ...auth,
     tokens: { ...auth.tokens, account_id: 'workspace-other' }
-  }).isFedrampAccount, false);
+  });
+  assert.equal(storedOther.workspaceRoutingVerified, false);
+  assert.equal(storedOther.isFedrampAccount, false);
   assert.equal(codexOAuthRequestContext(auth, {
     accountId: 'workspace-other',
     isFedrampAccount: true
-  }).isFedrampAccount, true);
+  }).workspaceRoutingVerified, false);
 });
 
 test('codexAuthIdentity prefers the selected workspace from tokens.account_id', () => {

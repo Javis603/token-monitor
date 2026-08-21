@@ -4,7 +4,12 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { codexAuthIdentity, codexManagedAccountMatchesIdentity } = require('./codexAuth');
+const {
+  assertCodexOAuthWorkspaceRouting,
+  codexAuthIdentity,
+  codexManagedAccountMatchesIdentity,
+  codexOAuthRequestContext
+} = require('./codexAuth');
 const { authWithSelectedCodexWorkspace, normalizeWorkspaceId } = require('./codexWorkspaces');
 
 function liveCodexAuthPath(env = process.env, homeDir = os.homedir()) {
@@ -39,27 +44,12 @@ async function readCodexAuthMaterial(authPath, deps = {}) {
   };
 }
 
-function codexAuthMaterialForWorkspace(material, workspaceId, options = {}) {
+function codexAuthMaterialForWorkspace(material, workspaceId) {
   const selectedWorkspaceId = normalizeWorkspaceId(workspaceId);
   if (!selectedWorkspaceId) return material;
-  const sourceIdentity = codexAuthIdentity(material?.auth);
-  const routedWorkspaceId = normalizeWorkspaceId(
-    sourceIdentity.claimedWorkspaceAccountId
-    || sourceIdentity.workspaceAccountId
-  );
-  const selectedIsFedramp = typeof options.isFedrampAccount === 'boolean'
-    ? options.isFedrampAccount
-    : undefined;
-  const switchesWorkspace = !routedWorkspaceId || selectedWorkspaceId !== routedWorkspaceId;
-  if (switchesWorkspace && typeof selectedIsFedramp !== 'boolean') {
-    throw new Error('The selected Codex workspace routing could not be verified. Sign in directly to that workspace before switching the system account.');
-  }
-  if (
-    typeof selectedIsFedramp === 'boolean'
-    && selectedIsFedramp !== sourceIdentity.isFedrampAccount
-  ) {
-    throw new Error('The selected Codex workspace uses different FedRAMP routing. Sign in directly to that workspace before switching the system account.');
-  }
+  assertCodexOAuthWorkspaceRouting(codexOAuthRequestContext(material?.auth, {
+    accountId: selectedWorkspaceId
+  }));
   const auth = authWithSelectedCodexWorkspace(material?.auth, selectedWorkspaceId);
   return {
     ...material,

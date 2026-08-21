@@ -50,11 +50,11 @@ test('normalizeCodexWorkspaces dedupes ids and labels unnamed personal workspace
   }), [
     { id: 'workspace-one', label: 'Team One', workspaceKind: '' },
     { id: 'personal', label: '', workspaceKind: 'personal' },
-    { id: 'fedramp', label: 'Government', workspaceKind: '', isFedrampAccount: true }
+    { id: 'fedramp', label: 'Government', workspaceKind: '' }
   ]);
 });
 
-test('listCodexWorkspaces preserves FedRAMP routing and annotates the current workspace', async () => {
+test('listCodexWorkspaces preserves current-auth FedRAMP routing without persisting workspace metadata', async () => {
   let request = null;
   const workspaces = await listCodexWorkspaces({
     tokens: {
@@ -82,8 +82,7 @@ test('listCodexWorkspaces preserves FedRAMP routing and annotates the current wo
   assert.deepEqual(workspaces, [{
     id: 'workspace-current',
     label: 'Government',
-    workspaceKind: '',
-    isFedrampAccount: true
+    workspaceKind: ''
   }]);
 });
 

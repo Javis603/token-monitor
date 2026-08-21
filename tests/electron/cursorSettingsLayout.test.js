@@ -599,9 +599,8 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(switchBody, /const previousAccounts = normalizeCodexManagedAccounts\(settings\.codexManagedAccounts\)/);
   assert.match(switchBody, /liveAuthSnapshot = await snapshotCodexAuthFile\(liveAuthPath\)/);
   assert.match(switchBody, /preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount/);
-  assert.match(switchBody, /codexAuthMaterialForWorkspace\(targetMaterial, account\.workspaceAccountId, \{/);
-  assert.match(switchBody, /isFedrampAccount: account\.workspaceIsFedramp/);
-  assert.match(switchBody, /workspaceIsFedramp: account\.workspaceIsFedramp/);
+  assert.match(switchBody, /codexAuthMaterialForWorkspace\(targetMaterial, account\.workspaceAccountId\)/);
+  assert.doesNotMatch(switchBody, /workspaceIsFedramp|codexIsFedramp/);
   assert.match(switchBody, /writeCodexAuthFile\(liveAuthPath, selectedMaterial\.data\)/);
   assert.match(switchBody, /restart: false/);
   assert.match(switchBody, /settings\.codexManagedAccounts = previousAccounts;/);

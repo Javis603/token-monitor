@@ -27,7 +27,12 @@ const openrouterLimits = require('./openrouterLimits');
 const thirdPartyLimits = require('./thirdPartyLimits');
 const { sharedDataDir } = require('./config');
 const { recordConsumption } = require('./deepseekBalanceHistory');
-const { codexAccountKey, codexAuthIdentity, codexOAuthRequestContext } = require('./codexAuth');
+const {
+  assertCodexOAuthWorkspaceRouting,
+  codexAccountKey,
+  codexAuthIdentity,
+  codexOAuthRequestContext
+} = require('./codexAuth');
 const minimaxLimits = require('./minimaxLimits');
 const { minimaxToken, minimaxBaseUrl, parseMinimaxTiers, fetchMinimaxLimits } = minimaxLimits;
 const mimoLimits = require('./mimoLimits');
@@ -2160,10 +2165,9 @@ function codexAccessTokenFromAuth(auth) {
 }
 
 function codexOAuthRequestHeaders(auth, deps = {}, extra = {}) {
-  const context = codexOAuthRequestContext(auth, {
-    accountId: deps.codexAccountId,
-    isFedrampAccount: deps.codexIsFedrampAccount
-  });
+  const context = assertCodexOAuthWorkspaceRouting(codexOAuthRequestContext(auth, {
+    accountId: deps.codexAccountId
+  }));
   const headers = {
     authorization: `Bearer ${context.accessToken}`,
     accept: 'application/json',
@@ -3021,9 +3025,6 @@ function normalizeCodexManagedAccounts(value) {
       workspaceAccountId: String(account.workspaceAccountId || account.providerAccountId || '').trim().toLowerCase(),
       workspaceLabel: String(account.workspaceLabel || '').trim(),
       workspaceKind: account.workspaceKind === 'personal' ? 'personal' : '',
-      ...(typeof account.workspaceIsFedramp === 'boolean'
-        ? { workspaceIsFedramp: account.workspaceIsFedramp }
-        : {}),
       enabled: account.enabled !== false
     };
   }).filter(Boolean);
@@ -3062,6 +3063,7 @@ function managedCodexAccountKey(account, authIdentity = {}, resolvedEmail = '') 
 function codexOAuthCanFallbackToRpc(error, deps = {}) {
   if (
     deps.codexAccountId
+    || error?.code === 'CODEX_WORKSPACE_ROUTING_UNVERIFIED'
     || deps.signal?.aborted
     || error?.code === 'ABORT_ERR'
     || error?.name === 'AbortError'
@@ -3142,8 +3144,7 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
     ...deps,
     env,
     codexAuthPath: account.authPath || pathApi.join(account.homePath, 'auth.json'),
-    codexAccountId: account.workspaceAccountId || undefined,
-    codexIsFedrampAccount: account.workspaceIsFedramp
+    codexAccountId: account.workspaceAccountId || undefined
   };
   const initialAuthIdentity = readLiveCodexIdentity(accountDeps);
   try {

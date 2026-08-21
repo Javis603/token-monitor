@@ -880,9 +880,6 @@ function normalizeCodexManagedAccounts(value) {
     );
     const rawWorkspaceLabel = String(account.workspaceLabel || '').trim();
     const workspaceKind = account.workspaceKind === 'personal' ? 'personal' : '';
-    const workspaceIsFedramp = typeof account.workspaceIsFedramp === 'boolean'
-      ? account.workspaceIsFedramp
-      : undefined;
     const accountKey = String(account.accountKey || '').trim();
     const dedupe = codexManagedAccountIdentityKey({
       id,
@@ -900,7 +897,6 @@ function normalizeCodexManagedAccounts(value) {
       workspaceAccountId,
       workspaceLabel: workspaceKind ? '' : rawWorkspaceLabel,
       workspaceKind,
-      ...(typeof workspaceIsFedramp === 'boolean' ? { workspaceIsFedramp } : {}),
       homePath,
       authPath: String(account.authPath || path.join(homePath, 'auth.json')).trim(),
       addedAt: account.addedAt || new Date().toISOString(),
@@ -942,10 +938,8 @@ function hydrateCodexManagedWorkspaceLabels() {
     .filter((account) => (
       account.enabled !== false
       && account.workspaceAccountId
-      && (
-        (!account.workspaceLabel && !account.workspaceKind)
-        || typeof account.workspaceIsFedramp !== 'boolean'
-      )
+      && !account.workspaceLabel
+      && !account.workspaceKind
     ));
   if (candidates.length === 0) return Promise.resolve(false);
 
@@ -966,10 +960,7 @@ function hydrateCodexManagedWorkspaceLabels() {
               id: account.id,
               workspaceAccountId: account.workspaceAccountId,
               label: workspace.label,
-              workspaceKind: workspace.workspaceKind,
-              ...(typeof workspace.isFedrampAccount === 'boolean'
-                ? { workspaceIsFedramp: workspace.isFedrampAccount }
-                : {})
+              workspaceKind: workspace.workspaceKind
             }
           : null;
       } catch (_) {
@@ -988,9 +979,7 @@ function hydrateCodexManagedWorkspaceLabels() {
         return account;
       }
       const shouldHydrateLabel = !account.workspaceLabel && !account.workspaceKind;
-      const shouldHydrateFedramp = typeof account.workspaceIsFedramp !== 'boolean'
-        && typeof resolved.workspaceIsFedramp === 'boolean';
-      if (!shouldHydrateLabel && !shouldHydrateFedramp) return account;
+      if (!shouldHydrateLabel) return account;
       changed = true;
       return {
         ...account,
@@ -998,7 +987,6 @@ function hydrateCodexManagedWorkspaceLabels() {
           workspaceLabel: resolved.label,
           workspaceKind: resolved.workspaceKind
         } : {}),
-        ...(shouldHydrateFedramp ? { workspaceIsFedramp: resolved.workspaceIsFedramp } : {}),
         updatedAt: new Date().toISOString()
       };
     });
@@ -1233,9 +1221,6 @@ function commitCodexManagedAccount(identity, homePath, existing, options = {}) {
     workspaceAccountId: identity.workspaceAccountId || identity.providerAccountId || '',
     workspaceLabel: String(identity.workspaceLabel || '').trim(),
     workspaceKind: identity.workspaceKind === 'personal' ? 'personal' : '',
-    ...(typeof identity.workspaceIsFedramp === 'boolean'
-      ? { workspaceIsFedramp: identity.workspaceIsFedramp }
-      : {}),
     homePath,
     authPath: path.join(homePath, 'auth.json'),
     addedAt: existing?.addedAt || now,
@@ -1383,10 +1368,7 @@ async function resolveCodexWorkspaceAfterLogin(auth, _homePath, options = {}) {
       workspaceAccountId,
       accountKey: codexAccountKey(initialIdentity.email, workspaceAccountId),
       workspaceLabel: selected.label,
-      workspaceKind: selected.workspaceKind,
-      ...(typeof selected.isFedrampAccount === 'boolean'
-        ? { workspaceIsFedramp: selected.isFedrampAccount }
-        : {})
+      workspaceKind: selected.workspaceKind
     }
   };
 }
@@ -1548,19 +1530,14 @@ async function switchCodexSystemAccount(id) {
   }
   let selectedMaterial;
   try {
-    selectedMaterial = codexAuthMaterialForWorkspace(targetMaterial, account.workspaceAccountId, {
-      isFedrampAccount: account.workspaceIsFedramp
-    });
+    selectedMaterial = codexAuthMaterialForWorkspace(targetMaterial, account.workspaceAccountId);
   } catch (error) {
     return { ok: false, error: error?.message || 'Could not verify the selected Codex workspace routing.' };
   }
   const targetIdentity = {
     ...selectedMaterial.identity,
     workspaceLabel: account.workspaceLabel,
-    workspaceKind: account.workspaceKind,
-    ...(typeof account.workspaceIsFedramp === 'boolean'
-      ? { workspaceIsFedramp: account.workspaceIsFedramp }
-      : {})
+    workspaceKind: account.workspaceKind
   };
 
   const previousAccounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);

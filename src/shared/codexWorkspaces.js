@@ -1,7 +1,7 @@
 'use strict';
 
 const { createOutboundFetch } = require('./outboundFetch');
-const { codexOAuthRequestContext } = require('./codexAuth');
+const { assertCodexOAuthWorkspaceRouting, codexOAuthRequestContext } = require('./codexAuth');
 
 const CODEX_WORKSPACES_URL = 'https://chatgpt.com/backend-api/accounts';
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -25,18 +25,8 @@ function codexOAuthCredentials(auth) {
   };
 }
 
-function workspaceFedrampStatus(item) {
-  const value = item?.chatgpt_account_is_fedramp
-    ?? item?.chatgptAccountIsFedramp
-    ?? item?.is_fedramp
-    ?? item?.isFedramp;
-  return typeof value === 'boolean' ? value : undefined;
-}
-
-function normalizeCodexWorkspaces(payload, options = {}) {
+function normalizeCodexWorkspaces(payload) {
   const items = Array.isArray(payload?.items) ? payload.items : [];
-  const currentAccountId = normalizeWorkspaceId(options.currentAccountId);
-  const currentIsFedramp = options.currentIsFedramp === true;
   const seen = new Set();
   const workspaces = [];
   for (const item of items) {
@@ -44,21 +34,17 @@ function normalizeCodexWorkspaces(payload, options = {}) {
     if (!id || seen.has(id)) continue;
     seen.add(id);
     const name = nonEmptyString(item?.name);
-    const responseFedramp = workspaceFedrampStatus(item);
-    const isFedrampAccount = responseFedramp
-      ?? (currentIsFedramp && id === currentAccountId ? true : undefined);
     workspaces.push({
       id,
       label: name,
-      workspaceKind: name ? '' : 'personal',
-      ...(typeof isFedrampAccount === 'boolean' ? { isFedrampAccount } : {})
+      workspaceKind: name ? '' : 'personal'
     });
   }
   return workspaces;
 }
 
 async function listCodexWorkspaces(auth, deps = {}) {
-  const context = codexOAuthRequestContext(auth);
+  const context = assertCodexOAuthWorkspaceRouting(codexOAuthRequestContext(auth));
   const credentials = codexOAuthCredentials(auth);
   if (!credentials) return [];
   const fetchFn = createOutboundFetch(deps.env || process.env, deps);
@@ -89,10 +75,7 @@ async function listCodexWorkspaces(auth, deps = {}) {
     throw error;
   }
   const payload = await response.json();
-  const workspaces = normalizeCodexWorkspaces(payload, {
-    currentAccountId: context.accountId,
-    currentIsFedramp: context.isFedrampAccount
-  });
+  const workspaces = normalizeCodexWorkspaces(payload);
   const isLegitimateEmptyList = Array.isArray(payload?.items) && payload.items.length === 0;
   if (workspaces.length === 0 && !isLegitimateEmptyList) {
     const topLevelKeys = payload && typeof payload === 'object' && !Array.isArray(payload)

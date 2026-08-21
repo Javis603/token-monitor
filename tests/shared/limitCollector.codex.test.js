@@ -405,14 +405,22 @@ test('fetchCodexLimits prefers read-only OAuth usage and maps wham windows', asy
       id: 'team',
       email: 'member@example.com',
       workspaceAccountId: 'workspace-team',
-      workspaceIsFedramp: true,
       homePath: '/tmp/token-monitor-codex/team'
     }]
   }, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin' },
     readFileSync: () => JSON.stringify({
-      tokens: { access_token: 'access-token', account_id: 'workspace-default' }
+      tokens: {
+        access_token: 'access-token',
+        account_id: 'workspace-team',
+        id_token: makeIdToken({
+          'https://api.openai.com/auth': {
+            chatgpt_account_id: 'workspace-team',
+            chatgpt_account_is_fedramp: true
+          }
+        })
+      }
     }),
     fetch: async (url, init) => {
       requests.push({ url, init });
@@ -456,6 +464,84 @@ test('fetchCodexLimits prefers read-only OAuth usage and maps wham windows', asy
   assert.deepEqual(providers[0].windows.map((window) => window.kind), ['session', 'weekly']);
   assert.deepEqual(providers[0].windows.map((window) => window.remainingPercent), [88, 66]);
   assert.deepEqual(providers[0].windows.map((window) => window.windowMinutes), [300, 10080]);
+});
+
+test('fetchCodexLimits makes no request for a managed workspace not proven by its auth snapshot', async () => {
+  let fetchCalls = 0;
+  let rpcCalls = 0;
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: [{
+      id: 'team',
+      email: 'member@example.com',
+      workspaceAccountId: 'workspace-team',
+      homePath: '/tmp/token-monitor-codex/team'
+    }]
+  }, {
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({
+      tokens: {
+        access_token: 'access-token',
+        account_id: 'workspace-personal',
+        id_token: makeIdToken({
+          'https://api.openai.com/auth': {
+            chatgpt_account_id: 'workspace-personal',
+            chatgpt_account_is_fedramp: false
+          }
+        })
+      }
+    }),
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error('routing must fail before HTTP');
+    },
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      throw new Error('routing mismatch must not start app-server');
+    }
+  });
+
+  assert.equal(fetchCalls, 0);
+  assert.equal(rpcCalls, 0);
+  assert.equal(providers[0].status, 'unavailable');
+  assert.equal(providers[0].source, 'oauth');
+  assert.deepEqual(providers[0].windows, []);
+});
+
+test('fetchCodexLimits makes no request when live auth has conflicting workspace routing', async () => {
+  let fetchCalls = 0;
+  let rpcCalls = 0;
+
+  await assert.rejects(fetchCodexLimits({}, {
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({
+      tokens: {
+        access_token: 'access-token',
+        account_id: 'workspace-team',
+        id_token: makeIdToken({
+          'https://api.openai.com/auth': {
+            chatgpt_account_id: 'workspace-personal',
+            chatgpt_account_is_fedramp: false
+          }
+        })
+      }
+    }),
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error('routing must fail before HTTP');
+    },
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      throw new Error('routing mismatch must not start app-server');
+    }
+  }), (error) => {
+    assert.equal(error.code, 'CODEX_WORKSPACE_ROUTING_UNVERIFIED');
+    assert.equal(error.status, 'unavailable');
+    return true;
+  });
+
+  assert.equal(fetchCalls, 0);
+  assert.equal(rpcCalls, 0);
 });
 
 test('fetchCodexLimits omits FedRAMP routing for an ordinary workspace', async () => {
