@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
 const probe = require('../../src/shared/antigravityProbe');
@@ -8,7 +9,7 @@ const rootPackage = require('../../package.json');
 
 test('probe stops waiting for process discovery when the parent signal aborts', async () => {
   const controller = new AbortController();
-  const pending = probe.probe({
+  const pending = runProbe({
     signal: controller.signal,
     probeTimeoutMs: 60_000,
     detectProcessInfos: () => new Promise(() => {})
@@ -26,7 +27,7 @@ test('an already-aborted parent does not create the provider timeout timer', asy
   const controller = new AbortController();
   controller.abort(new Error('already stopped'));
 
-  await assert.rejects(probe.probe({
+  await assert.rejects(runProbe({
     signal: controller.signal,
     probeTimeoutMs: 60_000
   }), /already stopped/);
@@ -122,8 +123,7 @@ test('parseProcessLine does not match agy embedded in an unrelated path', () => 
   assert.equal(probe._parseProcessLine('701 /usr/local/bin/legacy-agent start'), null);
 });
 
-function fakeSpawn(stdout, { exitCode = 0, stderr = '' } = {}) {
-  const { EventEmitter } = require('node:events');
+function fakeSpawn(stdout, { exitCode = 0, stderr = '', errorCode = '' } = {}) {
   return () => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -131,6 +131,12 @@ function fakeSpawn(stdout, { exitCode = 0, stderr = '' } = {}) {
     child.stdin = { end: () => {} };
     child.kill = () => {};
     setImmediate(() => {
+      if (errorCode) {
+        const error = new Error(`spawn failed: ${errorCode}`);
+        error.code = errorCode;
+        child.emit('error', error);
+        return;
+      }
       child.stdout.emit('data', Buffer.from(stdout));
       if (stderr) child.stderr.emit('data', Buffer.from(stderr));
       child.emit('close', exitCode);
@@ -138,6 +144,201 @@ function fakeSpawn(stdout, { exitCode = 0, stderr = '' } = {}) {
     return child;
   };
 }
+
+function cliUsagePayload() {
+  return {
+    status: 'SUCCESS',
+    command: {
+      name: 'usage',
+      data: {
+        groups: [{
+          name: 'Gemini',
+          buckets: [{
+            id: 'gemini-weekly',
+            window: 'weekly',
+            remaining_fraction: 0.75,
+            reset_time: '2026-08-28T00:00:00Z'
+          }]
+        }]
+      }
+    }
+  };
+}
+
+function isAgyCommand(command) {
+  return /(?:^|[\\/])agy(?:\.exe)?$/i.test(String(command));
+}
+
+function fakeProbeSpawn({
+  payload = cliUsagePayload(),
+  version = '1.1.17',
+  processOutput = '',
+  usageExitCode = 0,
+  usageStderr = '',
+  agyErrorCode = ''
+} = {}) {
+  return (cmd, args) => {
+    if (!isAgyCommand(cmd)) return fakeSpawn(processOutput)();
+    if (agyErrorCode) return fakeSpawn('', { errorCode: agyErrorCode })();
+    if (args[0] === '--version') return fakeSpawn(`${version}\n`)();
+    return fakeSpawn(usageExitCode === 0 ? JSON.stringify(payload) : '', {
+      exitCode: usageExitCode,
+      stderr: usageStderr
+    })();
+  };
+}
+
+function runProbe(deps = {}) {
+  return probe.probe({
+    agyCommand: 'agy',
+    spawn: fakeProbeSpawn({ version: '1.1.10' }),
+    ...deps
+  });
+}
+
+test('probe starts agy to read quota when no Antigravity process is running', async () => {
+  const calls = [];
+  let processDiscoveryCalls = 0;
+  const probeSpawn = fakeProbeSpawn();
+  const spawn = (cmd, args) => {
+    if (isAgyCommand(cmd)) calls.push([cmd, args]);
+    else processDiscoveryCalls += 1;
+    return probeSpawn(cmd, args);
+  };
+
+  const result = await runProbe({
+    platform: 'win32',
+    agyCommand: 'agy.exe',
+    spawn
+  });
+
+  assert.deepEqual(calls, [
+    ['agy.exe', ['--version']],
+    ['agy.exe', ['-p', '/usage', '--output-format', 'json']]
+  ]);
+  assert.equal(processDiscoveryCalls, 1);
+  assert.equal(result.source, 'cli');
+  assert.deepEqual(result.windows, [{
+    name: 'Gemini weekly',
+    kind: 'weekly',
+    remainingFraction: 0.75,
+    resetTime: '2026-08-28T00:00:00.000Z'
+  }]);
+});
+
+test('probe caches the agy version for automatic refreshes and rechecks it manually', async () => {
+  const calls = [];
+  const providerRuntimeState = new Map();
+  const probeSpawn = fakeProbeSpawn();
+  const spawn = (cmd, args) => {
+    if (isAgyCommand(cmd)) calls.push(args);
+    return probeSpawn(cmd, args);
+  };
+
+  const deps = {
+    platform: 'win32',
+    agyCommand: 'agy',
+    providerRuntimeState,
+    spawn
+  };
+  await runProbe(deps);
+  await runProbe(deps);
+  await runProbe({ ...deps, refreshReason: 'manual' });
+
+  assert.equal(calls.filter((args) => args[0] === '--version').length, 2);
+  assert.equal(calls.filter((args) => args[0] === '-p').length, 3);
+});
+
+test('probe skips /usage on agy versions older than 1.1.11', async () => {
+  const calls = [];
+  const probeSpawn = fakeProbeSpawn({ version: '1.1.10' });
+  const spawn = (cmd, args) => {
+    if (isAgyCommand(cmd)) calls.push([cmd, args]);
+    return probeSpawn(cmd, args);
+  };
+
+  const error = await runProbe({
+    platform: 'win32',
+    agyCommand: 'agy',
+    spawn
+  }).catch((caught) => caught);
+
+  assert.equal(error.status, 'notConfigured');
+  assert.deepEqual(calls, [['agy', ['--version']]]);
+});
+
+test('probe preserves a transient CLI failure when no RPC source is running', async () => {
+  const error = await runProbe({
+    platform: 'win32',
+    agyCommand: 'agy',
+    spawn: fakeProbeSpawn({ usageExitCode: 1, usageStderr: 'temporary CLI failure' })
+  }).catch((caught) => caught);
+
+  assert.equal(error.status, 'unavailable');
+  assert.equal(error.message, 'temporary CLI failure');
+});
+
+test('probe classifies transient agy spawn errors as unavailable', async () => {
+  const error = await runProbe({
+    platform: 'win32',
+    agyCommand: 'agy',
+    spawn: fakeProbeSpawn({ agyErrorCode: 'EACCES' })
+  }).catch((caught) => caught);
+
+  assert.equal(error.status, 'unavailable');
+});
+
+test('probe supplements CLI quota with plan from a running App, CLI, or IDE RPC', async () => {
+  const rpcPids = [];
+  const processOutput = [
+    '101 C:\\Users\\j\\.antigravity\\agy.exe language-server',
+    '102 C:\\Program Files\\Antigravity\\language_server.exe --app_data_dir antigravity --csrf_token app-token',
+    '103 C:\\Program Files\\Antigravity IDE\\language_server.exe --app_data_dir antigravity-ide --csrf_token ide-token'
+  ].join('\n');
+
+  const result = await runProbe({
+    platform: 'win32',
+    agyCommand: 'agy',
+    spawn: fakeProbeSpawn({ processOutput }),
+    listeningPorts: async (pid) => {
+      rpcPids.push(pid);
+      return [4000 + pid];
+    },
+    callLs: async ({ port, method }) => {
+      assert.equal(method, 'GetUserStatus');
+      if (port === 4102) throw new Error('App RPC unavailable');
+      if (port === 4101) {
+        return { userStatus: { userTier: { name: 'Google AI Pro' } } };
+      }
+      throw new Error('IDE RPC must not be inspected after CLI RPC succeeds');
+    }
+  });
+
+  assert.deepEqual(rpcPids, [102, 101]);
+  assert.equal(result.source, 'cli');
+  assert.equal(result.accountPlan, 'Google AI Pro');
+  assert.equal(result.windows[0].remainingFraction, 0.75);
+});
+
+test('probe keeps CLI quota when every running RPC fails', async () => {
+  let rpcCalls = 0;
+  const processOutput = '102 C:\\Program Files\\Antigravity\\language_server.exe --app_data_dir antigravity --csrf_token app-token';
+  const result = await runProbe({
+    platform: 'win32',
+    agyCommand: 'agy',
+    spawn: fakeProbeSpawn({ processOutput }),
+    listeningPorts: async () => [4102],
+    callLs: async () => {
+      rpcCalls += 1;
+      throw new Error('RPC unavailable');
+    }
+  });
+
+  assert.equal(rpcCalls, 2);
+  assert.equal(result.source, 'cli');
+  assert.equal(result.accountPlan, null);
+  assert.equal(result.windows[0].remainingFraction, 0.75);
+});
 
 test('detectProcessInfo (posix) returns the highest-priority Antigravity source', async () => {
   const stdout = [
@@ -403,7 +604,7 @@ test('_quotaSummaryWindows recognizes cadence aliases and marks disabled buckets
 
 test('probe prefers quota summary and merges identity from GetUserStatus', async () => {
   const methods = [];
-  const result = await probe.probe({
+  const result = await runProbe({
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
     listeningPorts: async () => [54733],
     callLs: async ({ method, body }) => {
@@ -434,7 +635,7 @@ test('probe prefers quota summary and merges identity from GetUserStatus', async
 
 test('parent cancellation during optional grouped identity lookup rejects the probe', async () => {
   const controller = new AbortController();
-  const pending = probe.probe({
+  const pending = runProbe({
     signal: controller.signal,
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
     listeningPorts: async () => [54733],
@@ -460,7 +661,7 @@ test('parent cancellation during optional grouped identity lookup rejects the pr
 
 test('probe checks every endpoint for grouped quota before accepting a legacy response', async () => {
   const calls = [];
-  const result = await probe.probe({
+  const result = await runProbe({
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
     listeningPorts: async () => [54733],
     callLs: async ({ scheme, method }) => {
@@ -502,7 +703,7 @@ test('probe checks every endpoint for grouped quota before accepting a legacy re
 
 test('probe follows app, CLI, then IDE source priority and stops after success', async () => {
   const calls = [];
-  const result = await probe.probe({
+  const result = await runProbe({
     detectProcessInfos: async () => [
       { pid: 30, kind: 'ide', csrfToken: 'ide' },
       { pid: 20, kind: 'cli', csrfToken: '' },
@@ -533,7 +734,7 @@ test('probe follows app, CLI, then IDE source priority and stops after success',
 
 test('probe accepts a valid app legacy response before lower-priority grouped sources', async () => {
   const calledPorts = [];
-  const result = await probe.probe({
+  const result = await runProbe({
     detectProcessInfos: async () => [
       { pid: 20, kind: 'cli', csrfToken: '' },
       { pid: 10, kind: 'app', csrfToken: 'app' }
@@ -566,7 +767,7 @@ test('probe accepts a valid app legacy response before lower-priority grouped so
 
 test('probe exhausts grouped quota across same-source processes before legacy fallback', async () => {
   const calls = [];
-  const result = await probe.probe({
+  const result = await runProbe({
     detectProcessInfos: async () => [
       { pid: 11, kind: 'app', csrfToken: 'first' },
       { pid: 12, kind: 'app', csrfToken: 'second' }
@@ -598,7 +799,7 @@ test('probe exhausts grouped quota across same-source processes before legacy fa
 
 test('probe resolves same-source process endpoints concurrently', async () => {
   const waiting = new Map();
-  const result = await probe.probe({
+  const result = await runProbe({
     probeTimeoutMs: 500,
     detectProcessInfos: async () => [
       { pid: 11, kind: 'app', csrfToken: 'first' },
@@ -634,7 +835,7 @@ test('probe resolves same-source process endpoints concurrently', async () => {
 test('probe enforces one provider-wide deadline and abort signal', async () => {
   let sawAbort = false;
   const startedAt = Date.now();
-  const err = await probe.probe({
+  const err = await runProbe({
     probeTimeoutMs: 40,
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
     listeningPorts: async () => [54733, 54734],
@@ -653,7 +854,7 @@ test('probe enforces one provider-wide deadline and abort signal', async () => {
 
 test('probe selects a reachable endpoint before requesting quota', async () => {
   const quotaTargets = [];
-  const result = await probe.probe({
+  const result = await runProbe({
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
     listeningPorts: async () => [100, 200],
     callLs: async ({ scheme, port, method }) => {
@@ -679,7 +880,7 @@ test('probe selects a reachable endpoint before requesting quota', async () => {
 });
 
 test('probe returns plan + 3 pools when GetUserStatus succeeds', async () => {
-  const result = await probe.probe({
+  const result = await runProbe({
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
     listeningPorts: async () => [54733],
     callLs: async ({ method }) => {
@@ -703,7 +904,7 @@ test('probe returns plan + 3 pools when GetUserStatus succeeds', async () => {
 });
 
 test('probe prefers userTier name and richer planInfo display fields', async () => {
-  const withUserTier = await probe.probe({
+  const withUserTier = await runProbe({
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
     listeningPorts: async () => [54733],
     callLs: async () => ({
@@ -720,7 +921,7 @@ test('probe prefers userTier name and richer planInfo display fields', async () 
   });
   assert.equal(withUserTier.accountPlan, 'Google AI Ultra');
 
-  const withPlanInfoDisplay = await probe.probe({
+  const withPlanInfoDisplay = await runProbe({
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
     listeningPorts: async () => [54733],
     callLs: async () => ({
@@ -739,7 +940,7 @@ test('probe prefers userTier name and richer planInfo display fields', async () 
 
 test('probe falls back to GetCommandModelConfigs when GetUserStatus has no userStatus', async () => {
   const methods = [];
-  const result = await probe.probe({
+  const result = await runProbe({
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
     listeningPorts: async () => [54733],
     callLs: async ({ method }) => {
@@ -766,7 +967,7 @@ test('probe falls back to GetCommandModelConfigs when GetUserStatus has no userS
 });
 
 test('probe rethrows the last error when every endpoint fails', async () => {
-  const err = await probe.probe({
+  const err = await runProbe({
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
     listeningPorts: async () => [54733],
     callLs: async () => { throw probe._errorWithStatus('unauthorized', '401'); }
@@ -775,7 +976,7 @@ test('probe rethrows the last error when every endpoint fails', async () => {
 });
 
 test('probe surfaces notConfigured from detectProcessInfo', async () => {
-  const err = await probe.probe({
+  const err = await runProbe({
     detectProcessInfo: async () => { throw probe._errorWithStatus('notConfigured', 'not running'); }
   }).catch((e) => e);
   assert.equal(err.status, 'notConfigured');

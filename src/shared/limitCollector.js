@@ -3092,8 +3092,9 @@ async function fetchAntigravityLimits(_options = {}, deps = {}) {
   const probeFn = deps.antigravityProbe || antigravityProbe.probe;
   try {
     const snapshot = await probeFn(deps);
-    const accountLabel = snapshot.accountPlan ? antigravityPlanLabelFromParts(snapshot.accountPlan) : '';
-    const accountKeySeed = snapshot.accountEmail || snapshot.accountPlan || 'default';
+    const planLabel = snapshot.accountPlan ? antigravityPlanLabelFromParts(snapshot.accountPlan) : '';
+    const accountKeySeed = snapshot.accountEmail
+      || (snapshot.source === 'cli' ? '' : snapshot.accountPlan || 'default');
     const windows = Array.isArray(snapshot.windows)
       ? snapshot.windows.map((window) => ({
           kind: window.kind,
@@ -3115,10 +3116,11 @@ async function fetchAntigravityLimits(_options = {}, deps = {}) {
         }));
     return normalizeLimitProvider({
       provider: 'antigravity',
-      accountKey: hashKey('antigravity', accountKeySeed),
-      accountLabel,
+      accountKey: accountKeySeed ? hashKey('antigravity', accountKeySeed) : '',
+      accountLabel: snapshot.source === 'cli' ? '' : planLabel,
+      planLabel: snapshot.source === 'cli' ? planLabel : '',
       accountEmail: snapshot.accountEmail || '',
-      source: 'rpc',
+      source: snapshot.source || 'rpc',
       sourceDetail: snapshot.sourceDetail || '',
       status: 'ok',
       updatedAt,
@@ -3777,6 +3779,7 @@ async function probeLimitProvider(provider, options = {}, context = {}, deps = {
     const result = await fetcher(options, {
       ...deps,
       fetch: createProbeFetch(resolveProviderFetch(provider, deps), { ...context, signal }, deps),
+      refreshReason: context.reason ?? deps.refreshReason,
       signal
     });
     return (Array.isArray(result) ? result : [result]).filter(Boolean);

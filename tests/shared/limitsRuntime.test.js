@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { performance } = require('node:perf_hooks');
 const test = require('node:test');
 
+const { fetchAntigravityLimits } = require('../../src/shared/limitCollector');
 const { createLimitsRuntime } = require('../../src/shared/limitsRuntime');
 
 function deferred() {
@@ -133,6 +134,30 @@ test('provider probes share runtime-local state across refreshes', async () => {
   assert.equal(runtimeStates.length, 2);
   assert.equal(runtimeStates[0] instanceof Map, true);
   assert.equal(runtimeStates[1], runtimeStates[0]);
+  runtime.stop();
+});
+
+test('Antigravity plan enrichment does not split an anonymous CLI identity', async () => {
+  let accountPlan = 'Google AI Pro';
+  const runtime = createLimitsRuntime({ limitProviders: ['antigravity'] }, runtimeDeps({
+    probeProvider: async () => [await fetchAntigravityLimits({}, {
+      antigravityProbe: async () => ({
+        accountPlan,
+        accountEmail: null,
+        source: 'cli',
+        windows: [{ name: 'Gemini weekly', kind: 'weekly', remainingFraction: 0.8 }]
+      })
+    })]
+  }));
+
+  await runtime.refresh({}, 'with-plan');
+  accountPlan = null;
+  await runtime.refresh({}, 'without-plan');
+
+  const providers = runtime.getSnapshot().providers;
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].status, 'ok');
+  assert.equal(providers[0].accountKey, '');
   runtime.stop();
 });
 

@@ -3,12 +3,17 @@
 const { abortError } = require('./probeDeadline');
 
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
 const https = require('node:https');
 const http = require('node:http');
+const path = require('node:path');
+const semver = require('semver');
 const { appVersion } = require('./appVersion');
 
 const DEFAULT_PROBE_TIMEOUT_MS = 8000;
 const DEFAULT_RPC_TIMEOUT_MS = 12000;
+const DEFAULT_CLI_VERSION_TIMEOUT_MS = 5000;
+const CLI_VERSION_CACHE_STATE_KEY = 'antigravity.cli-version-cache';
 
 function errorWithStatus(status, message) {
   const error = new Error(message || status);
@@ -417,6 +422,107 @@ function parseResetTime(value) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+function parseCliUsage(stdout) {
+  let payload;
+  try {
+    payload = JSON.parse(String(stdout || ''));
+  } catch (error) {
+    throw errorWithStatus('unavailable', `Antigravity CLI returned invalid JSON: ${error.message}`);
+  }
+  if (payload?.status !== 'SUCCESS' || String(payload?.command?.name || '').toLowerCase() !== 'usage') {
+    throw errorWithStatus('unavailable', 'Antigravity CLI did not return usage data');
+  }
+
+  const windows = [];
+  const groups = Array.isArray(payload?.command?.data?.groups) ? payload.command.data.groups : [];
+  for (const group of groups) {
+    const groupName = quotaGroupName(group?.name);
+    for (const bucket of Array.isArray(group?.buckets) ? group.buckets : []) {
+      const cadence = String(bucket?.window || '').trim().toLowerCase();
+      const kind = cadence === 'weekly' || cadence === 'week'
+        ? 'weekly'
+        : cadence === '5h' || cadence === '5-hour' ? 'session' : null;
+      const remainingFraction = bucket?.remaining_fraction;
+      if (!kind || typeof remainingFraction !== 'number' || !Number.isFinite(remainingFraction)) continue;
+      windows.push({
+        name: `${groupName} ${kind === 'session' ? '5-hour' : 'weekly'}`,
+        kind,
+        remainingFraction: Math.max(0, Math.min(1, remainingFraction)),
+        resetTime: parseResetTime(bucket?.reset_time)
+      });
+    }
+  }
+  if (windows.length === 0) {
+    throw errorWithStatus('unavailable', 'Antigravity CLI returned no quota windows');
+  }
+  return { accountPlan: null, accountEmail: null, windows, source: 'cli' };
+}
+
+function resolveAgyCommand(deps = {}) {
+  if (deps.agyCommand) return deps.agyCommand;
+  const platform = deps.platform || process.platform;
+  if (platform !== 'win32') return 'agy';
+  const localAppData = String((deps.env || process.env).LOCALAPPDATA || '').trim();
+  const candidate = localAppData ? path.win32.join(localAppData, 'agy', 'bin', 'agy.exe') : '';
+  if (candidate && (deps.existsSync || fs.existsSync)(candidate)) return candidate;
+  return 'agy.exe';
+}
+
+async function runAgyText(command, args, timeoutMs, deps) {
+  try {
+    return await runProcessText(command, args, { timeoutMs, deps });
+  } catch (error) {
+    if (!error?.status) {
+      error.status = error?.code === 'ENOENT' ? 'notConfigured' : 'unavailable';
+    }
+    throw error;
+  }
+}
+
+function cliVersionCache(deps) {
+  if (!(deps.providerRuntimeState instanceof Map)) return null;
+  let cache = deps.providerRuntimeState.get(CLI_VERSION_CACHE_STATE_KEY);
+  if (!(cache instanceof Map)) {
+    cache = new Map();
+    deps.providerRuntimeState.set(CLI_VERSION_CACHE_STATE_KEY, cache);
+  }
+  return cache;
+}
+
+async function agyVersion(command, deps) {
+  const cache = cliVersionCache(deps);
+  const cached = cache?.get(command);
+  if (cached && deps.refreshReason !== 'manual') return cached;
+
+  const versionText = await runAgyText(
+    command,
+    ['--version'],
+    DEFAULT_CLI_VERSION_TIMEOUT_MS,
+    deps
+  );
+  const version = semver.coerce(String(versionText));
+  if (!version) {
+    throw errorWithStatus('notConfigured', 'Unable to determine Antigravity CLI version');
+  }
+  cache?.set(command, version.version);
+  return version.version;
+}
+
+async function probeCliUsage(deps = {}) {
+  const command = resolveAgyCommand(deps);
+  const version = await agyVersion(command, deps);
+  if (semver.lt(version, '1.1.11')) {
+    throw errorWithStatus('notConfigured', 'Antigravity CLI /usage requires agy 1.1.11 or newer');
+  }
+  const stdout = await runAgyText(
+    command,
+    ['-p', '/usage', '--output-format', 'json'],
+    30_000,
+    deps
+  );
+  return parseCliUsage(stdout);
+}
+
 function quotaRemainingFraction(bucket) {
   const direct = bucket?.remainingFraction;
   if (typeof direct === 'number' && Number.isFinite(direct)) return direct;
@@ -705,10 +811,73 @@ async function detectedProcessInfos(deps) {
   return normalizeProcessInfos(await detectProcessInfos(deps));
 }
 
+function preferredProbeError(rpcError, cliError) {
+  if (rpcError?.status === 'notConfigured' && cliError?.status && cliError.status !== 'notConfigured') {
+    return cliError;
+  }
+  return rpcError;
+}
+
+async function supplementCliAccountPlan(snapshot, deps) {
+  const deadlineMs = Date.now() + DEFAULT_PROBE_TIMEOUT_MS;
+  const listPorts = deps.listeningPorts || listeningPorts;
+  const call = deps.callLs || callLs;
+  try {
+    const infos = await promiseBeforeDeadline(
+      (remainingTimeoutMs) => detectedProcessInfos({ ...deps, timeoutMs: remainingTimeoutMs }),
+      deadlineMs,
+      DEFAULT_PROBE_TIMEOUT_MS,
+      deps.signal
+    );
+    for (const info of infos) {
+      let ports;
+      try {
+        ports = await promiseBeforeDeadline(
+          (remainingTimeoutMs) => listPorts(info.pid, { ...deps, timeoutMs: remainingTimeoutMs }),
+          deadlineMs,
+          DEFAULT_PROBE_TIMEOUT_MS,
+          deps.signal
+        );
+      } catch (_) {
+        throwIfAborted(deps.signal);
+        if (remainingMs(deadlineMs) <= 0) return snapshot;
+        continue;
+      }
+      for (const candidate of endpointCandidates(info, ports)) {
+        try {
+          const data = await callBeforeDeadline(call, {
+            ...candidate,
+            method: 'GetUserStatus',
+            body: { metadata: PROBE_METADATA },
+            signal: deps.signal
+          }, deadlineMs, 1000);
+          const accountPlan = firstTrimmedString(data?.userStatus?.userTier?.name)
+            || preferredPlanInfoName(data?.userStatus?.planStatus?.planInfo);
+          if (accountPlan) return { ...snapshot, accountPlan };
+        } catch (_) {
+          throwIfAborted(deps.signal);
+          if (remainingMs(deadlineMs) <= 0) return snapshot;
+        }
+      }
+    }
+  } catch (_) {
+    throwIfAborted(deps.signal);
+  }
+  return snapshot;
+}
+
 async function probe(deps = {}) {
+  throwIfAborted(deps.signal);
+  let cliError;
+  try {
+    const snapshot = await probeCliUsage(deps);
+    return await supplementCliAccountPlan(snapshot, deps);
+  } catch (error) {
+    throwIfAborted(deps.signal);
+    cliError = error;
+  }
   const probeTimeoutMs = Math.max(1, Number(deps.probeTimeoutMs) || DEFAULT_PROBE_TIMEOUT_MS);
   const probeDeadlineMs = Date.now() + probeTimeoutMs;
-  throwIfAborted(deps.signal);
   const abortController = new AbortController();
   const abortTimer = setTimeout(() => abortController.abort(probeTimeoutError()), probeTimeoutMs);
   const signal = deps.signal
@@ -720,12 +889,17 @@ async function probe(deps = {}) {
   let lastError = errorWithStatus('notConfigured', 'Antigravity language server not running');
 
   try {
-    const infos = await promiseBeforeDeadline(
-      (timeoutMs) => detectedProcessInfos({ ...runtimeDeps, timeoutMs }),
-      probeDeadlineMs,
-      DEFAULT_RPC_TIMEOUT_MS,
-      signal
-    );
+    let infos;
+    try {
+      infos = await promiseBeforeDeadline(
+        (timeoutMs) => detectedProcessInfos({ ...runtimeDeps, timeoutMs }),
+        probeDeadlineMs,
+        DEFAULT_RPC_TIMEOUT_MS,
+        signal
+      );
+    } catch (error) {
+      throw preferredProbeError(error, cliError);
+    }
 
     // Source priority is deliberate and independent of ps/PID order. Processes
     // within one source are probed concurrently under the same provider-wide
@@ -783,7 +957,7 @@ async function probe(deps = {}) {
       if (legacy?.snapshot) return { ...legacy.snapshot, sourceDetail: kind };
       for (const result of legacyResults) lastError = result.lastError || lastError;
     }
-    throw lastError;
+    throw preferredProbeError(lastError, cliError);
   } finally {
     clearTimeout(abortTimer);
     abortController.abort();

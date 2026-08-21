@@ -3,7 +3,21 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { fetchAntigravityLimits } = require('../../src/shared/limitCollector');
+const { fetchAntigravityLimits, probeLimitProvider } = require('../../src/shared/limitCollector');
+
+test('probeLimitProvider forwards the manual refresh reason to Antigravity', async () => {
+  let refreshReason = null;
+  await probeLimitProvider('antigravity', {}, { reason: 'manual' }, {
+    providerFetchers: {
+      antigravity: async (_options, deps) => {
+        refreshReason = deps.refreshReason;
+        return { provider: 'antigravity', status: 'ok', windows: [] };
+      }
+    }
+  });
+
+  assert.equal(refreshReason, 'manual');
+});
 
 test('fetchAntigravityLimits returns notConfigured when probe says LS not running', async () => {
   const result = await fetchAntigravityLimits({}, {
@@ -62,6 +76,29 @@ test('fetchAntigravityLimits preserves Antigravity IDE source detail', async () 
 
   assert.equal(result.status, 'ok');
   assert.equal(result.sourceDetail, 'ide');
+});
+
+test('fetchAntigravityLimits keeps CLI identity stable when plan enrichment is unavailable', async () => {
+  const fetchWithPlan = (accountPlan) => fetchAntigravityLimits({}, {
+    antigravityProbe: async () => ({
+      accountPlan,
+      accountEmail: null,
+      source: 'cli',
+      windows: [
+        { name: 'Gemini weekly', kind: 'weekly', remainingFraction: 0.8 }
+      ]
+    })
+  });
+
+  const withPlan = await fetchWithPlan('Google AI Pro');
+  const withoutPlan = await fetchWithPlan(null);
+
+  assert.equal(withPlan.accountKey, withoutPlan.accountKey);
+  assert.equal(withPlan.accountKey, '');
+  assert.equal(withPlan.accountLabel, '');
+  assert.equal(withPlan.planLabel, 'Pro');
+  assert.equal(withoutPlan.accountLabel, '');
+  assert.equal(withoutPlan.planLabel, '');
 });
 
 test('fetchAntigravityLimits does not invent session windows for Starter accounts', async () => {
