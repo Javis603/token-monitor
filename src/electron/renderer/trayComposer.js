@@ -828,7 +828,14 @@
             l('trayComposer.creditsDisplay', 'Balance display'),
             [
               { value: 'balance', label: l('trayComposer.creditsDisplay.balance', 'Balance') },
-              { value: 'percent', label: l('trayComposer.creditsDisplay.percent', 'Percentage') }
+              {
+                value: 'percent',
+                label: l('trayComposer.creditsDisplay.percent', 'Meter percentage'),
+                detail: l(
+                  'trayComposer.creditsDisplay.percentDetail',
+                  'Uses the same display value as the balance meter.'
+                )
+              }
             ],
             source.creditsDisplay === 'percent' ? 'percent' : 'balance',
             (creditsDisplay) => updateItem(item, sourcePatch(item, rowIndex, { creditsDisplay }))
