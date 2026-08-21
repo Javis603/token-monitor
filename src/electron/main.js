@@ -721,7 +721,8 @@ function electronLimitsDeps() {
       };
     },
     resolveConfigSnapshot: () => electronLimitsConfig(),
-    onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal
+    onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
+    onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal
   };
 }
 
@@ -4219,10 +4220,44 @@ function redactThirdPartyProfilesForRenderer(profiles) {
           }
         : {}),
       accessToken: profile?.accessToken ? 'set' : '',
-      apiKey: profile?.apiKey ? 'set' : ''
+      apiKey: profile?.apiKey ? 'set' : '',
+      refreshToken: profile?.refreshToken ? 'set' : ''
     };
   }
   return out;
+}
+
+// Sub2API rotates its single-use refresh token on every renewal, so the rotated
+// pair must be persisted before the next collection cycle tries to refresh with
+// the now-dead token. Mirrors persistClaudeWebCookieRenewal's compare-and-swap.
+function persistThirdPartyCredentialsRenewal(renewal = {}) {
+  const accountName = String(renewal.accountName || '').trim();
+  const adapter = thirdPartyLimits.normalizeAdapterId(renewal.adapter);
+  const profile = accountName ? settings?.thirdPartyProfiles?.[accountName] : null;
+  if (!profile || profile.adapter !== adapter) return false;
+  const previousAccessToken = String(renewal.previous?.accessToken || '');
+  const previousRefreshToken = String(renewal.previous?.refreshToken || '');
+  if (
+    String(profile.accessToken || '') !== previousAccessToken
+    || String(profile.refreshToken || '') !== previousRefreshToken
+  ) return false;
+  const normalized = thirdPartyLimits.normalizeThirdPartyProfile({
+    ...profile,
+    accessToken: renewal.next?.accessToken,
+    refreshToken: renewal.next?.refreshToken
+  });
+  if (!normalized) return false;
+  settings.thirdPartyProfiles = {
+    ...settings.thirdPartyProfiles,
+    [accountName]: { ...normalized, enabled: profile.enabled !== false }
+  };
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (error) {
+    console.log(`[thirdparty] credential renewal persist failed: ${error?.message || error}`);
+    return false;
+  }
+  return true;
 }
 
 function settingsForRenderer() {
@@ -7195,6 +7230,7 @@ app.whenReady().then(() => {
     if (
       adapter === thirdPartyLimits.SUB2API_ADAPTER
       && !String(rawProfile.accessToken || '').trim()
+      && !String(rawProfile.refreshToken || '').trim()
     ) return { ok: false, errorCode: 'missingAccessToken' };
     if (
       [thirdPartyLimits.NEWAPI_TOKEN_ADAPTER, thirdPartyLimits.CUSTOM_BALANCE_ADAPTER].includes(adapter)
@@ -7237,10 +7273,16 @@ app.whenReady().then(() => {
       enabled: true
     });
     if (!profile) return { ok: false, errorCode: 'invalidCredential' };
+    let renewedCredentials = null;
     try {
       const provider = await thirdPartyLimits.fetchThirdPartyAccount({ name, ...profile }, electronProviderDeps({
         env: process.env,
-        signal: AbortSignal.timeout(15_000)
+        signal: AbortSignal.timeout(15_000),
+        onThirdPartyCredentialsRenewed: (renewal) => {
+          if (renewal?.accountName !== name) return false;
+          renewedCredentials = renewal.next || null;
+          return persistThirdPartyCredentialsRenewal(renewal);
+        }
       }));
       if (provider?.status !== 'ok') {
         return {
@@ -7248,9 +7290,16 @@ app.whenReady().then(() => {
           errorCode: provider?.status === 'unauthorized' ? 'invalidCredential' : 'unavailable'
         };
       }
+      const storedProfile = renewedCredentials
+        ? thirdPartyLimits.normalizeThirdPartyProfile({
+          ...profile,
+          accessToken: renewedCredentials.accessToken,
+          refreshToken: renewedCredentials.refreshToken
+        }) || profile
+        : profile;
       settings.thirdPartyProfiles = {
         ...(settings.thirdPartyProfiles || {}),
-        [name]: profile
+        [name]: storedProfile
       };
       saveSettings({ throwOnError: true });
       void queueLimitInvalidation({ provider: 'thirdparty', accountName: name }, 'profile-save');

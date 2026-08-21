@@ -22,6 +22,7 @@ const NEWAPI_STATUS_PATH = '/api/status';
 const NEWAPI_ACCOUNT_PATH = '/api/user/self';
 const NEWAPI_TOKEN_USAGE_PATH = '/api/usage/token/';
 const SUB2API_ME_PATH = '/api/v1/auth/me';
+const SUB2API_REFRESH_PATH = '/api/v1/auth/refresh';
 const DEFAULT_CUSTOM_ENDPOINT_PATH = '/user/balance';
 const DEFAULT_CUSTOM_CURRENCY = 'USD';
 const DEFAULT_CUSTOM_DIVISOR = 1;
@@ -396,10 +397,15 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
     mode: 'account',
     normalizeCredentials(profile) {
       const accessToken = cleanValue(profile.accessToken);
-      return accessToken ? { accessToken } : null;
+      const refreshToken = cleanValue(profile.refreshToken);
+      if (!accessToken && !refreshToken) return null;
+      return {
+        accessToken,
+        ...(refreshToken ? { refreshToken } : {})
+      };
     },
     identity(account) {
-      return [account.baseUrl, account.accessToken];
+      return [account.baseUrl, account.accessToken || account.refreshToken];
     },
     request(account) {
       return {
@@ -411,6 +417,26 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
     },
     unit() {
       return 1;
+    },
+    async renewCredentials(account, deps) {
+      const payload = await requestJson(
+        endpoint(account.baseUrl, SUB2API_REFRESH_PATH),
+        {
+          method: 'POST',
+          body: JSON.stringify({ refresh_token: account.refreshToken }),
+          headers: {}
+        },
+        deps
+      );
+      const data = sub2apiData(payload);
+      const accessToken = cleanValue(data?.access_token);
+      const refreshToken = cleanValue(data?.refresh_token) || account.refreshToken;
+      if (!accessToken || !refreshToken) {
+        const error = new Error('Sub2API token refresh returned no usable credentials');
+        error.status = 'unauthorized';
+        throw error;
+      }
+      return { accessToken, refreshToken };
     },
     quota(payload) {
       const data = sub2apiData(payload);
@@ -491,14 +517,53 @@ function endpoint(baseUrl, path) {
   return `${baseUrl}${path}`;
 }
 
+// One renewal retry per fetch: when the quota request is rejected as unauthorized
+// and the adapter can mint fresh credentials, rotate them, hand the rotated pair
+// to deps.onThirdPartyCredentialsRenewed for persistence, and retry once. Without
+// a persistence callback the renewal is skipped on purpose: single-use refresh
+// tokens must not be burned when the rotated value cannot be stored.
+async function fetchQuotaWithRenewal(account, adapter, deps) {
+  const attempt = async (credentials) => {
+    const effective = credentials ? { ...account, ...credentials } : account;
+    const request = adapter.request(effective);
+    return requestJson(endpoint(effective.baseUrl, request.path), { headers: request.headers }, deps);
+  };
+  try {
+    return { payload: await attempt(null) };
+  } catch (error) {
+    const renewable = error?.status === 'unauthorized'
+      && typeof adapter.renewCredentials === 'function'
+      && account.refreshToken
+      && typeof deps.onThirdPartyCredentialsRenewed === 'function';
+    if (!renewable) throw error;
+    const next = await adapter.renewCredentials(account, deps);
+    const renewal = {
+      provider: THIRD_PARTY_PROVIDER_ID,
+      adapter: account.adapter,
+      accountName: account.name,
+      baseUrl: account.baseUrl,
+      previous: { accessToken: account.accessToken || '', refreshToken: account.refreshToken },
+      next
+    };
+    try {
+      await deps.onThirdPartyCredentialsRenewed(renewal);
+    } catch (_) {
+      // Best effort: this cycle still proceeds with the rotated credentials.
+    }
+    return { payload: await attempt(next), renewal };
+  }
+}
+
 async function requestJson(url, options = {}, deps = {}) {
   const fetchFn = createOutboundFetch(deps.env || process.env, deps);
   const response = await fetchFn(url, {
-    method: 'GET',
+    method: options.method || 'GET',
     headers: {
       Accept: 'application/json',
+      ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...(options.headers || {})
     },
+    ...(options.body !== undefined ? { body: options.body } : {}),
     redirect: 'error',
     signal: deps.signal
   });
@@ -584,14 +649,22 @@ async function fetchThirdPartyAccount(account, deps = {}) {
       windows: []
     });
   }
-  const request = adapter.request(account);
   const statusRequest = adapter.statusRequest?.(account);
-  const [quotaResponse, statusResponse] = await Promise.allSettled([
-    requestJson(endpoint(account.baseUrl, request.path), { headers: request.headers }, deps),
-    statusRequest
-      ? requestJson(endpoint(account.baseUrl, statusRequest.path), { headers: statusRequest.headers }, deps)
-      : Promise.resolve(null)
-  ]);
+  const statusPromise = statusRequest
+    ? requestJson(endpoint(account.baseUrl, statusRequest.path), { headers: statusRequest.headers }, deps)
+      .then(
+        (value) => ({ fulfilled: true, value }),
+        (reason) => ({ fulfilled: false, reason })
+      )
+    : Promise.resolve(null);
+  let quotaResultPayload = null;
+  let quotaError = null;
+  try {
+    quotaResultPayload = (await fetchQuotaWithRenewal(account, adapter, deps)).payload;
+  } catch (error) {
+    quotaError = error;
+  }
+  const statusResponse = await statusPromise;
   if (deps.signal?.aborted) {
     throw deps.signal.reason || Object.assign(new Error('Third-party API request aborted'), { name: 'AbortError' });
   }
@@ -604,14 +677,14 @@ async function fetchThirdPartyAccount(account, deps = {}) {
     source: 'api',
     updatedAt
   };
-  if (quotaResponse.status === 'rejected') {
+  if (quotaError) {
     return normalizeLimitProvider({
       ...common,
-      status: quotaResponse.reason?.status || 'unavailable',
+      status: quotaError.status || 'unavailable',
       windows: []
     });
   }
-  if (statusRequest && statusResponse.status === 'rejected') {
+  if (statusRequest && statusResponse && !statusResponse.fulfilled) {
     return normalizeLimitProvider({
       ...common,
       status: 'unavailable',
@@ -620,9 +693,9 @@ async function fetchThirdPartyAccount(account, deps = {}) {
   }
 
   const unit = adapter.unit(
-    statusResponse.status === 'fulfilled' ? statusResponse.value : null
+    statusResponse && statusResponse.fulfilled ? statusResponse.value : null
   );
-  const quota = adapter.quota(quotaResponse.value, unit, account);
+  const quota = adapter.quota(quotaResultPayload, unit, account);
   if (!quota) {
     return normalizeLimitProvider({
       ...common,
@@ -675,6 +748,7 @@ module.exports = {
   NEWAPI_TOKEN_USAGE_PATH,
   SUB2API_ADAPTER,
   SUB2API_ME_PATH,
+  SUB2API_REFRESH_PATH,
   THIRD_PARTY_ADAPTER_IDS,
   THIRD_PARTY_ADAPTERS,
   THIRD_PARTY_ENV_ACCOUNT_NAME,

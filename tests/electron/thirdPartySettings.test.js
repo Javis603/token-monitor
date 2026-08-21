@@ -28,6 +28,8 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
   assert.match(html, /<input id="thirdpartyBaseUrlInput" type="url"/);
   assert.match(html, /id="thirdpartyHttpWarning"[^>]*role="status"[^>]*data-i18n="settings\.thirdparty\.httpWarning"/);
   assert.match(html, /<input id="thirdpartyAccessTokenInput" type="password"/);
+  assert.match(html, /<div id="thirdpartyRefreshTokenRow" class="thirdparty-field hidden">[\s\S]*?<input id="thirdpartyRefreshTokenInput" type="password"/);
+  assert.match(html, /data-i18n="settings\.thirdparty\.refreshToken">Refresh token \(optional\)/);
   assert.match(html, /<input id="thirdpartyUserIdInput" type="text"/);
   assert.match(html, /data-i18n="settings\.thirdparty\.userId">User ID \(New API only\)/);
   assert.match(html, /<div id="thirdpartyApiKeyRow" class="thirdparty-field hidden">[\s\S]*?<input id="thirdpartyApiKeyInput" type="password"/);
@@ -43,6 +45,9 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
   assert.match(app, /function selectedThirdPartyAdapter/);
   assert.match(app, /if \(platform === 'custom'\) return 'custom'/);
   assert.match(app, /if \(platform === 'sub2api'\) return 'sub2api'/);
+  assert.match(app, /thirdpartyRefreshTokenRow[\s\S]*?classList\.toggle\('hidden', !sub2apiMode\)/);
+  assert.match(app, /const refreshToken = String\(refreshTokenInput\?\.value \|\| ''\)\.trim\(\)/);
+  assert.match(app, /thirdPartyProfileErrorText\(result, adapter\)/);
   assert.match(app, /thirdpartyCustomConfig[\s\S]*?classList\.toggle\('hidden', !customMode\)/);
   assert.match(app, /thirdpartyCredentialGrid[\s\S]*?classList\.toggle\([\s\S]*?'single-field'/);
   assert.match(app, /baseUrlInput\?\.addEventListener\('input', updateThirdPartyHttpWarning\)/);
@@ -62,6 +67,8 @@ test('third-party credentials stay local while renderer metadata is redacted', (
   assert.match(main, /baseUrl: thirdPartyLimits\.normalizeThirdPartyBaseUrl\(profile\?\.baseUrl, \{/);
   assert.match(main, /accessToken: profile\?\.accessToken \? 'set' : ''/);
   assert.match(main, /apiKey: profile\?\.apiKey \? 'set' : ''/);
+  assert.match(main, /refreshToken: profile\?\.refreshToken \? 'set' : ''/);
+  assert.match(main, /function persistThirdPartyCredentialsRenewal/);
   assert.match(main, /endpointPath: thirdPartyLimits\.normalizeCustomEndpointPath\(profile\?\.endpointPath\)/);
   assert.match(main, /remainingPath: thirdPartyLimits\.normalizeCustomJsonPath\(profile\?\.remainingPath\)/);
   assert.match(main, /delete normalizedPatch\.thirdPartyProfiles/);

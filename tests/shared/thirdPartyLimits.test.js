@@ -13,6 +13,7 @@ const {
   NEWAPI_TOKEN_USAGE_PATH,
   SUB2API_ADAPTER,
   SUB2API_ME_PATH,
+  SUB2API_REFRESH_PATH,
   THIRD_PARTY_ADAPTER_IDS,
   THIRD_PARTY_ADAPTERS,
   THIRD_PARTY_ENV_ACCOUNT_NAME,
@@ -404,6 +405,153 @@ test('Sub2API adapter fails closed on business errors and missing balances', asy
   });
   assert.equal(unauthorized[0].status, 'unauthorized');
   assert.deepEqual(unauthorized[0].windows, []);
+});
+
+test('Sub2API adapter renews an expired access token once and reports the rotation', async () => {
+  const calls = [];
+  const renewals = [];
+  let currentAccess = 'expired-jwt';
+  const [provider] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      dashboard: {
+        adapter: SUB2API_ADAPTER,
+        baseUrl: 'https://renew.example',
+        accessToken: currentAccess,
+        refreshToken: 'refresh-1'
+      }
+    }
+  }, {
+    env: {},
+    fetch: async (url, init) => {
+      calls.push([init.method, url]);
+      if (url.endsWith(SUB2API_REFRESH_PATH)) {
+        assert.equal(init.method, 'POST');
+        assert.deepEqual(JSON.parse(init.body), { refresh_token: 'refresh-1' });
+        currentAccess = 'fresh-jwt';
+        return response(200, {
+          code: 0,
+          message: 'success',
+          data: {
+            access_token: currentAccess,
+            refresh_token: 'refresh-2',
+            expires_in: 3600
+          }
+        });
+      }
+      assert.equal(init.method, 'GET');
+      assert.equal(init.headers.Authorization, `Bearer ${currentAccess}`);
+      if (currentAccess === 'expired-jwt') {
+        return response(401, { code: 401, message: 'TOKEN_EXPIRED', data: null });
+      }
+      return response(200, {
+        code: 0,
+        message: 'success',
+        data: { id: 1, username: 'subscriber', balance: 3.5 }
+      });
+    },
+    onThirdPartyCredentialsRenewed: async (renewal) => {
+      renewals.push(renewal);
+      return true;
+    }
+  });
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.balance.amount, 3.5);
+  assert.deepEqual(renewals, [{
+    provider: 'thirdparty',
+    adapter: SUB2API_ADAPTER,
+    accountName: 'dashboard',
+    baseUrl: 'https://renew.example',
+    previous: { accessToken: 'expired-jwt', refreshToken: 'refresh-1' },
+    next: { accessToken: 'fresh-jwt', refreshToken: 'refresh-2' }
+  }]);
+  assert.deepEqual(calls, [
+    ['GET', 'https://renew.example/api/v1/auth/me'],
+    ['POST', 'https://renew.example/api/v1/auth/refresh'],
+    ['GET', 'https://renew.example/api/v1/auth/me']
+  ]);
+  assert.equal(JSON.stringify(provider).includes('refresh-1'), false);
+});
+
+test('Sub2API renewal is skipped without a persistence callback and fails closed on refresh errors', async () => {
+  const [unrenewed] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      stale: {
+        adapter: SUB2API_ADAPTER,
+        baseUrl: 'https://stale.example',
+        accessToken: 'expired-jwt',
+        refreshToken: 'refresh-1'
+      }
+    }
+  }, {
+    env: {},
+    fetch: async (url) => {
+      if (url.endsWith(SUB2API_REFRESH_PATH)) throw new Error('refresh must not be called');
+      return response(401, { code: 401, message: 'TOKEN_EXPIRED', data: null });
+    }
+  });
+  assert.equal(unrenewed.status, 'unauthorized');
+  assert.deepEqual(unrenewed.windows, []);
+
+  const [broken] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      broken: {
+        adapter: SUB2API_ADAPTER,
+        baseUrl: 'https://broken.example',
+        accessToken: 'expired-jwt',
+        refreshToken: 'dead-refresh'
+      }
+    }
+  }, {
+    env: {},
+    fetch: async (url) => (
+      url.endsWith(SUB2API_REFRESH_PATH)
+        ? response(401, { code: 401, message: 'REFRESH_TOKEN_INVALID', data: null })
+        : response(401, { code: 401, message: 'TOKEN_EXPIRED', data: null })
+    ),
+    onThirdPartyCredentialsRenewed: async () => true
+  });
+  assert.equal(broken.status, 'unauthorized');
+  assert.deepEqual(broken.windows, []);
+});
+
+test('Sub2API profiles may start from the refresh token alone', async () => {
+  const normalized = normalizeThirdPartyProfile({
+    adapter: SUB2API_ADAPTER,
+    baseUrl: 'https://refresh-only.example',
+    refreshToken: 'refresh-only'
+  });
+  assert.equal(normalized.accessToken, '');
+  assert.equal(normalized.refreshToken, 'refresh-only');
+
+  const [provider] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      bootstrap: { ...normalized }
+    }
+  }, {
+    env: {},
+    fetch: async (url, init) => {
+      if (url.endsWith(SUB2API_REFRESH_PATH)) {
+        assert.deepEqual(JSON.parse(init.body), { refresh_token: 'refresh-only' });
+        return response(200, {
+          code: 0,
+          message: 'success',
+          data: { access_token: 'minted-jwt', refresh_token: 'refresh-next' }
+        });
+      }
+      if (init.headers.Authorization !== 'Bearer minted-jwt') {
+        return response(401, { code: 401, message: 'UNAUTHORIZED', data: null });
+      }
+      return response(200, {
+        code: 0,
+        message: 'success',
+        data: { id: 5, username: 'bootstrap', balance: 1.25 }
+      });
+    },
+    onThirdPartyCredentialsRenewed: async () => true
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.balance.amount, 1.25);
 });
 
 test('custom adapter maps one GET response without exposing configuration', async () => {

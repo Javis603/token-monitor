@@ -12935,13 +12935,15 @@ function setThirdPartyAdapterFields() {
   const singleChoiceField = customMode || sub2apiMode;
   const accountMode = adapter === 'newapi-account' || sub2apiMode;
   const newApiAccountMode = adapter === 'newapi-account';
+  const pairedCredentials = newApiAccountMode || sub2apiMode;
   document.getElementById('thirdpartyChoiceGrid')?.classList.toggle('single-field', singleChoiceField);
   document.getElementById('thirdpartyModeField')?.classList.toggle('hidden', singleChoiceField);
   document.getElementById('thirdpartyCredentialGrid')?.classList.toggle(
     'single-field',
-    !newApiAccountMode
+    !pairedCredentials
   );
   document.getElementById('thirdpartyAccessTokenRow')?.classList.toggle('hidden', !accountMode);
+  document.getElementById('thirdpartyRefreshTokenRow')?.classList.toggle('hidden', !sub2apiMode);
   document.getElementById('thirdpartyUserIdRow')?.classList.toggle('hidden', !newApiAccountMode);
   document.getElementById('thirdpartyApiKeyRow')?.classList.toggle('hidden', accountMode);
   document.getElementById('thirdpartyCustomConfig')?.classList.toggle('hidden', !customMode);
@@ -14357,12 +14359,18 @@ function openrouterProfileErrorText(result) {
   return result?.error || t('settings.openrouter.saveFailedShort');
 }
 
-function thirdPartyProfileErrorText(result) {
+function thirdPartyProfileErrorText(result, adapter = '') {
   if (result?.errorCode === 'invalidName') return t('settings.thirdparty.invalidName');
   if (result?.errorCode === 'invalidAdapter') return t('settings.thirdparty.invalidAdapter');
   if (result?.errorCode === 'invalidBaseUrl') return t('settings.thirdparty.invalidBaseUrl');
+  if (result?.errorCode === 'missingAccessToken' && adapter === 'sub2api') {
+    return t('settings.thirdparty.missingSub2ApiToken');
+  }
   if (result?.errorCode === 'missingAccessToken') return t('settings.thirdparty.missingAccessToken');
   if (result?.errorCode === 'missingApiKey') return t('settings.thirdparty.missingApiKey');
+  if (result?.errorCode === 'invalidCredential' && adapter === 'sub2api') {
+    return t('settings.thirdparty.sub2ApiCredentialRejected');
+  }
   if (result?.errorCode === 'invalidEndpointPath') return t('settings.thirdparty.invalidEndpointPath');
   if (result?.errorCode === 'invalidAuthMode') return t('settings.thirdparty.invalidAuthMode');
   if (result?.errorCode === 'invalidJsonPath') return t('settings.thirdparty.invalidJsonPath');
@@ -15275,6 +15283,7 @@ function setupCursorAccountUI() {
     document.getElementById('thirdpartyProfileSubmit')?.addEventListener('click', async () => {
       const nameInput = document.getElementById('thirdpartyProfileName');
       const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
+      const refreshTokenInput = document.getElementById('thirdpartyRefreshTokenInput');
       const userIdInput = document.getElementById('thirdpartyUserIdInput');
       const keyInput = document.getElementById('thirdpartyApiKeyInput');
       const endpointPathInput = document.getElementById('thirdpartyEndpointPathInput');
@@ -15289,6 +15298,7 @@ function setupCursorAccountUI() {
       const adapter = selectedThirdPartyAdapter();
       const baseUrl = String(baseUrlInput?.value || '').trim();
       const accessToken = String(accessTokenInput?.value || '').trim();
+      const refreshToken = String(refreshTokenInput?.value || '').trim();
       const userId = String(userIdInput?.value || '').trim();
       const apiKey = String(keyInput?.value || '').trim();
       errorEl?.classList.add('hidden');
@@ -15297,6 +15307,7 @@ function setupCursorAccountUI() {
         adapter,
         baseUrl,
         accessToken,
+        refreshToken,
         userId,
         apiKey,
         endpointPath: String(endpointPathInput?.value || '').trim(),
@@ -15312,6 +15323,7 @@ function setupCursorAccountUI() {
         baseUrlInput.value = '';
         updateThirdPartyHttpWarning();
         accessTokenInput.value = '';
+        refreshTokenInput.value = '';
         userIdInput.value = '';
         keyInput.value = '';
         endpointPathInput.value = '/user/balance';
@@ -15324,7 +15336,7 @@ function setupCursorAccountUI() {
         renderThirdPartyProfiles();
         await refreshStats({ force: true });
       } else if (errorEl) {
-        errorEl.textContent = thirdPartyProfileErrorText(result);
+        errorEl.textContent = thirdPartyProfileErrorText(result, adapter);
         errorEl.classList.remove('hidden');
       }
     });
