@@ -28,6 +28,16 @@ function normalizeWorkspaceId(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function codexStoredAccountId(auth) {
+  const tokens = auth?.tokens || auth || {};
+  return normalizeWorkspaceId(
+    tokens.account_id
+    || tokens.accountId
+    || auth?.account_id
+    || auth?.accountId
+  );
+}
+
 function managedAccountWorkspaceId(account) {
   return normalizeWorkspaceId(
     account?.workspaceAccountId
@@ -188,12 +198,7 @@ function codexOAuthRequestContext(auth, options = {}) {
     || auth?.accessToken
     || ''
   ).trim();
-  const storedAccountId = normalizeWorkspaceId(
-    tokens.account_id
-    || tokens.accountId
-    || auth?.account_id
-    || auth?.accountId
-  );
+  const storedAccountId = codexStoredAccountId(auth);
   const requestedAccountId = normalizeWorkspaceId(options.accountId);
   const accountId = requestedAccountId || storedAccountId || claimedAccountId;
   return {
@@ -251,6 +256,7 @@ module.exports = {
   preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity,
   decodeJwtPayload,
+  codexStoredAccountId,
   codexOAuthRequestContext,
   codexAuthIdentity,
   codexAccountKey,

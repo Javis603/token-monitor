@@ -954,6 +954,40 @@ test('fetchCodexLimits accepts RPC for scoped legacy managed auth without an acc
   assert.ok(providers[0].windows.length > 0);
 });
 
+test('fetchCodexLimits rejects RPC when only the JWT claim matches the selected workspace', async () => {
+  let rpcCalls = 0;
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: [{
+      id: 'team',
+      email: 'member@example.com',
+      workspaceAccountId: 'workspace-team',
+      homePath: '/tmp/token-monitor-codex/team'
+    }]
+  }, {
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({
+      tokens: {
+        id_token: makeIdToken({
+          'https://api.openai.com/auth': {
+            chatgpt_account_id: 'workspace-team'
+          }
+        })
+      }
+    }),
+    readCodexResetCredits: async () => null,
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      return codexPayload('member@example.com');
+    }
+  });
+
+  assert.equal(rpcCalls, 1, 'app-server may still run for credential recovery');
+  assert.equal(providers[0].status, 'unauthorized');
+  assert.equal(providers[0].source, 'oauth');
+  assert.deepEqual(providers[0].windows, []);
+});
+
 test('fetchCodexLimits lets app-server recover stale native OAuth then retries usage', async () => {
   let fetchCalls = 0;
   let rpcCalls = 0;

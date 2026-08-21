@@ -27,7 +27,12 @@ const openrouterLimits = require('./openrouterLimits');
 const thirdPartyLimits = require('./thirdPartyLimits');
 const { sharedDataDir } = require('./config');
 const { recordConsumption } = require('./deepseekBalanceHistory');
-const { codexAccountKey, codexAuthIdentity, codexOAuthRequestContext } = require('./codexAuth');
+const {
+  codexAccountKey,
+  codexAuthIdentity,
+  codexOAuthRequestContext,
+  codexStoredAccountId
+} = require('./codexAuth');
 const minimaxLimits = require('./minimaxLimits');
 const { minimaxToken, minimaxBaseUrl, parseMinimaxTiers, fetchMinimaxLimits } = minimaxLimits;
 const mimoLimits = require('./mimoLimits');
@@ -3058,12 +3063,12 @@ function managedCodexAccountKey(account, authIdentity = {}, resolvedEmail = '') 
 function codexManagedRpcMatchesSelectedWorkspace(deps = {}, oauthAuthSnapshot = null) {
   const selectedWorkspaceId = String(deps.codexAccountId || '').trim().toLowerCase();
   if (!selectedWorkspaceId) return true;
-  const authWorkspaceId = String(
-    codexOAuthRequestContext(oauthAuthSnapshot?.auth).accountId
-    || deps.codexRpcWorkspaceAccountId
+  const storedWorkspaceId = String(
+    codexStoredAccountId(oauthAuthSnapshot?.auth)
+    || deps.codexRpcStoredAccountId
     || ''
   ).trim().toLowerCase();
-  return Boolean(authWorkspaceId && authWorkspaceId === selectedWorkspaceId);
+  return Boolean(storedWorkspaceId && storedWorkspaceId === selectedWorkspaceId);
 }
 
 function codexOAuthCanFallbackToRpc(error, deps = {}, managedRpcIsScoped = false) {
@@ -3159,12 +3164,11 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
     codexAuthPath: account.authPath || pathApi.join(account.homePath, 'auth.json'),
     codexAccountId: account.workspaceAccountId || undefined
   };
-  const initialAuthIdentity = readLiveCodexIdentity(accountDeps);
-  accountDeps.codexRpcWorkspaceAccountId = (
-    initialAuthIdentity.workspaceAccountId
-    || initialAuthIdentity.providerAccountId
-    || ''
-  );
+  const initialAuth = readLiveCodexAuth(accountDeps);
+  const initialAuthIdentity = initialAuth
+    ? codexAuthIdentity(initialAuth)
+    : { email: '', accountLabel: '', providerAccountId: '', accountKey: '' };
+  accountDeps.codexRpcStoredAccountId = codexStoredAccountId(initialAuth);
   try {
     const result = await readCodexUsageOrRpc(accountDeps);
     const payload = await withCodexOAuthResetCredits(result.payload, accountDeps, result.oauthAuthSnapshot);
@@ -3204,14 +3208,21 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
 // auth.json. The RPC `account/read` often omits the email, so the JWT in
 // auth.json is the reliable source. The shared composite key keeps the live
 // account consistent with managed accounts for cross-device dedup.
-function readLiveCodexIdentity(deps = {}) {
+function readLiveCodexAuth(deps = {}) {
   const read = deps.readFileSync || fs.readFileSync;
   const authPath = deps.codexAuthPath || codexAuthPath(deps.env || process.env);
   try {
-    return codexAuthIdentity(JSON.parse(read(authPath, 'utf8')));
+    return JSON.parse(read(authPath, 'utf8'));
   } catch (_) {
-    return { email: '', accountLabel: '', providerAccountId: '', accountKey: '' };
+    return null;
   }
+}
+
+function readLiveCodexIdentity(deps = {}) {
+  const auth = readLiveCodexAuth(deps);
+  return auth
+    ? codexAuthIdentity(auth)
+    : { email: '', accountLabel: '', providerAccountId: '', accountKey: '' };
 }
 
 async function fetchLiveCodexAccount(deps = {}, nowMs = Date.now(), managedAccounts = []) {

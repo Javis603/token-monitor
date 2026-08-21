@@ -10,6 +10,7 @@ const {
   decodeJwtPayload,
   codexAuthIdentity,
   codexOAuthRequestContext,
+  codexStoredAccountId,
   hashAccountKey,
   preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity
@@ -111,6 +112,21 @@ test('OAuth request context uses FedRAMP routing only for the claimed workspace'
   assert.equal(codexOAuthRequestContext(auth, {
     accountId: 'workspace-commercial'
   }).isFedrampAccount, false);
+});
+
+test('codexStoredAccountId does not use the JWT workspace fallback', () => {
+  const idToken = jwt({
+    'https://api.openai.com/auth': {
+      chatgpt_account_id: 'workspace-claimed'
+    }
+  });
+  assert.equal(codexStoredAccountId({ tokens: { id_token: idToken } }), '');
+  assert.equal(codexStoredAccountId({
+    tokens: {
+      account_id: 'workspace-stored',
+      id_token: idToken
+    }
+  }), 'workspace-stored');
 });
 
 test('codexAuthIdentity prefers the selected workspace from tokens.account_id', () => {
