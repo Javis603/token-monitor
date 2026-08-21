@@ -405,6 +405,7 @@ test('fetchCodexLimits prefers read-only OAuth usage and maps wham windows', asy
       id: 'team',
       email: 'member@example.com',
       workspaceAccountId: 'workspace-team',
+      workspaceIsFedramp: true,
       homePath: '/tmp/token-monitor-codex/team'
     }]
   }, {
@@ -447,6 +448,7 @@ test('fetchCodexLimits prefers read-only OAuth usage and maps wham windows', asy
   assert.equal(requests[0].url, 'https://chatgpt.com/backend-api/wham/usage');
   assert.equal(requests[0].init.headers.authorization, 'Bearer access-token');
   assert.equal(requests[0].init.headers['chatgpt-account-id'], 'workspace-team');
+  assert.equal(requests[0].init.headers['x-openai-fedramp'], 'true');
   assert.equal(providers[0].source, 'oauth');
   assert.equal(providers[0].sourceDetail, 'managed');
   assert.equal(providers[0].accountKey, codexAccountKey('member@example.com', 'workspace-team'));
@@ -454,6 +456,37 @@ test('fetchCodexLimits prefers read-only OAuth usage and maps wham windows', asy
   assert.deepEqual(providers[0].windows.map((window) => window.kind), ['session', 'weekly']);
   assert.deepEqual(providers[0].windows.map((window) => window.remainingPercent), [88, 66]);
   assert.deepEqual(providers[0].windows.map((window) => window.windowMinutes), [300, 10080]);
+});
+
+test('fetchCodexLimits omits FedRAMP routing for an ordinary workspace', async () => {
+  let request = null;
+  await fetchCodexLimits({}, {
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({
+      tokens: {
+        access_token: 'access-token',
+        account_id: 'workspace-personal',
+        id_token: makeIdToken({
+          'https://api.openai.com/auth': {
+            chatgpt_account_id: 'workspace-personal',
+            chatgpt_account_is_fedramp: false
+          }
+        })
+      }
+    }),
+    fetch: async (url, init) => {
+      request = { url, init };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ rate_limit: null })
+      };
+    },
+    readCodexResetCredits: async () => null
+  });
+
+  assert.equal(request.url, 'https://chatgpt.com/backend-api/wham/usage');
+  assert.equal(Object.hasOwn(request.init.headers, 'x-openai-fedramp'), false);
 });
 
 test('fetchCodexLimits preserves per-window usage when the OAuth rate limit is reached', async () => {
@@ -610,7 +643,13 @@ test('fetchCodexLimits uses Codex API paths for a non-ChatGPT base URL', async (
         return JSON.stringify({
           tokens: {
             access_token: authReads === 1 ? 'access-token-a' : 'access-token-b',
-            account_id: authReads === 1 ? 'account-a' : 'account-b'
+            account_id: authReads === 1 ? 'account-a' : 'account-b',
+            id_token: makeIdToken({
+              'https://api.openai.com/auth': {
+                chatgpt_account_id: authReads === 1 ? 'account-a' : 'account-b',
+                chatgpt_account_is_fedramp: true
+              }
+            })
           }
         });
       }
@@ -651,6 +690,7 @@ test('fetchCodexLimits uses Codex API paths for a non-ChatGPT base URL', async (
     'Bearer access-token-a'
   ]);
   assert.deepEqual(requests.map(({ init }) => init.headers['chatgpt-account-id']), ['account-a', 'account-a']);
+  assert.deepEqual(requests.map(({ init }) => init.headers['x-openai-fedramp']), ['true', 'true']);
   assert.equal(provider.source, 'oauth');
   assert.equal(provider.windows[0].remainingPercent, 96);
   assert.equal(provider.resetCredits.availableCount, 1);

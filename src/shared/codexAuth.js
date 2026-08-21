@@ -154,11 +154,58 @@ function decodeJwtPayload(token) {
   }
 }
 
-function codexAuthIdentity(auth) {
+function codexAuthClaims(auth) {
   const tokens = auth?.tokens || auth || {};
-  const idToken = tokens.id_token || auth?.id_token || '';
+  const idToken = tokens.id_token || tokens.idToken || auth?.id_token || auth?.idToken || '';
   const payload = decodeJwtPayload(idToken);
   const nested = payload['https://api.openai.com/auth'] || payload['https://api.openai.com/profile'] || {};
+  const claimedAccountId = normalizeWorkspaceId(
+    payload.chatgpt_account_id
+    || nested.chatgpt_account_id
+  );
+  const fedrampClaim = nested.chatgpt_account_is_fedramp
+    ?? payload.chatgpt_account_is_fedramp;
+  return {
+    tokens,
+    payload,
+    nested,
+    claimedAccountId,
+    isFedrampAccount: fedrampClaim === true
+  };
+}
+
+function codexOAuthRequestContext(auth, options = {}) {
+  const { tokens, claimedAccountId, isFedrampAccount: claimedFedramp } = codexAuthClaims(auth);
+  const accessToken = String(
+    tokens.access_token
+    || tokens.accessToken
+    || auth?.access_token
+    || auth?.accessToken
+    || ''
+  ).trim();
+  const storedAccountId = normalizeWorkspaceId(
+    tokens.account_id
+    || tokens.accountId
+    || auth?.account_id
+    || auth?.accountId
+  );
+  const requestedAccountId = normalizeWorkspaceId(options.accountId);
+  const accountId = requestedAccountId || storedAccountId || claimedAccountId;
+  const explicitFedramp = typeof options.isFedrampAccount === 'boolean'
+    ? options.isFedrampAccount
+    : undefined;
+  const claimMatchesRequestedWorkspace = !claimedAccountId
+    || !accountId
+    || accountId === claimedAccountId;
+  return {
+    accessToken,
+    accountId,
+    isFedrampAccount: explicitFedramp ?? (claimMatchesRequestedWorkspace && claimedFedramp)
+  };
+}
+
+function codexAuthIdentity(auth) {
+  const { tokens, payload, nested, isFedrampAccount } = codexAuthClaims(auth);
   const email = String(
     payload.email ||
     nested.email ||
@@ -190,6 +237,7 @@ function codexAuthIdentity(auth) {
     accountLabel,
     providerAccountId,
     workspaceAccountId: providerAccountId,
+    isFedrampAccount,
     accountKey: codexAccountKey(email, providerAccountId)
   };
 }
@@ -200,6 +248,7 @@ module.exports = {
   preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity,
   decodeJwtPayload,
+  codexOAuthRequestContext,
   codexAuthIdentity,
   codexAccountKey,
   hashAccountKey

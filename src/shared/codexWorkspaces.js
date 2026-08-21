@@ -1,6 +1,7 @@
 'use strict';
 
 const { createOutboundFetch } = require('./outboundFetch');
+const { codexOAuthRequestContext } = require('./codexAuth');
 
 const CODEX_WORKSPACES_URL = 'https://chatgpt.com/backend-api/accounts';
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -15,23 +16,27 @@ function normalizeWorkspaceId(value) {
 }
 
 function codexOAuthCredentials(auth) {
-  if (!auth || typeof auth !== 'object') return null;
-  const tokens = auth.tokens && typeof auth.tokens === 'object' ? auth.tokens : {};
-  const accessToken = nonEmptyString(tokens.access_token || tokens.accessToken);
+  const context = codexOAuthRequestContext(auth);
+  const accessToken = nonEmptyString(context.accessToken);
   if (!accessToken) return null;
   return {
     accessToken,
-    accountId: normalizeWorkspaceId(
-      tokens.account_id
-      || tokens.accountId
-      || auth.account_id
-      || auth.accountId
-    )
+    accountId: normalizeWorkspaceId(context.accountId)
   };
 }
 
-function normalizeCodexWorkspaces(payload) {
+function workspaceFedrampStatus(item) {
+  const value = item?.chatgpt_account_is_fedramp
+    ?? item?.chatgptAccountIsFedramp
+    ?? item?.is_fedramp
+    ?? item?.isFedramp;
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function normalizeCodexWorkspaces(payload, options = {}) {
   const items = Array.isArray(payload?.items) ? payload.items : [];
+  const currentAccountId = normalizeWorkspaceId(options.currentAccountId);
+  const currentIsFedramp = options.currentIsFedramp === true;
   const seen = new Set();
   const workspaces = [];
   for (const item of items) {
@@ -39,16 +44,21 @@ function normalizeCodexWorkspaces(payload) {
     if (!id || seen.has(id)) continue;
     seen.add(id);
     const name = nonEmptyString(item?.name);
+    const responseFedramp = workspaceFedrampStatus(item);
+    const isFedrampAccount = responseFedramp
+      ?? (currentIsFedramp && id === currentAccountId ? true : undefined);
     workspaces.push({
       id,
       label: name,
-      workspaceKind: name ? '' : 'personal'
+      workspaceKind: name ? '' : 'personal',
+      ...(typeof isFedrampAccount === 'boolean' ? { isFedrampAccount } : {})
     });
   }
   return workspaces;
 }
 
 async function listCodexWorkspaces(auth, deps = {}) {
+  const context = codexOAuthRequestContext(auth);
   const credentials = codexOAuthCredentials(auth);
   if (!credentials) return [];
   const fetchFn = createOutboundFetch(deps.env || process.env, deps);
@@ -67,6 +77,7 @@ async function listCodexWorkspaces(auth, deps = {}) {
     'User-Agent': 'codex-cli'
   };
   if (credentials.accountId) headers['ChatGPT-Account-Id'] = credentials.accountId;
+  if (context.isFedrampAccount) headers['X-OpenAI-Fedramp'] = 'true';
   const response = await fetchFn(CODEX_WORKSPACES_URL, {
     method: 'GET',
     headers,
@@ -78,7 +89,10 @@ async function listCodexWorkspaces(auth, deps = {}) {
     throw error;
   }
   const payload = await response.json();
-  const workspaces = normalizeCodexWorkspaces(payload);
+  const workspaces = normalizeCodexWorkspaces(payload, {
+    currentAccountId: context.accountId,
+    currentIsFedramp: context.isFedrampAccount
+  });
   const isLegitimateEmptyList = Array.isArray(payload?.items) && payload.items.length === 0;
   if (workspaces.length === 0 && !isLegitimateEmptyList) {
     const topLevelKeys = payload && typeof payload === 'object' && !Array.isArray(payload)

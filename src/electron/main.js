@@ -880,6 +880,10 @@ function normalizeCodexManagedAccounts(value) {
     );
     const rawWorkspaceLabel = String(account.workspaceLabel || '').trim();
     const workspaceKind = account.workspaceKind === 'personal' ? 'personal' : '';
+    const workspaceIsFedramp = typeof account.workspaceIsFedramp === 'boolean'
+      ? account.workspaceIsFedramp
+      : undefined;
+    const workspaceFedrampChecked = account.workspaceFedrampChecked === true;
     const accountKey = String(account.accountKey || '').trim();
     const dedupe = codexManagedAccountIdentityKey({
       id,
@@ -897,6 +901,8 @@ function normalizeCodexManagedAccounts(value) {
       workspaceAccountId,
       workspaceLabel: workspaceKind ? '' : rawWorkspaceLabel,
       workspaceKind,
+      ...(typeof workspaceIsFedramp === 'boolean' ? { workspaceIsFedramp } : {}),
+      ...(workspaceFedrampChecked ? { workspaceFedrampChecked: true } : {}),
       homePath,
       authPath: String(account.authPath || path.join(homePath, 'auth.json')).trim(),
       addedAt: account.addedAt || new Date().toISOString(),
@@ -938,8 +944,10 @@ function hydrateCodexManagedWorkspaceLabels() {
     .filter((account) => (
       account.enabled !== false
       && account.workspaceAccountId
-      && !account.workspaceLabel
-      && !account.workspaceKind
+      && (
+        (!account.workspaceLabel && !account.workspaceKind)
+        || account.workspaceFedrampChecked !== true
+      )
     ));
   if (candidates.length === 0) return Promise.resolve(false);
 
@@ -960,7 +968,9 @@ function hydrateCodexManagedWorkspaceLabels() {
               id: account.id,
               workspaceAccountId: account.workspaceAccountId,
               label: workspace.label,
-              workspaceKind: workspace.workspaceKind
+              workspaceKind: workspace.workspaceKind,
+              workspaceIsFedramp: workspace.isFedrampAccount,
+              workspaceFedrampChecked: true
             }
           : null;
       } catch (_) {
@@ -975,18 +985,24 @@ function hydrateCodexManagedWorkspaceLabels() {
     let changed = false;
     const accounts = normalizeCodexManagedAccounts(settings?.codexManagedAccounts).map((account) => {
       const resolved = labels.get(account.id);
-      if (
-        !resolved
-        || account.workspaceLabel
-        || account.workspaceKind
-        || account.enabled === false
-        || account.workspaceAccountId !== resolved.workspaceAccountId
-      ) return account;
+      if (!resolved || account.enabled === false || account.workspaceAccountId !== resolved.workspaceAccountId) {
+        return account;
+      }
+      const shouldHydrateLabel = !account.workspaceLabel && !account.workspaceKind;
+      const shouldHydrateFedramp = typeof account.workspaceIsFedramp !== 'boolean'
+        && typeof resolved.workspaceIsFedramp === 'boolean';
+      const shouldMarkFedrampChecked = account.workspaceFedrampChecked !== true
+        && resolved.workspaceFedrampChecked === true;
+      if (!shouldHydrateLabel && !shouldHydrateFedramp && !shouldMarkFedrampChecked) return account;
       changed = true;
       return {
         ...account,
-        workspaceLabel: resolved.label,
-        workspaceKind: resolved.workspaceKind,
+        ...(shouldHydrateLabel ? {
+          workspaceLabel: resolved.label,
+          workspaceKind: resolved.workspaceKind
+        } : {}),
+        ...(shouldHydrateFedramp ? { workspaceIsFedramp: resolved.workspaceIsFedramp } : {}),
+        ...(shouldMarkFedrampChecked ? { workspaceFedrampChecked: true } : {}),
         updatedAt: new Date().toISOString()
       };
     });
@@ -1221,6 +1237,10 @@ function commitCodexManagedAccount(identity, homePath, existing, options = {}) {
     workspaceAccountId: identity.workspaceAccountId || identity.providerAccountId || '',
     workspaceLabel: String(identity.workspaceLabel || '').trim(),
     workspaceKind: identity.workspaceKind === 'personal' ? 'personal' : '',
+    ...(typeof identity.workspaceIsFedramp === 'boolean'
+      ? { workspaceIsFedramp: identity.workspaceIsFedramp }
+      : {}),
+    ...(identity.workspaceFedrampChecked === true ? { workspaceFedrampChecked: true } : {}),
     homePath,
     authPath: path.join(homePath, 'auth.json'),
     addedAt: existing?.addedAt || now,
@@ -1368,7 +1388,9 @@ async function resolveCodexWorkspaceAfterLogin(auth, _homePath, options = {}) {
       workspaceAccountId,
       accountKey: codexAccountKey(initialIdentity.email, workspaceAccountId),
       workspaceLabel: selected.label,
-      workspaceKind: selected.workspaceKind
+      workspaceKind: selected.workspaceKind,
+      workspaceIsFedramp: selected.isFedrampAccount,
+      workspaceFedrampChecked: true
     }
   };
 }

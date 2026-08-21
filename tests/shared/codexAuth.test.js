@@ -9,6 +9,7 @@ const {
   codexManagedAccountMatchesIdentity,
   decodeJwtPayload,
   codexAuthIdentity,
+  codexOAuthRequestContext,
   hashAccountKey,
   preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity
@@ -61,6 +62,38 @@ test('codexAuthIdentity reads nested OpenAI auth claims', () => {
   assert.equal(identity.email, 'nested@example.com');
   assert.equal(identity.accountLabel, 'pro');
   assert.equal(identity.providerAccountId, 'acct_nested');
+});
+
+test('codexAuthIdentity and OAuth request context preserve workspace-scoped FedRAMP routing', () => {
+  const auth = {
+    tokens: {
+      access_token: 'access-token',
+      account_id: 'workspace-current',
+      id_token: jwt({
+        email: 'fedramp@example.com',
+        'https://api.openai.com/auth': {
+          chatgpt_account_id: 'workspace-current',
+          chatgpt_account_is_fedramp: true
+        }
+      })
+    }
+  };
+
+  assert.equal(codexAuthIdentity(auth).isFedrampAccount, true);
+  assert.deepEqual(codexOAuthRequestContext(auth), {
+    accessToken: 'access-token',
+    accountId: 'workspace-current',
+    isFedrampAccount: true
+  });
+  assert.equal(codexOAuthRequestContext(auth, { accountId: 'workspace-other' }).isFedrampAccount, false);
+  assert.equal(codexOAuthRequestContext({
+    ...auth,
+    tokens: { ...auth.tokens, account_id: 'workspace-other' }
+  }).isFedrampAccount, false);
+  assert.equal(codexOAuthRequestContext(auth, {
+    accountId: 'workspace-other',
+    isFedrampAccount: true
+  }).isFedrampAccount, true);
 });
 
 test('codexAuthIdentity prefers the selected workspace from tokens.account_id', () => {

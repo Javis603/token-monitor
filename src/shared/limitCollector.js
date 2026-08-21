@@ -27,7 +27,7 @@ const openrouterLimits = require('./openrouterLimits');
 const thirdPartyLimits = require('./thirdPartyLimits');
 const { sharedDataDir } = require('./config');
 const { recordConsumption } = require('./deepseekBalanceHistory');
-const { codexAccountKey, codexAuthIdentity } = require('./codexAuth');
+const { codexAccountKey, codexAuthIdentity, codexOAuthRequestContext } = require('./codexAuth');
 const minimaxLimits = require('./minimaxLimits');
 const { minimaxToken, minimaxBaseUrl, parseMinimaxTiers, fetchMinimaxLimits } = minimaxLimits;
 const mimoLimits = require('./mimoLimits');
@@ -2159,8 +2159,20 @@ function codexAccessTokenFromAuth(auth) {
   return String(tokens.access_token || auth?.access_token || '').trim();
 }
 
-function codexProviderAccountIdFromAuth(auth) {
-  return codexAuthIdentity(auth).providerAccountId;
+function codexOAuthRequestHeaders(auth, deps = {}, extra = {}) {
+  const context = codexOAuthRequestContext(auth, {
+    accountId: deps.codexAccountId,
+    isFedrampAccount: deps.codexIsFedrampAccount
+  });
+  const headers = {
+    authorization: `Bearer ${context.accessToken}`,
+    accept: 'application/json',
+    'user-agent': TOKEN_MONITOR_USER_AGENT,
+    ...extra
+  };
+  if (context.accountId) headers['chatgpt-account-id'] = context.accountId;
+  if (context.isFedrampAccount) headers['x-openai-fedramp'] = 'true';
+  return headers;
 }
 
 function readCodexOAuthAuth(deps = {}) {
@@ -2182,14 +2194,8 @@ function codexOAuthAuthSnapshot(deps = {}) {
 }
 
 async function fetchCodexUsage(deps = {}) {
-  const { auth, accessToken } = codexOAuthAuthSnapshot(deps);
-  const accountId = deps.codexAccountId || codexProviderAccountIdFromAuth(auth);
-  const headers = {
-    authorization: `Bearer ${accessToken}`,
-    accept: 'application/json',
-    'user-agent': TOKEN_MONITOR_USER_AGENT
-  };
-  if (accountId) headers['chatgpt-account-id'] = accountId;
+  const { auth } = codexOAuthAuthSnapshot(deps);
+  const headers = codexOAuthRequestHeaders(auth, deps);
   try {
     const baseUrl = codexChatGptBaseUrl(deps);
     const usagePath = codexBackendPaths(baseUrl).usage;
@@ -2268,7 +2274,7 @@ function parseCodexResetCreditsPayload(payload, nowMs = Date.now()) {
 }
 
 async function fetchCodexResetCredits(deps = {}) {
-  const { auth, accessToken } = codexOAuthAuthSnapshot(deps);
+  const { auth } = codexOAuthAuthSnapshot(deps);
 
   const fetchFn = deps.fetch || fetch;
   const timeoutMs = Number(deps.codexResetCreditsTimeoutMs || 4000);
@@ -2276,16 +2282,11 @@ async function fetchCodexResetCredits(deps = {}) {
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   const baseUrl = codexChatGptBaseUrl(deps);
   const url = `${baseUrl}${codexBackendPaths(baseUrl).resetCredits}`;
-  const accountId = deps.codexAccountId || codexProviderAccountIdFromAuth(auth);
   try {
-    const headers = {
-      authorization: `Bearer ${accessToken}`,
-      accept: 'application/json',
-      'user-agent': TOKEN_MONITOR_USER_AGENT,
+    const headers = codexOAuthRequestHeaders(auth, deps, {
       'openai-beta': 'codex-1',
       originator: 'Codex Desktop'
-    };
-    if (accountId) headers['chatgpt-account-id'] = accountId;
+    });
     const response = await fetchFn(url, {
       method: 'GET',
       headers,
@@ -3020,6 +3021,9 @@ function normalizeCodexManagedAccounts(value) {
       workspaceAccountId: String(account.workspaceAccountId || account.providerAccountId || '').trim().toLowerCase(),
       workspaceLabel: String(account.workspaceLabel || '').trim(),
       workspaceKind: account.workspaceKind === 'personal' ? 'personal' : '',
+      ...(typeof account.workspaceIsFedramp === 'boolean'
+        ? { workspaceIsFedramp: account.workspaceIsFedramp }
+        : {}),
       enabled: account.enabled !== false
     };
   }).filter(Boolean);
@@ -3138,7 +3142,8 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
     ...deps,
     env,
     codexAuthPath: account.authPath || pathApi.join(account.homePath, 'auth.json'),
-    codexAccountId: account.workspaceAccountId || undefined
+    codexAccountId: account.workspaceAccountId || undefined,
+    codexIsFedrampAccount: account.workspaceIsFedramp
   };
   const initialAuthIdentity = readLiveCodexIdentity(accountDeps);
   try {
