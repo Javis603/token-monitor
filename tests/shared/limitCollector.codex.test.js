@@ -510,7 +510,7 @@ test('fetchCodexLimits uses stored account_id when the live JWT claim differs', 
   assert.equal(provider.windows[0].remainingPercent, 92);
 });
 
-test('fetchCodexLimits follows CodexBar headers without adding FedRAMP routing', async () => {
+test('fetchCodexLimits adds official FedRAMP routing for the claimed workspace', async () => {
   let request = null;
   await fetchCodexLimits({}, {
     env: { PATH: '/usr/bin' },
@@ -538,7 +538,7 @@ test('fetchCodexLimits follows CodexBar headers without adding FedRAMP routing',
   });
 
   assert.equal(request.url, 'https://chatgpt.com/backend-api/wham/usage');
-  assert.equal(Object.hasOwn(request.init.headers, 'x-openai-fedramp'), false);
+  assert.equal(request.init.headers['x-openai-fedramp'], 'true');
 });
 
 test('fetchCodexLimits preserves per-window usage when the OAuth rate limit is reached', async () => {
@@ -742,7 +742,7 @@ test('fetchCodexLimits uses Codex API paths for a non-ChatGPT base URL', async (
     'Bearer access-token-a'
   ]);
   assert.deepEqual(requests.map(({ init }) => init.headers['chatgpt-account-id']), ['account-a', 'account-a']);
-  assert.deepEqual(requests.map(({ init }) => Object.hasOwn(init.headers, 'x-openai-fedramp')), [false, false]);
+  assert.deepEqual(requests.map(({ init }) => init.headers['x-openai-fedramp']), ['true', 'true']);
   assert.equal(provider.source, 'oauth');
   assert.equal(provider.windows[0].remainingPercent, 96);
   assert.equal(provider.resetCredits.availableCount, 1);
@@ -884,6 +884,74 @@ test('fetchCodexLimits keeps a selected managed workspace fail closed on a trans
   assert.equal(providers[0].status, 'unavailable');
   assert.equal(providers[0].source, 'oauth');
   assert.deepEqual(providers[0].windows, []);
+});
+
+test('fetchCodexLimits accepts RPC fallback when managed auth is scoped to the selected workspace', async () => {
+  let fetchCalls = 0;
+  let rpcCalls = 0;
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: [{
+      id: 'team',
+      email: 'member@example.com',
+      workspaceAccountId: 'workspace-team',
+      homePath: '/tmp/token-monitor-codex/team'
+    }]
+  }, {
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({
+      tokens: {
+        access_token: 'access-token',
+        account_id: 'workspace-team'
+      }
+    }),
+    fetch: async () => {
+      fetchCalls += 1;
+      return { ok: false, status: 503, headers: { get: () => null } };
+    },
+    readCodexResetCredits: async () => null,
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      return codexPayload('member@example.com');
+    }
+  });
+
+  assert.equal(fetchCalls, 2, 'scoped OAuth is retried once after app-server fallback');
+  assert.equal(rpcCalls, 1);
+  assert.equal(providers[0].status, 'ok');
+  assert.equal(providers[0].source, 'rpc');
+  assert.equal(providers[0].sourceDetail, 'managed');
+  assert.equal(providers[0].accountKey, codexAccountKey('member@example.com', 'workspace-team'));
+  assert.ok(providers[0].windows.length > 0);
+});
+
+test('fetchCodexLimits accepts RPC for scoped legacy managed auth without an access token', async () => {
+  let rpcCalls = 0;
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: [{
+      id: 'team',
+      email: 'member@example.com',
+      workspaceAccountId: 'workspace-team',
+      homePath: '/tmp/token-monitor-codex/team'
+    }]
+  }, {
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({
+      tokens: { account_id: 'workspace-team' }
+    }),
+    readCodexResetCredits: async () => null,
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      return codexPayload('member@example.com');
+    }
+  });
+
+  assert.equal(rpcCalls, 1);
+  assert.equal(providers[0].status, 'ok');
+  assert.equal(providers[0].source, 'rpc');
+  assert.equal(providers[0].accountKey, codexAccountKey('member@example.com', 'workspace-team'));
+  assert.ok(providers[0].windows.length > 0);
 });
 
 test('fetchCodexLimits lets app-server recover stale native OAuth then retries usage', async () => {

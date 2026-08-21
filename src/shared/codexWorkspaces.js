@@ -21,7 +21,8 @@ function codexOAuthCredentials(auth) {
   if (!accessToken) return null;
   return {
     accessToken,
-    accountId: normalizeWorkspaceId(context.accountId)
+    accountId: normalizeWorkspaceId(context.accountId),
+    isFedrampAccount: context.isFedrampAccount
   };
 }
 
@@ -62,6 +63,7 @@ async function listCodexWorkspaces(auth, deps = {}) {
     'User-Agent': 'codex-cli'
   };
   if (credentials.accountId) headers['ChatGPT-Account-Id'] = credentials.accountId;
+  if (credentials.isFedrampAccount) headers['X-OpenAI-Fedramp'] = 'true';
   const response = await fetchFn(CODEX_WORKSPACES_URL, {
     method: 'GET',
     headers,

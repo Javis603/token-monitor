@@ -81,7 +81,8 @@ test('OAuth request context prefers an explicit workspace, then stored account_i
   assert.equal(codexAuthIdentity(auth).workspaceAccountId, 'workspace-current');
   assert.deepEqual(codexOAuthRequestContext(auth), {
     accessToken: 'access-token',
-    accountId: 'workspace-current'
+    accountId: 'workspace-current',
+    isFedrampAccount: false
   });
   assert.equal(codexOAuthRequestContext(auth, { accountId: 'workspace-selected' }).accountId, 'workspace-selected');
   assert.equal(codexOAuthRequestContext({
@@ -90,6 +91,26 @@ test('OAuth request context prefers an explicit workspace, then stored account_i
       id_token: auth.tokens.id_token
     }
   }).accountId, 'workspace-claimed');
+});
+
+test('OAuth request context uses FedRAMP routing only for the claimed workspace', () => {
+  const auth = {
+    tokens: {
+      access_token: 'access-token',
+      account_id: 'workspace-government',
+      id_token: jwt({
+        'https://api.openai.com/auth': {
+          chatgpt_account_id: 'workspace-government',
+          chatgpt_account_is_fedramp: true
+        }
+      })
+    }
+  };
+
+  assert.equal(codexOAuthRequestContext(auth).isFedrampAccount, true);
+  assert.equal(codexOAuthRequestContext(auth, {
+    accountId: 'workspace-commercial'
+  }).isFedrampAccount, false);
 });
 
 test('codexAuthIdentity prefers the selected workspace from tokens.account_id', () => {

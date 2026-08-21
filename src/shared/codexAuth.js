@@ -163,16 +163,24 @@ function codexAuthClaims(auth) {
     payload.chatgpt_account_id
     || nested.chatgpt_account_id
   );
+  const claimedIsFedrampAccount = (
+    typeof nested.chatgpt_account_is_fedramp === 'boolean'
+      ? nested.chatgpt_account_is_fedramp
+      : typeof payload.chatgpt_account_is_fedramp === 'boolean'
+        ? payload.chatgpt_account_is_fedramp
+        : undefined
+  );
   return {
     tokens,
     payload,
     nested,
-    claimedAccountId
+    claimedAccountId,
+    claimedIsFedrampAccount
   };
 }
 
 function codexOAuthRequestContext(auth, options = {}) {
-  const { tokens, claimedAccountId } = codexAuthClaims(auth);
+  const { tokens, claimedAccountId, claimedIsFedrampAccount } = codexAuthClaims(auth);
   const accessToken = String(
     tokens.access_token
     || tokens.accessToken
@@ -190,7 +198,13 @@ function codexOAuthRequestContext(auth, options = {}) {
   const accountId = requestedAccountId || storedAccountId || claimedAccountId;
   return {
     accessToken,
-    accountId
+    accountId,
+    isFedrampAccount: Boolean(
+      accountId
+      && claimedAccountId
+      && accountId === claimedAccountId
+      && claimedIsFedrampAccount === true
+    )
   };
 }
 

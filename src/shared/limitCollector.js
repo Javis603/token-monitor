@@ -2170,6 +2170,7 @@ function codexOAuthRequestHeaders(auth, deps = {}, extra = {}) {
     ...extra
   };
   if (context.accountId) headers['chatgpt-account-id'] = context.accountId;
+  if (context.isFedrampAccount) headers['x-openai-fedramp'] = 'true';
   return headers;
 }
 
@@ -3054,9 +3055,20 @@ function managedCodexAccountKey(account, authIdentity = {}, resolvedEmail = '') 
   );
 }
 
-function codexOAuthCanFallbackToRpc(error, deps = {}) {
+function codexManagedRpcMatchesSelectedWorkspace(deps = {}, oauthAuthSnapshot = null) {
+  const selectedWorkspaceId = String(deps.codexAccountId || '').trim().toLowerCase();
+  if (!selectedWorkspaceId) return true;
+  const authWorkspaceId = String(
+    codexOAuthRequestContext(oauthAuthSnapshot?.auth).accountId
+    || deps.codexRpcWorkspaceAccountId
+    || ''
+  ).trim().toLowerCase();
+  return Boolean(authWorkspaceId && authWorkspaceId === selectedWorkspaceId);
+}
+
+function codexOAuthCanFallbackToRpc(error, deps = {}, managedRpcIsScoped = false) {
   if (
-    deps.codexAccountId
+    (deps.codexAccountId && !managedRpcIsScoped)
     || deps.signal?.aborted
     || error?.code === 'ABORT_ERR'
     || error?.name === 'AbortError'
@@ -3069,6 +3081,7 @@ function codexOAuthCanFallbackToRpc(error, deps = {}) {
 async function readCodexUsageOrRpc(deps = {}) {
   const oauthReader = deps.readCodexUsage || fetchCodexUsage;
   const rpcReader = deps.readCodexRpc || readCodexRpc;
+  let latestOAuthAuthSnapshot = null;
   const readOAuth = async () => {
     let oauthAuthSnapshot = null;
     try {
@@ -3076,6 +3089,7 @@ async function readCodexUsageOrRpc(deps = {}) {
     } catch (error) {
       if (oauthReader === fetchCodexUsage) throw error;
     }
+    latestOAuthAuthSnapshot = oauthAuthSnapshot;
     const oauthDeps = oauthAuthSnapshot ? { ...deps, codexOAuthAuthSnapshot: oauthAuthSnapshot } : deps;
     return {
       payload: normalizeCodexUsagePayload(await oauthReader(oauthDeps)),
@@ -3085,13 +3099,17 @@ async function readCodexUsageOrRpc(deps = {}) {
     };
   };
   let oauthError;
-  let transientLiveFailure;
+  let transientRpcFallback;
   try {
     return await readOAuth();
   } catch (error) {
     oauthError = error;
-    transientLiveFailure = codexOAuthCanFallbackToRpc(error, deps);
-    if (!['notConfigured', 'unauthorized'].includes(error?.status) && !transientLiveFailure) {
+    transientRpcFallback = codexOAuthCanFallbackToRpc(
+      error,
+      deps,
+      codexManagedRpcMatchesSelectedWorkspace(deps, latestOAuthAuthSnapshot)
+    );
+    if (!['notConfigured', 'unauthorized'].includes(error?.status) && !transientRpcFallback) {
       error.codexSource = 'oauth';
       throw error;
     }
@@ -3101,23 +3119,25 @@ async function readCodexUsageOrRpc(deps = {}) {
   try {
     rpcPayload = await rpcReader(deps);
   } catch (error) {
-    if (transientLiveFailure) {
+    if (transientRpcFallback) {
       oauthError.codexSource = 'oauth';
       throw oauthError;
     }
     error.codexSource = 'rpc';
     throw error;
   }
-  // For a selected managed workspace, app-server is recovery-only: it has no
-  // workspace selector and may report the account_id still stored in auth.json.
-  // Retry the scoped OAuth request after recovery and fail closed if the file
-  // still cannot prove the selected workspace. Native live accounts may keep
-  // using RPC because they have no separate Token Monitor workspace selection.
+  const managedRpcIsScoped = codexManagedRpcMatchesSelectedWorkspace(
+    deps,
+    latestOAuthAuthSnapshot
+  );
+  // A managed app-server result is usable only when its isolated auth snapshot
+  // is already scoped to the selected workspace. Otherwise RPC remains
+  // recovery-only and the explicitly scoped OAuth request must succeed.
   if (deps.codexAccountId || oauthError?.code === 'CODEX_OAUTH_HTTP_UNAUTHORIZED') {
     try {
       return await readOAuth();
     } catch (retryError) {
-      if (deps.codexAccountId) {
+      if (deps.codexAccountId && !managedRpcIsScoped) {
         retryError.codexSource = 'oauth';
         throw retryError;
       }
@@ -3140,6 +3160,11 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
     codexAccountId: account.workspaceAccountId || undefined
   };
   const initialAuthIdentity = readLiveCodexIdentity(accountDeps);
+  accountDeps.codexRpcWorkspaceAccountId = (
+    initialAuthIdentity.workspaceAccountId
+    || initialAuthIdentity.providerAccountId
+    || ''
+  );
   try {
     const result = await readCodexUsageOrRpc(accountDeps);
     const payload = await withCodexOAuthResetCredits(result.payload, accountDeps, result.oauthAuthSnapshot);
