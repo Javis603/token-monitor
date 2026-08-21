@@ -249,14 +249,16 @@ const balanceStats = {
   }
 };
 
-function balanceSource() {
-  return {
+function balanceSource(creditsDisplay = '') {
+  const source = {
     provider: 'deepseek',
     accountMode: 'lowest',
     accountKey: '',
     window: 'primary',
     valueMode: 'remaining'
   };
+  if (creditsDisplay) source.creditsDisplay = creditsDisplay;
+  return source;
 }
 
 test('a balance-only provider is offered in the tray window picker', () => {
@@ -274,6 +276,46 @@ test('a tray percent item prints a balance as compact money', () => {
 
   assert.equal(resolved.items[0].available, true);
   assert.equal(resolved.items[0].text, '¥4.00');
+});
+
+test('balance percentage opt-in applies consistently to text and stacked items', () => {
+  const statsWithReset = structuredClone(balanceStats);
+  statsWithReset.limits.providers[0].windows[0].resetsAt = '2026-07-23T09:00:00.000Z';
+  const percentSource = balanceSource('percent');
+  const doublePercent = trayLayoutApi.createTrayLayoutItem('doublePercent', { idFactory: () => 'double' });
+  doublePercent.rows = [balanceSource(), percentSource];
+  const doubleInfo = trayLayoutApi.createTrayLayoutItem('doubleInfo', { idFactory: () => 'info' });
+  doubleInfo.rows = [
+    { ...percentSource, metric: 'percent' },
+    { ...percentSource, metric: 'percentReset' }
+  ];
+
+  const resolved = trayLayoutApi.resolveTrayLayout({
+    version: trayLayoutApi.VERSION,
+    items: [
+      { id: 'percent', type: 'text', metric: 'percent', source: percentSource },
+      { id: 'percent-reset', type: 'text', metric: 'percentReset', source: percentSource },
+      doublePercent,
+      doubleInfo
+    ]
+  }, statsWithReset, { nowMs: Date.parse('2026-07-23T08:00:00.000Z') });
+
+  assert.equal(resolved.items[0].text, '40%');
+  assert.equal(resolved.items[1].text, '40% · 1h 00m');
+  assert.deepEqual(resolved.items[2].rows.map((row) => row.text), ['¥4.00', '40%']);
+  assert.deepEqual(resolved.items[3].rows.map((row) => row.text), ['40%', '40% · 1h 00m']);
+});
+
+test('tray layouts persist only the explicit balance percentage opt-in', () => {
+  const percent = trayLayoutApi.normalizeTrayLayout({
+    items: [{ id: 'percent', type: 'text', metric: 'percent', source: balanceSource('percent') }]
+  });
+  const invalid = trayLayoutApi.normalizeTrayLayout({
+    items: [{ id: 'invalid', type: 'text', metric: 'percent', source: balanceSource('ratio') }]
+  });
+
+  assert.equal(percent.items[0].source.creditsDisplay, 'percent');
+  assert.equal('creditsDisplay' in invalid.items[0].source, false);
 });
 
 test('a tray bar item meters a balance against its derived percentage', () => {

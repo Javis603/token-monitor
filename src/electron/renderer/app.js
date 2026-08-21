@@ -12539,11 +12539,15 @@ function trayComposerWindowChoices(source) {
   const choices = trayLayoutApi.sourceWindowOptions(
     state.stats || {},
     source
-  ).map((entry) => ({
-    value: entry.value,
-    label: trayComposerWindowLabel(entry),
-    preview: trayComposerSourcePreview({ ...source, window: entry.value })
-  }));
+  ).map((entry) => {
+    const selectedWindow = entry.selection?.window || entry.window;
+    return {
+      value: entry.value,
+      label: trayComposerWindowLabel(entry),
+      preview: trayComposerSourcePreview({ ...source, window: entry.value }),
+      credits: selectedWindow?.metric === 'credits'
+    };
+  });
   if (choices.length) return choices;
   return [{
     value: 'primary',

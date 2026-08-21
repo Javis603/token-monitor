@@ -812,6 +812,7 @@
         ));
       }
 
+      let selectedWindow = null;
       if (options.includeWindow !== false) {
         const windows = windowChoices(source);
         section.append(picker(
@@ -820,9 +821,25 @@
           source.window,
           (window) => updateItem(item, sourcePatch(item, rowIndex, { window }))
         ));
+
+        selectedWindow = windows.find((choice) => choice.value === source.window) || windows[0];
+        if (options.includeCreditsDisplay === true && selectedWindow?.credits) {
+          section.append(picker(
+            l('trayComposer.creditsDisplay', 'Balance display'),
+            [
+              { value: 'balance', label: l('trayComposer.creditsDisplay.balance', 'Balance') },
+              { value: 'percent', label: l('trayComposer.creditsDisplay.percent', 'Percentage') }
+            ],
+            source.creditsDisplay === 'percent' ? 'percent' : 'balance',
+            (creditsDisplay) => updateItem(item, sourcePatch(item, rowIndex, { creditsDisplay }))
+          ));
+        }
       }
 
-      if (options.includeValue !== false) {
+      const balanceAmountSelected = options.includeCreditsDisplay === true
+        && selectedWindow?.credits
+        && source.creditsDisplay !== 'percent';
+      if (options.includeValue !== false && !balanceAmountSelected) {
         const values = [
           { value: 'remaining', label: l('trayComposer.value.remaining', 'Remaining') },
           { value: 'used', label: l('trayComposer.value.used', 'Used') }
@@ -998,6 +1015,9 @@
                 : l('trayComposer.valueNumber', `Value ${index + 1}`, { number: index + 1 }),
             {
               includeMetric: item.metric === 'mixed',
+              includeCreditsDisplay: item.metric === 'percent'
+                || sourceForItem(item, index).metric === 'percent'
+                || sourceForItem(item, index).metric === 'percentReset',
               includeValue: item.type === 'bars'
                 || item.metric === 'percent'
                 || sourceForItem(item, index).metric === 'percent'
@@ -1059,6 +1079,7 @@
           if (item.metric === 'cost') popover.append(...costDisplayEditors(item));
         } else {
           popover.append(sourceEditor(item, 0, '', {
+            includeCreditsDisplay: item.metric === 'percent' || item.metric === 'percentReset',
             includeValue: item.metric === 'percent' || item.metric === 'percentReset'
           }));
         }
