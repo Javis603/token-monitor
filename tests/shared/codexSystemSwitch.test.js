@@ -7,12 +7,18 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  codexAuthMaterialForWorkspace,
   codexAccountMatchesIdentity,
   findMatchingCodexAccount,
   liveCodexAuthPath,
   readCodexAuthMaterial,
   writeCodexAuthFile
 } = require('../../src/shared/codexSystemSwitch');
+
+function makeIdToken(payload) {
+  const segment = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  return `${segment({ alg: 'none' })}.${segment(payload)}.`;
+}
 
 test('liveCodexAuthPath respects CODEX_HOME and otherwise uses the default Codex home', () => {
   assert.equal(
@@ -64,6 +70,33 @@ test('managed Codex accounts keep same-email workspaces distinct', () => {
     email: 'shared@example.com',
     workspaceAccountId: 'workspace-team'
   })?.id, 'team');
+});
+
+test('system switching applies the selected workspace without mutating managed auth material', () => {
+  const auth = {
+    tokens: {
+      access_token: 'access-token',
+      account_id: 'workspace-default',
+      id_token: makeIdToken({ email: 'member@example.com' })
+    }
+  };
+  const material = {
+    auth,
+    data: JSON.stringify(auth),
+    identity: { email: 'member@example.com', workspaceAccountId: 'workspace-default' },
+    authPath: '/managed/auth.json'
+  };
+
+  const selected = codexAuthMaterialForWorkspace(material, ' WORKSPACE-TEAM ');
+
+  assert.equal(codexAuthMaterialForWorkspace(material, ''), material);
+  assert.equal(auth.tokens.account_id, 'workspace-default');
+  assert.equal(material.data, JSON.stringify(auth));
+  assert.equal(selected.auth.tokens.account_id, 'workspace-team');
+  assert.equal(JSON.parse(selected.data).tokens.account_id, 'workspace-team');
+  assert.equal(selected.identity.email, 'member@example.com');
+  assert.equal(selected.identity.workspaceAccountId, 'workspace-team');
+  assert.equal(selected.authPath, '/managed/auth.json');
 });
 
 test('Codex auth files are written atomically with private permissions and readable identity', async () => {

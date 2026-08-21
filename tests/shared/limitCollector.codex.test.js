@@ -396,6 +396,180 @@ function makeIdToken(payload) {
 // The live account's auth.json is never read in tests unless a test opts in.
 const noLiveAuth = { readFileSync: () => { throw new Error('no auth.json'); } };
 
+test('fetchCodexLimits prefers read-only OAuth usage and maps wham windows', async () => {
+  const requests = [];
+  let rpcCalls = 0;
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: [{
+      id: 'team',
+      email: 'member@example.com',
+      workspaceAccountId: 'workspace-team',
+      homePath: '/tmp/token-monitor-codex/team'
+    }]
+  }, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({
+      tokens: { access_token: 'access-token', account_id: 'workspace-default' }
+    }),
+    fetch: async (url, init) => {
+      requests.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          plan_type: 'plus',
+          rate_limit: {
+            primary_window: {
+              used_percent: 12,
+              reset_at: 1_770_000_000,
+              limit_window_seconds: 18_000
+            },
+            secondary_window: {
+              used_percent: 34,
+              reset_at: 1_770_500_000,
+              limit_window_seconds: 604_800
+            }
+          }
+        })
+      };
+    },
+    readCodexResetCredits: async () => null,
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      throw new Error('RPC must not run when OAuth usage succeeds');
+    }
+  });
+
+  assert.equal(rpcCalls, 0);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, 'https://chatgpt.com/backend-api/wham/usage');
+  assert.equal(requests[0].init.headers.authorization, 'Bearer access-token');
+  assert.equal(requests[0].init.headers['chatgpt-account-id'], 'workspace-team');
+  assert.equal(providers[0].source, 'oauth');
+  assert.equal(providers[0].sourceDetail, 'managed');
+  assert.equal(providers[0].accountKey, codexAccountKey('member@example.com', 'workspace-team'));
+  assert.equal(providers[0].accountLabel, 'Plus');
+  assert.deepEqual(providers[0].windows.map((window) => window.kind), ['session', 'weekly']);
+  assert.deepEqual(providers[0].windows.map((window) => window.remainingPercent), [88, 66]);
+  assert.deepEqual(providers[0].windows.map((window) => window.windowMinutes), [300, 10080]);
+});
+
+test('fetchCodexLimits uses the Codex API usage path for a non-ChatGPT base URL', async () => {
+  const urls = [];
+  const provider = await fetchCodexLimits({}, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin', CODEX_HOME: '/tmp/token-monitor-codex/live' },
+    readFileSync: (file) => {
+      if (String(file).endsWith('auth.json')) {
+        return JSON.stringify({ tokens: { access_token: 'access-token' } });
+      }
+      if (String(file).endsWith('config.toml')) {
+        return 'chatgpt_base_url = "https://api.openai.com/"\n';
+      }
+      throw new Error(`unexpected read ${file}`);
+    },
+    fetch: async (url) => {
+      urls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          plan_type: 'plus',
+          rate_limit: {
+            primary_window: { used_percent: 4, reset_at: 1_770_000_000, limit_window_seconds: 18_000 }
+          }
+        })
+      };
+    },
+    readCodexResetCredits: async () => null
+  });
+
+  assert.deepEqual(urls, ['https://api.openai.com/api/codex/usage']);
+  assert.equal(provider.source, 'oauth');
+  assert.equal(provider.windows[0].remainingPercent, 96);
+});
+
+test('fetchCodexLimits rejects an unscoped RPC result for a selected managed workspace', async () => {
+  let rpcCalls = 0;
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: [{
+      id: 'team',
+      email: 'member@example.com',
+      workspaceAccountId: 'workspace-team',
+      homePath: '/tmp/token-monitor-codex/team'
+    }]
+  }, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({
+      tokens: { account_id: 'workspace-default' },
+      account: { email: 'default@example.com' }
+    }),
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      return codexPayload('default@example.com');
+    }
+  });
+
+  assert.equal(rpcCalls, 1, 'app-server may run only to recover CLI-owned credentials');
+  assert.equal(providers[0].status, 'unauthorized');
+  assert.equal(providers[0].source, 'oauth');
+  assert.equal(providers[0].accountEmail, 'member@example.com');
+  assert.equal(providers[0].accountKey, codexAccountKey('member@example.com', 'workspace-team'));
+  assert.deepEqual(providers[0].windows, []);
+});
+
+test('fetchCodexLimits does not hide OAuth outages behind CLI fallback', async () => {
+  let rpcCalls = 0;
+  await assert.rejects(fetchCodexLimits({}, {
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => ({ ok: false, status: 503, headers: { get: () => null } }),
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      return codexPayload('live@example.com');
+    }
+  }), /returned 503/);
+  assert.equal(rpcCalls, 0);
+});
+
+test('fetchCodexLimits lets app-server recover stale native OAuth then retries usage', async () => {
+  let fetchCalls = 0;
+  let rpcCalls = 0;
+  const provider = await fetchCodexLimits({}, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => {
+      fetchCalls += 1;
+      if (fetchCalls === 1) return { ok: false, status: 401, headers: { get: () => null } };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          plan_type: 'plus',
+          rate_limit: {
+            primary_window: { used_percent: 9, reset_at: 1_770_000_000, limit_window_seconds: 18_000 }
+          }
+        })
+      };
+    },
+    readCodexResetCredits: async () => null,
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      return codexPayload('live@example.com');
+    }
+  });
+
+  assert.equal(rpcCalls, 1);
+  assert.equal(fetchCalls, 2);
+  assert.equal(provider.source, 'oauth');
+  assert.equal(provider.windows[0].remainingPercent, 91);
+});
+
 test('fetchCodexLimits replaces a saved managed plan with the latest RPC plan', async () => {
   const providers = await fetchCodexLimits({
     includeLiveCodexAccount: false,
@@ -437,6 +611,7 @@ test('fetchCodexLimits returns one provider per managed Codex account', async ()
   }, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin' },
+    ...noLiveAuth,
     readCodexRpc: async (deps) => {
       // No live login configured in this scenario; only the managed homes resolve.
       if (!deps.env.CODEX_HOME) throw Object.assign(new Error('Codex account not configured'), { status: 'notConfigured' });
@@ -581,6 +756,7 @@ test('fetchCodexLimits can refresh only the requested managed Codex account', as
   }, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin' },
+    ...noLiveAuth,
     readCodexRpc: async (deps) => {
       const home = deps.env.CODEX_HOME || '<live>';
       seenHomes.push(home);
@@ -803,6 +979,7 @@ test('fetchCodexLimits skips disabled managed Codex accounts', async () => {
   }, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin' },
+    ...noLiveAuth,
     readCodexRpc: async (deps) => {
       if (!deps.env.CODEX_HOME) throw Object.assign(new Error('Codex account not configured'), { status: 'notConfigured' });
       seenHomes.push(deps.env.CODEX_HOME);
@@ -943,6 +1120,7 @@ test('fetchCodexLimits fills the live account email from auth.json when the RPC 
 test('fetchCodexLimits retries the next command after a Codex stdin transport failure', async () => {
   const { EventEmitter } = require('node:events');
   const commands = [];
+  const accountReadParams = [];
   const providers = await fetchCodexLimits({}, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin' },
@@ -979,6 +1157,7 @@ test('fetchCodexLimits retries the next command after a Codex stdin transport fa
           });
         }
         if (message.method === 'account/read') {
+          accountReadParams.push(message.params);
           respond({ account: { email: 'live@example.com', planType: 'plus' } });
         }
       };
@@ -990,6 +1169,7 @@ test('fetchCodexLimits retries the next command after a Codex stdin transport fa
     '/Applications/Codex.app/Contents/Resources/codex',
     '/Applications/ChatGPT.app/Contents/Resources/codex'
   ]);
+  assert.deepEqual(accountReadParams, [{ refreshToken: false }]);
   assert.equal(providers.status, 'ok');
   assert.equal(providers.windows[0].remainingPercent, 96);
 });
@@ -1368,7 +1548,7 @@ test('fetchCodexLimits augments reset credits expiry from the Codex OAuth endpoi
         })
       };
     },
-    readCodexRpc: async () => ({
+    readCodexUsage: async () => ({
       account: { email: 'live@example.com', planType: 'plus' },
       rateLimits: {
         primary: { usedPercent: 54, resetsAt: '2026-06-30T05:00:00Z', windowDurationMins: 300 }
