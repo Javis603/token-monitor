@@ -814,6 +814,53 @@ test('fetchCodexLimits falls back to RPC for a live-account OAuth network failur
   assert.equal(provider.source, 'rpc');
 });
 
+test('fetchCodexLimits keeps trusted RPC quota when live OAuth remains unauthorized after recovery', async () => {
+  let fetchCalls = 0;
+  let rpcCalls = 0;
+  const provider = await fetchCodexLimits({}, {
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'stale-token' } }),
+    fetch: async () => {
+      fetchCalls += 1;
+      return { ok: false, status: 401, headers: { get: () => null } };
+    },
+    readCodexResetCredits: async () => null,
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      return codexPayload('live@example.com');
+    }
+  });
+
+  assert.equal(fetchCalls, 2, 'OAuth is retried once after app-server credential recovery');
+  assert.equal(rpcCalls, 1);
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'rpc');
+  assert.ok(provider.windows.length > 0);
+});
+
+test('fetchCodexLimits falls back to RPC when the live OAuth response cannot be decoded', async () => {
+  let rpcCalls = 0;
+  const provider = await fetchCodexLimits({}, {
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => { throw new SyntaxError('unexpected OAuth response'); }
+    }),
+    readCodexResetCredits: async () => null,
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      return codexPayload('live@example.com');
+    }
+  });
+
+  assert.equal(rpcCalls, 1);
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'rpc');
+  assert.ok(provider.windows.length > 0);
+});
+
 test('fetchCodexLimits does not use RPC for a permanent live-account OAuth response', async () => {
   let rpcCalls = 0;
   await assert.rejects(fetchCodexLimits({}, {
