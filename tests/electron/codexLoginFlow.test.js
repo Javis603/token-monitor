@@ -118,7 +118,9 @@ test('Codex managed login stores workspace metadata without rewriting CLI auth b
   assert.match(resolver, /options\.selectWorkspace/);
   assert.match(resolver, /workspaceAccountId = normalizeWorkspaceId\(selected\.id\)/);
   assert.match(resolver, /accountKey: codexAccountKey\(initialIdentity\.email, workspaceAccountId\)/);
+  assert.match(resolver, /typeof selected\.isFedrampAccount === 'boolean'/);
   assert.match(resolver, /workspaceIsFedramp: selected\.isFedrampAccount/);
+  assert.doesNotMatch(resolver, /workspaceFedrampChecked/);
   assert.doesNotMatch(resolver, /writeCodexAuthFile/);
   const workspaceIndex = addAccount.indexOf('resolveCodexWorkspaceAfterLogin');
   const matchingIndex = addAccount.indexOf('findExistingCodexAccount');
@@ -159,6 +161,9 @@ test('Codex startup hydrates missing managed workspace labels without blocking s
   assert.match(hydration, /workspaceLabel: resolved\.label/);
   assert.match(hydration, /workspaceKind: resolved\.workspaceKind/);
   assert.match(hydration, /workspaceIsFedramp: resolved\.workspaceIsFedramp/);
+  assert.match(hydration, /typeof account\.workspaceIsFedramp !== 'boolean'/);
+  assert.match(hydration, /typeof workspace\.isFedrampAccount === 'boolean'/);
+  assert.doesNotMatch(hydration, /workspaceFedrampChecked/);
   assert.match(hydration, /queueLimitInvalidation\(\{ provider: 'codex' \}, 'workspace-label-hydrated'\)/);
   assert.match(ready, /void hydrateCodexManagedWorkspaceLabels\(\);/);
 });

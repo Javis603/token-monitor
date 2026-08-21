@@ -39,9 +39,27 @@ async function readCodexAuthMaterial(authPath, deps = {}) {
   };
 }
 
-function codexAuthMaterialForWorkspace(material, workspaceId) {
+function codexAuthMaterialForWorkspace(material, workspaceId, options = {}) {
   const selectedWorkspaceId = normalizeWorkspaceId(workspaceId);
   if (!selectedWorkspaceId) return material;
+  const sourceIdentity = codexAuthIdentity(material?.auth);
+  const routedWorkspaceId = normalizeWorkspaceId(
+    sourceIdentity.claimedWorkspaceAccountId
+    || sourceIdentity.workspaceAccountId
+  );
+  const selectedIsFedramp = typeof options.isFedrampAccount === 'boolean'
+    ? options.isFedrampAccount
+    : undefined;
+  const switchesWorkspace = !routedWorkspaceId || selectedWorkspaceId !== routedWorkspaceId;
+  if (switchesWorkspace && typeof selectedIsFedramp !== 'boolean') {
+    throw new Error('The selected Codex workspace routing could not be verified. Sign in directly to that workspace before switching the system account.');
+  }
+  if (
+    typeof selectedIsFedramp === 'boolean'
+    && selectedIsFedramp !== sourceIdentity.isFedrampAccount
+  ) {
+    throw new Error('The selected Codex workspace uses different FedRAMP routing. Sign in directly to that workspace before switching the system account.');
+  }
   const auth = authWithSelectedCodexWorkspace(material?.auth, selectedWorkspaceId);
   return {
     ...material,

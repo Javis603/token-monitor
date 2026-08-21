@@ -776,6 +776,24 @@ test('fetchCodexLimits does not use RPC for a permanent live-account OAuth respo
   assert.equal(rpcCalls, 0);
 });
 
+test('fetchCodexLimits surfaces OAuth 429 without replacing it with unscoped RPC quota', async () => {
+  let rpcCalls = 0;
+  await assert.rejects(fetchCodexLimits({}, {
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => ({ ok: false, status: 429, headers: { get: () => null } }),
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      return codexPayload('live@example.com');
+    }
+  }), (error) => {
+    assert.equal(error.status, 'sourceRateLimited');
+    assert.equal(error.httpStatus, 429);
+    return true;
+  });
+  assert.equal(rpcCalls, 0);
+});
+
 test('fetchCodexLimits preserves the OAuth outage when the live RPC fallback is unavailable', async () => {
   let rpcCalls = 0;
   await assert.rejects(fetchCodexLimits({}, {

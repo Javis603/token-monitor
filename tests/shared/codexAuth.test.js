@@ -44,6 +44,7 @@ test('codexAuthIdentity reads modern auth.json with top-level claims', () => {
   assert.equal(identity.email, 'user@example.com');
   assert.equal(identity.accountLabel, 'plus');
   assert.equal(identity.providerAccountId, 'acct_123');
+  assert.equal(identity.claimedWorkspaceAccountId, 'acct_123');
   assert.match(identity.accountKey, /^sha256:[0-9a-f]{64}$/);
 });
 
@@ -62,6 +63,7 @@ test('codexAuthIdentity reads nested OpenAI auth claims', () => {
   assert.equal(identity.email, 'nested@example.com');
   assert.equal(identity.accountLabel, 'pro');
   assert.equal(identity.providerAccountId, 'acct_nested');
+  assert.equal(identity.claimedWorkspaceAccountId, 'acct_nested');
 });
 
 test('codexAuthIdentity and OAuth request context preserve workspace-scoped FedRAMP routing', () => {

@@ -205,7 +205,7 @@ function codexOAuthRequestContext(auth, options = {}) {
 }
 
 function codexAuthIdentity(auth) {
-  const { tokens, payload, nested, isFedrampAccount } = codexAuthClaims(auth);
+  const { tokens, payload, nested, claimedAccountId, isFedrampAccount } = codexAuthClaims(auth);
   const email = String(
     payload.email ||
     nested.email ||
@@ -237,6 +237,7 @@ function codexAuthIdentity(auth) {
     accountLabel,
     providerAccountId,
     workspaceAccountId: providerAccountId,
+    claimedWorkspaceAccountId: claimedAccountId,
     isFedrampAccount,
     accountKey: codexAccountKey(email, providerAccountId)
   };
