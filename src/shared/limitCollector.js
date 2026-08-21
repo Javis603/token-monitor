@@ -2021,12 +2021,13 @@ function codexDirectRateLimits(payload = {}) {
   if (direct && typeof direct === 'object') return direct;
   const wham = payload.rateLimit || payload.rate_limit;
   if (!wham || typeof wham !== 'object') return {};
+  const limitReached = wham.limitReached ?? wham.limit_reached;
   const normalizeWindow = (window) => {
     if (!window || typeof window !== 'object') return null;
     const seconds = Number(window.limitWindowSeconds ?? window.limit_window_seconds);
     return {
       ...window,
-      usedPercent: window.usedPercent ?? window.used_percent,
+      usedPercent: limitReached === true ? 100 : (window.usedPercent ?? window.used_percent),
       resetsAt: window.resetsAt ?? window.resetAt ?? window.reset_at,
       windowDurationMins: Number.isFinite(seconds) ? seconds / 60 : undefined
     };
@@ -2134,8 +2135,12 @@ function readCodexOAuthAuth(deps = {}) {
   return { auth, accessToken };
 }
 
+function codexOAuthAuthSnapshot(deps = {}) {
+  return deps.codexOAuthAuthSnapshot || readCodexOAuthAuth(deps);
+}
+
 async function fetchCodexUsage(deps = {}) {
-  const { auth, accessToken } = readCodexOAuthAuth(deps);
+  const { auth, accessToken } = codexOAuthAuthSnapshot(deps);
   const accountId = deps.codexAccountId || codexProviderAccountIdFromAuth(auth);
   const headers = {
     authorization: `Bearer ${accessToken}`,
@@ -2221,7 +2226,7 @@ function parseCodexResetCreditsPayload(payload, nowMs = Date.now()) {
 }
 
 async function fetchCodexResetCredits(deps = {}) {
-  const { auth, accessToken } = readCodexOAuthAuth(deps);
+  const { auth, accessToken } = codexOAuthAuthSnapshot(deps);
 
   const fetchFn = deps.fetch || fetch;
   const timeoutMs = Number(deps.codexResetCreditsTimeoutMs || 4000);
@@ -2279,10 +2284,11 @@ async function readCodexResetCredits(deps = {}) {
   return fetchCodexResetCredits(deps);
 }
 
-async function withCodexOAuthResetCredits(payload, deps = {}) {
+async function withCodexOAuthResetCredits(payload, deps = {}, oauthAuthSnapshot = null) {
   const existing = codexResetCreditsSnapshot(payload);
   try {
-    const oauthResetCredits = await readCodexResetCredits(deps);
+    const resetDeps = oauthAuthSnapshot ? { ...deps, codexOAuthAuthSnapshot: oauthAuthSnapshot } : deps;
+    const oauthResetCredits = await readCodexResetCredits(resetDeps);
     return {
       ...payload,
       rateLimitResetCredits: mergeCodexResetCredits(oauthResetCredits, existing)
@@ -3010,9 +3016,24 @@ function managedCodexAccountKey(account, authIdentity = {}, resolvedEmail = '') 
 async function readCodexUsageOrRpc(deps = {}) {
   const oauthReader = deps.readCodexUsage || fetchCodexUsage;
   const rpcReader = deps.readCodexRpc || readCodexRpc;
+  const readOAuth = async () => {
+    let oauthAuthSnapshot = null;
+    try {
+      oauthAuthSnapshot = readCodexOAuthAuth(deps);
+    } catch (error) {
+      if (oauthReader === fetchCodexUsage) throw error;
+    }
+    const oauthDeps = oauthAuthSnapshot ? { ...deps, codexOAuthAuthSnapshot: oauthAuthSnapshot } : deps;
+    return {
+      payload: await oauthReader(oauthDeps),
+      source: 'oauth',
+      sourceDetail: '',
+      oauthAuthSnapshot
+    };
+  };
   let oauthError;
   try {
-    return { payload: await oauthReader(deps), source: 'oauth', sourceDetail: '' };
+    return await readOAuth();
   } catch (error) {
     oauthError = error;
     if (!['notConfigured', 'unauthorized'].includes(error?.status)) {
@@ -3035,7 +3056,7 @@ async function readCodexUsageOrRpc(deps = {}) {
   // using RPC because they have no separate Token Monitor workspace selection.
   if (deps.codexAccountId || oauthError?.code === 'CODEX_OAUTH_HTTP_UNAUTHORIZED') {
     try {
-      return { payload: await oauthReader(deps), source: 'oauth', sourceDetail: '' };
+      return await readOAuth();
     } catch (retryError) {
       if (deps.codexAccountId) {
         retryError.codexSource = 'oauth';
@@ -3059,10 +3080,13 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
     codexAuthPath: account.authPath || pathApi.join(account.homePath, 'auth.json'),
     codexAccountId: account.workspaceAccountId || undefined
   };
-  const authIdentity = readLiveCodexIdentity(accountDeps);
+  const initialAuthIdentity = readLiveCodexIdentity(accountDeps);
   try {
     const result = await readCodexUsageOrRpc(accountDeps);
-    const payload = await withCodexOAuthResetCredits(result.payload, accountDeps);
+    const payload = await withCodexOAuthResetCredits(result.payload, accountDeps, result.oauthAuthSnapshot);
+    const authIdentity = result.oauthAuthSnapshot
+      ? codexAuthIdentity(result.oauthAuthSnapshot.auth)
+      : initialAuthIdentity;
     const email = account.email || authIdentity.email || payload.account?.email;
     return mapCodexRateLimitsToProvider(payload, {
       accountKey: managedCodexAccountKey(account, authIdentity, email),
@@ -3075,10 +3099,10 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
       sourceDetail: 'managed'
     });
   } catch (error) {
-    const email = account.email || authIdentity.email;
+    const email = account.email || initialAuthIdentity.email;
     return normalizeLimitProvider({
       provider: 'codex',
-      accountKey: managedCodexAccountKey(account, authIdentity, email),
+      accountKey: managedCodexAccountKey(account, initialAuthIdentity, email),
       accountEmail: email,
       accountLabel: account.accountLabel,
       accountName: account.workspaceLabel,
@@ -3108,8 +3132,10 @@ function readLiveCodexIdentity(deps = {}) {
 
 async function fetchLiveCodexAccount(deps = {}, nowMs = Date.now(), managedAccounts = []) {
   const result = await readCodexUsageOrRpc(deps);
-  const payload = await withCodexOAuthResetCredits(result.payload, deps);
-  const authIdentity = readLiveCodexIdentity(deps);
+  const payload = await withCodexOAuthResetCredits(result.payload, deps, result.oauthAuthSnapshot);
+  const authIdentity = result.oauthAuthSnapshot
+    ? codexAuthIdentity(result.oauthAuthSnapshot.auth)
+    : readLiveCodexIdentity(deps);
   const email = authIdentity.email || payload.account?.email || '';
   const fallbackSeed = payload.account?.email || `${payload.account?.type || 'account'}:${payload.account?.planType || ''}:${deps.codexAuthPath || codexAuthPath(deps.env || process.env)}`;
   const accountKey = resolvedCodexAccountKey(

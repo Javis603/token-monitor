@@ -456,22 +456,52 @@ test('fetchCodexLimits prefers read-only OAuth usage and maps wham windows', asy
   assert.deepEqual(providers[0].windows.map((window) => window.windowMinutes), [300, 10080]);
 });
 
+test('fetchCodexLimits treats a reached OAuth rate limit as fully used', async () => {
+  const provider = await fetchCodexLimits({}, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        rate_limit: {
+          limit_reached: true,
+          primary_window: { used_percent: 40, reset_at: 1_770_000_000, limit_window_seconds: 18_000 },
+          secondary_window: { used_percent: 20, reset_at: 1_770_500_000, limit_window_seconds: 604_800 }
+        }
+      })
+    }),
+    readCodexResetCredits: async () => null
+  });
+
+  assert.deepEqual(provider.windows.map((window) => window.usedPercent), [100, 100]);
+  assert.deepEqual(provider.windows.map((window) => window.remainingPercent), [0, 0]);
+});
+
 test('fetchCodexLimits uses Codex API paths for a non-ChatGPT base URL', async () => {
-  const urls = [];
+  const requests = [];
+  let authReads = 0;
   const provider = await fetchCodexLimits({}, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin', CODEX_HOME: '/tmp/token-monitor-codex/live' },
     readFileSync: (file) => {
       if (String(file).endsWith('auth.json')) {
-        return JSON.stringify({ tokens: { access_token: 'access-token' } });
+        authReads += 1;
+        return JSON.stringify({
+          tokens: {
+            access_token: authReads === 1 ? 'access-token-a' : 'access-token-b',
+            account_id: authReads === 1 ? 'account-a' : 'account-b'
+          }
+        });
       }
       if (String(file).endsWith('config.toml')) {
         return 'chatgpt_base_url = "https://codex.example.com/"\n';
       }
       throw new Error(`unexpected read ${file}`);
     },
-    fetch: async (url) => {
-      urls.push(url);
+    fetch: async (url, init) => {
+      requests.push({ url, init });
       if (url.endsWith('/rate-limit-reset-credits')) {
         return {
           ok: true,
@@ -492,10 +522,16 @@ test('fetchCodexLimits uses Codex API paths for a non-ChatGPT base URL', async (
     }
   });
 
-  assert.deepEqual(urls, [
+  assert.deepEqual(requests.map(({ url }) => url), [
     'https://codex.example.com/api/codex/usage',
     'https://codex.example.com/api/codex/rate-limit-reset-credits'
   ]);
+  assert.equal(authReads, 1, 'usage, reset credits, and account identity share one OAuth snapshot');
+  assert.deepEqual(requests.map(({ init }) => init.headers.authorization), [
+    'Bearer access-token-a',
+    'Bearer access-token-a'
+  ]);
+  assert.deepEqual(requests.map(({ init }) => init.headers['chatgpt-account-id']), ['account-a', 'account-a']);
   assert.equal(provider.source, 'oauth');
   assert.equal(provider.windows[0].remainingPercent, 96);
   assert.equal(provider.resetCredits.availableCount, 1);
@@ -549,12 +585,20 @@ test('fetchCodexLimits does not hide OAuth outages behind CLI fallback', async (
 test('fetchCodexLimits lets app-server recover stale native OAuth then retries usage', async () => {
   let fetchCalls = 0;
   let rpcCalls = 0;
+  let authReads = 0;
+  const usageAuthorizations = [];
+  const resetAuthorizations = [];
   const provider = await fetchCodexLimits({}, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin' },
-    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
-    fetch: async () => {
+    readFileSync: (file) => {
+      if (!String(file).endsWith('auth.json')) throw new Error(`unexpected read ${file}`);
+      authReads += 1;
+      return JSON.stringify({ tokens: { access_token: authReads === 1 ? 'stale-token' : 'fresh-token' } });
+    },
+    fetch: async (_url, init) => {
       fetchCalls += 1;
+      usageAuthorizations.push(init.headers.authorization);
       if (fetchCalls === 1) return { ok: false, status: 401, headers: { get: () => null } };
       return {
         ok: true,
@@ -567,7 +611,10 @@ test('fetchCodexLimits lets app-server recover stale native OAuth then retries u
         })
       };
     },
-    readCodexResetCredits: async () => null,
+    readCodexResetCredits: async (resetDeps) => {
+      resetAuthorizations.push(resetDeps.codexOAuthAuthSnapshot?.accessToken);
+      return null;
+    },
     readCodexRpc: async () => {
       rpcCalls += 1;
       return codexPayload('live@example.com');
@@ -576,6 +623,8 @@ test('fetchCodexLimits lets app-server recover stale native OAuth then retries u
 
   assert.equal(rpcCalls, 1);
   assert.equal(fetchCalls, 2);
+  assert.deepEqual(usageAuthorizations, ['Bearer stale-token', 'Bearer fresh-token']);
+  assert.deepEqual(resetAuthorizations, ['fresh-token']);
   assert.equal(provider.source, 'oauth');
   assert.equal(provider.windows[0].remainingPercent, 91);
 });
