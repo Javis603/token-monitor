@@ -19,6 +19,7 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
   assert.match(html, /id="thirdpartyProfileList"/);
   assert.match(html, /<label for="thirdpartyPlatformInput"[^>]*data-i18n="settings\.thirdparty\.preset"/);
   assert.match(html, /<select id="thirdpartyPlatformInput">[\s\S]*?<option value="newapi"[^>]*>[\s\S]*?<option value="custom"/);
+  assert.match(html, /<option value="sub2api"[^>]*data-i18n="settings\.thirdparty\.presetSub2Api"/);
   assert.match(html, /<label for="thirdpartyModeInput"[^>]*data-i18n="settings\.thirdparty\.scope"/);
   assert.match(html, /<select id="thirdpartyModeInput">[\s\S]*?<option value="account"[^>]*>[\s\S]*?<option value="token"/);
   assert.match(html, /class="thirdparty-choice-grid"/);
@@ -41,6 +42,7 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
   assert.match(app, /function setThirdPartyAdapterFields/);
   assert.match(app, /function selectedThirdPartyAdapter/);
   assert.match(app, /if \(platform === 'custom'\) return 'custom'/);
+  assert.match(app, /if \(platform === 'sub2api'\) return 'sub2api'/);
   assert.match(app, /thirdpartyCustomConfig[\s\S]*?classList\.toggle\('hidden', !customMode\)/);
   assert.match(app, /thirdpartyCredentialGrid[\s\S]*?classList\.toggle\([\s\S]*?'single-field'/);
   assert.match(app, /baseUrlInput\?\.addEventListener\('input', updateThirdPartyHttpWarning\)/);

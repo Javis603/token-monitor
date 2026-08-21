@@ -10,15 +10,18 @@ const THIRD_PARTY_PROVIDER_ID = 'thirdparty';
 const THIRD_PARTY_ENV_ACCOUNT_NAME = 'environment';
 const NEWAPI_ACCOUNT_ADAPTER = 'newapi-account';
 const NEWAPI_TOKEN_ADAPTER = 'newapi-token';
+const SUB2API_ADAPTER = 'sub2api';
 const CUSTOM_BALANCE_ADAPTER = 'custom';
 const THIRD_PARTY_ADAPTER_IDS = Object.freeze([
   NEWAPI_ACCOUNT_ADAPTER,
   NEWAPI_TOKEN_ADAPTER,
+  SUB2API_ADAPTER,
   CUSTOM_BALANCE_ADAPTER
 ]);
 const NEWAPI_STATUS_PATH = '/api/status';
 const NEWAPI_ACCOUNT_PATH = '/api/user/self';
 const NEWAPI_TOKEN_USAGE_PATH = '/api/usage/token/';
+const SUB2API_ME_PATH = '/api/v1/auth/me';
 const DEFAULT_CUSTOM_ENDPOINT_PATH = '/user/balance';
 const DEFAULT_CUSTOM_CURRENCY = 'USD';
 const DEFAULT_CUSTOM_DIVISOR = 1;
@@ -279,6 +282,22 @@ function newapiTokenQuota(tokenData, unit) {
   });
 }
 
+function sub2apiData(payload) {
+  const code = finiteNumber(payload?.code);
+  if (code === null || code !== 0) return null;
+  return responseData(payload);
+}
+
+function sub2apiAccountQuota(meData) {
+  const balance = finiteNumber(meData?.balance);
+  return balance === null
+    ? null
+    : quotaResult({
+      label: 'Balance',
+      remaining: balance
+    });
+}
+
 function customBalanceQuota(payload, account) {
   if (payload?.success === false || payload?.code === false) return null;
   const divisor = account.divisor;
@@ -370,6 +389,35 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
     },
     planLabel() {
       return 'API key';
+    }
+  }),
+  [SUB2API_ADAPTER]: Object.freeze({
+    platform: 'sub2api',
+    mode: 'account',
+    normalizeCredentials(profile) {
+      const accessToken = cleanValue(profile.accessToken);
+      return accessToken ? { accessToken } : null;
+    },
+    identity(account) {
+      return [account.baseUrl, account.accessToken];
+    },
+    request(account) {
+      return {
+        path: SUB2API_ME_PATH,
+        headers: {
+          Authorization: `Bearer ${account.accessToken}`
+        }
+      };
+    },
+    unit() {
+      return 1;
+    },
+    quota(payload) {
+      const data = sub2apiData(payload);
+      return data ? sub2apiAccountQuota(data) : null;
+    },
+    planLabel() {
+      return 'Account';
     }
   }),
   [CUSTOM_BALANCE_ADAPTER]: Object.freeze({
@@ -625,6 +673,8 @@ module.exports = {
   NEWAPI_STATUS_PATH,
   NEWAPI_TOKEN_ADAPTER,
   NEWAPI_TOKEN_USAGE_PATH,
+  SUB2API_ADAPTER,
+  SUB2API_ME_PATH,
   THIRD_PARTY_ADAPTER_IDS,
   THIRD_PARTY_ADAPTERS,
   THIRD_PARTY_ENV_ACCOUNT_NAME,

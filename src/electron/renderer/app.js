@@ -12910,6 +12910,7 @@ function selectedThirdPartyAdapter() {
   const platform = String(document.getElementById('thirdpartyPlatformInput')?.value || 'newapi');
   const mode = String(document.getElementById('thirdpartyModeInput')?.value || 'account');
   if (platform === 'custom') return 'custom';
+  if (platform === 'sub2api') return 'sub2api';
   return mode === 'token' ? 'newapi-token' : 'newapi-account';
 }
 
@@ -12930,10 +12931,12 @@ function updateThirdPartyHttpWarning() {
 function setThirdPartyAdapterFields() {
   const adapter = selectedThirdPartyAdapter();
   const customMode = adapter === 'custom';
-  const accountMode = adapter === 'newapi-account';
+  const sub2apiMode = adapter === 'sub2api';
+  const singleChoiceField = customMode || sub2apiMode;
+  const accountMode = adapter === 'newapi-account' || sub2apiMode;
   const newApiAccountMode = adapter === 'newapi-account';
-  document.getElementById('thirdpartyChoiceGrid')?.classList.toggle('single-field', customMode);
-  document.getElementById('thirdpartyModeField')?.classList.toggle('hidden', customMode);
+  document.getElementById('thirdpartyChoiceGrid')?.classList.toggle('single-field', singleChoiceField);
+  document.getElementById('thirdpartyModeField')?.classList.toggle('hidden', singleChoiceField);
   document.getElementById('thirdpartyCredentialGrid')?.classList.toggle(
     'single-field',
     !newApiAccountMode
@@ -12946,9 +12949,11 @@ function setThirdPartyAdapterFields() {
   if (hint) {
     const hintKey = customMode
       ? 'settings.thirdparty.hintCustom'
-      : adapter === 'newapi-token'
-      ? 'settings.thirdparty.hintNewApiToken'
-      : 'settings.thirdparty.hintNewApiAccount';
+      : sub2apiMode
+        ? 'settings.thirdparty.hintSub2Api'
+        : adapter === 'newapi-token'
+          ? 'settings.thirdparty.hintNewApiToken'
+          : 'settings.thirdparty.hintNewApiAccount';
     hint.textContent = t(hintKey);
   }
 }
@@ -14597,7 +14602,9 @@ function renderThirdPartyProfiles() {
         ? t('settings.thirdparty.detailNewApiKey')
         : profile?.adapter === 'custom'
           ? t('settings.thirdparty.detailCustom')
-          : t('settings.thirdparty.detailNewApiAccount');
+          : profile?.adapter === 'sub2api'
+            ? t('settings.thirdparty.detailSub2Api')
+            : t('settings.thirdparty.detailNewApiAccount');
       let host = '';
       try { host = new URL(String(profile?.baseUrl || '')).host; } catch (_) {}
       return [adapter, host].filter(Boolean).join(' · ');

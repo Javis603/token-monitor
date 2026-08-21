@@ -11,6 +11,8 @@ const {
   NEWAPI_STATUS_PATH,
   NEWAPI_TOKEN_ADAPTER,
   NEWAPI_TOKEN_USAGE_PATH,
+  SUB2API_ADAPTER,
+  SUB2API_ME_PATH,
   THIRD_PARTY_ADAPTER_IDS,
   THIRD_PARTY_ADAPTERS,
   THIRD_PARTY_ENV_ACCOUNT_NAME,
@@ -102,7 +104,7 @@ test('third-party adapters are registered explicitly behind the stable provider 
   assert.deepEqual(Object.keys(THIRD_PARTY_ADAPTERS), THIRD_PARTY_ADAPTER_IDS);
   assert.deepEqual(
     THIRD_PARTY_ADAPTER_IDS,
-    [NEWAPI_ACCOUNT_ADAPTER, NEWAPI_TOKEN_ADAPTER, CUSTOM_BALANCE_ADAPTER]
+    [NEWAPI_ACCOUNT_ADAPTER, NEWAPI_TOKEN_ADAPTER, SUB2API_ADAPTER, CUSTOM_BALANCE_ADAPTER]
   );
   for (const adapter of Object.values(THIRD_PARTY_ADAPTERS)) {
     assert.equal(typeof adapter.normalizeCredentials, 'function');
@@ -310,6 +312,98 @@ test('New API token adapter exposes only that token quota', async () => {
   assert.equal(provider.windows[0].label, 'Token quota');
   assert.equal(provider.windows[0].limit, 60);
   assert.equal(JSON.stringify(provider).includes('sk-personal'), false);
+});
+
+test('Sub2API adapter reports the dashboard account balance without a status request', async () => {
+  const calls = [];
+  const [provider] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      dashboard: {
+        adapter: SUB2API_ADAPTER,
+        baseUrl: 'https://sub2api.example/v1',
+        accessToken: 'dashboard-jwt',
+        enabled: true
+      }
+    }
+  }, {
+    env: {},
+    fetch: async (url, init) => {
+      calls.push([url, init]);
+      return response(200, {
+        code: 0,
+        message: 'success',
+        data: {
+          id: 42,
+          username: 'subscriber',
+          balance: 12.5
+        }
+      });
+    }
+  });
+
+  assert.equal(provider.provider, 'thirdparty');
+  assert.equal(provider.accountName, 'dashboard');
+  assert.equal(provider.planLabel, 'Account');
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.balance.amount, 12.5);
+  assert.equal(provider.balance.currency, 'USD');
+  assert.equal(provider.balance.allTimeSpend, null);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], `https://sub2api.example${SUB2API_ME_PATH}`);
+  assert.equal(calls[0][1].method, 'GET');
+  assert.equal(calls[0][1].headers.Authorization, 'Bearer dashboard-jwt');
+  assert.equal(provider.windows[0].label, 'Balance');
+  assert.equal(provider.windows[0].remaining, 12.5);
+  assert.equal(provider.windows[0].showMeter, false);
+  const publicJson = JSON.stringify(provider);
+  assert.equal(publicJson.includes('dashboard-jwt'), false);
+  assert.equal(publicJson.includes('sub2api.example'), false);
+});
+
+test('Sub2API adapter fails closed on business errors and missing balances', async () => {
+  const businessError = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      expired: {
+        adapter: SUB2API_ADAPTER,
+        baseUrl: 'https://expired.example',
+        accessToken: 'expired-jwt'
+      }
+    }
+  }, {
+    env: {},
+    fetch: async () => response(200, { code: 401, message: 'token expired', data: null })
+  });
+  assert.equal(businessError[0].status, 'unavailable');
+  assert.deepEqual(businessError[0].windows, []);
+
+  const missingBalance = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      empty: {
+        adapter: SUB2API_ADAPTER,
+        baseUrl: 'https://empty.example',
+        accessToken: 'jwt'
+      }
+    }
+  }, {
+    env: {},
+    fetch: async () => response(200, { code: 0, message: 'success', data: { id: 7, username: 'no-balance' } })
+  });
+  assert.equal(missingBalance[0].status, 'unavailable');
+
+  const unauthorized = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      bad: {
+        adapter: SUB2API_ADAPTER,
+        baseUrl: 'https://bad.example',
+        accessToken: 'bad-jwt'
+      }
+    }
+  }, {
+    env: {},
+    fetch: async () => response(401, { code: 401, message: 'unauthorized' })
+  });
+  assert.equal(unauthorized[0].status, 'unauthorized');
+  assert.deepEqual(unauthorized[0].windows, []);
 });
 
 test('custom adapter maps one GET response without exposing configuration', async () => {
