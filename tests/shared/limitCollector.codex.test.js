@@ -456,7 +456,7 @@ test('fetchCodexLimits prefers read-only OAuth usage and maps wham windows', asy
   assert.deepEqual(providers[0].windows.map((window) => window.windowMinutes), [300, 10080]);
 });
 
-test('fetchCodexLimits treats a reached OAuth rate limit as fully used', async () => {
+test('fetchCodexLimits preserves per-window usage when the OAuth rate limit is reached', async () => {
   const provider = await fetchCodexLimits({}, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin' },
@@ -475,8 +475,32 @@ test('fetchCodexLimits treats a reached OAuth rate limit as fully used', async (
     readCodexResetCredits: async () => null
   });
 
-  assert.deepEqual(provider.windows.map((window) => window.usedPercent), [100, 100]);
-  assert.deepEqual(provider.windows.map((window) => window.remainingPercent), [0, 0]);
+  assert.deepEqual(provider.windows.map((window) => window.usedPercent), [40, 20]);
+  assert.deepEqual(provider.windows.map((window) => window.remainingPercent), [60, 80]);
+});
+
+test('fetchCodexLimits supports a single weekly OAuth window', async () => {
+  const provider = await fetchCodexLimits({}, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        rate_limit: {
+          primary_window: { used_percent: 35, reset_at: 1_770_500_000, limit_window_seconds: 604_800 }
+        }
+      })
+    }),
+    readCodexResetCredits: async () => null
+  });
+
+  assert.equal(provider.windows.length, 1);
+  assert.equal(provider.windows[0].kind, 'weekly');
+  assert.equal(provider.windows[0].usedPercent, 35);
+  assert.equal(provider.windows[0].remainingPercent, 65);
+  assert.equal(provider.windows[0].windowMinutes, 10_080);
 });
 
 test('fetchCodexLimits uses Codex API paths for a non-ChatGPT base URL', async () => {

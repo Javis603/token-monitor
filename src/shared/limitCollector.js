@@ -2021,13 +2021,12 @@ function codexDirectRateLimits(payload = {}) {
   if (direct && typeof direct === 'object') return direct;
   const wham = payload.rateLimit || payload.rate_limit;
   if (!wham || typeof wham !== 'object') return {};
-  const limitReached = wham.limitReached ?? wham.limit_reached;
   const normalizeWindow = (window) => {
     if (!window || typeof window !== 'object') return null;
     const seconds = Number(window.limitWindowSeconds ?? window.limit_window_seconds);
     return {
       ...window,
-      usedPercent: limitReached === true ? 100 : (window.usedPercent ?? window.used_percent),
+      usedPercent: window.usedPercent ?? window.used_percent,
       resetsAt: window.resetsAt ?? window.resetAt ?? window.reset_at,
       windowDurationMins: Number.isFinite(seconds) ? seconds / 60 : undefined
     };
