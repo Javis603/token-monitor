@@ -66,9 +66,28 @@ test('parseTraeEntUsage aggregates valid packs as a credits balance', () => {
 test('parseTraeEntUsage fails closed instead of publishing partial credit packs', () => {
   assert.throws(() => parseTraeEntUsage({ user_entitlement_pack_list: [pack(100, 10), {}] }), /unusable active/);
   assert.throws(() => parseTraeEntUsage({ user_entitlement_pack_list: [pack(100, -1)] }), /unusable active/);
-  assert.throws(() => parseTraeEntUsage({ user_entitlement_pack_list: [pack(100, 101)] }), /unusable active/);
   assert.throws(() => parseTraeEntUsage({ user_entitlement_pack_list: [] }), /no usable/);
   assert.throws(() => parseTraeEntUsage({}), /no entitlement pack list/);
+});
+
+test('parseTraeEntUsage preserves overage while clamping the spendable balance', () => {
+  const settledAcrossPacks = parseTraeEntUsage({
+    user_entitlement_pack_list: [pack(100, 120), pack(100, 20)]
+  });
+  assert.equal(settledAcrossPacks.window.used, 140);
+  assert.equal(settledAcrossPacks.window.limit, 200);
+  assert.equal(settledAcrossPacks.window.remaining, 60);
+  assert.equal(settledAcrossPacks.window.usedPercent, 70);
+  assert.equal(settledAcrossPacks.window.remainingPercent, 30);
+
+  const exhausted = parseTraeEntUsage({
+    user_entitlement_pack_list: [pack(100, 125)]
+  });
+  assert.equal(exhausted.window.used, 125);
+  assert.equal(exhausted.window.limit, 100);
+  assert.equal(exhausted.window.remaining, 0);
+  assert.equal(exhausted.window.usedPercent, 100);
+  assert.equal(exhausted.window.remainingPercent, 0);
 });
 
 test('fetchTraeLimits returns notConfigured without a token', async () => {

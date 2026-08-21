@@ -81,7 +81,7 @@ function parseTraeEntUsage(body) {
     // unusable row makes a partial aggregate unsafe to publish.
     if (packLimit === 0 && packUsed === 0) continue;
     activePackCount += 1;
-    if (packLimit === null || packUsed === null || packLimit <= 0 || packUsed < 0 || packUsed > packLimit) {
+    if (packLimit === null || packUsed === null || packLimit <= 0 || packUsed < 0) {
       throw new Error('Trae credits response contains an unusable active entitlement pack');
     }
     limit += packLimit;
@@ -89,8 +89,11 @@ function parseTraeEntUsage(body) {
   }
 
   if (activePackCount === 0) throw new Error('Trae credits response has no usable entitlement packs');
-  const remaining = limit - used;
-  const usedPercent = (used / limit) * 100;
+  // Usage can temporarily exceed an individual pack or the aggregate limit
+  // during settlement. Preserve the reported usage while presenting the
+  // spendable balance as exhausted instead of making the provider unavailable.
+  const remaining = Math.max(0, limit - used);
+  const usedPercent = Math.min(100, (used / limit) * 100);
   return {
     packCount: activePackCount,
     window: {
