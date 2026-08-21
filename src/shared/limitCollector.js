@@ -2133,11 +2133,16 @@ function unambiguousAlternateCodexRateLimits(rateLimitsById) {
 function codexRateLimitSnapshot(payload = {}) {
   const rateLimitsById = codexRateLimitsById(payload);
   const direct = codexDirectRateLimits(payload);
-  if (hasCodexRateLimitWindows(rateLimitsById.codex)) return rateLimitsById.codex;
+  // An explicit main bucket is authoritative even when it has no windows.
+  // OAuth additional_rate_limits are independent metered-feature quotas; they
+  // must never be promoted into the ordinary Codex session/weekly lanes. The
+  // alternate consensus below remains only for legacy RPC payloads that omit
+  // the canonical `codex` key entirely.
+  if (Object.hasOwn(rateLimitsById, 'codex')) return rateLimitsById.codex || {};
   if (hasCodexRateLimitWindows(direct)) return direct;
   const alternate = unambiguousAlternateCodexRateLimits(rateLimitsById);
   if (alternate) return alternate;
-  return rateLimitsById.codex || direct || {};
+  return direct || {};
 }
 
 function codexResetCreditsSnapshot(payload = {}) {
@@ -3050,6 +3055,18 @@ function managedCodexAccountKey(account, authIdentity = {}, resolvedEmail = '') 
   );
 }
 
+function codexOAuthCanFallbackToRpc(error, deps = {}) {
+  if (
+    deps.codexAccountId
+    || deps.signal?.aborted
+    || error?.code === 'ABORT_ERR'
+    || error?.name === 'AbortError'
+  ) return false;
+  const httpStatus = Number(error?.httpStatus);
+  if (Number.isFinite(httpStatus)) return httpStatus === 408 || httpStatus >= 500;
+  return !['notConfigured', 'unauthorized', 'sourceRateLimited'].includes(error?.status);
+}
+
 async function readCodexUsageOrRpc(deps = {}) {
   const oauthReader = deps.readCodexUsage || fetchCodexUsage;
   const rpcReader = deps.readCodexRpc || readCodexRpc;
@@ -3069,11 +3086,13 @@ async function readCodexUsageOrRpc(deps = {}) {
     };
   };
   let oauthError;
+  let transientLiveFailure;
   try {
     return await readOAuth();
   } catch (error) {
     oauthError = error;
-    if (!['notConfigured', 'unauthorized'].includes(error?.status)) {
+    transientLiveFailure = codexOAuthCanFallbackToRpc(error, deps);
+    if (!['notConfigured', 'unauthorized'].includes(error?.status) && !transientLiveFailure) {
       error.codexSource = 'oauth';
       throw error;
     }
@@ -3083,6 +3102,10 @@ async function readCodexUsageOrRpc(deps = {}) {
   try {
     rpcPayload = await rpcReader(deps);
   } catch (error) {
+    if (transientLiveFailure) {
+      oauthError.codexSource = 'oauth';
+      throw oauthError;
+    }
     error.codexSource = 'rpc';
     throw error;
   }

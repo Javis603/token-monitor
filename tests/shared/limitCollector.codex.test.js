@@ -503,7 +503,7 @@ test('fetchCodexLimits supports a single weekly OAuth window', async () => {
   assert.equal(provider.windows[0].windowMinutes, 10_080);
 });
 
-test('fetchCodexLimits preserves an additional OAuth bucket when the main bucket is absent', async () => {
+test('fetchCodexLimits does not promote an additional OAuth bucket when the main bucket is absent', async () => {
   const provider = await fetchCodexLimits({}, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin' },
@@ -529,11 +529,73 @@ test('fetchCodexLimits preserves an additional OAuth bucket when the main bucket
   assert.equal(provider.status, 'ok');
   assert.equal(provider.source, 'oauth');
   assert.equal(provider.accountLabel, 'Pro 20x');
-  assert.equal(provider.windows.length, 1);
-  assert.equal(provider.windows[0].kind, 'weekly');
-  assert.equal(provider.windows[0].usedPercent, 70);
-  assert.equal(provider.windows[0].remainingPercent, 30);
-  assert.equal(provider.windows[0].windowMinutes, 10_080);
+  assert.deepEqual(provider.windows, []);
+});
+
+test('fetchCodexLimits keeps the main OAuth windows without surfacing an additional bucket', async () => {
+  const provider = await fetchCodexLimits({}, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        plan_type: 'plus',
+        rate_limit: {
+          primary_window: { used_percent: 12, reset_at: 1_770_000_000, limit_window_seconds: 18_000 },
+          secondary_window: { used_percent: 34, reset_at: 1_770_500_000, limit_window_seconds: 604_800 }
+        },
+        additional_rate_limits: [{
+          limit_name: 'Codex Other',
+          metered_feature: 'codex_other',
+          rate_limit: {
+            primary_window: { used_percent: 70, reset_at: 1_770_500_000, limit_window_seconds: 604_800 }
+          }
+        }]
+      })
+    }),
+    readCodexResetCredits: async () => null
+  });
+
+  assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly']);
+  assert.deepEqual(provider.windows.map((window) => window.usedPercent), [12, 34]);
+});
+
+test('fetchCodexLimits does not choose between different additional OAuth buckets', async () => {
+  const provider = await fetchCodexLimits({}, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        plan_type: 'pro',
+        rate_limit: null,
+        additional_rate_limits: [
+          {
+            limit_name: 'Codex Other',
+            metered_feature: 'codex_other',
+            rate_limit: {
+              primary_window: { used_percent: 70, reset_at: 1_770_500_000, limit_window_seconds: 604_800 }
+            }
+          },
+          {
+            limit_name: 'Codex Spark',
+            metered_feature: 'codex_spark',
+            rate_limit: {
+              primary_window: { used_percent: 20, reset_at: 1_770_000_000, limit_window_seconds: 18_000 }
+            }
+          }
+        ]
+      })
+    }),
+    readCodexResetCredits: async () => null
+  });
+
+  assert.equal(provider.status, 'ok');
+  assert.deepEqual(provider.windows, []);
 });
 
 test('fetchCodexLimits uses Codex API paths for a non-ChatGPT base URL', async () => {
@@ -625,7 +687,56 @@ test('fetchCodexLimits rejects an unscoped RPC result for a selected managed wor
   assert.deepEqual(providers[0].windows, []);
 });
 
-test('fetchCodexLimits does not hide OAuth outages behind CLI fallback', async () => {
+test('fetchCodexLimits falls back to RPC for a transient live-account OAuth outage', async () => {
+  let rpcCalls = 0;
+  const provider = await fetchCodexLimits({}, {
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => ({ ok: false, status: 503, headers: { get: () => null } }),
+    readCodexResetCredits: async () => null,
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      return codexPayload('live@example.com');
+    }
+  });
+  assert.equal(rpcCalls, 1);
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'rpc');
+  assert.ok(provider.windows.length > 0);
+});
+
+test('fetchCodexLimits falls back to RPC for a live-account OAuth network failure', async () => {
+  let rpcCalls = 0;
+  const provider = await fetchCodexLimits({}, {
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => { throw new TypeError('network unavailable'); },
+    readCodexResetCredits: async () => null,
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      return codexPayload('live@example.com');
+    }
+  });
+
+  assert.equal(rpcCalls, 1);
+  assert.equal(provider.source, 'rpc');
+});
+
+test('fetchCodexLimits does not use RPC for a permanent live-account OAuth response', async () => {
+  let rpcCalls = 0;
+  await assert.rejects(fetchCodexLimits({}, {
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => ({ ok: false, status: 404, headers: { get: () => null } }),
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      return codexPayload('live@example.com');
+    }
+  }), /returned 404/);
+  assert.equal(rpcCalls, 0);
+});
+
+test('fetchCodexLimits preserves the OAuth outage when the live RPC fallback is unavailable', async () => {
   let rpcCalls = 0;
   await assert.rejects(fetchCodexLimits({}, {
     env: { PATH: '/usr/bin' },
@@ -633,10 +744,36 @@ test('fetchCodexLimits does not hide OAuth outages behind CLI fallback', async (
     fetch: async () => ({ ok: false, status: 503, headers: { get: () => null } }),
     readCodexRpc: async () => {
       rpcCalls += 1;
-      return codexPayload('live@example.com');
+      throw Object.assign(new Error('Codex CLI not found'), { status: 'notConfigured' });
     }
   }), /returned 503/);
+  assert.equal(rpcCalls, 1);
+});
+
+test('fetchCodexLimits keeps a selected managed workspace fail closed on a transient OAuth outage', async () => {
+  let rpcCalls = 0;
+  const providers = await fetchCodexLimits({
+    includeLiveCodexAccount: false,
+    codexManagedAccounts: [{
+      id: 'team',
+      email: 'member@example.com',
+      workspaceAccountId: 'workspace-team',
+      homePath: '/tmp/token-monitor-codex/team'
+    }]
+  }, {
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => ({ ok: false, status: 503, headers: { get: () => null } }),
+    readCodexRpc: async () => {
+      rpcCalls += 1;
+      return codexPayload('default@example.com');
+    }
+  });
+
   assert.equal(rpcCalls, 0);
+  assert.equal(providers[0].status, 'unavailable');
+  assert.equal(providers[0].source, 'oauth');
+  assert.deepEqual(providers[0].windows, []);
 });
 
 test('fetchCodexLimits lets app-server recover stale native OAuth then retries usage', async () => {
