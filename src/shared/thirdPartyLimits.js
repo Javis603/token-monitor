@@ -23,6 +23,7 @@ const NEWAPI_ACCOUNT_PATH = '/api/user/self';
 const NEWAPI_TOKEN_USAGE_PATH = '/api/usage/token/';
 const SUB2API_ME_PATH = '/api/v1/auth/me';
 const SUB2API_REFRESH_PATH = '/api/v1/auth/refresh';
+const SUB2API_USAGE_STATS_PATH = '/api/v1/usage/stats?period=month';
 const DEFAULT_CUSTOM_ENDPOINT_PATH = '/user/balance';
 const DEFAULT_CUSTOM_CURRENCY = 'USD';
 const DEFAULT_CUSTOM_DIVISOR = 1;
@@ -415,6 +416,17 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
         }
       };
     },
+    // Rolling-month usage stats only enrich the balance with a display-layer
+    // monthSpend; a failed or absent stats response must not hide the balance.
+    optionalStatus: true,
+    statusRequest(account) {
+      return {
+        path: SUB2API_USAGE_STATS_PATH,
+        headers: {
+          Authorization: `Bearer ${account.accessToken}`
+        }
+      };
+    },
     unit() {
       return 1;
     },
@@ -438,9 +450,16 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
       }
       return { accessToken, refreshToken };
     },
-    quota(payload) {
+    quota(payload, _unit, _account, statusPayload) {
       const data = sub2apiData(payload);
-      return data ? sub2apiAccountQuota(data) : null;
+      if (!data) return null;
+      const quota = sub2apiAccountQuota(data);
+      if (quota) {
+        const stats = sub2apiData(statusPayload);
+        const monthSpend = finiteNumber(stats?.total_actual_cost);
+        if (monthSpend !== null && monthSpend > 0) quota.balance.monthSpend = monthSpend;
+      }
+      return quota;
     },
     planLabel() {
       return 'Account';
@@ -684,7 +703,7 @@ async function fetchThirdPartyAccount(account, deps = {}) {
       windows: []
     });
   }
-  if (statusRequest && statusResponse && !statusResponse.fulfilled) {
+  if (statusRequest && statusResponse && !statusResponse.fulfilled && adapter.optionalStatus !== true) {
     return normalizeLimitProvider({
       ...common,
       status: 'unavailable',
@@ -692,10 +711,9 @@ async function fetchThirdPartyAccount(account, deps = {}) {
     });
   }
 
-  const unit = adapter.unit(
-    statusResponse && statusResponse.fulfilled ? statusResponse.value : null
-  );
-  const quota = adapter.quota(quotaResultPayload, unit, account);
+  const statusPayload = statusResponse && statusResponse.fulfilled ? statusResponse.value : null;
+  const unit = adapter.unit(statusPayload);
+  const quota = adapter.quota(quotaResultPayload, unit, account, statusPayload);
   if (!quota) {
     return normalizeLimitProvider({
       ...common,

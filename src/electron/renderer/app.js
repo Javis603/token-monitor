@@ -4699,9 +4699,18 @@ function renderProviderWindows(provider, color) {
     const balanceLabel = quotaWindow?.label || 'Balance';
     if (balanceAmount !== null) {
       const balanceValue = formatMoney(balanceAmount, currency);
+      // Balance presets without a fixed quota denominator (Sub2API reports the
+      // remaining USD balance plus an observed monthSpend) get the same
+      // display-layer meter DeepSeek uses: balance / (balance + month spend).
+      // Windows that already carry provider percentages pass through unchanged.
+      const meterPercent = creditsMeterPercent(provider, quotaWindow);
       const balanceNode = limitWindowNode(
         balanceLabel,
-        { ...(quotaWindow || { showMeter: false }), label: balanceLabel },
+        {
+          ...(quotaWindow || { showMeter: false }),
+          label: balanceLabel,
+          ...(meterPercent !== null ? { remainingPercent: meterPercent, showMeter: true } : {})
+        },
         color,
         0.95,
         balanceValue

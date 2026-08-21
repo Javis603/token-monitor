@@ -107,6 +107,8 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(app, /provider\.provider === 'thirdparty'/);
   assert.match(app, /function thirdPartyQuotaWindow/);
   assert.match(app, /quotaWindow\?\.label \|\| 'Balance'/);
+  assert.match(app, /const meterPercent = creditsMeterPercent\(provider, quotaWindow\)/);
+  assert.match(app, /\.\.\.\(meterPercent !== null \? \{ remainingPercent: meterPercent, showMeter: true \} : \{\}\)/);
   assert.match(app, /function thirdPartyPlanText/);
   assert.match(app, /if \(provider\?\.status !== 'ok'\) return undefined/);
   assert.match(app, /if \(planLabel === 'account'\) return 'Account'/);

@@ -349,16 +349,65 @@ test('Sub2API adapter reports the dashboard account balance without a status req
   assert.equal(provider.balance.amount, 12.5);
   assert.equal(provider.balance.currency, 'USD');
   assert.equal(provider.balance.allTimeSpend, null);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0][0], `https://sub2api.example${SUB2API_ME_PATH}`);
-  assert.equal(calls[0][1].method, 'GET');
-  assert.equal(calls[0][1].headers.Authorization, 'Bearer dashboard-jwt');
+  const meCall = calls.find(([url]) => url.endsWith(SUB2API_ME_PATH));
+  assert.ok(meCall, 'auth/me must be requested');
+  assert.equal(meCall[1].method, 'GET');
+  assert.equal(meCall[1].headers.Authorization, 'Bearer dashboard-jwt');
   assert.equal(provider.windows[0].label, 'Balance');
   assert.equal(provider.windows[0].remaining, 12.5);
   assert.equal(provider.windows[0].showMeter, false);
   const publicJson = JSON.stringify(provider);
   assert.equal(publicJson.includes('dashboard-jwt'), false);
   assert.equal(publicJson.includes('sub2api.example'), false);
+});
+
+test('Sub2API adapter attaches rolling-month spend and survives stats failures', async () => {
+  const [enriched] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      dashboard: {
+        adapter: SUB2API_ADAPTER,
+        baseUrl: 'https://stats.example',
+        accessToken: 'jwt'
+      }
+    }
+  }, {
+    env: {},
+    fetch: async (url) => (
+      url.startsWith('https://stats.example/api/v1/usage/stats')
+        ? response(200, {
+          code: 0,
+          message: 'success',
+          data: {
+            total_requests: 21,
+            total_actual_cost: 2.5
+          }
+        })
+        : response(200, { code: 0, message: 'success', data: { id: 1, balance: 12.5 } })
+    )
+  });
+  assert.equal(enriched.status, 'ok');
+  assert.equal(enriched.balance.amount, 12.5);
+  assert.equal(enriched.balance.monthSpend, 2.5);
+
+  const [withoutStats] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      legacy: {
+        adapter: SUB2API_ADAPTER,
+        baseUrl: 'https://legacy.example',
+        accessToken: 'jwt'
+      }
+    }
+  }, {
+    env: {},
+    fetch: async (url) => (
+      url.startsWith('https://legacy.example/api/v1/usage/stats')
+        ? response(404, { code: 404, message: 'not found' })
+        : response(200, { code: 0, message: 'success', data: { id: 1, balance: 7.5 } })
+    )
+  });
+  assert.equal(withoutStats.status, 'ok');
+  assert.equal(withoutStats.balance.amount, 7.5);
+  assert.equal(withoutStats.balance.monthSpend, null);
 });
 
 test('Sub2API adapter fails closed on business errors and missing balances', async () => {
@@ -465,7 +514,7 @@ test('Sub2API adapter renews an expired access token once and reports the rotati
     previous: { accessToken: 'expired-jwt', refreshToken: 'refresh-1' },
     next: { accessToken: 'fresh-jwt', refreshToken: 'refresh-2' }
   }]);
-  assert.deepEqual(calls, [
+  assert.deepEqual(calls.filter(([, url]) => !url.startsWith('https://renew.example/api/v1/usage/stats')), [
     ['GET', 'https://renew.example/api/v1/auth/me'],
     ['POST', 'https://renew.example/api/v1/auth/refresh'],
     ['GET', 'https://renew.example/api/v1/auth/me']
