@@ -1532,7 +1532,7 @@ async function switchCodexSystemAccount(id) {
   try {
     selectedMaterial = codexAuthMaterialForWorkspace(targetMaterial, account.workspaceAccountId);
   } catch (error) {
-    return { ok: false, error: error?.message || 'Could not verify the selected Codex workspace routing.' };
+    return { ok: false, error: error?.message || 'Could not prepare the selected Codex workspace.' };
   }
   const targetIdentity = {
     ...selectedMaterial.identity,

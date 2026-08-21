@@ -54,7 +54,7 @@ test('normalizeCodexWorkspaces dedupes ids and labels unnamed personal workspace
   ]);
 });
 
-test('listCodexWorkspaces preserves current-auth FedRAMP routing without persisting workspace metadata', async () => {
+test('listCodexWorkspaces follows CodexBar headers without inferring FedRAMP routing', async () => {
   let request = null;
   const workspaces = await listCodexWorkspaces({
     tokens: {
@@ -78,7 +78,7 @@ test('listCodexWorkspaces preserves current-auth FedRAMP routing without persist
   });
 
   assert.equal(request.url, CODEX_WORKSPACES_URL);
-  assert.equal(request.options.headers['X-OpenAI-Fedramp'], 'true');
+  assert.equal(Object.hasOwn(request.options.headers, 'X-OpenAI-Fedramp'), false);
   assert.deepEqual(workspaces, [{
     id: 'workspace-current',
     label: 'Government',

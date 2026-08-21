@@ -4,12 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {
-  assertCodexOAuthWorkspaceRouting,
-  codexAuthIdentity,
-  codexManagedAccountMatchesIdentity,
-  codexOAuthRequestContext
-} = require('./codexAuth');
+const { codexAuthIdentity, codexManagedAccountMatchesIdentity } = require('./codexAuth');
 const { authWithSelectedCodexWorkspace, normalizeWorkspaceId } = require('./codexWorkspaces');
 
 function liveCodexAuthPath(env = process.env, homeDir = os.homedir()) {
@@ -47,9 +42,6 @@ async function readCodexAuthMaterial(authPath, deps = {}) {
 function codexAuthMaterialForWorkspace(material, workspaceId) {
   const selectedWorkspaceId = normalizeWorkspaceId(workspaceId);
   if (!selectedWorkspaceId) return material;
-  assertCodexOAuthWorkspaceRouting(codexOAuthRequestContext(material?.auth, {
-    accountId: selectedWorkspaceId
-  }));
   const auth = authWithSelectedCodexWorkspace(material?.auth, selectedWorkspaceId);
   return {
     ...material,

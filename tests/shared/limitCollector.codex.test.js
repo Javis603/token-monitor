@@ -396,7 +396,7 @@ function makeIdToken(payload) {
 // The live account's auth.json is never read in tests unless a test opts in.
 const noLiveAuth = { readFileSync: () => { throw new Error('no auth.json'); } };
 
-test('fetchCodexLimits prefers read-only OAuth usage and maps wham windows', async () => {
+test('fetchCodexLimits prefers OAuth and applies the managed workspace account header', async () => {
   const requests = [];
   let rpcCalls = 0;
   const providers = await fetchCodexLimits({
@@ -413,10 +413,10 @@ test('fetchCodexLimits prefers read-only OAuth usage and maps wham windows', asy
     readFileSync: () => JSON.stringify({
       tokens: {
         access_token: 'access-token',
-        account_id: 'workspace-team',
+        account_id: 'workspace-personal',
         id_token: makeIdToken({
           'https://api.openai.com/auth': {
-            chatgpt_account_id: 'workspace-team',
+            chatgpt_account_id: 'workspace-personal',
             chatgpt_account_is_fedramp: true
           }
         })
@@ -456,7 +456,7 @@ test('fetchCodexLimits prefers read-only OAuth usage and maps wham windows', asy
   assert.equal(requests[0].url, 'https://chatgpt.com/backend-api/wham/usage');
   assert.equal(requests[0].init.headers.authorization, 'Bearer access-token');
   assert.equal(requests[0].init.headers['chatgpt-account-id'], 'workspace-team');
-  assert.equal(requests[0].init.headers['x-openai-fedramp'], 'true');
+  assert.equal(Object.hasOwn(requests[0].init.headers, 'x-openai-fedramp'), false);
   assert.equal(providers[0].source, 'oauth');
   assert.equal(providers[0].sourceDetail, 'managed');
   assert.equal(providers[0].accountKey, codexAccountKey('member@example.com', 'workspace-team'));
@@ -466,53 +466,11 @@ test('fetchCodexLimits prefers read-only OAuth usage and maps wham windows', asy
   assert.deepEqual(providers[0].windows.map((window) => window.windowMinutes), [300, 10080]);
 });
 
-test('fetchCodexLimits makes no request for a managed workspace not proven by its auth snapshot', async () => {
-  let fetchCalls = 0;
-  let rpcCalls = 0;
-  const providers = await fetchCodexLimits({
-    includeLiveCodexAccount: false,
-    codexManagedAccounts: [{
-      id: 'team',
-      email: 'member@example.com',
-      workspaceAccountId: 'workspace-team',
-      homePath: '/tmp/token-monitor-codex/team'
-    }]
-  }, {
-    env: { PATH: '/usr/bin' },
-    readFileSync: () => JSON.stringify({
-      tokens: {
-        access_token: 'access-token',
-        account_id: 'workspace-personal',
-        id_token: makeIdToken({
-          'https://api.openai.com/auth': {
-            chatgpt_account_id: 'workspace-personal',
-            chatgpt_account_is_fedramp: false
-          }
-        })
-      }
-    }),
-    fetch: async () => {
-      fetchCalls += 1;
-      throw new Error('routing must fail before HTTP');
-    },
-    readCodexRpc: async () => {
-      rpcCalls += 1;
-      throw new Error('routing mismatch must not start app-server');
-    }
-  });
-
-  assert.equal(fetchCalls, 0);
-  assert.equal(rpcCalls, 0);
-  assert.equal(providers[0].status, 'unavailable');
-  assert.equal(providers[0].source, 'oauth');
-  assert.deepEqual(providers[0].windows, []);
-});
-
-test('fetchCodexLimits makes no request when live auth has conflicting workspace routing', async () => {
-  let fetchCalls = 0;
+test('fetchCodexLimits uses stored account_id when the live JWT claim differs', async () => {
+  const requests = [];
   let rpcCalls = 0;
 
-  await assert.rejects(fetchCodexLimits({}, {
+  const provider = await fetchCodexLimits({}, {
     env: { PATH: '/usr/bin' },
     readFileSync: () => JSON.stringify({
       tokens: {
@@ -526,25 +484,33 @@ test('fetchCodexLimits makes no request when live auth has conflicting workspace
         })
       }
     }),
-    fetch: async () => {
-      fetchCalls += 1;
-      throw new Error('routing must fail before HTTP');
+    fetch: async (url, init) => {
+      requests.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          rate_limit: {
+            primary_window: { used_percent: 8, reset_at: 1_770_000_000, limit_window_seconds: 18_000 }
+          }
+        })
+      };
     },
+    readCodexResetCredits: async () => null,
     readCodexRpc: async () => {
       rpcCalls += 1;
-      throw new Error('routing mismatch must not start app-server');
+      throw new Error('RPC must not run when OAuth usage succeeds');
     }
-  }), (error) => {
-    assert.equal(error.code, 'CODEX_WORKSPACE_ROUTING_UNVERIFIED');
-    assert.equal(error.status, 'unavailable');
-    return true;
   });
 
-  assert.equal(fetchCalls, 0);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].init.headers['chatgpt-account-id'], 'workspace-team');
   assert.equal(rpcCalls, 0);
+  assert.equal(provider.source, 'oauth');
+  assert.equal(provider.windows[0].remainingPercent, 92);
 });
 
-test('fetchCodexLimits omits FedRAMP routing for an ordinary workspace', async () => {
+test('fetchCodexLimits follows CodexBar headers without adding FedRAMP routing', async () => {
   let request = null;
   await fetchCodexLimits({}, {
     env: { PATH: '/usr/bin' },
@@ -555,7 +521,7 @@ test('fetchCodexLimits omits FedRAMP routing for an ordinary workspace', async (
         id_token: makeIdToken({
           'https://api.openai.com/auth': {
             chatgpt_account_id: 'workspace-personal',
-            chatgpt_account_is_fedramp: false
+            chatgpt_account_is_fedramp: true
           }
         })
       }
@@ -776,7 +742,7 @@ test('fetchCodexLimits uses Codex API paths for a non-ChatGPT base URL', async (
     'Bearer access-token-a'
   ]);
   assert.deepEqual(requests.map(({ init }) => init.headers['chatgpt-account-id']), ['account-a', 'account-a']);
-  assert.deepEqual(requests.map(({ init }) => init.headers['x-openai-fedramp']), ['true', 'true']);
+  assert.deepEqual(requests.map(({ init }) => Object.hasOwn(init.headers, 'x-openai-fedramp')), [false, false]);
   assert.equal(provider.source, 'oauth');
   assert.equal(provider.windows[0].remainingPercent, 96);
   assert.equal(provider.resetCredits.availableCount, 1);

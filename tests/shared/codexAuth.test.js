@@ -64,43 +64,32 @@ test('codexAuthIdentity reads nested OpenAI auth claims', () => {
   assert.equal(identity.providerAccountId, 'acct_nested');
 });
 
-test('codexAuthIdentity and OAuth request context preserve workspace-scoped FedRAMP routing', () => {
+test('OAuth request context prefers an explicit workspace, then stored account_id, then JWT fallback', () => {
   const auth = {
     tokens: {
       access_token: 'access-token',
       account_id: 'workspace-current',
       id_token: jwt({
-        email: 'fedramp@example.com',
+        email: 'member@example.com',
         'https://api.openai.com/auth': {
-          chatgpt_account_id: 'workspace-current',
-          chatgpt_account_is_fedramp: true
+          chatgpt_account_id: 'workspace-claimed'
         }
       })
     }
   };
 
-  assert.equal(codexAuthIdentity(auth).isFedrampAccount, true);
+  assert.equal(codexAuthIdentity(auth).workspaceAccountId, 'workspace-current');
   assert.deepEqual(codexOAuthRequestContext(auth), {
     accessToken: 'access-token',
-    accountId: 'workspace-current',
-    claimedAccountId: 'workspace-current',
-    storedAccountId: 'workspace-current',
-    workspaceRoutingVerified: true,
-    isFedrampAccount: true
+    accountId: 'workspace-current'
   });
-  const requestedOther = codexOAuthRequestContext(auth, { accountId: 'workspace-other' });
-  assert.equal(requestedOther.workspaceRoutingVerified, false);
-  assert.equal(requestedOther.isFedrampAccount, false);
-  const storedOther = codexOAuthRequestContext({
-    ...auth,
-    tokens: { ...auth.tokens, account_id: 'workspace-other' }
-  });
-  assert.equal(storedOther.workspaceRoutingVerified, false);
-  assert.equal(storedOther.isFedrampAccount, false);
-  assert.equal(codexOAuthRequestContext(auth, {
-    accountId: 'workspace-other',
-    isFedrampAccount: true
-  }).workspaceRoutingVerified, false);
+  assert.equal(codexOAuthRequestContext(auth, { accountId: 'workspace-selected' }).accountId, 'workspace-selected');
+  assert.equal(codexOAuthRequestContext({
+    tokens: {
+      access_token: 'access-token',
+      id_token: auth.tokens.id_token
+    }
+  }).accountId, 'workspace-claimed');
 });
 
 test('codexAuthIdentity prefers the selected workspace from tokens.account_id', () => {

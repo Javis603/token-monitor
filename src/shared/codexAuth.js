@@ -163,19 +163,16 @@ function codexAuthClaims(auth) {
     payload.chatgpt_account_id
     || nested.chatgpt_account_id
   );
-  const fedrampClaim = nested.chatgpt_account_is_fedramp
-    ?? payload.chatgpt_account_is_fedramp;
   return {
     tokens,
     payload,
     nested,
-    claimedAccountId,
-    isFedrampAccount: fedrampClaim === true
+    claimedAccountId
   };
 }
 
 function codexOAuthRequestContext(auth, options = {}) {
-  const { tokens, claimedAccountId, isFedrampAccount: claimedFedramp } = codexAuthClaims(auth);
+  const { tokens, claimedAccountId } = codexAuthClaims(auth);
   const accessToken = String(
     tokens.access_token
     || tokens.accessToken
@@ -191,30 +188,14 @@ function codexOAuthRequestContext(auth, options = {}) {
   );
   const requestedAccountId = normalizeWorkspaceId(options.accountId);
   const accountId = requestedAccountId || storedAccountId || claimedAccountId;
-  const authWorkspaceId = claimedAccountId || storedAccountId;
-  const workspaceRoutingVerified = requestedAccountId
-    ? Boolean(authWorkspaceId && requestedAccountId === authWorkspaceId)
-    : !(claimedAccountId && storedAccountId && claimedAccountId !== storedAccountId);
   return {
     accessToken,
-    accountId,
-    claimedAccountId,
-    storedAccountId,
-    workspaceRoutingVerified,
-    isFedrampAccount: workspaceRoutingVerified && claimedFedramp
+    accountId
   };
 }
 
-function assertCodexOAuthWorkspaceRouting(context) {
-  if (context?.workspaceRoutingVerified) return context;
-  const error = new Error('The selected Codex workspace routing could not be verified. Sign in directly to that workspace and try again.');
-  error.status = 'unavailable';
-  error.code = 'CODEX_WORKSPACE_ROUTING_UNVERIFIED';
-  throw error;
-}
-
 function codexAuthIdentity(auth) {
-  const { tokens, payload, nested, isFedrampAccount } = codexAuthClaims(auth);
+  const { tokens, payload, nested } = codexAuthClaims(auth);
   const email = String(
     payload.email ||
     nested.email ||
@@ -246,7 +227,6 @@ function codexAuthIdentity(auth) {
     accountLabel,
     providerAccountId,
     workspaceAccountId: providerAccountId,
-    isFedrampAccount,
     accountKey: codexAccountKey(email, providerAccountId)
   };
 }
@@ -257,7 +237,6 @@ module.exports = {
   preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity,
   decodeJwtPayload,
-  assertCodexOAuthWorkspaceRouting,
   codexOAuthRequestContext,
   codexAuthIdentity,
   codexAccountKey,

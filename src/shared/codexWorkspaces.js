@@ -1,7 +1,7 @@
 'use strict';
 
 const { createOutboundFetch } = require('./outboundFetch');
-const { assertCodexOAuthWorkspaceRouting, codexOAuthRequestContext } = require('./codexAuth');
+const { codexOAuthRequestContext } = require('./codexAuth');
 
 const CODEX_WORKSPACES_URL = 'https://chatgpt.com/backend-api/accounts';
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -44,7 +44,6 @@ function normalizeCodexWorkspaces(payload) {
 }
 
 async function listCodexWorkspaces(auth, deps = {}) {
-  const context = assertCodexOAuthWorkspaceRouting(codexOAuthRequestContext(auth));
   const credentials = codexOAuthCredentials(auth);
   if (!credentials) return [];
   const fetchFn = createOutboundFetch(deps.env || process.env, deps);
@@ -63,7 +62,6 @@ async function listCodexWorkspaces(auth, deps = {}) {
     'User-Agent': 'codex-cli'
   };
   if (credentials.accountId) headers['ChatGPT-Account-Id'] = credentials.accountId;
-  if (context.isFedrampAccount) headers['X-OpenAI-Fedramp'] = 'true';
   const response = await fetchFn(CODEX_WORKSPACES_URL, {
     method: 'GET',
     headers,

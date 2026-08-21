@@ -27,12 +27,7 @@ const openrouterLimits = require('./openrouterLimits');
 const thirdPartyLimits = require('./thirdPartyLimits');
 const { sharedDataDir } = require('./config');
 const { recordConsumption } = require('./deepseekBalanceHistory');
-const {
-  assertCodexOAuthWorkspaceRouting,
-  codexAccountKey,
-  codexAuthIdentity,
-  codexOAuthRequestContext
-} = require('./codexAuth');
+const { codexAccountKey, codexAuthIdentity, codexOAuthRequestContext } = require('./codexAuth');
 const minimaxLimits = require('./minimaxLimits');
 const { minimaxToken, minimaxBaseUrl, parseMinimaxTiers, fetchMinimaxLimits } = minimaxLimits;
 const mimoLimits = require('./mimoLimits');
@@ -2165,9 +2160,9 @@ function codexAccessTokenFromAuth(auth) {
 }
 
 function codexOAuthRequestHeaders(auth, deps = {}, extra = {}) {
-  const context = assertCodexOAuthWorkspaceRouting(codexOAuthRequestContext(auth, {
+  const context = codexOAuthRequestContext(auth, {
     accountId: deps.codexAccountId
-  }));
+  });
   const headers = {
     authorization: `Bearer ${context.accessToken}`,
     accept: 'application/json',
@@ -2175,7 +2170,6 @@ function codexOAuthRequestHeaders(auth, deps = {}, extra = {}) {
     ...extra
   };
   if (context.accountId) headers['chatgpt-account-id'] = context.accountId;
-  if (context.isFedrampAccount) headers['x-openai-fedramp'] = 'true';
   return headers;
 }
 
@@ -3063,7 +3057,6 @@ function managedCodexAccountKey(account, authIdentity = {}, resolvedEmail = '') 
 function codexOAuthCanFallbackToRpc(error, deps = {}) {
   if (
     deps.codexAccountId
-    || error?.code === 'CODEX_WORKSPACE_ROUTING_UNVERIFIED'
     || deps.signal?.aborted
     || error?.code === 'ABORT_ERR'
     || error?.name === 'AbortError'
