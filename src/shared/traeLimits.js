@@ -89,9 +89,9 @@ function parseTraeEntUsage(body) {
   }
 
   if (activePackCount === 0) throw new Error('Trae credits response has no usable entitlement packs');
-  // Usage can temporarily exceed an individual pack or the aggregate limit
-  // during settlement. Preserve the reported usage while presenting the
-  // spendable balance as exhausted instead of making the provider unavailable.
+  // Preserve reported usage even when it exceeds an individual pack or the
+  // aggregate limit. Present the spendable balance as exhausted rather than
+  // treating an otherwise numeric response as unavailable.
   const remaining = Math.max(0, limit - used);
   const usedPercent = Math.min(100, (used / limit) * 100);
   return {

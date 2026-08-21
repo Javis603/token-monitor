@@ -66,6 +66,7 @@ test('parseTraeEntUsage aggregates valid packs as a credits balance', () => {
 test('parseTraeEntUsage fails closed instead of publishing partial credit packs', () => {
   assert.throws(() => parseTraeEntUsage({ user_entitlement_pack_list: [pack(100, 10), {}] }), /unusable active/);
   assert.throws(() => parseTraeEntUsage({ user_entitlement_pack_list: [pack(100, -1)] }), /unusable active/);
+  assert.throws(() => parseTraeEntUsage({ user_entitlement_pack_list: [pack(0, 10)] }), /unusable active/);
   assert.throws(() => parseTraeEntUsage({ user_entitlement_pack_list: [] }), /no usable/);
   assert.throws(() => parseTraeEntUsage({}), /no entitlement pack list/);
 });
