@@ -229,6 +229,38 @@ function normalizeQoderCnPricing(result) {
   return pricing.inputCostPerToken !== undefined || pricing.outputCostPerToken !== undefined ? pricing : null;
 }
 
+const QODER_CN_DEFAULT_PRICING = Object.freeze({
+  'qwen3.8-max': { inputCostPerToken: 12 / 7.25 / 1e6, outputCostPerToken: 36 / 7.25 / 1e6, cacheReadInputTokenCost: 1.5 / 7.25 / 1e6, cacheCreationInputTokenCost: 12 / 7.25 / 1e6 },
+  'qmodel_38max': { inputCostPerToken: 12 / 7.25 / 1e6, outputCostPerToken: 36 / 7.25 / 1e6, cacheReadInputTokenCost: 1.5 / 7.25 / 1e6, cacheCreationInputTokenCost: 12 / 7.25 / 1e6 },
+  'qwen3.7-max': { inputCostPerToken: 12 / 7.25 / 1e6, outputCostPerToken: 36 / 7.25 / 1e6, cacheReadInputTokenCost: 1.5 / 7.25 / 1e6, cacheCreationInputTokenCost: 12 / 7.25 / 1e6 },
+  'qmodel_latest': { inputCostPerToken: 12 / 7.25 / 1e6, outputCostPerToken: 36 / 7.25 / 1e6, cacheReadInputTokenCost: 1.5 / 7.25 / 1e6, cacheCreationInputTokenCost: 12 / 7.25 / 1e6 },
+  'qwen3.7-plus': { inputCostPerToken: 0.8 / 7.25 / 1e6, outputCostPerToken: 2.0 / 7.25 / 1e6, cacheReadInputTokenCost: 0.1 / 7.25 / 1e6, cacheCreationInputTokenCost: 0.8 / 7.25 / 1e6 },
+  'qmodel': { inputCostPerToken: 0.8 / 7.25 / 1e6, outputCostPerToken: 2.0 / 7.25 / 1e6, cacheReadInputTokenCost: 0.1 / 7.25 / 1e6, cacheCreationInputTokenCost: 0.8 / 7.25 / 1e6 },
+  'dashscope_qmodel': { inputCostPerToken: 0.8 / 7.25 / 1e6, outputCostPerToken: 2.0 / 7.25 / 1e6, cacheReadInputTokenCost: 0.1 / 7.25 / 1e6, cacheCreationInputTokenCost: 0.8 / 7.25 / 1e6 },
+  'qwen3.7-flash': { inputCostPerToken: 0.15 / 7.25 / 1e6, outputCostPerToken: 0.3 / 7.25 / 1e6, cacheReadInputTokenCost: 0.02 / 7.25 / 1e6, cacheCreationInputTokenCost: 0.15 / 7.25 / 1e6 },
+  'q37fmodel': { inputCostPerToken: 0.15 / 7.25 / 1e6, outputCostPerToken: 0.3 / 7.25 / 1e6, cacheReadInputTokenCost: 0.02 / 7.25 / 1e6, cacheCreationInputTokenCost: 0.15 / 7.25 / 1e6 },
+  'qwen3.6-flash': { inputCostPerToken: 0.15 / 7.25 / 1e6, outputCostPerToken: 0.3 / 7.25 / 1e6, cacheReadInputTokenCost: 0.02 / 7.25 / 1e6, cacheCreationInputTokenCost: 0.15 / 7.25 / 1e6 },
+  'q36fmodel': { inputCostPerToken: 0.15 / 7.25 / 1e6, outputCostPerToken: 0.3 / 7.25 / 1e6, cacheReadInputTokenCost: 0.02 / 7.25 / 1e6, cacheCreationInputTokenCost: 0.15 / 7.25 / 1e6 },
+  'qwen3.5-plus': { inputCostPerToken: 0.8 / 7.25 / 1e6, outputCostPerToken: 2.0 / 7.25 / 1e6, cacheReadInputTokenCost: 0.1 / 7.25 / 1e6, cacheCreationInputTokenCost: 0.8 / 7.25 / 1e6 },
+  'q35model': { inputCostPerToken: 0.8 / 7.25 / 1e6, outputCostPerToken: 2.0 / 7.25 / 1e6, cacheReadInputTokenCost: 0.1 / 7.25 / 1e6, cacheCreationInputTokenCost: 0.8 / 7.25 / 1e6 },
+  'qwen3.8-max-preview': { inputCostPerToken: 12 / 7.25 / 1e6, outputCostPerToken: 36 / 7.25 / 1e6, cacheReadInputTokenCost: 1.5 / 7.25 / 1e6, cacheCreationInputTokenCost: 12 / 7.25 / 1e6 },
+  'q35model_preview': { inputCostPerToken: 12 / 7.25 / 1e6, outputCostPerToken: 36 / 7.25 / 1e6, cacheReadInputTokenCost: 1.5 / 7.25 / 1e6, cacheCreationInputTokenCost: 12 / 7.25 / 1e6 },
+  'qmodel_preview': { inputCostPerToken: 12 / 7.25 / 1e6, outputCostPerToken: 36 / 7.25 / 1e6, cacheReadInputTokenCost: 1.5 / 7.25 / 1e6, cacheCreationInputTokenCost: 12 / 7.25 / 1e6 },
+  'deepseek-v4-pro': { inputCostPerToken: 2.0 / 7.25 / 1e6, outputCostPerToken: 8.0 / 7.25 / 1e6, cacheReadInputTokenCost: 0.5 / 7.25 / 1e6, cacheCreationInputTokenCost: 2.0 / 7.25 / 1e6 },
+  'dmodel': { inputCostPerToken: 2.0 / 7.25 / 1e6, outputCostPerToken: 8.0 / 7.25 / 1e6, cacheReadInputTokenCost: 0.5 / 7.25 / 1e6, cacheCreationInputTokenCost: 2.0 / 7.25 / 1e6 },
+  'deepseek-v4-flash': { inputCostPerToken: 0.4 / 7.25 / 1e6, outputCostPerToken: 1.5 / 7.25 / 1e6, cacheReadInputTokenCost: 0.1 / 7.25 / 1e6, cacheCreationInputTokenCost: 0.4 / 7.25 / 1e6 },
+  'dfmodel': { inputCostPerToken: 0.4 / 7.25 / 1e6, outputCostPerToken: 1.5 / 7.25 / 1e6, cacheReadInputTokenCost: 0.1 / 7.25 / 1e6, cacheCreationInputTokenCost: 0.4 / 7.25 / 1e6 },
+  'glm-5.2': { inputCostPerToken: 1.0 / 7.25 / 1e6, outputCostPerToken: 4.0 / 7.25 / 1e6, cacheReadInputTokenCost: 0.2 / 7.25 / 1e6, cacheCreationInputTokenCost: 1.0 / 7.25 / 1e6 },
+  'gm51model': { inputCostPerToken: 1.0 / 7.25 / 1e6, outputCostPerToken: 4.0 / 7.25 / 1e6, cacheReadInputTokenCost: 0.2 / 7.25 / 1e6, cacheCreationInputTokenCost: 1.0 / 7.25 / 1e6 },
+  'glm-5': { inputCostPerToken: 1.0 / 7.25 / 1e6, outputCostPerToken: 4.0 / 7.25 / 1e6, cacheReadInputTokenCost: 0.2 / 7.25 / 1e6, cacheCreationInputTokenCost: 1.0 / 7.25 / 1e6 },
+  'gmodel': { inputCostPerToken: 1.0 / 7.25 / 1e6, outputCostPerToken: 4.0 / 7.25 / 1e6, cacheReadInputTokenCost: 0.2 / 7.25 / 1e6, cacheCreationInputTokenCost: 1.0 / 7.25 / 1e6 },
+  'kimi-k2.7-code': { inputCostPerToken: 1.5 / 7.25 / 1e6, outputCostPerToken: 6.0 / 7.25 / 1e6, cacheReadInputTokenCost: 0.3 / 7.25 / 1e6, cacheCreationInputTokenCost: 1.5 / 7.25 / 1e6 },
+  'kmodel': { inputCostPerToken: 1.5 / 7.25 / 1e6, outputCostPerToken: 6.0 / 7.25 / 1e6, cacheReadInputTokenCost: 0.3 / 7.25 / 1e6, cacheCreationInputTokenCost: 1.5 / 7.25 / 1e6 },
+  'kmodel_latest': { inputCostPerToken: 1.5 / 7.25 / 1e6, outputCostPerToken: 6.0 / 7.25 / 1e6, cacheReadInputTokenCost: 0.3 / 7.25 / 1e6, cacheCreationInputTokenCost: 1.5 / 7.25 / 1e6 },
+  'minimax-m3': { inputCostPerToken: 0.6 / 7.25 / 1e6, outputCostPerToken: 2.4 / 7.25 / 1e6, cacheReadInputTokenCost: 0.15 / 7.25 / 1e6, cacheCreationInputTokenCost: 0.6 / 7.25 / 1e6 },
+  'mmodel': { inputCostPerToken: 0.6 / 7.25 / 1e6, outputCostPerToken: 2.4 / 7.25 / 1e6, cacheReadInputTokenCost: 0.15 / 7.25 / 1e6, cacheCreationInputTokenCost: 0.6 / 7.25 / 1e6 }
+});
+
 async function resolveQoderCnPricing(rows, options = {}) {
   const lookup = options.lookupModelPricing;
   const revision = options.pricingRevision ?? qoderCnPricingRevision();
@@ -245,11 +277,15 @@ async function resolveQoderCnPricing(rows, options = {}) {
       continue;
     }
     let pricing = null;
-    try {
-      pricing = normalizeQoderCnPricing(await lookup(modelId, commandTimeoutMs));
-    } catch (_) {
-      // An unknown model, offline lookup, or custom channel must remain
-      // cost-unavailable instead of inheriting an unrelated catalog price.
+    if (typeof lookup === 'function') {
+      try {
+        pricing = normalizeQoderCnPricing(await lookup(modelId, commandTimeoutMs));
+      } catch (_) {
+        // Fall through to built-in default rates when lookup is unavailable
+      }
+    }
+    if (!pricing && Object.prototype.hasOwnProperty.call(QODER_CN_DEFAULT_PRICING, modelId)) {
+      pricing = QODER_CN_DEFAULT_PRICING[modelId];
     }
     qoderCnPricingCache.set(modelId, { at: nowMs, revision, pricing });
     if (pricing) pricingByModel[modelId] = pricing;
