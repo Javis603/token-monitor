@@ -503,6 +503,39 @@ test('fetchCodexLimits supports a single weekly OAuth window', async () => {
   assert.equal(provider.windows[0].windowMinutes, 10_080);
 });
 
+test('fetchCodexLimits preserves an additional OAuth bucket when the main bucket is absent', async () => {
+  const provider = await fetchCodexLimits({}, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        plan_type: 'pro',
+        rate_limit: null,
+        additional_rate_limits: [{
+          limit_name: 'Codex Other',
+          metered_feature: 'codex_other',
+          rate_limit: {
+            primary_window: { used_percent: 70, reset_at: 1_770_500_000, limit_window_seconds: 604_800 }
+          }
+        }]
+      })
+    }),
+    readCodexResetCredits: async () => null
+  });
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'oauth');
+  assert.equal(provider.accountLabel, 'Pro 20x');
+  assert.equal(provider.windows.length, 1);
+  assert.equal(provider.windows[0].kind, 'weekly');
+  assert.equal(provider.windows[0].usedPercent, 70);
+  assert.equal(provider.windows[0].remainingPercent, 30);
+  assert.equal(provider.windows[0].windowMinutes, 10_080);
+});
+
 test('fetchCodexLimits uses Codex API paths for a non-ChatGPT base URL', async () => {
   const requests = [];
   let authReads = 0;

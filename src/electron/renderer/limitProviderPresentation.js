@@ -50,7 +50,7 @@
 
   const CAPABILITY_TAGS = {
     claude: ['Auto', 'OAuth/CLI', 'Web'],
-    codex: ['Auto', 'App/CLI RPC'],
+    codex: ['Auto', 'OAuth/App/CLI'],
     cursor: ['Manual login', 'Web'],
     antigravity: ['App/CLI must be open', 'RPC'],
     opencode: ['Auto', 'API/Web'],

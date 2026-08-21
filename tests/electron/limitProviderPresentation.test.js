@@ -272,7 +272,7 @@ test('Home omits reset rows that have no visible reset content', () => {
 
 test('capability tags explain how each provider is collected in settings', () => {
   assert.deepEqual(limitProviderCapabilityTags('claude'), ['Auto', 'OAuth/CLI', 'Web']);
-  assert.deepEqual(limitProviderCapabilityTags('codex'), ['Auto', 'App/CLI RPC']);
+  assert.deepEqual(limitProviderCapabilityTags('codex'), ['Auto', 'OAuth/App/CLI']);
   assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Manual login', 'Web']);
   assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['App/CLI must be open', 'RPC']);
   assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Auto', 'API/Web']);
@@ -366,6 +366,11 @@ test('named API profile toggles update immediately and roll back failed persiste
 });
 
 test('undetected settings tags include status and supported collection hints', () => {
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'codex', status: 'notConfigured', source: 'oauth' })
+      .map((tag) => tag.label),
+    ['Not set up', 'Auto', 'OAuth/App/CLI']
+  );
   // Antigravity's "App/CLI must be open" capability restates the notConfigured
   // status ("Open app or CLI"), so it is dropped to avoid a duplicate tag.
   assert.deepEqual(

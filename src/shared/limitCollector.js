@@ -2016,28 +2016,66 @@ function codexRateLimitsById(payload = {}) {
   return payload.rateLimitsByLimitId || payload.rate_limits_by_limit_id || {};
 }
 
+function normalizeCodexUsageWindow(window) {
+  if (!window || typeof window !== 'object') return null;
+  const seconds = Number(window.limitWindowSeconds ?? window.limit_window_seconds);
+  return {
+    ...window,
+    usedPercent: window.usedPercent ?? window.used_percent,
+    resetsAt: window.resetsAt ?? window.resetAt ?? window.reset_at,
+    windowDurationMins: Number.isFinite(seconds) ? seconds / 60 : undefined
+  };
+}
+
+function normalizeCodexUsageRateLimit(rateLimit, meta = {}) {
+  const source = rateLimit && typeof rateLimit === 'object' ? rateLimit : {};
+  const primary = normalizeCodexUsageWindow(source.primaryWindow || source.primary_window);
+  const secondary = normalizeCodexUsageWindow(source.secondaryWindow || source.secondary_window);
+  return {
+    ...(primary ? { primary } : {}),
+    ...(secondary ? { secondary } : {}),
+    ...(meta.limitId ? { limitId: meta.limitId } : {}),
+    ...(meta.limitName ? { limitName: meta.limitName } : {}),
+    planType: meta.planType
+  };
+}
+
+function normalizeCodexUsagePayload(payload = {}) {
+  if (!payload || typeof payload !== 'object') return payload;
+  const hasUsageShape = Object.hasOwn(payload, 'rateLimit')
+    || Object.hasOwn(payload, 'rate_limit')
+    || Object.hasOwn(payload, 'additionalRateLimits')
+    || Object.hasOwn(payload, 'additional_rate_limits');
+  if (!hasUsageShape) return payload;
+
+  const planType = payload.planType ?? payload.plan_type;
+  const rateLimit = payload.rateLimit ?? payload.rate_limit;
+  const rateLimits = normalizeCodexUsageRateLimit(rateLimit, { limitId: 'codex', planType });
+  const rateLimitsByLimitId = { ...codexRateLimitsById(payload), codex: rateLimits };
+  const additional = payload.additionalRateLimits ?? payload.additional_rate_limits;
+  for (const entry of Array.isArray(additional) ? additional : []) {
+    if (!entry || typeof entry !== 'object') continue;
+    const limitId = String(entry.meteredFeature ?? entry.metered_feature ?? '').trim();
+    if (!limitId || limitId === 'codex') continue;
+    rateLimitsByLimitId[limitId] = normalizeCodexUsageRateLimit(
+      entry.rateLimit ?? entry.rate_limit,
+      {
+        limitId,
+        limitName: String(entry.limitName ?? entry.limit_name ?? '').trim(),
+        planType
+      }
+    );
+  }
+
+  return { ...payload, rateLimits, rateLimitsByLimitId };
+}
+
 function codexDirectRateLimits(payload = {}) {
   const direct = payload.rateLimits || payload.rate_limits;
   if (direct && typeof direct === 'object') return direct;
   const wham = payload.rateLimit || payload.rate_limit;
   if (!wham || typeof wham !== 'object') return {};
-  const normalizeWindow = (window) => {
-    if (!window || typeof window !== 'object') return null;
-    const seconds = Number(window.limitWindowSeconds ?? window.limit_window_seconds);
-    return {
-      ...window,
-      usedPercent: window.usedPercent ?? window.used_percent,
-      resetsAt: window.resetsAt ?? window.resetAt ?? window.reset_at,
-      windowDurationMins: Number.isFinite(seconds) ? seconds / 60 : undefined
-    };
-  };
-  const primary = normalizeWindow(wham.primaryWindow || wham.primary_window);
-  const secondary = normalizeWindow(wham.secondaryWindow || wham.secondary_window);
-  return {
-    ...(primary ? { primary } : {}),
-    ...(secondary ? { secondary } : {}),
-    planType: payload.planType ?? payload.plan_type
-  };
+  return normalizeCodexUsageRateLimit(wham, { planType: payload.planType ?? payload.plan_type });
 }
 
 function codexRateLimitWindowSignature(snapshot) {
@@ -3024,7 +3062,7 @@ async function readCodexUsageOrRpc(deps = {}) {
     }
     const oauthDeps = oauthAuthSnapshot ? { ...deps, codexOAuthAuthSnapshot: oauthAuthSnapshot } : deps;
     return {
-      payload: await oauthReader(oauthDeps),
+      payload: normalizeCodexUsagePayload(await oauthReader(oauthDeps)),
       source: 'oauth',
       sourceDetail: '',
       oauthAuthSnapshot
