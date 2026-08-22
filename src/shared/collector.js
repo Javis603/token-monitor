@@ -37,6 +37,7 @@ const { claudeSessionRoots } = require('./claudePaths');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { buildClackyHistoryGraph, buildClackyPeriods, collectClackyRows } = require('./clackyUsage');
 const {
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
@@ -1146,6 +1147,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
   }
+  if (options.clackyGraph) {
+    rawGraphs.push(options.clackyGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.clackyGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -1219,6 +1224,7 @@ async function collectUsageOnce(options) {
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
+  const includesClacky = normalizedClients.split(',').includes('clacky');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -1249,6 +1255,8 @@ async function collectUsageOnce(options) {
   let qoderCnRows = null;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
+  let clackyPeriods = null;
+  let clackyRows = null;
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     const progress = { ...periods };
@@ -1310,6 +1318,20 @@ async function collectUsageOnce(options) {
         qoderCnPeriods = options.qoderCnFallbackPeriods || null;
       }
     }
+    if (includesClacky && (!targetRequested || targetClients.includes('clacky'))) {
+      try {
+        const clackySinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
+        clackyRows = collectClackyRows({ sinceMs: clackySinceMs });
+        const clackyJson = buildClackyPeriods({ now: collectedAt, allTimeSince, rows: clackyRows });
+        clackyPeriods = {
+          today: extractUsageFromTokscale(clackyJson.today),
+          month: extractUsageFromTokscale(clackyJson.month),
+          allTime: extractUsageFromTokscale(clackyJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`clacky parse failed: ${err.message}`);
+      }
+    }
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
@@ -1353,6 +1375,7 @@ async function collectUsageOnce(options) {
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
       if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
+      if (clackyPeriods) freshPartitions.clacky = clackyPeriods.today;
       if (qoderCnPeriodReadFailed && anchor.todayPartitions?.qodercn) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
@@ -1421,6 +1444,12 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, qoderCnPeriods.month);
       allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), qodercn: qoderCnPeriods.today };
+    }
+    if (clackyPeriods && !anchorUsed) {
+      today = mergePeriods(today, clackyPeriods.today);
+      month = mergePeriods(month, clackyPeriods.month);
+      allTime = mergePeriods(allTime, clackyPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), clacky: clackyPeriods.today };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1625,10 +1654,27 @@ async function collectUsageOnce(options) {
     const historyQoderCnGraph = qoderCnHistoryReadFailed
       ? options.qoderCnHistoryFallbackGraph
       : qoderCnGraph;
+    // OpenClacky billing events are self-contained (cost included), so the
+    // history graph needs no pricing pass — just the full rows.
+    let clackyGraph = null;
+    let clackyHistoryReadFailed = false;
+    if (includesClacky) {
+      try {
+        const rows = (!anchorUsed && clackyRows) ? clackyRows : collectClackyRows();
+        clackyGraph = buildClackyHistoryGraph({ rows });
+      } catch (err) {
+        clackyHistoryReadFailed = true;
+        if (typeof options.logger === 'function') options.logger(`clacky history parse failed: ${err.message}`);
+      }
+    }
+    const historyClackyGraph = clackyHistoryReadFailed
+      ? options.clackyHistoryFallbackGraph
+      : clackyGraph;
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
       qoderCnGraph: historyQoderCnGraph || null,
+      clackyGraph: historyClackyGraph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1937,6 +1983,8 @@ function clientSourceRoots(clientsCsv, options = {}) {
   add('workbuddy', ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')]);
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
+  // OpenClacky — billing ledger at ~/.clacky/billing/*.jsonl
+  add('clacky', ['clacky-billing', path.join(home, '.clacky', 'billing')]);
   // Qoder CN — SQLite DB under the platform Application Support dir.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform: process.platform, env: process.env });
   add('qodercn', ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]));

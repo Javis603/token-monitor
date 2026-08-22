@@ -200,6 +200,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'openclaw-agents',
   'pi-sessions',
   'proma-sessions',
+  'clacky-billing',
   'qodercn-db',
   REASONIX_SOURCE_CHECK_ID,
   'qwen-projects',
