@@ -138,12 +138,18 @@ function createWatcherCoordinator(deps = {}) {
   }
 
   function onMessage(message) {
-    if (message?.type === 'stopped') {
+    if (message?.type === 'released') {
       // Routed before the owner lookup: a normal stop clears `current` by
       // definition, so gating this on an owner meant the ack could never
-      // arrive and the grace timer always fired. Matched on revision so a late
-      // ack from an earlier stop cannot clear the current one's timer.
-      if (message.revision !== pendingStopRevision) return;
+      // arrive and the grace timer always fired.
+      //
+      // Compared as a watermark rather than an exact match. Under latest-wins a
+      // stop issued while an earlier teardown is still running never gets its
+      // own ack, so requiring equality left the watchdog armed against a
+      // release that had already happened, and it went on to terminate a
+      // perfectly healthy worker.
+      if (pendingStopRevision === null) return;
+      if (!(Number(message.throughRevision) >= pendingStopRevision)) return;
       pendingStopRevision = null;
       clearGrace();
       return;

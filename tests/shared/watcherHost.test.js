@@ -255,10 +255,39 @@ test('a stop ack clears the grace timer so an idle worker survives', () => {
   // close() clears `current` by definition, so an ack routed behind the owner
   // lookup could never arrive and the grace timer always fired, terminating a
   // worker that had already shut down cleanly and was reusable.
-  FakeWorker.last().emit('message', { type: 'stopped', revision: stop.revision });
+  FakeWorker.last().emit('message', { type: 'released', throughRevision: stop.revision });
   assert.equal(clock.timers[0].cleared, true, 'the ack must disarm the grace timer');
   assert.equal(coordinator.inspect().awaitingStopAck, false);
   assert.equal(FakeWorker.last().terminated, 0);
+});
+
+test('a stop issued during an unfinished teardown is still satisfied', () => {
+  FakeWorker.reset();
+  const clock = fakeTimers();
+  const coordinator = createWatcherCoordinator({
+    Worker: FakeWorker,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout
+  });
+  // stop A, start B, stop B, start C, all while A is still closing.
+  const a = coordinator.acquire({ dirs: ['/a'], clients: 'claude' }, {});
+  a.close();
+  const b = coordinator.acquire({ dirs: ['/b'], clients: 'claude' }, {});
+  b.close();
+  coordinator.acquire({ dirs: ['/c'], clients: 'claude' }, {});
+  const worker = FakeWorker.last();
+  const stops = worker.posted.filter((m) => m.type === 'stop');
+  assert.equal(stops.length, 2);
+  assert.equal(coordinator.inspect().awaitingStopAck, true);
+
+  // Latest-wins means the second stop never gets its own turn in the worker's
+  // loop, so it can only ever be answered by a watermark. Requiring an exact
+  // revision left this watchdog armed and it went on to kill a healthy worker.
+  const newest = Math.max(...worker.posted.map((m) => m.revision));
+  worker.emit('message', { type: 'released', throughRevision: newest });
+  assert.equal(coordinator.inspect().awaitingStopAck, false, 'the later stop must be satisfied');
+  const live = clock.timers.filter((t) => !t.cleared);
+  assert.equal(live.length, 0, 'no watchdog may outlive a completed release');
 });
 
 test('the grace timer still terminates a worker that never acks', () => {
@@ -293,7 +322,7 @@ test('a late ack from an earlier stop cannot disarm the current one', () => {
   const liveStop = FakeWorker.last().posted.at(-1);
   assert.notEqual(staleStop.revision, liveStop.revision);
 
-  FakeWorker.last().emit('message', { type: 'stopped', revision: staleStop.revision });
+  FakeWorker.last().emit('message', { type: 'released', throughRevision: staleStop.revision });
   assert.equal(coordinator.inspect().awaitingStopAck, true, 'a stale ack must not disarm the live timer');
 });
 
@@ -340,7 +369,7 @@ test('a stop acked after a restart disarms without disturbing the new owner', as
   const stop = FakeWorker.last().posted.find((m) => m.type === 'stop');
   coordinator.acquire({ dirs: ['/b'], clients: 'claude' }, {});
   // The worker acknowledges the release even though a configure overtook it.
-  FakeWorker.last().emit('message', { type: 'stopped', revision: stop.revision });
+  FakeWorker.last().emit('message', { type: 'released', throughRevision: stop.revision });
   assert.equal(clock.timers[0].cleared, true);
   assert.equal(coordinator.inspect().awaitingStopAck, false);
   assert.equal(FakeWorker.instances.length, 1, 'a healthy restart must not respawn');
@@ -504,6 +533,30 @@ test('a reconfigure issued before the first watcher is ready still lands', async
   } finally {
     fs.rmSync(rootA, { recursive: true, force: true });
     fs.rmSync(rootB, { recursive: true, force: true });
+  }
+});
+
+test('rapid restarts leave no watchdog armed against a live worker', async () => {
+  const roots = [tmpTree(), tmpTree(), tmpTree()];
+  let ready = 0;
+  const coordinator = withoutEnv(() => createWatcherCoordinator());
+  const handlers = { onReady: () => { ready += 1; } };
+  try {
+    const a = coordinator.acquire({ dirs: [roots[0]], clients: 'claude', usePolling: false }, handlers);
+    a.close();
+    const b = coordinator.acquire({ dirs: [roots[1]], clients: 'claude', usePolling: false }, handlers);
+    b.close();
+    const c = coordinator.acquire({ dirs: [roots[2]], clients: 'claude', usePolling: false }, handlers);
+    assert.ok(await until(() => ready >= 1), 'the latest config never became ready');
+    // An unanswered stop would leave the watchdog armed and terminate this
+    // healthy worker 30 seconds later.
+    assert.ok(
+      await until(() => coordinator.inspect().awaitingStopAck === false),
+      'a stop was never acknowledged across rapid restarts'
+    );
+    c.close({ skipClose: true });
+  } finally {
+    for (const root of roots) fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

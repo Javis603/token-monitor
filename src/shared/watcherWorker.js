@@ -68,11 +68,12 @@ async function pump() {
     while (desired && desired.revision !== appliedRevision) {
       const target = desired;
       await closeCurrent();
-      // The release actually happened, so acknowledge it even when a newer
-      // request has already overtaken this one. The owner arms a watchdog on
-      // this revision, and a stop that is silently folded into the next
-      // configure would leave that watchdog with nothing to disarm it.
-      if (!target.config) post({ type: 'stopped', revision: target.revision });
+      // A watermark, not a per-revision ack. Latest-wins means an intermediate
+      // stop never gets its own turn through this loop, so acking only the
+      // revision being applied would strand the owner's watchdog on a stop that
+      // is already satisfied. Nothing is watched at this point, so every stop up
+      // to the newest request we have seen has been honoured.
+      post({ type: 'released', throughRevision: (desired || target).revision });
       // A newer request arrived while the old tree was closing. Drop this one
       // and apply the newest instead of rebuilding something already stale.
       if (desired !== target) continue;
@@ -109,7 +110,7 @@ async function pump() {
           });
         }
       } else {
-        // Already acknowledged above, right after the release completed.
+        // The release watermark above already covered this stop.
         appliedRevision = target.revision;
       }
     }
