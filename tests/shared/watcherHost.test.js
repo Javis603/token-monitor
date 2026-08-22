@@ -125,7 +125,7 @@ test('unref runs after the message listener is attached', () => {
   assert.ok(FakeWorker.last().unrefMessageListeners >= 1, 'unref must run after listeners are attached');
 });
 
-test('an async worker error falls back to watching on this thread', async () => {
+test('a crashing worker falls back only once it has actually exited', async () => {
   FakeWorker.reset();
   const stub = stubChokidar();
   const fallbacks = [];
@@ -133,14 +133,25 @@ test('an async worker error falls back to watching on this thread', async () => 
     const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
     coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, { onHostFallback: (e) => fallbacks.push(e) });
     assert.equal(coordinator.inspect().hasWorker, true);
-    // A Worker constructor does not throw on a missing or broken module: it
-    // emits 'error' afterwards. Without this path the watcher dies silently.
+
+    // 'error' means the thread threw and is being torn down; it does not mean
+    // its descriptors are released. Starting a watcher here would hold two sets
+    // at once, on a path that is most likely reached under resource pressure.
     FakeWorker.last().emit('error', new Error("Cannot find module 'watcherWorker'"));
+    await wait(30);
+    assert.equal(coordinator.inspect().inProcess, false, 'must not watch before the thread exits');
+    assert.equal(stub.built.length, 0);
+
+    // 'exit' is the Worker's final event, and a Worker constructor does not
+    // throw on a missing or broken module, so this is where a load failure
+    // surfaces too. Without it the watcher would die silently.
+    FakeWorker.last().emit('exit', 1);
     await until(() => coordinator.inspect().inProcess);
-    assert.equal(coordinator.inspect().inProcess, true, 'must fall back to the in-process host');
     assert.equal(coordinator.inspect().workerDisabled, true);
     assert.equal(fallbacks.length, 1);
     assert.equal(stub.built.length, 1, 'the fallback host must actually start watching');
+    // The reported cause is the thread's own error, not the bare exit code.
+    assert.match(fallbacks[0].message, /Cannot find module/);
   } finally {
     stub.restore();
   }
@@ -175,6 +186,7 @@ test('one failure produces one fallback, not one per event', async () => {
     worker.emit('error', new Error("Cannot find module 'watcherWorker'"));
     worker.emit('exit', 1);
     await until(() => coordinator.inspect().inProcess);
+    await wait(30);
     assert.equal(stub.built.length, 1, 'a single failure must not start two watchers');
     assert.equal(fallbacks.length, 1, 'the owner must be told once');
   } finally {

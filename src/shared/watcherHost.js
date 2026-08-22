@@ -68,6 +68,11 @@ function createWatcherCoordinator(deps = {}) {
   // Per instance rather than one coordinator-wide flag: a flag would let a
   // terminate we asked for mask a genuine failure of the worker that replaced it.
   const expectedExits = new WeakSet();
+  // Why the failure is remembered rather than acted on: 'error' says the thread
+  // threw and is being torn down, 'exit' says it has actually stopped. Only the
+  // second proves its descriptors are gone, and starting a replacement watcher
+  // in between is the overlap the normal and watchdog paths both avoid.
+  const workerFailures = new WeakMap();
   let revision = 0;
   let pendingStopRevision = null;
   // Set while a thread is on its way out. `worker = null` happens synchronously
@@ -187,13 +192,17 @@ function createWatcherCoordinator(deps = {}) {
       spawned.on('message', onMessage);
       spawned.on('error', (error) => {
         if (expectedExits.has(spawned)) return;
-        fallBackToInProcess(error, spawned);
+        workerFailures.set(spawned, error);
       });
       spawned.on('exit', (code) => {
         if (expectedExits.has(spawned)) return;
         // An exit we did not ask for means the watcher is gone; a Worker that
-        // fails to load its module lands here rather than throwing above.
-        fallBackToInProcess(new Error(`watch worker exited unexpectedly (code ${code})`), spawned);
+        // fails to load its module lands here rather than throwing above, and
+        // a thread that threw arrives carrying the error it reported first.
+        const cause = workerFailures.get(spawned)
+          || new Error(`watch worker exited unexpectedly (code ${code})`);
+        workerFailures.delete(spawned);
+        fallBackToInProcess(cause, spawned);
       });
       spawned.unref();
       worker = spawned;
