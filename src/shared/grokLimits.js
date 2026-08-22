@@ -17,6 +17,7 @@ const { spawn } = require('node:child_process');
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { createOutboundFetch } = require('./outboundFetch');
+const { withSystemProxyEnv } = require('./systemProxyEnv');
 const { abortError } = require('./probeDeadline');
 
 const GROK_WEB_BILLING_GRPC_URL = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig';
@@ -440,6 +441,19 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
   const timeoutMs = Number(deps.rpcTimeoutMs || deps.fetchTimeoutMs || 5000);
   const signal = deps.signal;
   if (signal?.aborted) throw abortError(signal);
+  // The CLI is a plain Node program: it only reaches the network through
+  // proxy env vars, which a GUI-launched widget never has. Give it the OS
+  // proxy (primed in the background at startup — see systemProxyEnv.js) so
+  // both the billing RPC and its ~/.grok/auth.json token refresh can succeed.
+  // Existing env proxy vars always win; the first probe before the prime
+  // completes simply runs as it would today.
+  const childEnv = deps.systemProxyEnv === false
+    ? env
+    : withSystemProxyEnv(env, {
+      cachedSystemProxy: typeof deps.cachedSystemProxy === 'string'
+        ? deps.cachedSystemProxy
+        : undefined
+    });
 
   return new Promise((resolve, reject) => {
     let child;
@@ -510,7 +524,7 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
 
     try {
       child = spawnFn(command, args, {
-        env,
+        env: childEnv,
         stdio: ['pipe', 'pipe', 'pipe']
       });
     } catch (error) {
