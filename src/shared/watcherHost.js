@@ -70,6 +70,11 @@ function createWatcherCoordinator(deps = {}) {
   const expectedExits = new WeakSet();
   let revision = 0;
   let pendingStopRevision = null;
+  // Set while a thread is on its way out. `worker = null` happens synchronously
+  // but terminate() only settles once the thread has actually exited, so this
+  // gate, not the null, is what keeps a replacement from starting inside that
+  // window and putting two descriptor sets back in flight.
+  let terminating = null;
   let current = null;
   let inProcessHost = null;
   let graceTimer = null;
@@ -97,11 +102,24 @@ function createWatcherCoordinator(deps = {}) {
     const dying = worker;
     worker = null;
     expectedExits.add(dying);
-    const ended = Promise.resolve(dying.terminate()).catch(() => {});
-    if (!restore) return;
-    // Only after the thread is actually gone: starting a replacement first
-    // would put two descriptor sets back in flight.
-    void ended.then(restoreCurrentWatcher);
+    const gate = Promise.resolve(dying.terminate());
+    terminating = gate;
+    gate.then(
+      () => {
+        if (terminating !== gate) return;
+        terminating = null;
+        // Latest-wins: whatever the owner is by now is what gets applied.
+        if (restore) restoreCurrentWatcher();
+      },
+      (error) => {
+        if (terminating !== gate) return;
+        terminating = null;
+        // The thread never confirmed it exited, so its descriptors cannot be
+        // assumed released. Watching on this thread is worse for latency but
+        // it is the one path that does not depend on that thread.
+        if (restore) fallBackToInProcess(error);
+      }
+    );
   }
 
   // A failing worker emits 'error' and then 'exit', so this runs twice for one
@@ -197,6 +215,13 @@ function createWatcherCoordinator(deps = {}) {
       return makeHandle(owned, 'in-process');
     }
 
+    if (terminating) {
+      // A thread is still exiting. `current` is already updated and the gate
+      // applies the newest owner when it clears, so this stays latest-wins
+      // rather than queueing a spawn behind every intervening change.
+      return makeHandle(owned, 'worker');
+    }
+
     const active = ensureWorker();
     if (!active) return makeHandle(owned, 'in-process');
 
@@ -247,7 +272,8 @@ function createWatcherCoordinator(deps = {}) {
       hasWorker: Boolean(worker),
       workerDisabled,
       inProcess: Boolean(inProcessHost),
-      awaitingStopAck: pendingStopRevision !== null
+      awaitingStopAck: pendingStopRevision !== null,
+      terminating: terminating !== null
     })
   };
 }

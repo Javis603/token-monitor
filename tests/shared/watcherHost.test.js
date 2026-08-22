@@ -54,7 +54,14 @@ class FakeWorker extends EventEmitter {
     this.unrefMessageListeners = null;
   }
   postMessage(message) { this.posted.push(message); }
-  terminate() { this.terminated += 1; return Promise.resolve(); }
+  terminate() {
+    this.terminated += 1;
+    if (!this.deferTerminate) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      this.finishTerminate = resolve;
+      this.failTerminate = reject;
+    });
+  }
   configures() { return this.posted.filter((m) => m.type === 'configure'); }
   unref() { this.unrefMessageListeners = this.listenerCount('message'); }
   static reset() { FakeWorker.instances = []; }
@@ -338,6 +345,70 @@ test('a stop acked after a restart disarms without disturbing the new owner', as
   assert.equal(coordinator.inspect().awaitingStopAck, false);
   assert.equal(FakeWorker.instances.length, 1, 'a healthy restart must not respawn');
   assert.equal(FakeWorker.last().terminated, 0);
+});
+
+test('no replacement worker starts while the old thread is still exiting', async () => {
+  FakeWorker.reset();
+  const clock = fakeTimers();
+  const coordinator = createWatcherCoordinator({
+    Worker: FakeWorker,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout
+  });
+  const first = coordinator.acquire({ dirs: ['/a'], clients: 'claude' }, {});
+  const wedged = FakeWorker.last();
+  wedged.deferTerminate = true;
+  first.close();
+  coordinator.acquire({ dirs: ['/b'], clients: 'claude' }, {});
+  clock.timers[0].fn();
+  assert.equal(wedged.terminated, 1);
+  assert.equal(coordinator.inspect().terminating, true);
+
+  // terminate() resolves only once the thread has actually exited, so a
+  // settings change landing inside that window must not spawn a second worker
+  // while the first may still hold its descriptors.
+  coordinator.acquire({ dirs: ['/c'], clients: 'claude' }, {});
+  await wait(30);
+  assert.equal(FakeWorker.instances.length, 1, 'a replacement must wait for the exit');
+
+  wedged.finishTerminate();
+  await until(() => FakeWorker.instances.length === 2);
+  const replacement = FakeWorker.last();
+  await until(() => replacement.configures().length === 1);
+  // Latest-wins: the owner at the time the gate clears, not the one that was
+  // current when the watchdog fired.
+  assert.deepEqual(replacement.configures()[0].config.dirs, ['/c']);
+  assert.equal(coordinator.inspect().terminating, false);
+});
+
+test('a terminate that never confirms falls back instead of assuming release', async () => {
+  FakeWorker.reset();
+  const stub = stubChokidar();
+  const clock = fakeTimers();
+  const fallbacks = [];
+  try {
+    const coordinator = createWatcherCoordinator({
+      Worker: FakeWorker,
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout
+    });
+    const first = coordinator.acquire({ dirs: ['/a'], clients: 'claude' }, { onHostFallback: (e) => fallbacks.push(e) });
+    const wedged = FakeWorker.last();
+    wedged.deferTerminate = true;
+    first.close();
+    coordinator.acquire({ dirs: ['/b'], clients: 'claude' }, { onHostFallback: (e) => fallbacks.push(e) });
+    clock.timers[0].fn();
+
+    wedged.failTerminate(new Error('terminate failed'));
+    await until(() => coordinator.inspect().inProcess);
+    // A rejected terminate is not evidence the descriptors went away, so a
+    // second worker must not be started on the strength of it.
+    assert.equal(FakeWorker.instances.length, 1);
+    assert.equal(stub.built.length, 1, 'the owner must still end up watching');
+    assert.equal(fallbacks.length, 1);
+  } finally {
+    stub.restore();
+  }
 });
 
 test('the quit path terminates instead of waiting for the slow teardown', () => {
