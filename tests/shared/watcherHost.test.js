@@ -153,6 +153,61 @@ test('an unexpected worker exit falls back too', async () => {
   }
 });
 
+test('one failure produces one fallback, not one per event', async () => {
+  FakeWorker.reset();
+  const stub = stubChokidar();
+  const fallbacks = [];
+  try {
+    const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+    coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, { onHostFallback: (e) => fallbacks.push(e) });
+    // This is the real Node sequence for a worker that cannot load its module:
+    // the constructor succeeds, then 'error' fires, then 'exit'. Handling them
+    // independently builds a second in-process watcher and abandons the first.
+    const worker = FakeWorker.last();
+    worker.emit('error', new Error("Cannot find module 'watcherWorker'"));
+    worker.emit('exit', 1);
+    await until(() => coordinator.inspect().inProcess);
+    assert.equal(stub.built.length, 1, 'a single failure must not start two watchers');
+    assert.equal(fallbacks.length, 1, 'the owner must be told once');
+  } finally {
+    stub.restore();
+  }
+});
+
+test('an expected exit after terminate is not mistaken for a failure', async () => {
+  FakeWorker.reset();
+  const stub = stubChokidar();
+  const fallbacks = [];
+  try {
+    const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+    const host = coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, { onHostFallback: (e) => fallbacks.push(e) });
+    const worker = FakeWorker.last();
+    host.close({ skipClose: true });
+    worker.emit('exit', 0);
+    await wait(50);
+    assert.equal(fallbacks.length, 0, 'a terminate we asked for is not a failure');
+    assert.equal(stub.built.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+test('messages from a superseded watcher are dropped', () => {
+  FakeWorker.reset();
+  const first = [];
+  const second = [];
+  const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+  const handleA = coordinator.acquire({ dirs: ['/a'], clients: 'claude' }, { onEvent: (_e, p) => first.push(p) });
+  const revisionA = FakeWorker.last().posted.at(-1).revision;
+  handleA.close();
+  coordinator.acquire({ dirs: ['/b'], clients: 'claude' }, { onEvent: (_e, p) => second.push(p) });
+  // The old watcher can still emit while its teardown runs; those events belong
+  // to roots the new collector never asked for.
+  FakeWorker.last().emit('message', { type: 'event', revision: revisionA, event: 'add', filePath: '/a/stale.jsonl' });
+  assert.deepEqual(second, [], 'a superseded watcher must not feed the new owner');
+  assert.deepEqual(first, []);
+});
+
 test('a normal stop leaves the worker alive instead of terminating it', () => {
   FakeWorker.reset();
   const coordinator = createWatcherCoordinator({ Worker: FakeWorker });

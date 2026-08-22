@@ -35,9 +35,10 @@ function post(message) {
 
 function wire(instance, revision) {
   instance.on('all', (event, filePath) => {
-    // Events from a watcher the owner has already moved past would be
-    // attributed to the wrong root set.
-    if (revision !== appliedRevision) return;
+    // Keyed on the live watcher rather than the applied revision: a teardown
+    // has not finished applying the next config yet, so comparing against
+    // appliedRevision would keep forwarding events from roots being released.
+    if (revision !== watcherRevision) return;
     post({ type: 'event', revision, event, filePath });
   });
   instance.on('error', (error) => post({

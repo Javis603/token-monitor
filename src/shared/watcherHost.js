@@ -65,7 +65,9 @@ function createWatcherCoordinator(deps = {}) {
 
   let worker = null;
   let workerDisabled = false;
-  let expectingExit = false;
+  // Per instance rather than one coordinator-wide flag: a flag would let a
+  // terminate we asked for mask a genuine failure of the worker that replaced it.
+  const expectedExits = new WeakSet();
   let revision = 0;
   let current = null;
   let inProcessHost = null;
@@ -82,11 +84,17 @@ function createWatcherCoordinator(deps = {}) {
     if (!worker) return;
     const dying = worker;
     worker = null;
-    expectingExit = true;
+    expectedExits.add(dying);
     void dying.terminate();
   }
 
-  function fallBackToInProcess(error) {
+  // A failing worker emits 'error' and then 'exit', so this runs twice for one
+  // failure. Without both guards the second call builds a second in-process
+  // watcher and abandons the first, reintroducing the descriptor overlap this
+  // design exists to prevent.
+  function fallBackToInProcess(error, failedWorker) {
+    if (workerDisabled) return;
+    if (failedWorker && worker && worker !== failedWorker) return;
     worker = null;
     workerDisabled = true;
     clearGrace();
@@ -96,10 +104,12 @@ function createWatcherCoordinator(deps = {}) {
   }
 
   function onMessage(message) {
-    // The worker only emits for the watcher it has actually applied, so no
-    // revision filtering is needed here; `current` is the live owner.
-    const handlers = current?.handlers;
-    if (!handlers) return;
+    const owner = current;
+    if (!owner) return;
+    // A watcher that is still tearing down can emit between the owner moving on
+    // and the close completing, and those events belong to the previous roots.
+    if (message?.revision !== undefined && message.revision !== owner.revision) return;
+    const handlers = owner.handlers;
     if (message?.type === 'event') {
       handlers.onEvent?.(message.event, message.filePath);
       return;
@@ -126,14 +136,14 @@ function createWatcherCoordinator(deps = {}) {
       // the watcher would keep the process alive.
       spawned.on('message', onMessage);
       spawned.on('error', (error) => {
-        if (expectingExit) return;
-        fallBackToInProcess(error);
+        if (expectedExits.has(spawned)) return;
+        fallBackToInProcess(error, spawned);
       });
       spawned.on('exit', (code) => {
-        if (expectingExit) { expectingExit = false; return; }
+        if (expectedExits.has(spawned)) return;
         // An exit we did not ask for means the watcher is gone; a Worker that
         // fails to load its module lands here rather than throwing above.
-        fallBackToInProcess(new Error(`watch worker exited unexpectedly (code ${code})`));
+        fallBackToInProcess(new Error(`watch worker exited unexpectedly (code ${code})`), spawned);
       });
       spawned.unref();
       worker = spawned;
