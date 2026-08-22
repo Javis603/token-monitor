@@ -505,9 +505,15 @@ module.exports = {
   VOLCENGINE_FETCH_TIMEOUT_MS,
   VOLCENGINE_CODING_PLAN_URL,
   VOLCENGINE_ARK_CHAT_COMPLETIONS_URL,
+  clampPercent,
+  displayPlanText,
+  epochToIso,
+  fetchJsonWithDeadline,
+  numberOrNull,
   volcengineCredentials,
   parseVolcengineArkUsage,
   parseVolcengineCodingPlanUsage,
   signVolcengineRequest,
+  volcenginePlanLabel,
   fetchVolcengineLimits
 };

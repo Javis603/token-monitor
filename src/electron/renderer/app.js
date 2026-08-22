@@ -14,7 +14,7 @@ const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio',
-  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
+  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'volcagent', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
 
 function osIconFor(platform) {
@@ -96,6 +96,7 @@ const LIMIT_PROVIDERS = [
   { id: 'openrouter', label: 'OpenRouter' },
   { id: 'minimax', label: 'Minimax' },
   { id: 'volcengine', label: 'Volcengine' },
+  { id: 'volcagent', label: 'Volcengine Agent' },
   { id: 'ollama', label: 'Ollama' },
   { id: 'trae', label: 'Trae CN' },
   { id: 'thirdparty', label: 'Third-party APIs' }
@@ -114,6 +115,7 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   openrouter: 'openrouterAccountGroup',
   minimax: 'minimaxAccountGroup',
   volcengine: 'volcengineAccountGroup',
+  volcagent: 'volcagentAccountGroup',
   qoder: 'qoderAccountGroup',
   trae: 'traeAccountGroup',
   commandcode: 'commandcodeAccountGroup',
@@ -134,6 +136,7 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   openrouter: 'openrouterStatus',
   minimax: 'minimaxApiKeyStatus',
   volcengine: 'volcengineAccountStatus',
+  volcagent: 'volcagentAccountStatus',
   qoder: 'qoderAccountStatus',
   trae: 'traeAccountStatus',
   commandcode: 'commandcodeAccountStatus',
@@ -312,7 +315,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcagentAccountExpanded: false, volcagentPendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
@@ -4814,7 +4817,7 @@ function renderProviderWindows(provider, color) {
       mcpNode.classList.add('limit-window-wide');
       windows.append(mcpNode);
     }
-  } else if (provider.provider === 'volcengine') {
+  } else if (provider.provider === 'volcengine' || provider.provider === 'volcagent') {
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
     const monthly = windowForKind(provider, 'billing');
@@ -8532,6 +8535,7 @@ function syncSettingsForm() {
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
+  renderExternalProviderStatus('volcagent');
   renderExternalProviderStatus('qoder');
   renderExternalProviderStatus('trae');
   renderExternalProviderStatus('commandcode');
@@ -11645,6 +11649,7 @@ function renderStatsUpdate() {
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
+  renderExternalProviderStatus('volcagent');
   renderExternalProviderStatus('qoder');
   renderExternalProviderStatus('trae');
   renderExternalProviderStatus('commandcode');
@@ -13390,6 +13395,11 @@ const externalLimitAccountConfig = {
     sourceKey: 'volcengineCredentialsSource',
     pendingKey: 'volcenginePendingCheckSince'
   },
+  volcagent: {
+    configuredKey: 'volcagentCredentialsConfigured',
+    sourceKey: 'volcagentCredentialsSource',
+    pendingKey: 'volcagentPendingCheckSince'
+  },
   qoder: {
     configuredKey: 'qoderCookieConfigured',
     sourceKey: 'qoderCookieSource',
@@ -13556,6 +13566,10 @@ function volcenginePlatformUrl() {
   return 'https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe';
 }
 
+function volcagentPlatformUrl() {
+  return 'https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=agentPlan';
+}
+
 function claudePlatformUrl() {
   return 'https://claude.ai/settings/usage';
 }
@@ -13640,7 +13654,11 @@ function renderExternalProviderStatus(providerName) {
   manualPanel.classList.toggle('hidden', linked);
   openBtn.classList.toggle('hidden', linked);
   const canClearConfiguredClaude = providerName === 'claude' && configured;
-  logoutBtn.classList.toggle('hidden', source !== 'settings' || (!linked && !canClearConfiguredClaude));
+  // volcagent may inherit the Coding Plan account's credentials, in which case
+  // there is nothing provider-specific to clear — only show Clear when the
+  // Agent Plan fields were set explicitly.
+  const canClearVolcagent = providerName === 'volcagent' && state.settings?.volcagentAccessKeyId === 'set';
+  logoutBtn.classList.toggle('hidden', source !== 'settings' || (!linked && !canClearConfiguredClaude && !canClearVolcagent));
   refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();
 }
@@ -15595,6 +15613,62 @@ function setupCursorAccountUI() {
     });
   }
 
+  const volcagentToggle = document.getElementById('volcagentSettingsToggle');
+  if (volcagentToggle) {
+    volcagentToggle.addEventListener('click', () => setExternalAccountExpanded('volcagent', !state.volcagentAccountExpanded));
+    setExternalAccountExpanded('volcagent', false);
+    renderExternalProviderStatus('volcagent');
+
+    document.getElementById('volcagentOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal(volcagentPlatformUrl());
+    });
+
+    document.getElementById('volcagentLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ volcagentAccessKeyId: '', volcagentSecretAccessKey: '', volcagentRegion: '' });
+      clearExternalProviderCheckPending('volcagent');
+      clearExternalProviderPendingStatus('volcagent');
+      renderExternalProviderStatus('volcagent');
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('volcagentRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('volcagentCredentialsSubmit').addEventListener('click', async () => {
+      const accessKeyInput = document.getElementById('volcagentAccessKeyInput');
+      const secretInput = document.getElementById('volcagentSecretAccessKeyInput');
+      const regionInput = document.getElementById('volcagentRegionInput');
+      const errorEl = document.getElementById('volcagentErrorMessage');
+      errorEl.classList.add('hidden');
+      const accessKeyValue = String(accessKeyInput.value || '').trim();
+      const secretValue = String(secretInput.value || '').trim();
+      if (!accessKeyValue || (/^AKLT/i.test(accessKeyValue) && !secretValue)) {
+        errorEl.textContent = t('settings.volcagent.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('volcagent');
+        await saveSettings({
+          volcagentAccessKeyId: accessKeyInput.value,
+          volcagentSecretAccessKey: secretInput.value,
+          volcagentRegion: regionInput.value || 'cn-beijing'
+        });
+        accessKeyInput.value = '';
+        secretInput.value = '';
+        renderExternalProviderStatus('volcagent');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('volcagent', !externalProviderAccountLinked('volcagent'));
+        renderExternalProviderStatus('volcagent');
+      } catch (err) {
+        clearExternalProviderCheckPending('volcagent');
+        errorEl.textContent = t('settings.volcagent.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
   const claudeToggle = document.getElementById('claudeSettingsToggle');
   if (claudeToggle) {
     claudeToggle.addEventListener('click', () => setExternalAccountExpanded('claude', !state.claudeAccountExpanded));
@@ -16190,6 +16264,7 @@ function initSettingsAnimationWrappers() {
     '#zaiManualPanel',
     '#zaiteamManualPanel',
     '#volcengineManualPanel',
+    '#volcagentManualPanel',
     '#qoderManualPanel',
     '#traeManualPanel',
     '#commandcodeManualPanel',

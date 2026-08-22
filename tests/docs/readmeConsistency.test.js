@@ -179,6 +179,7 @@ const README_ICON_TO_LIMIT_PROVIDERS = {
   xai: ['grok'],
   'mimo-code': ['mimo'],
   zcode: ['zai', 'zaiteam'],
+  volcengine: ['volcengine', 'volcagent'],
   newapi: ['thirdparty']
 };
 

@@ -24,6 +24,8 @@ const CREDENTIAL_SETTING_PATHS = Object.freeze({
   zaiTeamProjectId: ['providers', 'zaiTeam', 'projectId'],
   volcengineAccessKeyId: ['providers', 'volcengine', 'accessKeyId'],
   volcengineSecretAccessKey: ['providers', 'volcengine', 'secretAccessKey'],
+  volcagentAccessKeyId: ['providers', 'volcagent', 'accessKeyId'],
+  volcagentSecretAccessKey: ['providers', 'volcagent', 'secretAccessKey'],
   qoderCookie: ['providers', 'qoder', 'cookie'],
   traeAccessToken: ['providers', 'trae', 'accessToken'],
   traeDeviceId: ['providers', 'trae', 'deviceId'],

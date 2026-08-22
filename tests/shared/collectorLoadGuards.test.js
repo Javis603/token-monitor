@@ -2778,7 +2778,7 @@ test('collector publishes live periods when only Qoder CN history read fails', a
   const originalRows = qoderCnUsage.collectQoderCnRows;
   const originalHistory = qoderCnUsage.buildQoderCnHistoryGraph;
   let failHistory = false;
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = freshCollector().localTodayKey();
   qoderCnUsage.collectQoderCnRows = async () => [];
   qoderCnUsage.buildQoderCnHistoryGraph = () => {
     if (failHistory) throw new Error('temporary Qoder CN history read failure');

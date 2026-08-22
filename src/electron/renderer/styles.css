@@ -3417,6 +3417,7 @@ html.is-windows .settings-panel select option {
 .row-icon-minimax    { -webkit-mask-image: url(../../../assets/icons/minimax.svg);       mask-image: url(../../../assets/icons/minimax.svg); }
 .row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
 .row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
+.row-icon-volcagent      { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
 .row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
 .row-icon-trae       { -webkit-mask-image: url(../../../assets/icons/trae.svg);          mask-image: url(../../../assets/icons/trae.svg); }
 .row-icon-qodercn    { -webkit-mask-image: url(../../../assets/icons/qodercn.svg);      mask-image: url(../../../assets/icons/qodercn.svg); }
@@ -3496,6 +3497,10 @@ html.is-windows .settings-panel select option {
   mask-image: url(../../../assets/icons/zai.svg);
 }
 .limit-icon-volcengine {
+  -webkit-mask-image: url(../../../assets/icons/volcengine.svg);
+  mask-image: url(../../../assets/icons/volcengine.svg);
+}
+.limit-icon-volcagent {
   -webkit-mask-image: url(../../../assets/icons/volcengine.svg);
   mask-image: url(../../../assets/icons/volcengine.svg);
 }
@@ -5050,6 +5055,7 @@ html.is-windows .limit-live-badge {
 #zaiManualPanel.hidden,
 #zaiteamManualPanel.hidden,
 #volcengineManualPanel.hidden,
+#volcagentManualPanel.hidden,
 #qoderManualPanel.hidden,
 #traeManualPanel.hidden,
 #commandcodeManualPanel.hidden,
@@ -5072,6 +5078,7 @@ html.is-windows .limit-live-badge {
 #zaiErrorMessage.hidden,
 #zaiteamErrorMessage.hidden,
 #volcengineErrorMessage.hidden,
+#volcagentErrorMessage.hidden,
 #qoderErrorMessage.hidden,
 #traeErrorMessage.hidden,
 #commandcodeErrorMessage.hidden,
@@ -5087,6 +5094,7 @@ html.is-windows .limit-live-badge {
 #zaiManualPanel,
 #zaiteamManualPanel,
 #volcengineManualPanel,
+#volcagentManualPanel,
 #qoderManualPanel,
 #traeManualPanel,
 #commandcodeManualPanel,
@@ -5104,6 +5112,7 @@ html.is-windows .limit-live-badge {
 #zaiManualPanel > .accordion-animation-inner,
 #zaiteamManualPanel > .accordion-animation-inner,
 #volcengineManualPanel > .accordion-animation-inner,
+#volcagentManualPanel > .accordion-animation-inner,
 #qoderManualPanel > .accordion-animation-inner,
 #traeManualPanel > .accordion-animation-inner,
 #commandcodeManualPanel > .accordion-animation-inner,
@@ -5137,6 +5146,7 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel input,
 #zaiApiRegionInput,
 #volcengineManualPanel input,
+#volcagentManualPanel input,
 #qoderManualPanel textarea,
 #qoderManualPanel select,
 #traeManualPanel input,
@@ -5169,6 +5179,7 @@ html.is-windows .limit-live-badge {
 #zaiManualPanel input,
 #zaiteamManualPanel input,
 #volcengineManualPanel input,
+#volcagentManualPanel input,
 #qoderManualPanel textarea,
 #traeManualPanel input,
 #commandcodeManualPanel textarea,

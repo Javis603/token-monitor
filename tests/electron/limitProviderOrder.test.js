@@ -52,6 +52,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'openrouter',
     'minimax',
     'volcengine',
+    'volcagent',
     'ollama',
     'trae',
     'thirdparty'

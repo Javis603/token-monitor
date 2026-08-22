@@ -17,6 +17,7 @@
     micode: '../../../assets/icons/xiaomi.svg',
     zcode: '../../../assets/icons/zai.svg',
     zaiteam: '../../../assets/icons/zai.svg',
+    volcagent: '../../../assets/icons/volcengine.svg',
     thirdparty: '../../../assets/icons/newapi.svg'
   };
 
