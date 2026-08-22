@@ -69,6 +69,7 @@ function createWatcherCoordinator(deps = {}) {
   // terminate we asked for mask a genuine failure of the worker that replaced it.
   const expectedExits = new WeakSet();
   let revision = 0;
+  let pendingStopRevision = null;
   let current = null;
   let inProcessHost = null;
   let graceTimer = null;
@@ -81,6 +82,7 @@ function createWatcherCoordinator(deps = {}) {
 
   function forceTerminate() {
     clearGrace();
+    pendingStopRevision = null;
     if (!worker) return;
     const dying = worker;
     worker = null;
@@ -104,6 +106,16 @@ function createWatcherCoordinator(deps = {}) {
   }
 
   function onMessage(message) {
+    if (message?.type === 'stopped') {
+      // Routed before the owner lookup: a normal stop clears `current` by
+      // definition, so gating this on an owner meant the ack could never
+      // arrive and the grace timer always fired. Matched on revision so a late
+      // ack from an earlier stop cannot clear the current one's timer.
+      if (message.revision !== pendingStopRevision) return;
+      pendingStopRevision = null;
+      clearGrace();
+      return;
+    }
     const owner = current;
     if (!owner) return;
     // A watcher that is still tearing down can emit between the owner moving on
@@ -158,6 +170,7 @@ function createWatcherCoordinator(deps = {}) {
     const owned = revision;
     current = { revision: owned, config, handlers };
     clearGrace();
+    pendingStopRevision = null;
 
     if (inProcessHost) {
       inProcessHost.close();
@@ -194,9 +207,11 @@ function createWatcherCoordinator(deps = {}) {
           return;
         }
         revision += 1;
-            try {
+        pendingStopRevision = revision;
+        try {
           worker.postMessage({ type: 'stop', revision });
         } catch (_) {
+          pendingStopRevision = null;
           forceTerminate();
           return;
         }
@@ -212,7 +227,12 @@ function createWatcherCoordinator(deps = {}) {
   return {
     acquire,
     // Test seam: asserts on which host actually served the last acquire.
-    inspect: () => ({ hasWorker: Boolean(worker), workerDisabled, inProcess: Boolean(inProcessHost) })
+    inspect: () => ({
+      hasWorker: Boolean(worker),
+      workerDisabled,
+      inProcess: Boolean(inProcessHost),
+      awaitingStopAck: pendingStopRevision !== null
+    })
   };
 }
 

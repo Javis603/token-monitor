@@ -220,6 +220,75 @@ test('a normal stop leaves the worker alive instead of terminating it', () => {
   assert.equal(worker.terminated, 0);
 });
 
+function fakeTimers() {
+  const timers = [];
+  return {
+    timers,
+    setTimeout: (fn, ms) => { const t = { fn, ms, cleared: false }; timers.push(t); return t; },
+    clearTimeout: (t) => { if (t) t.cleared = true; }
+  };
+}
+
+test('a stop ack clears the grace timer so an idle worker survives', () => {
+  FakeWorker.reset();
+  const clock = fakeTimers();
+  const coordinator = createWatcherCoordinator({
+    Worker: FakeWorker,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout
+  });
+  const host = coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, {});
+  host.close();
+  const stop = FakeWorker.last().posted.at(-1);
+  assert.equal(stop.type, 'stop');
+  assert.equal(clock.timers.length, 1, 'a grace timer must be armed');
+  assert.equal(coordinator.inspect().awaitingStopAck, true);
+
+  // close() clears `current` by definition, so an ack routed behind the owner
+  // lookup could never arrive and the grace timer always fired, terminating a
+  // worker that had already shut down cleanly and was reusable.
+  FakeWorker.last().emit('message', { type: 'stopped', revision: stop.revision });
+  assert.equal(clock.timers[0].cleared, true, 'the ack must disarm the grace timer');
+  assert.equal(coordinator.inspect().awaitingStopAck, false);
+  assert.equal(FakeWorker.last().terminated, 0);
+});
+
+test('the grace timer still terminates a worker that never acks', () => {
+  FakeWorker.reset();
+  const clock = fakeTimers();
+  const coordinator = createWatcherCoordinator({
+    Worker: FakeWorker,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout
+  });
+  const host = coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, {});
+  host.close();
+  clock.timers[0].fn();
+  // The timeout is the only thing standing between a wedged worker and pinned
+  // descriptors, so it has to stay effective.
+  assert.equal(FakeWorker.last().terminated, 1);
+});
+
+test('a late ack from an earlier stop cannot disarm the current one', () => {
+  FakeWorker.reset();
+  const clock = fakeTimers();
+  const coordinator = createWatcherCoordinator({
+    Worker: FakeWorker,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout
+  });
+  const firstHandle = coordinator.acquire({ dirs: ['/a'], clients: 'claude' }, {});
+  firstHandle.close();
+  const staleStop = FakeWorker.last().posted.at(-1);
+  const secondHandle = coordinator.acquire({ dirs: ['/b'], clients: 'claude' }, {});
+  secondHandle.close();
+  const liveStop = FakeWorker.last().posted.at(-1);
+  assert.notEqual(staleStop.revision, liveStop.revision);
+
+  FakeWorker.last().emit('message', { type: 'stopped', revision: staleStop.revision });
+  assert.equal(coordinator.inspect().awaitingStopAck, true, 'a stale ack must not disarm the live timer');
+});
+
 test('the quit path terminates instead of waiting for the slow teardown', () => {
   FakeWorker.reset();
   const coordinator = createWatcherCoordinator({ Worker: FakeWorker });

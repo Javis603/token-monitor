@@ -79,13 +79,17 @@ async function pump() {
           watcherRevision = target.revision;
           appliedRevision = target.revision;
           wire(instance, target.revision);
-          await new Promise((resolve) => {
+          // Both outcomes end the wait, but only one of them is readiness. The
+          // error itself already reached the owner through the wired handler.
+          const outcome = await new Promise((resolve) => {
             let settled = false;
-            const finish = () => { if (!settled) { settled = true; resolve(); } };
-            instance.once('ready', finish);
-            instance.once('error', finish);
+            const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
+            instance.once('ready', () => finish('ready'));
+            instance.once('error', () => finish('error'));
           });
-          if (watcherRevision === target.revision) post({ type: 'ready', revision: target.revision });
+          if (outcome === 'ready' && watcherRevision === target.revision) {
+            post({ type: 'ready', revision: target.revision });
+          }
         } catch (error) {
           appliedRevision = target.revision;
           post({
