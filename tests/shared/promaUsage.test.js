@@ -8,6 +8,7 @@ const test = require('node:test');
 
 const { buildPromaHistoryGraph, buildTokscaleJson, buildPromaPeriods, PROMA_ROOT } = require('../../src/shared/promaUsage');
 const { extractUsageFromTokscale, mergePeriods } = require('../../src/shared/usage');
+const { localIso } = require('../helpers/localTime');
 
 function writeJsonl(filePath, rows) {
   fs.writeFileSync(filePath, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
@@ -188,8 +189,10 @@ test('Proma keeps undated usage out of bounded periods and Trends', () => {
 test('Proma history keeps per-day and per-model token attribution', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'proma-usage-'));
   writeJsonl(path.join(root, 'session.jsonl'), [
-    assistantRow({ id: 'first', model: 'Claude-Sonnet', createdAt: '2026-07-08T12:00:00.000Z', input: 10, output: 2 }),
-    assistantRow({ id: 'second', model: 'gpt-5', createdAt: '2026-07-09T12:00:00.000Z', input: 20 })
+    // `contributions` is keyed by local calendar day, so the rows are stated in
+    // local time — a `Z` noon lands on the neighbouring day past ±12.
+    assistantRow({ id: 'first', model: 'Claude-Sonnet', createdAt: localIso(2026, 7, 8, 12), input: 10, output: 2 }),
+    assistantRow({ id: 'second', model: 'gpt-5', createdAt: localIso(2026, 7, 9, 12), input: 20 })
   ]);
   const graph = buildPromaHistoryGraph({ roots: [root] });
   assert.deepEqual(graph.contributions, [

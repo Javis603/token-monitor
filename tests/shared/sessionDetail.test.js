@@ -137,6 +137,7 @@ test('parseClaudeTranscript counts one reply once across content-block splits an
 });
 
 const { groupEvents, filterExchangesByPeriod, distributeCost } = require('../../src/shared/sessionDetail');
+const { localDate, localIso } = require('../helpers/localTime');
 
 function turn(ts, total, tools = []) {
   return { kind: 'turn', timestamp: ts, tokens: { input: total, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total }, tools };
@@ -168,12 +169,15 @@ test('turns before any prompt go in a leading exchange', () => {
 });
 
 test('filterExchangesByPeriod keeps only in-period turns and drops empties', () => {
-  const now = new Date('2026-05-30T12:00:00.000Z');
+  // `today` is cut at local midnight, so the clock and both exchanges are stated
+  // in local time. Written as `Z` instants the two exchanges share one local day
+  // at some offsets, and then the filter has nothing to exclude.
+  const now = localDate(2026, 5, 30, 12);
   const ex = groupEvents([
-    { kind: 'prompt', timestamp: '2026-05-29T06:00:00.000Z', text: 'yesterday' },
-    turn('2026-05-29T06:00:01.000Z', 999),
-    { kind: 'prompt', timestamp: '2026-05-30T06:00:00.000Z', text: 'today' },
-    turn('2026-05-30T06:00:01.000Z', 100)
+    { kind: 'prompt', timestamp: localIso(2026, 5, 29, 6), text: 'yesterday' },
+    turn(localIso(2026, 5, 29, 6, 0, 1), 999),
+    { kind: 'prompt', timestamp: localIso(2026, 5, 30, 6), text: 'today' },
+    turn(localIso(2026, 5, 30, 6, 0, 1), 100)
   ]);
   const today = filterExchangesByPeriod(ex, 'today', now);
   assert.equal(today.length, 1);

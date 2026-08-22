@@ -11,8 +11,14 @@ const {
   serializeMacWidgetSnapshot
 } = require('../../src/shared/macWidgetSnapshot');
 const { aggregateDevices } = require('../../src/shared/usage');
+const { localIso } = require('../helpers/localTime');
 
-const NOW = '2026-07-17T08:30:00.000Z';
+// The trend series is bucketed by *local* calendar day, so the clock has to be
+// stated in local time: `2026-07-17T08:30:00.000Z` is already the 16th at UTC-10
+// and the trend then ends a day early. The freshness stamps below move with it,
+// because `status.dataAgeSeconds` is the distance between the two.
+const NOW = localIso(2026, 7, 17, 8, 30);
+const SOURCE_UPDATED_AT = localIso(2026, 7, 17, 8, 25);
 
 function dailyHistory(count, start = '2026-01-01') {
   const startMs = Date.parse(`${start}T00:00:00.000Z`);
@@ -32,7 +38,7 @@ function buildSnapshot(stats, options = {}) {
 
 function sampleStats() {
   return {
-    updatedAt: '2026-07-17T08:25:00.000Z',
+    updatedAt: SOURCE_UPDATED_AT,
     periods: {
       today: {
         totalTokens: 1_200_000,
@@ -90,7 +96,7 @@ test('builds schema v6 overview, quota, models, activity, trend and presentation
   assert.equal(MAC_WIDGET_SCHEMA_VERSION, 6);
   assert.deepEqual(snapshot.overview, {
     currentPeriod: 'today', totalTokens: 1_200_000, costUsd: 1.25,
-    primaryTool: 'codex', updatedAt: '2026-07-17T08:25:00.000Z'
+    primaryTool: 'codex', updatedAt: SOURCE_UPDATED_AT
   });
   assert.equal(snapshot.periods.day.overview.totalTokens, 1_200_000);
   assert.equal(snapshot.periods.month.overview.totalTokens, 9_000_000);
@@ -188,13 +194,13 @@ test('keeps multi-account provider identities stable without exporting account d
       {
         provider: 'codex', accountKey: 'workspace-a', accountEmail: 'a@example.com',
         authPath: '/Users/private/.codex/auth.json', token: 'secret-a', workspaceId: 'private-a',
-        status: 'ok', updatedAt: '2026-07-17T08:25:00.000Z',
+        status: 'ok', updatedAt: SOURCE_UPDATED_AT,
         windows: [{ kind: 'weekly', remainingPercent: 70 }]
       },
       {
         provider: 'codex', accountKey: 'workspace-b', accountEmail: 'b@example.com',
         authPath: '/Users/private/.codex/auth-b.json', token: 'secret-b', workspaceId: 'private-b',
-        status: 'ok', updatedAt: '2026-07-17T08:25:00.000Z',
+        status: 'ok', updatedAt: SOURCE_UPDATED_AT,
         windows: [{ kind: 'weekly', remainingPercent: 60 }]
       }
     ]}
@@ -220,14 +226,14 @@ test('keeps anonymous Provider IDs stable when quota status and values change', 
       status: 'ok',
       balance: { amount: 12.5, currency: 'USD' },
       windows: [{ kind: 'billing', remaining: 12.5 }],
-      updatedAt: '2026-07-17T08:25:00.000Z'
+      updatedAt: SOURCE_UPDATED_AT
     }] }
   };
   const first = buildSnapshot(stats, { now: NOW });
   stats.limits.providers[0].status = 'unavailable';
   stats.limits.providers[0].balance.amount = 3.25;
   stats.limits.providers[0].windows[0].remaining = 3.25;
-  stats.limits.providers[0].updatedAt = '2026-07-17T09:25:00.000Z';
+  stats.limits.providers[0].updatedAt = localIso(2026, 7, 17, 9, 25);
   const second = buildSnapshot(stats, { now: NOW });
 
   assert.equal(first.quota[0].instanceId, 'openrouter-single');
@@ -403,7 +409,7 @@ test('returns a complete empty schema and stale status for missing or old data',
   assert.deepEqual(empty.models, []);
   assert.equal(empty.status.noData, true);
 
-  const stale = buildSnapshot({ updatedAt: '2026-07-17T07:00:00Z' }, { now: NOW });
+  const stale = buildSnapshot({ updatedAt: localIso(2026, 7, 17, 7, 0) }, { now: NOW });
   assert.equal(stale.status.isStale, true);
   assert.equal(stale.status.dataAgeSeconds, 5400);
 });
@@ -612,8 +618,11 @@ test('provider status summarizes configuration and login requirements without id
 
 test('fingerprints business content while ignoring snapshot clock fields', () => {
   const stats = sampleStats();
-  const first = buildSnapshot(stats, { now: '2026-07-17T08:30:00Z' });
-  const later = buildSnapshot(stats, { now: '2026-07-17T09:30:00Z' });
+  // Two clocks an hour apart on the same *local* day: the claim is that the
+  // clock does not reach the fingerprint, so the pair must not also step the
+  // trend's day — which is what a `Z` pair does against a local-time `NOW`.
+  const first = buildSnapshot(stats, { now: NOW });
+  const later = buildSnapshot(stats, { now: localIso(2026, 7, 17, 9, 30) });
   assert.equal(macWidgetSnapshotFingerprint(first), macWidgetSnapshotFingerprint(later));
 
   const tokenChange = structuredClone(stats);

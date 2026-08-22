@@ -22,6 +22,8 @@ const {
   resetQoderCnPricingCache
 } = require('../../src/shared/qoderCnUsage');
 
+const { localMs } = require('../helpers/localTime');
+
 const QODER_CN_DB_FIXTURE = path.join(__dirname, '..', 'fixtures', 'qoder-cn-local.db');
 
 test('QODER_CN_MODEL_DISPLAY_NAMES covers every official model code and the retired preview', () => {
@@ -76,19 +78,9 @@ test('normalizeQoderCnDbRow does not resolve inherited model names', () => {
   }
 });
 
-// buildQoderCnPeriods cuts "today" and "month" at *local* midnight, so a fixture
-// pinned to a UTC instant only lands on the day it means at some offsets: at
-// UTC+07 `2026-07-29T18:00:00Z` is already the 30th locally and a row two hours
-// behind it drops out of "today". Deriving the rows from the local midnight of
-// `now` instead states the boundary the code actually applies, so the same
-// assertion holds at every offset — and a rule that cut the day at UTC midnight
-// would fail everywhere except UTC rather than passing everywhere except a few.
-const localNoon = (year, monthIndex, day) => new Date(year, monthIndex, day, 12, 0, 0, 0).getTime();
-const localMidnight = (year, monthIndex, day) => new Date(year, monthIndex, day, 0, 0, 0, 0).getTime();
-
 test('buildQoderCnPeriods keeps day boundaries and tokscale-compatible totals', () => {
-  const now = localNoon(2026, 6, 29);
-  const dayStart = localMidnight(2026, 6, 29);
+  const now = localMs(2026, 7, 29, 12);
+  const dayStart = localMs(2026, 7, 29);
   const rows = [
     // One minute either side of the local day boundary: m1 belongs to the 28th
     // and only m2 to "today", whatever timezone the suite runs in.
@@ -192,10 +184,10 @@ test('Qoder CN cost uses input, output, cache-read, and cache-write rates', () =
 });
 
 test('undated Qoder CN rows count for allTime only, mirroring the proma includeUndated rule', () => {
-  const now = localNoon(2026, 6, 29);
+  const now = localMs(2026, 7, 29, 12);
   const rows = [
     { sessionId: 's1', messageId: 'm1', model: 'qmodel', input: 10, output: 2, cacheRead: 0, cacheWrite: 0, createdAt: 0, messages: 1 },
-    { sessionId: 's1', messageId: 'm2', model: 'qmodel', input: 20, output: 4, cacheRead: 0, cacheWrite: 0, createdAt: localMidnight(2026, 6, 29) + 60_000, messages: 1 }
+    { sessionId: 's1', messageId: 'm2', model: 'qmodel', input: 20, output: 4, cacheRead: 0, cacheWrite: 0, createdAt: localMs(2026, 7, 29) + 60_000, messages: 1 }
   ];
   const periods = buildQoderCnPeriods({ now: new Date(now).toISOString(), allTimeSince: '2026-01-01', rows });
   assert.equal(periods.today.totalInput, 20, 'undated row must not leak into today');
