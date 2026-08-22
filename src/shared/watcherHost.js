@@ -80,14 +80,28 @@ function createWatcherCoordinator(deps = {}) {
     graceTimer = null;
   }
 
-  function forceTerminate() {
+  function restoreCurrentWatcher() {
+    if (!current) return;
+    const active = ensureWorker();
+    if (!active) return;
+    active.postMessage({ type: 'configure', revision: current.revision, config: current.config });
+  }
+
+  // `restore` separates the two reasons we ever terminate. The quit path is
+  // done with watching entirely; a wedged teardown is not, and the collector
+  // that replaced the stopped one still expects a live watcher.
+  function forceTerminate({ restore = false } = {}) {
     clearGrace();
     pendingStopRevision = null;
     if (!worker) return;
     const dying = worker;
     worker = null;
     expectedExits.add(dying);
-    void dying.terminate();
+    const ended = Promise.resolve(dying.terminate()).catch(() => {});
+    if (!restore) return;
+    // Only after the thread is actually gone: starting a replacement first
+    // would put two descriptor sets back in flight.
+    void ended.then(restoreCurrentWatcher);
   }
 
   // A failing worker emits 'error' and then 'exit', so this runs twice for one
@@ -169,8 +183,10 @@ function createWatcherCoordinator(deps = {}) {
     revision += 1;
     const owned = revision;
     current = { revision: owned, config, handlers };
-    clearGrace();
-    pendingStopRevision = null;
+    // Deliberately does not disarm a stop that has not been acknowledged yet.
+    // A runtime restart is stop-then-immediate-acquire, so clearing here would
+    // cancel the watchdog in exactly the path where a wedged teardown would
+    // otherwise pin every descriptor with nothing left to notice.
 
     if (inProcessHost) {
       inProcessHost.close();
@@ -218,7 +234,7 @@ function createWatcherCoordinator(deps = {}) {
         // Only covers a worker that never answers. A normal stop leaves the
         // thread idle and reusable, so the next acquire skips spawn cost.
         clearGrace();
-        graceTimer = setTimer(forceTerminate, CLOSE_REPORT_GRACE_MS);
+        graceTimer = setTimer(() => forceTerminate({ restore: true }), CLOSE_REPORT_GRACE_MS);
         if (typeof graceTimer.unref === 'function') graceTimer.unref();
       }
     };

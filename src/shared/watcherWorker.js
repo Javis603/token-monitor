@@ -68,6 +68,11 @@ async function pump() {
     while (desired && desired.revision !== appliedRevision) {
       const target = desired;
       await closeCurrent();
+      // The release actually happened, so acknowledge it even when a newer
+      // request has already overtaken this one. The owner arms a watchdog on
+      // this revision, and a stop that is silently folded into the next
+      // configure would leave that watchdog with nothing to disarm it.
+      if (!target.config) post({ type: 'stopped', revision: target.revision });
       // A newer request arrived while the old tree was closing. Drop this one
       // and apply the newest instead of rebuilding something already stale.
       if (desired !== target) continue;
@@ -100,8 +105,8 @@ async function pump() {
           });
         }
       } else {
+        // Already acknowledged above, right after the release completed.
         appliedRevision = target.revision;
-        post({ type: 'stopped', revision: target.revision });
       }
     }
   } finally {

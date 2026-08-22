@@ -55,6 +55,7 @@ class FakeWorker extends EventEmitter {
   }
   postMessage(message) { this.posted.push(message); }
   terminate() { this.terminated += 1; return Promise.resolve(); }
+  configures() { return this.posted.filter((m) => m.type === 'configure'); }
   unref() { this.unrefMessageListeners = this.listenerCount('message'); }
   static reset() { FakeWorker.instances = []; }
   static last() { return FakeWorker.instances.at(-1); }
@@ -287,6 +288,56 @@ test('a late ack from an earlier stop cannot disarm the current one', () => {
 
   FakeWorker.last().emit('message', { type: 'stopped', revision: staleStop.revision });
   assert.equal(coordinator.inspect().awaitingStopAck, true, 'a stale ack must not disarm the live timer');
+});
+
+test('a restart keeps the watchdog armed for the stop it overtook', async () => {
+  FakeWorker.reset();
+  const clock = fakeTimers();
+  const coordinator = createWatcherCoordinator({
+    Worker: FakeWorker,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout
+  });
+  const first = coordinator.acquire({ dirs: ['/a'], clients: 'claude' }, {});
+  first.close();
+  assert.equal(clock.timers.length, 1);
+  // A runtime restart is stop-then-immediate-acquire. Disarming here would drop
+  // the only protection against a teardown that never completes, in the very
+  // path where that teardown runs.
+  coordinator.acquire({ dirs: ['/b'], clients: 'claude' }, {});
+  assert.equal(clock.timers[0].cleared, false, 'the restart must not disarm the in-flight stop');
+  assert.equal(coordinator.inspect().awaitingStopAck, true);
+
+  const wedged = FakeWorker.last();
+  clock.timers[0].fn();
+  assert.equal(wedged.terminated, 1, 'a wedged teardown must still be terminated');
+
+  // ...and the collector that replaced the stopped one must end up watching.
+  await until(() => FakeWorker.instances.length === 2);
+  const replacement = FakeWorker.last();
+  assert.notEqual(replacement, wedged);
+  await until(() => replacement.configures().length === 1);
+  assert.deepEqual(replacement.configures()[0].config.dirs, ['/b'], 'the live owner must be reapplied');
+});
+
+test('a stop acked after a restart disarms without disturbing the new owner', async () => {
+  FakeWorker.reset();
+  const clock = fakeTimers();
+  const coordinator = createWatcherCoordinator({
+    Worker: FakeWorker,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout
+  });
+  const first = coordinator.acquire({ dirs: ['/a'], clients: 'claude' }, {});
+  first.close();
+  const stop = FakeWorker.last().posted.find((m) => m.type === 'stop');
+  coordinator.acquire({ dirs: ['/b'], clients: 'claude' }, {});
+  // The worker acknowledges the release even though a configure overtook it.
+  FakeWorker.last().emit('message', { type: 'stopped', revision: stop.revision });
+  assert.equal(clock.timers[0].cleared, true);
+  assert.equal(coordinator.inspect().awaitingStopAck, false);
+  assert.equal(FakeWorker.instances.length, 1, 'a healthy restart must not respawn');
+  assert.equal(FakeWorker.last().terminated, 0);
 });
 
 test('the quit path terminates instead of waiting for the slow teardown', () => {
