@@ -479,6 +479,34 @@ test('a real worker delivers events and stops watching the old roots after a rec
   }
 });
 
+test('a reconfigure issued before the first watcher is ready still lands', async () => {
+  const rootA = tmpTree();
+  const rootB = tmpTree();
+  const seen = [];
+  let ready = 0;
+  const coordinator = withoutEnv(() => createWatcherCoordinator());
+  const handlers = { onEvent: (_e, p) => seen.push(p), onReady: () => { ready += 1; } };
+  try {
+    // Deliberately does not wait for the first watcher: awaiting `ready` inside
+    // the pump used to hold the whole lifecycle for an initial scan, leaving
+    // the roots the owner actually wants unwatched until it finished.
+    const first = coordinator.acquire({ dirs: [rootA], clients: 'claude', usePolling: false }, handlers);
+    first.close();
+    const second = coordinator.acquire({ dirs: [rootB], clients: 'claude', usePolling: false }, handlers);
+    assert.ok(await until(() => ready >= 1), 'the latest config never became ready');
+
+    fs.writeFileSync(path.join(rootB, 'nested', 'fresh.jsonl'), 'x');
+    assert.ok(await until(() => seen.some((p) => p.endsWith('fresh.jsonl'))), 'latest roots not watched');
+    fs.writeFileSync(path.join(rootA, 'nested', 'stale.jsonl'), 'x');
+    await wait(800);
+    assert.ok(!seen.some((p) => p.endsWith('stale.jsonl')), 'superseded roots still delivering');
+    second.close({ skipClose: true });
+  } finally {
+    fs.rmSync(rootA, { recursive: true, force: true });
+    fs.rmSync(rootB, { recursive: true, force: true });
+  }
+});
+
 test('close() returns to the caller instead of waiting for chokidar teardown', async () => {
   const root = tmpTree();
   let ready = 0;

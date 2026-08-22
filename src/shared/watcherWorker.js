@@ -84,17 +84,21 @@ async function pump() {
           watcherRevision = target.revision;
           appliedRevision = target.revision;
           wire(instance, target.revision);
-          // Both outcomes end the wait, but only one of them is readiness. The
-          // error itself already reached the owner through the wired handler.
-          const outcome = await new Promise((resolve) => {
-            let settled = false;
-            const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
-            instance.once('ready', () => finish('ready'));
-            instance.once('error', () => finish('error'));
-          });
-          if (outcome === 'ready' && watcherRevision === target.revision) {
+          // `ready` is a notification, not a lifecycle step. Awaiting it here
+          // held the pump for the length of an initial scan, so a configure
+          // arriving in that window waited on a watcher that was already being
+          // replaced and the new roots went unwatched for that long. Only
+          // close() has to be serialised, because only close() owns
+          // descriptors that must be gone before the next watch allocates.
+          let failed = false;
+          instance.once('error', () => { failed = true; });
+          instance.once('ready', () => {
+            // An initialisation error is not readiness, and a watcher that has
+            // since been replaced must not announce itself.
+            if (failed) return;
+            if (watcher !== instance || watcherRevision !== target.revision) return;
             post({ type: 'ready', revision: target.revision });
-          }
+          });
         } catch (error) {
           appliedRevision = target.revision;
           post({
