@@ -65,7 +65,7 @@ jobs:
       - run: npm ci
       - name: Run the suite at several UTC offsets
         run: |
-          for tz in Asia/Ho_Chi_Minh Asia/Kathmandu America/Los_Angeles Pacific/Honolulu Pacific/Kiritimati; do
+          for tz in Asia/Ho_Chi_Minh Asia/Kathmandu Pacific/Chatham America/Los_Angeles Pacific/Honolulu Pacific/Pago_Pago Pacific/Kiritimati; do
             echo "::group::TZ=$tz"
             TZ="$tz" npm test
             echo "::endgroup::"
