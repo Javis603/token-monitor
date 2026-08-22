@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -9,15 +10,16 @@ const { performance } = require('node:perf_hooks');
 
 const {
   createInProcessWatcherHost,
+  createWatcherCoordinator,
   createWatcherHost,
   inProcessRequested
 } = require('../../src/shared/watcherHost');
 
 const WATCH_HOST_ENV = 'TOKEN_MONITOR_WATCH_IN_PROCESS';
 
-function tmpTree() {
+function tmpTree(extra = 'nested') {
   const root = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-watch-host-'));
-  fs.mkdirSync(path.join(root, 'nested'), { recursive: true });
+  fs.mkdirSync(path.join(root, extra), { recursive: true });
   return root;
 }
 
@@ -30,35 +32,70 @@ function withoutEnv(fn) {
   }
 }
 
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function until(predicate, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await wait(25);
+  }
+  return false;
+}
+
+// Records what the coordinator does to a worker without spawning a thread, so
+// lifecycle ordering can be asserted exactly.
+class FakeWorker extends EventEmitter {
+  constructor() {
+    super();
+    FakeWorker.instances.push(this);
+    this.posted = [];
+    this.terminated = 0;
+    this.unrefMessageListeners = null;
+  }
+  postMessage(message) { this.posted.push(message); }
+  terminate() { this.terminated += 1; return Promise.resolve(); }
+  unref() { this.unrefMessageListeners = this.listenerCount('message'); }
+  static reset() { FakeWorker.instances = []; }
+  static last() { return FakeWorker.instances.at(-1); }
+}
+FakeWorker.instances = [];
+
+function stubChokidar() {
+  const chokidar = require('chokidar');
+  const original = chokidar.watch;
+  const built = [];
+  chokidar.watch = (dirs) => {
+    const instance = { dirs, closed: 0, on() { return instance; }, close() { instance.closed += 1; } };
+    built.push(instance);
+    return instance;
+  };
+  return { built, restore: () => { chokidar.watch = original; } };
+}
+
 test('the watcher runs in a worker by default', () => {
   withoutEnv(() => {
-    const root = tmpTree();
-    const host = createWatcherHost({ dirs: [root], clients: 'claude', usePolling: false }, {});
-    try {
-      // The whole point of the host: chokidar's teardown must not land on the
-      // thread driving the UI. A default flipped back to in-process would undo
-      // that silently, so it is asserted rather than assumed.
-      assert.equal(host.kind, 'worker');
-    } finally {
-      host.close({ skipClose: true });
-      fs.rmSync(root, { recursive: true, force: true });
-    }
+    FakeWorker.reset();
+    const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+    const host = createWatcherHost({ dirs: ['/tmp/x'], clients: 'claude' }, {}, { coordinator });
+    // A default flipped back to in-process would silently undo the whole point.
+    assert.equal(host.kind, 'worker');
   });
 });
 
 test('the env override pins the host in-process', () => {
   const saved = process.env[WATCH_HOST_ENV];
   process.env[WATCH_HOST_ENV] = '1';
-  const root = tmpTree();
+  const stub = stubChokidar();
   try {
     assert.equal(inProcessRequested(), true);
-    const host = createWatcherHost({ dirs: [root], clients: 'claude', usePolling: false }, {});
+    const host = createWatcherHost({ dirs: ['/tmp/x'], clients: 'claude' }, {});
     assert.equal(host.kind, 'in-process');
     host.close();
   } finally {
+    stub.restore();
     if (saved === undefined) delete process.env[WATCH_HOST_ENV];
     else process.env[WATCH_HOST_ENV] = saved;
-    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -71,48 +108,139 @@ test('off/0/false are honoured as an explicit "use the worker"', () => {
   }
 });
 
-test('a worker-hosted watcher delivers events across the thread boundary', async () => {
-  const root = tmpTree();
-  const events = [];
-  let ready = null;
-  const readyPromise = new Promise((res) => { ready = res; });
-  const host = withoutEnv(() => createWatcherHost(
-    { dirs: [root], clients: 'claude', usePolling: false },
-    { onEvent: (event, filePath) => events.push([event, filePath]), onReady: () => ready() }
-  ));
-  assert.equal(host.kind, 'worker');
+test('unref runs after the message listener is attached', () => {
+  FakeWorker.reset();
+  const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+  coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, {});
+  // Attaching a 'message' listener refs the MessagePort, so unref'ing first is
+  // silently undone and the watcher keeps the process alive.
+  assert.ok(FakeWorker.last().unrefMessageListeners >= 1, 'unref must run after listeners are attached');
+});
+
+test('an async worker error falls back to watching on this thread', async () => {
+  FakeWorker.reset();
+  const stub = stubChokidar();
+  const fallbacks = [];
   try {
-    await readyPromise;
-    fs.writeFileSync(path.join(root, 'nested', 'a.jsonl'), 'x');
-    // awaitWriteFinish holds events for its stability threshold before emitting.
-    const deadline = Date.now() + 15000;
-    while (events.length === 0 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    assert.ok(events.length > 0, 'expected at least one event from the worker');
-    assert.ok(
-      events.some(([, filePath]) => String(filePath).endsWith('a.jsonl')),
-      `expected the written file in ${JSON.stringify(events)}`
-    );
+    const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+    coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, { onHostFallback: (e) => fallbacks.push(e) });
+    assert.equal(coordinator.inspect().hasWorker, true);
+    // A Worker constructor does not throw on a missing or broken module: it
+    // emits 'error' afterwards. Without this path the watcher dies silently.
+    FakeWorker.last().emit('error', new Error("Cannot find module 'watcherWorker'"));
+    await until(() => coordinator.inspect().inProcess);
+    assert.equal(coordinator.inspect().inProcess, true, 'must fall back to the in-process host');
+    assert.equal(coordinator.inspect().workerDisabled, true);
+    assert.equal(fallbacks.length, 1);
+    assert.equal(stub.built.length, 1, 'the fallback host must actually start watching');
   } finally {
-    host.close({ skipClose: true });
-    fs.rmSync(root, { recursive: true, force: true });
+    stub.restore();
+  }
+});
+
+test('an unexpected worker exit falls back too', async () => {
+  FakeWorker.reset();
+  const stub = stubChokidar();
+  try {
+    const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+    coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, {});
+    FakeWorker.last().emit('exit', 1);
+    await until(() => coordinator.inspect().inProcess);
+    assert.equal(coordinator.inspect().inProcess, true);
+    assert.equal(stub.built.length, 1);
+  } finally {
+    stub.restore();
+  }
+});
+
+test('a normal stop leaves the worker alive instead of terminating it', () => {
+  FakeWorker.reset();
+  const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+  const host = coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, {});
+  host.close();
+  const worker = FakeWorker.last();
+  assert.equal(worker.posted.at(-1)?.type, 'stop');
+  // terminate() is the abnormal path only: racing a teardown we asked for
+  // would abandon descriptors the worker is still releasing.
+  assert.equal(worker.terminated, 0);
+});
+
+test('the quit path terminates instead of waiting for the slow teardown', () => {
+  FakeWorker.reset();
+  const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+  const host = coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, {});
+  host.close({ skipClose: true });
+  const worker = FakeWorker.last();
+  assert.equal(worker.terminated, 1);
+  assert.ok(!worker.posted.some((m) => m.type === 'stop'), 'quit must not wait on a stop round trip');
+});
+
+test('one worker serves successive collectors instead of overlapping', () => {
+  FakeWorker.reset();
+  const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+  const first = coordinator.acquire({ dirs: ['/a'], clients: 'claude' }, {});
+  first.close();
+  coordinator.acquire({ dirs: ['/b'], clients: 'claude' }, {});
+  // A second worker would hold a second full descriptor set while the first is
+  // still tearing down, which is exactly the overlap this design prevents.
+  assert.equal(FakeWorker.instances.length, 1, 'a restart must reuse the same worker');
+});
+
+test('a worker error reaches the owner with its code intact', async () => {
+  FakeWorker.reset();
+  const seen = [];
+  const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+  coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, { onError: (e) => seen.push(e) });
+  // The descriptor-exhaustion fallback keys off error.code, which does not
+  // survive a naive postMessage of an Error.
+  FakeWorker.last().emit('message', { type: 'error', message: 'ENOSPC: no space left', code: 'ENOSPC' });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].code, 'ENOSPC');
+});
+
+test('a real worker delivers events and stops watching the old roots after a reconfigure', async () => {
+  const rootA = tmpTree();
+  const rootB = tmpTree();
+  const seen = [];
+  const coordinator = withoutEnv(() => createWatcherCoordinator());
+  let readyCount = 0;
+  const handlers = {
+    onEvent: (event, filePath) => seen.push(filePath),
+    onReady: () => { readyCount += 1; }
+  };
+  try {
+    const first = coordinator.acquire({ dirs: [rootA], clients: 'claude', usePolling: false }, handlers);
+    assert.ok(await until(() => readyCount >= 1), 'worker never reported ready');
+    fs.writeFileSync(path.join(rootA, 'nested', 'a.jsonl'), 'x');
+    assert.ok(await until(() => seen.some((p) => p.endsWith('a.jsonl'))), 'no event from the worker');
+
+    first.close();
+    seen.length = 0;
+    readyCount = 0;
+    const second = coordinator.acquire({ dirs: [rootB], clients: 'claude', usePolling: false }, handlers);
+    assert.ok(await until(() => readyCount >= 1), 'worker never reported ready after reconfigure');
+
+    // The old roots must be genuinely released, not merely filtered.
+    fs.writeFileSync(path.join(rootA, 'nested', 'stale.jsonl'), 'x');
+    fs.writeFileSync(path.join(rootB, 'nested', 'fresh.jsonl'), 'x');
+    assert.ok(await until(() => seen.some((p) => p.endsWith('fresh.jsonl'))), 'new roots not watched');
+    await wait(800);
+    assert.ok(!seen.some((p) => p.endsWith('stale.jsonl')), 'old roots still delivering events');
+    second.close({ skipClose: true });
+  } finally {
+    fs.rmSync(rootA, { recursive: true, force: true });
+    fs.rmSync(rootB, { recursive: true, force: true });
   }
 });
 
 test('close() returns to the caller instead of waiting for chokidar teardown', async () => {
   const root = tmpTree();
-  let ready = null;
-  const readyPromise = new Promise((res) => { ready = res; });
-  const host = withoutEnv(() => createWatcherHost(
-    { dirs: [root], clients: 'claude', usePolling: false },
-    { onReady: () => ready() }
-  ));
+  let ready = 0;
+  const coordinator = withoutEnv(() => createWatcherCoordinator());
   try {
-    await readyPromise;
-    // This is the regression the worker exists to prevent: on the main thread
-    // the same call blocked for ~1s on a real tree. The assertion is about the
-    // call being non-blocking, not about this fixture being large.
+    const host = coordinator.acquire({ dirs: [root], clients: 'claude' }, { onReady: () => { ready += 1; } });
+    assert.ok(await until(() => ready >= 1), 'worker never reported ready');
+    // On the main thread this same call blocked for ~1s on a real tree.
     const started = performance.now();
     host.close();
     const elapsed = performance.now() - started;
@@ -122,75 +250,15 @@ test('close() returns to the caller instead of waiting for chokidar teardown', a
   }
 });
 
-test('a worker error reaches the owner with its code intact', async () => {
-  // The descriptor-exhaustion fallback keys off error.code, which does not
-  // survive a naive postMessage of an Error, so the host rebuilds it.
-  const root = tmpTree();
-  const seen = [];
-  const host = createWatcherHost(
-    { dirs: [root], clients: 'claude', usePolling: false },
-    { onError: (error) => seen.push(error) },
-    {
-      inProcess: false,
-      workerPath: path.join(__dirname, 'fixtures', 'watcherErrorWorker.js')
-    }
-  );
-  try {
-    const deadline = Date.now() + 10000;
-    while (seen.length === 0 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 25));
-    }
-    assert.equal(seen.length, 1);
-    assert.equal(seen[0].code, 'ENOSPC');
-    assert.match(seen[0].message, /no space/i);
-  } finally {
-    host.close({ skipClose: true });
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('an unusable worker falls back to watching on this thread', () => {
-  const root = tmpTree();
-  const fallbacks = [];
-  const host = createWatcherHost(
-    { dirs: [root], clients: 'claude', usePolling: false },
-    { onHostFallback: (error) => fallbacks.push(error) },
-    {
-      inProcess: false,
-      workerThreads: {
-        Worker: class {
-          constructor() { throw new Error('worker_threads unavailable'); }
-        }
-      }
-    }
-  );
-  try {
-    assert.equal(host.kind, 'in-process');
-    assert.equal(fallbacks.length, 1);
-    assert.match(fallbacks[0].message, /unavailable/);
-  } finally {
-    host.close();
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test('the in-process host still honours skipClose', () => {
-  const root = tmpTree();
-  const closed = [];
-  const chokidar = require('chokidar');
-  const originalWatch = chokidar.watch;
-  chokidar.watch = () => ({
-    on() { return this; },
-    close() { closed.push('closed'); }
-  });
+  const stub = stubChokidar();
   try {
-    const host = createInProcessWatcherHost({ dirs: [root], clients: 'claude' }, {});
+    const host = createInProcessWatcherHost({ dirs: ['/tmp/x'], clients: 'claude' }, {});
     host.close({ skipClose: true });
-    assert.deepEqual(closed, [], 'quit path must not walk the tree');
+    assert.equal(stub.built[0].closed, 0, 'quit path must not walk the tree');
     host.close();
-    assert.deepEqual(closed, ['closed']);
+    assert.equal(stub.built[0].closed, 1);
   } finally {
-    chokidar.watch = originalWatch;
-    fs.rmSync(root, { recursive: true, force: true });
+    stub.restore();
   }
 });

@@ -2,23 +2,28 @@
 
 // Where the file watcher physically runs.
 //
-// chokidar's close() is synchronous and superlinear in watched directory count
-// (measured on a real tree: ~1.1s for 548 dirs, ~12s for 1820). Every tracked-
-// client change rebuilds the watch roots, so on the main thread that teardown
-// froze the widget for about a second per toggle. Moving only the watcher to a
-// worker thread drops the owning thread's worst stall to well under a frame
-// while the worker still pays the same close cost.
+// chokidar's close() is synchronous on the calling thread and superlinear in
+// watched-directory count (measured on a real tree: ~1.1s for 548 dirs, ~12s
+// for 1820). Every tracked-client change rewrites the watch roots, so on the
+// owning thread that teardown froze the widget for about a second per toggle.
 //
-// unwatch() is not an alternative: it stops event delivery but retains the
-// descriptors (verified: 2613 fds before and after), so incremental root
-// updates would leak toward EMFILE and trip the sticky polling fallback.
+// One worker per coordinator, reused across collector restarts. That is not an
+// optimisation: it is what preserves the invariant the synchronous close used
+// to provide, namely that the old watcher is fully gone before a new one starts
+// on the same paths. Spawning a second worker per restart would instead overlap
+// two full descriptor sets, and on Linux the inotify budget is per-user and
+// shared with editors, so the overlap could trip the exhaustion fallback, which
+// is deliberately sticky for the process.
 //
-// The in-process implementation is kept as a real fallback and is what the
-// collector's watch-behaviour tests drive, since the reaction logic they cover
-// is identical on both paths.
+// unwatch() is not an alternative for incremental root edits: it stops event
+// delivery but retains the descriptors (verified: 2613 fds before and after).
+//
+// The in-process implementation is a real fallback, not dead code. A worker can
+// fail asynchronously (a Worker constructor does not throw on a missing or
+// broken module; it emits 'error' and exits afterwards), and watching on this
+// thread is worse for latency but still correct. It is also what the collector's
+// watch-behaviour tests drive, since the reaction logic is identical on both.
 
-// require.resolve rather than a path join, so the lookup keeps working inside
-// an asar archive — same as sessionDetailResolver.js does for its worker.
 const WORKER_PATH = require.resolve('./watcherWorker');
 const CLOSE_REPORT_GRACE_MS = 30_000;
 
@@ -49,99 +54,170 @@ function createInProcessWatcherHost(config = {}, handlers = {}) {
   };
 }
 
-function createWorkerWatcherHost(config = {}, handlers = {}, deps = {}) {
-  const { Worker } = deps.workerThreads || require('node:worker_threads');
-  const worker = new Worker(deps.workerPath || WORKER_PATH, {
-    workerData: {
-      dirs: config.dirs,
-      clients: config.clients,
-      usePolling: config.usePolling === true
-    }
-  });
-  // Nothing here should keep the process alive: the collector's own timers
-  // decide that, and a watcher that outlived them would hold quit open.
-  worker.unref();
-  let closing = false;
+// Exported as a factory rather than only as a module-level singleton: tests run
+// concurrently and a future second collector in one process must not share this
+// state. Production uses the default instance below.
+function createWatcherCoordinator(deps = {}) {
+  const WorkerClass = deps.Worker || require('node:worker_threads').Worker;
+  const workerPath = deps.workerPath || WORKER_PATH;
+  const setTimer = deps.setTimeout || setTimeout;
+  const clearTimer = deps.clearTimeout || clearTimeout;
+
+  let worker = null;
+  let workerDisabled = false;
+  let expectingExit = false;
+  let revision = 0;
+  let current = null;
+  let inProcessHost = null;
   let graceTimer = null;
 
-  const done = () => {
-    if (graceTimer) {
-      clearTimeout(graceTimer);
-      graceTimer = null;
-    }
-    void worker.terminate();
-  };
+  function clearGrace() {
+    if (!graceTimer) return;
+    clearTimer(graceTimer);
+    graceTimer = null;
+  }
 
-  worker.on('message', (message) => {
+  function forceTerminate() {
+    clearGrace();
+    if (!worker) return;
+    const dying = worker;
+    worker = null;
+    expectingExit = true;
+    void dying.terminate();
+  }
+
+  function fallBackToInProcess(error) {
+    worker = null;
+    workerDisabled = true;
+    clearGrace();
+    if (!current) return;
+    current.handlers.onHostFallback?.(error);
+    inProcessHost = createInProcessWatcherHost(current.config, current.handlers);
+  }
+
+  function onMessage(message) {
+    // The worker only emits for the watcher it has actually applied, so no
+    // revision filtering is needed here; `current` is the live owner.
+    const handlers = current?.handlers;
+    if (!handlers) return;
     if (message?.type === 'event') {
-      if (!closing) handlers.onEvent?.(message.event, message.filePath);
-      return;
-    }
-    if (message?.type === 'error') {
-      if (closing) return;
-      // Rebuild an Error so `code` reaches the descriptor-exhaustion check the
-      // same way chokidar's own error object would.
-      const error = new Error(message.message || 'watcher error');
-      if (message.code) error.code = message.code;
-      handlers.onError?.(error);
+      handlers.onEvent?.(message.event, message.filePath);
       return;
     }
     if (message?.type === 'ready') {
-      if (!closing) handlers.onReady?.();
+      handlers.onReady?.();
       return;
     }
-    if (message?.type === 'closed') done();
-  });
-  // A worker that dies on its own (failed spawn, thrown module) must not leave
-  // the collector believing it is watching.
-  worker.on('error', (error) => {
-    if (closing) return;
-    handlers.onError?.(error);
-  });
+    if (message?.type === 'error') {
+      const error = new Error(message.message || 'watcher error');
+      // Rebuild the code so the descriptor-exhaustion check sees what chokidar
+      // would have given it directly.
+      if (message.code) error.code = message.code;
+      handlers.onError?.(error);
+    }
+  }
+
+  function ensureWorker() {
+    if (worker || workerDisabled) return worker;
+    try {
+      const spawned = new WorkerClass(workerPath, {});
+      // Listeners first, then unref: attaching a 'message' listener refs the
+      // underlying MessagePort, so unref'ing before this would be undone and
+      // the watcher would keep the process alive.
+      spawned.on('message', onMessage);
+      spawned.on('error', (error) => {
+        if (expectingExit) return;
+        fallBackToInProcess(error);
+      });
+      spawned.on('exit', (code) => {
+        if (expectingExit) { expectingExit = false; return; }
+        // An exit we did not ask for means the watcher is gone; a Worker that
+        // fails to load its module lands here rather than throwing above.
+        fallBackToInProcess(new Error(`watch worker exited unexpectedly (code ${code})`));
+      });
+      spawned.unref();
+      worker = spawned;
+    } catch (error) {
+      fallBackToInProcess(error);
+    }
+    return worker;
+  }
+
+  function acquire(config = {}, handlers = {}) {
+    revision += 1;
+    const owned = revision;
+    current = { revision: owned, config, handlers };
+    clearGrace();
+
+    if (inProcessHost) {
+      inProcessHost.close();
+      inProcessHost = null;
+    }
+    if (workerDisabled) {
+      inProcessHost = createInProcessWatcherHost(config, handlers);
+      return makeHandle(owned, 'in-process');
+    }
+
+    const active = ensureWorker();
+    if (!active) return makeHandle(owned, 'in-process');
+
+    active.postMessage({ type: 'configure', revision: owned, config });
+    return makeHandle(owned, 'worker');
+  }
+
+  function makeHandle(owned, kind) {
+    return {
+      kind,
+      close({ skipClose = false } = {}) {
+        if (current?.revision !== owned) return;
+        current = null;
+        if (inProcessHost) {
+          inProcessHost.close({ skipClose });
+          inProcessHost = null;
+          return;
+        }
+        if (!worker) return;
+        if (skipClose) {
+          // Quit path: descriptors go with the process, so skip the slow
+          // teardown rather than waiting for a thread we are about to lose.
+          forceTerminate();
+          return;
+        }
+        revision += 1;
+            try {
+          worker.postMessage({ type: 'stop', revision });
+        } catch (_) {
+          forceTerminate();
+          return;
+        }
+        // Only covers a worker that never answers. A normal stop leaves the
+        // thread idle and reusable, so the next acquire skips spawn cost.
+        clearGrace();
+        graceTimer = setTimer(forceTerminate, CLOSE_REPORT_GRACE_MS);
+        if (typeof graceTimer.unref === 'function') graceTimer.unref();
+      }
+    };
+  }
 
   return {
-    kind: 'worker',
-    close({ skipClose = false } = {}) {
-      if (closing) return;
-      closing = true;
-      // Quit path: descriptors go with the process, so skip the slow teardown
-      // entirely rather than waiting for a thread we are about to lose.
-      if (skipClose) {
-        void worker.terminate();
-        return;
-      }
-      // Returns immediately. The worker pays chokidar's teardown on its own
-      // thread and reports back; the grace timer only covers a worker that
-      // never answers, so descriptors cannot be pinned forever.
-      try {
-        worker.postMessage({ type: 'close' });
-      } catch (_) {
-        done();
-        return;
-      }
-      graceTimer = setTimeout(done, CLOSE_REPORT_GRACE_MS);
-      if (typeof graceTimer.unref === 'function') graceTimer.unref();
-    }
+    acquire,
+    // Test seam: asserts on which host actually served the last acquire.
+    inspect: () => ({ hasWorker: Boolean(worker), workerDisabled, inProcess: Boolean(inProcessHost) })
   };
 }
+
+const defaultCoordinator = createWatcherCoordinator();
 
 function createWatcherHost(config = {}, handlers = {}, deps = {}) {
   const useInProcess = deps.inProcess ?? inProcessRequested(deps.env || process.env);
   if (useInProcess) return createInProcessWatcherHost(config, handlers);
-  try {
-    return createWorkerWatcherHost(config, handlers, deps);
-  } catch (error) {
-    // Worker threads are unavailable or the module failed to spawn. Watching on
-    // the owning thread is worse for latency but still correct, and it is what
-    // this code did before workers existed.
-    handlers.onHostFallback?.(error);
-    return createInProcessWatcherHost(config, handlers);
-  }
+  const coordinator = deps.coordinator || defaultCoordinator;
+  return coordinator.acquire(config, handlers);
 }
 
 module.exports = {
   createInProcessWatcherHost,
+  createWatcherCoordinator,
   createWatcherHost,
-  createWorkerWatcherHost,
   inProcessRequested
 };
