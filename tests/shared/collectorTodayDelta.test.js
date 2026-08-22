@@ -10,6 +10,9 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { EventEmitter } = require('node:events');
+const { installInProcessWatchHost } = require('../helpers/watchHost');
+
+installInProcessWatchHost(test);
 
 const collectorPath = require.resolve('../../src/shared/collector');
 

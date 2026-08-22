@@ -4,7 +4,6 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const chokidar = require('chokidar');
 const semver = require('semver');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
@@ -30,6 +29,7 @@ const {
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles');
+const { createWatcherHost } = require('./watcherHost');
 const { localDayKey, mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const cursorAuth = require('./cursorAuth');
@@ -3461,15 +3461,16 @@ function startCollector(options) {
     }, watchDebounceMs);
   }
 
-  // chokidar's close() returns a promise, but only after an O(N) synchronous
-  // pass that walks every watched entry and closes every fs.watch handle inline,
-  // so on a tree the size of ~/.claude/projects it blocks the caller for as long
-  // as that takes. Callers that must not overlap an old watcher with a new one
-  // (mode switches) pay that cost; the quit path skips it via
-  // stop({ skipCloseWatchers }) and lets the descriptors go with the process.
-  function closeWatchers() {
-    for (const watcher of watchers) {
-      try { watcher.close(); } catch (_) {}
+  // chokidar's close() walks every watched entry and closes every fs.watch
+  // handle inline, and its cost grows superlinearly with that count, so on a
+  // tree the size of ~/.claude/projects it runs for about a second. That cost
+  // has not gone away — watcherHost.js just decides which thread pays it, and
+  // by default that is a worker rather than the one driving the UI. `skipClose`
+  // is the quit path: descriptors go with the process, so there is nothing to
+  // wait for.
+  function closeWatchers({ skipClose = false } = {}) {
+    for (const host of watchers) {
+      try { host.close({ skipClose }); } catch (_) {}
     }
     watchers.length = 0;
   }
@@ -3532,53 +3533,62 @@ function startCollector(options) {
       log('No watchable client data directories found; relying on fallback interval only.');
       return;
     }
+    function handleWatchEvent(event, filePath) {
+      // The quit path leaves the watcher open (see stop), so events can still
+      // arrive after the collector is done with them.
+      if (stopped) return;
+      // Our own read-only opens of Qoder CN's local.db recreate its SQLite
+      // wal-index (local.db-shm), so watching that sidecar re-triggers the
+      // watch loop forever — confirmed: 142 events/5min with Qoder CN fully
+      // stopped, dropping to 0 after this filter. The real data signal lives
+      // in local.db / local.db-wal, so drop *.db-shm events under the
+      // qodercn roots only. (hermes/micode may share this pattern upstream —
+      // out of scope here, their watch behaviour is left untouched.)
+      if (isQoderCnSelfWatchEvent(filePath, rootsByClient)) return;
+      activityRevision += 1;
+      if (tickPending) {
+        pendingActivityRevision = pendingActivityRevision === null
+          ? activityRevision
+          : Math.max(pendingActivityRevision, activityRevision);
+      }
+      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient);
+      if (
+        reasonixNativeSessionCache
+        && isReasonixNativeSessionSidecar(filePath)
+        && isReasonixNativeSessionPath(
+          filePath,
+          typeof reasonixNativeSessionCache.sessionRoots === 'function'
+            ? reasonixNativeSessionCache.sessionRoots()
+            : reasonixNativeSessionWatchRoots()
+        )
+      ) {
+        reasonixNativeSessionCache.invalidate(filePath);
+      }
+      for (const client of clientsForWatchPath(filePath, sourceSyncRootsByClient)) {
+        sourceSyncQueue.record(client);
+      }
+      if (watchTriggersCollection) {
+        scheduleTick(
+          `watch:${event}:${path.basename(filePath || '')}`,
+          eventClients
+        );
+      } else recordWatchClients(eventClients);
+    }
+
     const usePolling = watchUsePolling || watchDescriptorFallback;
     try {
-      const ignored = watchIgnoreMatcher(clients);
-      const watcher = chokidar.watch(dirs, watcherOptions(usePolling, ignored));
-      watcher.on('all', (event, filePath) => {
-        // The quit path leaves the watcher open (see stop), so events can still
-        // arrive after the collector is done with them.
-        if (stopped) return;
-        // Our own read-only opens of Qoder CN's local.db recreate its SQLite
-        // wal-index (local.db-shm), so watching that sidecar re-triggers the
-        // watch loop forever — confirmed: 142 events/5min with Qoder CN fully
-        // stopped, dropping to 0 after this filter. The real data signal lives
-        // in local.db / local.db-wal, so drop *.db-shm events under the
-        // qodercn roots only. (hermes/micode may share this pattern upstream —
-        // out of scope here, their watch behaviour is left untouched.)
-        if (isQoderCnSelfWatchEvent(filePath, rootsByClient)) return;
-        activityRevision += 1;
-        if (tickPending) {
-          pendingActivityRevision = pendingActivityRevision === null
-            ? activityRevision
-            : Math.max(pendingActivityRevision, activityRevision);
+      const host = createWatcherHost(
+        { dirs, clients, usePolling },
+        {
+          onHostFallback: (error) => {
+            emitDiagnosticEvent({ subsystem: 'watcher', code: 'watcher-host-fallback' });
+            log(`Watch worker unavailable (${error.message}); watching on this thread.`);
+          },
+          onError: handleWatchError,
+          onEvent: handleWatchEvent
         }
-        const eventClients = clientsForWatchPath(filePath, attributionRootsByClient);
-        if (
-          reasonixNativeSessionCache
-          && isReasonixNativeSessionSidecar(filePath)
-          && isReasonixNativeSessionPath(
-            filePath,
-            typeof reasonixNativeSessionCache.sessionRoots === 'function'
-              ? reasonixNativeSessionCache.sessionRoots()
-              : reasonixNativeSessionWatchRoots()
-          )
-        ) {
-          reasonixNativeSessionCache.invalidate(filePath);
-        }
-        for (const client of clientsForWatchPath(filePath, sourceSyncRootsByClient)) {
-          sourceSyncQueue.record(client);
-        }
-        if (watchTriggersCollection) {
-          scheduleTick(
-            `watch:${event}:${path.basename(filePath || '')}`,
-            eventClients
-          );
-        } else recordWatchClients(eventClients);
-      });
-      watcher.on('error', handleWatchError);
-      watchers.push(watcher);
+      );
+      watchers.push(host);
       watchedDirectoryKey = directoryKey;
       lastWatchFailureCode = null;
       for (const dir of dirs) log(`Watching ${dir} (${usePolling ? 'polling 2s' : 'native events'})`);
@@ -3641,7 +3651,7 @@ function startCollector(options) {
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
     clearRolloverHistoryRetry();
     sourceSyncQueue.stop();
-    if (!options.skipCloseWatchers) closeWatchers();
+    closeWatchers({ skipClose: options.skipCloseWatchers === true });
     watchedDirectoryKey = null;
   }
 

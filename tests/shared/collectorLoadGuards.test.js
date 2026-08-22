@@ -18,10 +18,12 @@ const {
 } = require('../../src/shared/selfSyncThrottle');
 
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
+const { installInProcessWatchHost } = require('../helpers/watchHost');
 
 const collectorPath = require.resolve('../../src/shared/collector');
 
 installSourceEnvGuard(test);
+installInProcessWatchHost(test);
 
 function freshCollector() {
   delete require.cache[collectorPath];
