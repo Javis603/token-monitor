@@ -40,7 +40,8 @@ const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require(
 const {
   buildCopilotSessionStoreHistoryGraph,
   buildCopilotSessionStorePeriods,
-  collectCopilotSessionStoreRows
+  collectCopilotSessionStoreRows,
+  resolveCopilotSessionStorePricing
 } = require('./copilotSessionStoreUsage');
 const {
   buildQoderCnHistoryGraph,
@@ -1336,7 +1337,7 @@ async function collectUsageOnce(options) {
       try {
         const storeSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
         copilotStoreRows = await collectCopilotSessionStoreRows({ homeDir: options.homeDir, logger: options.logger, sinceMs: storeSinceMs });
-        copilotStorePricing = await resolveQoderCnPricing(copilotStoreRows, {
+        copilotStorePricing = await resolveCopilotSessionStorePricing(copilotStoreRows, {
           lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
           commandTimeoutMs: options.pricingTimeoutMs,
           pricingRevision: options.pricingRevision
@@ -1718,7 +1719,7 @@ async function collectUsageOnce(options) {
     if (includesCopilotStore) {
       try {
         const rows = (!anchorUsed && copilotStoreRows) ? copilotStoreRows : await collectCopilotSessionStoreRows({ homeDir: options.homeDir, logger: options.logger });
-        const pricing = (!anchorUsed && copilotStorePricing) ? copilotStorePricing : await resolveQoderCnPricing(rows, {
+        const pricing = (!anchorUsed && copilotStorePricing) ? copilotStorePricing : await resolveCopilotSessionStorePricing(rows, {
           lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
           commandTimeoutMs: options.pricingTimeoutMs,
           pricingRevision: options.pricingRevision

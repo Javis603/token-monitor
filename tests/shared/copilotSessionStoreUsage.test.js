@@ -9,7 +9,8 @@ const {
   buildCopilotSessionStoreHistoryGraph,
   buildCopilotSessionStorePeriods,
   copilotSessionStoreDataPaths,
-  normalizeCopilotSessionStoreDbRow
+  normalizeCopilotSessionStoreDbRow,
+  resolveCopilotSessionStorePricing
 } = require('../../src/shared/copilotSessionStoreUsage');
 
 test('copilotSessionStoreDataPaths defaults to ~/.copilot/session-store.db and honours the env override', () => {
@@ -126,4 +127,30 @@ test('buildCopilotSessionStoreHistoryGraph buckets per day and model under the c
   const day2 = graph.contributions[1].clients[0];
   assert.equal(day2.tokens.cacheRead, 4);
   assert.equal(day2.tokens.reasoning, 1);
+});
+
+test('resolveCopilotSessionStorePricing prices rows through the injected catalog lookup', async () => {
+  const rows = [
+    { model: 'GPT-5.6-Terra', input: 100, output: 10, cacheRead: 0, cacheWrite: 0 },
+    { model: 'gpt-5.6-terra', input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }
+  ];
+  const lookupCalls = [];
+  const pricingByModel = await resolveCopilotSessionStorePricing(rows, {
+    nowMs: 1_000,
+    pricingRevision: 7,
+    lookupModelPricing: async (modelId) => {
+      lookupCalls.push(modelId);
+      return { pricing: { inputCostPerToken: 2, outputCostPerToken: 1 } };
+    }
+  });
+  assert.deepEqual(lookupCalls, ['gpt-5.6-terra'], 'models dedupe case-insensitively');
+  assert.equal(pricingByModel['gpt-5.6-terra'].inputCostPerToken, 2);
+
+  // A failed/unknown lookup must stay cost-unavailable, not throw.
+  const empty = await resolveCopilotSessionStorePricing([{ model: 'unknown-model' }], {
+    nowMs: 1_000,
+    pricingRevision: 7,
+    lookupModelPricing: async () => { throw new Error('offline'); }
+  });
+  assert.deepEqual(empty, {});
 });

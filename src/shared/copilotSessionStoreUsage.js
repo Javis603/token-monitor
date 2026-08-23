@@ -12,10 +12,10 @@
 // failed read can rebuild today exactly from the last full scan's cached rows.
 //
 // Rows are merged into the existing 'copilot' client (never a separate client
-// id): same vendor icon/labels/pricing surfaces, no renderer churn. Cost
-// estimation reuses the shared per-model pricing lookup behind the Qoder CN
-// adapter because the pricing plumbing (models.dev catalog + custom pricing)
-// is identical for every local SQLite adapter.
+// id): same vendor icon/labels/pricing surfaces, no renderer churn. Costs are
+// estimated locally through the shared models.dev catalog lookup plus the
+// user's custom-pricing overrides, mirroring how every other parse-local
+// adapter prices its rows.
 
 const { execFile } = require('node:child_process');
 const fs = require('node:fs');
@@ -25,10 +25,13 @@ const { createHash } = require('node:crypto');
 const { promisify } = require('node:util');
 const execFileAsync = promisify(execFile);
 
-const { estimatedQoderCnRowCost, resolveQoderCnPricing, resetQoderCnPricingCache } = require('./qoderCnUsage');
+const { customPricingPath } = require('./tokscaleConfig');
 
 const COPILOT_SESSION_STORE_READ_MAX_BYTES = 50 * 1024 * 1024;
 const COPILOT_SESSION_STORE_READ_MAX_ROWS = 100_000;
+
+const COPILOT_SESSION_STORE_PRICING_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const COPILOT_SESSION_STORE_PRICING_LOOKUP_TIMEOUT_MS = 3000;
 
 const COPILOT_SESSION_STORE_USAGE_SQL = `
 SELECT id, session_id, model, input_tokens, output_tokens,
@@ -180,22 +183,98 @@ async function collectCopilotSessionStoreRows(options = {}) {
     }
   }
 
-  // The table can also back non-JetBrains surfaces sharing ~/.copilot; the id
-  // key keeps every source deduped when several db paths resolve to one file.
+  // Several db paths can resolve to one file; the id key keeps every source
+  // deduped when that happens.
   const unique = new Map();
   for (const row of rows) unique.set(row.messageId, row);
   return [...unique.values()];
 }
 
-function estimateRowCost(row, pricingByModel) {
-  return estimatedQoderCnRowCost({ model: row.model, input: row.input, output: row.output, cacheRead: row.cacheRead, cacheWrite: row.cacheWrite }, pricingByModel);
+// Positive capabilities stay cached. The custom-pricing file's mtime rides
+// along in the cache key so an edit invalidates immediately, matching the
+// cadence of every other local-adapter pricing lane.
+const COPILOT_SESSION_STORE_PRICING_REVISION_FALLBACK = 0;
+const copilotSessionStorePricingCache = new Map();
+
+function copilotSessionStorePricingRevision() {
+  try { return fs.statSync(customPricingPath()).mtimeMs; } catch (_) {
+    return COPILOT_SESSION_STORE_PRICING_REVISION_FALLBACK;
+  }
+}
+
+function normalizeCopilotSessionStorePricing(result) {
+  const source = result?.pricing;
+  if (!source || typeof source !== 'object') return null;
+  const pick = (key) => {
+    const value = Number(source[key]);
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  };
+  const pricing = {
+    inputCostPerToken: pick('inputCostPerToken'),
+    outputCostPerToken: pick('outputCostPerToken'),
+    cacheReadInputTokenCost: pick('cacheReadInputTokenCost'),
+    cacheCreationInputTokenCost: pick('cacheCreationInputTokenCost')
+  };
+  return pricing.inputCostPerToken !== undefined || pricing.outputCostPerToken !== undefined ? pricing : null;
+}
+
+async function resolveCopilotSessionStorePricing(rows, options = {}) {
+  const lookup = options.lookupModelPricing;
+  const pricingByModel = {};
+  if (typeof lookup !== 'function') return pricingByModel;
+  const revision = options.pricingRevision ?? copilotSessionStorePricingRevision();
+  const nowMs = options.nowMs ?? Date.now();
+  const commandTimeoutMs = options.commandTimeoutMs || COPILOT_SESSION_STORE_PRICING_LOOKUP_TIMEOUT_MS;
+  const modelIds = [...new Set((Array.isArray(rows) ? rows : [])
+    .map((row) => String(row?.model || '').trim().toLowerCase())
+    .filter(Boolean))];
+  for (const modelId of modelIds) {
+    const cached = copilotSessionStorePricingCache.get(modelId);
+    if (cached && cached.revision === revision && nowMs - cached.at < COPILOT_SESSION_STORE_PRICING_CACHE_TTL_MS) {
+      if (cached.pricing) pricingByModel[modelId] = cached.pricing;
+      continue;
+    }
+    let pricing = null;
+    try {
+      pricing = normalizeCopilotSessionStorePricing(await lookup(modelId, commandTimeoutMs));
+    } catch (_) {
+      // An unknown model, offline lookup, or custom channel must remain
+      // cost-unavailable instead of inheriting an unrelated catalog price.
+    }
+    copilotSessionStorePricingCache.set(modelId, { at: nowMs, revision, pricing });
+    if (pricing) pricingByModel[modelId] = pricing;
+  }
+  return pricingByModel;
+}
+
+function resetCopilotSessionStorePricingCache() {
+  copilotSessionStorePricingCache.clear();
+}
+
+function estimateCopilotSessionStoreRowCost(row, pricingByModel) {
+  const pricing = pricingByModel?.[String(row?.model || '').trim().toLowerCase()];
+  if (!pricing || typeof pricing !== 'object') return null;
+  const components = [
+    [row?.input, pricing.inputCostPerToken],
+    [row?.output, pricing.outputCostPerToken],
+    [row?.cacheRead, pricing.cacheReadInputTokenCost],
+    [row?.cacheWrite, pricing.cacheCreationInputTokenCost]
+  ];
+  let cost = 0;
+  for (const [tokens, unitCost] of components) {
+    if (!tokens) continue;
+    if (!Number.isFinite(Number(unitCost)) || Number(unitCost) < 0) return null;
+    cost += tokens * Number(unitCost);
+  }
+  return cost;
 }
 
 function buildTokscaleJson(startMs, rows, pricingByModel, includeUndated = false) {
   const grouped = new Map();
   for (const row of rows) {
     // Dated rows must fall inside the window, undated rows count only for
-    // allTime (includeUndated) — never for today/month, mirroring proma/qodercn.
+    // allTime (includeUndated) — never for today/month, so a row without a
+    // parseable timestamp cannot pollute the rolling windows.
     if (startMs && (row.createdAt ? row.createdAt < startMs : !includeUndated)) continue;
     const key = `${row.sessionId}\0${row.model}`;
     if (!grouped.has(key)) grouped.set(key, { ...row, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, messages: 0, startedAt: 0, lastUsedAt: 0, cost: 0 });
@@ -205,7 +284,7 @@ function buildTokscaleJson(startMs, rows, pricingByModel, includeUndated = false
     group.cacheRead += row.cacheRead;
     group.cacheWrite += row.cacheWrite;
     group.messages += row.messages;
-    const cost = estimateRowCost(row, pricingByModel);
+    const cost = estimateCopilotSessionStoreRowCost(row, pricingByModel);
     group.cost += cost === null ? 0 : cost;
     if (row.createdAt && (!group.startedAt || row.createdAt < group.startedAt)) group.startedAt = row.createdAt;
     if (row.createdAt > group.lastUsedAt) group.lastUsedAt = row.createdAt;
@@ -259,7 +338,7 @@ function buildCopilotSessionStoreHistoryGraph(options = {}) {
       model = { client: 'copilot', modelId: row.model, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: 0, messages: 0 };
       day.clients.push(model);
     }
-    const cost = estimateRowCost(row, options.pricingByModel);
+    const cost = estimateCopilotSessionStoreRowCost(row, options.pricingByModel);
     model.tokens.input += row.input;
     model.tokens.output += row.output;
     model.tokens.cacheRead += row.cacheRead;
@@ -276,8 +355,8 @@ module.exports = {
   normalizeCopilotSessionStoreDbRow,
   readCopilotSessionStoreRows,
   collectCopilotSessionStoreRows,
-  resolveCopilotSessionStorePricing: resolveQoderCnPricing,
-  resetCopilotSessionStorePricingCache: resetQoderCnPricingCache,
+  resolveCopilotSessionStorePricing,
+  resetCopilotSessionStorePricingCache,
   buildCopilotSessionStorePeriods,
   buildCopilotSessionStoreHistoryGraph
 };
