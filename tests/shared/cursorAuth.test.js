@@ -140,3 +140,27 @@ test('runCursorSync rejects when the tokscale stdin pipe breaks', async () => {
   });
   assert.equal(killed, true);
 });
+
+test('runCursorSync kills the child and keeps the abort error when superseded', async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {};
+  let killed = 0;
+  child.kill = () => { killed += 1; };
+  const controller = new AbortController();
+  const reason = new Error('collector stopped');
+  const pending = runCursorSync({
+    signal: controller.signal,
+    spawn: () => child,
+    tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
+    timeoutMs: 60_000
+  });
+
+  controller.abort(reason);
+  child.emit('close', 143);
+
+  await assert.rejects(pending, (caught) => caught === reason);
+  assert.equal(killed, 1);
+});

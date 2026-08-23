@@ -11,6 +11,7 @@ const {
   envelopeFromSettings,
   limitsConfigFromSettings,
   normalizeAllTimeSince,
+  usageSettingsFingerprint,
   usageConfigFromSettings
 } = require('../../src/electron/runtimeConfig');
 
@@ -18,6 +19,22 @@ test('all-time dates are normalized before entering the usage runtime', () => {
   assert.equal(normalizeAllTimeSince('2026-02-28'), '2026-02-28');
   assert.equal(normalizeAllTimeSince('2026-02-30'), '2024-01-01');
   assert.equal(normalizeAllTimeSince('not-a-date'), '2024-01-01');
+});
+
+test('usage settings fingerprint ignores display-only changes and tracks structural ones', () => {
+  const base = {
+    clients: 'claude,codex',
+    historyEnabled: true,
+    hiddenClients: 'codex'
+  };
+  assert.equal(
+    usageSettingsFingerprint(base),
+    usageSettingsFingerprint({ ...base, hiddenClients: 'claude', glassBlur: 80 })
+  );
+  assert.notEqual(
+    usageSettingsFingerprint(base),
+    usageSettingsFingerprint({ ...base, clients: 'claude' })
+  );
 });
 
 test('diagnostic configuration projects effective normalized values without credentials', () => {

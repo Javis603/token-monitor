@@ -10498,13 +10498,12 @@ async function onToolTrackingToggle() {
     .filter((cb) => cb.checked)
     .map((cb) => cb.dataset.client);
   await saveSettings({ clients: checked.join(',') });
-  // `clients` is usage-structural, so settings:update already restarts the usage
-  // runtime and its new collector runs a full tick on start. Forcing a refresh on
-  // top lands while that tick is in flight, so runTick coalesces it into a second
-  // full scan back-to-back — and drags an all-provider limits refresh along. The
-  // extra stats pushes then repaint the whole settings panel under the pointer,
-  // which is what made this checkbox stall while the eye and pin next to it did
-  // not (#471).
+  // `clients` is usage-structural, so settings:update schedules a latest-wins
+  // usage reconciliation and the eventual collector runs its own full tick.
+  // Forcing a refresh here would bypass that settling boundary, duplicate the
+  // scan, and drag an all-provider limits refresh along. The extra stats pushes
+  // would then repaint the whole settings panel under the pointer, which is what
+  // made this checkbox stall while the eye and pin next to it did not (#471).
 }
 
 async function onClientVisibilityToggle(clientId) {

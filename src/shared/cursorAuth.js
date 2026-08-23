@@ -92,9 +92,11 @@ function readActiveAccount({ home = os.homedir() } = {}) {
 function runTokscaleSubcommand(args, {
   stdin = null,
   timeoutMs = 30000,
+  signal,
   spawn: spawnFn = spawn,
   tokscaleCommand: resolveTokscaleCommand
 } = {}) {
+  if (signal?.aborted) return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('Cursor sync aborted'));
   return new Promise((resolve, reject) => {
     const tokscaleCommand = resolveTokscaleCommand || require('./collector').tokscaleCommand;
     const { bin, prefixArgs, env } = tokscaleCommand();
@@ -108,8 +110,14 @@ function runTokscaleSubcommand(args, {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
       if (error) reject(error);
       else resolve(value);
+    }
+
+    function onAbort() {
+      try { child.kill('SIGTERM'); } catch (_) {}
+      finish(signal.reason instanceof Error ? signal.reason : new Error('Cursor sync aborted'));
     }
 
     timer = setTimeout(() => {
@@ -133,6 +141,8 @@ function runTokscaleSubcommand(args, {
       }
       finish(null, stdout);
     });
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
     try {
       child.stdin.end(stdin || undefined);
     } catch (error) {

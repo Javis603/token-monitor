@@ -4,11 +4,11 @@
 // and its cost is superlinear in that count, so running it on the thread that
 // owns the collector froze the UI for about a second on every runtime restart.
 //
-// This thread is the only place a chokidar instance ever exists, which is what
-// keeps descriptors from overlapping: a reconfigure closes the previous watcher
-// and awaits it before opening the next, so the old roots are fully released
-// first. That ordering used to be provided by the owner closing synchronously
-// before starting a new collector, and it has to be preserved here instead.
+// This thread is the only place a chokidar instance ever exists. The production
+// owner normally recycles the whole thread on a collector replacement so its
+// native allocation high-water is released; an in-thread reconfigure (including
+// the explicitly reusable host mode) still closes and awaits the previous
+// watcher before opening the next, so descriptors never overlap.
 //
 // Nothing but the watcher lives here. Roots, attribution, debouncing and every
 // tick decision stay on the owning thread, so there is no collector state to

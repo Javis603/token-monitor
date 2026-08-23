@@ -72,6 +72,10 @@ function changedAny(previous, next, keys) {
   return keys.some((key) => !equalSetting(previous?.[key], next?.[key]));
 }
 
+function usageSettingsFingerprint(settings = {}) {
+  return JSON.stringify(USAGE_STRUCTURAL_KEYS.map((key) => [key, settings?.[key] ?? null]));
+}
+
 function normalizeAllTimeSince(value, fallback = DEFAULT_ALL_TIME_SINCE) {
   const raw = String(value ?? '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return fallback;
@@ -245,5 +249,6 @@ module.exports = {
   envelopeFromSettings,
   limitsConfigFromSettings,
   normalizeAllTimeSince,
+  usageSettingsFingerprint,
   usageConfigFromSettings
 };

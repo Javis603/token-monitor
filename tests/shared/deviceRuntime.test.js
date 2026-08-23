@@ -8,6 +8,7 @@ const { createDeviceRuntime } = require('../../src/shared/deviceRuntime');
 function harness(options = {}) {
   const { limitsDeps: injectedLimitsDeps = {}, ...runtimeOptions } = options;
   let usageOptions;
+  const usageOptionsHistory = [];
   let limitsDeps;
   const calls = [];
   const usageHandle = {
@@ -31,6 +32,7 @@ function harness(options = {}) {
   }, {
     createUsageRuntime(next) {
       usageOptions = next;
+      usageOptionsHistory.push(next);
       return usageHandle;
     },
     createLimitsRuntime(_config, nextDeps) {
@@ -39,7 +41,7 @@ function harness(options = {}) {
     },
     limitsDeps: injectedLimitsDeps
   });
-  return { calls, limitsDeps, records, runtime, usageOptions };
+  return { calls, limitsDeps, records, runtime, usageOptions, usageOptionsHistory };
 }
 
 test('usage publishes immediately without waiting for limits and late limits emit a second full record', () => {
@@ -127,6 +129,25 @@ test('stop invalidates both producer callbacks before stopping handles', () => {
   assert.deepEqual(calls, [['usageStop'], ['limitsStop']]);
 });
 
+test('usage reconfigure replaces only usage and rejects callbacks from the superseded runtime', () => {
+  const { calls, limitsDeps, records, runtime, usageOptionsHistory } = harness();
+  const firstUsage = usageOptionsHistory[0];
+
+  assert.equal(runtime.reconfigureUsage({ clients: 'codex' }), true);
+  assert.equal(usageOptionsHistory.length, 2);
+  assert.equal(usageOptionsHistory[1].clients, 'codex');
+  assert.deepEqual(calls, [['usageStop']]);
+
+  firstUsage.onUpdate({ updatedAt: 'stale', today: { totalTokens: 99 } }, 'late');
+  usageOptionsHistory[1].onUpdate({ updatedAt: 'fresh', today: { totalTokens: 7 } }, 'startup');
+  limitsDeps.onUpdate({ updatedAt: 'limits-time', refreshMs: 300000, providers: [] });
+
+  assert.equal(records.length, 2);
+  assert.equal(records[0].record.today.totalTokens, 7);
+  assert.equal(records[1].record.limits.updatedAt, 'limits-time');
+  assert.ok(!calls.some(([name]) => name === 'limitsStop'));
+});
+
 test('stop suppresses delegated diagnostic callbacks from late producer events', () => {
   const usageEvents = [];
   const limitsEvents = [];
@@ -192,6 +213,7 @@ test('runtime control wrappers do not delegate after stop', async () => {
   assert.equal(await runtime.refreshClient('cursor'), false);
   assert.equal(await runtime.refreshLimits({ provider: 'kimi' }, 'late'), false);
   assert.equal(runtime.reconfigureLimits({ limitsRefreshMs: 60000 }), null);
+  assert.equal(runtime.reconfigureUsage({ clients: 'codex' }), null);
   assert.equal(runtime.clearLimits({ provider: 'kimi' }, 'late'), null);
   await runtime.flush();
 

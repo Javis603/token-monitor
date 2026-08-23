@@ -9,6 +9,7 @@ const test = require('node:test');
 // wiring at the source level instead (same approach as refreshForceHistory.test.js).
 const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
 const runtimeConfigSource = fs.readFileSync(path.join(__dirname, '../../src/electron/runtimeConfig.js'), 'utf8');
+const mainSource = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 
 function handlerBody(name) {
   const match = rendererSource.match(new RegExp(`async function ${name}\\(\\) \\{([\\s\\S]*?)\\n\\}`));
@@ -17,11 +18,20 @@ function handlerBody(name) {
 }
 
 test('clients stays a usage-structural setting', () => {
-  // The reason the toggle needs no forced refresh: main restarts the usage
-  // runtime for this key, and a fresh collector runs a full tick on start.
+  // The reason the toggle needs no forced refresh: main replaces the usage
+  // runtime for this key, and a fresh collector runs its own initial tick.
   const keys = runtimeConfigSource.match(/const USAGE_STRUCTURAL_KEYS = Object\.freeze\(\[([\s\S]*?)\]\)/);
   assert.ok(keys, 'USAGE_STRUCTURAL_KEYS exists');
   assert.match(keys[1], /'clients'/);
+});
+
+test('usage-structural changes replace usage without restarting limits', () => {
+  const start = mainSource.indexOf("ipcMain.handle('settings:update'");
+  const end = mainSource.indexOf("ipcMain.handle('appearance:preview'", start);
+  const handler = mainSource.slice(start, end);
+  assert.match(handler, /if \(runtimeChange\.usageStructural\) \{\s*reconfigureUsageRuntimeForMode\(\);\s*\}/);
+  assert.doesNotMatch(handler, /runtimeChange\.usageStructural \|\| runtimeChange\.sinkStructural/);
+  assert.match(mainSource, /usageRuntimeReconciler\.schedule\(usageSettingsFingerprint\(settings\)\)/);
 });
 
 test('tracking a tool does not stack a second full scan on the restart (#471)', () => {
