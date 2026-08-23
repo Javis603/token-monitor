@@ -517,6 +517,7 @@ module.exports = {
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
   collectQoderCnRows,
+  estimatedQoderCnRowCost,
   normalizeQoderCnDbRow,
   qoderCnDataPaths,
   readQoderCnDbRows,

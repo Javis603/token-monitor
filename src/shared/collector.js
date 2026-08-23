@@ -38,6 +38,11 @@ const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
 const {
+  buildCopilotSessionStoreHistoryGraph,
+  buildCopilotSessionStorePeriods,
+  collectCopilotSessionStoreRows
+} = require('./copilotSessionStoreUsage');
+const {
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
   collectQoderCnRows,
@@ -1146,6 +1151,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
   }
+  if (options.copilotStoreGraph) {
+    rawGraphs.push(options.copilotStoreGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.copilotStoreGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -1219,6 +1228,9 @@ async function collectUsageOnce(options) {
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
+  // JetBrains Copilot requests live in ~/.copilot/session-store.db, which
+  // tokscale does not read; the local adapter below tops up the copilot client.
+  const includesCopilotStore = normalizedClients.split(',').includes('copilot');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -1249,11 +1261,21 @@ async function collectUsageOnce(options) {
   let qoderCnRows = null;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
+  let copilotStorePeriods = null;
+  let copilotStoreRows = null;
+  let copilotStorePricing = null;
+  const copilotStoreReadState = options.copilotStoreReadState;
+  if (copilotStoreReadState) {
+    copilotStoreReadState.periodFailed = false;
+    copilotStoreReadState.fallbackUsed = false;
+  }
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     const progress = { ...periods };
     if (qoderCnPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, qoderCnPeriods.today);
     if (qoderCnPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, qoderCnPeriods.month);
+    if (copilotStorePeriods?.today && progress.today) progress.today = mergePeriods(progress.today, copilotStorePeriods.today);
+    if (copilotStorePeriods?.month && progress.month) progress.month = mergePeriods(progress.month, copilotStorePeriods.month);
     try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
   };
   if (normalizedClients) {
@@ -1310,6 +1332,49 @@ async function collectUsageOnce(options) {
         qoderCnPeriods = options.qoderCnFallbackPeriods || null;
       }
     }
+    if (includesCopilotStore && (!targetRequested || targetClients.includes('copilot'))) {
+      try {
+        const storeSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
+        copilotStoreRows = await collectCopilotSessionStoreRows({ homeDir: options.homeDir, logger: options.logger, sinceMs: storeSinceMs });
+        copilotStorePricing = await resolveQoderCnPricing(copilotStoreRows, {
+          lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs,
+          pricingRevision: options.pricingRevision
+        });
+        const storeJson = buildCopilotSessionStorePeriods({ now: collectedAt, allTimeSince, rows: copilotStoreRows, pricingByModel: copilotStorePricing });
+        copilotStorePeriods = {
+          today: extractUsageFromTokscale(storeJson.today),
+          month: extractUsageFromTokscale(storeJson.month),
+          allTime: extractUsageFromTokscale(storeJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`copilot session-store parse failed: ${err.message}`);
+        if (copilotStoreReadState) copilotStoreReadState.periodFailed = true;
+        // Rows are append-only, so today's slice can be rebuilt exactly from
+        // the last full scan's cached rows. This keeps an anchored tick from
+        // silently dropping the JetBrains contribution out of the copilot
+        // partition (which would subtract it from month/allTime via the delta)
+        // until the full rescan that a read failure schedules.
+        const fallbackRows = Array.isArray(options.copilotStoreFallbackRows) ? options.copilotStoreFallbackRows : null;
+        const todayStart = new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime();
+        const recoveredRows = fallbackRows ? fallbackRows.filter((row) => row.createdAt >= todayStart) : [];
+        if (anchorUsed && recoveredRows.length > 0) {
+          try {
+            const storeJson = buildCopilotSessionStorePeriods({ now: collectedAt, allTimeSince, rows: recoveredRows, pricingByModel: {} });
+            copilotStorePeriods = {
+              today: extractUsageFromTokscale(storeJson.today),
+              month: extractUsageFromTokscale(storeJson.month),
+              allTime: extractUsageFromTokscale(storeJson.allTime)
+            };
+            if (copilotStoreReadState) copilotStoreReadState.fallbackUsed = true;
+          } catch (_) {
+            copilotStorePeriods = null;
+          }
+        } else {
+          copilotStorePeriods = null;
+        }
+      }
+    }
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
@@ -1357,6 +1422,13 @@ async function collectUsageOnce(options) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
         freshPartitions.qodercn = anchor.todayPartitions.qodercn;
+      }
+      if (copilotStorePeriods) {
+        // Top up tokscale's own copilot partition with the JetBrains-side
+        // contribution instead of keeping a separate client id.
+        freshPartitions.copilot = freshPartitions.copilot
+          ? mergePeriods(freshPartitions.copilot, copilotStorePeriods.today)
+          : copilotStorePeriods.today;
       }
       if (!useTargetedPartitions) {
         // The fallback rebuilds every Tokscale partition, but parse-local
@@ -1421,6 +1493,17 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, qoderCnPeriods.month);
       allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), qodercn: qoderCnPeriods.today };
+    }
+    if (copilotStorePeriods && !anchorUsed) {
+      today = mergePeriods(today, copilotStorePeriods.today);
+      month = mergePeriods(month, copilotStorePeriods.month);
+      allTime = mergePeriods(allTime, copilotStorePeriods.allTime);
+      todayPartitions = {
+        ...(todayPartitions || {}),
+        copilot: todayPartitions?.copilot
+          ? mergePeriods(todayPartitions.copilot, copilotStorePeriods.today)
+          : copilotStorePeriods.today
+      };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1585,6 +1668,9 @@ async function collectUsageOnce(options) {
       windowsPeriods,
       todayPartitions,
       qoderCnPeriods,
+      // Full row sets only: anchored ticks read just today's slice, which the
+      // collector must never cache as the fallback basis.
+      copilotStoreRows: !anchorUsed && includesCopilotStore ? copilotStoreRows : undefined,
       wslBundle,
       wslStatus,
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
@@ -1625,10 +1711,32 @@ async function collectUsageOnce(options) {
     const historyQoderCnGraph = qoderCnHistoryReadFailed
       ? options.qoderCnHistoryFallbackGraph
       : qoderCnGraph;
+    // Same full-read pattern as Qoder CN: anchored ticks collect only today's
+    // slice, so the graph needs its own full read; the pricing lookup is cached.
+    let copilotStoreGraph = null;
+    let copilotStoreHistoryReadFailed = false;
+    if (includesCopilotStore) {
+      try {
+        const rows = (!anchorUsed && copilotStoreRows) ? copilotStoreRows : await collectCopilotSessionStoreRows({ homeDir: options.homeDir, logger: options.logger });
+        const pricing = (!anchorUsed && copilotStorePricing) ? copilotStorePricing : await resolveQoderCnPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs,
+          pricingRevision: options.pricingRevision
+        });
+        copilotStoreGraph = buildCopilotSessionStoreHistoryGraph({ rows, pricingByModel: pricing });
+      } catch (err) {
+        copilotStoreHistoryReadFailed = true;
+        if (typeof options.logger === 'function') options.logger(`copilot session-store history parse failed: ${err.message}`);
+      }
+    }
+    const historyCopilotStoreGraph = copilotStoreHistoryReadFailed
+      ? options.copilotStoreHistoryFallbackGraph
+      : copilotStoreGraph;
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
       qoderCnGraph: historyQoderCnGraph || null,
+      copilotStoreGraph: historyCopilotStoreGraph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1644,6 +1752,9 @@ async function collectUsageOnce(options) {
     if (history) summary.history = history;
     if (!qoderCnHistoryReadFailed && qoderCnGraph && typeof options.onQoderCnHistoryGraph === 'function') {
       options.onQoderCnHistoryGraph(qoderCnGraph);
+    }
+    if (!copilotStoreHistoryReadFailed && copilotStoreGraph && typeof options.onCopilotStoreHistoryGraph === 'function') {
+      options.onCopilotStoreHistoryGraph(copilotStoreGraph);
     }
   }
   // After history, so `lastActivityDay` can come from the daily buckets this
@@ -2920,6 +3031,11 @@ function startCollector(options) {
   // later full/history tick instead of losing it at the tick boundary.
   let liveDailyHistoryDays = {};
   let qoderCnHistoryGraph = null;
+  // Last complete JetBrains Copilot row set (full scans only). A failed
+  // session-store read on an anchored tick rebuilds today's slice from it so
+  // the copilot partition never silently loses its JetBrains contribution.
+  let copilotStoreLastFullRows = null;
+  let copilotStoreHistoryGraph = null;
   let lastFullScanAt = 0;
   let pendingWaiters = [];
   let debounceTimer = null;
@@ -3148,9 +3264,16 @@ function startCollector(options) {
         refreshWsl: anchored ? refreshWsl : false,
         qoderCnFallbackPeriods: anchor?.qoderCnPeriods || null,
         qoderCnHistoryFallbackGraph: qoderCnHistoryGraph,
+        copilotStoreHistoryFallbackGraph: copilotStoreHistoryGraph,
         qoderCnReadState,
-        onAnchorComputed: (x) => { captured = x; },
+        copilotStoreReadState,
+        copilotStoreFallbackRows: copilotStoreLastFullRows || [],
+        onAnchorComputed: (x) => {
+          captured = x;
+          if (Array.isArray(x.copilotStoreRows)) copilotStoreLastFullRows = x.copilotStoreRows;
+        },
         onQoderCnHistoryGraph: (graph) => { qoderCnHistoryGraph = graph; },
+        onCopilotStoreHistoryGraph: (graph) => { copilotStoreHistoryGraph = graph; },
         onProgress: (partial) => {
           if (!partial.today) return;
           try {
@@ -3266,6 +3389,7 @@ function startCollector(options) {
         }
       }
       if (qoderCnReadState.periodFailed) scheduledWatchNeedsFullScan = true;
+      if (copilotStoreReadState.periodFailed) scheduledWatchNeedsFullScan = true;
       const transformedSummary = await onUpdate?.(summary, reason);
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'
         ? transformedSummary
