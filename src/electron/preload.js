@@ -101,6 +101,30 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
       return () => ipcRenderer.removeListener('minimax:accounts', handler);
     }
   },
+  deepseek: {
+    accounts: () => ipcRenderer.invoke('deepseek:accounts'),
+    addAccount: (apiKey, accountLabel) => ipcRenderer.invoke('deepseek:addAccount', apiKey, accountLabel),
+    updateAccount: (id, apiKey, accountLabel) => ipcRenderer.invoke('deepseek:updateAccount', id, apiKey, accountLabel),
+    removeAccount: (id) => ipcRenderer.invoke('deepseek:removeAccount', id),
+    setAccountEnabled: (id, enabled) => ipcRenderer.invoke('deepseek:setAccountEnabled', id, enabled),
+    onAccounts: (callback) => {
+      const handler = (_event, accounts) => callback(accounts);
+      ipcRenderer.on('deepseek:accounts', handler);
+      return () => ipcRenderer.removeListener('deepseek:accounts', handler);
+    }
+  },
+  zai: {
+    accounts: () => ipcRenderer.invoke('zai:accounts'),
+    addAccount: (apiKey, accountLabel) => ipcRenderer.invoke('zai:addAccount', apiKey, accountLabel),
+    updateAccount: (id, apiKey, accountLabel) => ipcRenderer.invoke('zai:updateAccount', id, apiKey, accountLabel),
+    removeAccount: (id) => ipcRenderer.invoke('zai:removeAccount', id),
+    setAccountEnabled: (id, enabled) => ipcRenderer.invoke('zai:setAccountEnabled', id, enabled),
+    onAccounts: (callback) => {
+      const handler = (_event, accounts) => callback(accounts);
+      ipcRenderer.on('zai:accounts', handler);
+      return () => ipcRenderer.removeListener('zai:accounts', handler);
+    }
+  },
   exportNow: () => ipcRenderer.invoke('export:now'),
   pickExportDir: () => ipcRenderer.invoke('export:pickAutoDir'),
   getTokscaleStatus: () => ipcRenderer.invoke('tokscale:getStatus'),

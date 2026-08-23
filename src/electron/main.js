@@ -212,13 +212,9 @@ const {
   fetchMimoLimits,
   normalizeMimoCookieHeader
 } = require('../shared/mimoLimits');
-const {
-  MINIMAX_LABEL_MAX_LENGTH,
-  cleanMinimaxSecret,
-  createMinimaxManagedAccount,
-  minimaxAccountKey,
-  minimaxKeySuffix
-} = require('../shared/minimaxAccounts');
+const { createApiKeyAccountController } = require('./apiKeyAccountControllers');
+const { fetchDeepSeekLimits } = require('../shared/deepseekLimits');
+const zaiLimits = require('../shared/zaiLimits');
 const { fetchMinimaxLimits } = require('../shared/minimaxLimits');
 const {
   createManagedAccountLifecycle,
@@ -572,6 +568,8 @@ function defaultSettings() {
     codexManagedAccounts: [],
     mimoManagedAccounts: [],
     minimaxManagedAccounts: [],
+    deepseekManagedAccounts: [],
+    zaiManagedAccounts: [],
     appUpdate: {
       lastCheckedAt: null,
       lastKnownLatest: null,
@@ -678,7 +676,9 @@ function electronLimitsConfig() {
     defaultLimitProviders: defaultLimitProviders(),
     codexManagedAccounts: codexManagedAccountsForCollector(),
     mimoManagedAccounts: mimoManagedAccountsForCollector(),
-    minimaxManagedAccounts: minimaxManagedAccountsForCollector()
+    minimaxManagedAccounts: apiKeyAccountControllers.minimax.managedAccountsForCollector(),
+    deepseekManagedAccounts: apiKeyAccountControllers.deepseek.managedAccountsForCollector(),
+    zaiManagedAccounts: apiKeyAccountControllers.zai.managedAccountsForCollector()
   });
 }
 
@@ -1162,216 +1162,63 @@ const mimoAccountLifecycle = createManagedAccountLifecycle({
   }
 });
 
-// ---------- MiniMax 多账号 ----------
-// 与 MiMo 同一骨架：settings.minimaxManagedAccounts 存元数据（含 keySuffix
-// 显示尾号，不含密钥），密钥存 credentials.json 的
-// providers.minimax.accounts.<id>.apiKey 动态路径。
+// ---------- API key 型供应商多账号（minimax / deepseek / zai）----------
+// 三家共用 apiKeyAccountControllers 工厂：settings.<provider>ManagedAccounts
+// 存元数据（含 keySuffix 显示尾号，不含密钥），密钥存 credentials.json 的
+// providers.<provider>.accounts.<id>.apiKey 动态路径；添加/换 key 前先活体
+// 验证（各 fetcher 探测一次）。
 
-function normalizeMinimaxAccountsMeta(value) {
+// settings 读取侧的元数据归一化（readSettings 在全局 settings 赋值前运行，
+// 不能走 controller，直接用共用归一化函数）。
+function normalizeApiKeyAccountsMeta(value) {
   return normalizeManagedAccountMeta(value, ['keySuffix']);
 }
 
-function minimaxAccountsForRenderer() {
-  return normalizeMinimaxAccountsMeta(settings?.minimaxManagedAccounts);
+function sendApiKeyAccountsPush(provider, controller) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send(`${provider}:accounts`, controller.accountsForRenderer()); } catch (_) {}
 }
 
-function readMinimaxAccountCredential(id) {
-  try {
-    return cleanMinimaxSecret(ensureCredentialStore().readManagedAccountCredential('minimax', id, 'apiKey'));
-  } catch (_) {
-    return '';
-  }
-}
-
-function writeMinimaxAccountCredential(id, value) {
-  const apiKey = cleanMinimaxSecret(value);
-  if (!apiKey) return false;
-  try {
-    return ensureCredentialStore().writeManagedAccountCredential('minimax', id, 'apiKey', apiKey);
-  } catch (_) {
-    return false;
-  }
-}
-
-function removeMinimaxAccountCredential(id) {
-  try {
-    return ensureCredentialStore().removeManagedAccountCredentials('minimax', id);
-  } catch (_) {
-    return false;
-  }
-}
-
-function minimaxManagedAccountsForCollector() {
-  return normalizeMinimaxAccountsMeta(settings?.minimaxManagedAccounts).map((account) => ({
-    ...account,
-    apiKey: readMinimaxAccountCredential(account.id)
-  })).filter((account) => account.apiKey);
-}
-
-const minimaxAccountLifecycle = createManagedAccountLifecycle({
-  provider: 'minimax',
-  normalizeAccounts: normalizeMinimaxAccountsMeta,
-  readCredential: readMinimaxAccountCredential,
-  writeCredential: writeMinimaxAccountCredential,
-  removeCredential: removeMinimaxAccountCredential,
-  getAccounts: () => settings?.minimaxManagedAccounts,
-  setAccounts: (accounts) => {
-    settings.minimaxManagedAccounts = accounts;
-  },
-  persistSettings: () => saveSettings({ throwOnError: true }),
-  broadcastChange: () => {
-    pushSettingsToRenderer();
-    sendMinimaxAccountsPush();
-  },
-  queueInvalidation: (scope, reason, options) => {
-    void queueLimitInvalidation(scope, reason, options);
-  }
-});
-
-async function addMinimaxManagedAccount(apiKeyValue, accountLabel) {
-  const accounts = normalizeMinimaxAccountsMeta(settings?.minimaxManagedAccounts);
-  const result = createMinimaxManagedAccount(apiKeyValue, String(accountLabel || ''), accounts);
-  if (!result.ok) return result;
-  // 活体验证：新密钥先探测一次，unauthorized 直接拒绝入库。
-  const [validation] = await fetchMinimaxLimits(
-    { minimaxManagedAccounts: [result.account] },
-    electronProviderDeps()
-  );
-  if (validation?.status !== 'ok') {
-    const errorCode = validation?.status === 'unauthorized'
-      ? 'invalidApiKey'
-      : validation?.status === 'sourceRateLimited' ? 'validationRateLimited' : 'validationUnavailable';
-    return { ok: false, errorCode };
-  }
-  const previousCredential = readMinimaxAccountCredential(result.account.id);
-  const credentialStored = writeMinimaxAccountCredential(result.account.id, result.account.apiKey);
-  delete result.account.apiKey;
-  if (!credentialStored) return { ok: false, errorCode: 'credentialStorageUnavailable' };
-  settings.minimaxManagedAccounts = normalizeMinimaxAccountsMeta([
-    ...accounts.filter((account) => account.accountKey !== result.account.accountKey),
-    result.account
-  ]);
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (_) {
-    if (previousCredential) writeMinimaxAccountCredential(result.account.id, previousCredential);
-    else removeMinimaxAccountCredential(result.account.id);
-    return { ok: false, errorCode: 'credentialStorageUnavailable' };
-  }
-  pushSettingsToRenderer();
-  sendMinimaxAccountsPush();
-  void queueLimitInvalidation({
-    provider: 'minimax',
-    accountId: result.account.id,
-    accountKey: result.account.accountKey
-  }, 'account-added');
-  return { ok: true, accounts: minimaxAccountsForRenderer() };
-}
-
-// 编辑账号：标签直接更新（清空则回退 key 尾号）；API key 有变化时先活体
-// 验证再换凭据。换 key 即换账号身份（accountKey = hash(key)），所以旧身份
-// 的 limits 数据要清掉、新身份立即刷新；与「删除后重新添加」等价，但保留
-// 账号 id、标签与添加时间。
-async function updateMinimaxManagedAccount(id, apiKeyValue, accountLabel) {
-  const accountId = String(id || '').trim();
-  const accounts = normalizeMinimaxAccountsMeta(settings?.minimaxManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  const nextLabel = String(accountLabel ?? '').trim().slice(0, MINIMAX_LABEL_MAX_LENGTH);
-  const nextKey = cleanMinimaxSecret(apiKeyValue ?? '');
-  const currentKey = readMinimaxAccountCredential(accountId);
-
-  // key 留空或与当前一致：仅更新标签，不触碰凭据。
-  if (!nextKey || nextKey === currentKey) {
-    account.accountLabel = nextLabel;
-    account.updatedAt = new Date().toISOString();
-    settings.minimaxManagedAccounts = accounts;
+// 活体验证：单账号探测一次，unauthorized 拒绝入库/换钥。错误码与 renderer
+// 的文案映射一致。
+function validateApiKeyAccountVia(fetchLimits, accountsOptionKey) {
+  return async (account) => {
+    let validation;
     try {
-      saveSettings({ throwOnError: true });
+      [validation] = await fetchLimits({ [accountsOptionKey]: [account] }, electronProviderDeps());
     } catch (_) {
-      return { ok: false, error: 'Could not persist account label' };
+      return { ok: false, errorCode: 'validationUnavailable' };
     }
-    pushSettingsToRenderer();
-    sendMinimaxAccountsPush();
-    void queueLimitInvalidation(
-      { provider: 'minimax', accountId, accountKey: account.accountKey },
-      'account-state',
-      { clear: false, refresh: true }
-    );
-    return { ok: true, accounts: minimaxAccountsForRenderer() };
-  }
-
-  // key 有变化：不能与其他已配置账号重复（那就是另一个账号本身）。
-  const nextAccountKey = minimaxAccountKey(nextKey);
-  if (accounts.some((entry) => entry.id !== accountId && entry.accountKey === nextAccountKey)) {
-    return { ok: false, errorCode: 'duplicateAccount' };
-  }
-  // 活体验证：新 key 先探测一次，unauthorized 直接拒绝换钥。
-  const [validation] = await fetchMinimaxLimits(
-    { minimaxManagedAccounts: [{ ...account, apiKey: nextKey, accountKey: nextAccountKey }] },
-    electronProviderDeps()
-  );
-  if (validation?.status !== 'ok') {
+    if (validation?.status === 'ok') return { ok: true };
     const errorCode = validation?.status === 'unauthorized'
       ? 'invalidApiKey'
       : validation?.status === 'sourceRateLimited' ? 'validationRateLimited' : 'validationUnavailable';
     return { ok: false, errorCode };
-  }
-  const previousKey = currentKey;
-  const previousAccountKey = account.accountKey;
-  if (!writeMinimaxAccountCredential(accountId, nextKey)) {
-    return { ok: false, errorCode: 'credentialStorageUnavailable' };
-  }
-  Object.assign(account, {
-    accountKey: nextAccountKey,
-    accountLabel: nextLabel || String(account.accountLabel || '').trim(),
-    keySuffix: minimaxKeySuffix(nextKey),
-    updatedAt: new Date().toISOString()
-  });
-  settings.minimaxManagedAccounts = accounts;
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (_) {
-    if (previousKey) writeMinimaxAccountCredential(accountId, previousKey);
-    return { ok: false, errorCode: 'credentialStorageUnavailable' };
-  }
-  pushSettingsToRenderer();
-  sendMinimaxAccountsPush();
-  // 旧身份的行数据清掉（换 key = 换账号身份），新身份立即采集。
-  void queueLimitInvalidation(
-    { provider: 'minimax', accountId, accountKey: previousAccountKey },
-    'account-removed',
-    { clear: true, refresh: false }
-  );
-  void queueLimitInvalidation(
-    { provider: 'minimax', accountId, accountKey: nextAccountKey },
-    'account-added'
-  );
-  return { ok: true, accounts: minimaxAccountsForRenderer() };
+  };
 }
 
-// 旧单账号密钥（settings.minimaxApiKey）一次性迁移为第一个托管账号。
-// accountKey 公式与单账号路径一致（hashKey('minimax', key)），limits 行身份
-// 与订阅绑定保持连续。幂等：仅当没有任何账号且旧密钥存在时执行；凭据
-// 写入成功后才清空旧 settings key，任何一步失败都保持旧路径下次重试。
-function migrateLegacyMinimaxApiKey() {
-  const legacyKey = cleanMinimaxSecret(settings?.minimaxApiKey || '');
-  if (!legacyKey) return;
-  if (normalizeMinimaxAccountsMeta(settings?.minimaxManagedAccounts).length > 0) return;
-  const result = createMinimaxManagedAccount(legacyKey, '', []);
-  if (!result.ok) return;
-  if (!writeMinimaxAccountCredential(result.account.id, result.account.apiKey)) return;
-  const { apiKey, ...meta } = result.account;
-  settings.minimaxManagedAccounts = [meta];
-  settings.minimaxApiKey = '';
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (_) {
-    // settings 落盘失败则整体回退：旧 key 路径继续工作，凭据残留在
-    // credentials.json 中等待下次迁移覆盖，无需回滚删除。
-    settings.minimaxManagedAccounts = [];
-    settings.minimaxApiKey = legacyKey;
-  }
+const apiKeyAccountProviders = {
+  minimax: { fetchLimits: fetchMinimaxLimits, accountsOptionKey: 'minimaxManagedAccounts' },
+  deepseek: { fetchLimits: fetchDeepSeekLimits, accountsOptionKey: 'deepseekManagedAccounts' },
+  zai: { fetchLimits: zaiLimits.fetchZaiLimits, accountsOptionKey: 'zaiManagedAccounts' }
+};
+
+const apiKeyAccountControllers = {};
+for (const [provider, wiring] of Object.entries(apiKeyAccountProviders)) {
+  apiKeyAccountControllers[provider] = createApiKeyAccountController({
+    provider,
+    getSettings: () => settings,
+    persistSettings: () => saveSettings({ throwOnError: true }),
+    broadcastChange: () => {
+      pushSettingsToRenderer();
+      sendApiKeyAccountsPush(provider, apiKeyAccountControllers[provider]);
+    },
+    queueInvalidation: (scope, reason, options) => {
+      void queueLimitInvalidation(scope, reason, options);
+    },
+    resolveCredentialStore: ensureCredentialStore,
+    validateAccount: validateApiKeyAccountVia(wiring.fetchLimits, wiring.accountsOptionKey)
+  });
 }
 
 function codexManagedRoot() {
@@ -1950,8 +1797,8 @@ function ensureSettingsLoaded() {
     }
   }
   rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
-  // 旧单账号 MiniMax 密钥迁移为托管账号（幂等，失败保留旧路径）。
-  migrateLegacyMinimaxApiKey();
+  // 旧单账号密钥迁移为托管账号（幂等，失败保留旧路径）。
+  for (const controller of Object.values(apiKeyAccountControllers)) controller.migrateLegacyKey();
   return settings;
 }
 
@@ -2393,7 +2240,9 @@ function readSettings() {
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
     merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
-    merged.minimaxManagedAccounts = normalizeMinimaxAccountsMeta(merged.minimaxManagedAccounts);
+    merged.minimaxManagedAccounts = normalizeApiKeyAccountsMeta(merged.minimaxManagedAccounts);
+    merged.deepseekManagedAccounts = normalizeApiKeyAccountsMeta(merged.deepseekManagedAccounts);
+    merged.zaiManagedAccounts = normalizeApiKeyAccountsMeta(merged.zaiManagedAccounts);
     if (saved.windowBehavior === undefined && saved.alwaysOnTop !== undefined) {
       merged.windowBehavior = saved.alwaysOnTop ? 'floating' : 'normal';
     }
@@ -4446,8 +4295,12 @@ function settingsForRenderer() {
     : deepseekToken(process.env)
       ? 'env'
       : '';
-  const minimaxAccountsForSource = normalizeMinimaxAccountsMeta(settings?.minimaxManagedAccounts);
-  const minimaxApiKeySource = settings?.minimaxApiKey || minimaxAccountsForSource.length > 0
+  const apiKeyAccountsForSource = {
+    minimax: settings?.minimaxManagedAccounts,
+    deepseek: settings?.deepseekManagedAccounts,
+    zai: settings?.zaiManagedAccounts
+  };
+  const minimaxApiKeySource = settings?.minimaxApiKey || (apiKeyAccountsForSource.minimax || []).length > 0
     ? 'settings'
     : minimaxToken(process.env)
       ? 'env'
@@ -4558,16 +4411,18 @@ function settingsForRenderer() {
     thirdPartyEnvConfigured: thirdPartyLimits.configuredAccounts({}, { env: process.env }).length > 0,
     codexManagedAccounts: codexAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
-    minimaxManagedAccounts: minimaxAccountsForRenderer(),
+    minimaxManagedAccounts: apiKeyAccountControllers.minimax.accountsForRenderer(),
+    deepseekManagedAccounts: apiKeyAccountControllers.deepseek.accountsForRenderer(),
+    zaiManagedAccounts: apiKeyAccountControllers.zai.accountsForRenderer(),
     claudeWebCookieConfigured: Boolean(currentClaudeWebCookie()),
     claudeWebCookieSource,
-    deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()),
+    deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()) || (apiKeyAccountsForSource.deepseek || []).length > 0,
     deepseekApiKeySource,
-    minimaxApiKeyConfigured: Boolean(currentMinimaxApiKey()) || minimaxAccountsForSource.length > 0,
+    minimaxApiKeyConfigured: Boolean(currentMinimaxApiKey()) || (apiKeyAccountsForSource.minimax || []).length > 0,
     minimaxApiKeySource,
     copilotApiTokenConfigured: Boolean(currentCopilotApiToken()),
     copilotApiTokenSource,
-    zaiApiKeyConfigured: Boolean(currentZaiApiKey()),
+    zaiApiKeyConfigured: Boolean(currentZaiApiKey()) || (apiKeyAccountsForSource.zai || []).length > 0,
     zaiApiKeySource,
     zaiTeamApiKeyConfigured: Boolean(currentZaiTeamApiKey()),
     zaiTeamApiKeySource,
@@ -4694,11 +4549,6 @@ function refreshLimitStatsPresentation() {
 function sendMimoAccountsPush() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try { mainWindow.webContents.send('mimo:accounts', mimoAccountsForRenderer()); } catch (_) {}
-}
-
-function sendMinimaxAccountsPush() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send('minimax:accounts', minimaxAccountsForRenderer()); } catch (_) {}
 }
 
 function unregisterWindowToggleShortcut() {
@@ -6238,6 +6088,8 @@ app.whenReady().then(() => {
     delete normalizedPatch.codexManagedAccounts;
     delete normalizedPatch.mimoManagedAccounts;
     delete normalizedPatch.minimaxManagedAccounts;
+    delete normalizedPatch.deepseekManagedAccounts;
+    delete normalizedPatch.zaiManagedAccounts;
     delete normalizedPatch.workbuddyAccessToken;
     delete normalizedPatch.workbuddyUserId;
     delete normalizedPatch.workbuddyEnterpriseId;
@@ -6746,13 +6598,7 @@ app.whenReady().then(() => {
     setAccountEnabled: mimoAccountLifecycle.setAccountEnabled,
     removeAccount: mimoAccountLifecycle.removeAccount
   });
-  ipcMain.handle('minimax:addAccount', (_event, apiKey, accountLabel) => addMinimaxManagedAccount(apiKey, accountLabel));
-  ipcMain.handle('minimax:updateAccount', (_event, id, apiKey, accountLabel) => updateMinimaxManagedAccount(id, apiKey, accountLabel));
-  registerManagedAccountIpc(ipcMain, 'minimax', {
-    listAccounts: minimaxAccountsForRenderer,
-    setAccountEnabled: (id, enabled) => minimaxAccountLifecycle.setAccountEnabled(id, enabled),
-    removeAccount: (id) => minimaxAccountLifecycle.removeAccount(id)
-  });
+  for (const controller of Object.values(apiKeyAccountControllers)) controller.registerIpc(ipcMain);
   ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
   ipcMain.handle('tokscale:checkNpm', () => checkTokscaleNpm());
   ipcMain.handle('tokscale:downloadFromNpm', () => downloadTokscaleFromNpm());

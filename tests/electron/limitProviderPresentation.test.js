@@ -167,7 +167,7 @@ function functionBody(source, name, nextName) {
 
 function runLocalProviderStatus(source, state, providerName) {
   const localDeviceHelper = functionBody(source, 'localDeviceLimitsProviders', 'localProviderStatus');
-  const localProviderHelper = functionBody(source, 'localProviderStatus', 'deepseekAccountLinked');
+  const localProviderHelper = functionBody(source, 'localProviderStatus', 'copilotProviderStatus');
   return vm.runInNewContext(
     `${localDeviceHelper}\n${localProviderHelper}\nlocalProviderStatus(${JSON.stringify(providerName)});`,
     { accountIdentityApi, state }
@@ -1295,23 +1295,25 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   // Settings pushes route through syncSettingsForm (which init() also calls), so
   // the two cards are re-rendered there and
   // onSettingsPush itself does not duplicate the calls.
-  for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus']) {
-    assert.match(statsRender, new RegExp(`${fn}\\(\\);`), `${fn} missing from renderStatsUpdate`);
-    assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
+  for (const fn of ["renderApiKeyAccountStatus('deepseek')", "renderApiKeyAccountStatus('minimax')", "renderApiKeyAccountStatus('zai')"]) {
+    assert.ok(statsRender.includes(`${fn};`), `${fn} missing from renderStatsUpdate`);
+    assert.ok(syncSettings.includes(`${fn};`), `${fn} missing from syncSettingsForm`);
   }
-  for (const provider of ['claude', 'zai', 'volcengine', 'qoder', 'trae', 'commandcode', 'kimi', 'ollama']) {
+
+  for (const provider of ['claude', 'zaiteam', 'volcengine', 'qoder', 'trae', 'commandcode', 'kimi', 'ollama']) {
     assert.match(statsRender, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
   }
-  for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus']) {
-    assert.doesNotMatch(settingsPush, new RegExp(`${fn}\\(\\);`), `${fn} should not be duplicated in onSettingsPush (syncSettingsForm covers it)`);
+  for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus', 'renderApiKeyAccountStatus']) {
+    assert.ok(!settingsPush.includes(`${fn}(`), `${fn} should not be duplicated in onSettingsPush (syncSettingsForm covers it)`);
   }
+
   assert.doesNotMatch(app, /renderGrokStatus|grokAccountLinked|grokAccountExpanded/);
 });
 
 test('saving Ollama credentials enables its provider and always settles validation', () => {
   const app = readRendererFile('app.js');
-  const renderExternalStatus = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
+  const renderExternalStatus = functionBody(app, 'renderExternalProviderStatus', 'apiKeyAccountsFromSettings');
   const selection = functionBody(app, 'limitProviderSelectionIncluding', 'missingLimitProviderStatus');
   const setup = functionBody(app, 'setupCursorAccountUI', 'initSettingsAnimationWrappers');
   const ollamaSetup = setup.slice(
@@ -1349,7 +1351,7 @@ test('saving Ollama credentials enables its provider and always settles validati
 test('account validation reads the local device raw limits, not the collapsed aggregate', () => {
   const app = readRendererFile('app.js');
   const rawHelper = functionBody(app, 'localDeviceLimitsProviders', 'localProviderStatus');
-  const helper = functionBody(app, 'localProviderStatus', 'deepseekAccountLinked');
+  const helper = functionBody(app, 'localProviderStatus', 'copilotProviderStatus');
   // Sync-mode aggregateLimits() collapses a local `unauthorized` row out in favor
   // of a remote `ok` (providerCollapseKey for deepseek/grok is just the provider
   // name; pickBetterProvider keeps the higher statusRank). So the account card
@@ -1367,7 +1369,6 @@ test('account validation reads the local device raw limits, not the collapsed ag
   // Falls back to the aggregate only for legacy/non-aggregated stats that do
   // not expose raw device rows at all.
   assert.match(helper, /state\.stats\?\.limits\?\.providers/);
-  assert.match(functionBody(app, 'deepseekProviderStatus', 'deepseekProviderForAccount'), /return localProviderStatus\('deepseek'\);/);
   assert.match(functionBody(app, 'minimaxProviderStatus', 'copilotProviderStatus'), /return localProviderStatus\('minimax'\);/);
 });
 

@@ -1093,8 +1093,38 @@ function apikeyProvider(name, accountKey, status, updatedAt) {
   };
 }
 
-test('aggregateLimits drops a local unauthorized row when a remote device has ok (deepseek/grok collapse by name)', () => {
+test('aggregateLimits drops a local unauthorized row when a remote device has ok (grok collapses by name)', () => {
   const aggregate = aggregateLimits([
+    {
+      deviceId: 'this-mac',
+      limits: {
+        updatedAt: '2026-06-24T10:00:00.000Z',
+        providers: [apikeyProvider('grok', 'sha256:local-bad-key', 'unauthorized', '2026-06-24T10:00:00.000Z')]
+      }
+    },
+    {
+      deviceId: 'office-pc',
+      limits: {
+        updatedAt: '2026-06-24T10:01:00.000Z',
+        providers: [apikeyProvider('grok', 'sha256:remote-good-key', 'ok', '2026-06-24T10:01:00.000Z')]
+      }
+    }
+  ], 0, Date.parse('2026-06-24T10:02:00.000Z'));
+
+  const grokRows = aggregate.providers.filter((provider) => provider.provider === 'grok');
+  assert.equal(grokRows.length, 1);
+  // The local unauthorized row is gone; only the remote ok survives.
+  assert.equal(grokRows[0].status, 'ok');
+  assert.equal(grokRows[0].sourceDeviceId, 'office-pc');
+  assert.equal(grokRows[0].accountKey, 'sha256:remote-good-key');
+});
+
+test('aggregateLimits keeps deepseek rows per accountKey and still prefers ok over unauthorized within one account', () => {
+  // DeepSeek joined the multi-account collapse whitelist (apiKeyAccounts
+  // providers): different accountKeys are different accounts and must never
+  // swallow each other — that is what makes the second configured account
+  // visible at all.
+  const perAccount = aggregateLimits([
     {
       deviceId: 'this-mac',
       limits: {
@@ -1111,12 +1141,36 @@ test('aggregateLimits drops a local unauthorized row when a remote device has ok
     }
   ], 0, Date.parse('2026-06-24T10:02:00.000Z'));
 
-  const deepseekRows = aggregate.providers.filter((provider) => provider.provider === 'deepseek');
-  assert.equal(deepseekRows.length, 1);
-  // The local unauthorized row is gone; only the remote ok survives.
-  assert.equal(deepseekRows[0].status, 'ok');
-  assert.equal(deepseekRows[0].sourceDeviceId, 'office-pc');
-  assert.equal(deepseekRows[0].accountKey, 'sha256:remote-good-key');
+  const rows = perAccount.providers.filter((provider) => provider.provider === 'deepseek');
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    new Set(rows.map((row) => row.accountKey)),
+    new Set(['sha256:local-bad-key', 'sha256:remote-good-key'])
+  );
+
+  // Same account observed as unauthorized locally and ok remotely still picks
+  // the ok row, preserving the single-account protection the old test pinned.
+  const sameAccount = aggregateLimits([
+    {
+      deviceId: 'this-mac',
+      limits: {
+        updatedAt: '2026-06-24T10:00:00.000Z',
+        providers: [apikeyProvider('deepseek', 'sha256:shared-key', 'unauthorized', '2026-06-24T10:00:00.000Z')]
+      }
+    },
+    {
+      deviceId: 'office-pc',
+      limits: {
+        updatedAt: '2026-06-24T10:01:00.000Z',
+        providers: [apikeyProvider('deepseek', 'sha256:shared-key', 'ok', '2026-06-24T10:01:00.000Z')]
+      }
+    }
+  ], 0, Date.parse('2026-06-24T10:02:00.000Z'));
+
+  const shared = sameAccount.providers.filter((provider) => provider.provider === 'deepseek');
+  assert.equal(shared.length, 1);
+  assert.equal(shared[0].status, 'ok');
+  assert.equal(shared[0].sourceDeviceId, 'office-pc');
 });
 
 test('aggregateLimits keeps minimax rows per accountKey and still prefers ok over unauthorized within one account', () => {

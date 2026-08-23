@@ -837,16 +837,27 @@
                 </span>
               </button>
               <div id="deepseekSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="deepseekOpenBrowser" data-i18n="settings.deepseek.openBrowser">Open DeepSeek API keys</button>
-                  <button id="deepseekLogoutButton" class="hidden" data-i18n="settings.deepseek.clearApiKey">Clear key</button>
-                  <button id="deepseekRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="deepseekManualPanel">
-                  <p class="settings-note" data-i18n="settings.deepseek.note">Paste a DeepSeek API key. It stays on this device and is used only for the balance API.</p>
-                  <input id="deepseekApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.deepseek.apiKeyPlaceholder" />
-                  <div class="settings-actions">
-                    <button id="deepseekApiKeySubmit" data-i18n="settings.deepseek.saveApiKey">Save API key</button>
+                <div id="deepseekAccountList" class="managed-account-list"></div>
+                <div id="deepseekAccountEmpty" class="opencode-empty" data-i18n="settings.deepseek.emptyList">No accounts yet. Click "+ Add account" below to get started.</div>
+                <div id="deepseekManualPanel" class="opencode-add-form">
+                  <button id="deepseekAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="deepseekAddDetails">
+                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span data-i18n="settings.deepseek.addAccount">Add account</span>
+                  </button>
+                  <div id="deepseekAddDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body">
+                      <div class="settings-actions">
+                        <button id="deepseekOpenBrowser" data-i18n="settings.deepseek.openBrowser">Open DeepSeek API keys</button>
+                      </div>
+                      <p class="settings-note" data-i18n="settings.deepseek.note">Paste a DeepSeek API key. It stays on this device and is used only for the balance API.</p>
+                      <input id="deepseekApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.deepseek.apiKeyPlaceholder" />
+                      <input id="deepseekAccountLabelInput" type="text" maxlength="64" autocomplete="off" spellcheck="false" data-i18n-placeholder="settings.deepseek.labelPlaceholder" placeholder="Label (optional, e.g. Personal)" />
+                      <div class="settings-actions">
+                        <button id="deepseekSaveAccountButton" data-i18n="settings.deepseek.saveAccount">Save account</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div id="deepseekErrorMessage" class="settings-note error hidden"></div>
@@ -896,23 +907,35 @@
                 </span>
               </button>
               <div id="zaiSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="zaiOpenBrowser" data-i18n="settings.zai.openBrowser">Open GLM Coding Plan</button>
-                  <button id="zaiLogoutButton" class="hidden" data-i18n="settings.zai.clearApiKey">Clear key</button>
-                  <button id="zaiRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div class="settings-row">
-                  <label for="zaiApiRegionInput" data-i18n="settings.zai.apiRegion">API region</label>
-                  <select id="zaiApiRegionInput">
-                    <option value="global" data-i18n="settings.zai.regionGlobal">Global (api.z.ai)</option>
-                    <option value="bigmodel-cn" data-i18n="settings.zai.regionBigmodelCn">BigModel CN (open.bigmodel.cn)</option>
-                  </select>
-                </div>
-                <div id="zaiManualPanel">
-                  <p class="settings-note" data-i18n="settings.zai.note">Paste a Z.ai API key for GLM Coding Plan quota lookup.</p>
-                  <input id="zaiApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.zai.apiKeyPlaceholder" />
-                  <div class="settings-actions">
-                    <button id="zaiApiKeySubmit" data-i18n="settings.zai.saveApiKey">Save API key</button>
+                <div id="zaiAccountList" class="managed-account-list"></div>
+                <div id="zaiAccountEmpty" class="opencode-empty" data-i18n="settings.zai.emptyList">No accounts yet. Click "+ Add account" below to get started.</div>
+                <div id="zaiManualPanel" class="opencode-add-form">
+                  <button id="zaiAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="zaiAddDetails">
+                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span data-i18n="settings.zai.addAccount">Add account</span>
+                  </button>
+                  <div id="zaiAddDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body">
+                      <div class="settings-actions">
+                        <button id="zaiOpenBrowser" data-i18n="settings.zai.openBrowser">Open GLM Coding Plan</button>
+                      </div>
+                      <!-- region 是组级共享设置：所有账号统一打同一 region 端点 -->
+                      <div class="settings-row">
+                        <label for="zaiApiRegionInput" data-i18n="settings.zai.apiRegion">API region</label>
+                        <select id="zaiApiRegionInput">
+                          <option value="global" data-i18n="settings.zai.regionGlobal">Global (api.z.ai)</option>
+                          <option value="bigmodel-cn" data-i18n="settings.zai.regionBigmodelCn">BigModel CN (open.bigmodel.cn)</option>
+                        </select>
+                      </div>
+                      <p class="settings-note" data-i18n="settings.zai.note">Paste a Z.ai API key for GLM Coding Plan quota lookup.</p>
+                      <input id="zaiApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.zai.apiKeyPlaceholder" />
+                      <input id="zaiAccountLabelInput" type="text" maxlength="64" autocomplete="off" spellcheck="false" data-i18n-placeholder="settings.zai.labelPlaceholder" placeholder="Label (optional, e.g. Personal)" />
+                      <div class="settings-actions">
+                        <button id="zaiSaveAccountButton" data-i18n="settings.zai.saveAccount">Save account</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div id="zaiErrorMessage" class="settings-note error hidden"></div>

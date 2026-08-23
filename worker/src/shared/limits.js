@@ -478,17 +478,13 @@ function isConfiguredProvider(provider) {
   return Boolean(provider.accountKey && provider.status !== 'notConfigured' && provider.status !== 'disabled');
 }
 
+// 用户可维护多账号的供应商：聚合按 provider:accountKey 保留多行（每账
+// 号一条），其余供应商折叠为单行（同名择优）。minimax/deepseek/zai 走
+// apiKeyAccounts 通用层。
+const MULTI_ACCOUNT_PROVIDER_IDS = new Set(['claude', 'codex', 'opencode', 'openrouter', 'thirdparty', 'mimo', 'minimax', 'deepseek', 'zai']);
+
 function providerCollapseKey(provider) {
-  if (
-    (provider.provider === 'claude'
-      || provider.provider === 'codex'
-      || provider.provider === 'opencode'
-      || provider.provider === 'openrouter'
-      || provider.provider === 'thirdparty'
-      || provider.provider === 'mimo'
-      || provider.provider === 'minimax')
-    && isConfiguredProvider(provider)
-  ) {
+  if (MULTI_ACCOUNT_PROVIDER_IDS.has(provider.provider) && isConfiguredProvider(provider)) {
     return providerAggregateKey(provider);
   }
   return provider.provider;

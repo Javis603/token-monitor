@@ -69,6 +69,7 @@ function limitProviderIds(source) {
 // provider table they dispatch through) in a sandbox instead of loading the DOM.
 function runTitle(source, expression, context = {}) {
   const snippets = TITLE_FUNCTIONS.map((name) => balancedBlock(source, `function ${name}(`));
+  snippets.unshift(balancedBlock(source, 'function planNameExcludedAccountTitle('));
   snippets.unshift(balancedBlock(source, 'const LIMIT_ACCOUNT_TITLES = {'));
   return vm.runInNewContext(`${snippets.join('\n')}\n${expression}`, context);
 }

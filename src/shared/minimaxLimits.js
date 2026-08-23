@@ -10,11 +10,11 @@
 
 const { normalizeLimitProvider } = require('./limits');
 const {
-  cleanMinimaxSecret,
-  minimaxAccountDisplayLabel,
-  minimaxAccountKey,
-  scopedMinimaxManagedAccounts
-} = require('./minimaxAccounts');
+  apiKeyAccountDisplayLabel,
+  cleanApiKeySecret,
+  managedApiKeyAccountKey,
+  scopedApiKeyManagedAccounts
+} = require('./apiKeyAccounts');
 
 const MINIMAX_KEY_NAMES = ['MINIMAX_CODING_API_KEY'];
 
@@ -27,10 +27,10 @@ const MINIMAX_WINDOW_MINUTES_5H = 5 * 60;
 const MINIMAX_WINDOW_MINUTES_WEEKLY = 7 * 24 * 60;
 
 function minimaxToken(env = process.env, explicitKey = '') {
-  const explicit = cleanMinimaxSecret(explicitKey);
+  const explicit = cleanApiKeySecret(explicitKey);
   if (explicit) return explicit;
   for (const name of MINIMAX_KEY_NAMES) {
-    const raw = cleanMinimaxSecret(env[name]);
+    const raw = cleanApiKeySecret(env[name]);
     if (raw) return raw;
   }
   return '';
@@ -213,7 +213,7 @@ function minimaxStatusProvider(status, updatedAt, account) {
     status,
     updatedAt,
     accountKey: account?.accountKey || '',
-    accountLabel: account ? minimaxAccountDisplayLabel(account) : '',
+    accountLabel: account ? apiKeyAccountDisplayLabel(account) : '',
     windows: []
   });
 }
@@ -279,8 +279,8 @@ async function probeMinimaxAccountKey(key, account, options, deps) {
       }
       return normalizeLimitProvider({
         provider: 'minimax',
-        accountKey: account ? account.accountKey : minimaxAccountKey(key),
-        accountLabel: account ? minimaxAccountDisplayLabel(account) || 'Token Plan' : 'Token Plan',
+        accountKey: account ? account.accountKey : managedApiKeyAccountKey('minimax', key),
+        accountLabel: account ? apiKeyAccountDisplayLabel(account) || 'Token Plan' : 'Token Plan',
         source: 'api',
         status: windows.length ? 'ok' : 'unavailable',
         updatedAt,
@@ -305,7 +305,7 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
   const scope = options.limitRefreshScope?.provider === 'minimax'
     ? options.limitRefreshScope
     : null;
-  const accounts = scopedMinimaxManagedAccounts(options.minimaxManagedAccounts, scope);
+  const accounts = scopedApiKeyManagedAccounts('minimax', options.minimaxManagedAccounts, scope);
   if (accounts.length > 0) {
     return Promise.all(accounts.map(
       (account) => probeMinimaxAccountKey(account.apiKey, account, options, deps)

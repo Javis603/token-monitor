@@ -18,9 +18,20 @@ function explicitChannels(source) {
 
 function factoryChannels(source) {
   const channels = [];
+  // 共用装配工厂（registerManagedAccountIpc）注册 accounts/setEnabled/remove
   for (const match of source.matchAll(/registerManagedAccountIpc\(ipcMain,\s*'([^']+)'/g)) {
     for (const suffix of ['accounts', 'setAccountEnabled', 'removeAccount']) {
       channels.push(`${match[1]}:${suffix}`);
+    }
+  }
+  // API key 型供应商控制器（apiKeyAccountProviders 表 →
+  // createApiKeyAccountController.registerIpc）注册五条标准 channel
+  const providerTable = source.match(/const apiKeyAccountProviders = \{[\s\S]*?\};/);
+  if (providerTable) {
+    for (const match of providerTable[0].matchAll(/^\s{2}(minimax|deepseek|zai):\s*\{/gm)) {
+      for (const suffix of ['accounts', 'addAccount', 'updateAccount', 'setAccountEnabled', 'removeAccount']) {
+        channels.push(`${match[1]}:${suffix}`);
+      }
     }
   }
   return channels;
@@ -36,14 +47,9 @@ test('main-process IPC channels are registered exactly once', () => {
 test('every managed-account factory channel the preload exposes is registered', () => {
   const preloadSource = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
   const registered = new Set([...explicitChannels(mainSource), ...factoryChannels(mainSource)]);
-  for (const prefix of ['mimo', 'minimax']) {
-    for (const suffix of ['accounts', 'setAccountEnabled', 'removeAccount']) {
-      assert.ok(registered.has(`${prefix}:${suffix}`), `${prefix}:${suffix} must be registered`);
-    }
-  }
-  // preload 里 invoke 的每个 channel 必须有对应 handler（只覆盖托管账号
-  // 相关的通道，避免全量清单随功能演进而漂移）。
-  for (const match of preloadSource.matchAll(/ipcRenderer\.invoke\('(mimo:[^']+|minimax:[^']+)'/g)) {
+  // preload 里 invoke 的每个托管账号 channel 必须有对应 handler——这是
+  // 通道全集的真源（新供应商接入 preload 后自动纳入校验）。
+  for (const match of preloadSource.matchAll(/ipcRenderer\.invoke\('((?:mimo|minimax|deepseek|zai):[^']+)'/g)) {
     assert.ok(registered.has(match[1]), `preload invokes ${match[1]} but no handler registers it`);
   }
 });

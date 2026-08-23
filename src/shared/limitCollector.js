@@ -25,8 +25,7 @@ const opencodeProfiles = require('./opencodeProfiles');
 const opencodeWeb = require('./opencodeWeb');
 const openrouterLimits = require('./openrouterLimits');
 const thirdPartyLimits = require('./thirdPartyLimits');
-const { sharedDataDir } = require('./config');
-const { recordConsumption } = require('./deepseekBalanceHistory');
+const deepseekLimits = require('./deepseekLimits');
 const {
   codexAccountKey,
   codexAuthIdentity,
@@ -3814,106 +3813,6 @@ function statusProvider(provider, status, updatedAt) {
   return normalizeLimitProvider({ provider, status, updatedAt, windows: [] });
 }
 
-function cleanSecret(value) {
-  let raw = value;
-  if (typeof raw !== 'string') return '';
-  raw = raw.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
-
-function deepseekToken(env = process.env, explicitKey = '') {
-  const explicit = cleanSecret(explicitKey);
-  if (explicit) return explicit;
-  for (const name of ['DEEPSEEK_API_KEY', 'DEEPSEEK_KEY']) {
-    const raw = cleanSecret(env[name]);
-    if (raw) return raw;
-  }
-  return '';
-}
-
-// rows: balance_infos from /user/balance. Returns { currency, amount(total), paid(topped_up) }.
-function selectFundedRow(rows) {
-  const parsed = [];
-  for (const row of rows || []) {
-    const amount = Number(row && row.total_balance);
-    const paid = Number(row && row.topped_up_balance);
-    const currency = String((row && row.currency) || '').trim().toUpperCase();
-    if (!Number.isFinite(amount) || !Number.isFinite(paid) || !currency) continue;
-    parsed.push({ currency, amount, paid });
-  }
-  if (parsed.length === 0) throw errorWithStatus('unavailable', 'no usable balance rows');
-  const funded = parsed
-    .filter((r) => r.amount > 0)
-    .sort((a, b) => (b.amount - a.amount) || (a.currency === 'USD' ? -1 : b.currency === 'USD' ? 1 : 0));
-  if (funded.length) return funded[0];
-  return parsed.find((r) => r.currency === 'USD') || parsed[0];
-}
-
-const DEEPSEEK_BALANCE_URL = 'https://api.deepseek.com/user/balance';
-
-async function fetchDeepSeekLimits(options = {}, deps = {}) {
-  const env = deps.env || process.env;
-  const now = (deps.now || Date.now)();
-  const key = deepseekToken(env, options.deepseekApiKey);
-  if (!key) {
-    return normalizeLimitProvider({ provider: 'deepseek', source: 'api', status: 'notConfigured', updatedAt: nowIso(now), windows: [] });
-  }
-  try {
-    const data = await fetchJson(DEEPSEEK_BALANCE_URL, { Authorization: `Bearer ${key}`, Accept: 'application/json' }, deps);
-    if (!data || !Array.isArray(data.balance_infos)) {
-      throw errorWithStatus('unavailable', 'unexpected balance response shape');
-    }
-    const row = selectFundedRow(data.balance_infos);
-    const accountKey = hashKey('deepseek', key);
-    const dataDir = sharedDataDir({ env });
-    const storePath = deps.deepseekStorePath || path.join(dataDir, 'deepseek-balance-v2.json');
-    const legacyStorePath = deps.deepseekLegacyStorePath
-      || (deps.deepseekStorePath ? null : path.join(dataDir, 'deepseek-balance.json'));
-    const spend = recordConsumption(
-      { accountKey, currency: row.currency, paid: row.paid, now, storePath, legacyStorePath },
-      deps
-    );
-    return normalizeLimitProvider({
-      provider: 'deepseek',
-      accountKey,
-      accountLabel: 'Pay-as-you-go',
-      source: 'api',
-      status: 'ok',
-      updatedAt: nowIso(now),
-      // DeepSeek has no rate-limit windows. The balance is the only quota it
-      // exposes, so it ships as a credits window: money, no wire percentage.
-      windows: [{
-        kind: 'billing',
-        metric: 'credits',
-        label: 'Balance',
-        remaining: row.amount,
-        currency: row.currency
-      }],
-      balance: {
-        amount: row.amount,
-        currency: row.currency,
-        todaySpend: spend.todaySpend,
-        weekSpend: spend.weekSpend,
-        monthSpend: spend.monthSpend,
-        allTimeSpend: spend.allTimeSpend,
-        trackingSince: spend.trackingSince,
-        monthSinceTracking: spend.monthSinceTracking
-      }
-    });
-  } catch (error) {
-    return normalizeLimitProvider({
-      provider: 'deepseek',
-      source: 'api',
-      status: providerStatusFromError(error),
-      updatedAt: nowIso(now),
-      windows: []
-    });
-  }
-}
-
 function providerFetchers(deps = {}) {
   return {
     claude: (providerOptions, probeDeps) => fetchClaudeLimits(providerOptions, probeDeps),
@@ -3922,7 +3821,7 @@ function providerFetchers(deps = {}) {
     antigravity: (providerOptions, probeDeps) => fetchAntigravityLimits(providerOptions, probeDeps),
     opencode: (providerOptions, probeDeps) => fetchOpenCodeLimits(providerOptions, probeDeps),
     openrouter: (providerOptions, probeDeps) => openrouterLimits.fetchOpenRouterLimits(providerOptions, probeDeps),
-    deepseek: (providerOptions, probeDeps) => fetchDeepSeekLimits(providerOptions, probeDeps),
+    deepseek: (providerOptions, probeDeps) => deepseekLimits.fetchDeepSeekLimits(providerOptions, probeDeps),
     minimax: (providerOptions, probeDeps) => minimaxLimits.fetchMinimaxLimits(providerOptions, probeDeps),
     mimo: (providerOptions, probeDeps) => fetchMimoLimits(providerOptions, probeDeps),
     grok: (providerOptions, probeDeps) => grokLimits.fetchGrokLimits(providerOptions, probeDeps),
@@ -3968,11 +3867,16 @@ function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
       ? (options.mimoManagedAccounts || deps.mimoManagedAccounts)
       : [];
     jobs = options.limitRefreshScope?.provider === 'mimo' ? 1 : Math.max(1, managed.length);
-  } else if (provider === 'minimax') {
-    const managed = Array.isArray(options.minimaxManagedAccounts || deps.minimaxManagedAccounts)
-      ? (options.minimaxManagedAccounts || deps.minimaxManagedAccounts)
-      : [];
-    jobs = options.limitRefreshScope?.provider === 'minimax' ? 1 : Math.max(1, managed.length);
+  } else {
+    // apiKeyAccounts 通用层的三家（minimax/deepseek/zai）：探测预算随账号
+    // 数放大；账号级 scope 命中时只按一份发放。
+    const managedKey = `${provider}ManagedAccounts`;
+    if (provider === 'minimax' || provider === 'deepseek' || provider === 'zai') {
+      const managed = Array.isArray(options[managedKey] || deps[managedKey])
+        ? (options[managedKey] || deps[managedKey])
+        : [];
+      jobs = options.limitRefreshScope?.provider === provider ? 1 : Math.max(1, managed.length);
+    }
   }
   return base * jobs;
 }
@@ -4260,13 +4164,13 @@ module.exports = {
   fetchClaudeLimits,
   fetchCodexLimits,
   fetchCursorLimits,
-  fetchDeepSeekLimits,
+  fetchDeepSeekLimits: deepseekLimits.fetchDeepSeekLimits,
   fetchMimoLimits,
   readCodexRpcWithCommand,
   runCodexLogin,
   runProcessText,
-  deepseekToken,
-  selectFundedRow,
+  deepseekToken: deepseekLimits.deepseekToken,
+  selectFundedRow: deepseekLimits.selectFundedRow,
   minimaxToken,
   minimaxBaseUrl,
   parseMinimaxTiers,

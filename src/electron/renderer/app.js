@@ -312,7 +312,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, minimaxAccountExpanded: false, zaiAccountExpanded: false, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
@@ -5013,6 +5013,16 @@ function renderLimitProviderRow(id, label, provider, color, options = {}) {
   return row;
 }
 
+// 单账号时代的 accountLabel 是套餐名（如 'Token Plan'），多账号行才是
+// 用户标签/尾号；标题排除该套餐名字面量后回退 Account N。
+function planNameExcludedAccountTitle(planName) {
+  return (provider, index) => {
+    const label = String(provider?.accountLabel || '').trim();
+    if (label && label !== planName) return label;
+    return `Account ${index + 1}`;
+  };
+}
+
 // Every limits surface (the limits panel and the Home cards) resolves account
 // titles here. One table keeps a provider from masking its email on one surface
 // while leaking it on the other, and from rendering two different titles for the
@@ -5023,11 +5033,14 @@ const LIMIT_ACCOUNT_TITLES = {
   opencode: opencodeAccountTitle,
   openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
   thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
-  // MiniMax 账号行标题读采集行自带的 accountLabel（自定义标签或 key 尾号）；
-  // 单账号兼容路径的 'Token Plan' 是套餐名不是账号名，不借用。
-  minimax: (provider, index) => {
+  // MiniMax / DeepSeek / Z.ai 账号行标题读采集行自带的 accountLabel
+  //（自定义标签或 key 尾号）；单账号兼容路径的套餐名（'Token Plan'、
+  // 'Pay-as-you-go'、'GLM …'）不是账号名，不借用。
+  minimax: planNameExcludedAccountTitle('Token Plan'),
+  deepseek: planNameExcludedAccountTitle('Pay-as-you-go'),
+  zai: (provider, index) => {
     const label = String(provider?.accountLabel || '').trim();
-    if (label && label !== 'Token Plan') return label;
+    if (label && !/^GLM\b/i.test(label)) return label;
     return `Account ${index + 1}`;
   }
 };
@@ -5139,6 +5152,14 @@ function renderMimoAccountGroup(label, providers, color) {
 
 function renderMinimaxAccountGroup(label, providers, color) {
   return renderManagedAccountGroup('minimax', label, providers, color, 'settings.minimax.nAccounts');
+}
+
+function renderDeepseekAccountGroup(label, providers, color) {
+  return renderManagedAccountGroup('deepseek', label, providers, color, 'settings.deepseek.nAccounts');
+}
+
+function renderZaiAccountGroup(label, providers, color) {
+  return renderManagedAccountGroup('zai', label, providers, color, 'settings.zai.nAccounts');
 }
 
 function opencodeAccountTitle(provider, index) {
@@ -5328,6 +5349,14 @@ function renderLimits() {
     }
     if (id === 'minimax' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderMinimaxAccountGroup(label, visibleProviders, color));
+      continue;
+    }
+    if (id === 'deepseek' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderDeepseekAccountGroup(label, visibleProviders, color));
+      continue;
+    }
+    if (id === 'zai' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderZaiAccountGroup(label, visibleProviders, color));
       continue;
     }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
@@ -8543,10 +8572,10 @@ function syncSettingsForm() {
   els.blurInput.value = String(state.settings.glassBlur ?? 32);
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
   syncSliderRows();
-  renderDeepseekStatus();
-  renderMinimaxStatus();
+  renderApiKeyAccountStatus('deepseek');
+  renderApiKeyAccountStatus('minimax');
+  renderApiKeyAccountStatus('zai');
   renderExternalProviderStatus('claude');
-  renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
@@ -11656,10 +11685,10 @@ function renderStatsUpdate() {
   renderWslPanel();
   updateOpenRouterProfilesStatus();
   updateThirdPartyProfilesStatus();
-  renderDeepseekStatus();
-  renderMinimaxStatus();
+  renderApiKeyAccountStatus('deepseek');
+  renderApiKeyAccountStatus('minimax');
+  renderApiKeyAccountStatus('zai');
   renderExternalProviderStatus('claude');
-  renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
@@ -13091,10 +13120,6 @@ function setThirdPartyAdapterFields() {
   }
 }
 
-function setDeepseekAccountExpanded(expanded) {
-  setAccountGroupExpanded('deepseek', expanded, 'deepseekAccountExpanded');
-}
-
 function setMimoAccountExpanded(expanded) {
   setAccountGroupExpanded('mimo', expanded, 'mimoAccountExpanded');
 }
@@ -13301,39 +13326,6 @@ function localProviderStatuses(name) {
   return providers.filter((provider) => provider.provider === name);
 }
 
-function deepseekAccountLinked() {
-  const provider = deepseekProviderForAccount();
-  return Boolean(state.settings?.deepseekApiKeyConfigured) && provider?.status === 'ok';
-}
-
-function deepseekProviderStatus() {
-  return localProviderStatus('deepseek');
-}
-
-function deepseekProviderForAccount() {
-  const provider = deepseekProviderStatus();
-  const pendingSince = Number(state.deepseekPendingCheckSince || 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state.deepseekPendingCheckSince = 0;
-  return provider;
-}
-
-function markDeepseekKeyCheckPending() {
-  state.deepseekPendingCheckSince = Date.now();
-  clearDeepseekProviderStatus();
-}
-
-function clearDeepseekPendingCheck() {
-  state.deepseekPendingCheckSince = 0;
-}
-
-function clearDeepseekProviderStatus() {
-  if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'deepseek');
-}
-
 // 设置页托管账号列表的共用渲染（MiMo / MiniMax）。骨架完全同构：状态
 // pill（x/y linked）、账号行（启停勾选、标题、副信息、二次确认删除）、
 // 空态与错误条。差异只在 i18n 文案 key、账号标题/副信息派生、settings
@@ -13515,11 +13507,6 @@ const externalLimitAccountConfig = {
     sourceKey: 'claudeWebCookieSource',
     pendingKey: 'claudePendingCheckSince'
   },
-  zai: {
-    configuredKey: 'zaiApiKeyConfigured',
-    sourceKey: 'zaiApiKeySource',
-    pendingKey: 'zaiPendingCheckSince'
-  },
   zaiteam: {
     configuredKey: 'zaiTeamApiKeyConfigured',
     sourceKey: 'zaiTeamApiKeySource',
@@ -13558,7 +13545,6 @@ const externalLimitAccountConfig = {
 };
 
 function clearDisabledLimitProviderPendingChecks(enabledProviders) {
-  if (!enabledProviders.has('deepseek')) clearDeepseekPendingCheck();
   if (!enabledProviders.has('copilot')) clearCopilotPendingCheck();
   for (const providerName of Object.keys(externalLimitAccountConfig)) {
     if (!enabledProviders.has(providerName)) clearExternalProviderCheckPending(providerName);
@@ -13763,10 +13749,6 @@ function renderExternalProviderStatus(providerName) {
   if (providerName === 'ollama' && wasPending && !pending && linked) {
     setExternalAccountExpanded('ollama', false);
   }
-  if (providerName === 'zai') {
-    const regionInput = document.getElementById('zaiApiRegionInput');
-    if (regionInput) regionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
-  }
   if (providerName === 'qoder') {
     const siteInput = document.getElementById('qoderSiteInput');
     if (siteInput) siteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
@@ -13784,29 +13766,37 @@ function renderExternalProviderStatus(providerName) {
   renderSettingsSummaries();
 }
 
-function setMinimaxAccountExpanded(expanded) {
-  const details = document.getElementById('minimaxSettingsDetails');
-  const toggle = document.getElementById('minimaxSettingsToggle');
-  if (!details || !toggle) return;
-  const next = Boolean(expanded);
-  state.minimaxAccountExpanded = next;
-  details.classList.toggle('hidden', !next);
-  toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-  limitProviderAccountGroup('minimax')?.classList.toggle('expanded', next);
-  syncLimitProviderAccountExpansion('minimax', next);
+// ---------- API key 型供应商的设置卡片（minimax / deepseek / zai 共用）----------
+// 全部按 provider 参数化：展开/收起、编辑态（复用添加表单）、状态渲染、
+// 事件绑定。i18n key 以 settings.<provider>.* 前缀由调用点传入字面量。
+
+function apiKeyAccountsFromSettings(provider) {
+  return state.settings?.[`${provider}ManagedAccounts`] || [];
 }
 
-function setMinimaxAddExpanded(expanded) {
-  const addToggle = document.getElementById('minimaxAddToggle');
-  const addDetails = document.getElementById('minimaxAddDetails');
+function setApiKeyAccountExpanded(provider, expanded) {
+  const details = document.getElementById(`${provider}SettingsDetails`);
+  const toggle = document.getElementById(`${provider}SettingsToggle`);
+  if (!details || !toggle) return;
+  const next = Boolean(expanded);
+  state[`${provider}AccountExpanded`] = next;
+  details.classList.toggle('hidden', !next);
+  toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
+  limitProviderAccountGroup(provider)?.classList.toggle('expanded', next);
+  syncLimitProviderAccountExpansion(provider, next);
+}
+
+function setApiKeyAccountAddExpanded(provider, expanded) {
+  const addToggle = document.getElementById(`${provider}AddToggle`);
+  const addDetails = document.getElementById(`${provider}AddDetails`);
   const next = Boolean(expanded);
   addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
   addDetails?.classList.toggle('hidden', !next);
-  document.getElementById('minimaxManualPanel')?.classList.toggle('expanded', next);
-  if (!next) clearMinimaxEditState();
+  document.getElementById(`${provider}ManualPanel`)?.classList.toggle('expanded', next);
+  if (!next) clearApiKeyAccountEditState(provider);
 }
 
-function minimaxSettingsAccountTitle(account, index) {
+function apiKeyAccountTitle(account, index) {
   const label = String(account?.accountLabel || '').trim();
   if (label) return label;
   const suffix = String(account?.keySuffix || '').trim();
@@ -13815,100 +13805,180 @@ function minimaxSettingsAccountTitle(account, index) {
 }
 
 // 标题用了自定义标签时，副信息显示 key 尾号补足区分度。
-function minimaxSettingsAccountInfo(account) {
+function apiKeyAccountInfo(account) {
   const label = String(account?.accountLabel || '').trim();
   const suffix = String(account?.keySuffix || '').trim();
   if (label && suffix) return suffix;
   return '';
 }
 
-function renderMinimaxStatus() {
+function renderApiKeyAccountStatus(provider) {
   renderManagedAccountList({
-    statusElId: 'minimaxApiKeyStatus',
-    listElId: 'minimaxAccountList',
-    emptyElId: 'minimaxAccountEmpty',
-    errorElId: 'minimaxErrorMessage',
-    errorStateKey: 'minimaxAccountError',
-    accounts: () => state.settings?.minimaxManagedAccounts || [],
+    statusElId: provider === 'zai' ? 'zaiAccountStatus' : `${provider}ApiKeyStatus`,
+    listElId: `${provider}AccountList`,
+    emptyElId: `${provider}AccountEmpty`,
+    errorElId: provider === 'zai' ? 'zaiErrorMessage' : `${provider}ErrorMessage`,
+    errorStateKey: `${provider}AccountError`,
+    accounts: () => apiKeyAccountsFromSettings(provider),
     applyAccounts: (accounts) => {
-      state.settings.minimaxManagedAccounts = accounts;
+      state.settings[`${provider}ManagedAccounts`] = accounts;
     },
-    accountTitle: minimaxSettingsAccountTitle,
-    accountInfo: minimaxSettingsAccountInfo,
-    api: window.tokenMonitor.minimax,
-    beginEdit: openMinimaxAccountEditor,
-    rerender: renderMinimaxStatus,
+    accountTitle: apiKeyAccountTitle,
+    accountInfo: apiKeyAccountInfo,
+    api: window.tokenMonitor[provider],
+    beginEdit: (account) => openApiKeyAccountEditor(provider, account),
+    rerender: () => renderApiKeyAccountStatus(provider),
     textKeys: {
-      notConfigured: 'settings.minimax.notConfigured',
-      connected: 'settings.minimax.connected',
-      toggleAccount: 'settings.minimax.toggleAccount',
-      toggleFailed: 'settings.minimax.toggleFailed',
-      disabled: 'settings.minimax.disabled',
-      remove: 'settings.minimax.remove',
-      removeConfirm: 'settings.minimax.removeConfirm',
-      removeFailed: 'settings.minimax.removeFailed',
-      edit: 'settings.minimax.edit'
+      notConfigured: `settings.${provider}.notConfigured`,
+      connected: `settings.${provider}.connected`,
+      toggleAccount: `settings.${provider}.toggleAccount`,
+      toggleFailed: `settings.${provider}.toggleFailed`,
+      disabled: `settings.${provider}.disabled`,
+      remove: `settings.${provider}.remove`,
+      removeConfirm: `settings.${provider}.removeConfirm`,
+      removeFailed: `settings.${provider}.removeFailed`,
+      edit: `settings.${provider}.edit`
     }
   });
 }
 
-// 编辑账号复用「添加账号」表单：点 ✎ 展开手风琴、预填标签、key 框留空
-// （key 是 secret，renderer 从不持有明文），表单顶部插入一行编辑提示，
-// 保存按钮按 state.minimaxEditingAccountId 决定走更新还是添加。
-function openMinimaxAccountEditor(account) {
-  state.minimaxEditingAccountId = String(account?.id || '');
-  // 预填显示名（标签或 key 尾号）——accountLabel 本身可能为空，直接填
-  // 会让「点开编辑却什么都没发生」。
-  const labelInput = document.getElementById('minimaxAccountLabelInput');
-  const displayName = minimaxSettingsAccountTitle(
+// 编辑账号复用「添加账号」表单：点 ✎ 展开手风琴、预填显示名（标签或
+// key 尾号——accountLabel 本身可能为空，直接填会让「点开编辑却什么都没
+// 发生」）、key 框留空（key 是 secret，renderer 从不持有明文），表单顶部
+// 插入一行编辑提示，保存按钮按编辑态决定走更新还是添加。
+function openApiKeyAccountEditor(provider, account) {
+  state[`${provider}EditingAccountId`] = String(account?.id || '');
+  const labelInput = document.getElementById(`${provider}AccountLabelInput`);
+  const displayName = apiKeyAccountTitle(
     account,
-    (state.settings?.minimaxManagedAccounts || []).findIndex((entry) => entry.id === account?.id)
+    apiKeyAccountsFromSettings(provider).findIndex((entry) => entry.id === account?.id)
   );
   if (labelInput) labelInput.value = String(account?.accountLabel || '') || displayName;
-  const keyInput = document.getElementById('minimaxApiKeyInput');
+  const keyInput = document.getElementById(`${provider}ApiKeyInput`);
   if (keyInput) keyInput.value = '';
-  renderMinimaxEditHint();
-  setMinimaxAddExpanded(true);
+  renderApiKeyAccountEditHint(provider);
+  setApiKeyAccountAddExpanded(provider, true);
 }
 
 // key 输入框占位符带 data-i18n-placeholder、按钮带 data-i18n，语言切换的
 // applyTranslations 会重写它们，所以编辑态只用一个动态插入的提示行表达
 // 「正在编辑 + key 留空保持不变」，由本函数在每次渲染时重建；两个输入
 // 框的占位提示也在编辑/添加两态间同步切换。
-function renderMinimaxEditHint() {
-  const details = document.getElementById('minimaxAddDetails');
+function renderApiKeyAccountEditHint(provider) {
+  const details = document.getElementById(`${provider}AddDetails`);
   if (!details) return;
-  document.querySelectorAll('.minimax-edit-hint').forEach((node) => node.remove());
-  const labelInput = document.getElementById('minimaxAccountLabelInput');
-  const keyInput = document.getElementById('minimaxApiKeyInput');
-  const editingId = String(state.minimaxEditingAccountId || '');
+  document.querySelectorAll(`.${provider}-edit-hint`).forEach((node) => node.remove());
+  const labelInput = document.getElementById(`${provider}AccountLabelInput`);
+  const keyInput = document.getElementById(`${provider}ApiKeyInput`);
+  const editingId = String(state[`${provider}EditingAccountId`] || '');
   if (!editingId) {
-    labelInput?.setAttribute('placeholder', t('settings.minimax.labelPlaceholder'));
-    keyInput?.setAttribute('placeholder', t('settings.minimax.apiKeyPlaceholder'));
+    labelInput?.setAttribute('placeholder', t(`settings.${provider}.labelPlaceholder`));
+    keyInput?.setAttribute('placeholder', t(`settings.${provider}.apiKeyPlaceholder`));
     return;
   }
-  const account = (state.settings?.minimaxManagedAccounts || [])
-    .find((entry) => entry.id === editingId);
+  const account = apiKeyAccountsFromSettings(provider).find((entry) => entry.id === editingId);
   if (!account) {
-    state.minimaxEditingAccountId = '';
+    state[`${provider}EditingAccountId`] = '';
     return;
   }
-  const displayName = minimaxSettingsAccountTitle(
+  const displayName = apiKeyAccountTitle(
     account,
-    (state.settings?.minimaxManagedAccounts || []).indexOf(account)
+    apiKeyAccountsFromSettings(provider).indexOf(account)
   );
   labelInput?.setAttribute('placeholder', displayName);
-  keyInput?.setAttribute('placeholder', t('settings.minimax.editKeyPlaceholder'));
+  keyInput?.setAttribute('placeholder', t(`settings.${provider}.editKeyPlaceholder`));
   const hint = document.createElement('p');
-  hint.className = 'settings-note minimax-edit-hint';
-  hint.textContent = t('settings.minimax.editingHint', { account: displayName });
+  hint.className = `settings-note ${provider}-edit-hint`;
+  hint.textContent = t(`settings.${provider}.editingHint`, { account: displayName });
   const body = details.querySelector('.opencode-add-body');
   if (body) body.prepend(hint);
 }
 
-function clearMinimaxEditState() {
-  state.minimaxEditingAccountId = '';
-  renderMinimaxEditHint();
+function clearApiKeyAccountEditState(provider) {
+  state[`${provider}EditingAccountId`] = '';
+  renderApiKeyAccountEditHint(provider);
+}
+
+// 三家共用的事件绑定：卡片展开、添加手风琴、控制台按钮、账号推送订阅、
+// 保存（编辑态走 updateAccount，key 留空表示只改标签）。extraBinding 给
+// 供应商特有控件（zai 的 region select）留挂点。
+function setupApiKeyAccountCard(provider, extraBinding) {
+  const toggle = document.getElementById(`${provider}SettingsToggle`);
+  if (!toggle) return;
+  toggle.addEventListener('click', () => setApiKeyAccountExpanded(provider, !state[`${provider}AccountExpanded`]));
+  setApiKeyAccountExpanded(provider, false);
+  setApiKeyAccountAddExpanded(provider, false);
+  renderApiKeyAccountStatus(provider);
+
+  document.getElementById(`${provider}AddToggle`)?.addEventListener('click', () => {
+    const details = document.getElementById(`${provider}AddDetails`);
+    setApiKeyAccountAddExpanded(provider, details?.classList.contains('hidden'));
+  });
+
+  window.tokenMonitor[provider].onAccounts((accounts) => {
+    state.settings[`${provider}ManagedAccounts`] = accounts || [];
+    renderApiKeyAccountStatus(provider);
+  });
+
+  window.tokenMonitor[provider].accounts().then((accounts) => {
+    state.settings[`${provider}ManagedAccounts`] = accounts || [];
+    renderApiKeyAccountStatus(provider);
+  }).catch(() => {});
+
+  document.getElementById(`${provider}SaveAccountButton`)?.addEventListener('click', async () => {
+    const keyInput = document.getElementById(`${provider}ApiKeyInput`);
+    const labelInput = document.getElementById(`${provider}AccountLabelInput`);
+    const saveButton = document.getElementById(`${provider}SaveAccountButton`);
+    // 编辑模式：key 留空表示只改标签；添加模式必须有 key。
+    const editingId = String(state[`${provider}EditingAccountId`] || '');
+    if (!editingId && !String(keyInput.value || '').trim()) {
+      state[`${provider}AccountError`] = t(`settings.${provider}.statusNotSet`);
+      renderApiKeyAccountStatus(provider);
+      return;
+    }
+    saveButton.disabled = true;
+    saveButton.textContent = t(`settings.${provider}.checking`);
+    let result;
+    try {
+      result = editingId
+        ? await window.tokenMonitor[provider].updateAccount(editingId, keyInput.value, labelInput?.value || '')
+        : await window.tokenMonitor[provider].addAccount(keyInput.value, labelInput?.value || '');
+    } catch (_) {
+      result = { ok: false, errorCode: 'validationUnavailable' };
+    } finally {
+      saveButton.disabled = false;
+      saveButton.textContent = t(`settings.${provider}.saveAccount`);
+    }
+    if (!result?.ok) {
+      if (result?.errorCode === 'missingApiKey') {
+        state[`${provider}AccountError`] = t(`settings.${provider}.statusNotSet`);
+      } else if (result?.errorCode === 'invalidApiKey') {
+        state[`${provider}AccountError`] = t(`settings.${provider}.invalidApiKey`);
+      } else if (result?.errorCode === 'duplicateAccount') {
+        state[`${provider}AccountError`] = t(`settings.${provider}.duplicateAccount`);
+      } else if (result?.errorCode === 'validationRateLimited') {
+        state[`${provider}AccountError`] = t(`settings.${provider}.validationRateLimited`);
+      } else if (result?.errorCode === 'validationUnavailable') {
+        state[`${provider}AccountError`] = t(`settings.${provider}.validationUnavailable`);
+      } else if (result?.errorCode === 'credentialStorageUnavailable') {
+        state[`${provider}AccountError`] = t(`settings.${provider}.credentialStorageUnavailable`);
+      } else {
+        state[`${provider}AccountError`] = result?.error || t(`settings.${provider}.addFailed`);
+      }
+      renderApiKeyAccountStatus(provider);
+      return;
+    }
+    keyInput.value = '';
+    if (labelInput) labelInput.value = '';
+    state[`${provider}AccountError`] = '';
+    state.settings[`${provider}ManagedAccounts`] = await window.tokenMonitor[provider].accounts();
+    clearApiKeyAccountEditState(provider);
+    renderApiKeyAccountStatus(provider);
+    setApiKeyAccountAddExpanded(provider, false);
+    await refreshStats({ force: true });
+  });
+
+  if (typeof extraBinding === 'function') extraBinding();
 }
 
 function renderCopilotStatus() {
@@ -13938,31 +14008,6 @@ function renderCopilotStatus() {
   refreshBtn.classList.toggle('hidden', !configured || (state.copilotSignInBusy && !linked));
   loginStatusEl.classList.toggle('hidden', !state.copilotLoginStatus);
   loginStatusEl.textContent = state.copilotLoginStatus;
-  renderSettingsSummaries();
-}
-
-function renderDeepseekStatus() {
-  const statusEl = document.getElementById('deepseekApiKeyStatus');
-  const openBtn = document.getElementById('deepseekOpenBrowser');
-  const logoutBtn = document.getElementById('deepseekLogoutButton');
-  const refreshBtn = document.getElementById('deepseekRefreshButton');
-  const manualPanel = document.getElementById('deepseekManualPanel');
-  const errorEl = document.getElementById('deepseekErrorMessage');
-  if (!statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
-
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
-
-  const source = state.settings?.deepseekApiKeySource || '';
-  const provider = deepseekProviderForAccount();
-  const configured = Boolean(state.settings?.deepseekApiKeyConfigured);
-  const enabled = limitProviderEnabled('deepseek');
-  const linked = deepseekAccountLinked();
-  setCursorStatusText(statusEl, apiKeyAccountStatusText('deepseek', provider, configured, source, enabled));
-  manualPanel.classList.toggle('hidden', linked);
-  openBtn.classList.toggle('hidden', linked);
-  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
-  refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();
 }
 
@@ -15568,184 +15613,25 @@ function setupCursorAccountUI() {
     });
   }
 
-  const deepseekToggle = document.getElementById('deepseekSettingsToggle');
-  if (deepseekToggle) {
-    deepseekToggle.addEventListener('click', () => setDeepseekAccountExpanded(!state.deepseekAccountExpanded));
-    setDeepseekAccountExpanded(false);
-    renderDeepseekStatus();
-
-    document.getElementById('deepseekOpenBrowser').addEventListener('click', () => {
+  setupApiKeyAccountCard('deepseek', () => {
+    document.getElementById('deepseekOpenBrowser')?.addEventListener('click', () => {
       window.tokenMonitor.openExternal('https://platform.deepseek.com/api_keys');
     });
-
-    document.getElementById('deepseekLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ deepseekApiKey: '' });
-      clearDeepseekPendingCheck();
-      clearDeepseekProviderStatus();
-      renderDeepseekStatus();
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('deepseekRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('deepseekApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('deepseekApiKeyInput');
-      const errorEl = document.getElementById('deepseekErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.deepseek.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markDeepseekKeyCheckPending();
-        await saveSettings({ deepseekApiKey: input.value });
-        input.value = '';
-        renderDeepseekStatus();
-        await refreshStats({ force: true });
-        if (deepseekAccountLinked()) setDeepseekAccountExpanded(false);
-        else setDeepseekAccountExpanded(true);
-        renderDeepseekStatus();
-      } catch (err) {
-        clearDeepseekPendingCheck();
-        errorEl.textContent = t('settings.deepseek.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-  const minimaxToggle = document.getElementById('minimaxSettingsToggle');
-  if (minimaxToggle) {
-    minimaxToggle.addEventListener('click', () => setMinimaxAccountExpanded(!state.minimaxAccountExpanded));
-    setMinimaxAccountExpanded(false);
-    setMinimaxAddExpanded(false);
-    renderMinimaxStatus();
-
-    document.getElementById('minimaxOpenBrowser').addEventListener('click', () => {
+  });
+  setupApiKeyAccountCard('minimax', () => {
+    document.getElementById('minimaxOpenBrowser')?.addEventListener('click', () => {
       window.tokenMonitor.openExternal(minimaxPlatformUrl());
     });
-
-    document.getElementById('minimaxAddToggle').addEventListener('click', () => {
-      const details = document.getElementById('minimaxAddDetails');
-      setMinimaxAddExpanded(details?.classList.contains('hidden'));
-    });
-
-    window.tokenMonitor.minimax.onAccounts((accounts) => {
-      state.settings.minimaxManagedAccounts = accounts || [];
-      renderMinimaxStatus();
-    });
-
-    window.tokenMonitor.minimax.accounts().then((accounts) => {
-      state.settings.minimaxManagedAccounts = accounts || [];
-      renderMinimaxStatus();
-    }).catch(() => {});
-
-    document.getElementById('minimaxSaveAccountButton').addEventListener('click', async () => {
-      const keyInput = document.getElementById('minimaxApiKeyInput');
-      const labelInput = document.getElementById('minimaxAccountLabelInput');
-      const saveButton = document.getElementById('minimaxSaveAccountButton');
-      // 编辑模式：key 留空表示只改标签；添加模式必须有 key。
-      const editingId = String(state.minimaxEditingAccountId || '');
-      if (!editingId && !String(keyInput.value || '').trim()) {
-        state.minimaxAccountError = t('settings.minimax.statusNotSet');
-        renderMinimaxStatus();
-        return;
-      }
-      saveButton.disabled = true;
-      saveButton.textContent = t('settings.minimax.checking');
-      let result;
-      try {
-        result = editingId
-          ? await window.tokenMonitor.minimax.updateAccount(editingId, keyInput.value, labelInput?.value || '')
-          : await window.tokenMonitor.minimax.addAccount(keyInput.value, labelInput?.value || '');
-      } catch (_) {
-        result = { ok: false, errorCode: 'validationUnavailable' };
-      } finally {
-        saveButton.disabled = false;
-        saveButton.textContent = t('settings.minimax.saveAccount');
-      }
-      if (!result?.ok) {
-        if (result?.errorCode === 'missingApiKey') {
-          state.minimaxAccountError = t('settings.minimax.statusNotSet');
-        } else if (result?.errorCode === 'invalidApiKey') {
-          state.minimaxAccountError = t('settings.minimax.invalidApiKey');
-        } else if (result?.errorCode === 'duplicateAccount') {
-          state.minimaxAccountError = t('settings.minimax.duplicateAccount');
-        } else if (result?.errorCode === 'validationRateLimited') {
-          state.minimaxAccountError = t('settings.minimax.validationRateLimited');
-        } else if (result?.errorCode === 'validationUnavailable') {
-          state.minimaxAccountError = t('settings.minimax.validationUnavailable');
-        } else if (result?.errorCode === 'credentialStorageUnavailable') {
-          state.minimaxAccountError = t('settings.minimax.credentialStorageUnavailable');
-        } else {
-          state.minimaxAccountError = result?.error || t('settings.minimax.addFailed');
-        }
-        renderMinimaxStatus();
-        return;
-      }
-      keyInput.value = '';
-      if (labelInput) labelInput.value = '';
-      state.minimaxAccountError = '';
-      state.settings.minimaxManagedAccounts = await window.tokenMonitor.minimax.accounts();
-      clearMinimaxEditState();
-      renderMinimaxStatus();
-      setMinimaxAddExpanded(false);
-      await refreshStats({ force: true });
-    });
-  }
-
-  const zaiToggle = document.getElementById('zaiSettingsToggle');
-  if (zaiToggle) {
+  });
+  setupApiKeyAccountCard('zai', () => {
     const zaiApiRegionInput = document.getElementById('zaiApiRegionInput');
     if (zaiApiRegionInput) zaiApiRegionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
+    // region 是组级共享设置：切换后所有账号统一打新 region 的端点。
     zaiApiRegionInput?.addEventListener('change', () => void saveSettings({ zaiApiRegion: zaiApiRegionInput.value || 'global' }));
-    zaiToggle.addEventListener('click', () => setExternalAccountExpanded('zai', !state.zaiAccountExpanded));
-    setExternalAccountExpanded('zai', false);
-    renderExternalProviderStatus('zai');
-
-    document.getElementById('zaiOpenBrowser').addEventListener('click', () => {
+    document.getElementById('zaiOpenBrowser')?.addEventListener('click', () => {
       window.tokenMonitor.openExternal(zaiPlatformUrl());
     });
-
-    document.getElementById('zaiLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ zaiApiKey: '' });
-      clearExternalProviderCheckPending('zai');
-      clearExternalProviderPendingStatus('zai');
-      renderExternalProviderStatus('zai');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('zaiApiKeyInput');
-      const regionInput = document.getElementById('zaiApiRegionInput');
-      const errorEl = document.getElementById('zaiErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.zai.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('zai');
-        await saveSettings({ zaiApiKey: input.value, zaiApiRegion: regionInput?.value || 'global' });
-        input.value = '';
-        renderExternalProviderStatus('zai');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('zai', !externalProviderAccountLinked('zai'));
-        renderExternalProviderStatus('zai');
-      } catch (err) {
-        clearExternalProviderCheckPending('zai');
-        errorEl.textContent = t('settings.zai.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
+  });
   const zaiteamToggle = document.getElementById('zaiteamSettingsToggle');
   if (zaiteamToggle) {
     zaiteamToggle.addEventListener('click', () => setExternalAccountExpanded('zaiteam', !state.zaiteamAccountExpanded));

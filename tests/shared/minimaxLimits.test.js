@@ -584,7 +584,7 @@ test('fetchMinimaxLimits aborts when the body stalls after the headers', { timeo
 
 // ---------- 多账号（managed accounts）----------
 
-const { createMinimaxManagedAccount } = require('../../src/shared/minimaxAccounts');
+const { createApiKeyManagedAccount } = require('../../src/shared/apiKeyAccounts');
 
 function tokenPlanBody(percent) {
   return {
@@ -598,8 +598,8 @@ function tokenPlanBody(percent) {
 }
 
 test('fetchMinimaxLimits probes every managed account and returns one row per account', async () => {
-  const first = createMinimaxManagedAccount('sk-cp-first-1111', 'Personal', []);
-  const second = createMinimaxManagedAccount('sk-cp-second-2222', '', []);
+  const first = createApiKeyManagedAccount('minimax', 'sk-cp-first-1111', 'Personal', []);
+  const second = createApiKeyManagedAccount('minimax', 'sk-cp-second-2222', '', []);
   assert.ok(first.ok && second.ok);
   const authHeaders = [];
 
@@ -626,8 +626,8 @@ test('fetchMinimaxLimits probes every managed account and returns one row per ac
 });
 
 test('fetchMinimaxLimits keeps account identity on failing rows so per-account lanes do not collide', async () => {
-  const good = createMinimaxManagedAccount('sk-cp-good-3333', 'Good', []);
-  const bad = createMinimaxManagedAccount('sk-cp-bad-4444', 'Bad', []);
+  const good = createApiKeyManagedAccount('minimax', 'sk-cp-good-3333', 'Good', []);
+  const bad = createApiKeyManagedAccount('minimax', 'sk-cp-bad-4444', 'Bad', []);
   assert.ok(good.ok && bad.ok);
 
   const rows = await fetchMinimaxLimits({
@@ -651,8 +651,8 @@ test('fetchMinimaxLimits keeps account identity on failing rows so per-account l
 });
 
 test('fetchMinimaxLimits honours the account-scoped refresh for a single account', async () => {
-  const first = createMinimaxManagedAccount('sk-cp-scope-5555', '', []);
-  const second = createMinimaxManagedAccount('sk-cp-other-6666', '', []);
+  const first = createApiKeyManagedAccount('minimax', 'sk-cp-scope-5555', '', []);
+  const second = createApiKeyManagedAccount('minimax', 'sk-cp-other-6666', '', []);
   assert.ok(first.ok && second.ok);
   const probed = [];
 
@@ -688,11 +688,11 @@ test('fetchMinimaxLimits falls back to the legacy single-key path when no accoun
   assert.ok(!Array.isArray(row), 'legacy path keeps returning a single row');
   assert.equal(row.status, 'ok');
   assert.equal(row.accountLabel, 'Token Plan');
-  assert.equal(row.accountKey, createMinimaxManagedAccount('sk-cp-legacy', '', []).account.accountKey);
+  assert.equal(row.accountKey, createApiKeyManagedAccount('minimax', 'sk-cp-legacy', '', []).account.accountKey);
 });
 
 test('managed accounts take precedence over the legacy key and env key', async () => {
-  const managed = createMinimaxManagedAccount('sk-cp-managed-7777', '', []);
+  const managed = createApiKeyManagedAccount('minimax', 'sk-cp-managed-7777', '', []);
   assert.ok(managed.ok);
   const probed = [];
 
