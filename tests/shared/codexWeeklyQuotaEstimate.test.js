@@ -160,6 +160,61 @@ test('counter regressions stay in one segment and endpoint netting cancels the r
   assert.ok(Math.abs(result.estimate.estimatedUsd - 120) < 0.000001);
 });
 
+test('a cost basis reprice starts a new segment without discarding completed evidence', () => {
+  const result = observeSeries([
+    { usedPercent: 30, costUsd: 100, rawCostUsd: 100, tokens: 10_000 },
+    { usedPercent: 31, costUsd: 100.1, rawCostUsd: 100.1, tokens: 10_100 },
+    { usedPercent: 32, costUsd: 101.3, rawCostUsd: 101.3, tokens: 11_300 },
+    { usedPercent: 33, costUsd: 102.4, rawCostUsd: 102.4, tokens: 12_400 },
+    { usedPercent: 34, costUsd: 103.7, rawCostUsd: 103.7, tokens: 13_700 },
+    { usedPercent: 34, costUsd: 80, rawCostUsd: 80, tokens: 13_700 },
+    { usedPercent: 35, costUsd: 81, rawCostUsd: 81, tokens: 14_700 },
+    { usedPercent: 36, costUsd: 82.2, rawCostUsd: 82.2, tokens: 15_900 },
+    { usedPercent: 37, costUsd: 83.3, rawCostUsd: 83.3, tokens: 17_000 }
+  ]);
+  const cycle = activeCycle(result);
+  assert.equal(cycle.segments.length, 2);
+  assert.equal(cycle.segments[0].reason, 'costBasisRebased');
+  assert.equal(cycle.samples.find((sample) => sample.reason === 'costBasisRebased').status, 'anomaly');
+  assert.equal(result.estimate.status, 'ready');
+  assert.equal(result.estimate.spanPercent, 6);
+  assert.ok(Math.abs(result.estimate.observedCostUsd - 6.9) < 0.000001);
+  assert.ok(Math.abs(result.estimate.estimatedUsd - 115) < 0.000001);
+});
+
+test('persisted endpoint segments recover across an observed cost basis reprice', () => {
+  const start = observation({ usedPercent: 30, costUsd: 100, rawCostUsd: 100, tokens: 10_000 });
+  const estimateStart = observation({
+    usedPercent: 31, costUsd: 100.1, rawCostUsd: 100.1, tokens: 10_100,
+    observedAt: '2026-08-12T01:00:00.000Z'
+  });
+  const estimateEnd = observation({
+    usedPercent: 36, costUsd: 82.2, rawCostUsd: 82.2, tokens: 15_900,
+    observedAt: '2026-08-12T07:00:00.000Z'
+  });
+  const state = normalizeState({
+    version: 2,
+    activeAccountKey: 'account-a',
+    accounts: { 'account-a': { currentCycleId: 'cycle-a', cycles: [{
+      id: 'cycle-a', resetAt: start.resetAt, latest: estimateEnd, segments: [{
+        id: 1, start, latest: estimateEnd, estimateStart, estimateEnd
+      }], samples: [{
+        jumpObservedAt: '2026-08-12T05:00:00.000Z', accountKey: 'account-a',
+        quotaCycleId: 'cycle-a', segmentId: 1, beforeRemainingPercent: 66,
+        afterRemainingPercent: 66, percentDelta: 0, previousCostUsd: 103.7,
+        currentCostUsd: 80, costDeltaUsd: -23.7, previousRawCostUsd: 103.7,
+        currentRawCostUsd: 80, rawCostDeltaUsd: -23.7, previousTokens: 13_700,
+        currentTokens: 13_700, tokenDelta: 0, status: 'anomaly', reason: 'counterRegression'
+      }]
+    }] } }
+  });
+  const estimate = estimateForAccount(state, 'account-a', start.resetAt);
+  assert.equal(estimate.status, 'ready');
+  assert.equal(estimate.spanPercent, 5);
+  assert.ok(Math.abs(estimate.observedCostUsd - 5.8) < 0.000001);
+  assert.ok(Math.abs(estimate.estimatedUsd - 116) < 0.000001);
+});
+
 test('version 1 state keeps valid estimate evidence but drops legacy device usage', () => {
   const latest = observation({ usedPercent: 34, costUsd: 13.7, tokens: 4_700_000 });
   const oldState = {
@@ -239,6 +294,48 @@ test('a reset is retained in the old cycle and starts an independent cycle', () 
   assert.equal(account.cycles[0].samples.at(-1).status, 'reset');
   assert.equal(reset.estimate.status, 'collecting');
   assert.equal(reset.estimate.sampleCount, 0);
+});
+
+test('granting a reset credit updates metadata without starting a quota cycle', () => {
+  const before = observeSeries([
+    { usedPercent: 30, costUsd: 10, tokens: 1_000_000, resetCreditsAvailable: 0 },
+    { usedPercent: 31, costUsd: 10.1, tokens: 1_100_000, resetCreditsAvailable: 0 },
+    { usedPercent: 32, costUsd: 11.3, tokens: 2_300_000, resetCreditsAvailable: 0 },
+    { usedPercent: 33, costUsd: 12.4, tokens: 3_400_000, resetCreditsAvailable: 0 },
+    { usedPercent: 34, costUsd: 13.7, tokens: 4_700_000, resetCreditsAvailable: 0 }
+  ]);
+  const originalCycleId = before.state.accounts['account-a'].currentCycleId;
+  const granted = observeCodexWeeklyQuota(before.state, observation({
+    resetAt: '2026-08-24T00:00:00.000Z',
+    observedAt: '2026-08-13T00:00:00.000Z',
+    usedPercent: 34,
+    costUsd: 13.7,
+    rawCostUsd: 13.7,
+    tokens: 4_700_000,
+    resetCreditsAvailable: 1
+  }));
+  const account = granted.state.accounts['account-a'];
+  assert.equal(account.cycles.length, 1);
+  assert.equal(account.currentCycleId, originalCycleId);
+  assert.equal(activeCycle(granted).resetAt, '2026-08-24T00:00:00.000Z');
+  assert.equal(granted.estimate.status, 'ready');
+});
+
+test('an elapsed reset deadline starts a new cycle even when usage remains zero', () => {
+  const before = observeSeries([
+    { usedPercent: 0, costUsd: 10, tokens: 1_000_000, resetCreditsAvailable: 0 }
+  ]);
+  const reset = observeCodexWeeklyQuota(before.state, observation({
+    resetAt: '2026-08-24T00:00:00.000Z',
+    observedAt: '2026-08-17T00:00:01.000Z',
+    usedPercent: 0,
+    costUsd: 10,
+    rawCostUsd: 10,
+    tokens: 1_000_000,
+    resetCreditsAvailable: 1
+  }));
+  assert.equal(reset.state.accounts['account-a'].cycles.length, 2);
+  assert.equal(activeCycle(reset).resetAt, '2026-08-24T00:00:00.000Z');
 });
 
 test('switching away and back requires a fresh boundary before sampling', () => {

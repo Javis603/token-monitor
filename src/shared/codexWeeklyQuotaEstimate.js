@@ -126,12 +126,7 @@ function newSegment(sample, id) {
   };
 }
 
-function segmentEstimate(segment) {
-  // Intermediate counter regressions and their later rebound cancel naturally
-  // here. Only the two endpoints of one uninterrupted local observation span
-  // contribute to the estimate.
-  const start = segment?.estimateStart;
-  const end = segment?.estimateEnd;
+function estimateLeg(start, end) {
   const spanPercent = start && end ? end.usedPercent - start.usedPercent : 0;
   if (!(spanPercent > EPSILON)) return { costUsd: 0, spanPercent: 0, sampleCount: 0 };
   return {
@@ -139,6 +134,61 @@ function segmentEstimate(segment) {
     spanPercent,
     sampleCount: Math.max(0, Math.round(spanPercent))
   };
+}
+
+function isCostBasisRebase(sample) {
+  return sample?.status === 'anomaly'
+    && sample.currentRawCostUsd < sample.previousRawCostUsd - EPSILON
+    && sample.currentTokens >= sample.previousTokens;
+}
+
+function observationFromJump(sample, side) {
+  const before = side === 'before';
+  return normalizeObservation({
+    usedPercent: 100 - (before ? sample.beforeRemainingPercent : sample.afterRemainingPercent),
+    costUsd: before ? sample.previousCostUsd : sample.currentCostUsd,
+    rawCostUsd: before ? sample.previousRawCostUsd : sample.currentRawCostUsd,
+    tokens: before ? sample.previousTokens : sample.currentTokens,
+    observedAt: sample.jumpObservedAt
+  });
+}
+
+function segmentEstimate(segment, samples = []) {
+  // Ordinary temporary regressions and their later rebound cancel naturally
+  // through endpoint netting. A raw-cost change with the exact same-or-higher
+  // token total is different: the collector repriced/rebuilt the cumulative
+  // cost basis, so costs from opposite sides of that boundary are not
+  // subtractable. Split that one persisted segment virtually as well, which
+  // repairs records written by older builds without rewriting the ledger.
+  const start = segment?.estimateStart;
+  const end = segment?.estimateEnd;
+  if (!start || !end) return estimateLeg(start, end);
+  const startMs = Date.parse(start.observedAt);
+  const endMs = Date.parse(end.observedAt);
+  const rebases = (samples || []).filter((sample) => (
+    sample.segmentId === segment.id
+      && isCostBasisRebase(sample)
+      && Date.parse(sample.jumpObservedAt) > startMs
+      && Date.parse(sample.jumpObservedAt) <= endMs
+  )).sort((left, right) => Date.parse(left.jumpObservedAt) - Date.parse(right.jumpObservedAt));
+  if (rebases.length === 0) return estimateLeg(start, end);
+
+  let cursor = start;
+  const total = { costUsd: 0, spanPercent: 0, sampleCount: 0 };
+  for (const rebase of rebases) {
+    const before = observationFromJump(rebase, 'before');
+    const after = observationFromJump(rebase, 'after');
+    const leg = estimateLeg(cursor, before);
+    total.costUsd += leg.costUsd;
+    total.spanPercent += leg.spanPercent;
+    total.sampleCount += leg.sampleCount;
+    cursor = after || cursor;
+  }
+  const finalLeg = estimateLeg(cursor, end);
+  total.costUsd += finalLeg.costUsd;
+  total.spanPercent += finalLeg.spanPercent;
+  total.sampleCount += finalLeg.sampleCount;
+  return total;
 }
 
 function baseCycleFields(value) {
@@ -291,7 +341,7 @@ function compactOldestSegment(cycle) {
   const index = cycle.segments.findIndex((segment) => segment.status === 'closed');
   if (index < 0) return false;
   const [segment] = cycle.segments.splice(index, 1);
-  const estimate = segmentEstimate(segment);
+  const estimate = segmentEstimate(segment, cycle.samples);
   cycle.compactedEstimateCostUsd += estimate.costUsd;
   cycle.compactedEstimateSpanPercent += estimate.spanPercent;
   cycle.compactedEstimateSampleCount += estimate.sampleCount;
@@ -324,7 +374,7 @@ function estimateFromCycle(cycle, options = {}) {
   let spanPercent = Math.max(0, finiteNumber(cycle?.compactedEstimateSpanPercent) || 0);
   let sampleCount = Math.max(0, Math.round(finiteNumber(cycle?.compactedEstimateSampleCount) || 0));
   for (const segment of cycle?.segments || []) {
-    const estimate = segmentEstimate(segment);
+    const estimate = segmentEstimate(segment, cycle.samples);
     observedCostUsd += estimate.costUsd;
     spanPercent += estimate.spanPercent;
     sampleCount += estimate.sampleCount;
@@ -397,10 +447,18 @@ function observeCodexWeeklyQuota(stateValue, observation, options = {}) {
   const resetCreditConsumed = cycle.latest.resetCreditsAvailable !== null
     && sample.resetCreditsAvailable !== null
     && sample.resetCreditsAvailable < cycle.latest.resetCreditsAvailable;
-  const naturalReset = timestampDistance(cycle.resetAt, resetAt) > RESET_AT_JITTER_MS;
+  const resetAtChanged = timestampDistance(cycle.resetAt, resetAt) > RESET_AT_JITTER_MS;
+  const previousResetMs = Date.parse(cycle.resetAt);
+  const nextResetMs = Date.parse(resetAt);
+  const observedMs = Date.parse(sample.observedAt);
+  const scheduledReset = resetAtChanged
+    && nextResetMs > previousResetMs + RESET_AT_JITTER_MS
+    && observedMs >= previousResetMs - RESET_AT_JITTER_MS;
   const percentageReset = sample.usedPercent < cycle.latest.usedPercent - EPSILON;
-  if (resetCreditConsumed || naturalReset || percentageReset) {
-    const reason = resetCreditConsumed ? 'resetCreditConsumed' : naturalReset ? 'resetAtChanged' : 'percentageIncreased';
+  if (scheduledReset || percentageReset) {
+    const reason = resetCreditConsumed && percentageReset
+      ? 'resetCreditConsumed'
+      : scheduledReset ? 'resetAtElapsed' : 'percentageIncreased';
     appendSample(cycle, jumpSample(cycle, accountKey, cycle.latest, sample, 'reset', reason));
     closeActiveSegment(cycle, reason);
     const next = newCycle(resetAt, sample, account.cycles.length + 1);
@@ -409,6 +467,11 @@ function observeCodexWeeklyQuota(stateValue, observation, options = {}) {
     account.currentCycleId = next.id;
     return { state, estimate: estimateFromCycle(next, options), changed: true };
   }
+  // Granting a manual-reset credit can move the API reset timestamp before the
+  // current quota actually resets. Keep the same cycle and only refresh its
+  // metadata; a real scheduled rollover must cross the previous deadline, and
+  // a consumed reset is still caught by the percentage returning toward zero.
+  if (resetAtChanged) cycle.resetAt = resetAt;
 
   const accountChanged = previousActiveKey !== accountKey;
   if (accountChanged) {
@@ -423,7 +486,7 @@ function observeCodexWeeklyQuota(stateValue, observation, options = {}) {
     && sample.rawCostUsd === previous.rawCostUsd
     && sample.tokens === previous.tokens
     && sample.resetCreditsAvailable === previous.resetCreditsAvailable;
-  if (unchanged) return { state, estimate: estimateFromCycle(cycle, options), changed: false };
+  if (unchanged) return { state, estimate: estimateFromCycle(cycle, options), changed: resetAtChanged };
 
   const percentDelta = sample.usedPercent - previous.usedPercent;
   const segment = activeSegment(cycle) || startSegment(cycle, previous);
@@ -436,9 +499,29 @@ function observeCodexWeeklyQuota(stateValue, observation, options = {}) {
   }
 
   const costDelta = sample.costUsd - previous.costUsd;
+  const rawCostDelta = sample.rawCostUsd - previous.rawCostUsd;
   const tokenDelta = sample.tokens - previous.tokens;
-  if (costDelta < -EPSILON || tokenDelta < 0) {
-    appendSample(cycle, jumpSample(cycle, accountKey, previous, sample, 'anomaly', 'counterRegression', segment.id));
+  const costBasisRebased = rawCostDelta < -EPSILON && tokenDelta >= 0;
+  if (costDelta < -EPSILON || rawCostDelta < -EPSILON || tokenDelta < 0) {
+    appendSample(cycle, jumpSample(
+      cycle,
+      accountKey,
+      previous,
+      sample,
+      'anomaly',
+      costBasisRebased ? 'costBasisRebased' : 'counterRegression',
+      segment.id
+    ));
+  }
+  if (costBasisRebased) {
+    closeActiveSegment(cycle, 'costBasisRebased');
+    const next = startSegment(cycle, sample);
+    if (percentDelta <= EPSILON) {
+      next.estimateStart = sample;
+      next.estimateEnd = sample;
+    }
+    cycle.latest = sample;
+    return { state, estimate: estimateFromCycle(cycle, options), changed: true };
   }
 
   segment.latest = sample;
