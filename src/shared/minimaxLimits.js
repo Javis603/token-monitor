@@ -9,7 +9,12 @@
 // status==3 placeholder lane that cc-switch / CodexBar both guard against.
 
 const { normalizeLimitProvider } = require('./limits');
-const { hashKey } = require('./hashKey');
+const {
+  cleanMinimaxSecret,
+  minimaxAccountDisplayLabel,
+  minimaxAccountKey,
+  scopedMinimaxManagedAccounts
+} = require('./minimaxAccounts');
 
 const MINIMAX_KEY_NAMES = ['MINIMAX_CODING_API_KEY'];
 
@@ -21,21 +26,11 @@ const MINIMAX_TOKEN_PLAN_REMAINS_URL_EN = 'https://api.minimax.io/v1/token_plan/
 const MINIMAX_WINDOW_MINUTES_5H = 5 * 60;
 const MINIMAX_WINDOW_MINUTES_WEEKLY = 7 * 24 * 60;
 
-function cleanSecret(value) {
-  let raw = value;
-  if (typeof raw !== 'string') return '';
-  raw = raw.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
-
 function minimaxToken(env = process.env, explicitKey = '') {
-  const explicit = cleanSecret(explicitKey);
+  const explicit = cleanMinimaxSecret(explicitKey);
   if (explicit) return explicit;
   for (const name of MINIMAX_KEY_NAMES) {
-    const raw = cleanSecret(env[name]);
+    const raw = cleanMinimaxSecret(env[name]);
     if (raw) return raw;
   }
   return '';
@@ -208,20 +203,28 @@ function shouldTryNextMinimaxRegion(error) {
   return code === 401 || code === 403;
 }
 
-async function fetchMinimaxLimits(options = {}, deps = {}) {
-  const env = deps.env || process.env;
+// 账号级状态行：多账号路径的失败/未配置行也必须携带账号身份，否则
+// limitsRuntime 会把不同账号的失败行全部落到 provider 通配 identity 上
+// 互相覆盖（rowIdentityKey 优先取 accountKey）。
+function minimaxStatusProvider(status, updatedAt, account) {
+  return normalizeLimitProvider({
+    provider: 'minimax',
+    source: 'api',
+    status,
+    updatedAt,
+    accountKey: account?.accountKey || '',
+    accountLabel: account ? minimaxAccountDisplayLabel(account) : '',
+    windows: []
+  });
+}
+
+// 探测单个 MiniMax 密钥：按 region × endpoint 顺序尝试（en→cn，
+// tokenPlan→legacy），沿用单账号时代的全部解析与重试规则。
+// account 为 null 表示单账号兼容路径（旧 settings.minimaxApiKey 或 env
+// 密钥），此时保持历史行为——错误行不带账号身份。
+async function probeMinimaxAccountKey(key, account, options, deps) {
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
-  const key = minimaxToken(env, options.minimaxApiKey);
-  if (!key) {
-    return normalizeLimitProvider({
-      provider: 'minimax',
-      source: 'api',
-      status: 'notConfigured',
-      updatedAt,
-      windows: []
-    });
-  }
   const fetchJson = deps.fetchJson || (async (u, headers) => {
     const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -259,20 +262,9 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
         const statusCode = parseNumberOrNull(baseResp.status_code);
         if (statusCode !== null && statusCode !== 0) {
           const statusMsg = typeof baseResp.status_msg === 'string' ? baseResp.status_msg : 'unknown error';
-          // Map auth-shaped errors to 'unauthorized' so the UI surfaces
-          // 'Update API key' instead of the generic 'Unavailable'. The endpoint
-          // signals auth failures via base_resp.status_msg phrasing ("log in",
-          // "cookie", "token", "auth", "key", "expired") rather than the HTTP
-          // status, which is always 200. Heuristic but matches the only
-          // failure mode observed against the live endpoint (status_code 1004).
           const lower = statusMsg.toLowerCase();
           const looksLikeAuth = /\b(log\s*in|cookie|token|auth|key|expired|invalid)\b/.test(lower);
           const status = looksLikeAuth ? 'unauthorized' : 'unavailable';
-          // Auth-shaped base_resp errors also drive the region retry. The
-          // endpoint returns 200 OK with status_code: 1004 ("cookie is missing,
-          // log in again") when the token belongs to the OTHER region — that's
-          // the same signal a 401 carries, just hidden in the body. Set
-          // statusCode: 401 so the retry loop in the caller picks it up.
           const retrySignal = looksLikeAuth ? 401 : null;
           throw Object.assign(new Error(`MiniMax error (code ${statusCode}): ${statusMsg}`), {
             status,
@@ -285,11 +277,10 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
       if (!windows.length && attempt.kind === 'tokenPlan' && next?.region === attempt.region) {
         throw Object.assign(new Error('MiniMax token-plan response has no quota windows'), { status: 'unavailable' });
       }
-      const accountKey = hashKey('minimax', key);
       return normalizeLimitProvider({
         provider: 'minimax',
-        accountKey,
-        accountLabel: 'Token Plan',
+        accountKey: account ? account.accountKey : minimaxAccountKey(key),
+        accountLabel: account ? minimaxAccountDisplayLabel(account) || 'Token Plan' : 'Token Plan',
         source: 'api',
         status: windows.length ? 'ok' : 'unavailable',
         updatedAt,
@@ -306,13 +297,27 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
       break;
     }
   }
-  return normalizeLimitProvider({
-    provider: 'minimax',
-    source: 'api',
-    status: mapMinimaxErrorStatus(lastError),
-    updatedAt,
-    windows: []
-  });
+  return minimaxStatusProvider(mapMinimaxErrorStatus(lastError), updatedAt, account);
+}
+
+async function fetchMinimaxLimits(options = {}, deps = {}) {
+  const env = deps.env || process.env;
+  const scope = options.limitRefreshScope?.provider === 'minimax'
+    ? options.limitRefreshScope
+    : null;
+  const accounts = scopedMinimaxManagedAccounts(options.minimaxManagedAccounts, scope);
+  if (accounts.length > 0) {
+    return Promise.all(accounts.map(
+      (account) => probeMinimaxAccountKey(account.apiKey, account, options, deps)
+    ));
+  }
+  // 单账号兼容路径：GUI 迁移前的 settings.minimaxApiKey 或 env 密钥
+  // （headless agent 仍走这里），行为与多账号改造前完全一致。
+  const key = minimaxToken(env, options.minimaxApiKey);
+  if (!key) {
+    return minimaxStatusProvider('notConfigured', new Date((deps.now || Date.now)()).toISOString());
+  }
+  return probeMinimaxAccountKey(key, null, options, deps);
 }
 
 function mapMinimaxErrorStatus(error) {

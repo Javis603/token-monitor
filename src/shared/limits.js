@@ -482,7 +482,8 @@ function providerCollapseKey(provider) {
       || provider.provider === 'opencode'
       || provider.provider === 'openrouter'
       || provider.provider === 'thirdparty'
-      || provider.provider === 'mimo')
+      || provider.provider === 'mimo'
+      || provider.provider === 'minimax')
     && isConfiguredProvider(provider)
   ) {
     return providerAggregateKey(provider);

@@ -1351,13 +1351,14 @@ test('account validation reads the local device raw limits, not the collapsed ag
   const rawHelper = functionBody(app, 'localDeviceLimitsProviders', 'localProviderStatus');
   const helper = functionBody(app, 'localProviderStatus', 'deepseekAccountLinked');
   // Sync-mode aggregateLimits() collapses a local `unauthorized` row out in favor
-  // of a remote `ok` (providerCollapseKey for deepseek/minimax/grok is just the
-  // provider name; pickBetterProvider keeps the higher statusRank). So the account
-  // card must read the LOCAL device's RAW limits from state.stats.devices, where
+  // of a remote `ok` (providerCollapseKey for deepseek/grok is just the provider
+  // name; pickBetterProvider keeps the higher statusRank). So the account card
+  // must read the LOCAL device's RAW limits from state.stats.devices, where
   // the local unauthorized row still lives — not state.stats.limits.providers,
   // where it has already been dropped. Searching the aggregate would miss the
   // local row and fall back to the remote `ok`, falsely reporting an invalid
-  // local key as Linked.
+  // local key as Linked. minimax joined the per-accountKey whitelist, but its
+  // per-account rows keep the same raw-vs-aggregate distinction.
   assert.match(rawHelper, /accountIdentityApi\.localDeviceLimitsProviders/);
   assert.match(rawHelper, /state\.stats/);
   assert.match(rawHelper, /state\.settings\?\.deviceId/);
@@ -1367,7 +1368,7 @@ test('account validation reads the local device raw limits, not the collapsed ag
   // not expose raw device rows at all.
   assert.match(helper, /state\.stats\?\.limits\?\.providers/);
   assert.match(functionBody(app, 'deepseekProviderStatus', 'deepseekProviderForAccount'), /return localProviderStatus\('deepseek'\);/);
-  assert.match(functionBody(app, 'minimaxProviderStatus', 'minimaxAccountLinked'), /return localProviderStatus\('minimax'\);/);
+  assert.match(functionBody(app, 'minimaxProviderStatus', 'copilotProviderStatus'), /return localProviderStatus\('minimax'\);/);
 });
 
 test('account validation does not treat a sole remote synced device as local', () => {

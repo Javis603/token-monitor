@@ -1075,7 +1075,7 @@ test('collectLimitsOnce flattens multiple providers returned by a provider fetch
 });
 
 // Regression guard for the renderer's localProviderStatus(): a sync-mode account
-// card (DeepSeek/Minimax/Grok) must read the local device's RAW limits from
+// card (DeepSeek/Grok) must read the local device's RAW limits from
 // stats.devices, not stats.limits.providers. This test pins the root cause:
 // aggregateLimits collapses a local `unauthorized` row out in favor of a remote
 // `ok`, so the local row is GONE from the aggregate. If the card read the
@@ -1093,8 +1093,37 @@ function apikeyProvider(name, accountKey, status, updatedAt) {
   };
 }
 
-test('aggregateLimits drops a local unauthorized row when a remote device has ok (deepseek/minimax/grok collapse by name)', () => {
+test('aggregateLimits drops a local unauthorized row when a remote device has ok (deepseek/grok collapse by name)', () => {
   const aggregate = aggregateLimits([
+    {
+      deviceId: 'this-mac',
+      limits: {
+        updatedAt: '2026-06-24T10:00:00.000Z',
+        providers: [apikeyProvider('deepseek', 'sha256:local-bad-key', 'unauthorized', '2026-06-24T10:00:00.000Z')]
+      }
+    },
+    {
+      deviceId: 'office-pc',
+      limits: {
+        updatedAt: '2026-06-24T10:01:00.000Z',
+        providers: [apikeyProvider('deepseek', 'sha256:remote-good-key', 'ok', '2026-06-24T10:01:00.000Z')]
+      }
+    }
+  ], 0, Date.parse('2026-06-24T10:02:00.000Z'));
+
+  const deepseekRows = aggregate.providers.filter((provider) => provider.provider === 'deepseek');
+  assert.equal(deepseekRows.length, 1);
+  // The local unauthorized row is gone; only the remote ok survives.
+  assert.equal(deepseekRows[0].status, 'ok');
+  assert.equal(deepseekRows[0].sourceDeviceId, 'office-pc');
+  assert.equal(deepseekRows[0].accountKey, 'sha256:remote-good-key');
+});
+
+test('aggregateLimits keeps minimax rows per accountKey and still prefers ok over unauthorized within one account', () => {
+  // MiniMax joined the multi-account collapse whitelist: different accountKeys
+  // are different accounts and must never swallow each other — that is what
+  // makes the second configured account visible at all.
+  const perAccount = aggregateLimits([
     {
       deviceId: 'this-mac',
       limits: {
@@ -1111,12 +1140,36 @@ test('aggregateLimits drops a local unauthorized row when a remote device has ok
     }
   ], 0, Date.parse('2026-06-24T10:02:00.000Z'));
 
-  const minimaxRows = aggregate.providers.filter((provider) => provider.provider === 'minimax');
-  assert.equal(minimaxRows.length, 1);
-  // The local unauthorized row is gone; only the remote ok survives.
-  assert.equal(minimaxRows[0].status, 'ok');
-  assert.equal(minimaxRows[0].sourceDeviceId, 'office-pc');
-  assert.equal(minimaxRows[0].accountKey, 'sha256:remote-good-key');
+  const rows = perAccount.providers.filter((provider) => provider.provider === 'minimax');
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    new Set(rows.map((row) => row.accountKey)),
+    new Set(['sha256:local-bad-key', 'sha256:remote-good-key'])
+  );
+
+  // Same account observed as unauthorized locally and ok remotely still picks
+  // the ok row, preserving the single-account protection the old test pinned.
+  const sameAccount = aggregateLimits([
+    {
+      deviceId: 'this-mac',
+      limits: {
+        updatedAt: '2026-06-24T10:00:00.000Z',
+        providers: [apikeyProvider('minimax', 'sha256:shared-key', 'unauthorized', '2026-06-24T10:00:00.000Z')]
+      }
+    },
+    {
+      deviceId: 'office-pc',
+      limits: {
+        updatedAt: '2026-06-24T10:01:00.000Z',
+        providers: [apikeyProvider('minimax', 'sha256:shared-key', 'ok', '2026-06-24T10:01:00.000Z')]
+      }
+    }
+  ], 0, Date.parse('2026-06-24T10:02:00.000Z'));
+
+  const shared = sameAccount.providers.filter((provider) => provider.provider === 'minimax');
+  assert.equal(shared.length, 1);
+  assert.equal(shared[0].status, 'ok');
+  assert.equal(shared[0].sourceDeviceId, 'office-pc');
 });
 
 test('the local device raw limits still carry the unauthorized row the aggregate dropped', () => {

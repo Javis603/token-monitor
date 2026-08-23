@@ -309,3 +309,28 @@ test('stores, migrates, and removes MiMo account cookies in the unified store', 
   assert.equal(store.readMimoCredential('account-1'), '');
   assert.equal(store.writeMimoCredential('__proto__', 'serviceToken=unsafe'), false);
 });
+
+test('managed-account credentials are shared storage for MiMo cookies and MiniMax keys', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  // 通用动态路径：providers.<provider>.accounts.<id>.<field>
+  assert.equal(store.writeManagedAccountCredential('minimax', 'minimax-1', 'apiKey', 'sk-cp-one'), true);
+  assert.equal(store.readManagedAccountCredential('minimax', 'minimax-1', 'apiKey'), 'sk-cp-one');
+  assert.equal(store.writeManagedAccountCredential('mimo', 'mimo-1', 'cookieHeader', 'userId=1'), true);
+  assert.equal(store.readManagedAccountCredential('mimo', 'mimo-1', 'cookieHeader'), 'userId=1');
+
+  // 同一 provider 下不同账号互不影响；remove 只删目标账号的整段。
+  assert.equal(store.writeManagedAccountCredential('minimax', 'minimax-2', 'apiKey', 'sk-cp-two'), true);
+  assert.equal(store.removeManagedAccountCredentials('minimax', 'minimax-1'), true);
+  assert.equal(store.readManagedAccountCredential('minimax', 'minimax-1', 'apiKey'), '');
+  assert.equal(store.readManagedAccountCredential('minimax', 'minimax-2', 'apiKey'), 'sk-cp-two');
+
+  // MiMo 的历史方法在泛化路径上仍是薄委托（行为不变）。
+  assert.equal(store.readMimoCredential('mimo-1'), 'userId=1');
+  assert.equal(store.writeMimoCredential('mimo-2', 'userId=2'), true);
+  assert.equal(store.readManagedAccountCredential('mimo', 'mimo-2', 'cookieHeader'), 'userId=2');
+
+  // 原型污染防护对动态段（provider/id/field）全部生效。
+  assert.equal(store.writeManagedAccountCredential('__proto__', 'x', 'apiKey', 'v'), false);
+  assert.equal(store.writeManagedAccountCredential('minimax', 'constructor', 'apiKey', 'v'), false);
+  assert.equal(store.readManagedAccountCredential('minimax', 'minimax-1', 'constructor'), '');
+});

@@ -212,6 +212,19 @@ const {
   fetchMimoLimits,
   normalizeMimoCookieHeader
 } = require('../shared/mimoLimits');
+const {
+  MINIMAX_LABEL_MAX_LENGTH,
+  cleanMinimaxSecret,
+  createMinimaxManagedAccount,
+  minimaxAccountKey,
+  minimaxKeySuffix
+} = require('../shared/minimaxAccounts');
+const { fetchMinimaxLimits } = require('../shared/minimaxLimits');
+const {
+  createManagedAccountLifecycle,
+  normalizeManagedAccountMeta,
+  registerManagedAccountIpc
+} = require('./managedAccounts');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
@@ -558,6 +571,7 @@ function defaultSettings() {
     ollamaCookie: '',
     codexManagedAccounts: [],
     mimoManagedAccounts: [],
+    minimaxManagedAccounts: [],
     appUpdate: {
       lastCheckedAt: null,
       lastKnownLatest: null,
@@ -663,7 +677,8 @@ function electronLimitsConfig() {
     workbuddyLocalSession: workbuddyDesktopSessionEnabled ? electronWorkbuddyLocalAuth.getSessionInfo() : {},
     defaultLimitProviders: defaultLimitProviders(),
     codexManagedAccounts: codexManagedAccountsForCollector(),
-    mimoManagedAccounts: mimoManagedAccountsForCollector()
+    mimoManagedAccounts: mimoManagedAccountsForCollector(),
+    minimaxManagedAccounts: minimaxManagedAccountsForCollector()
   });
 }
 
@@ -1040,27 +1055,8 @@ function codexManagedAccountsForCollector() {
 }
 
 function normalizeMimoManagedAccounts(value) {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set();
-  const accounts = [];
-  for (const account of value) {
-    if (!account || typeof account !== 'object') continue;
-    const id = String(account.id || '').trim();
-    const accountKey = String(account.accountKey || '').trim();
-    if (!id || !accountKey) continue;
-    if (seen.has(accountKey)) continue;
-    seen.add(accountKey);
-    accounts.push({
-      id,
-      accountKey,
-      accountEmail: String(account.accountEmail || '').trim().slice(0, 254),
-      accountLabel: String(account.accountLabel || '').trim(),
-      addedAt: account.addedAt || new Date().toISOString(),
-      updatedAt: account.updatedAt || account.addedAt || new Date().toISOString(),
-      enabled: account.enabled !== false
-    });
-  }
-  return accounts;
+  // MiMo 账号元数据与共用骨架形状一致（无供应商附加字段）。
+  return normalizeManagedAccountMeta(value, []);
 }
 
 function mimoAccountsForRenderer() {
@@ -1144,49 +1140,238 @@ async function addMimoManagedAccount(cookieValue) {
   return { ok: true, accounts: mimoAccountsForRenderer() };
 }
 
-async function removeMimoManagedAccount(id) {
-  const accountId = String(id || '').trim();
-  const accounts = normalizeMimoManagedAccounts(settings.mimoManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  const previousCookie = readMimoCredential(accountId);
-  if (!removeMimoCredential(accountId)) return { ok: false, error: 'Could not remove stored credential' };
-  settings.mimoManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (_) {
-    if (previousCookie) writeMimoCredential(accountId, previousCookie);
-    return { ok: false, error: 'Could not persist account removal' };
+// MiMo 删除/启停走共用生命周期（managedAccounts.js）；addAccount 因 cookie
+// 解析、email 回填等供应商差异保留专用实现。
+const mimoAccountLifecycle = createManagedAccountLifecycle({
+  provider: 'mimo',
+  normalizeAccounts: normalizeMimoManagedAccounts,
+  readCredential: readMimoCredential,
+  writeCredential: writeMimoCredential,
+  removeCredential: removeMimoCredential,
+  getAccounts: () => settings?.mimoManagedAccounts,
+  setAccounts: (accounts) => {
+    settings.mimoManagedAccounts = accounts;
+  },
+  persistSettings: () => saveSettings({ throwOnError: true }),
+  broadcastChange: () => {
+    pushSettingsToRenderer();
+    sendMimoAccountsPush();
+  },
+  queueInvalidation: (scope, reason, options) => {
+    void queueLimitInvalidation(scope, reason, options);
   }
-  pushSettingsToRenderer();
-  sendMimoAccountsPush();
-  void queueLimitInvalidation({ provider: 'mimo', accountId, accountKey: account.accountKey }, 'account-removed', {
-    clear: true,
-    refresh: false
-  });
-  return { ok: true, accounts: mimoAccountsForRenderer() };
+});
+
+// ---------- MiniMax 多账号 ----------
+// 与 MiMo 同一骨架：settings.minimaxManagedAccounts 存元数据（含 keySuffix
+// 显示尾号，不含密钥），密钥存 credentials.json 的
+// providers.minimax.accounts.<id>.apiKey 动态路径。
+
+function normalizeMinimaxAccountsMeta(value) {
+  return normalizeManagedAccountMeta(value, ['keySuffix']);
 }
 
-function setMimoManagedAccountEnabled(id, enabled) {
-  const accountId = String(id || '').trim();
-  const accounts = normalizeMimoManagedAccounts(settings.mimoManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  account.enabled = Boolean(enabled);
-  account.updatedAt = new Date().toISOString();
-  settings.mimoManagedAccounts = accounts;
+function minimaxAccountsForRenderer() {
+  return normalizeMinimaxAccountsMeta(settings?.minimaxManagedAccounts);
+}
+
+function readMinimaxAccountCredential(id) {
+  try {
+    return cleanMinimaxSecret(ensureCredentialStore().readManagedAccountCredential('minimax', id, 'apiKey'));
+  } catch (_) {
+    return '';
+  }
+}
+
+function writeMinimaxAccountCredential(id, value) {
+  const apiKey = cleanMinimaxSecret(value);
+  if (!apiKey) return false;
+  try {
+    return ensureCredentialStore().writeManagedAccountCredential('minimax', id, 'apiKey', apiKey);
+  } catch (_) {
+    return false;
+  }
+}
+
+function removeMinimaxAccountCredential(id) {
+  try {
+    return ensureCredentialStore().removeManagedAccountCredentials('minimax', id);
+  } catch (_) {
+    return false;
+  }
+}
+
+function minimaxManagedAccountsForCollector() {
+  return normalizeMinimaxAccountsMeta(settings?.minimaxManagedAccounts).map((account) => ({
+    ...account,
+    apiKey: readMinimaxAccountCredential(account.id)
+  })).filter((account) => account.apiKey);
+}
+
+const minimaxAccountLifecycle = createManagedAccountLifecycle({
+  provider: 'minimax',
+  normalizeAccounts: normalizeMinimaxAccountsMeta,
+  readCredential: readMinimaxAccountCredential,
+  writeCredential: writeMinimaxAccountCredential,
+  removeCredential: removeMinimaxAccountCredential,
+  getAccounts: () => settings?.minimaxManagedAccounts,
+  setAccounts: (accounts) => {
+    settings.minimaxManagedAccounts = accounts;
+  },
+  persistSettings: () => saveSettings({ throwOnError: true }),
+  broadcastChange: () => {
+    pushSettingsToRenderer();
+    sendMinimaxAccountsPush();
+  },
+  queueInvalidation: (scope, reason, options) => {
+    void queueLimitInvalidation(scope, reason, options);
+  }
+});
+
+async function addMinimaxManagedAccount(apiKeyValue, accountLabel) {
+  const accounts = normalizeMinimaxAccountsMeta(settings?.minimaxManagedAccounts);
+  const result = createMinimaxManagedAccount(apiKeyValue, String(accountLabel || ''), accounts);
+  if (!result.ok) return result;
+  // 活体验证：新密钥先探测一次，unauthorized 直接拒绝入库。
+  const [validation] = await fetchMinimaxLimits(
+    { minimaxManagedAccounts: [result.account] },
+    electronProviderDeps()
+  );
+  if (validation?.status !== 'ok') {
+    const errorCode = validation?.status === 'unauthorized'
+      ? 'invalidApiKey'
+      : validation?.status === 'sourceRateLimited' ? 'validationRateLimited' : 'validationUnavailable';
+    return { ok: false, errorCode };
+  }
+  const previousCredential = readMinimaxAccountCredential(result.account.id);
+  const credentialStored = writeMinimaxAccountCredential(result.account.id, result.account.apiKey);
+  delete result.account.apiKey;
+  if (!credentialStored) return { ok: false, errorCode: 'credentialStorageUnavailable' };
+  settings.minimaxManagedAccounts = normalizeMinimaxAccountsMeta([
+    ...accounts.filter((account) => account.accountKey !== result.account.accountKey),
+    result.account
+  ]);
   try {
     saveSettings({ throwOnError: true });
   } catch (_) {
-    return { ok: false, error: 'Could not persist account state' };
+    if (previousCredential) writeMinimaxAccountCredential(result.account.id, previousCredential);
+    else removeMinimaxAccountCredential(result.account.id);
+    return { ok: false, errorCode: 'credentialStorageUnavailable' };
   }
   pushSettingsToRenderer();
-  sendMimoAccountsPush();
-  void queueLimitInvalidation({ provider: 'mimo', accountId, accountKey: account.accountKey }, 'account-state', {
-    clear: !account.enabled,
-    refresh: account.enabled
+  sendMinimaxAccountsPush();
+  void queueLimitInvalidation({
+    provider: 'minimax',
+    accountId: result.account.id,
+    accountKey: result.account.accountKey
+  }, 'account-added');
+  return { ok: true, accounts: minimaxAccountsForRenderer() };
+}
+
+// 编辑账号：标签直接更新（清空则回退 key 尾号）；API key 有变化时先活体
+// 验证再换凭据。换 key 即换账号身份（accountKey = hash(key)），所以旧身份
+// 的 limits 数据要清掉、新身份立即刷新；与「删除后重新添加」等价，但保留
+// 账号 id、标签与添加时间。
+async function updateMinimaxManagedAccount(id, apiKeyValue, accountLabel) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeMinimaxAccountsMeta(settings?.minimaxManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  const nextLabel = String(accountLabel ?? '').trim().slice(0, MINIMAX_LABEL_MAX_LENGTH);
+  const nextKey = cleanMinimaxSecret(apiKeyValue ?? '');
+  const currentKey = readMinimaxAccountCredential(accountId);
+
+  // key 留空或与当前一致：仅更新标签，不触碰凭据。
+  if (!nextKey || nextKey === currentKey) {
+    account.accountLabel = nextLabel;
+    account.updatedAt = new Date().toISOString();
+    settings.minimaxManagedAccounts = accounts;
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (_) {
+      return { ok: false, error: 'Could not persist account label' };
+    }
+    pushSettingsToRenderer();
+    sendMinimaxAccountsPush();
+    void queueLimitInvalidation(
+      { provider: 'minimax', accountId, accountKey: account.accountKey },
+      'account-state',
+      { clear: false, refresh: true }
+    );
+    return { ok: true, accounts: minimaxAccountsForRenderer() };
+  }
+
+  // key 有变化：不能与其他已配置账号重复（那就是另一个账号本身）。
+  const nextAccountKey = minimaxAccountKey(nextKey);
+  if (accounts.some((entry) => entry.id !== accountId && entry.accountKey === nextAccountKey)) {
+    return { ok: false, errorCode: 'duplicateAccount' };
+  }
+  // 活体验证：新 key 先探测一次，unauthorized 直接拒绝换钥。
+  const [validation] = await fetchMinimaxLimits(
+    { minimaxManagedAccounts: [{ ...account, apiKey: nextKey, accountKey: nextAccountKey }] },
+    electronProviderDeps()
+  );
+  if (validation?.status !== 'ok') {
+    const errorCode = validation?.status === 'unauthorized'
+      ? 'invalidApiKey'
+      : validation?.status === 'sourceRateLimited' ? 'validationRateLimited' : 'validationUnavailable';
+    return { ok: false, errorCode };
+  }
+  const previousKey = currentKey;
+  const previousAccountKey = account.accountKey;
+  if (!writeMinimaxAccountCredential(accountId, nextKey)) {
+    return { ok: false, errorCode: 'credentialStorageUnavailable' };
+  }
+  Object.assign(account, {
+    accountKey: nextAccountKey,
+    accountLabel: nextLabel || String(account.accountLabel || '').trim(),
+    keySuffix: minimaxKeySuffix(nextKey),
+    updatedAt: new Date().toISOString()
   });
-  return { ok: true, accounts: mimoAccountsForRenderer() };
+  settings.minimaxManagedAccounts = accounts;
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    if (previousKey) writeMinimaxAccountCredential(accountId, previousKey);
+    return { ok: false, errorCode: 'credentialStorageUnavailable' };
+  }
+  pushSettingsToRenderer();
+  sendMinimaxAccountsPush();
+  // 旧身份的行数据清掉（换 key = 换账号身份），新身份立即采集。
+  void queueLimitInvalidation(
+    { provider: 'minimax', accountId, accountKey: previousAccountKey },
+    'account-removed',
+    { clear: true, refresh: false }
+  );
+  void queueLimitInvalidation(
+    { provider: 'minimax', accountId, accountKey: nextAccountKey },
+    'account-added'
+  );
+  return { ok: true, accounts: minimaxAccountsForRenderer() };
+}
+
+// 旧单账号密钥（settings.minimaxApiKey）一次性迁移为第一个托管账号。
+// accountKey 公式与单账号路径一致（hashKey('minimax', key)），limits 行身份
+// 与订阅绑定保持连续。幂等：仅当没有任何账号且旧密钥存在时执行；凭据
+// 写入成功后才清空旧 settings key，任何一步失败都保持旧路径下次重试。
+function migrateLegacyMinimaxApiKey() {
+  const legacyKey = cleanMinimaxSecret(settings?.minimaxApiKey || '');
+  if (!legacyKey) return;
+  if (normalizeMinimaxAccountsMeta(settings?.minimaxManagedAccounts).length > 0) return;
+  const result = createMinimaxManagedAccount(legacyKey, '', []);
+  if (!result.ok) return;
+  if (!writeMinimaxAccountCredential(result.account.id, result.account.apiKey)) return;
+  const { apiKey, ...meta } = result.account;
+  settings.minimaxManagedAccounts = [meta];
+  settings.minimaxApiKey = '';
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    // settings 落盘失败则整体回退：旧 key 路径继续工作，凭据残留在
+    // credentials.json 中等待下次迁移覆盖，无需回滚删除。
+    settings.minimaxManagedAccounts = [];
+    settings.minimaxApiKey = legacyKey;
+  }
 }
 
 function codexManagedRoot() {
@@ -1765,6 +1950,8 @@ function ensureSettingsLoaded() {
     }
   }
   rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
+  // 旧单账号 MiniMax 密钥迁移为托管账号（幂等，失败保留旧路径）。
+  migrateLegacyMinimaxApiKey();
   return settings;
 }
 
@@ -2206,6 +2393,7 @@ function readSettings() {
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
     merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
+    merged.minimaxManagedAccounts = normalizeMinimaxAccountsMeta(merged.minimaxManagedAccounts);
     if (saved.windowBehavior === undefined && saved.alwaysOnTop !== undefined) {
       merged.windowBehavior = saved.alwaysOnTop ? 'floating' : 'normal';
     }
@@ -4258,7 +4446,8 @@ function settingsForRenderer() {
     : deepseekToken(process.env)
       ? 'env'
       : '';
-  const minimaxApiKeySource = settings?.minimaxApiKey
+  const minimaxAccountsForSource = normalizeMinimaxAccountsMeta(settings?.minimaxManagedAccounts);
+  const minimaxApiKeySource = settings?.minimaxApiKey || minimaxAccountsForSource.length > 0
     ? 'settings'
     : minimaxToken(process.env)
       ? 'env'
@@ -4369,11 +4558,12 @@ function settingsForRenderer() {
     thirdPartyEnvConfigured: thirdPartyLimits.configuredAccounts({}, { env: process.env }).length > 0,
     codexManagedAccounts: codexAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
+    minimaxManagedAccounts: minimaxAccountsForRenderer(),
     claudeWebCookieConfigured: Boolean(currentClaudeWebCookie()),
     claudeWebCookieSource,
     deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()),
     deepseekApiKeySource,
-    minimaxApiKeyConfigured: Boolean(currentMinimaxApiKey()),
+    minimaxApiKeyConfigured: Boolean(currentMinimaxApiKey()) || minimaxAccountsForSource.length > 0,
     minimaxApiKeySource,
     copilotApiTokenConfigured: Boolean(currentCopilotApiToken()),
     copilotApiTokenSource,
@@ -4504,6 +4694,11 @@ function refreshLimitStatsPresentation() {
 function sendMimoAccountsPush() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try { mainWindow.webContents.send('mimo:accounts', mimoAccountsForRenderer()); } catch (_) {}
+}
+
+function sendMinimaxAccountsPush() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('minimax:accounts', minimaxAccountsForRenderer()); } catch (_) {}
 }
 
 function unregisterWindowToggleShortcut() {
@@ -6042,6 +6237,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.windowMaximized;
     delete normalizedPatch.codexManagedAccounts;
     delete normalizedPatch.mimoManagedAccounts;
+    delete normalizedPatch.minimaxManagedAccounts;
     delete normalizedPatch.workbuddyAccessToken;
     delete normalizedPatch.workbuddyUserId;
     delete normalizedPatch.workbuddyEnterpriseId;
@@ -6539,13 +6735,24 @@ app.whenReady().then(() => {
       .catch((error) => ({ ok: false, error: error.message }));
   });
   ipcMain.handle('app:openUserData', () => shell.openPath(app.getPath('userData')));
-  ipcMain.handle('mimo:accounts', () => mimoAccountsForRenderer());
+  // mimo:accounts / mimo:setAccountEnabled / mimo:removeAccount 由
+  // registerManagedAccountIpc 统一注册，这里只补供应商特有的 channel。
   ipcMain.handle('mimo:addAccount', (_event, cookieHeader) => addMimoManagedAccount(cookieHeader));
   ipcMain.handle('mimo:openConsole', () => shell.openExternal(MIMO_PLATFORM_CONSOLE_URL)
     .then(() => ({ ok: true }))
     .catch((error) => ({ ok: false, error: error.message })));
-  ipcMain.handle('mimo:setAccountEnabled', (_event, id, enabled) => setMimoManagedAccountEnabled(id, enabled));
-  ipcMain.handle('mimo:removeAccount', async (_event, id) => removeMimoManagedAccount(id));
+  registerManagedAccountIpc(ipcMain, 'mimo', {
+    listAccounts: mimoAccountsForRenderer,
+    setAccountEnabled: mimoAccountLifecycle.setAccountEnabled,
+    removeAccount: mimoAccountLifecycle.removeAccount
+  });
+  ipcMain.handle('minimax:addAccount', (_event, apiKey, accountLabel) => addMinimaxManagedAccount(apiKey, accountLabel));
+  ipcMain.handle('minimax:updateAccount', (_event, id, apiKey, accountLabel) => updateMinimaxManagedAccount(id, apiKey, accountLabel));
+  registerManagedAccountIpc(ipcMain, 'minimax', {
+    listAccounts: minimaxAccountsForRenderer,
+    setAccountEnabled: (id, enabled) => minimaxAccountLifecycle.setAccountEnabled(id, enabled),
+    removeAccount: (id) => minimaxAccountLifecycle.removeAccount(id)
+  });
   ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
   ipcMain.handle('tokscale:checkNpm', () => checkTokscaleNpm());
   ipcMain.handle('tokscale:downloadFromNpm', () => downloadTokscaleFromNpm());

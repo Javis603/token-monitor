@@ -334,29 +334,52 @@ class CredentialStore {
     return this.writeDocument(document);
   }
 
-  readMimoCredential(id, document = this.readDocument()) {
+  // 动态账号凭据的通用读写：凭据存放在
+  // credentials.providers.<provider>.accounts.<accountId>.<field>，与静态
+  // CREDENTIAL_SETTING_PATHS 的叶子不同，账号 id 是运行时生成的动态键。
+  // provider 与 field 在此模块内是可信常量，但同样过 safeDynamicKey，
+  // 让原型污染防护不依赖调用方的拼写。
+  readManagedAccountCredential(provider, id, field, document) {
     const accountId = safeDynamicKey(id);
-    if (!accountId) return '';
-    const value = valueAt(document.credentials, ['providers', 'mimo', 'accounts', accountId, 'cookieHeader']);
+    const providerKey = safeDynamicKey(provider);
+    const fieldKey = safeDynamicKey(field);
+    if (!accountId || !providerKey || !fieldKey) return '';
+    const source = document || this.readDocument();
+    const value = valueAt(source.credentials, ['providers', providerKey, 'accounts', accountId, fieldKey]);
     return typeof value === 'string' ? value : '';
   }
 
-  writeMimoCredential(id, cookieHeader) {
+  writeManagedAccountCredential(provider, id, field, value) {
     const accountId = safeDynamicKey(id);
-    if (!accountId || !credentialValuePresent(cookieHeader)) return false;
+    const providerKey = safeDynamicKey(provider);
+    const fieldKey = safeDynamicKey(field);
+    if (!accountId || !providerKey || !fieldKey || !credentialValuePresent(value)) return false;
     const document = this.readDocument();
-    setValueAt(document.credentials, ['providers', 'mimo', 'accounts', accountId, 'cookieHeader'], cookieHeader);
+    setValueAt(document.credentials, ['providers', providerKey, 'accounts', accountId, fieldKey], value);
     this.writeDocument(document);
     return true;
   }
 
-  removeMimoCredential(id) {
+  removeManagedAccountCredentials(provider, id) {
     const accountId = safeDynamicKey(id);
-    if (!accountId) return false;
+    const providerKey = safeDynamicKey(provider);
+    if (!accountId || !providerKey) return false;
     const document = this.readDocument();
-    deleteValueAt(document.credentials, ['providers', 'mimo', 'accounts', accountId]);
+    deleteValueAt(document.credentials, ['providers', providerKey, 'accounts', accountId]);
     this.writeDocument(document);
-    return !this.readMimoCredential(accountId);
+    return valueAt(this.readDocument().credentials, ['providers', providerKey, 'accounts', accountId]) === undefined;
+  }
+
+  readMimoCredential(id, document = this.readDocument()) {
+    return this.readManagedAccountCredential('mimo', id, 'cookieHeader', document);
+  }
+
+  writeMimoCredential(id, cookieHeader) {
+    return this.writeManagedAccountCredential('mimo', id, 'cookieHeader', cookieHeader);
+  }
+
+  removeMimoCredential(id) {
+    return this.removeManagedAccountCredentials('mimo', id);
   }
 
   migrateLegacyMimoCredentials(entries) {

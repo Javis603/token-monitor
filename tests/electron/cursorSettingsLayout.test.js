@@ -1035,7 +1035,6 @@ test('disabled credential providers settle account status instead of checking fo
 
   assert.match(toggleBody, /clearDisabledLimitProviderPendingChecks\(new Set\(checked\)\)/);
   assert.match(clearBody, /clearDeepseekPendingCheck\(\)/);
-  assert.match(clearBody, /clearMinimaxPendingCheck\(\)/);
   assert.match(clearBody, /clearCopilotPendingCheck\(\)/);
   assert.match(clearBody, /Object\.keys\(externalLimitAccountConfig\)/);
   assert.match(clearBody, /clearExternalProviderCheckPending\(providerName\)/);
@@ -1043,35 +1042,30 @@ test('disabled credential providers settle account status instead of checking fo
   assert.match(externalRenderBody, /const pending = enabled &&/);
   assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, provider, configured, source, enabled\)/);
   assert.match(deepseekRenderBody, /apiKeyAccountStatusText\('deepseek', provider, configured, source, enabled\)/);
-  assert.match(minimaxRenderBody, /apiKeyAccountStatusText\('minimax', provider, configured, source, enabled\)/);
+  // MiniMax 多账号后无单账号 pending 机制：状态 pill 走托管账号列表
+  //（x/y linked），与 MiMo 同一渲染路径。
+  assert.match(minimaxRenderBody, /renderManagedAccountList\(\{/);
   assert.match(copilotRenderBody, /copilotAccountStatusText\(provider, configured, source, enabled\)/);
 });
 
-test('MiniMax key changes invalidate stale provider status before re-checking', () => {
+test('MiniMax account saves go through the managed-account IPC with live validation', () => {
   const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /markMinimaxKeyCheckPending\(\);[\s\S]*await saveSettings\(\{ minimaxApiKey: input\.value \}\);[\s\S]*renderMinimaxStatus\(\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
-  assert.match(setupBody, /await saveSettings\(\{ minimaxApiKey: '' \}\);[\s\S]*clearMinimaxPendingCheck\(\);[\s\S]*clearMinimaxProviderStatus\(\);[\s\S]*renderMinimaxStatus\(\);/);
-
-  const linkedBody = functionBody(app, 'minimaxAccountLinked', 'apiKeyAccountStatusText');
-  assert.match(linkedBody, /minimaxProviderForAccount\(\)/);
-
-  const renderBody = functionBody(app, 'renderMinimaxStatus', 'renderDeepseekStatus');
-  assert.match(renderBody, /const provider = minimaxProviderForAccount\(\);/);
-
-  const pendingBody = functionBody(app, 'markMinimaxKeyCheckPending', 'clearMinimaxPendingCheck');
-  assert.match(pendingBody, /state\.minimaxPendingCheckSince = Date\.now\(\);/);
-  assert.match(pendingBody, /clearMinimaxProviderStatus\(\);/);
-
-  const providerBody = functionBody(app, 'minimaxProviderForAccount', 'markMinimaxKeyCheckPending');
-  assert.match(providerBody, /const pendingSince = Number\(state\.minimaxPendingCheckSince \|\| 0\);/);
-  assert.match(providerBody, /Date\.parse\(provider\.updatedAt \|\| ''\)/);
-  assert.match(providerBody, /updatedAt < pendingSince/);
-  assert.match(providerBody, /state\.minimaxPendingCheckSince = 0;/);
-
-  const clearBody = functionBody(app, 'clearMinimaxProviderStatus', 'apiKeyAccountStatusText');
-  assert.match(clearBody, /state\.stats\.limits\.providers = state\.stats\.limits\.providers\.filter/);
-  assert.match(clearBody, /provider\.provider !== 'minimax'/);
+  // 多账号流程：保存走专用 IPC（main 端先活体验证再入库），不再写单账号
+  // settings key。
+  assert.match(setupBody, /window\.tokenMonitor\.minimax\.addAccount\(keyInput\.value, labelInput\?\.value \|\| ''\)/);
+  assert.match(setupBody, /result\?\.errorCode === 'invalidApiKey'/);
+  assert.match(setupBody, /result\?\.errorCode === 'credentialStorageUnavailable'/);
+  assert.doesNotMatch(setupBody, /saveSettings\(\{ minimaxApiKey/);
+  const addBody = functionBody(main, 'addMinimaxManagedAccount', 'migrateLegacyMinimaxApiKey');
+  assert.match(addBody, /fetchMinimaxLimits\(/);
+  assert.ok(
+    addBody.indexOf('fetchMinimaxLimits') < addBody.indexOf('settings.minimaxManagedAccounts ='),
+    'validation must happen before persistence'
+  );
+  // 存入 settings 前剥离密钥本体——元数据永不携带 apiKey。
+  assert.match(addBody, /delete result\.account\.apiKey/);
 });
 
 test('MiMo account panel matches the manual Cookie provider layout', () => {
@@ -1117,8 +1111,9 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   // Limits rows mask through the shared resolver; the settings list stays readable.
   assert.match(app, /maskEmail: limitAccountEmailsMasked\(\)/);
   assert.match(app, /function mimoSettingsAccountTitle\(account, index\) \{[\s\S]*account\?\.accountEmail[\s\S]*`Account \$\{index \+ 1\}`/);
-  assert.match(app, /const accountName = mimoSettingsAccountTitle\(account, index\);/);
-  const addBody = functionBody(main, 'addMimoManagedAccount', 'removeMimoManagedAccount');
+  // 共用账号列表渲染：标题经 config 注入，不再在 renderMimoStatus 内联。
+  assert.match(app, /accountTitle: mimoSettingsAccountTitle,/);
+  const addBody = functionBody(main, 'addMimoManagedAccount', 'normalizeMinimaxAccountsMeta');
   assert.match(addBody, /const \[validation\] = await fetchMimoLimits\(\{ mimoManagedAccounts: \[result\.account\] \}, electronProviderDeps\(\)\)/);
   assert.ok(addBody.indexOf('fetchMimoLimits') < addBody.indexOf('settings.mimoManagedAccounts ='), 'validation must happen before persistence');
   assert.match(addBody, /result\.account\.accountEmail = String\(validation\.accountEmail/);
@@ -1204,7 +1199,11 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(main, /ensureCredentialStore\(\)\.writeMimoCredential\(id, cookieHeader\)/);
   assert.match(main, /cookieHeader: readMimoCredential\(account\.id\)/);
   assert.match(main, /migrateLegacyMimoCredentialFiles\(merged\.mimoManagedAccounts\)/);
-  assert.match(main, /if \(!removeMimoCredential\(accountId\)\) return \{ ok: false, error: 'Could not remove stored credential' \};/);
+  // 删除/启停走共用生命周期：MiMo 与 MiniMax 经 config 注入各自的凭据
+  // 读写，凭据移除失败仍然拒绝继续（防凭据残留）。
+  const managedAccounts = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'managedAccounts.js'), 'utf8');
+  assert.match(managedAccounts, /if \(!removeCredential\(accountId\)\) return \{ ok: false, error: 'Could not remove stored credential' \};/);
+  assert.match(main, /removeCredential: removeMimoCredential,/);
   assert.match(main, /delete result\.account\.cookieHeader/);
 });
 
@@ -1834,15 +1833,18 @@ test('main settings migrateLimitProviders normalizes without expanding old defau
 
 test('Home limits groups multiple MiMo accounts like Codex', () => {
   const app = readRendererFile('app.js');
-  const groupBody = functionBody(app, 'renderMimoAccountGroup', 'renderOpenCodeAccountGroup');
+  const groupBody = functionBody(app, 'renderManagedAccountGroup', 'renderMimoAccountGroup');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   // accountGroup marks the synthetic header provider, so a subscription card on
   // it summarises the group instead of adopting one member's record.
-  assert.match(groupBody, /const groupProvider = \{ provider: 'mimo', status: 'ok', windows: \[\], accountGroup: true \};/);
-  assert.match(groupBody, /planText: t\('settings\.mimo\.nAccounts', \{ count: providers\.length \}\)/);
-  assert.match(groupBody, /renderLimitProviderRow\('mimo', limitAccountTitle\('mimo', provider, index, providers\), provider, color/);
+  assert.match(groupBody, /const groupProvider = \{ provider: providerId, status: 'ok', windows: \[\], accountGroup: true \};/);
+  assert.match(groupBody, /planText: t\(nAccountsKey, \{ count: providers\.length \}\)/);
+  assert.match(groupBody, /renderLimitProviderRow\(providerId, limitAccountTitle\(providerId, provider, index, providers\), provider, color/);
   assert.match(renderLimitsBody, /if \(id === 'mimo' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
   assert.match(renderLimitsBody, /nodes\.push\(renderMimoAccountGroup\(label, visibleProviders, color\)\);/);
+  // MiniMax 多账号走同一个组渲染。
+  assert.match(renderLimitsBody, /if \(id === 'minimax' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
+  assert.match(renderLimitsBody, /nodes\.push\(renderMinimaxAccountGroup\(label, visibleProviders, color\)\);/);
 });
 
 test('a zero-config OpenCode machine is not reported as unconfigured', () => {

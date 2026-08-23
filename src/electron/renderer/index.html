@@ -861,16 +861,27 @@
                 </span>
               </button>
               <div id="minimaxSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="minimaxOpenBrowser" data-i18n="settings.minimax.openBrowser">Open Minimax Token Plan page</button>
-                  <button id="minimaxLogoutButton" class="hidden" data-i18n="settings.minimax.clearApiKey">Clear key</button>
-                  <button id="minimaxRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="minimaxManualPanel">
-                  <p class="settings-note" data-i18n="settings.minimax.note">Paste your Minimax API key. It stays on this device and is used only for the Token Plan quota API.</p>
-                  <input id="minimaxApiKeyInput" type="password" spellcheck="false" placeholder="sk-cp-..." data-i18n-placeholder="settings.minimax.apiKeyPlaceholder" />
-                  <div class="settings-actions">
-                    <button id="minimaxApiKeySubmit" data-i18n="settings.minimax.saveApiKey">Save API key</button>
+                <div id="minimaxAccountList" class="managed-account-list"></div>
+                <div id="minimaxAccountEmpty" class="opencode-empty" data-i18n="settings.minimax.emptyList">No accounts yet. Click "+ Add account" below to get started.</div>
+                <div id="minimaxManualPanel" class="opencode-add-form">
+                  <button id="minimaxAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="minimaxAddDetails">
+                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span data-i18n="settings.minimax.addAccount">Add account</span>
+                  </button>
+                  <div id="minimaxAddDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body">
+                      <div class="settings-actions">
+                        <button id="minimaxOpenBrowser" data-i18n="settings.minimax.openBrowser">Open Minimax Token Plan page</button>
+                      </div>
+                      <p class="settings-note" data-i18n="settings.minimax.note">Paste your Minimax API key. It stays on this device and is used only for the Token Plan quota API.</p>
+                      <input id="minimaxApiKeyInput" type="password" spellcheck="false" placeholder="sk-cp-..." data-i18n-placeholder="settings.minimax.apiKeyPlaceholder" />
+                      <input id="minimaxAccountLabelInput" type="text" maxlength="64" autocomplete="off" spellcheck="false" data-i18n-placeholder="settings.minimax.labelPlaceholder" placeholder="Label (optional, e.g. Personal)" />
+                      <div class="settings-actions">
+                        <button id="minimaxSaveAccountButton" data-i18n="settings.minimax.saveAccount">Save account</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div id="minimaxErrorMessage" class="settings-note error hidden"></div>

@@ -312,7 +312,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
@@ -5022,7 +5022,14 @@ const LIMIT_ACCOUNT_TITLES = {
   codex: codexAccountTitle,
   opencode: opencodeAccountTitle,
   openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
-  thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty')
+  thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
+  // MiniMax 账号行标题读采集行自带的 accountLabel（自定义标签或 key 尾号）；
+  // 单账号兼容路径的 'Token Plan' 是套餐名不是账号名，不借用。
+  minimax: (provider, index) => {
+    const label = String(provider?.accountLabel || '').trim();
+    if (label && label !== 'Token Plan') return label;
+    return `Account ${index + 1}`;
+  }
 };
 
 function limitAccountTitle(id, provider, index, providerEntries = [provider]) {
@@ -5103,22 +5110,20 @@ function renderClaudeAccountGroup(label, providers, color) {
   return row;
 }
 
-function mimoSettingsAccountTitle(account, index) {
-  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
-}
-
-function renderMimoAccountGroup(label, providers, color) {
+// 托管账号供应商在 limits 页的组渲染（组头 + 每账号一行）。MiMo 与
+// MiniMax 共用：组头文案 key 由调用点以字面量传入。
+function renderManagedAccountGroup(providerId, label, providers, color, nAccountsKey) {
   const row = document.createElement('div');
   row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: 'mimo', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('mimo', label, groupProvider, color, {
-    planText: t('settings.mimo.nAccounts', { count: providers.length }),
+  const groupProvider = { provider: providerId, status: 'ok', windows: [], accountGroup: true };
+  const head = renderLimitProviderHead(providerId, label, groupProvider, color, {
+    planText: t(nAccountsKey, { count: providers.length }),
     hideMeta: true
   });
   const accountList = document.createElement('div');
   accountList.className = 'limit-account-list';
   providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('mimo', limitAccountTitle('mimo', provider, index, providers), provider, color, {
+    accountList.append(renderLimitProviderRow(providerId, limitAccountTitle(providerId, provider, index, providers), provider, color, {
       accountRow: true,
       accountTitle: true,
       showIcon: false
@@ -5126,6 +5131,14 @@ function renderMimoAccountGroup(label, providers, color) {
   });
   row.append(head, accountList);
   return row;
+}
+
+function renderMimoAccountGroup(label, providers, color) {
+  return renderManagedAccountGroup('mimo', label, providers, color, 'settings.mimo.nAccounts');
+}
+
+function renderMinimaxAccountGroup(label, providers, color) {
+  return renderManagedAccountGroup('minimax', label, providers, color, 'settings.minimax.nAccounts');
 }
 
 function opencodeAccountTitle(provider, index) {
@@ -5311,6 +5324,10 @@ function renderLimits() {
     }
     if (id === 'mimo' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderMimoAccountGroup(label, visibleProviders, color));
+      continue;
+    }
+    if (id === 'minimax' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderMinimaxAccountGroup(label, visibleProviders, color));
       continue;
     }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
@@ -11965,12 +11982,10 @@ function renderLimitSessionsIcon(stats, height = 44, configOrder, colors = {}, o
   const gap = Math.max(3, Math.round(height * 0.1));
   const separator = ' · ';
   const padX = options.contentOnly === true ? 0 : layout.padX;
-  const fontSize = Math.round(height * 0.68);
-  const font = `500 ${fontSize}px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif`;
+  const fontFamily = '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif';
 
   const measureCanvas = document.createElement('canvas');
   const measureCtx = measureCanvas.getContext('2d');
-  measureCtx.font = font;
   // `percent` / `secondaryPercent` are already mode-adjusted by the picker and
   // handle balance windows, which carry no wire percentage of their own.
   const visiblePicks = picks.length === 1
@@ -11984,8 +11999,120 @@ function renderLimitSessionsIcon(stats, height = 44, configOrder, colors = {}, o
     : picks.map((pick) => ({
         ...pick,
         text: formatPercent(pick.percent)
+      })).filter((pick) => pick.text);
+  if (visiblePicks.length === 0) return null;
+
+  // 多个账号条目时按供应商分列——单账号供应商一列大字、垂直居中（与
+  // 历史单行布局一致），多账号供应商一列内账号上下两行小字（字号约为
+  // 单行的 5 成，菜单栏高度内两行的物理上限；第三个及以后的账号截断，
+  // 细节交给 limits 页与 tooltip）。列序 = 供应商配置顺序，例如 GLM +
+  // 双账号 MiniMax 场景：
+  //   [GLM 64%]  [MM 42%]
+  //              [MM 85%]
+  // 全部供应商都只有一个账号时保持旧的单行渲染（· 分隔），行为与
+  // 多账号改造前完全一致。
+  if (picks.length > 1 && new Set(picks.map((pick) => pick.providerRecord.provider)).size < picks.length) {
+    // 按供应商 id 收集条目（分轮填充把追加账号放在数组尾部，同供应商
+    // 条目并不相邻，不能做相邻分组）；列序 = 该供应商首次出现的顺序，
+    // 即供应商配置顺序。
+    const columns = [];
+    const columnsById = new Map();
+    for (const pick of visiblePicks) {
+      const id = pick.providerRecord.provider;
+      if (!columnsById.has(id)) {
+        const column = { id, picks: [] };
+        columnsById.set(id, column);
+        columns.push(column);
+      }
+      columnsById.get(id).picks.push(pick);
+    }
+    const rowFontSize = Math.max(8, Math.round(height * 0.34));
+    const rowFont = `500 ${rowFontSize}px ${fontFamily}`;
+    const bigFontSize = Math.round(height * 0.68);
+    const bigFont = `500 ${bigFontSize}px ${fontFamily}`;
+    const columnGap = Math.max(4, Math.round(height * 0.14));
+
+    // 最多展示两家供应商（沿用历史的容量约定）：超出按供应商配置顺序
+    // 截断。多账号列只画一个正常尺寸的图标（左侧、垂直居中，与单账号
+    // 列同尺寸——每行各画一个小图标会小到看不清），右侧上下两行小字。
+    const columnLayouts = columns.slice(0, 2).map((column) => {
+      const image = trayProviderImages[column.id];
+      if (column.picks.length === 1) {
+        measureCtx.font = bigFont;
+        const textWidth = Math.ceil(measureCtx.measureText(column.picks[0].text).width);
+        return {
+          column,
+          mode: 'single',
+          image,
+          text: column.picks[0].text,
+          width: (image ? iconSize + gap : 0) + textWidth
+        };
+      }
+      measureCtx.font = rowFont;
+      const rows = column.picks.slice(0, 2).map((pick) => ({
+        pick,
+        text: pick.text,
+        width: Math.ceil(measureCtx.measureText(pick.text).width)
       }));
-  const entries = visiblePicks.map((pick) => {
+      return {
+        column,
+        mode: 'stacked',
+        image,
+        rows,
+        width: (image ? iconSize + gap : 0) + rows.reduce((max, row) => Math.max(max, row.width), 0)
+      };
+    });
+
+    const width = Math.ceil(
+      padX * 2
+      + columnLayouts.reduce((sum, column) => sum + column.width, 0)
+      + columnGap * (columnLayouts.length - 1)
+    );
+    const columnCanvas = document.createElement('canvas');
+    columnCanvas.width = Math.max(1, width);
+    columnCanvas.height = height;
+    const columnCtx = columnCanvas.getContext('2d');
+    columnCtx.clearRect(0, 0, columnCanvas.width, columnCanvas.height);
+    columnCtx.textBaseline = 'middle';
+    columnCtx.fillStyle = textColor;
+
+    let x = padX;
+    for (const columnLayout of columnLayouts) {
+      if (columnLayout.mode === 'single') {
+        columnCtx.font = bigFont;
+        let textX = x;
+        if (columnLayout.image) {
+          drawProviderImage(columnCtx, columnLayout.image, x, layout.iconY, iconSize,
+            options.providerContrastHalo === true,
+            trayGlyphInk(options, columnLayout.image)
+          );
+          textX = x + iconSize + gap;
+        }
+        columnCtx.fillText(columnLayout.text, textX, height / 2 + 1);
+      } else {
+        columnCtx.font = rowFont;
+        if (columnLayout.image) {
+          drawProviderImage(columnCtx, columnLayout.image, x, layout.iconY, iconSize,
+            options.providerContrastHalo === true,
+            trayGlyphInk(options, columnLayout.image)
+          );
+        }
+        const textX = x + (columnLayout.image ? iconSize + gap : 0);
+        columnLayout.rows.forEach((row, rowIndex) => {
+          const centerY = height * (rowIndex === 0 ? 0.27 : 0.73);
+          columnCtx.fillText(row.text, textX, centerY);
+        });
+      }
+      x += columnLayout.width + columnGap;
+    }
+    return columnCanvas.toDataURL('image/png');
+  }
+
+  const fontSize = Math.round(height * 0.68);
+  const font = `500 ${fontSize}px ${fontFamily}`;
+  measureCtx.font = font;
+  // 单行路径（全部供应商均为单账号）沿用历史容量：最多两家。
+  const entries = visiblePicks.slice(0, 2).map((pick) => {
     const text = pick.text;
     const image = trayProviderImages[pick.providerRecord.provider];
     const textWidth = Math.ceil(measureCtx.measureText(text).width);
@@ -13207,133 +13334,146 @@ function clearDeepseekProviderStatus() {
   state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'deepseek');
 }
 
-function renderMimoStatus() {
-  const statusEl = document.getElementById('mimoAccountStatus');
-  const listEl = document.getElementById('mimoAccountList');
-  const emptyEl = document.getElementById('mimoAccountEmpty');
-  const errorEl = document.getElementById('mimoAccountErrorMessage');
+// 设置页托管账号列表的共用渲染（MiMo / MiniMax）。骨架完全同构：状态
+// pill（x/y linked）、账号行（启停勾选、标题、副信息、二次确认删除）、
+// 空态与错误条。差异只在 i18n 文案 key、账号标题/副信息派生、settings
+// 数组与 IPC 通道，经 config 注入；i18n key 在调用点写字面量，保持可
+// 被文案扫描工具识别。
+function renderManagedAccountList(config) {
+  const statusEl = document.getElementById(config.statusElId);
+  const listEl = document.getElementById(config.listElId);
+  const emptyEl = document.getElementById(config.emptyElId);
+  const errorEl = document.getElementById(config.errorElId);
   if (!statusEl || !listEl || !emptyEl || !errorEl) return;
-  const accounts = state.settings?.mimoManagedAccounts || [];
+  const accounts = config.accounts();
   const enabledCount = accounts.filter((account) => account.enabled !== false).length;
   const statusText = accounts.length === 0
-    ? t('settings.mimo.notConfigured')
-    : t('settings.mimo.connected', { linked: enabledCount, total: accounts.length });
+    ? t(config.textKeys.notConfigured)
+    : t(config.textKeys.connected, { linked: enabledCount, total: accounts.length });
   setCursorStatusText(statusEl, statusText);
-  errorEl.textContent = state.mimoAccountError || '';
-  errorEl.classList.toggle('hidden', !state.mimoAccountError);
+  const errorMessage = state[config.errorStateKey] || '';
+  errorEl.textContent = errorMessage;
+  errorEl.classList.toggle('hidden', !errorMessage);
   emptyEl.classList.toggle('hidden', accounts.length > 0);
 
   listEl.replaceChildren();
-  if (accounts.length > 0) {
-    for (const [index, account] of accounts.entries()) {
-      const enabled = account.enabled !== false;
-      const accountName = mimoSettingsAccountTitle(account, index);
-      const row = document.createElement('div');
-      row.className = 'managed-account-row';
-      row.classList.toggle('disabled', !enabled);
+  for (const [index, account] of accounts.entries()) {
+    const enabled = account.enabled !== false;
+    const accountName = config.accountTitle(account, index);
+    const row = document.createElement('div');
+    row.className = 'managed-account-row';
+    row.classList.toggle('disabled', !enabled);
 
-      const input = document.createElement('input');
-      input.className = 'managed-account-checkbox';
-      input.type = 'checkbox';
-      input.checked = enabled;
-      input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
-        account: accountName
-      }));
-      input.addEventListener('change', async () => {
-        input.disabled = true;
-        const result = await window.tokenMonitor.mimo.setAccountEnabled(account.id, input.checked);
-        if (!result?.ok) {
-          state.mimoAccountError = result?.error || t('settings.mimo.toggleFailed');
-        } else {
-          state.mimoAccountError = '';
-          state.settings.mimoManagedAccounts = result.accounts || [];
-        }
-        renderMimoStatus();
-        renderSettingsSummaries();
-      });
+    const input = document.createElement('input');
+    input.className = 'managed-account-checkbox';
+    input.type = 'checkbox';
+    input.checked = enabled;
+    input.setAttribute('aria-label', t(config.textKeys.toggleAccount, { account: accountName }));
+    input.addEventListener('change', async () => {
+      input.disabled = true;
+      const result = await config.api.setAccountEnabled(account.id, input.checked);
+      if (!result?.ok) {
+        state[config.errorStateKey] = result?.error || t(config.textKeys.toggleFailed);
+      } else {
+        state[config.errorStateKey] = '';
+        config.applyAccounts(result.accounts || []);
+      }
+      config.rerender();
+    });
 
-      const main = document.createElement('div');
-      main.className = 'managed-account-main';
-      const label = document.createElement('div');
-      label.className = 'managed-account-email';
-      label.textContent = accountName;
-      main.append(label);
+    const main = document.createElement('div');
+    main.className = 'managed-account-main';
+    const label = document.createElement('div');
+    label.className = 'managed-account-email';
+    label.textContent = accountName;
+    main.append(label);
 
-      const right = document.createElement('span');
-      right.className = 'managed-account-right';
-      const info = document.createElement('span');
-      info.className = 'managed-account-info';
-      info.textContent = enabled ? limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel) : t('settings.mimo.disabled');
+    const right = document.createElement('span');
+    right.className = 'managed-account-right';
+    const info = document.createElement('span');
+    info.className = 'managed-account-info';
+    info.textContent = enabled ? config.accountInfo(account) : t(config.textKeys.disabled);
 
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'managed-account-remove';
-      remove.textContent = '✕';
-      remove.title = t('settings.mimo.remove');
-      let confirmingRemove = false;
-      remove.addEventListener('click', async () => {
-        if (!confirmingRemove) {
-          confirmingRemove = true;
-          remove.classList.add('confirming');
-          remove.textContent = '✓';
-          remove.title = t('settings.mimo.removeConfirm', {
-            account: accountName
-          });
-          return;
-        }
-        const result = await window.tokenMonitor.mimo.removeAccount(account.id);
-        if (result?.ok) {
-          state.mimoAccountError = '';
-          state.settings.mimoManagedAccounts = result.accounts || [];
-          renderMimoStatus();
-          renderSettingsSummaries();
-          refreshStats({ force: true }).catch(() => {});
-          return;
-        }
-        state.mimoAccountError = result?.error || t('settings.mimo.removeFailed');
-        renderMimoStatus();
-        renderSettingsSummaries();
-      });
-
-      right.append(info, remove);
-      row.append(input, main, right);
-      listEl.append(row);
+    // 可选的编辑入口（config.beginEdit 存在时启用）：复用该供应商的
+    // 「添加账号」表单，由 config 决定预填与保存语义（MiniMax 预填标签、
+    // 保存走 updateAccount）。
+    const editButton = config.beginEdit ? document.createElement('button') : null;
+    if (editButton) {
+      editButton.type = 'button';
+      editButton.className = 'managed-account-rename';
+      editButton.textContent = '✎';
+      editButton.title = t(config.textKeys.edit);
+      editButton.addEventListener('click', () => config.beginEdit(account));
     }
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'managed-account-remove';
+    remove.textContent = '✕';
+    remove.title = t(config.textKeys.remove);
+    let confirmingRemove = false;
+    remove.addEventListener('click', async () => {
+      if (!confirmingRemove) {
+        confirmingRemove = true;
+        remove.classList.add('confirming');
+        remove.textContent = '✓';
+        remove.title = t(config.textKeys.removeConfirm, { account: accountName });
+        return;
+      }
+      const result = await config.api.removeAccount(account.id);
+      if (result?.ok) {
+        state[config.errorStateKey] = '';
+        config.applyAccounts(result.accounts || []);
+        config.rerender();
+        refreshStats({ force: true }).catch(() => {});
+        return;
+      }
+      state[config.errorStateKey] = result?.error || t(config.textKeys.removeFailed);
+      config.rerender();
+    });
+
+    if (editButton) right.append(info, editButton, remove);
+    else right.append(info, remove);
+    row.append(input, main, right);
+    listEl.append(row);
   }
   renderSettingsSummaries();
 }
 
+function mimoSettingsAccountTitle(account, index) {
+  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
+}
+
+function renderMimoStatus() {
+  renderManagedAccountList({
+    statusElId: 'mimoAccountStatus',
+    listElId: 'mimoAccountList',
+    emptyElId: 'mimoAccountEmpty',
+    errorElId: 'mimoAccountErrorMessage',
+    errorStateKey: 'mimoAccountError',
+    accounts: () => state.settings?.mimoManagedAccounts || [],
+    applyAccounts: (accounts) => {
+      state.settings.mimoManagedAccounts = accounts;
+    },
+    accountTitle: mimoSettingsAccountTitle,
+    accountInfo: (account) => limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel),
+    api: window.tokenMonitor.mimo,
+    rerender: renderMimoStatus,
+    textKeys: {
+      notConfigured: 'settings.mimo.notConfigured',
+      connected: 'settings.mimo.connected',
+      toggleAccount: 'settings.mimo.toggleAccount',
+      toggleFailed: 'settings.mimo.toggleFailed',
+      disabled: 'settings.mimo.disabled',
+      remove: 'settings.mimo.remove',
+      removeConfirm: 'settings.mimo.removeConfirm',
+      removeFailed: 'settings.mimo.removeFailed'
+    }
+  });
+}
+
 function minimaxProviderStatus() {
   return localProviderStatus('minimax');
-}
-
-function minimaxAccountLinked() {
-  const provider = minimaxProviderForAccount();
-  return Boolean(state.settings?.minimaxApiKeyConfigured) && provider?.status === 'ok';
-}
-
-function minimaxProviderForAccount() {
-  const provider = minimaxProviderStatus();
-  const pendingSince = Number(state.minimaxPendingCheckSince || 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state.minimaxPendingCheckSince = 0;
-  return provider;
-}
-
-function markMinimaxKeyCheckPending() {
-  state.minimaxPendingCheckSince = Date.now();
-  clearMinimaxProviderStatus();
-}
-
-function clearMinimaxPendingCheck() {
-  state.minimaxPendingCheckSince = 0;
-}
-
-function clearMinimaxProviderStatus() {
-  if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'minimax');
 }
 
 function copilotProviderStatus() {
@@ -13419,7 +13559,6 @@ const externalLimitAccountConfig = {
 
 function clearDisabledLimitProviderPendingChecks(enabledProviders) {
   if (!enabledProviders.has('deepseek')) clearDeepseekPendingCheck();
-  if (!enabledProviders.has('minimax')) clearMinimaxPendingCheck();
   if (!enabledProviders.has('copilot')) clearCopilotPendingCheck();
   for (const providerName of Object.keys(externalLimitAccountConfig)) {
     if (!enabledProviders.has(providerName)) clearExternalProviderCheckPending(providerName);
@@ -13521,7 +13660,7 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
 // account lands on platform.minimax.io, not the CN landing page. Fall back
 // to the CN host until we've seen a successful poll.
 function minimaxPlatformUrl() {
-  const provider = minimaxProviderForAccount();
+  const provider = minimaxProviderStatus();
   const region = provider && provider.region === 'en' ? 'en' : 'cn';
   return region === 'en'
     ? 'https://platform.minimax.io/user-center/payment/token-plan'
@@ -13657,29 +13796,119 @@ function setMinimaxAccountExpanded(expanded) {
   syncLimitProviderAccountExpansion('minimax', next);
 }
 
+function setMinimaxAddExpanded(expanded) {
+  const addToggle = document.getElementById('minimaxAddToggle');
+  const addDetails = document.getElementById('minimaxAddDetails');
+  const next = Boolean(expanded);
+  addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
+  addDetails?.classList.toggle('hidden', !next);
+  document.getElementById('minimaxManualPanel')?.classList.toggle('expanded', next);
+  if (!next) clearMinimaxEditState();
+}
+
+function minimaxSettingsAccountTitle(account, index) {
+  const label = String(account?.accountLabel || '').trim();
+  if (label) return label;
+  const suffix = String(account?.keySuffix || '').trim();
+  if (suffix) return suffix;
+  return `Account ${index + 1}`;
+}
+
+// 标题用了自定义标签时，副信息显示 key 尾号补足区分度。
+function minimaxSettingsAccountInfo(account) {
+  const label = String(account?.accountLabel || '').trim();
+  const suffix = String(account?.keySuffix || '').trim();
+  if (label && suffix) return suffix;
+  return '';
+}
+
 function renderMinimaxStatus() {
-  const statusEl = document.getElementById('minimaxApiKeyStatus');
-  const openBtn = document.getElementById('minimaxOpenBrowser');
-  const logoutBtn = document.getElementById('minimaxLogoutButton');
-  const refreshBtn = document.getElementById('minimaxRefreshButton');
-  const manualPanel = document.getElementById('minimaxManualPanel');
-  const errorEl = document.getElementById('minimaxErrorMessage');
-  if (!statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
+  renderManagedAccountList({
+    statusElId: 'minimaxApiKeyStatus',
+    listElId: 'minimaxAccountList',
+    emptyElId: 'minimaxAccountEmpty',
+    errorElId: 'minimaxErrorMessage',
+    errorStateKey: 'minimaxAccountError',
+    accounts: () => state.settings?.minimaxManagedAccounts || [],
+    applyAccounts: (accounts) => {
+      state.settings.minimaxManagedAccounts = accounts;
+    },
+    accountTitle: minimaxSettingsAccountTitle,
+    accountInfo: minimaxSettingsAccountInfo,
+    api: window.tokenMonitor.minimax,
+    beginEdit: openMinimaxAccountEditor,
+    rerender: renderMinimaxStatus,
+    textKeys: {
+      notConfigured: 'settings.minimax.notConfigured',
+      connected: 'settings.minimax.connected',
+      toggleAccount: 'settings.minimax.toggleAccount',
+      toggleFailed: 'settings.minimax.toggleFailed',
+      disabled: 'settings.minimax.disabled',
+      remove: 'settings.minimax.remove',
+      removeConfirm: 'settings.minimax.removeConfirm',
+      removeFailed: 'settings.minimax.removeFailed',
+      edit: 'settings.minimax.edit'
+    }
+  });
+}
 
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
+// 编辑账号复用「添加账号」表单：点 ✎ 展开手风琴、预填标签、key 框留空
+// （key 是 secret，renderer 从不持有明文），表单顶部插入一行编辑提示，
+// 保存按钮按 state.minimaxEditingAccountId 决定走更新还是添加。
+function openMinimaxAccountEditor(account) {
+  state.minimaxEditingAccountId = String(account?.id || '');
+  // 预填显示名（标签或 key 尾号）——accountLabel 本身可能为空，直接填
+  // 会让「点开编辑却什么都没发生」。
+  const labelInput = document.getElementById('minimaxAccountLabelInput');
+  const displayName = minimaxSettingsAccountTitle(
+    account,
+    (state.settings?.minimaxManagedAccounts || []).findIndex((entry) => entry.id === account?.id)
+  );
+  if (labelInput) labelInput.value = String(account?.accountLabel || '') || displayName;
+  const keyInput = document.getElementById('minimaxApiKeyInput');
+  if (keyInput) keyInput.value = '';
+  renderMinimaxEditHint();
+  setMinimaxAddExpanded(true);
+}
 
-  const source = state.settings?.minimaxApiKeySource || '';
-  const provider = minimaxProviderForAccount();
-  const configured = Boolean(state.settings?.minimaxApiKeyConfigured);
-  const enabled = limitProviderEnabled('minimax');
-  const linked = minimaxAccountLinked();
-  setCursorStatusText(statusEl, apiKeyAccountStatusText('minimax', provider, configured, source, enabled));
-  manualPanel.classList.toggle('hidden', linked);
-  openBtn.classList.toggle('hidden', linked);
-  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
-  refreshBtn.classList.toggle('hidden', !configured);
-  renderSettingsSummaries();
+// key 输入框占位符带 data-i18n-placeholder、按钮带 data-i18n，语言切换的
+// applyTranslations 会重写它们，所以编辑态只用一个动态插入的提示行表达
+// 「正在编辑 + key 留空保持不变」，由本函数在每次渲染时重建；两个输入
+// 框的占位提示也在编辑/添加两态间同步切换。
+function renderMinimaxEditHint() {
+  const details = document.getElementById('minimaxAddDetails');
+  if (!details) return;
+  document.querySelectorAll('.minimax-edit-hint').forEach((node) => node.remove());
+  const labelInput = document.getElementById('minimaxAccountLabelInput');
+  const keyInput = document.getElementById('minimaxApiKeyInput');
+  const editingId = String(state.minimaxEditingAccountId || '');
+  if (!editingId) {
+    labelInput?.setAttribute('placeholder', t('settings.minimax.labelPlaceholder'));
+    keyInput?.setAttribute('placeholder', t('settings.minimax.apiKeyPlaceholder'));
+    return;
+  }
+  const account = (state.settings?.minimaxManagedAccounts || [])
+    .find((entry) => entry.id === editingId);
+  if (!account) {
+    state.minimaxEditingAccountId = '';
+    return;
+  }
+  const displayName = minimaxSettingsAccountTitle(
+    account,
+    (state.settings?.minimaxManagedAccounts || []).indexOf(account)
+  );
+  labelInput?.setAttribute('placeholder', displayName);
+  keyInput?.setAttribute('placeholder', t('settings.minimax.editKeyPlaceholder'));
+  const hint = document.createElement('p');
+  hint.className = 'settings-note minimax-edit-hint';
+  hint.textContent = t('settings.minimax.editingHint', { account: displayName });
+  const body = details.querySelector('.opencode-add-body');
+  if (body) body.prepend(hint);
+}
+
+function clearMinimaxEditState() {
+  state.minimaxEditingAccountId = '';
+  renderMinimaxEditHint();
 }
 
 function renderCopilotStatus() {
@@ -15390,47 +15619,79 @@ function setupCursorAccountUI() {
   if (minimaxToggle) {
     minimaxToggle.addEventListener('click', () => setMinimaxAccountExpanded(!state.minimaxAccountExpanded));
     setMinimaxAccountExpanded(false);
+    setMinimaxAddExpanded(false);
     renderMinimaxStatus();
 
     document.getElementById('minimaxOpenBrowser').addEventListener('click', () => {
       window.tokenMonitor.openExternal(minimaxPlatformUrl());
     });
 
-    document.getElementById('minimaxLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ minimaxApiKey: '' });
-      clearMinimaxPendingCheck();
-      clearMinimaxProviderStatus();
+    document.getElementById('minimaxAddToggle').addEventListener('click', () => {
+      const details = document.getElementById('minimaxAddDetails');
+      setMinimaxAddExpanded(details?.classList.contains('hidden'));
+    });
+
+    window.tokenMonitor.minimax.onAccounts((accounts) => {
+      state.settings.minimaxManagedAccounts = accounts || [];
       renderMinimaxStatus();
-      await refreshStats({ force: true });
     });
 
-    document.getElementById('minimaxRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
+    window.tokenMonitor.minimax.accounts().then((accounts) => {
+      state.settings.minimaxManagedAccounts = accounts || [];
+      renderMinimaxStatus();
+    }).catch(() => {});
 
-    document.getElementById('minimaxApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('minimaxApiKeyInput');
-      const errorEl = document.getElementById('minimaxErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.minimax.statusNotSet');
-        errorEl.classList.remove('hidden');
+    document.getElementById('minimaxSaveAccountButton').addEventListener('click', async () => {
+      const keyInput = document.getElementById('minimaxApiKeyInput');
+      const labelInput = document.getElementById('minimaxAccountLabelInput');
+      const saveButton = document.getElementById('minimaxSaveAccountButton');
+      // 编辑模式：key 留空表示只改标签；添加模式必须有 key。
+      const editingId = String(state.minimaxEditingAccountId || '');
+      if (!editingId && !String(keyInput.value || '').trim()) {
+        state.minimaxAccountError = t('settings.minimax.statusNotSet');
+        renderMinimaxStatus();
         return;
       }
+      saveButton.disabled = true;
+      saveButton.textContent = t('settings.minimax.checking');
+      let result;
       try {
-        markMinimaxKeyCheckPending();
-        await saveSettings({ minimaxApiKey: input.value });
-        input.value = '';
-        renderMinimaxStatus();
-        await refreshStats({ force: true });
-        if (minimaxAccountLinked()) setMinimaxAccountExpanded(false);
-        else setMinimaxAccountExpanded(true);
-        renderMinimaxStatus();
-      } catch (err) {
-        clearMinimaxPendingCheck();
-        errorEl.textContent = t('settings.minimax.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
+        result = editingId
+          ? await window.tokenMonitor.minimax.updateAccount(editingId, keyInput.value, labelInput?.value || '')
+          : await window.tokenMonitor.minimax.addAccount(keyInput.value, labelInput?.value || '');
+      } catch (_) {
+        result = { ok: false, errorCode: 'validationUnavailable' };
+      } finally {
+        saveButton.disabled = false;
+        saveButton.textContent = t('settings.minimax.saveAccount');
       }
+      if (!result?.ok) {
+        if (result?.errorCode === 'missingApiKey') {
+          state.minimaxAccountError = t('settings.minimax.statusNotSet');
+        } else if (result?.errorCode === 'invalidApiKey') {
+          state.minimaxAccountError = t('settings.minimax.invalidApiKey');
+        } else if (result?.errorCode === 'duplicateAccount') {
+          state.minimaxAccountError = t('settings.minimax.duplicateAccount');
+        } else if (result?.errorCode === 'validationRateLimited') {
+          state.minimaxAccountError = t('settings.minimax.validationRateLimited');
+        } else if (result?.errorCode === 'validationUnavailable') {
+          state.minimaxAccountError = t('settings.minimax.validationUnavailable');
+        } else if (result?.errorCode === 'credentialStorageUnavailable') {
+          state.minimaxAccountError = t('settings.minimax.credentialStorageUnavailable');
+        } else {
+          state.minimaxAccountError = result?.error || t('settings.minimax.addFailed');
+        }
+        renderMinimaxStatus();
+        return;
+      }
+      keyInput.value = '';
+      if (labelInput) labelInput.value = '';
+      state.minimaxAccountError = '';
+      state.settings.minimaxManagedAccounts = await window.tokenMonitor.minimax.accounts();
+      clearMinimaxEditState();
+      renderMinimaxStatus();
+      setMinimaxAddExpanded(false);
+      await refreshStats({ force: true });
     });
   }
 

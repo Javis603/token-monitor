@@ -43,7 +43,7 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
   openrouter: ['openrouterProfiles'],
   deepseek: ['deepseekApiKey'],
-  minimax: ['minimaxApiKey'],
+  minimax: ['minimaxApiKey', 'minimaxManagedAccounts'],
   copilot: ['copilotApiToken', 'copilotEnterpriseHost'],
   zai: ['zaiApiKey', 'zaiApiRegion'],
   zaiteam: ['zaiTeamApiKey', 'zaiTeamOrganizationId', 'zaiTeamProjectId'],
@@ -193,6 +193,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     ollamaCookie: settings.ollamaCookie || '',
     codexManagedAccounts: context.codexManagedAccounts ?? settings.codexManagedAccounts ?? [],
     mimoManagedAccounts: context.mimoManagedAccounts ?? settings.mimoManagedAccounts ?? [],
+    minimaxManagedAccounts: context.minimaxManagedAccounts ?? settings.minimaxManagedAccounts ?? [],
     thirdPartyProfiles: settings.thirdPartyProfiles || {}
   };
 }

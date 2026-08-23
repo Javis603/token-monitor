@@ -3968,6 +3968,11 @@ function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
       ? (options.mimoManagedAccounts || deps.mimoManagedAccounts)
       : [];
     jobs = options.limitRefreshScope?.provider === 'mimo' ? 1 : Math.max(1, managed.length);
+  } else if (provider === 'minimax') {
+    const managed = Array.isArray(options.minimaxManagedAccounts || deps.minimaxManagedAccounts)
+      ? (options.minimaxManagedAccounts || deps.minimaxManagedAccounts)
+      : [];
+    jobs = options.limitRefreshScope?.provider === 'minimax' ? 1 : Math.max(1, managed.length);
   }
   return base * jobs;
 }

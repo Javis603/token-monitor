@@ -734,14 +734,37 @@ test('configured session quota picks keep provider ids for icon rendering', () =
     }
   };
 
+  // The picker no longer truncates to two entries — the tray title and the
+  // two-row icon each take their own slice. Order is provider-config order.
   assert.deepEqual(
     pickConfiguredSessionLimits(limitStats, {
       limitProviderOrder: 'claude,codex,cursor',
       limitProviders: 'claude,codex,cursor',
       showLimitUsed: false
     }).map((pick) => [pick.provider, pick.percent]),
-    [['claude', 24], ['codex', 57]]
+    [['claude', 24], ['codex', 57], ['cursor', 91]]
   );
+});
+
+test('configured session quota picks surface every account of a multi-account provider', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'minimax', status: 'ok', accountKey: 'a', windows: [{ kind: 'session', remainingPercent: 80 }] },
+        { provider: 'minimax', status: 'ok', accountKey: 'b', windows: [{ kind: 'session', remainingPercent: 30 }] }
+      ]
+    }
+  };
+
+  // Round one keeps the historical per-provider representative (lowest
+  // remaining); the second account is appended as an extra entry instead of
+  // being dropped — that entry is what the two-row tray icon renders.
+  const picks = pickConfiguredSessionLimits(limitStats, {
+    limitProviderOrder: 'minimax',
+    limitProviders: 'minimax',
+    showLimitUsed: false
+  });
+  assert.deepEqual(picks.map((pick) => pick.providerRecord.accountKey), ['b', 'a']);
 });
 
 test('tray session quota text falls back to one provider session and weekly windows', () => {

@@ -89,6 +89,18 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
       return () => ipcRenderer.removeListener('mimo:accounts', handler);
     }
   },
+  minimax: {
+    accounts: () => ipcRenderer.invoke('minimax:accounts'),
+    addAccount: (apiKey, accountLabel) => ipcRenderer.invoke('minimax:addAccount', apiKey, accountLabel),
+    updateAccount: (id, apiKey, accountLabel) => ipcRenderer.invoke('minimax:updateAccount', id, apiKey, accountLabel),
+    removeAccount: (id) => ipcRenderer.invoke('minimax:removeAccount', id),
+    setAccountEnabled: (id, enabled) => ipcRenderer.invoke('minimax:setAccountEnabled', id, enabled),
+    onAccounts: (callback) => {
+      const handler = (_event, accounts) => callback(accounts);
+      ipcRenderer.on('minimax:accounts', handler);
+      return () => ipcRenderer.removeListener('minimax:accounts', handler);
+    }
+  },
   exportNow: () => ipcRenderer.invoke('export:now'),
   pickExportDir: () => ipcRenderer.invoke('export:pickAutoDir'),
   getTokscaleStatus: () => ipcRenderer.invoke('tokscale:getStatus'),
