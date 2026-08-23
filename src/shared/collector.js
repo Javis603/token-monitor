@@ -1016,13 +1016,14 @@ function applySessionTimestamps(periods, home, deps = {}) {
 
 // The process-wide rationing for cursor/antigravity syncs. Deliberately a single
 // module-scoped instance with no per-call override: the tokscale cache it guards
-// is one directory on disk, so a collector rebuilt by a settings change must not
-// hand itself a fresh allowance — and a second instance would split the state
-// that decides a sync from the state that schedules the catch-up waiting on it,
-// which is the divergence this whole path keeps being bitten by. Tests read it
-// through the export to pin a floor without driving a whole tick; a test wanting
-// isolation builds its own with createSelfSyncThrottle() and drives that
-// directly, rather than threading one back in here.
+// is one directory on disk, so a collector rebuilt by a settings change must
+// inherit whether its predecessor consumed or returned the shared allowance. A
+// second instance would split the state that decides a sync from the state that
+// schedules the catch-up waiting on it, which is the divergence this whole path
+// keeps being bitten by. Tests read it through the export to pin a floor without
+// driving a whole tick; a test wanting isolation builds its own with
+// createSelfSyncThrottle() and drives that directly, rather than threading one
+// back in here.
 const selfSyncThrottle = createSelfSyncThrottle();
 
 async function maybeSyncCursor(clientsCsv, logger, options = {}) {
@@ -1032,12 +1033,15 @@ async function maybeSyncCursor(clientsCsv, logger, options = {}) {
   if (!cursorAuth.readActiveAccount()) return;
   if (!selfSyncThrottle.claim('cursor', options.minIntervalMs)) return;
   const attempt = selfSyncThrottle.beginAttempt('cursor');
+  const cancelAttempt = () => selfSyncThrottle.cancelAttempt('cursor', attempt);
+  options.signal?.addEventListener('abort', cancelAttempt, { once: true });
+  if (options.signal?.aborted) cancelAttempt();
   try {
     await cursorAuth.runCursorSync({ signal: options.signal });
     selfSyncThrottle.completeAttempt('cursor', attempt, false);
   } catch (err) {
     if (options.signal?.aborted) {
-      selfSyncThrottle.completeAttempt('cursor', attempt, true, 'sync-aborted', { failureStage: 'aborted' });
+      cancelAttempt();
       throw abortReason(options.signal);
     }
     if (typeof logger === 'function') logger(`cursor sync failed: ${err.message}`);
@@ -1047,6 +1051,8 @@ async function maybeSyncCursor(clientsCsv, logger, options = {}) {
       exitCode: err?.syncExitCode
     });
     options.onFailure?.('cursor');
+  } finally {
+    options.signal?.removeEventListener('abort', cancelAttempt);
   }
 }
 
@@ -1070,12 +1076,15 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
   if (!selfSyncThrottle.claim('antigravity', options.minIntervalMs)) return;
   const attempt = selfSyncThrottle.beginAttempt('antigravity');
   if (typeof options.run === 'function') {
+    const cancelAttempt = () => selfSyncThrottle.cancelAttempt('antigravity', attempt);
+    options.signal?.addEventListener('abort', cancelAttempt, { once: true });
+    if (options.signal?.aborted) cancelAttempt();
     try {
       await options.run({ signal: options.signal });
       selfSyncThrottle.completeAttempt('antigravity', attempt, false);
     } catch (err) {
       if (options.signal?.aborted) {
-        selfSyncThrottle.completeAttempt('antigravity', attempt, true, 'sync-aborted', { failureStage: 'aborted' });
+        cancelAttempt();
         throw abortReason(options.signal);
       }
       if (typeof logger === 'function') logger(`antigravity sync failed: ${err.message}`);
@@ -1085,6 +1094,8 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
         exitCode: err?.syncExitCode
       });
       options.onFailure?.('antigravity');
+    } finally {
+      options.signal?.removeEventListener('abort', cancelAttempt);
     }
     return;
   }
@@ -1108,18 +1119,19 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
     // The failure code reaches the health record; stderr only ever reaches the
     // local log, since it is neither translatable nor reliably free of the
     // user's paths.
-    const settle = (failed, code = '', details = {}, notifyFailure = true) => {
+    const settle = (failed, code = '', details = {}, notifyFailure = true, cancelled = false) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
       options.signal?.removeEventListener('abort', onAbort);
-      selfSyncThrottle.completeAttempt('antigravity', attempt, failed, code, details);
+      if (cancelled) selfSyncThrottle.cancelAttempt('antigravity', attempt);
+      else selfSyncThrottle.completeAttempt('antigravity', attempt, failed, code, details);
       if (failed && notifyFailure) options.onFailure?.('antigravity');
       resolve();
     };
     const onAbort = () => {
       try { child.kill('SIGTERM'); } catch (_) {}
-      settle(true, 'sync-aborted', { failureStage: 'aborted' }, false);
+      settle(false, '', {}, false, true);
     };
     timer = setTimeout(() => {
       child.kill('SIGTERM');

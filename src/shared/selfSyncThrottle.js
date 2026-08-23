@@ -106,11 +106,12 @@ function createSelfSyncThrottle(options = {}) {
   // timer still let an unrelated client's watch event drain the failed one
   // straight back out.
   const lastSyncFailed = {};
-  // stop() cannot cancel a sync already in flight — a spawned `antigravity sync`
-  // runs up to 30s — so a collector rebuilt by a settings change can have the
-  // previous one's attempt land after its own. Latest attempt wins: a completion
-  // only writes the flag while it is still the newest attempt for its kind.
-  // (lastSyncAt is deliberately left alone; an old stamp only rate-limits.)
+  // A collector replacement may cancel an in-flight sync, while two explicit
+  // refreshes can still overlap. Latest attempt wins: a completion only writes
+  // the flag while it is still the newest attempt for its kind. Cancellation
+  // invalidates its attempt token and restores the claim it consumed, so the
+  // replacement collector may take that allowance without turning a lifecycle
+  // event into failure backoff.
   const attemptSeq = {};
   // Reporting state, kept apart from the three fields above because those decide
   // behaviour and these only describe it. `lastSyncAt` in particular is the
@@ -124,7 +125,11 @@ function createSelfSyncThrottle(options = {}) {
   const lastFailureStage = {};
   const lastDetailCode = {};
   const lastExitCode = {};
-  const completedSeq = {};
+  const pendingAttemptSeq = {};
+  const hasCompletedAttempt = {};
+  const pendingClaimPreviousSyncAt = {};
+  const attemptPreviousSyncAt = {};
+  const attemptPreviousLastAttemptAt = {};
   for (const kind of SELF_SYNC_KINDS) {
     lastSyncAt[kind] = 0;
     lastSyncFailed[kind] = false;
@@ -135,7 +140,11 @@ function createSelfSyncThrottle(options = {}) {
     lastFailureStage[kind] = '';
     lastDetailCode[kind] = '';
     lastExitCode[kind] = null;
-    completedSeq[kind] = 0;
+    pendingAttemptSeq[kind] = 0;
+    hasCompletedAttempt[kind] = false;
+    pendingClaimPreviousSyncAt[kind] = null;
+    attemptPreviousSyncAt[kind] = 0;
+    attemptPreviousLastAttemptAt[kind] = 0;
   }
 
   // Claims the right to sync `kind` now, stamping the clock when it grants one.
@@ -150,6 +159,7 @@ function createSelfSyncThrottle(options = {}) {
     // other deadline in the collector is wall-clock too, and one hybrid would be
     // worse than this guard.
     if (elapsed >= 0 && elapsed < minIntervalMs) return false;
+    pendingClaimPreviousSyncAt[kind] = lastSyncAt[kind];
     lastSyncAt[kind] = nowMs;
     return true;
   }
@@ -168,13 +178,18 @@ function createSelfSyncThrottle(options = {}) {
 
   function beginAttempt(kind) {
     attemptSeq[kind] += 1;
+    pendingAttemptSeq[kind] = attemptSeq[kind];
+    attemptPreviousSyncAt[kind] = pendingClaimPreviousSyncAt[kind] ?? lastSyncAt[kind];
+    pendingClaimPreviousSyncAt[kind] = null;
+    attemptPreviousLastAttemptAt[kind] = lastAttemptAt[kind];
     lastAttemptAt[kind] = now();
     return attemptSeq[kind];
   }
 
   function completeAttempt(kind, attempt, failed, code = '', details = {}) {
-    if (attempt !== attemptSeq[kind]) return;
-    completedSeq[kind] = attempt;
+    if (attempt !== attemptSeq[kind] || pendingAttemptSeq[kind] !== attempt) return;
+    pendingAttemptSeq[kind] = 0;
+    hasCompletedAttempt[kind] = true;
     lastSyncFailed[kind] = failed;
     if (!failed) {
       lastSuccessAt[kind] = now();
@@ -194,17 +209,23 @@ function createSelfSyncThrottle(options = {}) {
     lastExitCode[kind] = normalizeClientSyncExitCode(details?.exitCode);
   }
 
-  // A read-only view for diagnostics. `pending` is reachable rather than
-  // theoretical: stop() cannot cancel a sync already in flight, so a collector
-  // rebuilt by a settings change can be asked for a snapshot while the previous
-  // one's subprocess is still running.
+  function cancelAttempt(kind, attempt) {
+    if (attempt !== attemptSeq[kind] || pendingAttemptSeq[kind] !== attempt) return false;
+    lastSyncAt[kind] = attemptPreviousSyncAt[kind];
+    lastAttemptAt[kind] = attemptPreviousLastAttemptAt[kind];
+    pendingAttemptSeq[kind] = 0;
+    // Fence a late subprocess completion without reusing the cancelled token.
+    attemptSeq[kind] += 1;
+    return true;
+  }
+
+  // A read-only view for diagnostics. Cancellation restores the previous
+  // completed state (or idle when there was none), so a collector replacement
+  // never surfaces as a provider failure or a permanently pending attempt.
   function syncStatus(kind) {
-    const started = attemptSeq[kind] || 0;
     let state = 'idle';
-    if (started > 0) {
-      if (completedSeq[kind] !== started) state = 'pending';
-      else state = lastSyncFailed[kind] ? 'failed' : 'ok';
-    }
+    if (pendingAttemptSeq[kind]) state = 'pending';
+    else if (hasCompletedAttempt[kind]) state = lastSyncFailed[kind] ? 'failed' : 'ok';
     return {
       state,
       lastAttemptAt: lastAttemptAt[kind] || 0,
@@ -230,7 +251,7 @@ function createSelfSyncThrottle(options = {}) {
     return SYNC_MIN_INTERVAL_MS;
   }
 
-  return { claim, msUntilDue, beginAttempt, completeAttempt, sourceFloorMs, minIntervalForTick, syncStatus };
+  return { claim, msUntilDue, beginAttempt, completeAttempt, cancelAttempt, sourceFloorMs, minIntervalForTick, syncStatus };
 }
 
 // The per-collector half: which clients saw a source event that has not been

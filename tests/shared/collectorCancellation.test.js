@@ -1,12 +1,26 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
-const { startCollector } = require('../../src/shared/collector');
+const cursorAuth = require('../../src/shared/cursorAuth');
+const { startCollector, selfSyncThrottle } = require('../../src/shared/collector');
+const { SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = require('../../src/shared/selfSyncThrottle');
 
 function nextTurn() {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+async function waitFor(predicate, timeoutMs = 2000) {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt >= timeoutMs) throw new Error('Timed out waiting for collector lifecycle');
+    await nextTurn();
+  }
 }
 
 test('stopping superseded collectors aborts their physical scan before the next period', async () => {
@@ -78,4 +92,120 @@ test('stopping superseded collectors aborts their physical scan before the next 
   assert.equal(active, 0);
   assert.equal(aborted, 31);
   assert.equal(completed, 0);
+});
+
+test('a self-sync cancelled by usage replacement is neutral and returns its allowance', async () => {
+  const originalReadActiveAccount = cursorAuth.readActiveAccount;
+  const originalRunCursorSync = cursorAuth.runCursorSync;
+  const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cancelled-self-sync-'));
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = sharedDir;
+  let syncCalls = 0;
+  let firstStartedResolve;
+  const firstStarted = new Promise((resolve) => { firstStartedResolve = resolve; });
+  cursorAuth.readActiveAccount = () => ({ accountId: 'cursor-test' });
+  cursorAuth.runCursorSync = ({ signal } = {}) => {
+    syncCalls += 1;
+    if (syncCalls > 1) return Promise.resolve();
+    firstStartedResolve();
+    return new Promise((resolve, reject) => {
+      const onAbort = () => reject(signal.reason);
+      signal.addEventListener('abort', onAbort, { once: true });
+      if (signal.aborted) onAbort();
+    });
+  };
+
+  const options = {
+    clients: 'cursor',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 5000,
+    deviceId: 'self-sync-cancellation-test',
+    agentVersion: 'test',
+    historyEnabled: false,
+    dailyHistoryArchiveEnabled: false,
+    projectsEnabled: false,
+    wslScanEnabled: false,
+    watchEnabled: false,
+    anchorPersistenceEnabled: false,
+    runTokscale: async () => ({ entries: [] })
+  };
+  let superseded = null;
+  let replacement = null;
+  try {
+    superseded = startCollector({ ...options, onUpdate() {} });
+    await firstStarted;
+    superseded.stop();
+
+    const updates = [];
+    replacement = startCollector({ ...options, onUpdate: (summary) => updates.push(summary) });
+    await waitFor(() => updates.length === 1);
+
+    assert.equal(syncCalls, 2, 'the cancelled claim does not block the replacement sync');
+    assert.equal(selfSyncThrottle.sourceFloorMs('cursor'), SYNC_SOURCE_EVENT_MIN_INTERVAL_MS);
+    assert.equal(selfSyncThrottle.syncStatus('cursor').state, 'ok');
+    assert.notEqual(updates[0].clientHealth.clients.cursor.collection.state, 'failed');
+  } finally {
+    superseded?.stop();
+    replacement?.stop();
+    cursorAuth.readActiveAccount = originalReadActiveAccount;
+    cursorAuth.runCursorSync = originalRunCursorSync;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    fs.rmSync(sharedDir, { recursive: true, force: true });
+  }
+});
+
+test('native Antigravity cancellation releases the claim without publishing failure', async () => {
+  const childProcess = require('node:child_process');
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const originalSpawn = childProcess.spawn;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cancelled-antigravity-'));
+  fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+  let syncSpawns = 0;
+  let killed = 0;
+  childProcess.spawn = (_bin, args) => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end() {} };
+    child.kill = () => { killed += 1; };
+    if (args.includes('antigravity') && args.includes('sync')) {
+      syncSpawns += 1;
+      if (syncSpawns > 1) setImmediate(() => child.emit('close', 0));
+    }
+    return child;
+  };
+  delete require.cache[collectorPath];
+
+  try {
+    const fresh = require(collectorPath);
+    const controller = new AbortController();
+    const options = {
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 5000,
+      deviceId: 'antigravity-cancellation-test',
+      agentVersion: 'test',
+      historyEnabled: false,
+      homeDir: home,
+      runTokscale: async () => ({ entries: [] })
+    };
+    const cancelled = fresh.collectUsageOnce({ ...options, signal: controller.signal });
+    await waitFor(() => syncSpawns === 1);
+    controller.abort(new Error('usage runtime superseded'));
+    await assert.rejects(cancelled, /usage runtime superseded/);
+
+    assert.equal(killed, 1);
+    assert.equal(fresh.selfSyncThrottle.syncStatus('antigravity').state, 'idle');
+    assert.equal(fresh.selfSyncThrottle.sourceFloorMs('antigravity'), SYNC_SOURCE_EVENT_MIN_INTERVAL_MS);
+
+    const replacement = await fresh.collectUsageOnce(options);
+    assert.equal(syncSpawns, 2, 'the replacement immediately owns the restored allowance');
+    assert.equal(fresh.selfSyncThrottle.syncStatus('antigravity').state, 'ok');
+    assert.notEqual(replacement.clientHealth.clients.antigravity.collection.state, 'failed');
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
