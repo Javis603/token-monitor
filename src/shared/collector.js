@@ -3221,6 +3221,7 @@ function startCollector(options) {
     try {
       let captured = null;
       const qoderCnReadState = { periodFailed: false };
+      const copilotStoreReadState = { periodFailed: false };
       const summary = await collectUsageOnce({
         ...options,
         clients,

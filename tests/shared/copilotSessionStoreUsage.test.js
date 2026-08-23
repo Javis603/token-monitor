@@ -8,7 +8,6 @@ const test = require('node:test');
 const {
   buildCopilotSessionStoreHistoryGraph,
   buildCopilotSessionStorePeriods,
-  collectCopilotSessionStoreRows,
   copilotSessionStoreDataPaths,
   normalizeCopilotSessionStoreDbRow
 } = require('../../src/shared/copilotSessionStoreUsage');
