@@ -126,6 +126,32 @@ function boundedRows(iterable, { maxReadRows }) {
   return rows;
 }
 
+// A WAL-mode database cannot always be opened read-only in place: when the
+// -shm file is absent and no other connection is live (IDE fully closed after
+// a checkpoint), SQLite refuses the open. Snapshotting the db + -wal + -shm
+// trio into a private directory sidesteps that — the copied connection owns
+// its shm and replays the WAL itself. The copy may be a few frames stale
+// relative to a live writer, which is fine for usage monitoring.
+function snapshotDatabaseTrio(dbPath) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-copilot-store-'));
+  try {
+    for (const suffix of ['', '-wal', '-shm']) {
+      const source = dbPath + suffix;
+      const target = path.join(dir, 'store.db' + suffix);
+      try {
+        fs.copyFileSync(source, target);
+      } catch (_) {
+        // A missing -wal/-shm is normal (checkpointed database); only the main
+        // file is required.
+      }
+    }
+    return { dbPath: path.join(dir, 'store.db'), dir };
+  } catch (err) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+    throw err;
+  }
+}
+
 async function readCopilotSessionStoreRows(dbPath, options = {}) {
   const run = options.execFile || execFileAsync;
   const sinceMs = options.sinceMs;
@@ -157,11 +183,36 @@ async function readCopilotSessionStoreRows(dbPath, options = {}) {
       }
     } catch (nodeError) {
       if (isReadBudgetError(nodeError)) throw nodeError;
-      // Fail loudly so the collector keeps its previous snapshot and logs the
-      // cause instead of silently reporting zero JetBrains usage.
-      const message = `copilot session-store sqlite read failed: sqlite3 CLI: ${cliError.message}; node:sqlite: ${nodeError.message}`;
-      if (typeof options.logger === 'function') options.logger(message);
-      throw new Error(message, { cause: nodeError });
+      // Last resort: snapshot the db + -wal + -shm trio into a private temp
+      // directory and read the copy, so a checkpointed/closed IDE (no -shm,
+      // no live connection) still reports its usage instead of erroring.
+      let snapshotDir = null;
+      try {
+        const snapshot = snapshotDatabaseTrio(dbPath);
+        snapshotDir = snapshot.dir;
+        const snapshotRequire = options.requireFn || require;
+        const { DatabaseSync: SnapshotDatabaseSync } = snapshotRequire('node:sqlite');
+        const database = new SnapshotDatabaseSync(snapshot.dbPath, { readOnly: true });
+        try {
+          database.exec('PRAGMA busy_timeout = 250');
+          const statement = database.prepare(sinceMs ? COPILOT_SESSION_STORE_USAGE_SINCE_SQL : COPILOT_SESSION_STORE_USAGE_SQL);
+          const iterator = sinceMs ? statement.iterate(sinceMs) : statement.iterate();
+          return boundedRows(iterator, { maxReadRows });
+        } finally {
+          database.close();
+        }
+      } catch (snapshotError) {
+        if (isReadBudgetError(snapshotError)) throw snapshotError;
+        // Fail loudly so the collector keeps its previous snapshot and logs
+        // the cause instead of silently reporting zero JetBrains usage.
+        const message = `copilot session-store sqlite read failed: sqlite3 CLI: ${cliError.message}; node:sqlite: ${nodeError.message}; snapshot copy: ${snapshotError.message}`;
+        if (typeof options.logger === 'function') options.logger(message);
+        throw new Error(message, { cause: snapshotError });
+      } finally {
+        if (snapshotDir) {
+          try { fs.rmSync(snapshotDir, { recursive: true, force: true }); } catch (_) {}
+        }
+      }
     }
   }
 }
