@@ -85,6 +85,22 @@ test('100 to 99 remaining contributes from the witnessed reset boundary without 
   assert.ok(Math.abs(result.estimate.observedCostUsd - 0.001) < 0.000001);
 });
 
+test('same-percent polling before 100 to 99 keeps the witnessed reset cost', () => {
+  const result = observeSeries([
+    { usedPercent: 0, costUsd: 20, tokens: 2_000_000 },
+    { usedPercent: 0, costUsd: 20.4, tokens: 2_400_000 },
+    { usedPercent: 1, costUsd: 20.6, tokens: 2_600_000 },
+    { usedPercent: 2, costUsd: 21.6, tokens: 3_600_000 },
+    { usedPercent: 3, costUsd: 22.6, tokens: 4_600_000 }
+  ]);
+  const sample = activeCycle(result).samples[0];
+  assert.equal(sample.reason, 'initialRoundedBucket');
+  assert.ok(Math.abs(sample.costDeltaUsd - 0.6) < 0.000001);
+  assert.equal(result.estimate.spanPercent, 3);
+  assert.ok(Math.abs(result.estimate.observedCostUsd - 2.6) < 0.000001);
+  assert.ok(Math.abs(result.estimate.estimatedUsd - (260 / 3)) < 0.000001);
+});
+
 test('a witnessed 100 to 97 span estimates from all three percentage points', () => {
   const result = observeSeries([
     { usedPercent: 0, costUsd: 20, tokens: 2_000_000 },
@@ -122,6 +138,32 @@ test('existing v2 reset segments recover the witnessed 100 percent endpoint', ()
   const estimate = estimateForAccount(state, 'account-a', reset.resetAt, { minSampleCount: 1 });
   assert.equal(estimate.spanPercent, 3);
   assert.ok(Math.abs(estimate.estimatedUsd - 80) < 0.000001);
+});
+
+test('existing v2 reset segments recover cost hidden by same-percent polling', () => {
+  const reset = observation({ usedPercent: 0, costUsd: 20, tokens: 2_000_000 });
+  const at97 = observation({
+    usedPercent: 3, costUsd: 22.6, tokens: 4_600_000,
+    observedAt: '2026-08-12T03:00:00.000Z'
+  });
+  const state = normalizeState({
+    version: 2,
+    activeAccountKey: 'account-a',
+    accounts: { 'account-a': { currentCycleId: 'cycle-a', cycles: [{
+      id: 'cycle-a', resetAt: reset.resetAt, latest: at97, segments: [{
+        id: 1, start: reset, latest: at97,
+        estimateStart: observation({
+          usedPercent: 0, costUsd: 20.4, tokens: 2_400_000,
+          observedAt: '2026-08-12T00:30:00.000Z'
+        }),
+        estimateEnd: at97
+      }]
+    }] } }
+  });
+  const estimate = estimateForAccount(state, 'account-a', reset.resetAt, { minSampleCount: 1 });
+  assert.equal(estimate.spanPercent, 3);
+  assert.ok(Math.abs(estimate.observedCostUsd - 2.6) < 0.000001);
+  assert.ok(Math.abs(estimate.estimatedUsd - (260 / 3)) < 0.000001);
 });
 
 test('a multi-percent jump is rejected, saved, and becomes the next anchor', () => {
