@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
+const { referencedTerminationOptions } = require('../helpers/referencedTerminationTimers');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -194,7 +195,7 @@ test('runCursorSync stops waiting when forced termination never reports close', 
     spawn: () => child,
     tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
     timeoutMs: 1,
-    terminationOptions: { graceMs: 1, closeGraceMs: 1 },
+    terminationOptions: referencedTerminationOptions({ graceMs: 1, closeGraceMs: 1 }),
     onTerminationUnconfirmed: (error) => diagnostics.push(error.code)
   });
 

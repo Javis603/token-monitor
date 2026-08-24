@@ -10,6 +10,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { EventEmitter } = require('node:events');
+const { referencedTerminationOptions } = require('../helpers/referencedTerminationTimers');
 
 const collectorPath = require.resolve('../../src/shared/collector');
 
@@ -252,7 +253,7 @@ test('a capability probe cannot hold the process-wide resolver forever after SIG
       { bin: 'tokscale', prefixArgs: [], env: {}, identity: 'unconfirmed-test' },
       {
         timeoutMs: 1,
-        terminationOptions: { graceMs: 1, closeGraceMs: 1 },
+        terminationOptions: referencedTerminationOptions({ graceMs: 1, closeGraceMs: 1 }),
         onTerminationUnconfirmed: (error) => diagnostics.push(error.code)
       }
     );

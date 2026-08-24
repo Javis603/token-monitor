@@ -11,6 +11,7 @@ const cursorAuth = require('../../src/shared/cursorAuth');
 const { createDeviceRuntime } = require('../../src/shared/deviceRuntime');
 const { startCollector, selfSyncThrottle } = require('../../src/shared/collector');
 const { SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = require('../../src/shared/selfSyncThrottle');
+const { referencedTerminationOptions } = require('../helpers/referencedTerminationTimers');
 
 function nextTurn() {
   return new Promise((resolve) => setImmediate(resolve));
@@ -380,7 +381,7 @@ test('unconfirmed forced termination releases the replacement barrier with a dia
       clients: 'claude',
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1,
-      subprocessTerminationOptions: { graceMs: 1, closeGraceMs: 1 },
+      subprocessTerminationOptions: referencedTerminationOptions({ graceMs: 1, closeGraceMs: 1 }),
       deviceId: 'unconfirmed-close-barrier-test',
       agentVersion: 'test',
       historyEnabled: false,
@@ -622,7 +623,7 @@ test('native Antigravity reports and settles an unconfirmed forced termination',
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 5000,
       selfSyncTimeoutMs: 1,
-      subprocessTerminationOptions: { graceMs: 1, closeGraceMs: 1 },
+      subprocessTerminationOptions: referencedTerminationOptions({ graceMs: 1, closeGraceMs: 1 }),
       deviceId: 'antigravity-unconfirmed-test',
       agentVersion: 'test',
       historyEnabled: false,
