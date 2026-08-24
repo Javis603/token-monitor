@@ -297,43 +297,61 @@
       byId.get(id).push(provider);
     }
 
+    const showUsed = Boolean(options.showLimitUsed);
+    // 条目构造：percent 已按 showUsed 调整并处理无 wire 百分比的余额窗口。
+    const candidateFor = (provider) => {
+      const selection = compactLimitSelection(provider);
+      if (!selection) return null;
+      const remaining = remainingPercent(selection.primaryWindow, provider);
+      const modePercent = (window) => {
+        if (!balanceDisplay.isCreditsWindow(window)) {
+          return limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
+        }
+        const left = remainingPercent(window, provider);
+        if (left === null) return null;
+        return showUsed ? 100 - left : left;
+      };
+      const percent = modePercent(selection.primaryWindow);
+      const secondaryPercent = modePercent(selection.secondaryWindow);
+      return {
+        ...selection,
+        selectedWindow: selection.primaryWindow,
+        remaining,
+        percent,
+        secondaryPercent,
+        // Keep the old field available to internal callers while the mode id
+        // remains a compatibility surface.
+        weeklyPercent: selection.secondaryWindow?.kind === 'weekly' ? secondaryPercent : null
+      };
+    };
+    // 供应商内的条目排序沿用旧规则：主窗口 kind 优先（session>weekly>
+    // billing），同级取剩余最低。
+    const byWindowKindThenRemaining = (a, b) => {
+      const rank = (candidate) => ['session', 'weekly', 'billing'].indexOf(candidate.primaryWindow.kind);
+      return rank(a) - rank(b) || a.remaining - b.remaining;
+    };
+
+    // 账号条目分两轮入选：第一轮每供应商取一条代表条（与旧版「每供应
+    // 商择一」完全一致），第二轮把多账号供应商的其余账号条目按同序补
+    // 在末尾——MiniMax 双账号这类场景两条都能进入候选，而单账号供应商
+    // 的展示顺序与截断行为保持不变。不再在此截断到两家：title 与托盘
+    // 位图各自决定取几条（前 2）。
     const picks = [];
+    const extras = [];
     for (const id of configuredProviderOrder(providers, options)) {
-      let pick = null;
+      const candidates = [];
       for (const provider of byId.get(id) || []) {
-        const selection = compactLimitSelection(provider);
-        if (!selection) continue;
-        const showUsed = Boolean(options.showLimitUsed);
-        const remaining = remainingPercent(selection.primaryWindow, provider);
-        const modePercent = (window) => {
-          if (!balanceDisplay.isCreditsWindow(window)) {
-            return limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
-          }
-          const left = remainingPercent(window, provider);
-          if (left === null) return null;
-          return showUsed ? 100 - left : left;
-        };
-        const percent = modePercent(selection.primaryWindow);
-        const secondaryPercent = modePercent(selection.secondaryWindow);
-        const candidate = {
-          ...selection,
-          selectedWindow: selection.primaryWindow,
-          remaining,
-          percent,
-          secondaryPercent,
-          // Keep the old field available to internal callers while the mode id
-          // remains a compatibility surface.
-          weeklyPercent: selection.secondaryWindow?.kind === 'weekly' ? secondaryPercent : null
-        };
-        const candidateRank = ['session', 'weekly', 'billing'].indexOf(selection.primaryWindow.kind);
-        const pickRank = pick ? ['session', 'weekly', 'billing'].indexOf(pick.primaryWindow.kind) : Infinity;
-        if (!pick || candidateRank < pickRank || (candidateRank === pickRank && remaining < pick.remaining)) pick = candidate;
+        const candidate = candidateFor(provider);
+        if (candidate) candidates.push(candidate);
       }
-      if (!pick) continue;
-      picks.push(pick);
-      if (picks.length === 2) break;
+      if (!candidates.length) continue;
+      candidates.sort(byWindowKindThenRemaining);
+      picks.push(candidates[0]);
+      if (candidates.length > 1) {
+        extras.push(...candidates.slice(1).sort(byWindowKindThenRemaining));
+      }
     }
-    return picks;
+    return [...picks, ...extras];
   }
 
   function pickConfiguredSessionLimits(stats, options = {}) {
@@ -341,7 +359,9 @@
   }
 
   function formatConfiguredSessionLimits(stats, options = {}) {
-    const picks = pickConfiguredLimitProviders(stats, options);
+    // title 是单行兜底（位图未就绪时），与位图两行布局无关：仍取前两个
+    // 账号条目拼接，超出部分只在位图/limits 页呈现。
+    const picks = pickConfiguredLimitProviders(stats, options).slice(0, 2);
     if (picks.length === 0) return '';
     if (picks.length === 1) {
       return [formatPercent(picks[0].percent), formatPercent(picks[0].secondaryPercent)]

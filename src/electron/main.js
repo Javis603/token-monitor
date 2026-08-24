@@ -212,6 +212,15 @@ const {
   fetchMimoLimits,
   normalizeMimoCookieHeader
 } = require('../shared/mimoLimits');
+const { createApiKeyAccountController } = require('./apiKeyAccountControllers');
+const { fetchDeepSeekLimits } = require('../shared/deepseekLimits');
+const zaiLimits = require('../shared/zaiLimits');
+const { fetchMinimaxLimits } = require('../shared/minimaxLimits');
+const {
+  createManagedAccountLifecycle,
+  normalizeManagedAccountMeta,
+  registerManagedAccountIpc
+} = require('./managedAccounts');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
@@ -560,6 +569,9 @@ function defaultSettings() {
     ollamaCookie: '',
     codexManagedAccounts: [],
     mimoManagedAccounts: [],
+    minimaxManagedAccounts: [],
+    deepseekManagedAccounts: [],
+    zaiManagedAccounts: [],
     appUpdate: {
       lastCheckedAt: null,
       lastKnownLatest: null,
@@ -665,7 +677,10 @@ function electronLimitsConfig() {
     workbuddyLocalSession: workbuddyDesktopSessionEnabled ? electronWorkbuddyLocalAuth.getSessionInfo() : {},
     defaultLimitProviders: defaultLimitProviders(),
     codexManagedAccounts: codexManagedAccountsForCollector(),
-    mimoManagedAccounts: mimoManagedAccountsForCollector()
+    mimoManagedAccounts: mimoManagedAccountsForCollector(),
+    minimaxManagedAccounts: apiKeyAccountControllers.minimax.managedAccountsForCollector(),
+    deepseekManagedAccounts: apiKeyAccountControllers.deepseek.managedAccountsForCollector(),
+    zaiManagedAccounts: apiKeyAccountControllers.zai.managedAccountsForCollector()
   });
 }
 
@@ -1042,27 +1057,8 @@ function codexManagedAccountsForCollector() {
 }
 
 function normalizeMimoManagedAccounts(value) {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set();
-  const accounts = [];
-  for (const account of value) {
-    if (!account || typeof account !== 'object') continue;
-    const id = String(account.id || '').trim();
-    const accountKey = String(account.accountKey || '').trim();
-    if (!id || !accountKey) continue;
-    if (seen.has(accountKey)) continue;
-    seen.add(accountKey);
-    accounts.push({
-      id,
-      accountKey,
-      accountEmail: String(account.accountEmail || '').trim().slice(0, 254),
-      accountLabel: String(account.accountLabel || '').trim(),
-      addedAt: account.addedAt || new Date().toISOString(),
-      updatedAt: account.updatedAt || account.addedAt || new Date().toISOString(),
-      enabled: account.enabled !== false
-    });
-  }
-  return accounts;
+  // MiMo 账号元数据与共用骨架形状一致（无供应商附加字段）。
+  return normalizeManagedAccountMeta(value, []);
 }
 
 function mimoAccountsForRenderer() {
@@ -1146,49 +1142,85 @@ async function addMimoManagedAccount(cookieValue) {
   return { ok: true, accounts: mimoAccountsForRenderer() };
 }
 
-async function removeMimoManagedAccount(id) {
-  const accountId = String(id || '').trim();
-  const accounts = normalizeMimoManagedAccounts(settings.mimoManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  const previousCookie = readMimoCredential(accountId);
-  if (!removeMimoCredential(accountId)) return { ok: false, error: 'Could not remove stored credential' };
-  settings.mimoManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (_) {
-    if (previousCookie) writeMimoCredential(accountId, previousCookie);
-    return { ok: false, error: 'Could not persist account removal' };
+// MiMo 删除/启停走共用生命周期（managedAccounts.js）；addAccount 因 cookie
+// 解析、email 回填等供应商差异保留专用实现。
+const mimoAccountLifecycle = createManagedAccountLifecycle({
+  provider: 'mimo',
+  normalizeAccounts: normalizeMimoManagedAccounts,
+  readCredential: readMimoCredential,
+  writeCredential: writeMimoCredential,
+  removeCredential: removeMimoCredential,
+  getAccounts: () => settings?.mimoManagedAccounts,
+  setAccounts: (accounts) => {
+    settings.mimoManagedAccounts = accounts;
+  },
+  persistSettings: () => saveSettings({ throwOnError: true }),
+  broadcastChange: () => {
+    pushSettingsToRenderer();
+    sendMimoAccountsPush();
+  },
+  queueInvalidation: (scope, reason, options) => {
+    void queueLimitInvalidation(scope, reason, options);
   }
-  pushSettingsToRenderer();
-  sendMimoAccountsPush();
-  void queueLimitInvalidation({ provider: 'mimo', accountId, accountKey: account.accountKey }, 'account-removed', {
-    clear: true,
-    refresh: false
-  });
-  return { ok: true, accounts: mimoAccountsForRenderer() };
+});
+
+// ---------- API key 型供应商多账号（minimax / deepseek / zai）----------
+// 三家共用 apiKeyAccountControllers 工厂：settings.<provider>ManagedAccounts
+// 存元数据（含 keySuffix 显示尾号，不含密钥），密钥存 credentials.json 的
+// providers.<provider>.accounts.<id>.apiKey 动态路径；添加/换 key 前先活体
+// 验证（各 fetcher 探测一次）。
+
+// settings 读取侧的元数据归一化（readSettings 在全局 settings 赋值前运行，
+// 不能走 controller，直接用共用归一化函数）。
+function normalizeApiKeyAccountsMeta(value) {
+  return normalizeManagedAccountMeta(value, ['keySuffix']);
 }
 
-function setMimoManagedAccountEnabled(id, enabled) {
-  const accountId = String(id || '').trim();
-  const accounts = normalizeMimoManagedAccounts(settings.mimoManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  account.enabled = Boolean(enabled);
-  account.updatedAt = new Date().toISOString();
-  settings.mimoManagedAccounts = accounts;
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (_) {
-    return { ok: false, error: 'Could not persist account state' };
-  }
-  pushSettingsToRenderer();
-  sendMimoAccountsPush();
-  void queueLimitInvalidation({ provider: 'mimo', accountId, accountKey: account.accountKey }, 'account-state', {
-    clear: !account.enabled,
-    refresh: account.enabled
+function sendApiKeyAccountsPush(provider, controller) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send(`${provider}:accounts`, controller.accountsForRenderer()); } catch (_) {}
+}
+
+// 活体验证：单账号探测一次，unauthorized 拒绝入库/换钥。错误码与 renderer
+// 的文案映射一致。
+function validateApiKeyAccountVia(fetchLimits, accountsOptionKey) {
+  return async (account) => {
+    let validation;
+    try {
+      [validation] = await fetchLimits({ [accountsOptionKey]: [account] }, electronProviderDeps());
+    } catch (_) {
+      return { ok: false, errorCode: 'validationUnavailable' };
+    }
+    if (validation?.status === 'ok') return { ok: true };
+    const errorCode = validation?.status === 'unauthorized'
+      ? 'invalidApiKey'
+      : validation?.status === 'sourceRateLimited' ? 'validationRateLimited' : 'validationUnavailable';
+    return { ok: false, errorCode };
+  };
+}
+
+const apiKeyAccountProviders = {
+  minimax: { fetchLimits: fetchMinimaxLimits, accountsOptionKey: 'minimaxManagedAccounts' },
+  deepseek: { fetchLimits: fetchDeepSeekLimits, accountsOptionKey: 'deepseekManagedAccounts' },
+  zai: { fetchLimits: zaiLimits.fetchZaiLimits, accountsOptionKey: 'zaiManagedAccounts' }
+};
+
+const apiKeyAccountControllers = {};
+for (const [provider, wiring] of Object.entries(apiKeyAccountProviders)) {
+  apiKeyAccountControllers[provider] = createApiKeyAccountController({
+    provider,
+    getSettings: () => settings,
+    persistSettings: () => saveSettings({ throwOnError: true }),
+    broadcastChange: () => {
+      pushSettingsToRenderer();
+      sendApiKeyAccountsPush(provider, apiKeyAccountControllers[provider]);
+    },
+    queueInvalidation: (scope, reason, options) => {
+      void queueLimitInvalidation(scope, reason, options);
+    },
+    resolveCredentialStore: ensureCredentialStore,
+    validateAccount: validateApiKeyAccountVia(wiring.fetchLimits, wiring.accountsOptionKey)
   });
-  return { ok: true, accounts: mimoAccountsForRenderer() };
 }
 
 function codexManagedRoot() {
@@ -1767,6 +1799,8 @@ function ensureSettingsLoaded() {
     }
   }
   rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
+  // 旧单账号密钥迁移为托管账号（幂等，失败保留旧路径）。
+  for (const controller of Object.values(apiKeyAccountControllers)) controller.migrateLegacyKey();
   return settings;
 }
 
@@ -2208,6 +2242,9 @@ function readSettings() {
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
     merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
+    merged.minimaxManagedAccounts = normalizeApiKeyAccountsMeta(merged.minimaxManagedAccounts);
+    merged.deepseekManagedAccounts = normalizeApiKeyAccountsMeta(merged.deepseekManagedAccounts);
+    merged.zaiManagedAccounts = normalizeApiKeyAccountsMeta(merged.zaiManagedAccounts);
     if (saved.windowBehavior === undefined && saved.alwaysOnTop !== undefined) {
       merged.windowBehavior = saved.alwaysOnTop ? 'floating' : 'normal';
     }
@@ -4282,7 +4319,12 @@ function settingsForRenderer() {
     : deepseekToken(process.env)
       ? 'env'
       : '';
-  const minimaxApiKeySource = settings?.minimaxApiKey
+  const apiKeyAccountsForSource = {
+    minimax: settings?.minimaxManagedAccounts,
+    deepseek: settings?.deepseekManagedAccounts,
+    zai: settings?.zaiManagedAccounts
+  };
+  const minimaxApiKeySource = settings?.minimaxApiKey || (apiKeyAccountsForSource.minimax || []).length > 0
     ? 'settings'
     : minimaxToken(process.env)
       ? 'env'
@@ -4393,15 +4435,18 @@ function settingsForRenderer() {
     thirdPartyEnvConfigured: thirdPartyLimits.configuredAccounts({}, { env: process.env }).length > 0,
     codexManagedAccounts: codexAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
+    minimaxManagedAccounts: apiKeyAccountControllers.minimax.accountsForRenderer(),
+    deepseekManagedAccounts: apiKeyAccountControllers.deepseek.accountsForRenderer(),
+    zaiManagedAccounts: apiKeyAccountControllers.zai.accountsForRenderer(),
     claudeWebCookieConfigured: Boolean(currentClaudeWebCookie()),
     claudeWebCookieSource,
-    deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()),
+    deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()) || (apiKeyAccountsForSource.deepseek || []).length > 0,
     deepseekApiKeySource,
-    minimaxApiKeyConfigured: Boolean(currentMinimaxApiKey()),
+    minimaxApiKeyConfigured: Boolean(currentMinimaxApiKey()) || (apiKeyAccountsForSource.minimax || []).length > 0,
     minimaxApiKeySource,
     copilotApiTokenConfigured: Boolean(currentCopilotApiToken()),
     copilotApiTokenSource,
-    zaiApiKeyConfigured: Boolean(currentZaiApiKey()),
+    zaiApiKeyConfigured: Boolean(currentZaiApiKey()) || (apiKeyAccountsForSource.zai || []).length > 0,
     zaiApiKeySource,
     zaiTeamApiKeyConfigured: Boolean(currentZaiTeamApiKey()),
     zaiTeamApiKeySource,
@@ -6088,6 +6133,9 @@ app.whenReady().then(() => {
     delete normalizedPatch.windowMaximized;
     delete normalizedPatch.codexManagedAccounts;
     delete normalizedPatch.mimoManagedAccounts;
+    delete normalizedPatch.minimaxManagedAccounts;
+    delete normalizedPatch.deepseekManagedAccounts;
+    delete normalizedPatch.zaiManagedAccounts;
     delete normalizedPatch.workbuddyAccessToken;
     delete normalizedPatch.workbuddyUserId;
     delete normalizedPatch.workbuddyEnterpriseId;
@@ -6588,13 +6636,18 @@ app.whenReady().then(() => {
       .catch((error) => ({ ok: false, error: error.message }));
   });
   ipcMain.handle('app:openUserData', () => shell.openPath(app.getPath('userData')));
-  ipcMain.handle('mimo:accounts', () => mimoAccountsForRenderer());
+  // mimo:accounts / mimo:setAccountEnabled / mimo:removeAccount 由
+  // registerManagedAccountIpc 统一注册，这里只补供应商特有的 channel。
   ipcMain.handle('mimo:addAccount', (_event, cookieHeader) => addMimoManagedAccount(cookieHeader));
   ipcMain.handle('mimo:openConsole', () => shell.openExternal(MIMO_PLATFORM_CONSOLE_URL)
     .then(() => ({ ok: true }))
     .catch((error) => ({ ok: false, error: error.message })));
-  ipcMain.handle('mimo:setAccountEnabled', (_event, id, enabled) => setMimoManagedAccountEnabled(id, enabled));
-  ipcMain.handle('mimo:removeAccount', async (_event, id) => removeMimoManagedAccount(id));
+  registerManagedAccountIpc(ipcMain, 'mimo', {
+    listAccounts: mimoAccountsForRenderer,
+    setAccountEnabled: mimoAccountLifecycle.setAccountEnabled,
+    removeAccount: mimoAccountLifecycle.removeAccount
+  });
+  for (const controller of Object.values(apiKeyAccountControllers)) controller.registerIpc(ipcMain);
   ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
   ipcMain.handle('tokscale:checkNpm', () => checkTokscaleNpm());
   ipcMain.handle('tokscale:downloadFromNpm', () => downloadTokscaleFromNpm());

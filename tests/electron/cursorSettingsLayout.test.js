@@ -640,27 +640,22 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(renderLimits, /state\.codexSwitchPopoverRenderPending = false;/);
 });
 
-test('DeepSeek account panel provides a first-class API key entry', () => {
+test('DeepSeek account panel provides a first-class managed-account entry', () => {
   const html = readRendererFile('index.html');
   const details = html.match(/<div id="deepseekSettingsDetails"[\s\S]*?<div id="deepseekErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  assert.match(details, /<div id="deepseekAccountList" class="managed-account-list">/);
+  assert.match(details, /<button id="deepseekAddToggle"[\s\S]*aria-controls="deepseekAddDetails"/);
   assert.match(details, /<button id="deepseekOpenBrowser"[\s\S]*data-i18n="settings\.deepseek\.openBrowser">/);
-  assert.match(details, /<button id="deepseekLogoutButton" class="hidden" data-i18n="settings\.deepseek\.clearApiKey">/);
   assert.match(details, /<input id="deepseekApiKeyInput" type="password"[\s\S]*data-i18n-placeholder="settings\.deepseek\.apiKeyPlaceholder"/);
-  assert.match(details, /<button id="deepseekApiKeySubmit"[\s\S]*data-i18n="settings\.deepseek\.saveApiKey">/);
+  assert.match(details, /<input id="deepseekAccountLabelInput"[\s\S]*data-i18n-placeholder="settings\.deepseek\.labelPlaceholder"/);
+  assert.match(details, /<button id="deepseekSaveAccountButton"[\s\S]*data-i18n="settings\.deepseek\.saveAccount">/);
+  assert.doesNotMatch(details, /deepseekLogoutButton|deepseekRefreshButton|deepseekApiKeySubmit/);
 
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
+  assert.match(setupBody, /setupApiKeyAccountCard\('deepseek'/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/platform\.deepseek\.com\/api_keys'\)/);
-  assert.match(setupBody, /saveSettings\(\{ deepseekApiKey: input\.value \}\)/);
-  assert.match(setupBody, /saveSettings\(\{ deepseekApiKey: '' \}\)/);
-  assert.match(setupBody, /refreshStats\(\{ force: true \}\)/);
-  const renderBody = functionBody(app, 'renderDeepseekStatus', 'renderOpenCodeProfiles');
-  assert.match(renderBody, /const openBtn = document\.getElementById\('deepseekOpenBrowser'\);/);
-  assert.match(renderBody, /const linked = deepseekAccountLinked\(\);/);
-  assert.match(renderBody, /manualPanel\.classList\.toggle\('hidden', linked\)/);
-  assert.match(renderBody, /openBtn\.classList\.toggle\('hidden', linked\)/);
-  assert.match(renderBody, /logoutBtn\.classList\.toggle\('hidden', !linked \|\| source !== 'settings'\)/);
-  assert.match(renderBody, /refreshBtn\.classList\.toggle\('hidden', !configured\)/);
+  assert.doesNotMatch(setupBody, /saveSettings\(\{ deepseekApiKey/);
 });
 
 test('API key account entries share styling and Copilot uses the folded token entry', () => {
@@ -713,7 +708,7 @@ test('Copilot account panel provides GitHub sign-in plus manual token fallback',
   assert.match(setupBody, /saveSettings\(\{ copilotApiToken: input\.value \}\)/);
   assert.match(setupBody, /saveSettings\(\{ copilotApiToken: '' \}\)/);
 
-  const renderBody = functionBody(app, 'renderCopilotStatus', 'renderDeepseekStatus');
+  const renderBody = functionBody(app, 'renderCopilotStatus', 'renderOpenCodeProfiles');
   assert.match(renderBody, /cancelBtn\.classList\.toggle\('hidden', !state\.copilotSignInBusy \|\| !state\.copilotSignInCancelable \|\| linked\)/);
   assert.match(renderBody, /refreshBtn\.classList\.toggle\('hidden', !configured \|\| \(state\.copilotSignInBusy && !linked\)\)/);
   assert.match(renderBody, /errorEl\.textContent = state\.copilotErrorMessage \|\| '';/);
@@ -731,7 +726,7 @@ test('Copilot account panel provides GitHub sign-in plus manual token fallback',
 
 test('Z.ai, Volcengine, Qoder, Trae, and Ollama account panels are exposed in settings', () => {
   const html = readRendererFile('index.html');
-  assert.match(html, /<div id="zaiAccountGroup"[\s\S]*?<select id="zaiApiRegionInput">[\s\S]*?<input id="zaiApiKeyInput" type="password"[\s\S]*?<button id="zaiApiKeySubmit"[\s\S]*data-i18n="settings\.zai\.saveApiKey">/);
+  assert.match(html, /<div id="zaiAccountGroup"[\s\S]*?<div id="zaiAccountList" class="managed-account-list">[\s\S]*?<select id="zaiApiRegionInput">[\s\S]*?<input id="zaiApiKeyInput" type="password"[\s\S]*?<input id="zaiAccountLabelInput"[\s\S]*?<button id="zaiSaveAccountButton"[\s\S]*data-i18n="settings\.zai\.saveAccount">/);
   assert.match(html, /<div id="volcengineAccountGroup"[\s\S]*?data-i18n="settings\.volcengine\.accessKeyId">API key \/ Access key ID[\s\S]*?<input id="volcengineAccessKeyInput" type="password"[\s\S]*placeholder="ark-\.\.\. or AKLT\.\.\."[\s\S]*?<input id="volcengineSecretAccessKeyInput" type="password"[\s\S]*?<input id="volcengineRegionInput" type="text"[\s\S]*?<button id="volcengineCredentialsSubmit"[\s\S]*data-i18n="settings\.volcengine\.saveCredentials">/);
   assert.match(html, /<div id="qoderAccountGroup"[\s\S]*?<select id="qoderSiteInput">[\s\S]*?<textarea id="qoderCookieInput"[\s\S]*?<button id="qoderCookieSubmit"[\s\S]*data-i18n="settings\.qoder\.saveCookie">/);
   assert.match(html, /<div id="traeAccountGroup"[\s\S]*?<input id="traeTokenInput" type="password"[\s\S]*?data-i18n-placeholder="settings\.trae\.tokenPlaceholder"[\s\S]*?<input id="traeDeviceIdInput" type="text"[\s\S]*?data-i18n-placeholder="settings\.trae\.deviceIdPlaceholder"[\s\S]*?<button id="traeTokenSubmit"[\s\S]*data-i18n="settings\.trae\.saveCredentials">/);
@@ -760,7 +755,8 @@ test('Z.ai, Volcengine, Qoder, Trae, and Ollama account panels are exposed in se
 
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /saveSettings\(\{ zaiApiKey: input\.value, zaiApiRegion: regionInput\?\.value \|\| 'global' \}\)/);
+  assert.match(setupBody, /setupApiKeyAccountCard\('zai'/);
+  assert.doesNotMatch(setupBody, /saveSettings\(\{ zaiApiKey/);
   assert.match(setupBody, /zaiApiRegionInput\?\.addEventListener\('change', \(\) => void saveSettings\(\{ zaiApiRegion: zaiApiRegionInput\.value \|\| 'global' \}\)\)/);
   assert.match(setupBody, /const accessKeyValue = String\(accessKeyInput\.value \|\| ''\)\.trim\(\);/);
   assert.match(setupBody, /\/\^AKLT\/i\.test\(accessKeyValue\) && !secretValue/);
@@ -956,7 +952,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   assert.doesNotMatch(setupBody, /saveSettings\(\{\s*claudeWebCookie: input\.value/);
   assert.match(setupBody, /saveSettings\(\{ claudeWebCookie: '' \}\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(claudePlatformUrl\(\)\)/);
-  const statusBody = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
+  const statusBody = functionBody(app, 'renderExternalProviderStatus', 'apiKeyAccountsFromSettings');
   assert.match(statusBody, /const canClearConfiguredClaude = providerName === 'claude' && configured;/);
   assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked\)/);
   assert.match(statusBody, /source !== 'settings' \|\| \(!linked && !canClearConfiguredClaude\)/);
@@ -992,86 +988,63 @@ test('DeepSeek account pill keeps its validated API key state after moving into 
   const app = readRendererFile('app.js');
   assert.match(app, /deepseek: 'deepseekAccountGroup'/);
   assert.match(app, /deepseek: 'deepseekApiKeyStatus'/);
-
-  const linkedBody = functionBody(app, 'deepseekAccountLinked', 'deepseekProviderStatus');
-  assert.match(linkedBody, /Boolean\(state\.settings\?\.deepseekApiKeyConfigured\)/);
-  assert.match(linkedBody, /deepseekProviderForAccount\(\)/);
-  assert.match(linkedBody, /provider\?\.status === 'ok'/);
-
-  const renderBody = functionBody(app, 'renderDeepseekStatus', 'renderOpenCodeProfiles');
-  assert.match(renderBody, /const configured = Boolean\(state\.settings\?\.deepseekApiKeyConfigured\);/);
-  assert.match(renderBody, /apiKeyAccountStatusText\('deepseek', provider, configured, source, enabled\)/);
+  // 多账号状态 pill 走托管账号列表（x/y linked），与 MiMo/MiniMax 同路径。
+  assert.match(app, /function renderApiKeyAccountStatus\(provider\) \{[\s\S]*renderManagedAccountList\(\{/);
 });
 
 test('DeepSeek key changes invalidate stale provider status before re-checking', () => {
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /markDeepseekKeyCheckPending\(\);[\s\S]*await saveSettings\(\{ deepseekApiKey: input\.value \}\);[\s\S]*renderDeepseekStatus\(\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
-  assert.match(setupBody, /await saveSettings\(\{ deepseekApiKey: '' \}\);[\s\S]*clearDeepseekPendingCheck\(\);[\s\S]*clearDeepseekProviderStatus\(\);[\s\S]*renderDeepseekStatus\(\);/);
-
-  const pendingBody = functionBody(app, 'markDeepseekKeyCheckPending', 'clearDeepseekPendingCheck');
-  assert.match(pendingBody, /state\.deepseekPendingCheckSince = Date\.now\(\);/);
-  assert.match(pendingBody, /clearDeepseekProviderStatus\(\);/);
-
-  const providerBody = functionBody(app, 'deepseekProviderForAccount', 'markDeepseekKeyCheckPending');
-  assert.match(providerBody, /const pendingSince = Number\(state\.deepseekPendingCheckSince \|\| 0\);/);
-  assert.match(providerBody, /Date\.parse\(provider\.updatedAt \|\| ''\)/);
-  assert.match(providerBody, /updatedAt < pendingSince/);
-  assert.match(providerBody, /state\.deepseekPendingCheckSince = 0;/);
-
-  const clearBody = functionBody(app, 'clearDeepseekProviderStatus', 'renderDeepseekStatus');
-  assert.match(clearBody, /state\.stats\.limits\.providers = state\.stats\.limits\.providers\.filter/);
-  assert.match(clearBody, /provider\.provider !== 'deepseek'/);
+  // 多账号流程：保存走专用 IPC（main 端先活体验证再入库），不再写单账号
+  // settings key，也没有 renderer 侧 pending 遮罩。
+  assert.match(setupBody, /setupApiKeyAccountCard\('deepseek'/);
+  assert.doesNotMatch(setupBody, /saveSettings\(\{ deepseekApiKey/);
+  assert.doesNotMatch(app, /markDeepseekKeyCheckPending|deepseekAccountLinked/);
 });
 
 test('disabled credential providers settle account status instead of checking forever', () => {
   const app = readRendererFile('app.js');
   const toggleBody = functionBody(app, 'onLimitProviderToggle', 'onLimitProviderMove');
   const clearBody = functionBody(app, 'clearDisabledLimitProviderPendingChecks', 'externalProviderForAccount');
-  const externalRenderBody = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
-  const deepseekRenderBody = functionBody(app, 'renderDeepseekStatus', 'renderOpenCodeProfiles');
-  const minimaxRenderBody = functionBody(app, 'renderMinimaxStatus', 'renderCopilotStatus');
-  const copilotRenderBody = functionBody(app, 'renderCopilotStatus', 'renderDeepseekStatus');
+  const externalRenderBody = functionBody(app, 'renderExternalProviderStatus', 'apiKeyAccountsFromSettings');
+  const copilotRenderBody = functionBody(app, 'renderCopilotStatus', 'renderOpenCodeProfiles');
 
   assert.match(toggleBody, /clearDisabledLimitProviderPendingChecks\(new Set\(checked\)\)/);
-  assert.match(clearBody, /clearDeepseekPendingCheck\(\)/);
-  assert.match(clearBody, /clearMinimaxPendingCheck\(\)/);
   assert.match(clearBody, /clearCopilotPendingCheck\(\)/);
   assert.match(clearBody, /Object\.keys\(externalLimitAccountConfig\)/);
   assert.match(clearBody, /clearExternalProviderCheckPending\(providerName\)/);
   assert.match(externalRenderBody, /const enabled = limitProviderEnabled\(providerName\);/);
   assert.match(externalRenderBody, /const pending = enabled &&/);
   assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, provider, configured, source, enabled\)/);
-  assert.match(deepseekRenderBody, /apiKeyAccountStatusText\('deepseek', provider, configured, source, enabled\)/);
-  assert.match(minimaxRenderBody, /apiKeyAccountStatusText\('minimax', provider, configured, source, enabled\)/);
+  // minimax/deepseek/zai 多账号后无单账号 pending 机制：状态 pill 走托管
+  // 账号列表（x/y linked），与 MiMo 同一渲染路径。
+  assert.match(app, /function renderApiKeyAccountStatus\(provider\) \{[\s\S]*renderManagedAccountList\(\{/);
   assert.match(copilotRenderBody, /copilotAccountStatusText\(provider, configured, source, enabled\)/);
 });
 
-test('MiniMax key changes invalidate stale provider status before re-checking', () => {
+test('MiniMax account saves go through the managed-account IPC with live validation', () => {
   const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /markMinimaxKeyCheckPending\(\);[\s\S]*await saveSettings\(\{ minimaxApiKey: input\.value \}\);[\s\S]*renderMinimaxStatus\(\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
-  assert.match(setupBody, /await saveSettings\(\{ minimaxApiKey: '' \}\);[\s\S]*clearMinimaxPendingCheck\(\);[\s\S]*clearMinimaxProviderStatus\(\);[\s\S]*renderMinimaxStatus\(\);/);
-
-  const linkedBody = functionBody(app, 'minimaxAccountLinked', 'apiKeyAccountStatusText');
-  assert.match(linkedBody, /minimaxProviderForAccount\(\)/);
-
-  const renderBody = functionBody(app, 'renderMinimaxStatus', 'renderDeepseekStatus');
-  assert.match(renderBody, /const provider = minimaxProviderForAccount\(\);/);
-
-  const pendingBody = functionBody(app, 'markMinimaxKeyCheckPending', 'clearMinimaxPendingCheck');
-  assert.match(pendingBody, /state\.minimaxPendingCheckSince = Date\.now\(\);/);
-  assert.match(pendingBody, /clearMinimaxProviderStatus\(\);/);
-
-  const providerBody = functionBody(app, 'minimaxProviderForAccount', 'markMinimaxKeyCheckPending');
-  assert.match(providerBody, /const pendingSince = Number\(state\.minimaxPendingCheckSince \|\| 0\);/);
-  assert.match(providerBody, /Date\.parse\(provider\.updatedAt \|\| ''\)/);
-  assert.match(providerBody, /updatedAt < pendingSince/);
-  assert.match(providerBody, /state\.minimaxPendingCheckSince = 0;/);
-
-  const clearBody = functionBody(app, 'clearMinimaxProviderStatus', 'apiKeyAccountStatusText');
-  assert.match(clearBody, /state\.stats\.limits\.providers = state\.stats\.limits\.providers\.filter/);
-  assert.match(clearBody, /provider\.provider !== 'minimax'/);
+  // 多账号流程：保存走共用 setupApiKeyAccountCard → 专用 IPC（main 端先
+  // 活体验证再入库），不再写单账号 settings key。
+  assert.match(setupBody, /setupApiKeyAccountCard\('minimax'/);
+  const saveBody = functionBody(app, 'setupApiKeyAccountCard', 'renderCopilotStatus');
+  assert.match(saveBody, /window\.tokenMonitor\[provider\]\.addAccount\(keyInput\.value, labelInput\?\.value \|\| ''\)/);
+  assert.match(saveBody, /window\.tokenMonitor\[provider\]\.updateAccount\(editingId, keyInput\.value, labelInput\?\.value \|\| ''\)/);
+  assert.match(saveBody, /result\?\.errorCode === 'invalidApiKey'/);
+  assert.match(saveBody, /result\?\.errorCode === 'credentialStorageUnavailable'/);
+  assert.doesNotMatch(setupBody, /saveSettings\(\{ minimaxApiKey/);
+  // main 侧三家共用 apiKeyAccountControllers 工厂：活体验证先于持久化，
+  // 存入 settings 前剥离密钥本体。
+  const controllerBody = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'apiKeyAccountControllers.js'), 'utf8');
+  assert.match(controllerBody, /const validation = await validateAccount\(result\.account\);/);
+  assert.ok(
+    controllerBody.indexOf('await validateAccount') < controllerBody.indexOf('writeAccounts(['),
+    'validation must happen before persistence'
+  );
+  assert.match(controllerBody, /delete result\.account\.apiKey/);
+  assert.match(main, /apiKeyAccountProviders = \{[\s\S]*minimax: \{ fetchLimits: fetchMinimaxLimits/);
 });
 
 test('MiMo account panel matches the manual Cookie provider layout', () => {
@@ -1117,8 +1090,9 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   // Limits rows mask through the shared resolver; the settings list stays readable.
   assert.match(app, /maskEmail: limitAccountEmailsMasked\(\)/);
   assert.match(app, /function mimoSettingsAccountTitle\(account, index\) \{[\s\S]*account\?\.accountEmail[\s\S]*`Account \$\{index \+ 1\}`/);
-  assert.match(app, /const accountName = mimoSettingsAccountTitle\(account, index\);/);
-  const addBody = functionBody(main, 'addMimoManagedAccount', 'removeMimoManagedAccount');
+  // 共用账号列表渲染：标题经 config 注入，不再在 renderMimoStatus 内联。
+  assert.match(app, /accountTitle: mimoSettingsAccountTitle,/);
+  const addBody = functionBody(main, 'addMimoManagedAccount', 'normalizeApiKeyAccountsMeta');
   assert.match(addBody, /const \[validation\] = await fetchMimoLimits\(\{ mimoManagedAccounts: \[result\.account\] \}, electronProviderDeps\(\)\)/);
   assert.ok(addBody.indexOf('fetchMimoLimits') < addBody.indexOf('settings.mimoManagedAccounts ='), 'validation must happen before persistence');
   assert.match(addBody, /result\.account\.accountEmail = String\(validation\.accountEmail/);
@@ -1204,7 +1178,11 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(main, /ensureCredentialStore\(\)\.writeMimoCredential\(id, cookieHeader\)/);
   assert.match(main, /cookieHeader: readMimoCredential\(account\.id\)/);
   assert.match(main, /migrateLegacyMimoCredentialFiles\(merged\.mimoManagedAccounts\)/);
-  assert.match(main, /if \(!removeMimoCredential\(accountId\)\) return \{ ok: false, error: 'Could not remove stored credential' \};/);
+  // 删除/启停走共用生命周期：MiMo 与 MiniMax 经 config 注入各自的凭据
+  // 读写，凭据移除失败仍然拒绝继续（防凭据残留）。
+  const managedAccounts = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'managedAccounts.js'), 'utf8');
+  assert.match(managedAccounts, /if \(!removeCredential\(accountId\)\) return \{ ok: false, error: 'Could not remove stored credential' \};/);
+  assert.match(main, /removeCredential: removeMimoCredential,/);
   assert.match(main, /delete result\.account\.cookieHeader/);
 });
 
@@ -1832,15 +1810,18 @@ test('main settings migrateLimitProviders normalizes without expanding old defau
 
 test('Home limits groups multiple MiMo accounts like Codex', () => {
   const app = readRendererFile('app.js');
-  const groupBody = functionBody(app, 'renderMimoAccountGroup', 'renderOpenCodeAccountGroup');
+  const groupBody = functionBody(app, 'renderManagedAccountGroup', 'renderMimoAccountGroup');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   // accountGroup marks the synthetic header provider, so a subscription card on
   // it summarises the group instead of adopting one member's record.
-  assert.match(groupBody, /const groupProvider = \{ provider: 'mimo', status: 'ok', windows: \[\], accountGroup: true \};/);
-  assert.match(groupBody, /planText: t\('settings\.mimo\.nAccounts', \{ count: providers\.length \}\)/);
-  assert.match(groupBody, /renderLimitProviderRow\('mimo', limitAccountTitle\('mimo', provider, index, providers\), provider, color/);
+  assert.match(groupBody, /const groupProvider = \{ provider: providerId, status: 'ok', windows: \[\], accountGroup: true \};/);
+  assert.match(groupBody, /planText: t\(nAccountsKey, \{ count: providers\.length \}\)/);
+  assert.match(groupBody, /renderLimitProviderRow\(providerId, limitAccountTitle\(providerId, provider, index, providers\), provider, color/);
   assert.match(renderLimitsBody, /if \(id === 'mimo' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
   assert.match(renderLimitsBody, /nodes\.push\(renderMimoAccountGroup\(label, visibleProviders, color\)\);/);
+  // MiniMax 多账号走同一个组渲染。
+  assert.match(renderLimitsBody, /if \(id === 'minimax' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
+  assert.match(renderLimitsBody, /nodes\.push\(renderMinimaxAccountGroup\(label, visibleProviders, color\)\);/);
 });
 
 test('a zero-config OpenCode machine is not reported as unconfigured', () => {

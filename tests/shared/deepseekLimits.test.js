@@ -218,3 +218,103 @@ test('fetchDeepSeekLimits bounds a body that stalls after the headers', { timeou
   });
   assert.equal(r.status, 'unavailable');
 });
+
+// ---------- 多账号（managed accounts）----------
+
+const { createApiKeyManagedAccount } = require('../../src/shared/apiKeyAccounts');
+
+function deepseekBalanceBody(amount = 42.5, currency = 'USD') {
+  return { balance_infos: [{ total_balance: String(amount), topped_up_balance: String(amount), currency }] };
+}
+
+test('fetchDeepSeekLimits probes every managed account and returns one row per account', async () => {
+  const first = createApiKeyManagedAccount('deepseek', 'sk-first-1111', 'Personal', []);
+  const second = createApiKeyManagedAccount('deepseek', 'sk-second-2222', '', []);
+  assert.ok(first.ok && second.ok);
+  const tokens = [];
+
+  const rows = await fetchDeepSeekLimits({
+    deepseekManagedAccounts: [first.account, second.account]
+  }, {
+    env: {},
+    deepseekStorePath: '/tmp/ds-multi.json',
+    fetch: async (_url, init) => {
+      tokens.push(init.headers.Authorization);
+      return { ok: true, status: 200, json: async () => deepseekBalanceBody() };
+    }
+  });
+
+  assert.ok(Array.isArray(rows));
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => row.status), ['ok', 'ok']);
+  assert.deepEqual(tokens, ['Bearer sk-first-1111', 'Bearer sk-second-2222']);
+  assert.equal(rows[0].accountKey, first.account.accountKey);
+  assert.equal(rows[0].accountLabel, 'Personal');
+  assert.equal(rows[1].accountLabel, '2222', '无标签回退 key 尾号');
+});
+
+test('fetchDeepSeekLimits keeps account identity on failing rows', async () => {
+  const good = createApiKeyManagedAccount('deepseek', 'sk-good-3333', '', []);
+  const bad = createApiKeyManagedAccount('deepseek', 'sk-bad-4444', '', []);
+  assert.ok(good.ok && bad.ok);
+
+  const rows = await fetchDeepSeekLimits({
+    deepseekManagedAccounts: [good.account, bad.account]
+  }, {
+    env: {},
+    deepseekStorePath: '/tmp/ds-mixed.json',
+    fetch: async (_url, init) => (
+      init.headers.Authorization === 'Bearer sk-bad-4444'
+        ? { ok: false, status: 401, json: async () => ({}) }
+        : { ok: true, status: 200, json: async () => deepseekBalanceBody() }
+    )
+  });
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[1].status, 'unauthorized');
+  // 失败行也带账号身份，防 provider 通配 identity 互相覆盖。
+  assert.equal(rows[1].accountKey, bad.account.accountKey);
+});
+
+test('fetchDeepSeekLimits honours the account-scoped refresh', async () => {
+  const first = createApiKeyManagedAccount('deepseek', 'sk-scope-5555', '', []);
+  const second = createApiKeyManagedAccount('deepseek', 'sk-other-6666', '', []);
+  assert.ok(first.ok && second.ok);
+  const probed = [];
+
+  const rows = await fetchDeepSeekLimits({
+    deepseekManagedAccounts: [first.account, second.account],
+    limitRefreshScope: { provider: 'deepseek', accountKey: first.account.accountKey }
+  }, {
+    env: {},
+    deepseekStorePath: '/tmp/ds-scope.json',
+    fetch: async (_url, init) => {
+      probed.push(init.headers.Authorization);
+      return { ok: true, status: 200, json: async () => deepseekBalanceBody() };
+    }
+  });
+
+  assert.deepEqual(probed, ['Bearer sk-scope-5555']);
+  assert.equal(rows.length, 1);
+});
+
+test('managed accounts take precedence over the legacy key and env key', async () => {
+  const managed = createApiKeyManagedAccount('deepseek', 'sk-managed-7777', '', []);
+  assert.ok(managed.ok);
+  const probed = [];
+
+  const rows = await fetchDeepSeekLimits({
+    deepseekApiKey: 'sk-legacy',
+    deepseekManagedAccounts: [managed.account]
+  }, {
+    env: { DEEPSEEK_API_KEY: 'sk-env' },
+    deepseekStorePath: '/tmp/ds-prio.json',
+    fetch: async (_url, init) => {
+      probed.push(init.headers.Authorization);
+      return { ok: true, status: 200, json: async () => deepseekBalanceBody() };
+    }
+  });
+
+  assert.deepEqual(probed, ['Bearer sk-managed-7777']);
+  assert.equal(rows.length, 1);
+});

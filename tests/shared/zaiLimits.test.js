@@ -254,3 +254,94 @@ test('fetchZaiLimits physically aborts a hung request within its configured boun
   assert.equal(provider.status, 'unavailable');
   assert.equal(signal.aborted, true);
 });
+
+// ---------- 多账号（managed accounts）----------
+
+const { createApiKeyManagedAccount } = require('../../src/shared/apiKeyAccounts');
+
+function zaiQuotaBody() {
+  return {
+    data: {
+      limits: [
+        { type: 'TOKENS_LIMIT', usage: 40, remaining: 60, unit: 5, number: 1, nextResetTime: 1_800_000_000_000 },
+        { type: 'TOKENS_LIMIT', usage: 10, remaining: 90, unit: 6, number: 1, nextResetTime: 1_800_000_000_000 }
+      ]
+    }
+  };
+}
+
+test('fetchZaiLimits probes every managed account and returns one row per account', async () => {
+  const first = createApiKeyManagedAccount('zai', 'sk-first-1111', 'Personal', []);
+  const second = createApiKeyManagedAccount('zai', 'sk-second-2222', '', []);
+  assert.ok(first.ok && second.ok);
+  const tokens = [];
+
+  const rows = await fetchZaiLimits({
+    zaiManagedAccounts: [first.account, second.account]
+  }, {
+    env: {},
+    now: () => 1_716_350_000_000,
+    fetch: async (url, init) => {
+      tokens.push(init.headers.Authorization);
+      // quota 端点回窗口，subscription 端点回套餐名。
+      const body = url.includes('/subscription/')
+        ? { data: [{ product_name: 'GLM Coding Plan' }] }
+        : zaiQuotaBody();
+      return { ok: true, status: 200, json: async () => body };
+    }
+  });
+
+  assert.ok(Array.isArray(rows));
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => row.status), ['ok', 'ok']);
+  // 每账号固定两跳（quota + subscription），共 4 次请求；Promise.all 并发
+  // 下两个账号的请求会交错，比较排序后的集合。
+  assert.deepEqual([...tokens].sort(), [
+    'Bearer sk-first-1111', 'Bearer sk-first-1111',
+    'Bearer sk-second-2222', 'Bearer sk-second-2222'
+  ]);
+  // 多账号行：账号名是用户标签（无标签为空），套餐名移入 planLabel。
+  assert.equal(rows[0].accountLabel, 'Personal');
+  assert.equal(rows[1].accountLabel, '2222', '无标签回退 key 尾号');
+  assert.equal(rows[1].planLabel, 'GLM Coding Plan');
+});
+
+test('fetchZaiLimits keeps account identity and region on failing rows', async () => {
+  const bad = createApiKeyManagedAccount('zai', 'sk-bad-4444', '', []);
+  assert.ok(bad.ok);
+
+  const rows = await fetchZaiLimits({
+    zaiApiRegion: 'bigmodel-cn',
+    zaiManagedAccounts: [bad.account]
+  }, {
+    env: {},
+    now: () => 1_716_350_000_000,
+    fetch: async () => ({ ok: false, status: 401, json: async () => ({}) })
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, 'unauthorized');
+  assert.equal(rows[0].accountKey, bad.account.accountKey);
+  assert.equal(rows[0].region, 'bigmodel-cn');
+});
+
+test('managed accounts take precedence over the legacy key and env key', async () => {
+  const managed = createApiKeyManagedAccount('zai', 'sk-managed-7777', '', []);
+  assert.ok(managed.ok);
+  const probed = [];
+
+  const rows = await fetchZaiLimits({
+    zaiApiKey: 'sk-legacy',
+    zaiManagedAccounts: [managed.account]
+  }, {
+    env: { ZAI_API_KEY: 'sk-env' },
+    now: () => 1_716_350_000_000,
+    fetch: async (_url, init) => {
+      probed.push(init.headers.Authorization);
+      return { ok: true, status: 200, json: async () => zaiQuotaBody() };
+    }
+  });
+
+  assert.deepEqual(probed, ['Bearer sk-managed-7777', 'Bearer sk-managed-7777']);
+  assert.equal(rows.length, 1);
+});

@@ -581,3 +581,133 @@ test('fetchMinimaxLimits aborts when the body stalls after the headers', { timeo
   assert.equal(r.status, 'unavailable');
   assert.deepEqual(r.windows, []);
 });
+
+// ---------- 多账号（managed accounts）----------
+
+const { createApiKeyManagedAccount } = require('../../src/shared/apiKeyAccounts');
+
+function tokenPlanBody(percent) {
+  return {
+    base_resp: { status_code: 0, status_msg: 'success' },
+    data: {
+      model_remains: [
+        { model_name: 'general', current_interval_remaining_percent: String(percent) }
+      ]
+    }
+  };
+}
+
+test('fetchMinimaxLimits probes every managed account and returns one row per account', async () => {
+  const first = createApiKeyManagedAccount('minimax', 'sk-cp-first-1111', 'Personal', []);
+  const second = createApiKeyManagedAccount('minimax', 'sk-cp-second-2222', '', []);
+  assert.ok(first.ok && second.ok);
+  const authHeaders = [];
+
+  const rows = await fetchMinimaxLimits({
+    minimaxManagedAccounts: [first.account, second.account]
+  }, {
+    env: {},
+    now: () => 1_716_350_000_000,
+    fetch: async (url, init) => {
+      authHeaders.push(init.headers.Authorization);
+      return okResponse(tokenPlanBody(url.includes('minimaxi.com') ? 30 : 60));
+    }
+  });
+
+  assert.ok(Array.isArray(rows));
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => row.status), ['ok', 'ok']);
+  // 每行携带各自账号身份：accountKey 沿用单账号公式，标签缺失时回退
+  // key 尾号（2222），保证 UI 可区分。
+  assert.equal(rows[0].accountKey, first.account.accountKey);
+  assert.equal(rows[0].accountLabel, 'Personal');
+  assert.equal(rows[1].accountLabel, '2222');
+  assert.deepEqual(authHeaders, ['Bearer sk-cp-first-1111', 'Bearer sk-cp-second-2222']);
+});
+
+test('fetchMinimaxLimits keeps account identity on failing rows so per-account lanes do not collide', async () => {
+  const good = createApiKeyManagedAccount('minimax', 'sk-cp-good-3333', 'Good', []);
+  const bad = createApiKeyManagedAccount('minimax', 'sk-cp-bad-4444', 'Bad', []);
+  assert.ok(good.ok && bad.ok);
+
+  const rows = await fetchMinimaxLimits({
+    minimaxManagedAccounts: [good.account, bad.account]
+  }, {
+    env: {},
+    now: () => 1_716_350_000_000,
+    fetch: async (_url, init) => (
+      init.headers.Authorization === 'Bearer sk-cp-bad-4444'
+        ? unauthorized()
+        : okResponse(tokenPlanBody(55))
+    )
+  });
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].status, 'ok');
+  assert.equal(rows[1].status, 'unauthorized');
+  // 失败行也带账号身份：limitsRuntime 的 rowIdentityKey 优先取 accountKey，
+  // 无身份的失败行会全部落到 provider 通配 identity 上互相覆盖。
+  assert.equal(rows[1].accountKey, bad.account.accountKey);
+});
+
+test('fetchMinimaxLimits honours the account-scoped refresh for a single account', async () => {
+  const first = createApiKeyManagedAccount('minimax', 'sk-cp-scope-5555', '', []);
+  const second = createApiKeyManagedAccount('minimax', 'sk-cp-other-6666', '', []);
+  assert.ok(first.ok && second.ok);
+  const probed = [];
+
+  const rows = await fetchMinimaxLimits({
+    minimaxManagedAccounts: [first.account, second.account],
+    limitRefreshScope: { provider: 'minimax', accountKey: first.account.accountKey }
+  }, {
+    env: {},
+    now: () => 1_716_350_000_000,
+    fetch: async (_url, init) => {
+      probed.push(init.headers.Authorization);
+      return okResponse(tokenPlanBody(10));
+    }
+  });
+
+  assert.deepEqual(probed, ['Bearer sk-cp-scope-5555']);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].accountKey, first.account.accountKey);
+});
+
+test('fetchMinimaxLimits falls back to the legacy single-key path when no accounts exist', async () => {
+  let calls = 0;
+  const row = await fetchMinimaxLimits({ minimaxApiKey: 'sk-cp-legacy' }, {
+    env: {},
+    now: () => 1_716_350_000_000,
+    fetch: async () => {
+      calls += 1;
+      return okResponse(tokenPlanBody(77));
+    }
+  });
+
+  assert.equal(calls, 1);
+  assert.ok(!Array.isArray(row), 'legacy path keeps returning a single row');
+  assert.equal(row.status, 'ok');
+  assert.equal(row.accountLabel, 'Token Plan');
+  assert.equal(row.accountKey, createApiKeyManagedAccount('minimax', 'sk-cp-legacy', '', []).account.accountKey);
+});
+
+test('managed accounts take precedence over the legacy key and env key', async () => {
+  const managed = createApiKeyManagedAccount('minimax', 'sk-cp-managed-7777', '', []);
+  assert.ok(managed.ok);
+  const probed = [];
+
+  const rows = await fetchMinimaxLimits({
+    minimaxApiKey: 'sk-cp-legacy',
+    minimaxManagedAccounts: [managed.account]
+  }, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-env' },
+    now: () => 1_716_350_000_000,
+    fetch: async (_url, init) => {
+      probed.push(init.headers.Authorization);
+      return okResponse(tokenPlanBody(40));
+    }
+  });
+
+  assert.deepEqual(probed, ['Bearer sk-cp-managed-7777']);
+  assert.equal(rows.length, 1);
+});

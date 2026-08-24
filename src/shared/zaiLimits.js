@@ -3,6 +3,11 @@
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { runWithProbeDeadline } = require('./probeDeadline');
+const {
+  apiKeyAccountDisplayLabel,
+  cleanApiKeySecret,
+  scopedApiKeyManagedAccounts
+} = require('./apiKeyAccounts');
 
 const ZAI_FETCH_TIMEOUT_MS = 12_000;
 
@@ -21,16 +26,6 @@ const ZAI_SUBSCRIPTION_PATH = '/api/biz/subscription/list';
 const ZAI_QUOTA_URL = `${ZAI_REGIONS.global.baseUrl}${ZAI_QUOTA_PATH}`;
 const ZAI_SUBSCRIPTION_URL = `${ZAI_REGIONS.global.baseUrl}${ZAI_SUBSCRIPTION_PATH}`;
 const ZAI_KEY_NAMES = ['ZAI_API_KEY', 'Z_AI_API_KEY', 'GLM_API_KEY', 'ZHIPU_API_KEY'];
-
-function cleanSecret(value) {
-  let raw = value;
-  if (typeof raw !== 'string') return '';
-  raw = raw.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
 
 function numberOrNull(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -99,10 +94,10 @@ function displayPlanText(value) {
 }
 
 function zaiToken(env = process.env, explicitKey = '') {
-  const explicit = cleanSecret(explicitKey);
+  const explicit = cleanApiKeySecret(explicitKey);
   if (explicit) return explicit;
   for (const name of ZAI_KEY_NAMES) {
-    const raw = cleanSecret(env[name]);
+    const raw = cleanApiKeySecret(env[name]);
     if (raw) return raw;
   }
   return '';
@@ -293,23 +288,28 @@ async function fetchJson(url, key, deps = {}) {
   }, { signal: deps.signal, deadlineMs });
 }
 
-async function fetchZaiLimits(options = {}, deps = {}) {
-  const env = deps.env || process.env;
-  const now = (deps.now || Date.now)();
-  const updatedAt = new Date(now).toISOString();
-  const key = zaiToken(env, options.zaiApiKey);
-  const region = zaiRegion(options, env);
-  if (!key) {
-    return normalizeLimitProvider({
-      provider: 'zai',
-      source: 'api',
-      status: 'notConfigured',
-      updatedAt,
-      windows: [],
-      region
-    });
-  }
+// 账号级状态行：多账号路径的失败/未配置行必须携带账号身份，否则
+// limitsRuntime 会把不同账号的失败行全部落到 provider 通配 identity 上
+// 互相覆盖（rowIdentityKey 优先取 accountKey）。
+function zaiStatusProvider(status, updatedAt, region, account) {
+  return normalizeLimitProvider({
+    provider: 'zai',
+    source: 'api',
+    status,
+    updatedAt,
+    accountKey: account?.accountKey || '',
+    accountLabel: account ? apiKeyAccountDisplayLabel(account) : '',
+    windows: [],
+    region
+  });
+}
 
+// 探测单个 Z.ai 密钥。account 为 null 表示单账号兼容路径（旧
+// settings.zaiApiKey 或 env 密钥），保持历史行为——accountLabel 即套餐
+// 名（如 'GLM Coding'）。多账号路径改用「用户标签优先」的账号名，套餐
+// 名移入 planLabel，避免两个账号同名无法区分。
+async function probeZaiAccountKey(key, account, region, deps) {
+  const updatedAt = new Date((deps.now || Date.now)()).toISOString();
   try {
     const quota = await fetchJson(zaiQuotaUrl(region), key, deps);
     let subscription = null;
@@ -320,7 +320,8 @@ async function fetchZaiLimits(options = {}, deps = {}) {
     return normalizeLimitProvider({
       provider: 'zai',
       accountKey: hashKey('zai', key),
-      accountLabel: usage.plan,
+      accountLabel: account ? apiKeyAccountDisplayLabel(account) : usage.plan,
+      planLabel: account ? usage.plan : undefined,
       source: 'api',
       status: usage.windows.length ? 'ok' : 'unavailable',
       updatedAt,
@@ -328,15 +329,39 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       region
     });
   } catch (error) {
-    return normalizeLimitProvider({
-      provider: 'zai',
-      source: 'api',
-      status: error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable',
-      updatedAt,
-      windows: [],
-      region
-    });
+    const status = error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable';
+    return account
+      ? zaiStatusProvider(status, updatedAt, region, account)
+      : normalizeLimitProvider({
+        provider: 'zai',
+        source: 'api',
+        status,
+        updatedAt,
+        windows: [],
+        region
+      });
   }
+}
+
+async function fetchZaiLimits(options = {}, deps = {}) {
+  const env = deps.env || process.env;
+  const region = zaiRegion(options, env);
+  const scope = options.limitRefreshScope?.provider === 'zai'
+    ? options.limitRefreshScope
+    : null;
+  const accounts = scopedApiKeyManagedAccounts('zai', options.zaiManagedAccounts, scope);
+  if (accounts.length > 0) {
+    return Promise.all(accounts.map(
+      (account) => probeZaiAccountKey(account.apiKey, account, region, deps)
+    ));
+  }
+  // 单账号兼容路径：GUI 迁移前的 settings.zaiApiKey 或 env 密钥（headless
+  // agent 仍走这里），行为与多账号改造前完全一致。
+  const key = zaiToken(env, options.zaiApiKey);
+  if (!key) {
+    return zaiStatusProvider('notConfigured', new Date((deps.now || Date.now)()).toISOString(), region, null);
+  }
+  return probeZaiAccountKey(key, null, region, deps);
 }
 
 module.exports = {

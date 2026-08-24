@@ -1238,6 +1238,29 @@ span.settings-note.settings-item-desc {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+.managed-account-rename {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  opacity: 0.55;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+.managed-account-row:hover .managed-account-rename {
+  opacity: 0.85;
+}
+.managed-account-rename:hover {
+  opacity: 1;
+  color: var(--text);
+}
 .managed-account-remove {
   flex: 0 0 auto;
   width: 18px;

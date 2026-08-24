@@ -339,7 +339,7 @@ Response includes:
 - `devices`, including each device's normalized `periods`, `limits`, `receivedAt`, `osName` / `osVersion` when reported, optional `syncUploadIntervalMs`, and optional `periodWindows`
 - stale status for devices that have not reported recently
 
-If multiple devices report the same provider account, the hub keeps the freshest valid limits status for that account. Public Worker stats omit account identifiers.
+If multiple devices report the same provider account, the hub keeps the freshest valid limits status for that account. Providers whose accounts are user-managed (Claude, Codex, OpenCode, OpenRouter, third-party, MiMo, MiniMax) aggregate at `provider:accountKey` granularity, so a provider may legitimately appear as several rows — one per configured account; every other provider collapses to a single row per provider id. A hub older than MiniMax multi-account support folds MiniMax rows back to one, so multi-account devices should redeploy the hub with the widget. Public Worker stats omit account identifiers.
 
 ## `GET /api/devices`
 

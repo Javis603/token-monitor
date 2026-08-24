@@ -69,6 +69,7 @@ function limitProviderIds(source) {
 // provider table they dispatch through) in a sandbox instead of loading the DOM.
 function runTitle(source, expression, context = {}) {
   const snippets = TITLE_FUNCTIONS.map((name) => balancedBlock(source, `function ${name}(`));
+  snippets.unshift(balancedBlock(source, 'function planNameExcludedAccountTitle('));
   snippets.unshift(balancedBlock(source, 'const LIMIT_ACCOUNT_TITLES = {'));
   return vm.runInNewContext(`${snippets.join('\n')}\n${expression}`, context);
 }
@@ -154,8 +155,9 @@ test('title resolution matches between the limits panel and Home', () => {
   const renderGroups = [
     ["renderLimitProviderRow\\('codex', limitAccountTitle\\('codex', provider, index, providers\\)", 'codex'],
     ["renderLimitProviderRow\\('claude', limitAccountTitle\\('claude', provider, index, providers\\)", 'claude'],
-    ["renderLimitProviderRow\\('mimo', limitAccountTitle\\('mimo', provider, index, providers\\)", 'mimo'],
-    ["renderLimitProviderRow\\('opencode', limitAccountTitle\\('opencode', provider, index, providers\\)", 'opencode']
+    ["renderLimitProviderRow\\('opencode', limitAccountTitle\\('opencode', provider, index, providers\\)", 'opencode'],
+    // MiMo / MiniMax 账号行走共用的组渲染，标题同样必须过 limitAccountTitle。
+    ["renderLimitProviderRow\\(providerId, limitAccountTitle\\(providerId, provider, index, providers\\), provider, color, \\{[\\s\\S]*accountTitle: true", 'managed-account groups']
   ];
   for (const [pattern, provider] of renderGroups) {
     assert.match(app, new RegExp(pattern), `${provider} rows should resolve titles through limitAccountTitle`);
