@@ -17,12 +17,14 @@ const { spawn } = require('node:child_process');
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { createOutboundFetch } = require('./outboundFetch');
+const { withSystemProxyEnv } = require('./systemProxyEnv');
 const { abortError } = require('./probeDeadline');
 
 const GROK_WEB_BILLING_GRPC_URL = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig';
 const GROK_KEY_NAMES = ['GROK_BEARER_TOKEN'];
 const GROK_OIDC_PREFIX = 'https://auth.x.ai::';
 const GROK_LEGACY_SCOPE = 'https://accounts.x.ai/sign-in';
+const GROK_TOKEN_ENDPOINT = 'https://auth.x.ai/oauth2/token';
 
 function resolveGrokHome(env = process.env) {
   if (typeof env.GROK_HOME === 'string' && env.GROK_HOME.trim()) {
@@ -86,6 +88,62 @@ function grokCredential(env = process.env, options = {}) {
     if (raw) return { token: raw, source: 'env' };
   }
   return readAuthJson(env, options);
+}
+
+// Exchange a stored refresh_token for a fresh access_token via xAI's OIDC
+// token endpoint. This lets the widget manage its own Grok credential
+// independently of the CLI's ~/.grok/auth.json — the CLI's 6h access tokens
+// expire silently on a proxied network because the GUI-spawned CLI can't
+// reach auth.x.ai to refresh, so the widget holds its own refresh_token
+// (imported once from auth.json or entered in settings) and refreshes it
+// through the same system-proxy-aware fetch the rest of the widget uses.
+//
+// xAI uses soft refresh-token rotation: the old token stays valid for a
+// while after a new one is issued, so the CLI and the widget can each hold
+// their own copy without one invalidating the other. The new refresh_token
+// is returned so the caller can persist it for next time.
+async function refreshGrokAccessToken(refreshToken, clientId, deps = {}) {
+  const token = cleanSecret(refreshToken);
+  const id = cleanSecret(clientId);
+  if (!token || !id) return null;
+  const fetchFn = resolveGrokFetch(deps);
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timeoutMs = Number(deps.refreshTimeoutMs || 12000);
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const response = await fetchFn(GROK_TOKEN_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json'
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: token,
+        client_id: id
+      }).toString(),
+      ...(controller ? { signal: controller.signal } : {})
+    });
+    if (!response.ok) {
+      const err = new Error(`Grok token refresh failed (HTTP ${response.status})`);
+      err.status = response.status === 401 || response.status === 403 ? 'unauthorized' : 'unavailable';
+      throw err;
+    }
+    const body = await response.json();
+    if (!body || typeof body.access_token !== 'string' || !body.access_token) {
+      const err = new Error('Grok token refresh returned no access_token');
+      err.status = 'unavailable';
+      throw err;
+    }
+    return {
+      accessToken: body.access_token,
+      refreshToken: typeof body.refresh_token === 'string' && body.refresh_token ? body.refresh_token : token,
+      expiresIn: Number(body.expires_in) || 21600,
+      tokenType: body.token_type || 'Bearer'
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function numberOrNull(value) {
@@ -440,6 +498,19 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
   const timeoutMs = Number(deps.rpcTimeoutMs || deps.fetchTimeoutMs || 5000);
   const signal = deps.signal;
   if (signal?.aborted) throw abortError(signal);
+  // The CLI is a plain Node program: it only reaches the network through
+  // proxy env vars, which a GUI-launched widget never has. Give it the OS
+  // proxy (primed in the background at startup — see systemProxyEnv.js) so
+  // both the billing RPC and its ~/.grok/auth.json token refresh can succeed.
+  // Existing env proxy vars always win; the first probe before the prime
+  // completes simply runs as it would today.
+  const childEnv = deps.systemProxyEnv === false
+    ? env
+    : withSystemProxyEnv(env, {
+      cachedSystemProxy: typeof deps.cachedSystemProxy === 'string'
+        ? deps.cachedSystemProxy
+        : undefined
+    });
 
   return new Promise((resolve, reject) => {
     let child;
@@ -510,7 +581,7 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
 
     try {
       child = spawnFn(command, args, {
-        env,
+        env: childEnv,
         stdio: ['pipe', 'pipe', 'pipe']
       });
     } catch (error) {
@@ -654,6 +725,43 @@ async function fetchGrokLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
+
+  // Managed credential path: when the user has imported a refresh_token into
+  // the widget's own credential store (or GROK_REFRESH_TOKEN env), the widget
+  // refreshes it independently — no dependency on the CLI's ~/.grok/auth.json,
+  // no race with the CLI's own token refresh. The system-proxy-aware fetch
+  // (resolveGrokFetch) handles the network reach, same as the web billing
+  // fallback below.
+  const managedRefreshToken = cleanSecret(options.grokRefreshToken) || cleanSecret(env.GROK_REFRESH_TOKEN);
+  const managedClientId = cleanSecret(options.grokClientId) || cleanSecret(env.GROK_CLIENT_ID);
+  if (managedRefreshToken && managedClientId) {
+    if (deps.signal?.aborted) throw abortError(deps.signal);
+    try {
+      const refreshed = await (deps.refreshAccessToken || refreshGrokAccessToken)(managedRefreshToken, managedClientId, deps);
+      if (refreshed) {
+        const managedCredential = { token: refreshed.accessToken, source: 'managed', email: '' };
+        const windows = await (deps.fetchWebGrpcBilling || fetchGrokWebGrpcBilling)(managedCredential, deps);
+        return normalizeLimitProvider({
+          provider: 'grok',
+          accountKey: hashKey('grok', refreshed.accessToken),
+          accountLabel: 'SuperGrok',
+          accountEmail: '',
+          source: 'web',
+          sourceDetail: 'managed',
+          status: 'ok',
+          updatedAt,
+          windows
+        });
+      }
+    } catch (_managedError) {
+      if (deps.signal?.aborted) throw abortError(deps.signal);
+      // Fall through to the auto-detected auth.json path rather than failing
+      // hard: the CLI may have refreshed auth.json since the import, and the
+      // ambient path can still produce a reading.
+    }
+  }
+
+  // Auto-detected path: ~/.grok/auth.json (written by `grok login`) or env.
   const credential = grokCredential(env, { ...options, ...(deps.grokHome ? { grokHome: deps.grokHome } : {}) });
   if (shouldTryGrokRpc(credential, deps)) {
     try {
@@ -743,9 +851,11 @@ module.exports = {
   GROK_KEY_NAMES,
   GROK_OIDC_PREFIX,
   GROK_LEGACY_SCOPE,
+  GROK_TOKEN_ENDPOINT,
   resolveGrokHome,
   readAuthJson,
   grokCredential,
+  refreshGrokAccessToken,
   parseGrokBilling,
   parseGrokGrpcWebBilling,
   resolveGrokFetch,

@@ -31,7 +31,9 @@ const CREDENTIAL_SETTING_PATHS = Object.freeze({
   kimiApiKey: ['providers', 'kimi', 'apiKey'],
   kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
   ollamaCookie: ['providers', 'ollama', 'cookie'],
-  thirdPartyProfiles: ['providers', 'thirdparty', 'profiles']
+  thirdPartyProfiles: ['providers', 'thirdparty', 'profiles'],
+  grokRefreshToken: ['providers', 'grok', 'refreshToken'],
+  grokClientId: ['providers', 'grok', 'clientId']
 });
 
 function emptyDocument() {

@@ -31,6 +31,7 @@ const {
   computeRetryDelayMs,
   isRetryableLimitStatus
 } = require('./limitsRetryPolicy');
+const { primeMacSystemProxy } = require('./systemProxyEnv');
 
 const DEFAULT_LIMITS_MAX_CONCURRENCY = 3;
 
@@ -889,6 +890,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     if (started || stopped) return;
     started = true;
     if (!enabled) return;
+    // Prime the macOS system-proxy lookup in the background so CLI-based
+    // providers (Grok's agent RPC) can inject it into their child env without
+    // ever blocking a probe on scutil.
+    primeMacSystemProxy();
     lastScheduledFullAt = now();
     void refresh({}, 'startup');
     scheduleInterval(refreshMs);
