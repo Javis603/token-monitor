@@ -228,172 +228,6 @@ test('messages from a superseded watcher are dropped', () => {
   assert.deepEqual(first, []);
 });
 
-test('the optional reusable mode closes gracefully without terminating', () => {
-  FakeWorker.reset();
-  const coordinator = createWatcherCoordinator({ Worker: FakeWorker, recycleOnClose: false });
-  const host = coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, {});
-  host.close();
-  const worker = FakeWorker.last();
-  assert.equal(worker.posted.at(-1)?.type, 'stop');
-  // terminate() is the abnormal path only: racing a teardown we asked for
-  // would abandon descriptors the worker is still releasing.
-  assert.equal(worker.terminated, 0);
-});
-
-function fakeTimers() {
-  const timers = [];
-  return {
-    timers,
-    setTimeout: (fn, ms) => { const t = { fn, ms, cleared: false }; timers.push(t); return t; },
-    clearTimeout: (t) => { if (t) t.cleared = true; }
-  };
-}
-
-test('a stop ack clears the grace timer so an idle worker survives', () => {
-  FakeWorker.reset();
-  const clock = fakeTimers();
-  const coordinator = createWatcherCoordinator({
-    Worker: FakeWorker,
-    recycleOnClose: false,
-    setTimeout: clock.setTimeout,
-    clearTimeout: clock.clearTimeout
-  });
-  const host = coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, {});
-  host.close();
-  const stop = FakeWorker.last().posted.at(-1);
-  assert.equal(stop.type, 'stop');
-  assert.equal(clock.timers.length, 1, 'a grace timer must be armed');
-  assert.equal(coordinator.inspect().awaitingStopAck, true);
-
-  // close() clears `current` by definition, so an ack routed behind the owner
-  // lookup could never arrive and the grace timer always fired, terminating a
-  // worker that had already shut down cleanly and was reusable.
-  FakeWorker.last().emit('message', { type: 'released', throughRevision: stop.revision });
-  assert.equal(clock.timers[0].cleared, true, 'the ack must disarm the grace timer');
-  assert.equal(coordinator.inspect().awaitingStopAck, false);
-  assert.equal(FakeWorker.last().terminated, 0);
-});
-
-test('a stop issued during an unfinished teardown is still satisfied', () => {
-  FakeWorker.reset();
-  const clock = fakeTimers();
-  const coordinator = createWatcherCoordinator({
-    Worker: FakeWorker,
-    recycleOnClose: false,
-    setTimeout: clock.setTimeout,
-    clearTimeout: clock.clearTimeout
-  });
-  // stop A, start B, stop B, start C, all while A is still closing.
-  const a = coordinator.acquire({ dirs: ['/a'], clients: 'claude' }, {});
-  a.close();
-  const b = coordinator.acquire({ dirs: ['/b'], clients: 'claude' }, {});
-  b.close();
-  coordinator.acquire({ dirs: ['/c'], clients: 'claude' }, {});
-  const worker = FakeWorker.last();
-  const stops = worker.posted.filter((m) => m.type === 'stop');
-  assert.equal(stops.length, 2);
-  assert.equal(coordinator.inspect().awaitingStopAck, true);
-
-  // Latest-wins means the second stop never gets its own turn in the worker's
-  // loop, so it can only ever be answered by a watermark. Requiring an exact
-  // revision left this watchdog armed and it went on to kill a healthy worker.
-  const newest = Math.max(...worker.posted.map((m) => m.revision));
-  worker.emit('message', { type: 'released', throughRevision: newest });
-  assert.equal(coordinator.inspect().awaitingStopAck, false, 'the later stop must be satisfied');
-  const live = clock.timers.filter((t) => !t.cleared);
-  assert.equal(live.length, 0, 'no watchdog may outlive a completed release');
-});
-
-test('the grace timer still terminates a worker that never acks', () => {
-  FakeWorker.reset();
-  const clock = fakeTimers();
-  const coordinator = createWatcherCoordinator({
-    Worker: FakeWorker,
-    recycleOnClose: false,
-    setTimeout: clock.setTimeout,
-    clearTimeout: clock.clearTimeout
-  });
-  const host = coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, {});
-  host.close();
-  clock.timers[0].fn();
-  // The timeout is the only thing standing between a wedged worker and pinned
-  // descriptors, so it has to stay effective.
-  assert.equal(FakeWorker.last().terminated, 1);
-});
-
-test('a late ack from an earlier stop cannot disarm the current one', () => {
-  FakeWorker.reset();
-  const clock = fakeTimers();
-  const coordinator = createWatcherCoordinator({
-    Worker: FakeWorker,
-    recycleOnClose: false,
-    setTimeout: clock.setTimeout,
-    clearTimeout: clock.clearTimeout
-  });
-  const firstHandle = coordinator.acquire({ dirs: ['/a'], clients: 'claude' }, {});
-  firstHandle.close();
-  const staleStop = FakeWorker.last().posted.at(-1);
-  const secondHandle = coordinator.acquire({ dirs: ['/b'], clients: 'claude' }, {});
-  secondHandle.close();
-  const liveStop = FakeWorker.last().posted.at(-1);
-  assert.notEqual(staleStop.revision, liveStop.revision);
-
-  FakeWorker.last().emit('message', { type: 'released', throughRevision: staleStop.revision });
-  assert.equal(coordinator.inspect().awaitingStopAck, true, 'a stale ack must not disarm the live timer');
-});
-
-test('a restart keeps the watchdog armed for the stop it overtook', async () => {
-  FakeWorker.reset();
-  const clock = fakeTimers();
-  const coordinator = createWatcherCoordinator({
-    Worker: FakeWorker,
-    recycleOnClose: false,
-    setTimeout: clock.setTimeout,
-    clearTimeout: clock.clearTimeout
-  });
-  const first = coordinator.acquire({ dirs: ['/a'], clients: 'claude' }, {});
-  first.close();
-  assert.equal(clock.timers.length, 1);
-  // A runtime restart is stop-then-immediate-acquire. Disarming here would drop
-  // the only protection against a teardown that never completes, in the very
-  // path where that teardown runs.
-  coordinator.acquire({ dirs: ['/b'], clients: 'claude' }, {});
-  assert.equal(clock.timers[0].cleared, false, 'the restart must not disarm the in-flight stop');
-  assert.equal(coordinator.inspect().awaitingStopAck, true);
-
-  const wedged = FakeWorker.last();
-  clock.timers[0].fn();
-  assert.equal(wedged.terminated, 1, 'a wedged teardown must still be terminated');
-
-  // ...and the collector that replaced the stopped one must end up watching.
-  await until(() => FakeWorker.instances.length === 2);
-  const replacement = FakeWorker.last();
-  assert.notEqual(replacement, wedged);
-  await until(() => replacement.configures().length === 1);
-  assert.deepEqual(replacement.configures()[0].config.dirs, ['/b'], 'the live owner must be reapplied');
-});
-
-test('a stop acked after a restart disarms without disturbing the new owner', async () => {
-  FakeWorker.reset();
-  const clock = fakeTimers();
-  const coordinator = createWatcherCoordinator({
-    Worker: FakeWorker,
-    recycleOnClose: false,
-    setTimeout: clock.setTimeout,
-    clearTimeout: clock.clearTimeout
-  });
-  const first = coordinator.acquire({ dirs: ['/a'], clients: 'claude' }, {});
-  first.close();
-  const stop = FakeWorker.last().posted.find((m) => m.type === 'stop');
-  coordinator.acquire({ dirs: ['/b'], clients: 'claude' }, {});
-  // The worker acknowledges the release even though a configure overtook it.
-  FakeWorker.last().emit('message', { type: 'released', throughRevision: stop.revision });
-  assert.equal(clock.timers[0].cleared, true);
-  assert.equal(coordinator.inspect().awaitingStopAck, false);
-  assert.equal(FakeWorker.instances.length, 1, 'a healthy restart must not respawn');
-  assert.equal(FakeWorker.last().terminated, 0);
-});
-
 test('no replacement worker starts while the old thread is still exiting', async () => {
   FakeWorker.reset();
   const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
@@ -441,7 +275,20 @@ test('a terminate that never confirms falls back instead of assuming release', a
     assert.equal(FakeWorker.instances.length, 1);
     assert.equal(stub.built.length, 1, 'the owner must still end up watching');
     assert.equal(stub.built[0].options.usePolling, true, 'unconfirmed release must not overlap native descriptors');
+    assert.equal(coordinator.inspect().forcePollingFallback, true);
     assert.equal(fallbacks.length, 1);
+
+    // The unconfirmed native worker may still be alive. Closing this fallback
+    // and acquiring another owner must not silently re-enable native watching.
+    const fallback = coordinator.acquire(
+      { dirs: ['/c'], clients: 'claude', usePolling: false },
+      { onHostFallback: (e) => fallbacks.push(e) }
+    );
+    assert.equal(fallback.kind, 'in-process');
+    assert.equal(stub.built.length, 2);
+    assert.equal(stub.built[0].closed, 1, 'the previous fallback host must close');
+    assert.equal(stub.built[1].options.usePolling, true, 'polling must stay sticky for every later owner');
+    fallback.close();
   } finally {
     stub.restore();
   }
@@ -454,7 +301,7 @@ test('the quit path terminates instead of waiting for the slow teardown', () => 
   host.close({ skipClose: true });
   const worker = FakeWorker.last();
   assert.equal(worker.terminated, 1);
-  assert.ok(!worker.posted.some((m) => m.type === 'stop'), 'quit must not wait on a stop round trip');
+  assert.equal(worker.posted.filter((m) => m.type !== 'configure').length, 0);
 });
 
 test('successive collectors recycle the worker without overlapping', async () => {
@@ -548,7 +395,7 @@ test('a reconfigure issued before the first watcher is ready still lands', async
   }
 });
 
-test('rapid restarts leave no watchdog armed against a live worker', async () => {
+test('rapid restarts leave the latest worker active after every exit barrier', async () => {
   const roots = [tmpTree(), tmpTree(), tmpTree()];
   let ready = 0;
   const coordinator = withoutEnv(() => createWatcherCoordinator());
@@ -560,12 +407,8 @@ test('rapid restarts leave no watchdog armed against a live worker', async () =>
     b.close();
     const c = coordinator.acquire({ dirs: [roots[2]], clients: 'claude', usePolling: false }, handlers);
     assert.ok(await until(() => ready >= 1), 'the latest config never became ready');
-    // An unanswered stop would leave the watchdog armed and terminate this
-    // healthy worker 30 seconds later.
-    assert.ok(
-      await until(() => coordinator.inspect().awaitingStopAck === false),
-      'a stop was never acknowledged across rapid restarts'
-    );
+    assert.equal(coordinator.inspect().terminating, false);
+    assert.equal(coordinator.inspect().hasWorker, true);
     c.close({ skipClose: true });
   } finally {
     for (const root of roots) fs.rmSync(root, { recursive: true, force: true });

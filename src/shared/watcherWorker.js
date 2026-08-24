@@ -5,10 +5,10 @@
 // owns the collector froze the UI for about a second on every runtime restart.
 //
 // This thread is the only place a chokidar instance ever exists. The production
-// owner normally recycles the whole thread on a collector replacement so its
-// native allocation high-water is released; an in-thread reconfigure (including
-// the explicitly reusable host mode) still closes and awaits the previous
-// watcher before opening the next, so descriptors never overlap.
+// owner recycles the whole thread on a collector replacement so its native
+// allocation high-water is released. A defensive in-thread reconfigure still
+// closes and awaits the previous watcher before opening the next, so descriptors
+// never overlap even if a caller replaces an owner without closing it first.
 //
 // Nothing but the watcher lives here. Roots, attribution, debouncing and every
 // tick decision stay on the owning thread, so there is no collector state to
@@ -68,12 +68,6 @@ async function pump() {
     while (desired && desired.revision !== appliedRevision) {
       const target = desired;
       await closeCurrent();
-      // A watermark, not a per-revision ack. Latest-wins means an intermediate
-      // stop never gets its own turn through this loop, so acking only the
-      // revision being applied would strand the owner's watchdog on a stop that
-      // is already satisfied. Nothing is watched at this point, so every stop up
-      // to the newest request we have seen has been honoured.
-      post({ type: 'released', throughRevision: (desired || target).revision });
       // A newer request arrived while the old tree was closing. Drop this one
       // and apply the newest instead of rebuilding something already stale.
       if (desired !== target) continue;
@@ -109,10 +103,7 @@ async function pump() {
             code: error?.code || ''
           });
         }
-      } else {
-        // The release watermark above already covered this stop.
-        appliedRevision = target.revision;
-      }
+      } else appliedRevision = target.revision;
     }
   } finally {
     running = false;
@@ -122,11 +113,6 @@ async function pump() {
 parentPort.on('message', (message) => {
   if (message?.type === 'configure') {
     desired = { revision: message.revision, config: message.config };
-    void pump();
-    return;
-  }
-  if (message?.type === 'stop') {
-    desired = { revision: message.revision, config: null };
     void pump();
   }
 });
