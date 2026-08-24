@@ -130,7 +130,7 @@ function createWatcherCoordinator(deps = {}) {
         // The thread never confirmed it exited, so its descriptors cannot be
         // assumed released. Watching on this thread is worse for latency but
         // it is the one path that does not depend on that thread.
-        if (restore) fallBackToInProcess(error);
+        if (restore) fallBackToInProcess(error, null, { forcePolling: true });
       }
     );
   }
@@ -139,7 +139,7 @@ function createWatcherCoordinator(deps = {}) {
   // failure. Without both guards the second call builds a second in-process
   // watcher and abandons the first, reintroducing the descriptor overlap this
   // design exists to prevent.
-  function fallBackToInProcess(error, failedWorker) {
+  function fallBackToInProcess(error, failedWorker, options = {}) {
     if (workerDisabled) return;
     if (failedWorker && worker && worker !== failedWorker) return;
     worker = null;
@@ -147,7 +147,14 @@ function createWatcherCoordinator(deps = {}) {
     clearGrace();
     if (!current) return;
     current.handlers.onHostFallback?.(error);
-    inProcessHost = createInProcessWatcherHost(current.config, current.handlers);
+    // A rejected terminate does not prove the old worker released its native
+    // descriptors. Polling is the only safe fallback on that path; ordinary
+    // startup/crash failures still retain the configured native mode because
+    // their exit event already confirmed release.
+    const fallbackConfig = options.forcePolling
+      ? { ...current.config, usePolling: true }
+      : current.config;
+    inProcessHost = createInProcessWatcherHost(fallbackConfig, current.handlers);
   }
 
   function onMessage(message) {

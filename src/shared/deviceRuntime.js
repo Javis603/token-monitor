@@ -118,7 +118,8 @@ function createDeviceRuntime(options = {}, deps = {}) {
     }
   };
 
-  let usageRuntime = makeUsageRuntime(usageRuntimeOptions(options.usageOptions), deps.usageDeps || {});
+  let activeUsageOptions = options.usageOptions || {};
+  let usageRuntime = makeUsageRuntime(usageRuntimeOptions(activeUsageOptions), deps.usageDeps || {});
   const limitsRuntime = makeLimitsRuntime(limitsOptions, limitsDeps);
 
   function reconfigureUsage(nextUsageOptions = {}) {
@@ -128,7 +129,16 @@ function createDeviceRuntime(options = {}, deps = {}) {
     // physical work takes longer to stop.
     usageGeneration += 1;
     usageRuntime?.stop?.();
-    usageRuntime = makeUsageRuntime(usageRuntimeOptions(nextUsageOptions), deps.usageDeps || {});
+    try {
+      usageRuntime = makeUsageRuntime(usageRuntimeOptions(nextUsageOptions), deps.usageDeps || {});
+      activeUsageOptions = nextUsageOptions;
+    } catch (error) {
+      // Starting first would overlap the old and new collectors, including
+      // their watcher descriptor sets. Restore the last known-good config
+      // instead so a failed replacement cannot leave usage permanently dead.
+      usageRuntime = makeUsageRuntime(usageRuntimeOptions(activeUsageOptions), deps.usageDeps || {});
+      throw error;
+    }
     return true;
   }
 

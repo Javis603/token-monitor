@@ -6,7 +6,11 @@ const test = require('node:test');
 const { createDeviceRuntime } = require('../../src/shared/deviceRuntime');
 
 function harness(options = {}) {
-  const { limitsDeps: injectedLimitsDeps = {}, ...runtimeOptions } = options;
+  const {
+    createUsageRuntime: injectedCreateUsageRuntime,
+    limitsDeps: injectedLimitsDeps = {},
+    ...runtimeOptions
+  } = options;
   let usageOptions;
   const usageOptionsHistory = [];
   let limitsDeps;
@@ -33,6 +37,7 @@ function harness(options = {}) {
     createUsageRuntime(next) {
       usageOptions = next;
       usageOptionsHistory.push(next);
+      if (injectedCreateUsageRuntime) return injectedCreateUsageRuntime(next, usageHandle, calls);
       return usageHandle;
     },
     createLimitsRuntime(_config, nextDeps) {
@@ -146,6 +151,34 @@ test('usage reconfigure replaces only usage and rejects callbacks from the super
   assert.equal(records[0].record.today.totalTokens, 7);
   assert.equal(records[1].record.limits.updatedAt, 'limits-time');
   assert.ok(!calls.some(([name]) => name === 'limitsStop'));
+});
+
+test('usage reconfigure restores the last known-good config when replacement startup throws', () => {
+  const startupError = new Error('replacement startup failed');
+  let attempt = 0;
+  const startedClients = [];
+  const rollbackCalls = [];
+  const { calls, runtime } = harness({
+    usageOptions: { clients: 'claude' },
+    createUsageRuntime(next, defaultHandle) {
+      attempt += 1;
+      startedClients.push(next.clients);
+      if (attempt === 2) throw startupError;
+      if (attempt === 3) {
+        return {
+          ...defaultHandle,
+          tick: (...args) => { rollbackCalls.push(args); return 'rollback-tick'; }
+        };
+      }
+      return defaultHandle;
+    }
+  });
+
+  assert.throws(() => runtime.reconfigureUsage({ clients: 'codex' }), startupError);
+  assert.deepEqual(startedClients, ['claude', 'codex', 'claude']);
+  assert.deepEqual(calls, [['usageStop']]);
+  assert.equal(runtime.tick('manual'), 'rollback-tick');
+  assert.deepEqual(rollbackCalls, [['manual', undefined]]);
 });
 
 test('stop suppresses delegated diagnostic callbacks from late producer events', () => {

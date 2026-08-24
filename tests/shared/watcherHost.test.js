@@ -73,8 +73,8 @@ function stubChokidar() {
   const chokidar = require('chokidar');
   const original = chokidar.watch;
   const built = [];
-  chokidar.watch = (dirs) => {
-    const instance = { dirs, closed: 0, on() { return instance; }, close() { instance.closed += 1; } };
+  chokidar.watch = (dirs, options) => {
+    const instance = { dirs, options, closed: 0, on() { return instance; }, close() { instance.closed += 1; } };
     built.push(instance);
     return instance;
   };
@@ -428,11 +428,11 @@ test('a terminate that never confirms falls back instead of assuming release', a
   const fallbacks = [];
   try {
     const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
-    const first = coordinator.acquire({ dirs: ['/a'], clients: 'claude' }, { onHostFallback: (e) => fallbacks.push(e) });
+    const first = coordinator.acquire({ dirs: ['/a'], clients: 'claude', usePolling: false }, { onHostFallback: (e) => fallbacks.push(e) });
     const wedged = FakeWorker.last();
     wedged.deferTerminate = true;
     first.close();
-    coordinator.acquire({ dirs: ['/b'], clients: 'claude' }, { onHostFallback: (e) => fallbacks.push(e) });
+    coordinator.acquire({ dirs: ['/b'], clients: 'claude', usePolling: false }, { onHostFallback: (e) => fallbacks.push(e) });
 
     wedged.failTerminate(new Error('terminate failed'));
     await until(() => coordinator.inspect().inProcess);
@@ -440,6 +440,7 @@ test('a terminate that never confirms falls back instead of assuming release', a
     // second worker must not be started on the strength of it.
     assert.equal(FakeWorker.instances.length, 1);
     assert.equal(stub.built.length, 1, 'the owner must still end up watching');
+    assert.equal(stub.built[0].options.usePolling, true, 'unconfirmed release must not overlap native descriptors');
     assert.equal(fallbacks.length, 1);
   } finally {
     stub.restore();
