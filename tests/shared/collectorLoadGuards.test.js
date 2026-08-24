@@ -13,6 +13,7 @@ const path = require('node:path');
 const { performance } = require('node:perf_hooks');
 
 const { emptyPeriod } = require('../../src/shared/usage');
+const { localDayKey } = require('../../src/shared/history');
 const {
   clampTimerDelayMs, SYNC_MIN_INTERVAL_MS, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS
 } = require('../../src/shared/selfSyncThrottle');
@@ -2778,7 +2779,7 @@ test('collector publishes live periods when only Qoder CN history read fails', a
   const originalRows = qoderCnUsage.collectQoderCnRows;
   const originalHistory = qoderCnUsage.buildQoderCnHistoryGraph;
   let failHistory = false;
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = localDayKey();
   qoderCnUsage.collectQoderCnRows = async () => [];
   qoderCnUsage.buildQoderCnHistoryGraph = () => {
     if (failHistory) throw new Error('temporary Qoder CN history read failure');
