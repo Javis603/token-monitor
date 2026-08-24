@@ -9,9 +9,10 @@ const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require(
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
 const { normalizeSyncUploadIntervalMs, staleAfterMsForSyncUpload } = require('./syncUploadInterval');
 const TOKEN_KEYS = ['totalTokens', 'total_tokens', 'totalTokenCount', 'total_token_count', 'tokens', 'tokenCount', 'token_count'];
-// Additive components for a token total. `reasoning` is deliberately excluded for ordinary clients:
-// OpenAI/Codex report reasoning_output_tokens WITHIN output_tokens (tokscale's `output` already
-// includes it). Reasonix is the exception: its `output` and `reasoning` fields are disjoint.
+// Additive components for a token total. `reasoning` is deliberately excluded
+// from the generic fallback because most Tokscale clients either leave it at 0
+// or already include it in output. A small client allowlist below opts into
+// Tokscale's disjoint output/reasoning JSON contract.
 const TOKEN_COMPONENT_KEYS = [
   'input', 'inputTokens', 'input_tokens', 'promptTokens', 'prompt_tokens',
   'output', 'outputTokens', 'output_tokens', 'completionTokens', 'completion_tokens',
@@ -30,6 +31,7 @@ const OUTPUT_TOKEN_KEYS = ['output', 'outputTokens', 'output_tokens', 'completio
 const CACHE_READ_TOKEN_KEYS = ['cacheRead', 'cacheReadTokens', 'cache_read_tokens', 'cachedTokens', 'cached_tokens', 'cacheReadInputTokens', 'totalCacheRead'];
 const CACHE_WRITE_TOKEN_KEYS = ['cacheWrite', 'cacheWriteTokens', 'cache_write_tokens', 'cacheCreationInputTokens', 'totalCacheWrite'];
 const REASONING_TOKEN_KEYS = ['reasoning', 'reasoningTokens', 'reasoning_tokens'];
+const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'codex', 'dsh']);
 // Read off tokscale's per-entry `performance` block. `msPer1KTokens` is deliberately ignored:
 // it is a pre-divided ratio, and only raw sums survive being added across rows and devices.
 const TIMED_DURATION_KEYS = ['totalDurationMs', 'total_duration_ms', 'timedDurationMs', 'timed_duration_ms'];
@@ -79,22 +81,23 @@ function tokenValue(obj) {
   return sum;
 }
 
-// Most clients expose reasoning as a subset of output, so the generic token
-// total intentionally leaves it out. Reasonix stats are different: Tokscale
-// emits output and reasoning as disjoint fields, so only that client adds the
-// separate reasoning component to its token total.
+// Most clients do not expose a separate additive reasoning bucket, so the
+// generic total intentionally leaves it out. Tokscale emits disjoint output
+// and reasoning for these clients; add reasoning only when no explicit total
+// is present.
 function tokenValueForClient(obj, client) {
   const base = tokenValue(obj);
-  if (client !== REASONIX_CLIENT) return base;
+  if (!TOKSCALE_DISJOINT_REASONING_CLIENTS.has(client)) return base;
   const direct = firstNumber(obj, TOKEN_KEYS);
   return direct !== 0 ? base : base + Math.max(0, firstNumber(obj, REASONING_TOKEN_KEYS));
 }
 
-// The public breakdown uses one output-family bucket. Reasonix's independent reasoning
-// component belongs there so cache-hit + cache-miss + output still closes over totalTokens.
+// The public breakdown uses one reasoning-inclusive output-family bucket.
+// Fold Tokscale's independent reasoning component into it so cache-hit +
+// cache-miss + output still closes over totalTokens.
 function outputValueForClient(obj, client) {
   const output = Math.max(0, firstNumber(obj, OUTPUT_TOKEN_KEYS));
-  return client === REASONIX_CLIENT
+  return TOKSCALE_DISJOINT_REASONING_CLIENTS.has(client)
     ? output + Math.max(0, firstNumber(obj, REASONING_TOKEN_KEYS))
     : output;
 }
@@ -495,6 +498,7 @@ function sessionFromRow(row) {
   session.costUsd = costValue(row);
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
   Object.assign(session, sessionTokenComponents(row));
+  session.outputTokens = Math.max(0, Math.round(outputValueForClient(row, client)));
   session.startedAt = normalizeIsoTimestamp(firstString(row, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(row, LAST_USED_AT_KEYS));
   session.projectId = String(row.projectId || row.project_id || '').trim();

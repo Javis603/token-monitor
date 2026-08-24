@@ -87,11 +87,10 @@ function parseDshDetailEvents(text) {
   // dsh's own persistence layer can replay an already-flushed line back into
   // the file (crash/retry on the writer side); tokscale's dsh parser guards
   // against double-counting it with a dedup key of message identity + time +
-  // routing + token signature, not `seq` (dsh.rs) — port the same key so a
-  // replay isn't double counted here either. Scoped to assistant/message
-  // like tokscale's own dedup: user/message never carries usage, so a
-  // replayed prompt cannot skew the token total the way a replayed turn can.
-  const seenAssistantKeys = new Set();
+  // routing + token signature. Summaries get their own namespace so an
+  // otherwise-identical assistant call cannot suppress a real compaction
+  // charge.
+  const seenUsageKeys = new Set();
   let header = null;
   let seedLength = null;
   for (const line of String(text || '').split(/\r?\n/)) {
@@ -123,7 +122,8 @@ function parseDshDetailEvents(text) {
     // part of the copied prefix — tokscale itself skips strictly `seq <
     // seed_length` (dsh.rs), and matching it here is a hard requirement,
     // not a rounding choice.
-    if (seedLength !== null && numberValue(record?.seq) < seedLength) continue;
+    const recordSeq = Number.isFinite(record?.seq) ? record.seq : null;
+    if (seedLength !== null && recordSeq !== null && recordSeq < seedLength) continue;
     // An event without a usable time cannot be placed in the exchange
     // timeline correctly — defaulting it to epoch 0 would either sort it out
     // of order or drop it from every non-"total" period filter silently.
@@ -136,21 +136,25 @@ function parseDshDetailEvents(text) {
       if (record.data?.source?.kind !== 'user') continue;
       const promptText = promptFromContent(record.data?.content);
       if (promptText) events.push({ kind: 'prompt', timestamp: new Date(time).toISOString(), text: promptText });
-    } else if (record?.type === 'assistant/message') {
+    } else if (record?.type === 'assistant/message' || record?.type === 'compaction/summary') {
+      const isSummary = record.type === 'compaction/summary';
       const usage = record.data?.usage;
       if (!usage) continue;
       const tokens = usageTokens(usage);
       if (tokens.total === 0) continue;
       const source = record.data?.message?.source;
       const messageId = String(record.data?.message?.id || '').trim();
-      const identity = messageId || `sid:${header?.id || ''}`;
+      const identity = messageId
+        ? `msg:${messageId}`
+        : (recordSeq !== null ? `seq:${recordSeq}` : `sid:${header?.id || ''}`);
       const dedupKey = [
-        identity, time, source?.provider || '', source?.model || '',
+        isSummary ? `summary:${identity}` : identity,
+        time, source?.provider || '', source?.model || '',
         tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite, tokens.reasoning
       ].join(':');
-      if (seenAssistantKeys.has(dedupKey)) continue;
-      seenAssistantKeys.add(dedupKey);
-      const tools = Array.isArray(record.data?.message?.content)
+      if (seenUsageKeys.has(dedupKey)) continue;
+      seenUsageKeys.add(dedupKey);
+      const tools = !isSummary && Array.isArray(record.data?.message?.content)
         ? record.data.message.content.filter((block) => block && block.type === 'tool-call' && typeof block.name === 'string').map((block) => block.name)
         : [];
       events.push({ kind: 'turn', timestamp: new Date(time).toISOString(), tokens, tools });

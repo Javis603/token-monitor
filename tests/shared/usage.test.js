@@ -878,7 +878,7 @@ test('extractUsageBundleFromTokscale isolates rows without a client for safe fal
   assert.equal(bundle.period.totalTokens, 7);
 });
 
-test('extractUsageFromTokscale keeps session usage grouped by client and model', () => {
+test('extractUsageFromTokscale folds disjoint Codex reasoning into the public output bucket', () => {
   const period = extractUsageFromTokscale({
     groupBy: 'client,session,model',
     entries: [
@@ -918,20 +918,41 @@ test('extractUsageFromTokscale keeps session usage grouped by client and model',
   });
 
   const codex = period.sessions['codex:rollout-1'];
-  // reasoning (2) is a subset of output (5), so it is NOT added to the total:
-  // entry 1 = 10 + 5 + 100 = 115, entry 2 = 2 + 3 = 5 → 120 (reasoning still tracked separately).
-  assert.equal(codex.totalTokens, 120);
+  // Tokscale's latest JSON makes output (5) and reasoning (2) disjoint. Token
+  // Monitor's public wire keeps output reasoning-inclusive, so entry 1 is
+  // 10 + (5 + 2) + 100 = 117 and entry 2 is 2 + 3 = 5.
+  assert.equal(codex.totalTokens, 122);
   assert.equal(codex.costUsd, 0.3);
   assert.equal(codex.messageCount, 4);
   assert.equal(codex.inputTokens, 12);
-  assert.equal(codex.outputTokens, 8);
+  assert.equal(codex.outputTokens, 10);
   assert.equal(codex.cacheReadTokens, 100);
   assert.equal(codex.reasoningTokens, 2);
   assert.equal(codex.lastUsedAt, '2026-05-30T04:00:00.000Z');
-  assert.equal(codex.models['gpt-5'], 115);
+  assert.equal(codex.models['gpt-5'], 117);
   assert.equal(codex.models['gpt-4o'], 5);
-  assert.equal(codex.providers.openai, 120);
+  assert.equal(codex.providers.openai, 122);
   assert.equal(period.sessions['cursor:cursor-active'].models['cursor-auto'], 3);
+});
+
+test('extractUsageFromTokscale folds disjoint DSH reasoning into totals and output', () => {
+  const period = extractUsageFromTokscale({
+    entries: [{
+      client: 'dsh',
+      sessionId: 'session-reasoning',
+      model: 'deepseek-reasoner',
+      input: 2885,
+      output: 2,
+      reasoning: 23
+    }]
+  });
+
+  assert.equal(period.totalTokens, 2910);
+  assert.equal(period.outputTokens, 25);
+  assert.equal(period.clientOutputs.dsh, 25);
+  assert.equal(period.sessions['dsh:session-reasoning'].totalTokens, 2910);
+  assert.equal(period.sessions['dsh:session-reasoning'].outputTokens, 25);
+  assert.equal(period.sessions['dsh:session-reasoning'].reasoningTokens, 23);
 });
 
 test('aggregateDevices combines session usage across devices', () => {

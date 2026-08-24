@@ -7,7 +7,28 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { ensureVendoredTokscale } = require('../../scripts/ensure-vendored-tokscale');
-const { manifestMode } = require('../../scripts/vendoredTokscale');
+const { loadManifest, manifestMode } = require('../../scripts/vendoredTokscale');
+
+test('vendor manifest covers every upstream native npm target', () => {
+  const manifest = loadManifest();
+  const platformPackages = Object.fromEntries(
+    Object.entries(manifest.platforms).map(([key, entry]) => [key, entry.package])
+  );
+  assert.deepEqual(platformPackages, {
+    'android-arm64': '@tokscale/cli-android-arm64',
+    'darwin-arm64': '@tokscale/cli-darwin-arm64',
+    'darwin-x64': '@tokscale/cli-darwin-x64',
+    'linux-arm64': '@tokscale/cli-linux-arm64-gnu',
+    'linux-arm64-musl': '@tokscale/cli-linux-arm64-musl',
+    'linux-x64': '@tokscale/cli-linux-x64-gnu',
+    'linux-x64-musl': '@tokscale/cli-linux-x64-musl',
+    'win32-arm64': '@tokscale/cli-win32-arm64-msvc',
+    'win32-x64': '@tokscale/cli-win32-x64-msvc'
+  });
+  for (const entry of Object.values(manifest.platforms)) {
+    assert.match(entry.sha256, /^[0-9a-f]{64}$/);
+  }
+});
 
 test('manifestMode defaults to override and only "upstream" flips it', () => {
   assert.equal(manifestMode({}), 'override');

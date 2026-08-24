@@ -26,19 +26,25 @@ function normalizeTimeMetrics(value) {
   };
 }
 
-// Additive token components. Existing clients expose reasoning inside `output`,
-// but Reasonix emits it as a disjoint component.
+// Tokscale emits these clients' reasoning as a disjoint JSON bucket. History
+// uses the same reasoning-inclusive public output convention as usage.js.
+const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'codex', 'dsh']);
+
+function hasDisjointReasoning(client) {
+  return TOKSCALE_DISJOINT_REASONING_CLIENTS.has(String(client).trim().toLowerCase());
+}
+
 function sumTokens(breakdown, client = '') {
   if (!breakdown || typeof breakdown !== 'object') return 0;
   return num(breakdown.input) + num(breakdown.output)
     + num(breakdown.cacheRead) + num(breakdown.cacheWrite)
-    + (String(client).trim().toLowerCase() === REASONIX_CLIENT ? num(breakdown.reasoning) : 0);
+    + (hasDisjointReasoning(client) ? num(breakdown.reasoning) : 0);
 }
 
 function sumOutputTokens(breakdown, client = '') {
   if (!breakdown || typeof breakdown !== 'object') return 0;
   return num(breakdown.output)
-    + (String(client).trim().toLowerCase() === REASONIX_CLIENT ? num(breakdown.reasoning) : 0);
+    + (hasDisjointReasoning(client) ? num(breakdown.reasoning) : 0);
 }
 
 function componentValues(value, totalTokens, exact) {

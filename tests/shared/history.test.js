@@ -35,9 +35,13 @@ test('num coerces finite numbers and strings, else 0', () => {
   assert.equal(num(undefined), 0);
 });
 
-test('sumTokens adds the additive components and excludes reasoning', () => {
+test('sumTokens adds disjoint Tokscale reasoning only for opted-in clients', () => {
   const b = { input: 10, output: 20, cacheRead: 100, cacheWrite: 5, reasoning: 999 };
   assert.equal(sumTokens(b), 135);
+  assert.equal(sumTokens(b, 'codex'), 1134);
+  assert.equal(sumTokens(b, 'dsh'), 1134);
+  assert.equal(sumTokens(b, 'reasonix'), 1134);
+  assert.equal(sumTokens(b, 'claude'), 135);
   assert.equal(sumTokens({}), 0);
   assert.equal(sumTokens(null), 0);
 });

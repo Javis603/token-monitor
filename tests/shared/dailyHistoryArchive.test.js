@@ -512,12 +512,15 @@ test('lazy write ownership is checked after the archive read', () => {
   assert.equal(writes, 0);
 });
 
-test('durable reconstruction never adds reasoning on top of output tokens', () => {
+test('durable reconstruction preserves client-specific reasoning semantics without recounting it', () => {
   const archive = captureDailyHistoryArchive({}, graph('2026-07-18', [
-    client('codex', 'gpt', 100, 1, 1, { reasoning: 30 })
+    client('codex', 'gpt', 100, 1, 1, { reasoning: 30 }),
+    client('claude', 'opus', 100, 1, 1, { reasoning: 30 })
   ]), { todayKey: '2026-07-18' });
   const restored = historyFrom(graphFromDailyHistoryArchive([], archive, { todayKey: '2026-07-18' }));
-  assert.equal(restored.daily[0].tokens, 100);
+  assert.equal(restored.daily[0].tokens, 230);
+  assert.equal(restored.daily[0].perClient.codex.tokens, 130);
+  assert.equal(restored.daily[0].perClient.claude.tokens, 100);
 });
 
 test('clearDailyHistoryArchive removes persisted data and accepts a missing file', () => {
