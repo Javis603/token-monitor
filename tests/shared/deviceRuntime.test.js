@@ -216,6 +216,30 @@ test('stop suppresses delegated diagnostic callbacks from late producer events',
   ]);
 });
 
+test('a superseded runtime may still report unconfirmed physical termination', () => {
+  const forwardedEvents = [];
+  const { runtime, usageOptionsHistory } = harness({
+    usageOptions: {},
+    onDiagnosticEvent: (event) => forwardedEvents.push(event)
+  });
+  const firstUsage = usageOptionsHistory[0];
+
+  runtime.reconfigureUsage({ clients: 'codex' });
+  firstUsage.onDiagnosticEvent({ subsystem: 'collector', code: 'late-ordinary-event' });
+  firstUsage.onDiagnosticEvent({
+    subsystem: 'collector',
+    code: 'subprocess-termination-unconfirmed',
+    operation: 'tokscale-scan'
+  });
+
+  assert.deepEqual(forwardedEvents, [{
+    subsystem: 'collector',
+    code: 'subprocess-termination-unconfirmed',
+    operation: 'tokscale-scan'
+  }]);
+  runtime.stop();
+});
+
 test('runtime control methods delegate to the precise producer', () => {
   const { calls, runtime } = harness();
   assert.equal(runtime.tick('manual', { forceHistory: true }), 'tick');

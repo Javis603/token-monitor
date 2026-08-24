@@ -5,6 +5,7 @@ const { createLimitsRuntime } = require('./limitsRuntime');
 const { createUsageRuntime } = require('./usageRuntime');
 
 let nextRuntimeEpoch = 1;
+const SUPERSEDED_USAGE_DIAGNOSTIC_CODES = new Set(['subprocess-termination-unconfirmed']);
 
 function createDeviceRuntime(options = {}, deps = {}) {
   const epoch = nextRuntimeEpoch++;
@@ -67,7 +68,11 @@ function createDeviceRuntime(options = {}, deps = {}) {
         return transformed;
       },
       onDiagnosticEvent(event) {
-        if (!active || generation !== usageGeneration) return;
+        if (!active) return;
+        if (
+          generation !== usageGeneration
+          && !SUPERSEDED_USAGE_DIAGNOSTIC_CODES.has(event?.code)
+        ) return;
         try {
           nextUsageOptions?.onDiagnosticEvent?.(event);
         } catch (error) {

@@ -24,6 +24,43 @@ async function waitFor(predicate, timeoutMs = 2000) {
   }
 }
 
+test('whenIdle observes the startup tick registered ahead of its start barrier continuation', async () => {
+  let releaseBarrier;
+  const startBarrier = new Promise((resolve) => { releaseBarrier = resolve; });
+  let scans = 0;
+  const runtime = startCollector({
+    clients: 'claude',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 5000,
+    deviceId: 'startup-barrier-ordering-test',
+    agentVersion: 'test',
+    historyEnabled: false,
+    dailyHistoryArchiveEnabled: false,
+    projectsEnabled: false,
+    wslScanEnabled: false,
+    watchEnabled: false,
+    anchorPersistenceEnabled: false,
+    startBarrier,
+    runTokscale: async () => {
+      scans += 1;
+      return { entries: [] };
+    }
+  });
+
+  try {
+    let idle = false;
+    const pendingIdle = runtime.whenIdle().then(() => { idle = true; });
+    await nextTurn();
+    assert.equal(idle, false, 'the unresolved startup barrier remains observable');
+
+    releaseBarrier();
+    await pendingIdle;
+    assert.equal(scans, 3, 'whenIdle resolves only after the startup full scan');
+  } finally {
+    runtime.stop();
+  }
+});
+
 test('stopping superseded collectors aborts their physical scan before the next period', async () => {
   let active = 0;
   let maxActive = 0;
@@ -153,6 +190,104 @@ test('usage replacement waits for an aborted tokscale child to close before spaw
   }
 });
 
+test('usage replacement abandons its wait for a shared capability probe without cancelling the probe', async () => {
+  const childProcess = require('node:child_process');
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  let helpChild = null;
+  let helpClosed = false;
+
+  function closingChild(code, stdout = '', stderr = '') {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end() {} };
+    child.kill = () => true;
+    setImmediate(() => {
+      if (stdout) child.stdout.emit('data', stdout);
+      if (stderr) child.stderr.emit('data', stderr);
+      child.emit('close', code);
+    });
+    return child;
+  }
+
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    if (args.includes('--help')) {
+      helpChild = new EventEmitter();
+      helpChild.stdout = new EventEmitter();
+      helpChild.stderr = new EventEmitter();
+      helpChild.stdin = { end() {} };
+      helpChild.kill = () => true;
+      return helpChild;
+    }
+    const clientIndex = args.indexOf('--client');
+    const requested = clientIndex === -1 ? '' : args[clientIndex + 1];
+    if (requested.split(',').includes('dsh')) {
+      return closingChild(2, '', "error: invalid value 'dsh' for --client");
+    }
+    return closingChild(0, JSON.stringify({ entries: [] }));
+  };
+  delete require.cache[collectorPath];
+
+  let runtime = null;
+  try {
+    const fresh = require(collectorPath);
+    const usageOptions = {
+      clients: 'claude,dsh',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 5000,
+      deviceId: 'shared-capability-probe-barrier-test',
+      agentVersion: 'test',
+      historyEnabled: false,
+      dailyHistoryArchiveEnabled: false,
+      projectsEnabled: false,
+      wslScanEnabled: false,
+      watchEnabled: false,
+      anchorPersistenceEnabled: false
+    };
+    runtime = createDeviceRuntime({ usageOptions }, {
+      createUsageRuntime: (next) => fresh.startCollector(next),
+      createLimitsRuntime: () => ({ stop() {} })
+    });
+    await waitFor(() => helpChild !== null);
+
+    const callsBeforeReplacement = calls.length;
+    assert.equal(runtime.reconfigureUsage({ ...usageOptions, clients: 'claude' }), true);
+    await waitFor(() => calls.length > callsBeforeReplacement);
+    assert.ok(
+      calls.slice(callsBeforeReplacement).some((args) => args.includes('--client') && args[args.indexOf('--client') + 1] === 'claude'),
+      'replacement collection starts before the no-longer-needed shared probe settles'
+    );
+
+    const helpProbesBeforeClose = calls.filter((args) => args.includes('--help')).length;
+    helpChild.stdout.emit('data', '--client [possible values: claude]');
+    helpChild.emit('close', 0);
+    helpClosed = true;
+    await nextTurn();
+
+    const callsBeforeCacheCheck = calls.length;
+    await fresh.collectUsageOnce({
+      clients: 'claude,dsh',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 5000,
+      deviceId: 'shared-capability-probe-cache-test',
+      agentVersion: 'test',
+      limitsEnabled: false
+    });
+    const cacheCheckCalls = calls.slice(callsBeforeCacheCheck);
+    assert.equal(calls.filter((args) => args.includes('--help')).length, helpProbesBeforeClose, 'detached probe still populates the shared cache');
+    assert.ok(cacheCheckCalls.every((args) => !args.includes('--help')));
+    assert.ok(cacheCheckCalls.every((args) => args[args.indexOf('--client') + 1] === 'claude'));
+  } finally {
+    runtime?.stop();
+    if (helpChild && !helpClosed) helpChild.emit('close', 0);
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});
+
 test('timed-out tokscale remains the replacement barrier through forced termination', async () => {
   const childProcess = require('node:child_process');
   const collectorPath = require.resolve('../../src/shared/collector');
@@ -207,6 +342,76 @@ test('timed-out tokscale remains the replacement barrier through forced terminat
 
     children[0].emit('close', null, 'SIGKILL');
     await waitFor(() => children.length >= 2);
+  } finally {
+    runtime?.stop();
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});
+
+test('unconfirmed forced termination releases the replacement barrier with a diagnostic', async () => {
+  const childProcess = require('node:child_process');
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const originalSpawn = childProcess.spawn;
+  const children = [];
+  childProcess.spawn = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end() {} };
+    child.signals = [];
+    child.kill = (signal) => { child.signals.push(signal); return true; };
+    children.push(child);
+    if (children.length > 1) {
+      setImmediate(() => {
+        child.stdout.emit('data', JSON.stringify({ entries: [] }));
+        child.emit('close', 0);
+      });
+    }
+    return child;
+  };
+  delete require.cache[collectorPath];
+
+  const diagnostics = [];
+  let runtime = null;
+  try {
+    const fresh = require(collectorPath);
+    const usageOptions = {
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1,
+      subprocessTerminationOptions: { graceMs: 1, closeGraceMs: 1 },
+      deviceId: 'unconfirmed-close-barrier-test',
+      agentVersion: 'test',
+      historyEnabled: false,
+      dailyHistoryArchiveEnabled: false,
+      projectsEnabled: false,
+      wslScanEnabled: false,
+      watchEnabled: false,
+      anchorPersistenceEnabled: false
+    };
+    runtime = createDeviceRuntime({
+      usageOptions,
+      onDiagnosticEvent: (event) => diagnostics.push(event)
+    }, {
+      createUsageRuntime: (next) => fresh.startCollector(next),
+      createLimitsRuntime: () => ({ stop() {} })
+    });
+    await waitFor(() => children[0]?.signals.includes('SIGTERM'));
+
+    assert.equal(runtime.reconfigureUsage(usageOptions), true);
+    await waitFor(() => children[0].signals.includes('SIGKILL'));
+    await waitFor(() => children.length >= 2);
+
+    assert.deepEqual(diagnostics, [{
+      subsystem: 'collector',
+      code: 'subprocess-termination-unconfirmed',
+      operation: 'tokscale-scan'
+    }]);
+
+    children[0].emit('close', null, 'SIGKILL');
+    await nextTurn();
+    assert.equal(diagnostics.length, 1, 'a late close is cleanup, not a second outcome');
   } finally {
     runtime?.stop();
     childProcess.spawn = originalSpawn;
@@ -383,6 +588,59 @@ test('native Antigravity timeout remains pending until the child closes', async 
     assert.equal(failed, 1);
     assert.equal(fresh.selfSyncThrottle.syncStatus('antigravity').failureCode, 'sync-timeout');
     assert.equal(summary.clientHealth.clients.antigravity.collection.state, 'failed');
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('native Antigravity reports and settles an unconfirmed forced termination', async () => {
+  const childProcess = require('node:child_process');
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const originalSpawn = childProcess.spawn;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-unconfirmed-antigravity-'));
+  fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+  let syncChild = null;
+  childProcess.spawn = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end() {} };
+    child.signals = [];
+    child.kill = (signal) => { child.signals.push(signal); return true; };
+    syncChild = child;
+    return child;
+  };
+  delete require.cache[collectorPath];
+
+  try {
+    const fresh = require(collectorPath);
+    const diagnostics = [];
+    const summary = await fresh.collectUsageOnce({
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 5000,
+      selfSyncTimeoutMs: 1,
+      subprocessTerminationOptions: { graceMs: 1, closeGraceMs: 1 },
+      deviceId: 'antigravity-unconfirmed-test',
+      agentVersion: 'test',
+      historyEnabled: false,
+      homeDir: home,
+      runTokscale: async () => ({ entries: [] }),
+      onDiagnosticEvent: (event) => diagnostics.push(event)
+    });
+
+    assert.deepEqual(syncChild.signals, ['SIGTERM', 'SIGKILL']);
+    assert.deepEqual(diagnostics, [{
+      subsystem: 'collector',
+      code: 'subprocess-termination-unconfirmed',
+      operation: 'antigravity-sync'
+    }]);
+    assert.equal(fresh.selfSyncThrottle.syncStatus('antigravity').failureCode, 'sync-timeout');
+    assert.equal(summary.clientHealth.clients.antigravity.collection.state, 'failed');
+
+    syncChild.emit('close', null, 'SIGKILL');
   } finally {
     childProcess.spawn = originalSpawn;
     delete require.cache[collectorPath];

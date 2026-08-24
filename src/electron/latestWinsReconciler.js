@@ -13,6 +13,7 @@ function createLatestWinsReconciler(options = {}) {
   let desiredKey = null;
   let timer = null;
   let retryAttempt = 0;
+  let exhausted = false;
   let disposed = false;
 
   function clearTimerOnly() {
@@ -24,6 +25,7 @@ function createLatestWinsReconciler(options = {}) {
     clearTimerOnly();
     desiredKey = null;
     retryAttempt = 0;
+    exhausted = false;
   }
 
   function arm(delay) {
@@ -31,9 +33,20 @@ function createLatestWinsReconciler(options = {}) {
     if (typeof timer?.unref === 'function') timer.unref();
   }
 
-  function retry(key) {
+  function retry(key, error = null) {
     if (disposed || desiredKey !== key || activeKey === key) return false;
-    if (retryAttempt >= retryDelaysMs.length) return false;
+    if (retryAttempt >= retryDelaysMs.length) {
+      if (exhausted) return false;
+      exhausted = true;
+      try {
+        options.onExhausted?.({
+          key,
+          attempts: retryAttempt + 1,
+          error
+        });
+      } catch (_) {}
+      return false;
+    }
     arm(retryDelaysMs[retryAttempt]);
     retryAttempt += 1;
     return true;
@@ -63,7 +76,7 @@ function createLatestWinsReconciler(options = {}) {
       return applied;
     } catch (error) {
       try { options.onError?.(error); } catch (_) {}
-      retry(key);
+      retry(key, error);
       return false;
     }
   }
@@ -74,6 +87,7 @@ function createLatestWinsReconciler(options = {}) {
     clearTimerOnly();
     desiredKey = normalized;
     retryAttempt = 0;
+    exhausted = false;
     if (desiredKey === activeKey) {
       desiredKey = null;
       return false;
@@ -102,6 +116,7 @@ function createLatestWinsReconciler(options = {}) {
       desiredKey,
       pendingKey: timer !== null ? desiredKey : null,
       retryAttempt,
+      exhausted,
       scheduled: timer !== null
     })
   };

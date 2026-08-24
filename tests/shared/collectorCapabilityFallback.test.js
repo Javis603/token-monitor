@@ -233,3 +233,37 @@ test('a timed-out capability probe waits through forced termination until close'
     delete require.cache[collectorPath];
   }
 });
+
+test('a capability probe cannot hold the process-wide resolver forever after SIGKILL', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = { end: () => {} };
+  const signals = [];
+  const diagnostics = [];
+  child.kill = (signal) => { signals.push(signal); return true; };
+  childProcess.spawn = () => child;
+
+  try {
+    const { spawnTokscaleHelp } = freshCollector();
+    const pending = spawnTokscaleHelp(
+      { bin: 'tokscale', prefixArgs: [], env: {}, identity: 'unconfirmed-test' },
+      {
+        timeoutMs: 1,
+        terminationOptions: { graceMs: 1, closeGraceMs: 1 },
+        onTerminationUnconfirmed: (error) => diagnostics.push(error.code)
+      }
+    );
+
+    await assert.rejects(pending, (error) => error.code === 'termination-unconfirmed');
+    assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+    assert.deepEqual(diagnostics, ['termination-unconfirmed']);
+
+    child.emit('close', null, 'SIGKILL');
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});

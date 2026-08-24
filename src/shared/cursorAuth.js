@@ -5,7 +5,10 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
-const { createSubprocessTermination } = require('./subprocessTermination');
+const {
+  createSubprocessTermination,
+  terminationUnconfirmedError
+} = require('./subprocessTermination');
 const { classifyClientSyncDetailCode } = require('./clientHealth');
 
 const MAX_SYNC_EXIT_CODE = 2 ** 31 - 1;
@@ -96,7 +99,9 @@ function runTokscaleSubcommand(args, {
   timeoutMs = 30000,
   signal,
   spawn: spawnFn = spawn,
-  tokscaleCommand: resolveTokscaleCommand
+  tokscaleCommand: resolveTokscaleCommand,
+  terminationOptions,
+  onTerminationUnconfirmed
 } = {}) {
   if (signal?.aborted) return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('Cursor sync aborted'));
   return new Promise((resolve, reject) => {
@@ -108,13 +113,19 @@ function runTokscaleSubcommand(args, {
     let settled = false;
     let timer;
     let terminalError = null;
-    const termination = createSubprocessTermination(child);
+    const termination = createSubprocessTermination(child, {
+      ...(terminationOptions || {}),
+      onUnconfirmed() {
+        const error = terminationUnconfirmedError(terminalError, `tokscale cursor ${args[0]}`);
+        try { onTerminationUnconfirmed?.(error); } catch (_) {}
+        finish(error);
+      }
+    });
 
     function finish(error, value) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      termination.confirmClosed();
       signal?.removeEventListener('abort', onAbort);
       if (error) reject(error);
       else resolve(value);
@@ -153,6 +164,8 @@ function runTokscaleSubcommand(args, {
       termination.request();
     });
     child.on('close', (code) => {
+      termination.confirmClosed();
+      if (settled) return;
       if (terminalError) return finish(terminalError);
       if (code !== 0) {
         return finish(annotateSyncError(

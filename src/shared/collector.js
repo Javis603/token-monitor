@@ -32,7 +32,10 @@ const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles'
 const { createWatcherHost } = require('./watcherHost');
 const { localDayKey, mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
-const { createSubprocessTermination } = require('./subprocessTermination');
+const {
+  createSubprocessTermination,
+  terminationUnconfirmedError
+} = require('./subprocessTermination');
 const cursorAuth = require('./cursorAuth');
 const { claudeSessionRoots } = require('./claudePaths');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
@@ -176,7 +179,7 @@ function throwIfAborted(signal) {
   if (signal?.aborted) throw abortReason(signal);
 }
 
-function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand(), signal) {
+function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand(), signal, options = {}) {
   const { bin, prefixArgs, env } = command;
   if (signal?.aborted) return Promise.reject(abortReason(signal));
   return new Promise((resolve, reject) => {
@@ -186,13 +189,19 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
     let settled = false;
     let timeout = null;
     let terminalError = null;
-    const termination = createSubprocessTermination(child);
+    const termination = createSubprocessTermination(child, {
+      ...(options.terminationOptions || {}),
+      onUnconfirmed() {
+        const error = terminationUnconfirmedError(terminalError, options.operation || 'tokscale');
+        try { options.onTerminationUnconfirmed?.(error); } catch (_) {}
+        finish(error);
+      }
+    });
 
     function finish(error, value) {
       if (settled) return;
       settled = true;
       if (timeout) clearTimeout(timeout);
-      termination.confirmClosed();
       signal?.removeEventListener('abort', onAbort);
       if (error) reject(error);
       else resolve(value);
@@ -225,6 +234,8 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
       finish(error);
     });
     child.on('close', (code) => {
+      termination.confirmClosed();
+      if (settled) return;
       if (terminalError) return finish(terminalError);
       if (code !== 0) {
         const error = new Error(`tokscale exited with code ${code}: ${stderr.trim() || stdout.trim()}`);
@@ -253,12 +264,18 @@ function spawnTokscaleHelp(command, options = {}) {
     let stderr = '';
     let settled = false;
     let terminalError = null;
-    const termination = createSubprocessTermination(child, options.terminationOptions);
+    const termination = createSubprocessTermination(child, {
+      ...(options.terminationOptions || {}),
+      onUnconfirmed() {
+        const error = terminationUnconfirmedError(terminalError, 'tokscale capability probe');
+        try { options.onTerminationUnconfirmed?.(error); } catch (_) {}
+        finish(error);
+      }
+    });
     const finish = (error, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      termination.confirmClosed();
       if (error) reject(error);
       else resolve(value);
     };
@@ -279,6 +296,8 @@ function spawnTokscaleHelp(command, options = {}) {
       finish(error);
     });
     child.on('close', (code) => {
+      termination.confirmClosed();
+      if (settled) return;
       if (terminalError) return finish(terminalError);
       if (code !== 0) return finish(new Error(`--help exited with code ${code}: ${stderr.trim() || stdout.trim()}`));
       try { finish(null, parseSupportedClients(`${stdout}\n${stderr}`)); } catch (error) { finish(error); }
@@ -330,6 +349,33 @@ function isUnknownTokscaleClientError(error) {
     && /--client/i.test(error.tokscaleStderr || '');
 }
 
+// The capability lookup is process-wide and must keep running so it can fill
+// the shared cache for a later collector. A superseded collector only gives up
+// its own wait: otherwise its in-flight tick keeps whenIdle() pending and holds
+// the replacement behind a probe it may no longer need.
+function waitForSharedCapabilityProbe(probe, signal) {
+  if (!signal) return Promise.resolve(probe);
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      callback(value);
+    };
+    const onAbort = () => finish(reject, abortReason(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    Promise.resolve(probe).then(
+      (supported) => finish(resolve, supported),
+      (error) => finish(reject, error)
+    );
+    // Close the race where abort happens after the first check but before the
+    // listener is installed.
+    if (signal.aborted) onAbort();
+  });
+}
+
 // Reactive, not proactive: a binary that recognizes every requested client
 // never pays for a capability probe. Only once tokscale has actually
 // rejected the CSV (exit 2) do we spend one `--help` probe to learn what the
@@ -339,13 +385,17 @@ function isUnknownTokscaleClientError(error) {
 // too (and warned once) so we don't re-probe on every subsequent failure —
 // the original tokscale error surfaces instead, same as before this filter
 // existed.
-function retryWithKnownCapabilities(error, requested, command, emptyResult, retry, signal) {
+function retryWithKnownCapabilities(error, requested, command, emptyResult, retry, signal, options = {}) {
   if (signal?.aborted) return Promise.reject(abortReason(signal));
   if (!isUnknownTokscaleClientError(error)) return Promise.reject(error);
   // The resolver caches failed probes as well as successful ones. Do not bind
   // this process-wide capability lookup to one collector's lifetime: aborting a
   // superseded collector must not poison the cache for every later runtime.
-  return tokscaleCapabilityResolver.probe(command.identity, () => spawnTokscaleHelp(command)).then((supported) => {
+  const sharedProbe = tokscaleCapabilityResolver.probe(
+    command.identity,
+    () => spawnTokscaleHelp(command, options)
+  );
+  return waitForSharedCapabilityProbe(sharedProbe, signal).then((supported) => {
     throwIfAborted(signal);
     if (!supported) return Promise.reject(error);
     const filtered = filterSupportedClients(requested, supported);
@@ -360,7 +410,7 @@ function applyKnownCapabilityFilter(clientFilter, identity) {
   return supported ? filterSupportedClients(clientFilter, supported) : clientFilter;
 }
 
-function runTokscale({ clients, flags, commandTimeoutMs, signal }) {
+function runTokscale({ clients, flags, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed }) {
   throwIfAborted(signal);
   const command = tokscaleCommand();
   const requested = tokscaleClientFilter(clients);
@@ -368,14 +418,22 @@ function runTokscale({ clients, flags, commandTimeoutMs, signal }) {
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
   if (!clientFilter) return Promise.resolve({ entries: [] });
   const runArgs = (filter) => ['--json', '--client', filter, '--group-by', 'client,session,model', ...flags];
-  return spawnTokscaleJson(runArgs(clientFilter), commandTimeoutMs, command, signal).catch((error) => (
+  const subprocessOptions = {
+    operation: 'tokscale scan',
+    terminationOptions,
+    onTerminationUnconfirmed
+  };
+  return spawnTokscaleJson(runArgs(clientFilter), commandTimeoutMs, command, signal, subprocessOptions).catch((error) => (
     retryWithKnownCapabilities(error, requested, command, { entries: [] }, (filtered) => (
-      spawnTokscaleJson(runArgs(filtered), commandTimeoutMs, command, signal)
-    ), signal)
+      spawnTokscaleJson(runArgs(filtered), commandTimeoutMs, command, signal, subprocessOptions)
+    ), signal, {
+      terminationOptions,
+      onTerminationUnconfirmed
+    })
   ));
 }
 
-function runTokscaleGraph({ clients, commandTimeoutMs, signal }) {
+function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed }) {
   throwIfAborted(signal);
   const command = tokscaleCommand();
   const requested = tokscaleClientFilter(clients);
@@ -383,10 +441,18 @@ function runTokscaleGraph({ clients, commandTimeoutMs, signal }) {
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
   if (!clientFilter) return Promise.resolve({ contributions: [] });
   const runArgs = (filter) => ['graph', '--client', filter, '--no-spinner'];
-  return spawnTokscaleJson(runArgs(clientFilter), commandTimeoutMs, command, signal).catch((error) => (
+  const subprocessOptions = {
+    operation: 'tokscale graph',
+    terminationOptions,
+    onTerminationUnconfirmed
+  };
+  return spawnTokscaleJson(runArgs(clientFilter), commandTimeoutMs, command, signal, subprocessOptions).catch((error) => (
     retryWithKnownCapabilities(error, requested, command, { contributions: [] }, (filtered) => (
-      spawnTokscaleJson(runArgs(filtered), commandTimeoutMs, command, signal)
-    ), signal)
+      spawnTokscaleJson(runArgs(filtered), commandTimeoutMs, command, signal, subprocessOptions)
+    ), signal, {
+      terminationOptions,
+      onTerminationUnconfirmed
+    })
   ));
 }
 
@@ -1078,7 +1144,12 @@ async function maybeSyncCursor(clientsCsv, logger, options = {}) {
   options.signal?.addEventListener('abort', cancelAttempt, { once: true });
   if (options.signal?.aborted) cancelAttempt();
   try {
-    await cursorAuth.runCursorSync({ signal: options.signal, timeoutMs: options.timeoutMs });
+    await cursorAuth.runCursorSync({
+      signal: options.signal,
+      timeoutMs: options.timeoutMs,
+      terminationOptions: options.terminationOptions,
+      onTerminationUnconfirmed: options.onTerminationUnconfirmed
+    });
     selfSyncThrottle.completeAttempt('cursor', attempt, false);
   } catch (err) {
     if (options.signal?.aborted) {
@@ -1148,7 +1219,19 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
   // interval, which is the latency this whole path exists to remove.
   await new Promise((resolve) => {
     const child = spawn(bin, [...prefixArgs, 'antigravity', 'sync'], { env, windowsHide: true });
-    const termination = createSubprocessTermination(child);
+    const termination = createSubprocessTermination(child, {
+      ...(options.terminationOptions || {}),
+      onUnconfirmed() {
+        const error = terminationUnconfirmedError(null, 'tokscale antigravity sync');
+        try { options.onTerminationUnconfirmed?.(error); } catch (_) {}
+        if (terminalOutcome?.cancelled) return settle(false, '', {}, false, true);
+        settle(
+          true,
+          terminalOutcome?.code || 'sync-failed',
+          terminalOutcome?.details || { failureStage: 'process-exit' }
+        );
+      }
+    });
     let stderr = '';
     // One outcome per spawn. A child reports more than once — a SIGTERM'd
     // timeout still emits close afterwards, and error is usually followed by
@@ -1166,7 +1249,6 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      termination.confirmClosed();
       options.signal?.removeEventListener('abort', onAbort);
       if (cancelled) selfSyncThrottle.cancelAttempt('antigravity', attempt);
       else selfSyncThrottle.completeAttempt('antigravity', attempt, failed, code, details);
@@ -1203,6 +1285,8 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
       });
     });
     child.on('close', (code) => {
+      termination.confirmClosed();
+      if (settled) return;
       if (terminalOutcome?.cancelled) return settle(false, '', {}, false, true);
       if (terminalOutcome) {
         return settle(
@@ -1328,7 +1412,27 @@ async function collectUsageOnce(options) {
   // straddles local midnight cannot pair a day-N today scan with a day-N+1
   // window (issue #37 follow-up). Injectable for tests.
   const collectedAt = collectionDate(options.now);
-  const runTokscaleFn = options.runTokscale || runTokscale;
+  const reportTerminationUnconfirmed = (operation) => {
+    try {
+      options.onDiagnosticEvent?.({
+        subsystem: 'collector',
+        code: 'subprocess-termination-unconfirmed',
+        operation
+      });
+    } catch (_) {
+      // Diagnostics observers must never affect collection or cancellation.
+    }
+  };
+  const runTokscaleFn = options.runTokscale || ((input) => runTokscale({
+    ...input,
+    terminationOptions: options.subprocessTerminationOptions,
+    onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
+  }));
+  const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
+    ...input,
+    terminationOptions: options.subprocessTerminationOptions,
+    onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-graph')
+  }));
   const collectWsl = options.collectWslUsage || collectWslUsageImpl;
   const probeWslStateFn = options.probeWslState || probeWslStateImpl;
   // Injectable only for the WSL-status gate, so tests can exercise the win32
@@ -1404,6 +1508,8 @@ async function collectUsageOnce(options) {
       minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'cursor'),
       signal: options.signal,
       timeoutMs: options.selfSyncTimeoutMs,
+      terminationOptions: options.subprocessTerminationOptions,
+      onTerminationUnconfirmed: () => reportTerminationUnconfirmed('cursor-sync'),
       onFailure: options.onSelfSyncFailed
     });
     await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
@@ -1411,6 +1517,8 @@ async function collectUsageOnce(options) {
       run: options.runAntigravitySync,
       signal: options.signal,
       timeoutMs: options.selfSyncTimeoutMs,
+      terminationOptions: options.subprocessTerminationOptions,
+      onTerminationUnconfirmed: () => reportTerminationUnconfirmed('antigravity-sync'),
       onFailure: options.onSelfSyncFailed
     });
     throwIfAborted(options.signal);
@@ -1790,7 +1898,7 @@ async function collectUsageOnce(options) {
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
       todayKey: localTodayKey(collectedAt),
-      runGraph: options.runGraph,
+      runGraph: runGraphFn,
       signal: options.signal,
       dailyHistoryArchiveEnabled: options.dailyHistoryArchiveEnabled,
       dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,
@@ -3836,6 +3944,10 @@ function startCollector(options) {
   }
 
   function whenIdle() {
+    // startCollector() calls loop() synchronously before returning this handle,
+    // so runTick's reaction to this same barrier is always registered first.
+    // It clears startBarrier before this continuation asks again; the regression
+    // test pins that startup ordering because reversing it would microtask-spin.
     if (startBarrier) return Promise.resolve(startBarrier).then(() => whenIdle());
     if (!tickInFlight) return Promise.resolve();
     return new Promise((resolve) => idleWaiters.push(resolve));

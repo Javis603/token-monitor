@@ -36,7 +36,10 @@ test('subprocess termination waits for close and escalates after the grace perio
 
   clock.timers[0].fn();
   assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  assert.equal(clock.timers[1].ms, 5000);
+  assert.equal(clock.timers[1].unrefCalled, true);
   termination.confirmClosed();
+  assert.equal(clock.timers[1].cleared, true);
 });
 
 test('confirmed close disarms forced termination', () => {
@@ -52,4 +55,32 @@ test('confirmed close disarms forced termination', () => {
   assert.equal(clock.timers[0].cleared, true);
   clock.timers[0].fn();
   assert.deepEqual(signals, ['SIGTERM']);
+});
+
+test('forced termination reports an unconfirmed close after a bounded second grace', () => {
+  const clock = fakeTimers();
+  const signals = [];
+  let unconfirmed = 0;
+  const termination = createSubprocessTermination(
+    { kill: (signal) => { signals.push(signal); return true; } },
+    {
+      graceMs: 10,
+      closeGraceMs: 20,
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      onUnconfirmed: () => { unconfirmed += 1; }
+    }
+  );
+
+  termination.request();
+  clock.timers[0].fn();
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  assert.equal(clock.timers[1].ms, 20);
+  assert.equal(unconfirmed, 0);
+
+  clock.timers[1].fn();
+  clock.timers[1].fn();
+  assert.equal(unconfirmed, 1, 'the terminal fallback is reported once');
+
+  termination.confirmClosed();
 });

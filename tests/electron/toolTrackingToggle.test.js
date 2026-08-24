@@ -34,6 +34,13 @@ test('usage-structural changes replace usage without restarting limits', () => {
   assert.match(mainSource, /usageRuntimeReconciler\.schedule\(usageSettingsFingerprint\(settings\)\)/);
 });
 
+test('exhausted usage replacement retries are visible in diagnostics', () => {
+  assert.match(
+    mainSource,
+    /onExhausted:\s*\(\{ attempts \}\)\s*=>\s*recordDiagnosticEvent\(\{[\s\S]*?subsystem:\s*'usage-runtime',[\s\S]*?code:\s*'usage-reconfigure-exhausted',[\s\S]*?attempts/
+  );
+});
+
 test('tracking a tool does not stack a second full scan on the restart (#471)', () => {
   // A `clients` change already restarts the usage runtime, whose new collector
   // runs a full tick immediately. Forcing a refresh on top queues a second full

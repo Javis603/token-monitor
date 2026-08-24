@@ -65,6 +65,7 @@ test('thirty A-B toggles ending at the active configuration do no work', () => {
     desiredKey: null,
     pendingKey: null,
     retryAttempt: 0,
+    exhausted: false,
     scheduled: false
   });
 });
@@ -133,6 +134,7 @@ test('a failed apply keeps the desired key and retries until it converges', () =
     desiredKey: 'b',
     pendingKey: 'b',
     retryAttempt: 1,
+    exhausted: false,
     scheduled: true
   });
   assert.equal(clock.timers[1].ms, 1000);
@@ -144,6 +146,7 @@ test('a failed apply keeps the desired key and retries until it converges', () =
     desiredKey: null,
     pendingKey: null,
     retryAttempt: 0,
+    exhausted: false,
     scheduled: false
   });
 });
@@ -179,12 +182,14 @@ test('a newer desired key cancels an older retry and owns the settle window', ()
 test('retries are bounded while the unconverged desired key remains observable', () => {
   const clock = fakeTimers();
   let attempts = 0;
+  const exhaustedEvents = [];
   const reconciler = createLatestWinsReconciler({
     delayMs: 1,
     retryDelaysMs: [10, 20],
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
-    apply: () => { attempts += 1; return false; }
+    apply: () => { attempts += 1; return false; },
+    onExhausted: (event) => exhaustedEvents.push(event)
   });
   reconciler.setActiveKey('a');
   reconciler.schedule('b');
@@ -194,11 +199,16 @@ test('retries are bounded while the unconverged desired key remains observable',
   clock.timers[2].fn();
 
   assert.equal(attempts, 3);
+  assert.deepEqual(exhaustedEvents, [{ key: 'b', attempts: 3, error: null }]);
   assert.deepEqual(reconciler.state(), {
     activeKey: 'a',
     desiredKey: 'b',
     pendingKey: null,
     retryAttempt: 2,
+    exhausted: true,
     scheduled: false
   });
+
+  reconciler.schedule('c');
+  assert.equal(reconciler.state().exhausted, false, 'a newer desired key owns a fresh retry budget');
 });

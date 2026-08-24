@@ -181,6 +181,35 @@ test('runCursorSync timeout requests termination and waits for child close', asy
   });
 });
 
+test('runCursorSync stops waiting when forced termination never reports close', async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {};
+  const signals = [];
+  const diagnostics = [];
+  child.kill = (signal) => { signals.push(signal); return true; };
+  const pending = runCursorSync({
+    spawn: () => child,
+    tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
+    timeoutMs: 1,
+    terminationOptions: { graceMs: 1, closeGraceMs: 1 },
+    onTerminationUnconfirmed: (error) => diagnostics.push(error.code)
+  });
+
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.code, 'termination-unconfirmed');
+    assert.match(error.cause?.message || '', /timed out after 1ms/);
+    assert.equal(error.syncFailureStage, 'timeout');
+    return true;
+  });
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  assert.deepEqual(diagnostics, ['termination-unconfirmed']);
+
+  child.emit('close', null, 'SIGKILL');
+});
+
 test('runCursorSync kills the child and keeps the abort error when superseded', async () => {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();

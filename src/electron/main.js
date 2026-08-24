@@ -2496,7 +2496,12 @@ const usageRuntimeReconciler = createLatestWinsReconciler({
   delayMs: USAGE_RECONFIGURE_SETTLE_MS,
   retryDelaysMs: USAGE_RECONFIGURE_RETRY_DELAYS_MS,
   apply: () => applyUsageRuntimeForMode(),
-  onError: (error) => console.log(`[usage-runtime] settings reconciliation failed: ${error.message}`)
+  onError: (error) => console.log(`[usage-runtime] settings reconciliation failed: ${error.message}`),
+  onExhausted: ({ attempts }) => recordDiagnosticEvent({
+    subsystem: 'usage-runtime',
+    code: 'usage-reconfigure-exhausted',
+    attempts
+  })
 });
 let localDevice = null;
 let localStats = null;
