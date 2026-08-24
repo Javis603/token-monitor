@@ -436,6 +436,9 @@ const sessionsWithLiveSource = new WeakSet();
 function mergeSession(target, source) {
   target.totalTokens += Math.max(0, Math.round(asNumber(source.totalTokens)));
   target.costUsd += asNumber(source.costUsd);
+  if (Object.prototype.hasOwnProperty.call(source, 'quotaCostUsd')) {
+    target.quotaCostUsd = asNumber(target.quotaCostUsd) + asNumber(source.quotaCostUsd);
+  }
   target.messageCount += Math.max(0, Math.round(asNumber(source.messageCount)));
   target.inputTokens += Math.max(0, Math.round(asNumber(source.inputTokens)));
   target.outputTokens += Math.max(0, Math.round(asNumber(source.outputTokens)));
@@ -493,6 +496,9 @@ function sessionFromRow(row) {
   const session = emptySession(client, id);
   session.totalTokens = Math.max(0, Math.round(tokenValueForClient(row, client)));
   session.costUsd = costValue(row);
+  if (row.quotaCostUsd !== undefined || row.quota_cost_usd !== undefined) {
+    session.quotaCostUsd = asNumber(row.quotaCostUsd ?? row.quota_cost_usd);
+  }
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
   Object.assign(session, sessionTokenComponents(row));
   session.startedAt = normalizeIsoTimestamp(firstString(row, STARTED_AT_KEYS));
@@ -520,6 +526,9 @@ function normalizeSession(input, fallbackKey) {
   const componentTotal = components.inputTokens + components.outputTokens + components.cacheReadTokens + components.cacheWriteTokens; // reasoning is a subset of output — see TOKEN_COMPONENT_KEYS
   session.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? input.tokens ?? componentTotal)));
   session.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
+  if (input.quotaCostUsd !== undefined || input.quota_cost_usd !== undefined) {
+    session.quotaCostUsd = asNumber(input.quotaCostUsd ?? input.quota_cost_usd);
+  }
   session.messageCount = Math.max(0, Math.round(firstNumber(input, MESSAGE_COUNT_KEYS)));
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));

@@ -4578,6 +4578,29 @@ function renderProviderWindows(provider, color) {
       monthlyNode.classList.add('limit-window-wide');
       windows.append(monthlyNode);
     }
+    const quotaEstimate = provider.weeklyQuotaValueEstimate;
+    if (quotaEstimate) {
+      const ready = quotaEstimate.status === 'ready' && Number.isFinite(quotaEstimate.estimatedUsd);
+      const estimateNode = limitWindowNode(
+        t('limits.codex.weeklyValueEstimate'),
+        { showMeter: false },
+        color,
+        0.68,
+        ready ? formatMoney(quotaEstimate.estimatedUsd, 'USD') : t('limits.codex.weeklyValueCollecting'),
+        ''
+      );
+      estimateNode.classList.add('limit-window-wide', 'limit-window-no-reset');
+      estimateNode.title = ready
+        ? t('limits.codex.weeklyValueReadyHelp', {
+            span: quotaEstimate.spanPercent,
+            cost: formatMoney(quotaEstimate.observedCostUsd, 'USD')
+          })
+        : t('limits.codex.weeklyValueCollectingHelp', {
+            span: quotaEstimate.spanPercent || 0,
+            required: quotaEstimate.requiredSampleCount || 3
+          });
+      windows.append(estimateNode);
+    }
     const resetNode = codexResetCreditsNode(provider.resetCredits);
     if (resetNode) windows.append(resetNode);
   } else if (provider.provider === 'cursor') {

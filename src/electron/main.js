@@ -234,6 +234,7 @@ const {
 const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServicesRecovery');
 const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
+const { createCodexWeeklyQuotaEstimateStore } = require('../shared/codexWeeklyQuotaEstimateStore');
 const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
 const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidgetDemand');
@@ -2510,13 +2511,45 @@ let cachedMacWidgetConfiguration;
 let trayRefreshInFlight = false;
 let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
+const codexWeeklyQuotaEstimateStore = createCodexWeeklyQuotaEstimateStore();
 
 function electronPresentationStats(stats) {
-  return projectLimitStatsForDisplay(stats, {
+  const visibleStats = projectLimitStatsForDisplay(stats, {
     localDeviceId: settings?.deviceId,
     syncActive: mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim()),
     opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
   });
+  const estimateSource = lastCollectedDevice
+    ? { ...visibleStats, periods: lastCollectedDevice.periods, devices: [lastCollectedDevice] }
+    : visibleStats;
+  let estimateResult;
+  try {
+    estimateResult = codexWeeklyQuotaEstimateStore.observe(estimateSource, {
+      localDeviceId: settings?.deviceId
+    });
+  } catch (error) {
+    console.warn(`Could not update Codex weekly quota estimate: ${error.message}`);
+  }
+  if (!Array.isArray(visibleStats?.limits?.providers)) return visibleStats;
+  return {
+    ...visibleStats,
+    limits: {
+      ...visibleStats.limits,
+      providers: visibleStats.limits.providers.map((provider) => {
+        if (provider?.provider !== 'codex') return provider;
+        const weekly = (provider.windows || []).find((window) => (
+          String(window?.kind || '').toLowerCase() === 'weekly'
+        ));
+        if (!weekly) return provider;
+        const accountKey = String(provider.accountKey || '').trim();
+        if (!accountKey) return provider;
+        const estimate = estimateResult?.accountKey === accountKey && estimateResult.estimate
+          ? estimateResult.estimate
+          : codexWeeklyQuotaEstimateStore.estimateForAccount(accountKey, weekly.resetsAt);
+        return { ...provider, weeklyQuotaValueEstimate: estimate };
+      })
+    }
+  };
 }
 let trayCodexPendingSince = 0;
 let trayCodexSwitchInFlight = false;
