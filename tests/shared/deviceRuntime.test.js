@@ -179,6 +179,10 @@ test('usage reconfigure restores the last known-good config when replacement sta
   assert.deepEqual(calls, [['usageStop']]);
   assert.equal(runtime.tick('manual'), 'rollback-tick');
   assert.deepEqual(rollbackCalls, [['manual', undefined]]);
+
+  assert.equal(runtime.reconfigureUsage({ clients: 'codex' }), true);
+  assert.deepEqual(startedClients, ['claude', 'codex', 'claude', 'codex']);
+  assert.deepEqual(calls, [['usageStop'], ['usageStop']]);
 });
 
 test('stop suppresses delegated diagnostic callbacks from late producer events', () => {

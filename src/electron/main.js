@@ -2491,8 +2491,10 @@ function withHistoryPreview(stats, devices) {
 let mode = 'idle';
 let deviceRuntimeHandle = null;
 const USAGE_RECONFIGURE_SETTLE_MS = 750;
+const USAGE_RECONFIGURE_RETRY_DELAYS_MS = Object.freeze([1000, 3000, 10_000]);
 const usageRuntimeReconciler = createLatestWinsReconciler({
   delayMs: USAGE_RECONFIGURE_SETTLE_MS,
+  retryDelaysMs: USAGE_RECONFIGURE_RETRY_DELAYS_MS,
   apply: () => applyUsageRuntimeForMode(),
   onError: (error) => console.log(`[usage-runtime] settings reconciliation failed: ${error.message}`)
 });

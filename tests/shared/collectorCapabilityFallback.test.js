@@ -18,6 +18,14 @@ function freshCollector() {
   return require(collectorPath);
 }
 
+async function waitFor(predicate, timeoutMs = 2000) {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt >= timeoutMs) throw new Error('Timed out waiting for capability probe state');
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 function jsonChild(payload) {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
@@ -186,6 +194,40 @@ test('a probe that itself fails surfaces the original tokscale error, not a sile
       }),
       /tokscale exited with code 2/
     );
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});
+
+test('a timed-out capability probe waits through forced termination until close', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = { end: () => {} };
+  const signals = [];
+  child.kill = (signal) => { signals.push(signal); return true; };
+  childProcess.spawn = () => child;
+
+  try {
+    const { spawnTokscaleHelp } = freshCollector();
+    const pending = spawnTokscaleHelp(
+      { bin: 'tokscale', prefixArgs: [], env: {}, identity: 'test' },
+      { timeoutMs: 1, terminationOptions: { graceMs: 1 } }
+    );
+    let settled = false;
+    pending.catch(() => { settled = true; });
+
+    await waitFor(() => signals.includes('SIGKILL'));
+    assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+    assert.equal(settled, false, 'probe remains in flight until physical close');
+    child.stdout.emit('data', Buffer.alloc(1024 * 1024, 120));
+    child.stderr.emit('data', Buffer.alloc(1024 * 1024, 121));
+    child.emit('close', null, 'SIGKILL');
+
+    await assert.rejects(pending, /capability probe timed out after 1ms/);
   } finally {
     childProcess.spawn = originalSpawn;
     delete require.cache[collectorPath];

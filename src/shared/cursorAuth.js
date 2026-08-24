@@ -9,6 +9,7 @@ const { createSubprocessTermination } = require('./subprocessTermination');
 const { classifyClientSyncDetailCode } = require('./clientHealth');
 
 const MAX_SYNC_EXIT_CODE = 2 ** 31 - 1;
+const MAX_TOKSCALE_STDERR_LENGTH = 64 * 1024;
 
 function annotateSyncError(error, failureStage, exitCode = null) {
   const target = error instanceof Error ? error : new Error(String(error || 'Cursor sync failed'));
@@ -134,8 +135,13 @@ function runTokscaleSubcommand(args, {
       );
       termination.request();
     }, timeoutMs);
-    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.stdout.on('data', (chunk) => {
+      if (!settled && !terminalError) stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      if (settled || terminalError || stderr.length >= MAX_TOKSCALE_STDERR_LENGTH) return;
+      stderr += chunk.toString().slice(0, MAX_TOKSCALE_STDERR_LENGTH - stderr.length);
+    });
     child.on('error', (error) => {
       if (terminalError) return;
       finish(annotateSyncError(error, 'spawn'));

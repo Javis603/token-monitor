@@ -60,7 +60,13 @@ test('thirty A-B toggles ending at the active configuration do no work', () => {
   assert.equal(clock.timers.length, 15);
   assert.ok(clock.timers.every((timer) => timer.cleared));
   assert.deepEqual(applied, []);
-  assert.deepEqual(reconciler.state(), { activeKey: 'a', pendingKey: null, scheduled: false });
+  assert.deepEqual(reconciler.state(), {
+    activeKey: 'a',
+    desiredKey: null,
+    pendingKey: null,
+    retryAttempt: 0,
+    scheduled: false
+  });
 });
 
 test('failed or cancelled reconciliation does not advance the active key', () => {
@@ -99,4 +105,100 @@ test('apply errors are reported without escaping the timer callback', () => {
   assert.doesNotThrow(() => clock.timers[0].fn());
   assert.deepEqual(seen, ['boom']);
   assert.equal(reconciler.state().activeKey, 'a');
+});
+
+test('a failed apply keeps the desired key and retries until it converges', () => {
+  const clock = fakeTimers();
+  const applied = [];
+  const seen = [];
+  const reconciler = createLatestWinsReconciler({
+    delayMs: 750,
+    retryDelaysMs: [1000, 3000],
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    apply: (key) => {
+      applied.push(key);
+      if (applied.length === 1) throw new Error('temporary startup failure');
+      return true;
+    },
+    onError: (error) => seen.push(error.message)
+  });
+  reconciler.setActiveKey('a');
+  reconciler.schedule('b');
+
+  clock.timers[0].fn();
+  assert.deepEqual(seen, ['temporary startup failure']);
+  assert.deepEqual(reconciler.state(), {
+    activeKey: 'a',
+    desiredKey: 'b',
+    pendingKey: 'b',
+    retryAttempt: 1,
+    scheduled: true
+  });
+  assert.equal(clock.timers[1].ms, 1000);
+
+  clock.timers[1].fn();
+  assert.deepEqual(applied, ['b', 'b']);
+  assert.deepEqual(reconciler.state(), {
+    activeKey: 'b',
+    desiredKey: null,
+    pendingKey: null,
+    retryAttempt: 0,
+    scheduled: false
+  });
+});
+
+test('a newer desired key cancels an older retry and owns the settle window', () => {
+  const clock = fakeTimers();
+  const applied = [];
+  const reconciler = createLatestWinsReconciler({
+    delayMs: 750,
+    retryDelaysMs: [1000],
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    apply: (key) => {
+      applied.push(key);
+      if (key === 'b') throw new Error('temporary startup failure');
+      return true;
+    }
+  });
+  reconciler.setActiveKey('a');
+  reconciler.schedule('b');
+  clock.timers[0].fn();
+
+  reconciler.schedule('c');
+  assert.equal(clock.timers[1].cleared, true, 'the retry for b is cancelled');
+  assert.equal(clock.timers[2].ms, 750);
+  clock.timers[2].fn();
+
+  assert.deepEqual(applied, ['b', 'c']);
+  assert.equal(reconciler.state().activeKey, 'c');
+  assert.equal(reconciler.state().desiredKey, null);
+});
+
+test('retries are bounded while the unconverged desired key remains observable', () => {
+  const clock = fakeTimers();
+  let attempts = 0;
+  const reconciler = createLatestWinsReconciler({
+    delayMs: 1,
+    retryDelaysMs: [10, 20],
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    apply: () => { attempts += 1; return false; }
+  });
+  reconciler.setActiveKey('a');
+  reconciler.schedule('b');
+
+  clock.timers[0].fn();
+  clock.timers[1].fn();
+  clock.timers[2].fn();
+
+  assert.equal(attempts, 3);
+  assert.deepEqual(reconciler.state(), {
+    activeKey: 'a',
+    desiredKey: 'b',
+    pendingKey: null,
+    retryAttempt: 2,
+    scheduled: false
+  });
 });

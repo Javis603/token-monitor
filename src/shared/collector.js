@@ -212,8 +212,14 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
       timeout = null;
       termination.request();
     }, commandTimeoutMs);
-    child.stdout.on('data', (chunk) => { if (!settled) stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk) => { if (!settled) stderr += chunk.toString(); });
+    // Keep draining both pipes after termination is requested, but stop retaining
+    // data the result can no longer use. A stubborn child must not grow our heap
+    // while the physical-close barrier waits for TERM/KILL to take effect.
+    child.stdout.on('data', (chunk) => { if (!settled && !terminalError) stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => {
+      if (settled || terminalError || stderr.length >= MAX_TOKSCALE_STDERR_LENGTH) return;
+      stderr += chunk.toString().slice(0, MAX_TOKSCALE_STDERR_LENGTH - stderr.length);
+    });
     child.on('error', (error) => {
       if (terminalError) return;
       finish(error);
@@ -234,26 +240,48 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
 }
 
 const TOKSCALE_CAPABILITY_PROBE_TIMEOUT_MS = 10_000;
+const MAX_TOKSCALE_STDERR_LENGTH = 64 * 1024;
 // tokscale rejects an unknown --client value with this exact exit code (see
 // the TOKSCALE_CLIENT_ALIASES comment above) — verified on 4.7.0 and 4.8.0.
 const TOKSCALE_UNKNOWN_CLIENT_EXIT_CODE = 2;
 
-function spawnTokscaleHelp(command) {
+function spawnTokscaleHelp(command, options = {}) {
+  const timeoutMs = options.timeoutMs ?? TOKSCALE_CAPABILITY_PROBE_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     const child = spawn(command.bin, [...command.prefixArgs, '--help'], { env: command.env, windowsHide: true });
     let stdout = '';
     let stderr = '';
-    const timeout = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error(`tokscale capability probe timed out after ${TOKSCALE_CAPABILITY_PROBE_TIMEOUT_MS}ms`));
-    }, TOKSCALE_CAPABILITY_PROBE_TIMEOUT_MS);
-    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', (error) => { clearTimeout(timeout); reject(error); });
-    child.on('close', (code) => {
+    let settled = false;
+    let terminalError = null;
+    const termination = createSubprocessTermination(child, options.terminationOptions);
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
-      if (code !== 0) return reject(new Error(`--help exited with code ${code}: ${stderr.trim() || stdout.trim()}`));
-      try { resolve(parseSupportedClients(`${stdout}\n${stderr}`)); } catch (error) { reject(error); }
+      termination.confirmClosed();
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const timeout = setTimeout(() => {
+      if (terminalError) return;
+      terminalError = new Error(`tokscale capability probe timed out after ${timeoutMs}ms`);
+      termination.request();
+    }, timeoutMs);
+    child.stdout.on('data', (chunk) => {
+      if (!settled && !terminalError) stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      if (settled || terminalError || stderr.length >= MAX_TOKSCALE_STDERR_LENGTH) return;
+      stderr += chunk.toString().slice(0, MAX_TOKSCALE_STDERR_LENGTH - stderr.length);
+    });
+    child.on('error', (error) => {
+      if (terminalError) return;
+      finish(error);
+    });
+    child.on('close', (code) => {
+      if (terminalError) return finish(terminalError);
+      if (code !== 0) return finish(new Error(`--help exited with code ${code}: ${stderr.trim() || stdout.trim()}`));
+      try { finish(null, parseSupportedClients(`${stdout}\n${stderr}`)); } catch (error) { finish(error); }
     });
   });
 }
@@ -1163,7 +1191,7 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
       termination.request();
     }, options.timeoutMs ?? 30000);
     child.stderr.on('data', (chunk) => {
-      if (stderr.length >= MAX_SYNC_DETAIL_INPUT_LENGTH) return;
+      if (terminalOutcome || stderr.length >= MAX_SYNC_DETAIL_INPUT_LENGTH) return;
       const remaining = MAX_SYNC_DETAIL_INPUT_LENGTH - stderr.length;
       stderr += chunk.toString().slice(0, remaining);
     });
@@ -3933,6 +3961,7 @@ module.exports = {
   selfSyncThrottle,
   isQoderCnSelfWatchEvent,
   shouldIncludeHistory,
+  spawnTokscaleHelp,
   startCollector,
   tokscaleCommand,
   tokscaleClientFilter,
