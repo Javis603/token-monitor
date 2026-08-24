@@ -96,61 +96,34 @@ function mergeSelfSyncSelection(left, right) {
 // it is read per call, never captured, so patching Date.now still works.
 function createSelfSyncThrottle(options = {}) {
   const now = () => (typeof options.now === 'function' ? options.now() : Date.now());
-  const lastSyncAt = {};
-  // Whether the last attempt for this kind failed. The short source floor is a
-  // reward for a sync that works: once one fails there is nothing upstream to
-  // say whether the cause is transient, so the client drops to the idle cadence
-  // until an attempt succeeds. Expressed as the floor itself rather than as a
-  // longer timer, because the floor is read from three places — the drain, the
-  // catch-up arm, and the sync decision — and a backoff that only moved the
-  // timer still let an unrelated client's watch event drain the failed one
-  // straight back out.
-  const lastSyncFailed = {};
-  // A collector replacement may cancel an in-flight sync, while two explicit
-  // refreshes can still overlap. Latest attempt wins: a completion only writes
-  // the flag while it is still the newest attempt for its kind. Cancellation
-  // invalidates its attempt token and restores the claim it consumed, so the
-  // replacement collector may take that allowance without turning a lifecycle
-  // event into failure backoff.
-  const attemptSeq = {};
-  // Reporting state, kept apart from the three fields above because those decide
-  // behaviour and these only describe it. `lastSyncAt` in particular is the
-  // rate-limit anchor — `claim()` moves it, and a completion deliberately does
-  // not — so it answers "when may the next sync run", never "when did one last
-  // work". A diagnostic that reads it as the latter is the mistake this exists
-  // to prevent.
-  const lastAttemptAt = {};
-  const lastSuccessAt = {};
-  const lastFailureCode = {};
-  const lastFailureStage = {};
-  const lastDetailCode = {};
-  const lastExitCode = {};
-  const pendingAttemptSeq = {};
-  const hasCompletedAttempt = {};
-  const pendingClaimPreviousSyncAt = {};
-  const attemptPreviousSyncAt = {};
-  const attemptPreviousLastAttemptAt = {};
-  for (const kind of SELF_SYNC_KINDS) {
-    lastSyncAt[kind] = 0;
-    lastSyncFailed[kind] = false;
-    attemptSeq[kind] = 0;
-    lastAttemptAt[kind] = 0;
-    lastSuccessAt[kind] = 0;
-    lastFailureCode[kind] = '';
-    lastFailureStage[kind] = '';
-    lastDetailCode[kind] = '';
-    lastExitCode[kind] = null;
-    pendingAttemptSeq[kind] = 0;
-    hasCompletedAttempt[kind] = false;
-    pendingClaimPreviousSyncAt[kind] = null;
-    attemptPreviousSyncAt[kind] = 0;
-    attemptPreviousLastAttemptAt[kind] = 0;
-  }
+  // Keep every field for one client together. These values form one state
+  // machine: splitting them into parallel maps made adding cancellation state
+  // depend on every method updating the same growing list of containers.
+  const states = Object.fromEntries(SELF_SYNC_KINDS.map((kind) => [kind, {
+    // Rate-limit state. `lastSyncAt` is moved by claim(), not completion.
+    lastSyncAt: 0,
+    lastSyncFailed: false,
+    // Latest-attempt fence and the rollback snapshot for cancellation.
+    attemptSeq: 0,
+    pendingAttemptSeq: 0,
+    pendingClaimPreviousSyncAt: null,
+    attemptPreviousSyncAt: 0,
+    attemptPreviousLastAttemptAt: 0,
+    // Reporting state. It never decides whether a sync may run.
+    hasCompletedAttempt: false,
+    lastAttemptAt: 0,
+    lastSuccessAt: 0,
+    lastFailureCode: '',
+    lastFailureStage: '',
+    lastDetailCode: '',
+    lastExitCode: null
+  }]));
 
   // Claims the right to sync `kind` now, stamping the clock when it grants one.
   function claim(kind, minIntervalMs = SYNC_MIN_INTERVAL_MS) {
+    const state = states[kind];
     const nowMs = now();
-    const elapsed = nowMs - lastSyncAt[kind];
+    const elapsed = nowMs - state.lastSyncAt;
     // A backwards clock step (an NTP correction, a VM resume) leaves a stamp in
     // the future, and a negative elapsed compares below every floor — including
     // the zero floor, which would refuse the manual refresh outright. The stamp
@@ -159,8 +132,8 @@ function createSelfSyncThrottle(options = {}) {
     // other deadline in the collector is wall-clock too, and one hybrid would be
     // worse than this guard.
     if (elapsed >= 0 && elapsed < minIntervalMs) return false;
-    pendingClaimPreviousSyncAt[kind] = lastSyncAt[kind];
-    lastSyncAt[kind] = nowMs;
+    state.pendingClaimPreviousSyncAt = state.lastSyncAt;
+    state.lastSyncAt = nowMs;
     return true;
   }
 
@@ -171,51 +144,54 @@ function createSelfSyncThrottle(options = {}) {
   // claim — a stamp from a clock that no longer exists is not something to wait
   // out.
   function msUntilDue(kind, minIntervalMs) {
-    const elapsed = now() - lastSyncAt[kind];
+    const elapsed = now() - states[kind].lastSyncAt;
     if (elapsed < 0) return 0;
     return Math.max(0, minIntervalMs - elapsed);
   }
 
   function beginAttempt(kind) {
-    attemptSeq[kind] += 1;
-    pendingAttemptSeq[kind] = attemptSeq[kind];
-    attemptPreviousSyncAt[kind] = pendingClaimPreviousSyncAt[kind] ?? lastSyncAt[kind];
-    pendingClaimPreviousSyncAt[kind] = null;
-    attemptPreviousLastAttemptAt[kind] = lastAttemptAt[kind];
-    lastAttemptAt[kind] = now();
-    return attemptSeq[kind];
+    const state = states[kind];
+    state.attemptSeq += 1;
+    state.pendingAttemptSeq = state.attemptSeq;
+    state.attemptPreviousSyncAt = state.pendingClaimPreviousSyncAt ?? state.lastSyncAt;
+    state.pendingClaimPreviousSyncAt = null;
+    state.attemptPreviousLastAttemptAt = state.lastAttemptAt;
+    state.lastAttemptAt = now();
+    return state.attemptSeq;
   }
 
   function completeAttempt(kind, attempt, failed, code = '', details = {}) {
-    if (attempt !== attemptSeq[kind] || pendingAttemptSeq[kind] !== attempt) return;
-    pendingAttemptSeq[kind] = 0;
-    hasCompletedAttempt[kind] = true;
-    lastSyncFailed[kind] = failed;
+    const state = states[kind];
+    if (attempt !== state.attemptSeq || state.pendingAttemptSeq !== attempt) return;
+    state.pendingAttemptSeq = 0;
+    state.hasCompletedAttempt = true;
+    state.lastSyncFailed = failed;
     if (!failed) {
-      lastSuccessAt[kind] = now();
-      lastFailureCode[kind] = '';
-      lastFailureStage[kind] = '';
-      lastDetailCode[kind] = '';
-      lastExitCode[kind] = null;
+      state.lastSuccessAt = now();
+      state.lastFailureCode = '';
+      state.lastFailureStage = '';
+      state.lastDetailCode = '';
+      state.lastExitCode = null;
       return;
     }
     const requestedStage = normalizeClientSyncFailureStage(details?.failureStage);
     const failureStage = requestedStage || FAILURE_STAGE_BY_CODE[code] || 'unknown';
-    lastFailureCode[kind] = SELF_SYNC_FAILURE_CODES.has(code)
+    state.lastFailureCode = SELF_SYNC_FAILURE_CODES.has(code)
       ? code
       : (FAILURE_CODE_BY_STAGE[failureStage] || 'sync-failed');
-    lastFailureStage[kind] = failureStage;
-    lastDetailCode[kind] = normalizeClientSyncDetailCode(details?.detailCode) || 'unknown';
-    lastExitCode[kind] = normalizeClientSyncExitCode(details?.exitCode);
+    state.lastFailureStage = failureStage;
+    state.lastDetailCode = normalizeClientSyncDetailCode(details?.detailCode) || 'unknown';
+    state.lastExitCode = normalizeClientSyncExitCode(details?.exitCode);
   }
 
   function cancelAttempt(kind, attempt) {
-    if (attempt !== attemptSeq[kind] || pendingAttemptSeq[kind] !== attempt) return false;
-    lastSyncAt[kind] = attemptPreviousSyncAt[kind];
-    lastAttemptAt[kind] = attemptPreviousLastAttemptAt[kind];
-    pendingAttemptSeq[kind] = 0;
+    const state = states[kind];
+    if (attempt !== state.attemptSeq || state.pendingAttemptSeq !== attempt) return false;
+    state.lastSyncAt = state.attemptPreviousSyncAt;
+    state.lastAttemptAt = state.attemptPreviousLastAttemptAt;
+    state.pendingAttemptSeq = 0;
     // Fence a late subprocess completion without reusing the cancelled token.
-    attemptSeq[kind] += 1;
+    state.attemptSeq += 1;
     return true;
   }
 
@@ -223,22 +199,23 @@ function createSelfSyncThrottle(options = {}) {
   // completed state (or idle when there was none), so a collector replacement
   // never surfaces as a provider failure or a permanently pending attempt.
   function syncStatus(kind) {
+    const current = states[kind];
     let state = 'idle';
-    if (pendingAttemptSeq[kind]) state = 'pending';
-    else if (hasCompletedAttempt[kind]) state = lastSyncFailed[kind] ? 'failed' : 'ok';
+    if (current.pendingAttemptSeq) state = 'pending';
+    else if (current.hasCompletedAttempt) state = current.lastSyncFailed ? 'failed' : 'ok';
     return {
       state,
-      lastAttemptAt: lastAttemptAt[kind] || 0,
-      lastSuccessAt: lastSuccessAt[kind] || 0,
-      failureCode: lastFailureCode[kind] || '',
-      failureStage: lastFailureStage[kind] || '',
-      detailCode: lastDetailCode[kind] || '',
-      exitCode: lastExitCode[kind]
+      lastAttemptAt: current.lastAttemptAt || 0,
+      lastSuccessAt: current.lastSuccessAt || 0,
+      failureCode: current.lastFailureCode || '',
+      failureStage: current.lastFailureStage || '',
+      detailCode: current.lastDetailCode || '',
+      exitCode: current.lastExitCode
     };
   }
 
   function sourceFloorMs(kind) {
-    return lastSyncFailed[kind] ? SYNC_MIN_INTERVAL_MS : SYNC_SOURCE_EVENT_MIN_INTERVAL_MS;
+    return states[kind].lastSyncFailed ? SYNC_MIN_INTERVAL_MS : SYNC_SOURCE_EVENT_MIN_INTERVAL_MS;
   }
 
   // How long this kind must have been idle before a tick may sync it. An

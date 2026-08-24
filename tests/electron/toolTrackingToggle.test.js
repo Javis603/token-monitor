@@ -31,7 +31,7 @@ test('usage-structural changes replace usage without restarting limits', () => {
   const handler = mainSource.slice(start, end);
   assert.match(handler, /if \(runtimeChange\.usageStructural\) \{\s*reconfigureUsageRuntimeForMode\(\);\s*\}/);
   assert.doesNotMatch(handler, /runtimeChange\.usageStructural \|\| runtimeChange\.sinkStructural/);
-  assert.match(mainSource, /usageRuntimeReconciler\.schedule\(usageSettingsFingerprint\(settings\)\)/);
+  assert.match(mainSource, /usageRuntimeReconciler\.schedule\(usageConfigFingerprint\(usageConfigForMode\(\)\)\)/);
 });
 
 test('exhausted usage replacement retries are visible in diagnostics', () => {

@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const semver = require('semver');
+const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv, PARSE_LOCAL_CLIENTS } = require('./clientTracking');
@@ -166,17 +167,6 @@ function parseJsonOutput(stdout) {
     }
   }
   throw new Error(`Could not parse tokscale JSON output: ${text.slice(0, 300)}`);
-}
-
-function abortReason(signal, fallback = 'operation aborted') {
-  if (signal?.reason instanceof Error) return signal.reason;
-  const error = new Error(String(signal?.reason || fallback));
-  error.name = 'AbortError';
-  return error;
-}
-
-function throwIfAborted(signal) {
-  if (signal?.aborted) throw abortReason(signal);
 }
 
 function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand(), signal, options = {}) {

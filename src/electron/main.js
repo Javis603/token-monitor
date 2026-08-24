@@ -277,7 +277,7 @@ const {
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
-  usageSettingsFingerprint,
+  usageConfigFingerprint,
   usageConfigFromSettings
 } = require('./runtimeConfig');
 const {
@@ -3455,7 +3455,7 @@ function startSyncCollector() {
   }, {
     limitsDeps: electronLimitsDeps()
   });
-  usageRuntimeReconciler.setActiveKey(usageSettingsFingerprint(settings));
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
@@ -3502,7 +3502,7 @@ function startHostCollector() {
   }, {
     limitsDeps: electronLimitsDeps()
   });
-  usageRuntimeReconciler.setActiveKey(usageSettingsFingerprint(settings));
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
@@ -4043,7 +4043,7 @@ function startLocalCollector() {
   }, {
     limitsDeps: electronLimitsDeps()
   });
-  usageRuntimeReconciler.setActiveKey(usageSettingsFingerprint(settings));
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
@@ -4904,19 +4904,26 @@ function restartDeviceRuntimeForMode() {
   else startLocalCollector();
 }
 
+function usageCollectorNameForMode() {
+  return mode === 'local'
+    ? 'collector'
+    : (settings.hubMode === 'host' && embeddedHub ? 'host-collector' : 'sync-collector');
+}
+
+function usageConfigForMode() {
+  return electronUsageConfig(usageCollectorNameForMode());
+}
+
 function applyUsageRuntimeForMode() {
   if (!deviceRuntimeHandle?.reconfigureUsage) {
     restartDeviceRuntimeForMode();
     return Boolean(deviceRuntimeHandle);
   }
-  const collectorName = mode === 'local'
-    ? 'collector'
-    : (settings.hubMode === 'host' && embeddedHub ? 'host-collector' : 'sync-collector');
-  return deviceRuntimeHandle.reconfigureUsage(electronUsageConfig(collectorName)) === true;
+  return deviceRuntimeHandle.reconfigureUsage(usageConfigForMode()) === true;
 }
 
 function reconfigureUsageRuntimeForMode() {
-  return usageRuntimeReconciler.schedule(usageSettingsFingerprint(settings));
+  return usageRuntimeReconciler.schedule(usageConfigFingerprint(usageConfigForMode()));
 }
 
 // Quit-path teardown. Every step here must be synchronous, because performQuit

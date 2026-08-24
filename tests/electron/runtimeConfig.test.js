@@ -11,7 +11,7 @@ const {
   envelopeFromSettings,
   limitsConfigFromSettings,
   normalizeAllTimeSince,
-  usageSettingsFingerprint,
+  usageConfigFingerprint,
   usageConfigFromSettings
 } = require('../../src/electron/runtimeConfig');
 
@@ -21,19 +21,65 @@ test('all-time dates are normalized before entering the usage runtime', () => {
   assert.equal(normalizeAllTimeSince('not-a-date'), '2024-01-01');
 });
 
-test('usage settings fingerprint ignores display-only changes and tracks structural ones', () => {
+test('usage config fingerprint tracks only effective structural values', () => {
   const base = {
     clients: 'claude,codex',
     historyEnabled: true,
     hiddenClients: 'codex'
   };
+  const context = {
+    intervalMs: 10 * 60 * 1000,
+    historyIntervalMs: 15 * 60 * 1000,
+    watchEnabled: true,
+    watchTriggersCollection: false,
+    intervalRequiresActivity: true
+  };
+  const baseConfig = usageConfigFromSettings(base, {
+    ...context,
+    onError: () => 'first',
+    logger: () => 'first'
+  });
+  const displayConfig = usageConfigFromSettings({ ...base, hiddenClients: 'claude', glassBlur: 80 }, {
+    ...context,
+    onError: () => 'second',
+    logger: () => 'second'
+  });
   assert.equal(
-    usageSettingsFingerprint(base),
-    usageSettingsFingerprint({ ...base, hiddenClients: 'claude', glassBlur: 80 })
+    usageConfigFingerprint(baseConfig),
+    usageConfigFingerprint(displayConfig),
+    'callbacks and display-only settings do not identify collection work'
   );
   assert.notEqual(
-    usageSettingsFingerprint(base),
-    usageSettingsFingerprint({ ...base, clients: 'claude' })
+    usageConfigFingerprint(usageConfigFromSettings(base, context)),
+    usageConfigFingerprint(usageConfigFromSettings({ ...base, clients: 'claude' }, context))
+  );
+});
+
+test('usage config fingerprint dedupes raw settings with the same effective runtime', () => {
+  const smartContext = {
+    intervalMs: 10 * 60 * 1000,
+    historyIntervalMs: 15 * 60 * 1000,
+    watchEnabled: true,
+    watchTriggersCollection: false,
+    intervalRequiresActivity: true
+  };
+  const omittedDefaults = usageConfigFromSettings({ collectionIntervalMs: 5 * 60 * 1000 }, smartContext);
+  const explicitDefaults = usageConfigFromSettings({
+    collectionIntervalMs: 30 * 60 * 1000,
+    historyEnabled: true,
+    sessionUsageArchiveEnabled: true,
+    projectsEnabled: true,
+    wslScanEnabled: true
+  }, smartContext);
+
+  assert.equal(
+    usageConfigFingerprint(omittedDefaults),
+    usageConfigFingerprint(explicitDefaults),
+    'smart mode ignores raw intervals and explicit true defaults'
+  );
+  assert.notEqual(
+    usageConfigFingerprint(explicitDefaults),
+    usageConfigFingerprint(usageConfigFromSettings({ historyEnabled: false }, smartContext))
   );
 });
 

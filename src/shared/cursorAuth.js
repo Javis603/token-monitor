@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
+const { abortReason } = require('./abortSignal');
 const {
   createSubprocessTermination,
   terminationUnconfirmedError
@@ -103,7 +104,7 @@ function runTokscaleSubcommand(args, {
   terminationOptions,
   onTerminationUnconfirmed
 } = {}) {
-  if (signal?.aborted) return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('Cursor sync aborted'));
+  if (signal?.aborted) return Promise.reject(abortReason(signal, 'Cursor sync aborted'));
   return new Promise((resolve, reject) => {
     const tokscaleCommand = resolveTokscaleCommand || require('./collector').tokscaleCommand;
     const { bin, prefixArgs, env } = tokscaleCommand();
@@ -133,7 +134,7 @@ function runTokscaleSubcommand(args, {
 
     function onAbort() {
       if (terminalError) return;
-      terminalError = signal.reason instanceof Error ? signal.reason : new Error('Cursor sync aborted');
+      terminalError = abortReason(signal, 'Cursor sync aborted');
       clearTimeout(timer);
       termination.request();
     }
