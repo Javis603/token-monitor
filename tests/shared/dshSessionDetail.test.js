@@ -175,8 +175,11 @@ test('readDshSessionDetail counts compaction summaries as real provider calls', 
 
   const detail = readDshSessionDetail({ sessionId: 'session-summary', sessionsRoot: root, home: '/home/tester', env: {} });
   assert.equal(detail.exchanges.length, 1);
-  assert.equal(detail.exchanges[0].turnCount, 2);
+  assert.equal(detail.exchanges[0].turnCount, 1);
+  assert.equal(detail.exchanges[0].turns.length, 2);
+  assert.deepEqual(detail.exchanges[0].turns.map((turn) => turn.type), ['compaction-summary', 'reply']);
   assert.equal(detail.totals.totalTokens, 100);
+  assert.equal(detail.totals.turnCount, 1);
 });
 
 test('readDshSessionDetail namespaces summaries away from matching assistant calls', () => {
@@ -191,8 +194,23 @@ test('readDshSessionDetail namespaces summaries away from matching assistant cal
   ]);
 
   const detail = readDshSessionDetail({ sessionId: 'session-summary-identity', sessionsRoot: root, home: '/home/tester', env: {} });
-  assert.equal(detail.exchanges[0].turnCount, 2);
+  assert.equal(detail.exchanges[0].turnCount, 1);
+  assert.equal(detail.exchanges[0].turns.length, 2);
   assert.equal(detail.totals.totalTokens, 60);
+});
+
+test('readDshSessionDetail retains summary-only paid usage without claiming a reply', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  writeFixture(root, 'session-summary-only', [
+    sessionHeader({ id: 'session-summary-only' }),
+    compactionSummary({ seq: 1, usage: { inputTokens: 10, outputTokens: 20 } })
+  ]);
+
+  const detail = readDshSessionDetail({ sessionId: 'session-summary-only', sessionsRoot: root, home: '/home/tester', env: {} });
+  assert.equal(detail.exchanges.length, 1);
+  assert.equal(detail.exchanges[0].turnCount, 0);
+  assert.equal(detail.exchanges[0].turns.length, 1);
+  assert.equal(detail.totals.totalTokens, 30);
 });
 
 // #419 (the PR this module's discovery/decode primitives were extracted from)

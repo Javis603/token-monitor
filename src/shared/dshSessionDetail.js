@@ -157,7 +157,13 @@ function parseDshDetailEvents(text) {
       const tools = !isSummary && Array.isArray(record.data?.message?.content)
         ? record.data.message.content.filter((block) => block && block.type === 'tool-call' && typeof block.name === 'string').map((block) => block.name)
         : [];
-      events.push({ kind: 'turn', timestamp: new Date(time).toISOString(), tokens, tools });
+      events.push({
+        kind: 'turn',
+        type: isSummary ? 'compaction-summary' : 'reply',
+        timestamp: new Date(time).toISOString(),
+        tokens,
+        tools
+      });
     }
   }
   return events;
