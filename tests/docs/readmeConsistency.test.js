@@ -109,7 +109,7 @@ const supportedToolIdOrder = [
   'volcengine',
   'ollama',
   'trae',
-  'newapi'
+  'thirdparty'
 ];
 
 // Exact counts, not "at least": a floor check would still pass after new tools land, which is
@@ -178,8 +178,7 @@ test('localized READMEs list the same supported tools', () => {
 const README_ICON_TO_LIMIT_PROVIDERS = {
   xai: ['grok'],
   'mimo-code': ['mimo'],
-  zcode: ['zai', 'zaiteam'],
-  newapi: ['thirdparty']
+  zcode: ['zai', 'zaiteam']
 };
 
 test('limit provider order follows the supported-tools table', () => {

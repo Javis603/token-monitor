@@ -24,6 +24,7 @@ const NEWAPI_TOKEN_USAGE_PATH = '/api/usage/token/';
 const SUB2API_ME_PATH = '/api/v1/auth/me';
 const SUB2API_REFRESH_PATH = '/api/v1/auth/refresh';
 const SUB2API_USAGE_STATS_PATH = '/api/v1/usage/stats?period=month';
+const SUB2API_DASHBOARD_STATS_PATH = '/api/v1/usage/dashboard/stats';
 const DEFAULT_CUSTOM_ENDPOINT_PATH = '/user/balance';
 const DEFAULT_CUSTOM_CURRENCY = 'USD';
 const DEFAULT_CUSTOM_DIVISOR = 1;
@@ -300,6 +301,22 @@ function sub2apiAccountQuota(meData) {
     });
 }
 
+function sub2apiUsageSummary(stats) {
+  if (!stats || typeof stats !== 'object') return null;
+  return {
+    period: 'month',
+    requests: stats.total_requests,
+    inputTokens: stats.total_input_tokens,
+    outputTokens: stats.total_output_tokens,
+    cacheReadTokens: stats.total_cache_read_tokens,
+    cacheCreationTokens: stats.total_cache_creation_tokens,
+    totalTokens: stats.total_tokens,
+    standardCost: stats.total_cost,
+    actualCost: stats.total_actual_cost,
+    averageDurationMs: stats.average_duration_ms
+  };
+}
+
 function customBalanceQuota(payload, account) {
   if (payload?.success === false || payload?.code === false) return null;
   const divisor = account.divisor;
@@ -408,6 +425,12 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
     identity(account) {
       return [account.baseUrl, account.accessToken || account.refreshToken];
     },
+    accountKeyIdentity(account) {
+      // Both dashboard credentials rotate. Keep the runtime identity tied to
+      // the named profile so a renewal or manual replacement cannot leave the
+      // previous last-good row behind.
+      return [account.baseUrl, account.name];
+    },
     request(account) {
       return {
         path: SUB2API_ME_PATH,
@@ -416,15 +439,13 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
         }
       };
     },
-    // Rolling-month usage stats only enrich the balance with a display-layer
-    // monthSpend; a failed or absent stats response must not hide the balance.
-    optionalStatus: true,
-    statusRequest(account) {
+    // Usage endpoints only enrich the balance. Older deployments may omit
+    // either one, so a failed stats response must not hide a valid balance.
+    enrichmentRequests(account) {
+      const headers = { Authorization: `Bearer ${account.accessToken}` };
       return {
-        path: SUB2API_USAGE_STATS_PATH,
-        headers: {
-          Authorization: `Bearer ${account.accessToken}`
-        }
+        month: { path: SUB2API_USAGE_STATS_PATH, headers },
+        allTime: { path: SUB2API_DASHBOARD_STATS_PATH, headers }
       };
     },
     unit() {
@@ -450,14 +471,18 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
       }
       return { accessToken, refreshToken };
     },
-    quota(payload, _unit, _account, statusPayload) {
+    quota(payload, _unit, _account, _statusPayload, enrichmentPayloads) {
       const data = sub2apiData(payload);
       if (!data) return null;
       const quota = sub2apiAccountQuota(data);
       if (quota) {
-        const stats = sub2apiData(statusPayload);
-        const monthSpend = finiteNumber(stats?.total_actual_cost);
-        if (monthSpend !== null && monthSpend > 0) quota.balance.monthSpend = monthSpend;
+        const monthStats = sub2apiData(enrichmentPayloads?.month);
+        const allTimeStats = sub2apiData(enrichmentPayloads?.allTime);
+        const monthSpend = finiteNumber(monthStats?.total_actual_cost);
+        const allTimeSpend = finiteNumber(allTimeStats?.total_actual_cost);
+        if (monthSpend !== null) quota.balance.monthSpend = monthSpend;
+        if (allTimeSpend !== null) quota.balance.allTimeSpend = allTimeSpend;
+        quota.usageSummary = sub2apiUsageSummary(monthStats);
       }
       return quota;
     },
@@ -536,11 +561,11 @@ function endpoint(baseUrl, path) {
   return `${baseUrl}${path}`;
 }
 
-// One renewal retry per fetch: when the quota request is rejected as unauthorized
-// and the adapter can mint fresh credentials, rotate them, hand the rotated pair
-// to deps.onThirdPartyCredentialsRenewed for persistence, and retry once. Without
-// a persistence callback the renewal is skipped on purpose: single-use refresh
-// tokens must not be burned when the rotated value cannot be stored.
+// A Sub2API refresh token is single-use. Only rotate when the caller owns a
+// persistence callback, and require that callback to durably accept the new
+// pair before retrying the quota request. A failed compare-and-swap therefore
+// cannot make a stale collection cycle look successful with credentials that
+// the next cycle cannot recover.
 async function fetchQuotaWithRenewal(account, adapter, deps) {
   const attempt = async (credentials) => {
     const effective = credentials ? { ...account, ...credentials } : account;
@@ -564,10 +589,17 @@ async function fetchQuotaWithRenewal(account, adapter, deps) {
       previous: { accessToken: account.accessToken || '', refreshToken: account.refreshToken },
       next
     };
+    let persisted;
     try {
-      await deps.onThirdPartyCredentialsRenewed(renewal);
+      persisted = await deps.onThirdPartyCredentialsRenewed(renewal);
     } catch (_) {
-      // Best effort: this cycle still proceeds with the rotated credentials.
+      persisted = false;
+    }
+    if (persisted !== true) {
+      const persistenceError = new Error('Sub2API renewed credentials could not be persisted');
+      persistenceError.status = 'unavailable';
+      persistenceError.code = 'credentialPersistenceFailed';
+      throw persistenceError;
     }
     return { payload: await attempt(next), renewal };
   }
@@ -595,6 +627,23 @@ async function requestJson(url, options = {}, deps = {}) {
   return response.json();
 }
 
+async function fetchOptionalEnrichments(account, adapter, deps) {
+  const requests = Object.entries(adapter.enrichmentRequests?.(account) || {});
+  const results = await Promise.all(requests.map(async ([key, request]) => {
+    try {
+      const value = await requestJson(
+        endpoint(account.baseUrl, request.path),
+        { headers: request.headers },
+        deps
+      );
+      return [key, value];
+    } catch (_) {
+      return null;
+    }
+  }));
+  return Object.fromEntries(results.filter(Boolean));
+}
+
 function normalizeThirdPartyProfile(profile = {}) {
   if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return null;
   const adapter = normalizeAdapterId(profile.adapter);
@@ -613,6 +662,13 @@ function accountIdentity(account) {
   return [account.adapter, ...identity].join('\0');
 }
 
+function accountKeyIdentity(account, adapter, quotaPayload) {
+  const identity = adapter.accountKeyIdentity?.(account, quotaPayload);
+  return identity
+    ? [account.adapter, ...identity].join('\0')
+    : accountIdentity(account);
+}
+
 function configuredAccounts(options = {}, deps = {}) {
   const accounts = [];
   const seen = new Set();
@@ -620,9 +676,10 @@ function configuredAccounts(options = {}, deps = {}) {
     const profileName = thirdPartyProfileName(name);
     const normalized = normalizeThirdPartyProfile(profile);
     if (!profileName || !normalized?.enabled) continue;
-    const identity = accountIdentity(normalized);
+    const account = { name: profileName, ...normalized };
+    const identity = accountIdentity(account);
     if (seen.has(identity)) continue;
-    accounts.push({ name: profileName, ...normalized });
+    accounts.push(account);
     seen.add(identity);
   }
 
@@ -676,21 +733,36 @@ async function fetchThirdPartyAccount(account, deps = {}) {
         (reason) => ({ fulfilled: false, reason })
       )
     : Promise.resolve(null);
+  const enrichmentPromise = fetchOptionalEnrichments(account, adapter, deps);
   let quotaResultPayload = null;
+  let renewedCredentials = null;
   let quotaError = null;
   try {
-    quotaResultPayload = (await fetchQuotaWithRenewal(account, adapter, deps)).payload;
+    const quotaResult = await fetchQuotaWithRenewal(account, adapter, deps);
+    quotaResultPayload = quotaResult.payload;
+    renewedCredentials = quotaResult.renewal?.next || null;
   } catch (error) {
     quotaError = error;
   }
   const statusResponse = await statusPromise;
+  const enrichmentPayloads = renewedCredentials
+    ? await fetchOptionalEnrichments({ ...account, ...renewedCredentials }, adapter, deps)
+    : await enrichmentPromise;
   if (deps.signal?.aborted) {
     throw deps.signal.reason || Object.assign(new Error('Third-party API request aborted'), { name: 'AbortError' });
   }
 
   const common = {
     provider: THIRD_PARTY_PROVIDER_ID,
-    accountKey: hashKey(THIRD_PARTY_PROVIDER_ID, accountIdentity(account)),
+    adapterId: account.adapter,
+    accountKey: hashKey(
+      THIRD_PARTY_PROVIDER_ID,
+      accountKeyIdentity(
+        account,
+        adapter,
+        quotaResultPayload
+      )
+    ),
     accountName: account.name,
     accountLabel: account.name,
     source: 'api',
@@ -713,7 +785,7 @@ async function fetchThirdPartyAccount(account, deps = {}) {
 
   const statusPayload = statusResponse && statusResponse.fulfilled ? statusResponse.value : null;
   const unit = adapter.unit(statusPayload);
-  const quota = adapter.quota(quotaResultPayload, unit, account, statusPayload);
+  const quota = adapter.quota(quotaResultPayload, unit, account, statusPayload, enrichmentPayloads);
   if (!quota) {
     return normalizeLimitProvider({
       ...common,
@@ -727,7 +799,8 @@ async function fetchThirdPartyAccount(account, deps = {}) {
     planLabel: adapter.planLabel(),
     status: 'ok',
     windows: [quota.window],
-    balance: quota.balance
+    balance: quota.balance,
+    usageSummary: quota.usageSummary
   });
 }
 
@@ -765,8 +838,10 @@ module.exports = {
   NEWAPI_TOKEN_ADAPTER,
   NEWAPI_TOKEN_USAGE_PATH,
   SUB2API_ADAPTER,
+  SUB2API_DASHBOARD_STATS_PATH,
   SUB2API_ME_PATH,
   SUB2API_REFRESH_PATH,
+  SUB2API_USAGE_STATS_PATH,
   THIRD_PARTY_ADAPTER_IDS,
   THIRD_PARTY_ADAPTERS,
   THIRD_PARTY_ENV_ACCOUNT_NAME,

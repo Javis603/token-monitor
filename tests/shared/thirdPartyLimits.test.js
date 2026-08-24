@@ -3,6 +3,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
+const { createLimitsRuntime } = require('../../src/shared/limitsRuntime');
+
 const {
   DEFAULT_QUOTA_PER_UNIT,
   CUSTOM_BALANCE_ADAPTER,
@@ -12,8 +14,10 @@ const {
   NEWAPI_TOKEN_ADAPTER,
   NEWAPI_TOKEN_USAGE_PATH,
   SUB2API_ADAPTER,
+  SUB2API_DASHBOARD_STATS_PATH,
   SUB2API_ME_PATH,
   SUB2API_REFRESH_PATH,
+  SUB2API_USAGE_STATS_PATH,
   THIRD_PARTY_ADAPTER_IDS,
   THIRD_PARTY_ADAPTERS,
   THIRD_PARTY_ENV_ACCOUNT_NAME,
@@ -315,7 +319,7 @@ test('New API token adapter exposes only that token quota', async () => {
   assert.equal(JSON.stringify(provider).includes('sk-personal'), false);
 });
 
-test('Sub2API adapter reports the dashboard account balance without a status request', async () => {
+test('Sub2API adapter reports the dashboard balance without usable enrichment totals', async () => {
   const calls = [];
   const [provider] = await fetchThirdPartyLimits({
     thirdPartyProfiles: {
@@ -361,7 +365,7 @@ test('Sub2API adapter reports the dashboard account balance without a status req
   assert.equal(publicJson.includes('sub2api.example'), false);
 });
 
-test('Sub2API adapter attaches rolling-month spend and survives stats failures', async () => {
+test('Sub2API adapter attaches rolling-month and all-time spend and survives stats failures', async () => {
   const [enriched] = await fetchThirdPartyLimits({
     thirdPartyProfiles: {
       dashboard: {
@@ -372,22 +376,50 @@ test('Sub2API adapter attaches rolling-month spend and survives stats failures',
     }
   }, {
     env: {},
-    fetch: async (url) => (
-      url.startsWith('https://stats.example/api/v1/usage/stats')
+    fetch: async (url) => {
+      if (url.endsWith(SUB2API_DASHBOARD_STATS_PATH)) {
+        return response(200, {
+          code: 0,
+          message: 'success',
+          data: { total_actual_cost: 18.75 }
+        });
+      }
+      return url.endsWith(SUB2API_USAGE_STATS_PATH)
         ? response(200, {
           code: 0,
           message: 'success',
           data: {
             total_requests: 21,
+            total_input_tokens: 1234,
+            total_output_tokens: 456,
+            total_cache_read_tokens: 200,
+            total_cache_creation_tokens: 50,
+            total_tokens: 1940,
+            total_cost: 3,
+            average_duration_ms: 850,
             total_actual_cost: 2.5
           }
         })
-        : response(200, { code: 0, message: 'success', data: { id: 1, balance: 12.5 } })
-    )
+        : response(200, { code: 0, message: 'success', data: { id: 1, balance: 12.5 } });
+    }
   });
   assert.equal(enriched.status, 'ok');
   assert.equal(enriched.balance.amount, 12.5);
   assert.equal(enriched.balance.monthSpend, 2.5);
+  assert.equal(enriched.balance.allTimeSpend, 18.75);
+  assert.equal(enriched.adapterId, SUB2API_ADAPTER);
+  assert.deepEqual(enriched.usageSummary, {
+    period: 'month',
+    requests: 21,
+    inputTokens: 1234,
+    outputTokens: 456,
+    cacheReadTokens: 200,
+    cacheCreationTokens: 50,
+    totalTokens: 1940,
+    standardCost: 3,
+    actualCost: 2.5,
+    averageDurationMs: 850
+  });
 
   const [withoutStats] = await fetchThirdPartyLimits({
     thirdPartyProfiles: {
@@ -400,7 +432,7 @@ test('Sub2API adapter attaches rolling-month spend and survives stats failures',
   }, {
     env: {},
     fetch: async (url) => (
-      url.startsWith('https://legacy.example/api/v1/usage/stats')
+      url.startsWith('https://legacy.example/api/v1/usage/')
         ? response(404, { code: 404, message: 'not found' })
         : response(200, { code: 0, message: 'success', data: { id: 1, balance: 7.5 } })
     )
@@ -408,6 +440,8 @@ test('Sub2API adapter attaches rolling-month spend and survives stats failures',
   assert.equal(withoutStats.status, 'ok');
   assert.equal(withoutStats.balance.amount, 7.5);
   assert.equal(withoutStats.balance.monthSpend, null);
+  assert.equal(withoutStats.balance.allTimeSpend, null);
+  assert.equal(withoutStats.usageSummary, undefined);
 });
 
 test('Sub2API adapter fails closed on business errors and missing balances', async () => {
@@ -456,7 +490,7 @@ test('Sub2API adapter fails closed on business errors and missing balances', asy
   assert.deepEqual(unauthorized[0].windows, []);
 });
 
-test('Sub2API adapter renews an expired access token once and reports the rotation', async () => {
+test('Sub2API adapter renews an expired access token once after persisting the rotation', async () => {
   const calls = [];
   const renewals = [];
   let currentAccess = 'expired-jwt';
@@ -514,7 +548,7 @@ test('Sub2API adapter renews an expired access token once and reports the rotati
     previous: { accessToken: 'expired-jwt', refreshToken: 'refresh-1' },
     next: { accessToken: 'fresh-jwt', refreshToken: 'refresh-2' }
   }]);
-  assert.deepEqual(calls.filter(([, url]) => !url.startsWith('https://renew.example/api/v1/usage/stats')), [
+  assert.deepEqual(calls.filter(([, url]) => !url.startsWith('https://renew.example/api/v1/usage/')), [
     ['GET', 'https://renew.example/api/v1/auth/me'],
     ['POST', 'https://renew.example/api/v1/auth/refresh'],
     ['GET', 'https://renew.example/api/v1/auth/me']
@@ -522,7 +556,7 @@ test('Sub2API adapter renews an expired access token once and reports the rotati
   assert.equal(JSON.stringify(provider).includes('refresh-1'), false);
 });
 
-test('Sub2API renewal is skipped without a persistence callback and fails closed on refresh errors', async () => {
+test('Sub2API renewal requires a persistence callback and fails closed on refresh errors', async () => {
   const [unrenewed] = await fetchThirdPartyLimits({
     thirdPartyProfiles: {
       stale: {
@@ -564,7 +598,40 @@ test('Sub2API renewal is skipped without a persistence callback and fails closed
   assert.deepEqual(broken.windows, []);
 });
 
-test('Sub2API profiles may start from the refresh token alone', async () => {
+test('Sub2API does not retry with a rotated pair that persistence rejected', async () => {
+  let retriedWithFreshToken = false;
+  const [provider] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      dashboard: {
+        adapter: SUB2API_ADAPTER,
+        baseUrl: 'https://persist.example',
+        accessToken: 'expired-jwt',
+        refreshToken: 'refresh-1'
+      }
+    }
+  }, {
+    env: {},
+    fetch: async (url, init) => {
+      if (url.endsWith(SUB2API_REFRESH_PATH)) {
+        return response(200, {
+          code: 0,
+          data: { access_token: 'fresh-jwt', refresh_token: 'refresh-2' }
+        });
+      }
+      if (url.endsWith(SUB2API_ME_PATH) && init.headers.Authorization === 'Bearer fresh-jwt') {
+        retriedWithFreshToken = true;
+        return response(200, { code: 0, data: { balance: 2 } });
+      }
+      return response(401, { code: 401, message: 'TOKEN_EXPIRED', data: null });
+    },
+    onThirdPartyCredentialsRenewed: async () => false
+  });
+
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(retriedWithFreshToken, false);
+});
+
+test('Sub2API profiles may start from a refresh token and retain both credentials', async () => {
   const normalized = normalizeThirdPartyProfile({
     adapter: SUB2API_ADAPTER,
     baseUrl: 'https://refresh-only.example',
@@ -601,6 +668,90 @@ test('Sub2API profiles may start from the refresh token alone', async () => {
   });
   assert.equal(provider.status, 'ok');
   assert.equal(provider.balance.amount, 1.25);
+
+  assert.deepEqual(normalizeThirdPartyProfile({
+    adapter: SUB2API_ADAPTER,
+    baseUrl: 'https://dashboard.example',
+    accessToken: 'dashboard-jwt',
+    refreshToken: 'dashboard-refresh'
+  }), {
+    adapter: SUB2API_ADAPTER,
+    baseUrl: 'https://dashboard.example',
+    accessToken: 'dashboard-jwt',
+    refreshToken: 'dashboard-refresh',
+    enabled: true
+  });
+});
+
+test('Sub2API account identity stays stable when its access token is replaced', async () => {
+  const collect = async (accessToken) => {
+    const [provider] = await fetchThirdPartyLimits({
+      thirdPartyProfiles: {
+        dashboard: {
+          adapter: SUB2API_ADAPTER,
+          baseUrl: 'https://stable.example',
+          accessToken
+        }
+      }
+    }, {
+      env: {},
+      fetch: async (url) => (
+        url.includes('/usage/stats')
+          ? response(404, { code: 404, message: 'not found' })
+          : response(200, { code: 0, message: 'success', data: { id: 42, balance: 3.5 } })
+      )
+    });
+    return provider;
+  };
+
+  const before = await collect('dashboard-jwt-before');
+  const after = await collect('dashboard-jwt-after');
+  assert.equal(before.status, 'ok');
+  assert.equal(after.status, 'ok');
+  assert.equal(before.accountKey, after.accountKey);
+  assert.equal(JSON.stringify([before, after]).includes('dashboard-jwt'), false);
+});
+
+test('Sub2API credential replacement keeps one LimitsRuntime identity', async (t) => {
+  let accessToken = 'dashboard-jwt-before';
+  const runtime = createLimitsRuntime({ limitProviders: ['thirdparty'] }, {
+    autoStart: false,
+    autoRetry: false,
+    cleanupGraceMs: 0,
+    maxConcurrency: 1,
+    providerPhysicalBoundMs: () => 100,
+    resolveConfigSnapshot: () => ({
+      limitProviders: ['thirdparty'],
+      thirdPartyProfiles: {
+        dashboard: {
+          adapter: SUB2API_ADAPTER,
+          baseUrl: 'https://runtime.example',
+          accessToken
+        }
+      }
+    }),
+    probeProvider: async (_provider, config, context, deps) => fetchThirdPartyLimits(config, {
+      ...deps,
+      env: {},
+      signal: context.signal,
+      fetch: async (url) => (
+        url.includes('/usage/stats')
+          ? response(404, { code: 404, message: 'not found' })
+          : response(200, { code: 0, message: 'success', data: { id: 42, balance: 3.5 } })
+      )
+    })
+  });
+  t.after(() => runtime.stop());
+
+  await runtime.refresh({ provider: 'thirdparty' }, 'startup');
+  const originalKey = runtime.getSnapshot().providers[0].accountKey;
+  accessToken = 'dashboard-jwt-after';
+  await runtime.refresh({ provider: 'thirdparty' }, 'credential-save');
+
+  const providers = runtime.getSnapshot().providers;
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].accountKey, originalKey);
+  assert.equal(providers[0].status, 'ok');
 });
 
 test('custom adapter maps one GET response without exposing configuration', async () => {

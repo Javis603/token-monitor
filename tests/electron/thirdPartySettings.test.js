@@ -14,6 +14,7 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
   const html = read('src/electron/renderer/index.html');
   const app = read('src/electron/renderer/app.js');
   const preload = read('src/electron/preload.js');
+  const styles = read('src/electron/renderer/styles.css');
 
   assert.match(html, /id="thirdpartyAccountGroup"/);
   assert.match(html, /id="thirdpartyProfileList"/);
@@ -24,6 +25,9 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
   assert.match(html, /<select id="thirdpartyModeInput">[\s\S]*?<option value="account"[^>]*>[\s\S]*?<option value="token"/);
   assert.match(html, /class="thirdparty-choice-grid"/);
   assert.match(html, /id="thirdpartyModeHint"/);
+  assert.match(html, /id="thirdpartySub2ApiSteps" class="settings-note hidden"/);
+  assert.match(html, /settings\.thirdparty\.sub2ApiStep1/);
+  assert.match(html, /DevTools → Application → Local storage/);
   assert.match(html, /<label for="thirdpartyBaseUrlInput"[^>]*data-i18n="settings\.thirdparty\.baseUrl"/);
   assert.match(html, /<input id="thirdpartyBaseUrlInput" type="url"/);
   assert.match(html, /id="thirdpartyHttpWarning"[^>]*role="status"[^>]*data-i18n="settings\.thirdparty\.httpWarning"/);
@@ -46,13 +50,20 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
   assert.match(app, /if \(platform === 'custom'\) return 'custom'/);
   assert.match(app, /if \(platform === 'sub2api'\) return 'sub2api'/);
   assert.match(app, /thirdpartyRefreshTokenRow[\s\S]*?classList\.toggle\('hidden', !sub2apiMode\)/);
+  assert.match(app, /thirdpartySub2ApiSteps[\s\S]*?classList\.toggle\('hidden', !sub2apiMode\)/);
+  assert.match(app, /const accessTokenKey = 'settings\.thirdparty\.accessToken'/);
+  assert.match(app, /const refreshTokenKey = 'settings\.thirdparty\.refreshToken'/);
+  assert.match(app, /settings\.thirdparty\.sub2ApiAccessTokenPlaceholder/);
+  assert.match(app, /settings\.thirdparty\.sub2ApiRefreshTokenPlaceholder/);
+  assert.match(styles, /#thirdpartyRefreshTokenRow\.hidden,/);
   assert.match(app, /const refreshToken = String\(refreshTokenInput\?\.value \|\| ''\)\.trim\(\)/);
   assert.match(app, /thirdPartyProfileErrorText\(result, adapter\)/);
   assert.match(app, /thirdpartyCustomConfig[\s\S]*?classList\.toggle\('hidden', !customMode\)/);
   assert.match(app, /thirdpartyCredentialGrid[\s\S]*?classList\.toggle\([\s\S]*?'single-field'/);
+  assert.match(app, /const pairedCredentials = newApiAccountMode;/);
   assert.match(app, /baseUrlInput\?\.addEventListener\('input', updateThirdPartyHttpWarning\)/);
   assert.match(app, /new URL\(String\(input\?\.value \|\| ''\)\.trim\(\)\)\.protocol === 'http:'/);
-  assert.match(read('src/electron/renderer/styles.css'), /\.thirdparty-choice-grid\.single-field,[\s\S]*?\.thirdparty-credential-grid\.single-field \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(styles, /\.thirdparty-choice-grid\.single-field,[\s\S]*?\.thirdparty-credential-grid\.single-field \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/);
   assert.match(preload, /saveProfile: \(profile\) => ipcRenderer\.invoke\('thirdparty:saveProfile', profile\)/);
 });
 
@@ -68,7 +79,9 @@ test('third-party credentials stay local while renderer metadata is redacted', (
   assert.match(main, /accessToken: profile\?\.accessToken \? 'set' : ''/);
   assert.match(main, /apiKey: profile\?\.apiKey \? 'set' : ''/);
   assert.match(main, /refreshToken: profile\?\.refreshToken \? 'set' : ''/);
-  assert.match(main, /function persistThirdPartyCredentialsRenewal/);
+  assert.match(main, /function persistThirdPartyCredentialsRenewal\(renewal = \{\}, fallbackProfile = null\)/);
+  assert.match(main, /onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal/);
+  assert.match(main, /return persistThirdPartyCredentialsRenewal\(renewal, profile\)/);
   assert.match(main, /endpointPath: thirdPartyLimits\.normalizeCustomEndpointPath\(profile\?\.endpointPath\)/);
   assert.match(main, /remainingPath: thirdPartyLimits\.normalizeCustomJsonPath\(profile\?\.remainingPath\)/);
   assert.match(main, /delete normalizedPatch\.thirdPartyProfiles/);
@@ -110,6 +123,8 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(app, /const meterPercent = creditsMeterPercent\(provider, quotaWindow\)/);
   assert.match(app, /\.\.\.\(meterPercent !== null \? \{ remainingPercent: meterPercent, showMeter: true \} : \{\}\)/);
   assert.match(app, /function thirdPartyPlanText/);
+  assert.match(app, /adapterId === 'sub2api'/);
+  assert.match(app, /const THIRD_PARTY_ADAPTER_VISUALS/);
   assert.match(app, /if \(provider\?\.status !== 'ok'\) return undefined/);
   assert.match(app, /if \(planLabel === 'account'\) return 'Account'/);
   assert.match(app, /if \(planLabel === 'api key'\) return 'API key'/);
@@ -118,21 +133,34 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(app, /function thirdPartySpendNode/);
   assert.match(app, /balance\?\.requestCount/);
   assert.match(app, /settings\.thirdparty\.requests/);
-  assert.match(app, /if \(allTimeSpend === null && entries\.length === 0\) return null/);
-  assert.match(app, /const summary = allTimeSpend === null \? '' : `All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
-  assert.match(app, /label: allTimeSpend === null \? 'Details' : 'Spend'/);
+  assert.match(app, /if \(allTimeSpend === null && monthSpend === null && entries\.length === 0\) return null/);
+  assert.match(app, /monthSpend !== null[\s\S]*?`Month \$\{formatMoney\(monthSpend, currency\)\}`/);
+  assert.match(app, /allTimeSpend !== null[\s\S]*?`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
+  assert.match(app, /\]\.join\(' · '\)/);
+  assert.match(app, /settings\.thirdparty\.monthTokens/);
+  assert.match(app, /settings\.thirdparty\.avgResponse/);
+  assert.match(app, /label: summary \? 'Spend' : 'Details'/);
   assert.match(balanceDisplay, /return symbol \? `\$\{symbol\}\$\{number\.toFixed\(2\)\}` : `\$\{code\} \$\{number\.toFixed\(2\)\}`/);
   assert.match(app, /`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
   assert.match(app, /function renderNamedApiAccountGroup[\s\S]*?planText: options\.groupPlanText/);
+  assert.match(app, /function renderNamedApiAccountGroup[\s\S]*?markId: options\.groupMarkId/);
   assert.match(app, /groupPlanText: t\('settings\.openrouter\.nAccounts', \{ count: providers\.length \}\)/);
   assert.match(app, /groupPlanText: t\('settings\.thirdparty\.nAccounts', \{ count: providers\.length \}\)/);
+  assert.match(app, /const sharedFamily = thirdPartySharedAdapterFamily\(providers\)/);
+  assert.match(app, /groupMarkId: sharedFamily \|\| 'thirdparty'/);
+  assert.match(app, /sharedFamily === null[\s\S]*?markIdForProvider/);
   assert.doesNotMatch(i18n, /settings\.thirdparty\.(?:spend|allTime)/);
   assert.match(app, /limitDetailInfoNode\(detailEntries, 'limit-spend-info-wrap'\)/);
   assert.match(app, /function renderThirdPartyAccountGroup/);
   assert.match(app, /renderNamedApiAccountGroup\('thirdparty'/);
   assert.match(presentation, /thirdparty: \['Relay', 'API'\]/);
-  assert.match(styles, /\.limit-icon-thirdparty/);
-  assert.match(colors, /thirdparty: '#DD2E57'/);
+  assert.match(styles, /\.limit-icon-sub2api/);
+  assert.match(styles, /assets\/icons\/sub2api\.svg/);
+  assert.match(styles, /\.limit-icon-thirdparty[\s\S]*?assets\/icons\/thirdparty\.svg/);
+  assert.doesNotMatch(styles, /customapi\.svg/);
+  assert.match(app, /custom: \{ color: '#8A96A8', markId: 'thirdparty' \}/);
+  assert.doesNotMatch(app, /mark\.style\.color/);
+  assert.match(colors, /thirdparty: '#8090A6'/);
 });
 
 test('third-party money formatting preserves supported custom units', () => {
@@ -165,11 +193,41 @@ test('third-party scope labels do not infer adapters from display text', () => {
       thirdPartyPlanText({ status: 'ok', planLabel: 'Account' }),
       thirdPartyPlanText({ status: 'ok', planLabel: 'API key' }),
       thirdPartyPlanText({ status: 'ok', planLabel: 'Custom' }),
+      thirdPartyPlanText({ status: 'ok', adapterId: 'newapi-account', planLabel: 'Account' }),
+      thirdPartyPlanText({ status: 'ok', adapterId: 'sub2api', planLabel: 'Account' }),
       thirdPartyPlanText({ status: 'ok', planLabel: 'Token deluxe' }) ?? null,
       thirdPartyPlanText({ status: 'unavailable', planLabel: 'Account' }) ?? null
     ]);`
   );
-  assert.deepEqual(JSON.parse(result), ['Account', 'API key', 'Custom', null, null]);
+  assert.deepEqual(JSON.parse(result), ['Account', 'API key', 'Custom', 'New API · Account', 'Sub2API · Account', null, null]);
+});
+
+test('third-party group icon represents a shared adapter family', () => {
+  const app = read('src/electron/renderer/app.js');
+  const start = app.indexOf('function thirdPartyAdapterFamily');
+  const end = app.indexOf('function renderNamedApiAccountGroup', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const source = app.slice(start, end);
+  const result = vm.runInNewContext(
+    `${source}
+    JSON.stringify([
+      thirdPartySharedAdapterFamily([{ adapterId: 'newapi-account' }, { adapterId: 'newapi-token' }]),
+      thirdPartySharedAdapterFamily([{ adapterId: 'sub2api' }, { adapterId: 'sub2api' }]),
+      thirdPartySharedAdapterFamily([{ adapterId: 'custom' }, { adapterId: 'custom' }]),
+      thirdPartySharedAdapterFamily([{ adapterId: 'newapi-account' }, { adapterId: 'sub2api' }]),
+      thirdPartySharedAdapterFamily([{ adapterId: 'newapi-account' }, {}]),
+      thirdPartySharedAdapterFamily([{}, {}])
+    ]);`
+  );
+  assert.deepEqual(JSON.parse(result), [
+    'newapi',
+    'sub2api',
+    'thirdparty',
+    null,
+    null,
+    ''
+  ]);
 });
 
 test('third-party profile rows keep metadata on line two and rename on line one', () => {
@@ -263,17 +321,19 @@ test('third-party fallback stays last after named providers across product surfa
   for (const file of ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md']) {
     const content = read(file);
     assert.ok(
-      content.indexOf('tools-icon/newapi.png') > content.indexOf('tools-icon/ollama.png'),
+      content.indexOf('tools-icon/thirdparty.png') > content.indexOf('tools-icon/ollama.png'),
       file
     );
   }
 });
 
-test('third-party adapters document New API compatibility, Custom, assets, and environment variables', () => {
+test('third-party adapters share one documentation icon and preserve compatibility guidance', () => {
   for (const file of ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md']) {
     const content = read(file);
-    assert.match(content, /\.github\/assets\/tools-icon\/newapi\.png"/, file);
+    assert.match(content, /\.github\/assets\/tools-icon\/thirdparty\.png"/, file);
+    assert.doesNotMatch(content, /\.github\/assets\/tools-icon\/newapi\.png"/, file);
     assert.match(content, /Third-party APIs|第三方 API|サードパーティAPI|서드파티 API/, file);
+    assert.match(content, /New API \/ Sub2API/, file);
     assert.match(content, /Custom|自訂|自定义|カスタム|사용자 지정/, file);
     assert.match(content, /One API/, file);
   }
@@ -282,7 +342,8 @@ test('third-party adapters document New API compatibility, Custom, assets, and e
   assert.match(env, /TOKEN_MONITOR_NEWAPI_ACCESS_TOKEN=/);
   assert.match(env, /TOKEN_MONITOR_NEWAPI_USER_ID=/);
   assert.match(env, /TOKEN_MONITOR_NEWAPI_API_KEY=/);
-  assert.equal(fs.existsSync(path.join(root, '.github/assets/tools-icon/newapi.png')), true);
+  assert.equal(fs.existsSync(path.join(root, '.github/assets/tools-icon/thirdparty.png')), true);
+  assert.equal(fs.existsSync(path.join(root, '.github/assets/tools-icon/newapi.png')), false);
   assert.equal(fs.existsSync(path.join(root, 'assets/icons/newapi.svg')), true);
 });
 

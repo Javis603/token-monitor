@@ -4273,14 +4273,16 @@ function redactThirdPartyProfilesForRenderer(profiles) {
   return out;
 }
 
-// Sub2API rotates its single-use refresh token on every renewal, so the rotated
-// pair must be persisted before the next collection cycle tries to refresh with
-// the now-dead token. Mirrors persistClaudeWebCookieRenewal's compare-and-swap.
-function persistThirdPartyCredentialsRenewal(renewal = {}) {
+// Sub2API rotates its single-use refresh token on every renewal. Persist the
+// new pair with a compare-and-swap before the collector retries with it. A
+// fallback profile lets a refresh-only account bootstrap during its save probe;
+// the rotated pair is written before that probe continues.
+function persistThirdPartyCredentialsRenewal(renewal = {}, fallbackProfile = null) {
   const accountName = String(renewal.accountName || '').trim();
   const adapter = thirdPartyLimits.normalizeAdapterId(renewal.adapter);
-  const profile = accountName ? settings?.thirdPartyProfiles?.[accountName] : null;
-  if (!profile || profile.adapter !== adapter) return false;
+  const profiles = settings?.thirdPartyProfiles || {};
+  const profile = profiles[accountName] || fallbackProfile;
+  if (!accountName || !profile || profile.adapter !== adapter) return false;
   const previousAccessToken = String(renewal.previous?.accessToken || '');
   const previousRefreshToken = String(renewal.previous?.refreshToken || '');
   if (
@@ -4294,12 +4296,14 @@ function persistThirdPartyCredentialsRenewal(renewal = {}) {
   });
   if (!normalized) return false;
   settings.thirdPartyProfiles = {
-    ...settings.thirdPartyProfiles,
+    ...profiles,
     [accountName]: { ...normalized, enabled: profile.enabled !== false }
   };
   try {
     saveSettings({ throwOnError: true });
   } catch (error) {
+    // Keep the rotated pair in memory so this process can recover on a later
+    // settings write, but tell the caller not to present this renewal as durable.
     console.log(`[thirdparty] credential renewal persist failed: ${error?.message || error}`);
     return false;
   }
@@ -7314,8 +7318,8 @@ app.whenReady().then(() => {
     ) return { ok: false, errorCode: 'missingAccessToken' };
     if (
       adapter === thirdPartyLimits.SUB2API_ADAPTER
-      && !String(rawProfile.accessToken || '').trim()
-      && !String(rawProfile.refreshToken || '').trim()
+      && !thirdPartyLimits.newapiAccessToken({}, rawProfile.accessToken)
+      && !thirdPartyLimits.newapiAccessToken({}, rawProfile.refreshToken)
     ) return { ok: false, errorCode: 'missingAccessToken' };
     if (
       [thirdPartyLimits.NEWAPI_TOKEN_ADAPTER, thirdPartyLimits.CUSTOM_BALANCE_ADAPTER].includes(adapter)
@@ -7366,7 +7370,7 @@ app.whenReady().then(() => {
         onThirdPartyCredentialsRenewed: (renewal) => {
           if (renewal?.accountName !== name) return false;
           renewedCredentials = renewal.next || null;
-          return persistThirdPartyCredentialsRenewal(renewal);
+          return persistThirdPartyCredentialsRenewal(renewal, profile);
         }
       }));
       if (provider?.status !== 'ok') {

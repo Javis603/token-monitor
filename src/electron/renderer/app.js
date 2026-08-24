@@ -16,6 +16,7 @@ const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio',
   'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
+const limitMarksWithIcon = new Set([...clientsWithIcon, 'newapi', 'sub2api']);
 
 function osIconFor(platform) {
   const prefix = String(platform || '').toLowerCase().split('-')[0];
@@ -43,7 +44,8 @@ function iconKindFor(rowData, breakdown) {
       : { kind: 'dot' };
   }
   if (breakdown === 'project') return { kind: 'icon', iconClass: 'row-icon-project' };
-  return clientsWithIcon.has(rowData.key)
+  const iconSet = breakdown === 'limits' ? limitMarksWithIcon : clientsWithIcon;
+  return iconSet.has(rowData.key)
     ? { kind: 'icon', iconClass: `row-icon-${rowData.key}` }
     : { kind: 'dot' };
 }
@@ -4019,8 +4021,10 @@ function providerSpendNode(balance) {
 
 function thirdPartySpendNode(provider, quotaWindow) {
   const balance = provider?.balance || null;
+  const usage = provider?.usageSummary || null;
   const currency = balance?.currency || 'USD';
   const allTimeSpend = optionalFiniteNumber(balance?.allTimeSpend);
+  const monthSpend = optionalFiniteNumber(balance?.monthSpend);
   const entries = [];
   const total = optionalFiniteNumber(quotaWindow?.limit);
   const requestCount = optionalFiniteNumber(balance?.requestCount);
@@ -4034,12 +4038,39 @@ function thirdPartySpendNode(provider, quotaWindow) {
   if (expiresAt && !Number.isNaN(expiresAt.getTime())) {
     entries.push([t('settings.thirdparty.expires'), expiresAt.toLocaleDateString()]);
   }
-  if (allTimeSpend === null && entries.length === 0) return null;
+  const usageCountEntry = (key, value) => {
+    const number = optionalFiniteNumber(value);
+    if (number !== null) entries.push([t(key), Math.max(0, Math.trunc(number)).toLocaleString()]);
+  };
+  if (usage) {
+    usageCountEntry('settings.thirdparty.monthRequests', usage.requests);
+    usageCountEntry('settings.thirdparty.monthTokens', usage.totalTokens);
+    usageCountEntry('settings.thirdparty.inputTokens', usage.inputTokens);
+    usageCountEntry('settings.thirdparty.outputTokens', usage.outputTokens);
+    const cacheTokens = [usage.cacheReadTokens, usage.cacheCreationTokens]
+      .map(optionalFiniteNumber)
+      .filter((value) => value !== null)
+      .reduce((sum, value) => sum + value, 0);
+    if (cacheTokens > 0) usageCountEntry('settings.thirdparty.cacheTokens', cacheTokens);
+    const averageDurationMs = optionalFiniteNumber(usage.averageDurationMs);
+    if (averageDurationMs !== null) {
+      const duration = averageDurationMs < 1000
+        ? `${Math.round(averageDurationMs)} ms`
+        : `${(averageDurationMs / 1000).toFixed(averageDurationMs < 10000 ? 1 : 0)} s`;
+      entries.push([t('settings.thirdparty.avgResponse'), duration]);
+    }
+    const standardCost = optionalFiniteNumber(usage.standardCost);
+    if (standardCost !== null) entries.push([t('settings.thirdparty.standardCost'), formatMoney(standardCost, currency)]);
+  }
+  if (allTimeSpend === null && monthSpend === null && entries.length === 0) return null;
   // Without a spend figure the row has nothing to summarize, so it retitles
   // itself and leans entirely on the tooltip.
-  const summary = allTimeSpend === null ? '' : `All time ${formatMoney(allTimeSpend, currency)}`;
+  const summary = [
+    ...(monthSpend !== null ? [`Month ${formatMoney(monthSpend, currency)}`] : []),
+    ...(allTimeSpend !== null ? [`All time ${formatMoney(allTimeSpend, currency)}`] : [])
+  ].join(' · ');
   return limitNoteRowNode({
-    label: allTimeSpend === null ? 'Details' : 'Spend',
+    label: summary ? 'Spend' : 'Details',
     summary,
     detailEntries: entries,
     ariaParts: [
@@ -4256,7 +4287,7 @@ function providersByLimitProviderId(providers) {
 
 function renderLimitProviderMark(id, color) {
   const mark = document.createElement('span');
-  if (clientsWithIcon.has(id)) {
+  if (limitMarksWithIcon.has(id)) {
     mark.className = `limit-icon limit-icon-${id}`;
   } else {
     mark.className = 'dot';
@@ -4407,7 +4438,7 @@ function renderLimitProviderHead(id, label, provider, color, options = {}) {
   titleBlock.className = 'limit-title';
   const name = document.createElement('div');
   name.className = 'limit-name';
-  if (options.showIcon !== false) name.append(renderLimitProviderMark(id, color));
+  if (options.showIcon !== false) name.append(renderLimitProviderMark(options.markId || id, color));
   const title = document.createElement('span');
   title.className = 'limit-name-title';
   title.textContent = options.title || label;
@@ -5186,11 +5217,41 @@ function namedApiAccountTitle(provider, index, providerId) {
 
 function thirdPartyPlanText(provider) {
   if (provider?.status !== 'ok') return undefined;
+  const adapterId = String(provider?.adapterId || '').toLowerCase();
+  if (adapterId === 'newapi-account') return 'New API · Account';
+  if (adapterId === 'newapi-token') return 'New API · API key';
+  if (adapterId === 'sub2api') return 'Sub2API · Account';
+  if (adapterId === 'custom') return 'Custom';
   const planLabel = String(provider?.planLabel || '').toLowerCase();
   if (planLabel === 'account') return 'Account';
   if (planLabel === 'api key') return 'API key';
   if (planLabel === 'custom') return 'Custom';
   return undefined;
+}
+
+const THIRD_PARTY_ADAPTER_VISUALS = Object.freeze({
+  'newapi-account': { color: '#C738FB', markId: 'newapi' },
+  'newapi-token': { color: '#C738FB', markId: 'newapi' },
+  sub2api: { color: '#39D9E7', markId: 'sub2api' },
+  custom: { color: '#8A96A8', markId: 'thirdparty' }
+});
+
+function thirdPartyAdapterVisual(provider, fallbackColor) {
+  return THIRD_PARTY_ADAPTER_VISUALS[String(provider?.adapterId || '').toLowerCase()]
+    || { color: fallbackColor, markId: 'thirdparty' };
+}
+
+function thirdPartyAdapterFamily(provider) {
+  const adapterId = String(provider?.adapterId || '').toLowerCase();
+  if (adapterId === 'newapi-account' || adapterId === 'newapi-token') return 'newapi';
+  if (adapterId === 'sub2api') return 'sub2api';
+  if (adapterId === 'custom') return 'thirdparty';
+  return '';
+}
+
+function thirdPartySharedAdapterFamily(providers) {
+  const families = new Set((providers || []).map(thirdPartyAdapterFamily));
+  return families.size === 1 ? [...families][0] : null;
 }
 
 function renderNamedApiAccountGroup(providerId, label, providers, color, options = {}) {
@@ -5199,19 +5260,23 @@ function renderNamedApiAccountGroup(providerId, label, providers, color, options
   const groupProvider = { provider: providerId, status: 'ok', windows: [], accountGroup: true };
   const head = renderLimitProviderHead(providerId, label, groupProvider, color, {
     planText: options.groupPlanText,
-    hideMeta: true
+    hideMeta: true,
+    ...(options.groupMarkId ? { markId: options.groupMarkId } : {})
   });
   const accountList = document.createElement('div');
   accountList.className = 'limit-account-list';
   providers.forEach((provider, index) => {
+    const providerColor = options.colorForProvider?.(provider) || color;
+    const markId = options.markIdForProvider?.(provider);
     accountList.append(renderLimitProviderRow(
       providerId,
       limitAccountTitle(providerId, provider, index, providers),
       provider,
-      color,
+      providerColor,
       {
         accountRow: true,
-        showIcon: false,
+        showIcon: Boolean(markId),
+        ...(markId ? { markId } : {}),
         ...(options.planTextForProvider
           ? { planText: options.planTextForProvider(provider) }
           : {})
@@ -5229,9 +5294,15 @@ function renderOpenRouterAccountGroup(label, providers, color) {
 }
 
 function renderThirdPartyAccountGroup(label, providers, color) {
+  const sharedFamily = thirdPartySharedAdapterFamily(providers);
   return renderNamedApiAccountGroup('thirdparty', label, providers, color, {
     groupPlanText: t('settings.thirdparty.nAccounts', { count: providers.length }),
-    planTextForProvider: thirdPartyPlanText
+    groupMarkId: sharedFamily || 'thirdparty',
+    planTextForProvider: thirdPartyPlanText,
+    colorForProvider: (provider) => thirdPartyAdapterVisual(provider, color).color,
+    ...(sharedFamily === null
+      ? { markIdForProvider: (provider) => thirdPartyAdapterVisual(provider, color).markId }
+      : {})
   });
 }
 
@@ -5323,12 +5394,16 @@ function renderLimits() {
       continue;
     }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
+    const thirdPartyVisual = id === 'thirdparty' ? thirdPartyAdapterVisual(provider, color) : null;
     const rowOptions = id === 'codex'
       ? { accountTitle: true, allowSystemSwitch: true }
       : id === 'thirdparty'
-        ? { planText: thirdPartyPlanText(provider) }
+        ? {
+            planText: thirdPartyPlanText(provider),
+            markId: thirdPartyVisual.markId
+          }
         : undefined;
-    nodes.push(renderLimitProviderRow(id, label, provider, color, rowOptions));
+    nodes.push(renderLimitProviderRow(id, label, provider, thirdPartyVisual?.color || color, rowOptions));
   }
   els.limitsPanel.replaceChildren(...nodes);
 }
@@ -6308,6 +6383,12 @@ function homeLimitRows() {
     colors: clientColors,
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
+    accountColor: (provider, id, fallbackColor) => (
+      id === 'thirdparty' ? thirdPartyAdapterVisual(provider, fallbackColor).color : fallbackColor
+    ),
+    accountIcon: (provider, id) => (
+      id === 'thirdparty' ? thirdPartyAdapterVisual(provider, clientColors.thirdparty).markId : id
+    ),
     accountName: (provider, index, providerEntries) => {
       const id = String(provider?.provider || '').trim().toLowerCase();
       const option = providerOptions.find((entry) => entry.id === id);
@@ -6356,7 +6437,7 @@ function renderHomeLimitModule() {
     const account = document.createElement('div');
     account.className = 'home-limit-account-head';
     const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ key: row.providerId || row.key }, 'limits'), row.color);
+    applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.name;
@@ -12954,7 +13035,7 @@ function setThirdPartyAdapterFields() {
   const singleChoiceField = customMode || sub2apiMode;
   const accountMode = adapter === 'newapi-account' || sub2apiMode;
   const newApiAccountMode = adapter === 'newapi-account';
-  const pairedCredentials = newApiAccountMode || sub2apiMode;
+  const pairedCredentials = newApiAccountMode;
   document.getElementById('thirdpartyChoiceGrid')?.classList.toggle('single-field', singleChoiceField);
   document.getElementById('thirdpartyModeField')?.classList.toggle('hidden', singleChoiceField);
   document.getElementById('thirdpartyCredentialGrid')?.classList.toggle(
@@ -12963,6 +13044,7 @@ function setThirdPartyAdapterFields() {
   );
   document.getElementById('thirdpartyAccessTokenRow')?.classList.toggle('hidden', !accountMode);
   document.getElementById('thirdpartyRefreshTokenRow')?.classList.toggle('hidden', !sub2apiMode);
+  document.getElementById('thirdpartySub2ApiSteps')?.classList.toggle('hidden', !sub2apiMode);
   document.getElementById('thirdpartyUserIdRow')?.classList.toggle('hidden', !newApiAccountMode);
   document.getElementById('thirdpartyApiKeyRow')?.classList.toggle('hidden', accountMode);
   document.getElementById('thirdpartyCustomConfig')?.classList.toggle('hidden', !customMode);
@@ -12976,6 +13058,34 @@ function setThirdPartyAdapterFields() {
           ? 'settings.thirdparty.hintNewApiToken'
           : 'settings.thirdparty.hintNewApiAccount';
     hint.textContent = t(hintKey);
+  }
+  const accessTokenLabel = document.getElementById('thirdpartyAccessTokenLabel');
+  const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
+  const refreshTokenLabel = document.getElementById('thirdpartyRefreshTokenLabel');
+  const refreshTokenInput = document.getElementById('thirdpartyRefreshTokenInput');
+  const accessTokenKey = 'settings.thirdparty.accessToken';
+  const accessTokenPlaceholderKey = sub2apiMode
+    ? 'settings.thirdparty.sub2ApiAccessTokenPlaceholder'
+    : 'settings.thirdparty.accessTokenPlaceholder';
+  const refreshTokenKey = 'settings.thirdparty.refreshToken';
+  const refreshTokenPlaceholderKey = sub2apiMode
+    ? 'settings.thirdparty.sub2ApiRefreshTokenPlaceholder'
+    : 'settings.thirdparty.refreshTokenPlaceholder';
+  if (accessTokenLabel) {
+    accessTokenLabel.dataset.i18n = accessTokenKey;
+    accessTokenLabel.textContent = t(accessTokenKey);
+  }
+  if (accessTokenInput) {
+    accessTokenInput.dataset.i18nPlaceholder = accessTokenPlaceholderKey;
+    accessTokenInput.placeholder = t(accessTokenPlaceholderKey);
+  }
+  if (refreshTokenLabel) {
+    refreshTokenLabel.dataset.i18n = refreshTokenKey;
+    refreshTokenLabel.textContent = t(refreshTokenKey);
+  }
+  if (refreshTokenInput) {
+    refreshTokenInput.dataset.i18nPlaceholder = refreshTokenPlaceholderKey;
+    refreshTokenInput.placeholder = t(refreshTokenPlaceholderKey);
   }
 }
 

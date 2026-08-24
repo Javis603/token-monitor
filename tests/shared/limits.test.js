@@ -283,6 +283,7 @@ test('aggregateLimits preserves distinct OpenRouter accounts and public stats sc
 test('aggregateLimits preserves distinct Third-party API accounts while keeping Base URLs off the wire', () => {
   const providers = ['工作', 'personal'].map((accountName, index) => normalizeLimitProvider({
     provider: 'thirdparty',
+    adapterId: index === 0 ? 'sub2api' : 'custom',
     accountKey: `sha256:thirdparty-${index}`,
     accountName,
     accountLabel: accountName,
@@ -318,6 +319,7 @@ test('aggregateLimits preserves distinct Third-party API accounts while keeping 
   assert.equal(work.balance.requestCount, 10);
   assert.equal(work.balance.quotaGroup, 'default');
   assert.equal(work.balance.expiresAt, '2027-01-15T08:00:00.000Z');
+  assert.equal(work.adapterId, 'sub2api');
   assert.equal(JSON.stringify(thirdparty).includes('http'), false);
 
   const publicPayload = publicLimits({ providers: thirdparty });
