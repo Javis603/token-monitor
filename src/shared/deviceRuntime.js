@@ -53,10 +53,11 @@ function createDeviceRuntime(options = {}, deps = {}) {
     }
   });
 
-  function usageRuntimeOptions(nextUsageOptions = {}) {
+  function usageRuntimeOptions(nextUsageOptions = {}, runtimeOptions = {}) {
     const generation = ++usageGeneration;
     const configured = {
       ...nextUsageOptions,
+      ...runtimeOptions,
       onUpdate(summary, reason) {
         if (!active || generation !== usageGeneration) return;
         const transformed = options.transformUsage
@@ -128,15 +129,33 @@ function createDeviceRuntime(options = {}, deps = {}) {
     // callbacks from a custom or non-cooperative collector harmless even if its
     // physical work takes longer to stop.
     usageGeneration += 1;
-    usageRuntime?.stop?.();
+    const previousUsageRuntime = usageRuntime;
+    previousUsageRuntime?.stop?.();
+    let startBarrier = null;
     try {
-      usageRuntime = makeUsageRuntime(usageRuntimeOptions(nextUsageOptions), deps.usageDeps || {});
+      startBarrier = previousUsageRuntime?.whenIdle?.() || null;
+    } catch (error) {
+      try { options.onError?.(error, 'usage-stop'); } catch (_) {}
+    }
+    if (startBarrier) {
+      startBarrier = Promise.resolve(startBarrier).catch((error) => {
+        try { options.onError?.(error, 'usage-stop'); } catch (_) {}
+      });
+    }
+    try {
+      usageRuntime = makeUsageRuntime(
+        usageRuntimeOptions(nextUsageOptions, startBarrier ? { startBarrier } : {}),
+        deps.usageDeps || {}
+      );
       activeUsageOptions = nextUsageOptions;
     } catch (error) {
       // Starting first would overlap the old and new collectors, including
       // their watcher descriptor sets. Restore the last known-good config
       // instead so a failed replacement cannot leave usage permanently dead.
-      usageRuntime = makeUsageRuntime(usageRuntimeOptions(activeUsageOptions), deps.usageDeps || {});
+      usageRuntime = makeUsageRuntime(
+        usageRuntimeOptions(activeUsageOptions, startBarrier ? { startBarrier } : {}),
+        deps.usageDeps || {}
+      );
       throw error;
     }
     return true;

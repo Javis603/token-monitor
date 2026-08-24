@@ -157,8 +157,12 @@ test('runCursorSync kills the child and keeps the abort error when superseded', 
     tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
     timeoutMs: 60_000
   });
+  let settled = false;
+  pending.catch(() => { settled = true; });
 
   controller.abort(reason);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, 'SIGTERM delivery is not physical process exit');
   child.emit('close', 143);
 
   await assert.rejects(pending, (caught) => caught === reason);

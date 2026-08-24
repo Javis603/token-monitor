@@ -32,6 +32,7 @@ const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles'
 const { createWatcherHost } = require('./watcherHost');
 const { localDayKey, mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
+const { createSubprocessTermination } = require('./subprocessTermination');
 const cursorAuth = require('./cursorAuth');
 const { claudeSessionRoots } = require('./claudePaths');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
@@ -184,19 +185,25 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
     let stderr = '';
     let settled = false;
     let timeout = null;
+    let cancellationError = null;
+    const termination = createSubprocessTermination(child);
 
     function finish(error, value) {
       if (settled) return;
       settled = true;
       if (timeout) clearTimeout(timeout);
+      termination.confirmClosed();
       signal?.removeEventListener('abort', onAbort);
       if (error) reject(error);
       else resolve(value);
     }
 
     function onAbort() {
-      try { child.kill('SIGTERM'); } catch (_) {}
-      finish(abortReason(signal));
+      if (cancellationError) return;
+      cancellationError = abortReason(signal);
+      if (timeout) clearTimeout(timeout);
+      timeout = null;
+      termination.request();
     }
 
     timeout = setTimeout(() => {
@@ -205,8 +212,12 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
     }, commandTimeoutMs);
     child.stdout.on('data', (chunk) => { if (!settled) stdout += chunk.toString(); });
     child.stderr.on('data', (chunk) => { if (!settled) stderr += chunk.toString(); });
-    child.on('error', (error) => finish(error));
+    child.on('error', (error) => {
+      if (cancellationError) return;
+      finish(error);
+    });
     child.on('close', (code) => {
+      if (cancellationError) return finish(cancellationError);
       if (code !== 0) {
         const error = new Error(`tokscale exited with code ${code}: ${stderr.trim() || stdout.trim()}`);
         error.tokscaleExitCode = code;
@@ -1107,6 +1118,7 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
   // interval, which is the latency this whole path exists to remove.
   await new Promise((resolve) => {
     const child = spawn(bin, [...prefixArgs, 'antigravity', 'sync'], { env, windowsHide: true });
+    const termination = createSubprocessTermination(child);
     let stderr = '';
     // One outcome per spawn. A child reports more than once — a SIGTERM'd
     // timeout still emits close afterwards, and error is usually followed by
@@ -1116,6 +1128,7 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
     // event back into a set that no longer has anything to collect.
     let settled = false;
     let timer = null;
+    let cancellationRequested = false;
     // The failure code reaches the health record; stderr only ever reaches the
     // local log, since it is neither translatable nor reliably free of the
     // user's paths.
@@ -1123,6 +1136,7 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      termination.confirmClosed();
       options.signal?.removeEventListener('abort', onAbort);
       if (cancelled) selfSyncThrottle.cancelAttempt('antigravity', attempt);
       else selfSyncThrottle.completeAttempt('antigravity', attempt, failed, code, details);
@@ -1130,8 +1144,11 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
       resolve();
     };
     const onAbort = () => {
-      try { child.kill('SIGTERM'); } catch (_) {}
-      settle(false, '', {}, false, true);
+      if (cancellationRequested) return;
+      cancellationRequested = true;
+      if (timer) clearTimeout(timer);
+      timer = null;
+      termination.request();
     };
     timer = setTimeout(() => {
       child.kill('SIGTERM');
@@ -1142,11 +1159,15 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
       const remaining = MAX_SYNC_DETAIL_INPUT_LENGTH - stderr.length;
       stderr += chunk.toString().slice(0, remaining);
     });
-    child.on('error', (err) => settle(true, 'sync-spawn-failed', {
-      failureStage: 'spawn',
-      detailCode: classifyClientSyncDetailCode({ client: 'antigravity', text: err?.message })
-    }));
+    child.on('error', (err) => {
+      if (cancellationRequested) return;
+      settle(true, 'sync-spawn-failed', {
+        failureStage: 'spawn',
+        detailCode: classifyClientSyncDetailCode({ client: 'antigravity', text: err?.message })
+      });
+    });
     child.on('close', (code) => {
+      if (cancellationRequested) return settle(false, '', {}, false, true);
       if (code !== 0 && !settled && typeof logger === 'function') {
         logger(`antigravity sync exited ${code}: ${stderr.trim().slice(0, 200)}`);
       }
@@ -2954,6 +2975,7 @@ function startCollector(options) {
   const watchNativeForced = watchPollingEnvOverride() === false;
   const runtimeAbortController = new AbortController();
   const runtimeSignal = runtimeAbortController.signal;
+  let startBarrier = options.startBarrier ? Promise.resolve(options.startBarrier) : null;
   const trackedClients = new Set(normalizeClientsCsv(clients).split(',').filter(Boolean));
   const reasonixNativeSessionsEnabled = options.reasonixNativeSessionsEnabled === true;
   const reasonixNativeSessionCache = reasonixNativeSessionsEnabled && trackedClients.has('reasonix')
@@ -2976,6 +2998,7 @@ function startCollector(options) {
     env: process.env
   });
   let tickInFlight = false;
+  let idleWaiters = [];
   let tickPending = false;
   let pendingForceHistory = false;
   let pendingRolloverHistoryRetry = false;
@@ -3451,6 +3474,15 @@ function startCollector(options) {
 
   async function runTick(reason, tickOptions = {}) {
     if (stopped || runtimeSignal.aborted) return false;
+    if (startBarrier) {
+      const barrier = startBarrier;
+      try {
+        await barrier;
+      } finally {
+        if (startBarrier === barrier) startBarrier = null;
+      }
+      if (stopped || runtimeSignal.aborted) return false;
+    }
     const tickActivityRevision = Number.isFinite(tickOptions.activityRevision)
       ? tickOptions.activityRevision
       : activityRevision;
@@ -3513,6 +3545,11 @@ function startCollector(options) {
       return initialResult === true;
     } finally {
       tickInFlight = false;
+      if (idleWaiters.length > 0) {
+        const waiters = idleWaiters;
+        idleWaiters = [];
+        resolveWaiters(waiters, true);
+      }
       if (stopped && pendingWaiters.length > 0) {
         const waiters = pendingWaiters;
         pendingWaiters = [];
@@ -3753,6 +3790,12 @@ function startCollector(options) {
     watchedDirectoryKey = null;
   }
 
+  function whenIdle() {
+    if (startBarrier) return Promise.resolve(startBarrier).then(() => whenIdle());
+    if (!tickInFlight) return Promise.resolve();
+    return new Promise((resolve) => idleWaiters.push(resolve));
+  }
+
   function getDiagnostics() {
     const watchMode = !watchEnabled
       ? 'disabled'
@@ -3816,7 +3859,8 @@ function startCollector(options) {
     getDiagnostics,
     refreshClient,
     stop,
-    tick: (reason = 'manual', tickOptions = {}) => runTick(reason, tickOptions)
+    tick: (reason = 'manual', tickOptions = {}) => runTick(reason, tickOptions),
+    whenIdle
   };
 }
 

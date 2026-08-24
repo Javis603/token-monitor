@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
+const { createSubprocessTermination } = require('./subprocessTermination');
 const { classifyClientSyncDetailCode } = require('./clientHealth');
 
 const MAX_SYNC_EXIT_CODE = 2 ** 31 - 1;
@@ -105,19 +106,24 @@ function runTokscaleSubcommand(args, {
     let stderr = '';
     let settled = false;
     let timer;
+    let cancellationError = null;
+    const termination = createSubprocessTermination(child);
 
     function finish(error, value) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      termination.confirmClosed();
       signal?.removeEventListener('abort', onAbort);
       if (error) reject(error);
       else resolve(value);
     }
 
     function onAbort() {
-      try { child.kill('SIGTERM'); } catch (_) {}
-      finish(signal.reason instanceof Error ? signal.reason : new Error('Cursor sync aborted'));
+      if (cancellationError) return;
+      cancellationError = signal.reason instanceof Error ? signal.reason : new Error('Cursor sync aborted');
+      clearTimeout(timer);
+      termination.request();
     }
 
     timer = setTimeout(() => {
@@ -126,12 +132,17 @@ function runTokscaleSubcommand(args, {
     }, timeoutMs);
     child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', (error) => finish(annotateSyncError(error, 'spawn')));
+    child.on('error', (error) => {
+      if (cancellationError) return;
+      finish(annotateSyncError(error, 'spawn'));
+    });
     child.stdin.on('error', (error) => {
       try { child.kill('SIGTERM'); } catch (_) {}
+      if (cancellationError) return;
       finish(annotateSyncError(error, 'process-exit'));
     });
     child.on('close', (code) => {
+      if (cancellationError) return finish(cancellationError);
       if (code !== 0) {
         return finish(annotateSyncError(
           new Error(`tokscale cursor ${args[0]} exited ${code}: ${(stderr || stdout).trim()}`),
@@ -147,6 +158,7 @@ function runTokscaleSubcommand(args, {
       child.stdin.end(stdin || undefined);
     } catch (error) {
       try { child.kill('SIGTERM'); } catch (_) {}
+      if (cancellationError) return;
       finish(annotateSyncError(error, 'process-exit'));
     }
   });

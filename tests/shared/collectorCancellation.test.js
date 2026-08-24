@@ -8,6 +8,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const cursorAuth = require('../../src/shared/cursorAuth');
+const { createDeviceRuntime } = require('../../src/shared/deviceRuntime');
 const { startCollector, selfSyncThrottle } = require('../../src/shared/collector');
 const { SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = require('../../src/shared/selfSyncThrottle');
 
@@ -94,6 +95,64 @@ test('stopping superseded collectors aborts their physical scan before the next 
   assert.equal(completed, 0);
 });
 
+test('usage replacement waits for an aborted tokscale child to close before spawning again', async () => {
+  const childProcess = require('node:child_process');
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const originalSpawn = childProcess.spawn;
+  const children = [];
+  childProcess.spawn = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end() {} };
+    child.kill = () => true;
+    children.push(child);
+    if (children.length > 1) {
+      setImmediate(() => {
+        child.stdout.emit('data', JSON.stringify({ entries: [] }));
+        child.emit('close', 0);
+      });
+    }
+    return child;
+  };
+  delete require.cache[collectorPath];
+
+  let runtime = null;
+  try {
+    const fresh = require(collectorPath);
+    const usageOptions = {
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 5000,
+      deviceId: 'physical-close-barrier-test',
+      agentVersion: 'test',
+      historyEnabled: false,
+      dailyHistoryArchiveEnabled: false,
+      projectsEnabled: false,
+      wslScanEnabled: false,
+      watchEnabled: false,
+      anchorPersistenceEnabled: false
+    };
+    runtime = createDeviceRuntime({ usageOptions }, {
+      createUsageRuntime: (next) => fresh.startCollector(next),
+      createLimitsRuntime: () => ({ stop() {} })
+    });
+    await waitFor(() => children.length === 1);
+
+    assert.equal(runtime.reconfigureUsage(usageOptions), true);
+    assert.equal(runtime.reconfigureUsage(usageOptions), true);
+    await nextTurn();
+    assert.equal(children.length, 1, 'even chained replacements must remain behind the physical close barrier');
+
+    children[0].emit('close', null, 'SIGTERM');
+    await waitFor(() => children.length >= 2);
+  } finally {
+    runtime?.stop();
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});
+
 test('a self-sync cancelled by usage replacement is neutral and returns its allowance', async () => {
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
@@ -163,6 +222,7 @@ test('native Antigravity cancellation releases the claim without publishing fail
   fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
   let syncSpawns = 0;
   let killed = 0;
+  let firstSyncChild = null;
   childProcess.spawn = (_bin, args) => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -171,6 +231,7 @@ test('native Antigravity cancellation releases the claim without publishing fail
     child.kill = () => { killed += 1; };
     if (args.includes('antigravity') && args.includes('sync')) {
       syncSpawns += 1;
+      if (syncSpawns === 1) firstSyncChild = child;
       if (syncSpawns > 1) setImmediate(() => child.emit('close', 0));
     }
     return child;
@@ -193,6 +254,11 @@ test('native Antigravity cancellation releases the claim without publishing fail
     const cancelled = fresh.collectUsageOnce({ ...options, signal: controller.signal });
     await waitFor(() => syncSpawns === 1);
     controller.abort(new Error('usage runtime superseded'));
+    let cancellationSettled = false;
+    cancelled.catch(() => { cancellationSettled = true; });
+    await nextTurn();
+    assert.equal(cancellationSettled, false, 'Antigravity cancellation waits for child close');
+    firstSyncChild.emit('close', null, 'SIGTERM');
     await assert.rejects(cancelled, /usage runtime superseded/);
 
     assert.equal(killed, 1);
