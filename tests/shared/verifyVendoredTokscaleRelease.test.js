@@ -6,6 +6,7 @@ const test = require('node:test');
 const {
   parseChecksumManifest,
   platformKeyForPackage,
+  resolveReleaseTagCommit,
   verifyManifestTargets,
   verifyVendoredTokscaleRelease
 } = require('../../scripts/verify-vendored-tokscale-release');
@@ -98,6 +99,7 @@ test('release verification downloads and hashes every native asset', async () =>
     manifest: value.manifest,
     optionalDependencies: value.optionalDependencies,
     release: value.release,
+    tagCommit: value.manifest.commit,
     download: async (_manifest, entry) => {
       downloads.push(entry.asset);
       return value.payloads[entry.asset];
@@ -116,11 +118,46 @@ test('release verification requires the exact source commit', async () => {
       manifest: value.manifest,
       optionalDependencies: value.optionalDependencies,
       release: value.release,
+      tagCommit: value.manifest.commit,
       download: async () => { throw new Error('must not download'); },
       log: () => {}
     }),
     /Release target is main, expected source commit/
   );
+});
+
+test('release verification rejects a correct target_commitish whose tag resolves elsewhere', async () => {
+  const value = fixture();
+  await assert.rejects(
+    verifyVendoredTokscaleRelease({
+      manifest: value.manifest,
+      optionalDependencies: value.optionalDependencies,
+      release: value.release,
+      tagCommit: 'f'.repeat(40),
+      download: async () => { throw new Error('must not download'); },
+      log: () => {}
+    }),
+    /Release tag resolves to f{40}, expected source commit/
+  );
+});
+
+test('tag resolution peels an annotated tag to its commit', async () => {
+  const value = fixture();
+  const tagObjectSha = 'a'.repeat(40);
+  const requested = [];
+  const fetchImpl = async (url) => {
+    requested.push(url);
+    if (url.includes('/git/ref/tags/')) {
+      return { ok: true, json: async () => ({ object: { type: 'tag', sha: tagObjectSha } }) };
+    }
+    if (url.endsWith(`/git/tags/${tagObjectSha}`)) {
+      return { ok: true, json: async () => ({ object: { type: 'commit', sha: value.manifest.commit } }) };
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  assert.equal(await resolveReleaseTagCommit(value.manifest, { fetchImpl }), value.manifest.commit);
+  assert.equal(requested.length, 2);
 });
 
 test('release verification rejects a missing asset before downloading', async () => {
@@ -131,6 +168,7 @@ test('release verification rejects a missing asset before downloading', async ()
       manifest: value.manifest,
       optionalDependencies: value.optionalDependencies,
       release: value.release,
+      tagCommit: value.manifest.commit,
       download: async () => { throw new Error('must not download'); },
       log: () => {}
     }),
@@ -149,6 +187,7 @@ test('release verification rejects checksum-list drift', async () => {
       manifest: value.manifest,
       optionalDependencies: value.optionalDependencies,
       release: value.release,
+      tagCommit: value.manifest.commit,
       download: async (_manifest, entry) => value.payloads[entry.asset],
       log: () => {}
     }),
@@ -164,6 +203,7 @@ test('release verification hashes downloaded bytes instead of trusting metadata'
       manifest: value.manifest,
       optionalDependencies: value.optionalDependencies,
       release: value.release,
+      tagCommit: value.manifest.commit,
       download: async (_manifest, entry) => value.payloads[entry.asset],
       log: () => {}
     }),

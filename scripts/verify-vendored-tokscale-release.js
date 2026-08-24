@@ -11,6 +11,8 @@ const { loadManifest, manifestMode } = require('./vendoredTokscale');
 
 const API_TIMEOUT_MS = 30 * 1000;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const GIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
+const MAX_TAG_DEPTH = 8;
 
 function platformKeyForPackage(packageName) {
   const match = String(packageName || '').match(
@@ -81,8 +83,7 @@ function verifyManifestTargets(manifest, optionalDependencies) {
   return entries;
 }
 
-async function fetchReleaseMetadata(manifest, { fetchImpl = fetch, token = process.env.GITHUB_TOKEN || '' } = {}) {
-  const url = `https://api.github.com/repos/${manifest.releaseRepo}/releases/tags/${encodeURIComponent(manifest.releaseTag)}`;
+async function fetchGithubJson(url, label, { fetchImpl = fetch, token = process.env.GITHUB_TOKEN || '' } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   try {
@@ -93,11 +94,39 @@ async function fetchReleaseMetadata(manifest, { fetchImpl = fetch, token = proce
     };
     if (token) headers.Authorization = `Bearer ${token}`;
     const response = await fetchImpl(url, { headers, signal: controller.signal });
-    if (!response.ok) throw new Error(`GitHub Release lookup failed: ${response.status} ${url}`);
+    if (!response.ok) throw new Error(`${label} failed: ${response.status} ${url}`);
     return response.json();
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function fetchReleaseMetadata(manifest, options = {}) {
+  const url = `https://api.github.com/repos/${manifest.releaseRepo}/releases/tags/${encodeURIComponent(manifest.releaseTag)}`;
+  return fetchGithubJson(url, 'GitHub Release lookup', options);
+}
+
+async function resolveReleaseTagCommit(manifest, options = {}) {
+  const refUrl = `https://api.github.com/repos/${manifest.releaseRepo}/git/ref/tags/${encodeURIComponent(manifest.releaseTag)}`;
+  const ref = await fetchGithubJson(refUrl, 'GitHub tag ref lookup', options);
+  let object = ref?.object;
+  const seenTags = new Set();
+
+  for (let depth = 0; depth <= MAX_TAG_DEPTH; depth += 1) {
+    const type = String(object?.type || '');
+    const sha = String(object?.sha || '');
+    if (!GIT_SHA_PATTERN.test(sha)) throw new Error(`GitHub tag ref returned an invalid object SHA: ${sha || 'missing'}`);
+    if (type === 'commit') return sha;
+    if (type !== 'tag') throw new Error(`GitHub tag ref resolves to unsupported object type: ${type || 'missing'}`);
+    if (seenTags.has(sha)) throw new Error(`GitHub tag ref contains a tag cycle at ${sha}`);
+    if (depth === MAX_TAG_DEPTH) throw new Error(`GitHub tag ref exceeds ${MAX_TAG_DEPTH} annotated tag levels`);
+    seenTags.add(sha);
+
+    const tagUrl = `https://api.github.com/repos/${manifest.releaseRepo}/git/tags/${sha}`;
+    const tag = await fetchGithubJson(tagUrl, 'GitHub annotated tag lookup', options);
+    object = tag?.object;
+  }
+  throw new Error('GitHub tag ref could not be resolved to a commit');
 }
 
 function parseChecksumManifest(buffer) {
@@ -149,6 +178,7 @@ async function verifyVendoredTokscaleRelease({
   manifest = loadManifest(),
   optionalDependencies = require('@tokscale/cli/package.json').optionalDependencies,
   release = null,
+  tagCommit = null,
   fetchImpl = fetch,
   token = process.env.GITHUB_TOKEN || '',
   download = (currentManifest, entry) => downloadAsset(currentManifest, entry, fetchImpl),
@@ -162,6 +192,10 @@ async function verifyVendoredTokscaleRelease({
 
   const metadata = release || await fetchReleaseMetadata(manifest, { fetchImpl, token });
   verifyReleaseMetadata(manifest, entries, metadata);
+  const resolvedTagCommit = tagCommit || await resolveReleaseTagCommit(manifest, { fetchImpl, token });
+  if (resolvedTagCommit !== manifest.commit) {
+    throw new Error(`Release tag resolves to ${resolvedTagCommit}, expected source commit ${manifest.commit}`);
+  }
   const checksumBuffer = await download(manifest, { asset: 'SHA256SUMS' });
   const checksums = parseChecksumManifest(checksumBuffer);
   if (checksums.size !== entries.length) {
@@ -177,7 +211,7 @@ async function verifyVendoredTokscaleRelease({
     verifySha256(buffer, entry.sha256);
     log(`Verified ${entry.key}: ${entry.asset} (${buffer.length} bytes)`);
   }
-  log(`Verified vendor Release ${manifest.releaseTag}: target ${manifest.commit} and all ${entries.length} native assets.`);
+  log(`Verified vendor Release ${manifest.releaseTag}: tag commit ${manifest.commit} and all ${entries.length} native assets.`);
   return { status: 'verified', targets: entries.length };
 }
 
@@ -193,6 +227,7 @@ module.exports = {
   fetchReleaseMetadata,
   parseChecksumManifest,
   platformKeyForPackage,
+  resolveReleaseTagCommit,
   verifyManifestTargets,
   verifyReleaseMetadata,
   verifyVendoredTokscaleRelease
