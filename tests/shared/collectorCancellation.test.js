@@ -153,6 +153,67 @@ test('usage replacement waits for an aborted tokscale child to close before spaw
   }
 });
 
+test('timed-out tokscale remains the replacement barrier through forced termination', async () => {
+  const childProcess = require('node:child_process');
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const originalSpawn = childProcess.spawn;
+  const children = [];
+  childProcess.spawn = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end() {} };
+    child.signals = [];
+    child.kill = (signal) => { child.signals.push(signal); return true; };
+    children.push(child);
+    if (children.length > 1) {
+      setImmediate(() => {
+        child.stdout.emit('data', JSON.stringify({ entries: [] }));
+        child.emit('close', 0);
+      });
+    }
+    return child;
+  };
+  delete require.cache[collectorPath];
+
+  let runtime = null;
+  try {
+    const fresh = require(collectorPath);
+    const usageOptions = {
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1,
+      deviceId: 'timeout-close-barrier-test',
+      agentVersion: 'test',
+      historyEnabled: false,
+      dailyHistoryArchiveEnabled: false,
+      projectsEnabled: false,
+      wslScanEnabled: false,
+      watchEnabled: false,
+      anchorPersistenceEnabled: false
+    };
+    runtime = createDeviceRuntime({ usageOptions }, {
+      createUsageRuntime: (next) => fresh.startCollector(next),
+      createLimitsRuntime: () => ({ stop() {} })
+    });
+    await waitFor(() => children[0]?.signals.includes('SIGTERM'));
+
+    assert.equal(runtime.reconfigureUsage(usageOptions), true);
+    await nextTurn();
+    assert.equal(children.length, 1, 'replacement stays blocked after the timeout requests SIGTERM');
+
+    await waitFor(() => children[0].signals.includes('SIGKILL'), 3500);
+    assert.equal(children.length, 1, 'forced termination is still only a request until close');
+
+    children[0].emit('close', null, 'SIGKILL');
+    await waitFor(() => children.length >= 2);
+  } finally {
+    runtime?.stop();
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});
+
 test('a self-sync cancelled by usage replacement is neutral and returns its allowance', async () => {
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
@@ -269,6 +330,59 @@ test('native Antigravity cancellation releases the claim without publishing fail
     assert.equal(syncSpawns, 2, 'the replacement immediately owns the restored allowance');
     assert.equal(fresh.selfSyncThrottle.syncStatus('antigravity').state, 'ok');
     assert.notEqual(replacement.clientHealth.clients.antigravity.collection.state, 'failed');
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('native Antigravity timeout remains pending until the child closes', async () => {
+  const childProcess = require('node:child_process');
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const originalSpawn = childProcess.spawn;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-timeout-antigravity-'));
+  fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+  let syncChild = null;
+  childProcess.spawn = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end() {} };
+    child.signals = [];
+    child.kill = (signal) => { child.signals.push(signal); return true; };
+    syncChild = child;
+    return child;
+  };
+  delete require.cache[collectorPath];
+
+  try {
+    const fresh = require(collectorPath);
+    let failed = 0;
+    const pending = fresh.collectUsageOnce({
+      clients: 'antigravity',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 5000,
+      selfSyncTimeoutMs: 1,
+      deviceId: 'antigravity-timeout-test',
+      agentVersion: 'test',
+      historyEnabled: false,
+      homeDir: home,
+      runTokscale: async () => ({ entries: [] }),
+      onSelfSyncFailed: () => { failed += 1; }
+    });
+    let settled = false;
+    pending.then(() => { settled = true; }, () => { settled = true; });
+
+    await waitFor(() => syncChild?.signals.includes('SIGTERM'));
+    assert.equal(settled, false, 'sync timeout must not release the operation before close');
+    assert.equal(fresh.selfSyncThrottle.syncStatus('antigravity').state, 'pending');
+
+    syncChild.emit('close', null, 'SIGTERM');
+    const summary = await pending;
+    assert.equal(failed, 1);
+    assert.equal(fresh.selfSyncThrottle.syncStatus('antigravity').failureCode, 'sync-timeout');
+    assert.equal(summary.clientHealth.clients.antigravity.collection.state, 'failed');
   } finally {
     childProcess.spawn = originalSpawn;
     delete require.cache[collectorPath];

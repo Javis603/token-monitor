@@ -106,7 +106,7 @@ function runTokscaleSubcommand(args, {
     let stderr = '';
     let settled = false;
     let timer;
-    let cancellationError = null;
+    let terminalError = null;
     const termination = createSubprocessTermination(child);
 
     function finish(error, value) {
@@ -120,29 +120,34 @@ function runTokscaleSubcommand(args, {
     }
 
     function onAbort() {
-      if (cancellationError) return;
-      cancellationError = signal.reason instanceof Error ? signal.reason : new Error('Cursor sync aborted');
+      if (terminalError) return;
+      terminalError = signal.reason instanceof Error ? signal.reason : new Error('Cursor sync aborted');
       clearTimeout(timer);
       termination.request();
     }
 
     timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      finish(annotateSyncError(new Error(`tokscale cursor ${args[0]} timed out after ${timeoutMs}ms`), 'timeout'));
+      if (terminalError) return;
+      terminalError = annotateSyncError(
+        new Error(`tokscale cursor ${args[0]} timed out after ${timeoutMs}ms`),
+        'timeout'
+      );
+      termination.request();
     }, timeoutMs);
     child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
     child.on('error', (error) => {
-      if (cancellationError) return;
+      if (terminalError) return;
       finish(annotateSyncError(error, 'spawn'));
     });
     child.stdin.on('error', (error) => {
-      try { child.kill('SIGTERM'); } catch (_) {}
-      if (cancellationError) return;
-      finish(annotateSyncError(error, 'process-exit'));
+      if (terminalError) return;
+      terminalError = annotateSyncError(error, 'process-exit');
+      clearTimeout(timer);
+      termination.request();
     });
     child.on('close', (code) => {
-      if (cancellationError) return finish(cancellationError);
+      if (terminalError) return finish(terminalError);
       if (code !== 0) {
         return finish(annotateSyncError(
           new Error(`tokscale cursor ${args[0]} exited ${code}: ${(stderr || stdout).trim()}`),
@@ -157,9 +162,10 @@ function runTokscaleSubcommand(args, {
     try {
       child.stdin.end(stdin || undefined);
     } catch (error) {
-      try { child.kill('SIGTERM'); } catch (_) {}
-      if (cancellationError) return;
-      finish(annotateSyncError(error, 'process-exit'));
+      if (terminalError) return;
+      terminalError = annotateSyncError(error, 'process-exit');
+      clearTimeout(timer);
+      termination.request();
     }
   });
 }

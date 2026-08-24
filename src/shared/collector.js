@@ -185,7 +185,7 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
     let stderr = '';
     let settled = false;
     let timeout = null;
-    let cancellationError = null;
+    let terminalError = null;
     const termination = createSubprocessTermination(child);
 
     function finish(error, value) {
@@ -199,25 +199,27 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
     }
 
     function onAbort() {
-      if (cancellationError) return;
-      cancellationError = abortReason(signal);
+      if (terminalError) return;
+      terminalError = abortReason(signal);
       if (timeout) clearTimeout(timeout);
       timeout = null;
       termination.request();
     }
 
     timeout = setTimeout(() => {
-      try { child.kill('SIGTERM'); } catch (_) {}
-      finish(new Error(`tokscale timed out after ${commandTimeoutMs}ms`));
+      if (terminalError) return;
+      terminalError = new Error(`tokscale timed out after ${commandTimeoutMs}ms`);
+      timeout = null;
+      termination.request();
     }, commandTimeoutMs);
     child.stdout.on('data', (chunk) => { if (!settled) stdout += chunk.toString(); });
     child.stderr.on('data', (chunk) => { if (!settled) stderr += chunk.toString(); });
     child.on('error', (error) => {
-      if (cancellationError) return;
+      if (terminalError) return;
       finish(error);
     });
     child.on('close', (code) => {
-      if (cancellationError) return finish(cancellationError);
+      if (terminalError) return finish(terminalError);
       if (code !== 0) {
         const error = new Error(`tokscale exited with code ${code}: ${stderr.trim() || stdout.trim()}`);
         error.tokscaleExitCode = code;
@@ -1048,7 +1050,7 @@ async function maybeSyncCursor(clientsCsv, logger, options = {}) {
   options.signal?.addEventListener('abort', cancelAttempt, { once: true });
   if (options.signal?.aborted) cancelAttempt();
   try {
-    await cursorAuth.runCursorSync({ signal: options.signal });
+    await cursorAuth.runCursorSync({ signal: options.signal, timeoutMs: options.timeoutMs });
     selfSyncThrottle.completeAttempt('cursor', attempt, false);
   } catch (err) {
     if (options.signal?.aborted) {
@@ -1128,7 +1130,7 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
     // event back into a set that no longer has anything to collect.
     let settled = false;
     let timer = null;
-    let cancellationRequested = false;
+    let terminalOutcome = null;
     // The failure code reaches the health record; stderr only ever reaches the
     // local log, since it is neither translatable nor reliably free of the
     // user's paths.
@@ -1144,30 +1146,43 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
       resolve();
     };
     const onAbort = () => {
-      if (cancellationRequested) return;
-      cancellationRequested = true;
+      if (terminalOutcome) return;
+      terminalOutcome = { cancelled: true };
       if (timer) clearTimeout(timer);
       timer = null;
       termination.request();
     };
     timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      settle(true, 'sync-timeout', { failureStage: 'timeout' });
-    }, 30000);
+      if (terminalOutcome) return;
+      terminalOutcome = {
+        failed: true,
+        code: 'sync-timeout',
+        details: { failureStage: 'timeout' }
+      };
+      timer = null;
+      termination.request();
+    }, options.timeoutMs ?? 30000);
     child.stderr.on('data', (chunk) => {
       if (stderr.length >= MAX_SYNC_DETAIL_INPUT_LENGTH) return;
       const remaining = MAX_SYNC_DETAIL_INPUT_LENGTH - stderr.length;
       stderr += chunk.toString().slice(0, remaining);
     });
     child.on('error', (err) => {
-      if (cancellationRequested) return;
+      if (terminalOutcome) return;
       settle(true, 'sync-spawn-failed', {
         failureStage: 'spawn',
         detailCode: classifyClientSyncDetailCode({ client: 'antigravity', text: err?.message })
       });
     });
     child.on('close', (code) => {
-      if (cancellationRequested) return settle(false, '', {}, false, true);
+      if (terminalOutcome?.cancelled) return settle(false, '', {}, false, true);
+      if (terminalOutcome) {
+        return settle(
+          terminalOutcome.failed,
+          terminalOutcome.code,
+          terminalOutcome.details
+        );
+      }
       if (code !== 0 && !settled && typeof logger === 'function') {
         logger(`antigravity sync exited ${code}: ${stderr.trim().slice(0, 200)}`);
       }
@@ -1360,12 +1375,14 @@ async function collectUsageOnce(options) {
     await maybeSyncCursor(syncClients, options.logger, {
       minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'cursor'),
       signal: options.signal,
+      timeoutMs: options.selfSyncTimeoutMs,
       onFailure: options.onSelfSyncFailed
     });
     await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
       minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'antigravity'),
       run: options.runAntigravitySync,
       signal: options.signal,
+      timeoutMs: options.selfSyncTimeoutMs,
       onFailure: options.onSelfSyncFailed
     });
     throwIfAborted(options.signal);
