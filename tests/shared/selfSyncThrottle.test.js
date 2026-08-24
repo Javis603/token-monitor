@@ -14,9 +14,23 @@ const {
   createSourceSyncQueue,
   mergeSelfSyncSelection,
   selfSyncSelected,
+  SELF_SYNC_KINDS,
   SYNC_MIN_INTERVAL_MS,
   SYNC_SOURCE_EVENT_MIN_INTERVAL_MS
 } = require('../../src/shared/selfSyncThrottle');
+
+test('self-sync kinds are unique and unknown diagnostic kinds stay idle', () => {
+  assert.deepEqual([...new Set(SELF_SYNC_KINDS)], SELF_SYNC_KINDS);
+  assert.deepEqual(createSelfSyncThrottle().syncStatus('future-client'), {
+    state: 'idle',
+    lastAttemptAt: 0,
+    lastSuccessAt: 0,
+    failureCode: '',
+    failureStage: '',
+    detailCode: '',
+    exitCode: null
+  });
+});
 
 // A clock and a timer wheel the tests own outright, so a deadline can be
 // asserted at the millisecond without sleeping or patching a global.

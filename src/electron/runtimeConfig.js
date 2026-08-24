@@ -262,6 +262,7 @@ function classifySettingsChange(previous = {}, next = {}) {
 
 module.exports = {
   LIMIT_PROVIDER_SETTING_KEYS,
+  USAGE_STRUCTURAL_KEYS,
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,

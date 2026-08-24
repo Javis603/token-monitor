@@ -100,7 +100,9 @@ function createSelfSyncThrottle(options = {}) {
   // machine: splitting them into parallel maps made adding cancellation state
   // depend on every method updating the same growing list of containers.
   const states = Object.fromEntries(SELF_SYNC_KINDS.map((kind) => [kind, {
-    // Rate-limit state. `lastSyncAt` is moved by claim(), not completion.
+    // Rate-limit state. `lastSyncAt` is moved by claim(), not completion. A
+    // failure selects the longer floor everywhere so another client's event
+    // cannot bypass the failed client's backoff.
     lastSyncAt: 0,
     lastSyncFailed: false,
     // Latest-attempt fence and the rollback snapshot for cancellation.
@@ -109,7 +111,9 @@ function createSelfSyncThrottle(options = {}) {
     pendingClaimPreviousSyncAt: null,
     attemptPreviousSyncAt: 0,
     attemptPreviousLastAttemptAt: 0,
-    // Reporting state. It never decides whether a sync may run.
+    // Reporting state. It never decides whether a sync may run; lastAttemptAt
+    // is the completed-attempt timestamp, while lastSyncAt is only the allowance
+    // anchor above.
     hasCompletedAttempt: false,
     lastAttemptAt: 0,
     lastSuccessAt: 0,
@@ -200,6 +204,17 @@ function createSelfSyncThrottle(options = {}) {
   // never surfaces as a provider failure or a permanently pending attempt.
   function syncStatus(kind) {
     const current = states[kind];
+    if (!current) {
+      return {
+        state: 'idle',
+        lastAttemptAt: 0,
+        lastSuccessAt: 0,
+        failureCode: '',
+        failureStage: '',
+        detailCode: '',
+        exitCode: null
+      };
+    }
     let state = 'idle';
     if (current.pendingAttemptSeq) state = 'pending';
     else if (current.hasCompletedAttempt) state = current.lastSyncFailed ? 'failed' : 'ok';

@@ -65,7 +65,8 @@ const {
   clampTimerDelayMs,
   createSelfSyncThrottle,
   createSourceSyncQueue,
-  mergeSelfSyncSelection
+  mergeSelfSyncSelection,
+  SELF_SYNC_KINDS
 } = require('./selfSyncThrottle');
 const {
   LIMITS_RESET_BOUNDARY_MAX_TIMER_MS,
@@ -360,9 +361,6 @@ function waitForSharedCapabilityProbe(probe, signal) {
       (supported) => finish(resolve, supported),
       (error) => finish(reject, error)
     );
-    // Close the race where abort happens after the first check but before the
-    // listener is installed.
-    if (signal.aborted) onAbort();
   });
 }
 
@@ -2303,7 +2301,7 @@ function clientWatchCandidates(clientsCsv) {
 
 // Clients whose dirs are tokscale caches written only by our own maybeSync* calls.
 // Watching them turns every tick into the trigger for the next one (issue #15).
-const SELF_SYNCED_CLIENTS = new Set(['cursor', 'antigravity']);
+const SELF_SYNCED_CLIENTS = new Set(SELF_SYNC_KINDS);
 
 // The Antigravity CLI's parse-local data dir (honors GEMINI_CLI_HOME like tokscale).
 // It belongs to the umbrella `antigravity` client but, unlike that client's IDE
