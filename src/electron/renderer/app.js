@@ -5694,12 +5694,13 @@ function updateServiceStatusAgoLabels() {
 }
 
 function onServiceStatusTick() {
-  if (state.breakdown !== 'status') { stopServiceStatusTicker(); return; }
+  if (!serviceStatusSurfaceVisible()) { stopServiceStatusTicker(); return; }
   updateServiceStatusAgoLabels();
   maybeFetchServiceStatus();
 }
 
 function ensureServiceStatusTicker() {
+  if (!serviceStatusSurfaceVisible()) { stopServiceStatusTicker(); return; }
   if (state.serviceStatusTicker) return;
   state.serviceStatusTicker = setInterval(onServiceStatusTick, 1000);
   onServiceStatusTick();
@@ -5845,6 +5846,12 @@ function turnNode(turn) {
 
 let contentReadySignaled = false;
 
+function signalContentReady() {
+  if (contentReadySignaled || !state.settings || !state.stats) return;
+  contentReadySignaled = true;
+  window.tokenMonitor.signalContentReady?.();
+}
+
 function renderTrends() {
   const charts = window.TokenMonitorUsageCharts;
   const previousBars = captureTrendBarMotion();
@@ -5908,6 +5915,26 @@ function viewLabelById(id) {
   return view ? viewLabel(view) : id;
 }
 
+function isSettingsPanelOpen() {
+  return Boolean(els.settingsPanel && !els.settingsPanel.classList.contains('hidden'));
+}
+
+function visibleStatsSurface() {
+  return statsRenderSchedulerApi.visibleStatsSurface(
+    document.hidden,
+    state.floatingBubble.collapsed,
+    isSettingsPanelOpen()
+  );
+}
+
+function isSettingsSurfaceVisible() {
+  return visibleStatsSurface() === 'settings';
+}
+
+function serviceStatusSurfaceVisible() {
+  return visibleStatsSurface() === 'main' && state.breakdown === 'status';
+}
+
 function openHomeSettings() {
   if (!els.settingsPanel) return;
   els.settingsPanel.classList.remove('hidden');
@@ -5939,18 +5966,22 @@ function openSettingsPanel() {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
+  syncSettingsForm();
+  ensureServiceStatusTicker();
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
 }
 
 function openViewFromTray(viewId) {
   if (!availableBreakdownIds().includes(viewId)) return;
+  const settingsWasOpen = isSettingsPanelOpen();
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   stopWindowShortcutRecording();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   state.openSession = null;
-  renderBreakdownChange(viewId, { allowHidden: true });
+  if (!renderBreakdownChange(viewId, { allowHidden: true }) && settingsWasOpen) render();
+  ensureServiceStatusTicker();
 }
 
 const HOME_HISTORY_MAX_RETRIES = 3;
@@ -7216,10 +7247,7 @@ function render() {
     state.currentTotal = fixedUnavailable ? 0 : Number(period.totalTokens || 0);
     hidePeriodContentForMessage(fixedPeriodMessage(state.fixedPeriodSnapshot, detailUnavailable ? state.breakdown : ''));
     renderFloatingBubbleContent();
-    if (!contentReadySignaled) {
-      contentReadySignaled = true;
-      window.tokenMonitor.signalContentReady?.();
-    }
+    signalContentReady();
     return;
   }
   els.fixedPeriodMessage.classList.add('hidden');
@@ -7314,10 +7342,7 @@ function render() {
   renderFloatingBubbleContent();
   // Tell main the window has painted real content (not the static "0" defaults),
   // so a recreated window can stay hidden until it's populated. See loadWindowFile.
-  if (!contentReadySignaled) {
-    contentReadySignaled = true;
-    window.tokenMonitor.signalContentReady?.();
-  }
+  signalContentReady();
 }
 
 function setStatus(text, isError = false) {
@@ -7461,7 +7486,6 @@ async function refreshStats(options = {}) {
       state.homeHistorySignature = '';
     }
     applyCodexActiveAccountFromStats();
-    setStatus(statusTextFor(state.mode, state.streamConnected));
     const forceFixedPeriodHistory = options.forceHistory === true;
     if (fixedPeriodRangesApi.isDerived(state.period)) {
       await warmFixedPeriodHistory({
@@ -7485,7 +7509,9 @@ async function refreshStats(options = {}) {
     // live-dot tooltip + sync settings line, so keep the header status pill
     // hidden instead of surfacing the raw hub error (e.g. a 404 HTML page).
     console.log(`[refresh] getStats failed: ${error.message}`);
-    setStatus(statusTextFor(state.mode, state.streamConnected));
+    if (!document.hidden && !state.floatingBubble.collapsed) {
+      setStatus(statusTextFor(state.mode, state.streamConnected));
+    }
     if (feedback) settleRefreshButtonState('error');
   } finally {
     if (feedback) state.refreshBusy = false;
@@ -8028,6 +8054,7 @@ function handleWindowShortcutRecordKey(event) {
 }
 
 function applyFloatingBubbleState(payload = {}) {
+  const wasCollapsed = state.floatingBubble.collapsed;
   const side = payload?.collapsed && ['left', 'right'].includes(payload.side) ? payload.side : null;
   state.floatingBubble = { collapsed: Boolean(side), side };
   document.documentElement.classList.toggle('floating-bubble-collapsed-left', side === 'left');
@@ -8039,7 +8066,17 @@ function applyFloatingBubbleState(payload = {}) {
     els.floatingBubbleTab.title = title;
     els.floatingBubbleTab.setAttribute('aria-label', title);
   }
-  renderFloatingBubbleContent();
+  if (wasCollapsed && !state.floatingBubble.collapsed) {
+    if (isSettingsPanelOpen()) {
+      syncSettingsForm();
+      renderConnectionStatus('settings');
+    } else {
+      renderStatsUpdate();
+    }
+  } else {
+    renderFloatingBubbleContent();
+  }
+  ensureServiceStatusTicker();
 }
 
 const BUBBLE_CONTENT_VALUES = ['icon', 'tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'custom'];
@@ -11249,12 +11286,15 @@ els.pinButton.addEventListener('click', () => {
 els.settingsButton.addEventListener('click', (event) => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.toggle('hidden');
-  const settingsOpen = !els.settingsPanel.classList.contains('hidden');
+  const settingsOpen = isSettingsPanelOpen();
+  if (settingsOpen) syncSettingsForm();
+  else render();
   if (!settingsOpen) stopWindowShortcutRecording();
   els.shell.classList.toggle('settings-open', settingsOpen);
   if (!settingsOpen && event.detail > 0) els.settingsButton.blur();
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
+  ensureServiceStatusTicker();
 });
 els.saveSettingsButton.addEventListener('click', async () => {
   const submittedHubFields = {
@@ -11814,26 +11854,45 @@ window.tokenMonitor.onFloatingBubbleState?.((payload) => {
 window.tokenMonitor.onHubPush?.((payload) => {
   if (!payload?.info) return;
   state.hubInfo = payload.info;
+  const settingsVisible = isSettingsSurfaceVisible();
   // The first switch to Host mode generates the shared secret asynchronously
   // after settings:update has already returned, so mirror the freshly minted
   // value back into state + input — otherwise the Shared Secret field stays
   // blank and other devices can't pair until the user clicks Regenerate.
   if (payload.info.secret && payload.info.secret !== state.settings?.hubHostSecret) {
     state.settings = { ...state.settings, hubHostSecret: payload.info.secret };
-    if (els.hubSecretInput && state.settings.hubMode === 'host') {
+    if (settingsVisible && els.hubSecretInput && state.settings.hubMode === 'host') {
       els.hubSecretInput.value = payload.info.secret;
     }
   }
-  renderHubStatus();
+  if (settingsVisible) renderHubStatus();
 });
 
 window.tokenMonitor.onTokscalePush?.((payload) => {
   mergeTokscalePayload(payload);
-  renderTokscaleStatus();
+  if (isSettingsSurfaceVisible()) renderTokscaleStatus();
 });
 
+function renderConnectionStatus(surface = visibleStatsSurface()) {
+  if (surface !== 'main' && surface !== 'settings') return;
+  setLiveDot(state.streamConnected);
+  setStatus(statusTextFor(state.mode, state.streamConnected));
+  if (surface === 'settings') renderSyncClientStatus();
+}
+
 function renderStatsUpdate() {
-  render();
+  const surface = visibleStatsSurface();
+  renderConnectionStatus(surface);
+  if (surface === 'main') {
+    render();
+    return;
+  }
+  if (surface === 'bubble') {
+    renderFloatingBubbleContent();
+    signalContentReady();
+    return;
+  }
+  if (surface !== 'settings') return;
   renderCodexAccounts();
   renderSettingsSummaries();
   renderLimitProviderCheckboxes();
@@ -11853,6 +11912,7 @@ function renderStatsUpdate() {
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
   renderCopilotStatus();
+  signalContentReady();
 }
 
 const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler({
@@ -11865,6 +11925,8 @@ document.addEventListener('visibilitychange', () => {
     void refreshHubBuildStatus();
   }
   statsRenderScheduler.flush();
+  if (isSettingsSurfaceVisible()) refreshTrayComposers();
+  ensureServiceStatusTicker();
 });
 
 window.tokenMonitor.onStatsPush?.((payload) => {
@@ -11892,9 +11954,10 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   } else {
     return;
   }
-  setLiveDot(state.streamConnected);
-  setStatus(statusTextFor(state.mode, state.streamConnected));
-  renderSyncClientStatus();
+  if (payload.event === 'status') {
+    if (document.hidden) statsRenderScheduler.request();
+    else renderConnectionStatus();
+  }
   if (!wasStreamConnected && state.streamConnected && state.settings?.hubMode === 'client') {
     void refreshHubBuildStatus();
   }
@@ -12668,7 +12731,8 @@ function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
 }
 
 async function maybeUpdateBarsIcon(options = {}) {
-  if (options.refreshComposers !== false) refreshTrayComposers();
+  if (options.refreshComposers !== false && isSettingsSurfaceVisible()) refreshTrayComposers();
+  else syncCustomTrayClockTimer();
   const mode = state.settings?.trayContent;
   if (!window.TokenMonitorTrayText.isGeneratedTrayIconMode(mode)) return;
   if (!window.tokenMonitor.setTrayIcons) return;
@@ -12957,17 +13021,7 @@ function createTrayComposer(surface) {
   });
 }
 
-function refreshTrayComposers() {
-  const surfaces = [
-    { id: 'tray', root: els.trayComposer, visible: state.settings?.showTrayIcon !== false },
-    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleEnabled === true }
-  ];
-  window.TokenMonitorTrayComposer.syncTrayComposerSurfaces(
-    surfaces,
-    trayComposers,
-    createTrayComposer
-  );
-  Object.values(trayComposers).forEach((composer) => composer?.refresh());
+function syncCustomTrayClockTimer() {
   const clockNeeded = (
     state.settings?.trayContent === 'custom'
       && trayLayoutApi.trayLayoutNeedsClock(state.settings?.trayCustomLayout)
@@ -12984,6 +13038,20 @@ function refreshTrayComposers() {
     clearInterval(customTrayClockTimer);
     customTrayClockTimer = null;
   }
+}
+
+function refreshTrayComposers() {
+  const surfaces = [
+    { id: 'tray', root: els.trayComposer, visible: state.settings?.showTrayIcon !== false },
+    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleEnabled === true }
+  ];
+  window.TokenMonitorTrayComposer.syncTrayComposerSurfaces(
+    surfaces,
+    trayComposers,
+    createTrayComposer
+  );
+  Object.values(trayComposers).forEach((composer) => composer?.refresh());
+  syncCustomTrayClockTimer();
 }
 
 function loadImage(src) {

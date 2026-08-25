@@ -6,7 +6,8 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
-  createStatsRenderScheduler
+  createStatsRenderScheduler,
+  visibleStatsSurface
 } = require('../../src/electron/renderer/statsRenderScheduler');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
@@ -41,6 +42,14 @@ test('visible stats updates continue rendering every push', () => {
   scheduler.request();
   scheduler.request();
   assert.equal(renders, 2);
+});
+
+test('visible stats update only the exposed surface', () => {
+  assert.equal(visibleStatsSurface(false, false, false), 'main');
+  assert.equal(visibleStatsSurface(false, false, true), 'settings');
+  assert.equal(visibleStatsSurface(false, true, false), 'bubble');
+  assert.equal(visibleStatsSurface(true, false, false), null);
+  assert.equal(visibleStatsSurface(true, true, false), null);
 });
 
 test('hidden payloads keep the latest state and tray updates before visible rendering resumes', () => {
@@ -111,5 +120,6 @@ test('all stats refreshes use visibility-aware rendering', () => {
   );
 
   assert.match(refreshStats, /getStats\(options\)[\s\S]*statsRenderScheduler\.request\(\);/);
+  assert.equal([...refreshStats.matchAll(/setStatus\(statusTextFor/g)].length, 1);
   assert.doesNotMatch(statsRender, /renderMimoStatus\(\);/);
 });

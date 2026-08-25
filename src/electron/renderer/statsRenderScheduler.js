@@ -5,6 +5,12 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorStatsRenderScheduler = api;
 })(typeof window !== 'undefined' ? window : null, function createStatsRenderSchedulerApi() {
+  function visibleStatsSurface(rendererHidden, floatingBubbleCollapsed, settingsOpen) {
+    if (rendererHidden) return null;
+    if (floatingBubbleCollapsed) return 'bubble';
+    return settingsOpen ? 'settings' : 'main';
+  }
+
   function createStatsRenderScheduler({ isHidden, render }) {
     if (typeof isHidden !== 'function') throw new TypeError('isHidden must be a function');
     if (typeof render !== 'function') throw new TypeError('render must be a function');
@@ -32,6 +38,7 @@
   }
 
   return {
-    createStatsRenderScheduler
+    createStatsRenderScheduler,
+    visibleStatsSurface
   };
 });
