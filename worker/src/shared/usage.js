@@ -6,7 +6,9 @@
 const PERIODS = ['today', 'month', 'allTime'];
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
 const { normalizeClientHealth } = require('./clientHealth');
-const { coerceHistory, dayKeyAddDays, localDayKey, mergeHistories } = require('./history');
+const {
+  coerceHistory, dayKeyAddDays, localDayKey, mergeHistories, normalizeTokscaleClientName
+} = require('./history');
 const { REASONIX_CLIENT } = require('./reasonixPaths');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
@@ -169,7 +171,7 @@ function emptyPeriod() {
 }
 
 function normalizeClientName(value) {
-  const raw = String(value || '').trim().toLowerCase();
+  const raw = normalizeTokscaleClientName(value);
   if (!raw) return null;
   if (raw.includes('claude')) return 'claude';
   if (raw.includes('codex')) return 'codex';
@@ -181,7 +183,6 @@ function normalizeClientName(value) {
   if (raw.includes('qwen')) return 'qwen';
   if (raw.includes('grok')) return 'grok';
   if (raw.includes('copilot')) return 'copilot';
-  if (raw === 'omp') return 'pi';
   if (/\bpi\b/.test(raw)) return 'pi';
   if (raw.includes('zed')) return 'zed';
   if (raw.includes('kilocode')) return 'kilocode';

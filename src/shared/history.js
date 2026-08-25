@@ -4,6 +4,19 @@
 // Cloudflare Worker can import it. Pure functions only — no I/O.
 const { REASONIX_CLIENT } = require('./reasonixPaths');
 
+const TOKSCALE_CLIENT_ALIASES = new Map([
+  ['omp', 'pi']
+]);
+
+// Canonical Token Monitor identity for client ids emitted by Tokscale. Keep
+// this small and exact: product-name heuristics still belong to usage.js, while
+// history and the durable archive need the same raw-id aliases as live usage.
+function normalizeTokscaleClientName(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  return TOKSCALE_CLIENT_ALIASES.get(raw) || raw;
+}
+
 function num(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '') {
@@ -99,7 +112,7 @@ function parseGraphResult(raw) {
     const clientRows = Array.isArray(row.clients) ? row.clients : [];
     for (const c of clientRows) {
       if (!c || typeof c !== 'object') continue;
-      const client = String(c.client || 'unknown');
+      const client = normalizeTokscaleClientName(c.client) || 'unknown';
       const model = String(c.modelId || c.model || c.model_id || 'unknown');
       const t = sumTokens(c.tokens, client);
       const cst = num(c.cost);
@@ -528,7 +541,8 @@ function deviceHistoryRevision(devices) {
 }
 
 module.exports = {
-  num, sumTokens, parseGraphResult, computeIntensities, localDayKey, dayKeyAddDays,
+  num, normalizeTokscaleClientName, sumOutputTokens, sumTokens,
+  parseGraphResult, computeIntensities, localDayKey, dayKeyAddDays,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
   coerceHistory, historyPreview, historyRevision, deviceHistoryRevision
 };

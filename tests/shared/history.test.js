@@ -101,6 +101,31 @@ test('parseGraphResult folds client rows into perClient/perModel and derives day
   });
 });
 
+test('parseGraphResult folds OMP graph rows into the existing Pi history identity', () => {
+  const { contributions } = parseGraphResult({
+    contributions: [{
+      date: '2026-08-25',
+      clients: [
+        {
+          client: 'pi', modelId: 'gpt-5',
+          tokens: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+          cost: 1, messages: 1
+        },
+        {
+          client: 'omp', modelId: 'gpt-5',
+          tokens: { input: 20, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+          cost: 2, messages: 1
+        }
+      ]
+    }]
+  });
+
+  assert.deepEqual(contributions[0].perClient, {
+    pi: { tokens: 30, cost: 3, messages: 2, unclassifiedTokens: 0 }
+  });
+  assert.equal(Object.hasOwn(contributions[0].perClient, 'omp'), false);
+});
+
 test('parseGraphResult is defensive about missing/garbage input', () => {
   assert.deepEqual(parseGraphResult(null), { contributions: [] });
   assert.deepEqual(parseGraphResult({}), { contributions: [] });

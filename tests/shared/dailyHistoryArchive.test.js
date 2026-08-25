@@ -512,15 +512,36 @@ test('lazy write ownership is checked after the archive read', () => {
   assert.equal(writes, 0);
 });
 
-test('durable reconstruction preserves client-specific reasoning semantics without recounting it', () => {
+test('durable archive canonicalizes OMP into Pi before identity and reconstruction', () => {
+  const archive = captureDailyHistoryArchive({}, graph('2026-07-18', [
+    client('pi', 'gpt', 10, 1, 1),
+    client('omp', 'gpt', 20, 2, 1)
+  ]), { todayKey: '2026-07-18' });
+  const observations = Object.values(archive.days['2026-07-18'].observations);
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].client, 'pi');
+  assert.equal(observations[0].tokens, 30);
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, { todayKey: '2026-07-18' }));
+  assert.equal(restored.daily[0].perClient.pi.tokens, 30);
+  assert.equal(Object.hasOwn(restored.daily[0].perClient, 'omp'), false);
+});
+
+test('durable reconstruction preserves client-specific reasoning output without recounting it', () => {
   const archive = captureDailyHistoryArchive({}, graph('2026-07-18', [
     client('codex', 'gpt', 100, 1, 1, { reasoning: 30 }),
+    client('dsh', 'deepseek', 50, 1, 1, { reasoning: 20 }),
     client('claude', 'opus', 100, 1, 1, { reasoning: 30 })
   ]), { todayKey: '2026-07-18' });
   const restored = historyFrom(graphFromDailyHistoryArchive([], archive, { todayKey: '2026-07-18' }));
-  assert.equal(restored.daily[0].tokens, 230);
+  assert.equal(restored.daily[0].tokens, 300);
+  assert.equal(restored.daily[0].outputTokens, 50);
   assert.equal(restored.daily[0].perClient.codex.tokens, 130);
+  assert.equal(restored.daily[0].perClient.codex.outputTokens, 30);
+  assert.equal(restored.daily[0].perClient.dsh.tokens, 70);
+  assert.equal(restored.daily[0].perClient.dsh.outputTokens, 20);
   assert.equal(restored.daily[0].perClient.claude.tokens, 100);
+  assert.equal(restored.daily[0].perClient.claude.outputTokens, undefined);
 });
 
 test('clearDailyHistoryArchive removes persisted data and accepts a missing file', () => {
