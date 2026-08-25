@@ -37,6 +37,16 @@ test('kimiWorkSessionsRoots mirrors platform paths and relocated Windows shares'
     path.join(homeAppData, workSuffix),
     path.join(envAppData, workSuffix)
   ]);
+  assert.deepEqual(kimiWorkSessionsRoots(home, 'win32', {}), [
+    path.join(homeAppData, workSuffix)
+  ]);
+  assert.deepEqual(kimiWorkSessionsRoots(home, 'win32', { APPDATA: '' }), [
+    path.join(homeAppData, workSuffix)
+  ]);
+  assert.deepEqual(kimiWorkSessionsRoots(home, 'win32', { APPDATA: '   ' }), [
+    path.join(homeAppData, workSuffix),
+    path.join('   ', workSuffix)
+  ]);
   assert.deepEqual(kimiWorkSessionsRoots(home, 'win32', { APPDATA: envAppData }, { useEnvRoots: false }), [
     path.join(homeAppData, workSuffix)
   ]);

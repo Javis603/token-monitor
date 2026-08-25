@@ -1411,8 +1411,21 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
     fs.mkdirSync(cliSess, { recursive: true });
     fs.writeFileSync(path.join(cliSess, 'state.json'), JSON.stringify({ workDir: path.join(tmp, 'CliProj') }));
     period.sessions['kimi:session_xyz'] = { client: 'kimi', sessionId: 'session_xyz', totalTokens: 200 };
+    const fallbackSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_fallback');
+    fs.mkdirSync(fallbackSess, { recursive: true });
+    fs.writeFileSync(path.join(fallbackSess, 'state.json'), JSON.stringify({
+      workDir: '   ',
+      custom: { workspacePath: path.join(tmp, 'FallbackProj') },
+      createdAt: { malformed: true },
+      updatedAt: []
+    }));
+    period.sessions['kimi:session_fallback'] = { client: 'kimi', sessionId: 'session_fallback', totalTokens: 100 };
+    const malformedSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_malformed');
+    fs.mkdirSync(malformedSess, { recursive: true });
+    fs.writeFileSync(path.join(malformedSess, 'state.json'), JSON.stringify({ workDir: { malformed: true } }));
+    period.sessions['kimi:session_malformed'] = { client: 'kimi', sessionId: 'session_malformed', totalTokens: 100 };
     // Kimi Work: <desktop runtime>/sessions/<workspace>/<conv-*>/state.json,
-    // only reachable on darwin because kimiWorkSessionsRoot follows process.platform.
+    // only reachable on darwin because kimiWorkSessionsRoots follows process.platform.
     if (process.platform === 'darwin') {
       const workConv = path.join(tmp, 'Library', 'Application Support', 'kimi-desktop', 'daimon-share', 'daimon', 'runtime', 'kimi-code', 'home', 'sessions', 'wd_work_a', 'conv-abc');
       fs.mkdirSync(workConv, { recursive: true });
@@ -1429,6 +1442,10 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
     applySessionTimestamps({ today: period }, tmp, { resolveProjects: true });
     assert.equal(period.sessions['kimi:session_xyz'].projectLabel, 'CliProj');
     assert.ok(period.sessions['kimi:session_xyz'].projectId, 'CLI session_* session should resolve a projectId');
+    assert.equal(period.sessions['kimi:session_fallback'].projectLabel, 'FallbackProj');
+    assert.equal(period.sessions['kimi:session_fallback'].startedAt || '', '', 'malformed timestamps must stay unset');
+    assert.equal(period.sessions['kimi:session_fallback'].lastUsedAt || '', '', 'malformed timestamps must stay unset');
+    assert.equal(period.sessions['kimi:session_malformed'].projectId || '', '', 'non-string project metadata must stay unset');
     assert.equal(period.sessions['kimi:conv-missing'].projectId || '', '', 'sessions without state.json must stay project-less');
     if (process.platform === 'darwin') {
       assert.equal(period.sessions['kimi:conv-abc'].projectLabel, 'WorkProj');

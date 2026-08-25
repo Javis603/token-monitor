@@ -2018,8 +2018,15 @@ function kimiWorkSessionsRoots(home = os.homedir(), platform = process.platform,
     const homeAppData = path.join(home, 'AppData', 'Roaming');
     const roots = [path.join(homeAppData, KIMI_WORK_SESSIONS_SUFFIX)];
     if (options.useEnvRoots !== false) {
-      const appData = typeof env.APPDATA === 'string' && env.APPDATA.trim() ? env.APPDATA : homeAppData;
-      roots.push(kimiWorkShareDirRoot(appData, options) || path.join(appData, KIMI_WORK_SESSIONS_SUFFIX));
+      // Tokscale uses `var_os("APPDATA").filter(|value| !value.is_empty())`:
+      // missing/empty values add no env-derived root, while whitespace remains
+      // a literal path. Keep health and watcher discovery semantically aligned.
+      const appData = typeof env.APPDATA === 'string' && env.APPDATA.length > 0
+        ? env.APPDATA
+        : null;
+      if (appData) {
+        roots.push(kimiWorkShareDirRoot(appData, options) || path.join(appData, KIMI_WORK_SESSIONS_SUFFIX));
+      }
     }
     return [...new Set(roots)];
   }
@@ -2067,12 +2074,14 @@ function kimiStateMetadata(statePath, options = {}) {
   let state;
   try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (_) { return {}; }
   if (!state || typeof state !== 'object') return {};
+  const stringValue = (value) => typeof value === 'string' ? value.trim() : '';
+  const projectPath = stringValue(state.workDir) || stringValue(state.custom?.workspacePath);
   const identity = options.resolveProjects === false
     ? {}
-    : projectIdentity(String(state.workDir || state.custom?.workspacePath || '').trim());
+    : projectIdentity(projectPath);
   // Kimi writes valid ISO strings in state.json; pass them through as-is.
-  const startedAt = String(state.createdAt || '').trim();
-  const lastUsedAt = String(state.updatedAt || '').trim();
+  const startedAt = stringValue(state.createdAt);
+  const lastUsedAt = stringValue(state.updatedAt);
   return {
     ...(identity.projectId ? identity : {}),
     ...(startedAt ? { startedAt } : {}),
