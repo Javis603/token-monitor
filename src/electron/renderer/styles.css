@@ -3418,9 +3418,11 @@ html.is-windows .settings-panel select option {
 .row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
 .row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
 .row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
+.row-icon-trae       { -webkit-mask-image: url(../../../assets/icons/trae.svg);          mask-image: url(../../../assets/icons/trae.svg); }
 .row-icon-qodercn    { -webkit-mask-image: url(../../../assets/icons/qodercn.svg);      mask-image: url(../../../assets/icons/qodercn.svg); }
 .row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
 .row-icon-thirdparty { -webkit-mask-image: url(../../../assets/icons/newapi.svg);         mask-image: url(../../../assets/icons/newapi.svg); }
+.row-icon-token-monitor { -webkit-mask-image: url(../../../assets/icons/token-monitor.svg); mask-image: url(../../../assets/icons/token-monitor.svg); }
 .row-icon-os-apple   { -webkit-mask-image: url(../../../assets/icons/os-apple.svg);      mask-image: url(../../../assets/icons/os-apple.svg); }
 .row-icon-os-linux   { -webkit-mask-image: url(../../../assets/icons/os-linux.svg);      mask-image: url(../../../assets/icons/os-linux.svg); }
 .row-icon-os-windows { -webkit-mask-image: url(../../../assets/icons/os-windows.svg);    mask-image: url(../../../assets/icons/os-windows.svg); }
@@ -3500,6 +3502,10 @@ html.is-windows .settings-panel select option {
 .limit-icon-qoder {
   -webkit-mask-image: url(../../../assets/icons/qoder.svg);
   mask-image: url(../../../assets/icons/qoder.svg);
+}
+.limit-icon-trae {
+  -webkit-mask-image: url(../../../assets/icons/trae.svg);
+  mask-image: url(../../../assets/icons/trae.svg);
 }
 .limit-icon-workbuddy {
   -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);
@@ -5045,6 +5051,7 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel.hidden,
 #volcengineManualPanel.hidden,
 #qoderManualPanel.hidden,
+#traeManualPanel.hidden,
 #commandcodeManualPanel.hidden,
 #ollamaManualPanel.hidden,
 #mimoManualPanel.hidden,
@@ -5066,6 +5073,7 @@ html.is-windows .limit-live-badge {
 #zaiteamErrorMessage.hidden,
 #volcengineErrorMessage.hidden,
 #qoderErrorMessage.hidden,
+#traeErrorMessage.hidden,
 #commandcodeErrorMessage.hidden,
 #ollamaErrorMessage.hidden,
 #kimiErrorMessage.hidden,
@@ -5080,6 +5088,7 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel,
 #volcengineManualPanel,
 #qoderManualPanel,
+#traeManualPanel,
 #commandcodeManualPanel,
 #ollamaManualPanel,
 #mimoManualPanel,
@@ -5096,6 +5105,7 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel > .accordion-animation-inner,
 #volcengineManualPanel > .accordion-animation-inner,
 #qoderManualPanel > .accordion-animation-inner,
+#traeManualPanel > .accordion-animation-inner,
 #commandcodeManualPanel > .accordion-animation-inner,
 #ollamaManualPanel > .accordion-animation-inner,
 #mimoManualPanel > .accordion-animation-inner,
@@ -5129,6 +5139,7 @@ html.is-windows .limit-live-badge {
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
 #qoderManualPanel select,
+#traeManualPanel input,
 #commandcodeManualPanel textarea,
 #ollamaManualPanel textarea,
 #mimoManualPanel input,
@@ -5159,6 +5170,7 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel input,
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
+#traeManualPanel input,
 #commandcodeManualPanel textarea,
 #ollamaManualPanel textarea,
 #mimoManualPanel input,

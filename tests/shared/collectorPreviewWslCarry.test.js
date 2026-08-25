@@ -22,6 +22,9 @@ process.on('exit', () => { try { fs.rmSync(sharedDir, { recursive: true, force: 
 
 const { startCollector, wslPeriodsForPreview } = require('../../src/shared/collector');
 const { emptyPeriod } = require('../../src/shared/usage');
+const { installInProcessWatchHost } = require('../helpers/watchHost');
+
+installInProcessWatchHost(test);
 
 test('wslPeriodsForPreview gates the frozen WSL snapshot by day and month', () => {
   const anchor = {

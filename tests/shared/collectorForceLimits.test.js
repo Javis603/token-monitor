@@ -7,6 +7,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { extractUsageFromTokscale, mergePeriods } = require('../../src/shared/usage');
+const { installInProcessWatchHost } = require('../helpers/watchHost');
+
+installInProcessWatchHost(test);
 
 // Isolate the shared data dir so startCollector's persisted collector-anchor.json
 // does not write the real user data dir during the suite.

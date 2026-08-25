@@ -7,7 +7,7 @@ const test = require('node:test');
 
 const charts = require('../../src/electron/renderer/usageCharts');
 const {
-  clientColors, modelVendorFor, modelColor, clampDaily,
+  clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
   dailyBarsChart, candleChart, contribHeatmap, statsCards,
   barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths
 } = charts;
@@ -36,11 +36,25 @@ test('clientColors carries the known palette and a default', () => {
   assert.equal(typeof clientColors.default, 'string');
 });
 
+test('fallbackModelColors never collides with a named provider color', () => {
+  const providerColors = new Set(
+    Object.entries(clientColors)
+      .filter(([key]) => key !== 'default')
+      .map(([, color]) => color.toLowerCase())
+  );
+  for (const color of fallbackModelColors) {
+    assert.ok(!providerColors.has(color.toLowerCase()), `${color} collides with a named provider color`);
+  }
+});
+
 test('modelVendorFor maps families and modelColor falls back deterministically', () => {
   assert.equal(modelVendorFor('claude-sonnet-4'), 'claude');
   assert.equal(modelVendorFor('gpt-5'), 'codex');
   assert.equal(modelVendorFor('kimi-k2'), 'kimi');
   assert.equal(modelVendorFor('moonshot-v1'), 'kimi');
+  assert.equal(modelVendorFor('k2d6-agent'), 'kimi');
+  assert.equal(modelVendorFor('k3-agent'), 'kimi');
+  assert.equal(modelVendorFor('k3-agent-swarm'), 'kimi');
   assert.equal(modelVendorFor('doubao-seed-1.6'), 'doubao');
   assert.equal(modelVendorFor('hy3'), 'hunyuan');
   assert.equal(modelVendorFor('hunyuan-t1'), 'hunyuan');

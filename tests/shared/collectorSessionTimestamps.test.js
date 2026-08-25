@@ -8,6 +8,9 @@ const test = require('node:test');
 
 const { applySessionTimestamps } = require('../../src/shared/collector');
 const { indexDshSessionHeaders } = require('../../src/shared/dshSessionFiles');
+const { installInProcessWatchHost } = require('../helpers/watchHost');
+
+installInProcessWatchHost(test);
 
 const collectorPath = require.resolve('../../src/shared/collector');
 function freshCollector() {

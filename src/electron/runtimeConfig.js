@@ -30,6 +30,24 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'projectsEnabled',
   'wslScanEnabled'
 ]);
+// Functions and identity fields deliberately stay out: this key answers only
+// whether replacing the active usage runtime would change its collection work.
+// Values arrive from usageConfigFromSettings() after mode-specific normalization.
+const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
+  'clients',
+  'allTimeSince',
+  'intervalMs',
+  'historyEnabled',
+  'dailyHistoryArchiveEnabled',
+  'projectsEnabled',
+  'historyIntervalMs',
+  'watchEnabled',
+  'watchUsePolling',
+  'watchTriggersCollection',
+  'intervalRequiresActivity',
+  'watchDebounceMs',
+  'wslScanEnabled'
+]);
 const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsEnabled',
   'limitProviders',
@@ -49,6 +67,7 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   zaiteam: ['zaiTeamApiKey', 'zaiTeamOrganizationId', 'zaiTeamProjectId'],
   volcengine: ['volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion'],
   qoder: ['qoderCookie', 'qoderSite'],
+  trae: ['traeAccessToken', 'traeDeviceId'],
   // The desktop widget auto-detects WorkBuddy when the provider itself is
   // enabled. Token and metadata fields remain available to headless/CLI deployments.
   workbuddy: ['workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo'],
@@ -69,6 +88,10 @@ function equalSetting(left, right) {
 
 function changedAny(previous, next, keys) {
   return keys.some((key) => !equalSetting(previous?.[key], next?.[key]));
+}
+
+function usageConfigFingerprint(config = {}) {
+  return JSON.stringify(USAGE_CONFIG_FINGERPRINT_KEYS.map((key) => [key, config?.[key] ?? null]));
 }
 
 function normalizeAllTimeSince(value, fallback = DEFAULT_ALL_TIME_SINCE) {
@@ -145,6 +168,14 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     volcengineRegion: settings.volcengineRegion || '',
     qoderCookie: settings.qoderCookie || '',
     qoderSite: settings.qoderSite || 'global',
+    traeAccessToken: settings.traeAccessToken
+      || env.TOKEN_MONITOR_TRAE_ACCESS_TOKEN
+      || env.TRAE_ACCESS_TOKEN
+      || '',
+    traeDeviceId: settings.traeDeviceId
+      || env.TOKEN_MONITOR_TRAE_DEVICE_ID
+      || env.TRAE_DEVICE_ID
+      || '',
     commandcodeCookie: settings.commandcodeCookie || '',
     workbuddyAccessToken: workbuddySettings.workbuddyAccessToken
       || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN
@@ -231,10 +262,12 @@ function classifySettingsChange(previous = {}, next = {}) {
 
 module.exports = {
   LIMIT_PROVIDER_SETTING_KEYS,
+  USAGE_STRUCTURAL_KEYS,
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
   normalizeAllTimeSince,
+  usageConfigFingerprint,
   usageConfigFromSettings
 };

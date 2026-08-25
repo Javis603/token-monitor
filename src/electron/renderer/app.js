@@ -14,7 +14,7 @@ const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio',
-  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'ollama', 'thirdparty', 'hunyuan'
+  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
 
 function osIconFor(platform) {
@@ -35,7 +35,7 @@ function iconKindFor(rowData, breakdown) {
     const vendor = modelVendorFor(rowData.key);
     return vendor && clientsWithIcon.has(vendor)
       ? { kind: 'icon', iconClass: `row-icon-${vendor}` }
-      : { kind: 'dot' };
+      : { kind: 'icon', iconClass: 'row-icon-token-monitor' };
   }
   if (breakdown === 'session') {
     return rowData.client && clientsWithIcon.has(rowData.client)
@@ -97,6 +97,7 @@ const LIMIT_PROVIDERS = [
   { id: 'minimax', label: 'Minimax' },
   { id: 'volcengine', label: 'Volcengine' },
   { id: 'ollama', label: 'Ollama' },
+  { id: 'trae', label: 'Trae CN' },
   { id: 'thirdparty', label: 'Third-party APIs' }
 ];
 const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
@@ -114,6 +115,7 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   minimax: 'minimaxAccountGroup',
   volcengine: 'volcengineAccountGroup',
   qoder: 'qoderAccountGroup',
+  trae: 'traeAccountGroup',
   commandcode: 'commandcodeAccountGroup',
   ollama: 'ollamaAccountGroup',
   thirdparty: 'thirdpartyAccountGroup'
@@ -133,6 +135,7 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   minimax: 'minimaxApiKeyStatus',
   volcengine: 'volcengineAccountStatus',
   qoder: 'qoderAccountStatus',
+  trae: 'traeAccountStatus',
   commandcode: 'commandcodeAccountStatus',
   ollama: 'ollamaAccountStatus',
   thirdparty: 'thirdpartyStatus'
@@ -209,9 +212,9 @@ const LIMIT_SOURCE_LABELS = { oauth: 'OAuth', cli: 'CLI', web: 'Web', rpc: 'RPC'
 const LIMIT_CAPABILITY_TAG_KEYS = {
   Auto: 'settings.limits.capability.auto',
   'OAuth/CLI': 'settings.limits.capability.oauthCli',
+  'OAuth/App/CLI': 'settings.limits.capability.oauthAppCli',
   'CLI RPC': 'settings.limits.capability.cliRpc',
   'CLI/Web': 'settings.limits.capability.cliWeb',
-  'App/CLI RPC': 'settings.limits.capability.appCliRpc',
   'Manual login': 'settings.limits.capability.manualLogin',
   Web: 'settings.limits.capability.web',
   'Web/API': 'settings.limits.capability.webApi',
@@ -4144,7 +4147,7 @@ function formatHomeLimitWindowValue(window, showUsed) {
   return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
 }
 
-function workbuddyCreditsValue(provider, credits) {
+function creditsBalanceValue(provider, credits) {
   const amount = creditsAmount(provider, credits);
   if (amount !== null) {
     return formatCompactMoney(amount, credits?.currency || provider?.balance?.currency);
@@ -4875,10 +4878,10 @@ function renderProviderWindows(provider, color) {
       node.classList.add('limit-window-wide');
       windows.append(node);
     }
-  } else if (provider.provider === 'workbuddy') {
+  } else if (provider.provider === 'workbuddy' || provider.provider === 'trae') {
     const credits = windowForKind(provider, 'billing');
     const balance = provider.balance || null;
-    const value = workbuddyCreditsValue(provider, credits);
+    const value = creditsBalanceValue(provider, credits);
     if (credits && value) {
       const displayWindow = {
         ...credits,
@@ -8539,6 +8542,7 @@ function syncSettingsForm() {
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
+  renderExternalProviderStatus('trae');
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
@@ -10503,7 +10507,12 @@ async function onToolTrackingToggle() {
     .filter((cb) => cb.checked)
     .map((cb) => cb.dataset.client);
   await saveSettings({ clients: checked.join(',') });
-  await refreshStats({ force: true });
+  // `clients` is usage-structural, so settings:update schedules a latest-wins
+  // usage reconciliation and the eventual collector runs its own full tick.
+  // Forcing a refresh here would bypass that settling boundary, duplicate the
+  // scan, and drag an all-provider limits refresh along. The extra stats pushes
+  // would then repaint the whole settings panel under the pointer, which is what
+  // made this checkbox stall while the eye and pin next to it did not (#471).
 }
 
 async function onClientVisibilityToggle(clientId) {
@@ -11645,6 +11654,7 @@ function renderStatsUpdate() {
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
+  renderExternalProviderStatus('trae');
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
@@ -13399,6 +13409,11 @@ const externalLimitAccountConfig = {
     configuredKey: 'qoderCookieConfigured',
     sourceKey: 'qoderCookieSource',
     pendingKey: 'qoderPendingCheckSince'
+  },
+  trae: {
+    configuredKey: 'traeAccessTokenConfigured',
+    sourceKey: 'traeAccessTokenSource',
+    pendingKey: 'traePendingCheckSince'
   },
   commandcode: {
     configuredKey: 'commandcodeCookieConfigured',
@@ -15740,6 +15755,57 @@ function setupCursorAccountUI() {
     });
   }
 
+  const traeToggle = document.getElementById('traeSettingsToggle');
+  if (traeToggle) {
+    traeToggle.addEventListener('click', () => setExternalAccountExpanded('trae', !state.traeAccountExpanded));
+    setExternalAccountExpanded('trae', false);
+    renderExternalProviderStatus('trae');
+
+    document.getElementById('traeOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal('https://www.trae.cn');
+    });
+    document.getElementById('traeLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ traeAccessToken: '', traeDeviceId: '' });
+      clearExternalProviderCheckPending('trae');
+      clearExternalProviderPendingStatus('trae');
+      renderExternalProviderStatus('trae');
+      await refreshStats({ force: true });
+    });
+    document.getElementById('traeRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+    document.getElementById('traeTokenSubmit').addEventListener('click', async () => {
+      const tokenInput = document.getElementById('traeTokenInput');
+      const deviceIdInput = document.getElementById('traeDeviceIdInput');
+      const errorEl = document.getElementById('traeErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(tokenInput.value || '').trim()) {
+        errorEl.textContent = t('settings.trae.missingAuthorization');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('trae');
+        await saveSettings({
+          traeAccessToken: tokenInput.value,
+          traeDeviceId: deviceIdInput.value,
+          limitProviders: limitProviderSelectionIncluding('trae'),
+          limitsEnabled: true
+        });
+        tokenInput.value = '';
+        deviceIdInput.value = '';
+        renderExternalProviderStatus('trae');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('trae', !externalProviderAccountLinked('trae'));
+        renderExternalProviderStatus('trae');
+      } catch (err) {
+        clearExternalProviderCheckPending('trae');
+        errorEl.textContent = t('settings.trae.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
   const commandcodeToggle = document.getElementById('commandcodeSettingsToggle');
   if (commandcodeToggle) {
     commandcodeToggle.addEventListener('click', () => setExternalAccountExpanded('commandcode', !state.commandcodeAccountExpanded));
@@ -16152,6 +16218,7 @@ function initSettingsAnimationWrappers() {
     '#zaiteamManualPanel',
     '#volcengineManualPanel',
     '#qoderManualPanel',
+    '#traeManualPanel',
     '#commandcodeManualPanel',
     '#kimiManualPanel',
     '#ollamaManualPanel'

@@ -53,6 +53,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'minimax',
     'volcengine',
     'ollama',
+    'trae',
     'thirdparty'
   ]);
 });

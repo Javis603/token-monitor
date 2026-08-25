@@ -16,6 +16,7 @@ const {
   REASONIX_EVENT_REPLAY_LIMITS,
   REASONIX_EVENT_REPLAY_PROBE_MAX_BYTES
 } = require('../../src/shared/reasonixSessionDetail');
+const { localIso, localMs } = require('../helpers/localTime');
 
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -55,19 +56,23 @@ test('Reasonix legacy typed model.final compatibility still maps prompts/turns/t
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-detail-'));
   const stateHome = path.join(root, 'state');
   const projectDirectory = path.join('projects', 'opaque-project', 'sessions');
-  const firstTurn = '2026-08-08T10:00:00.000Z';
-  const oldTurn = '2026-07-31T10:00:00.000Z';
+  // `readReasonix`'s clock below is local (`new Date(2026, 7, 8, 12, 0)`) and the
+  // today/month reads bucket against it in local time, so the turns are stated
+  // the same way: as `Z` literals the recent turn crosses into the next local day
+  // past UTC+12 and drops out of both windows.
+  const firstTurn = localIso(2026, 8, 8, 10);
+  const oldTurn = localIso(2026, 7, 31, 10);
   writeSidecarSession(stateHome, projectDirectory, 'filename-is-not-the-id', {
     id: 'branch-123',
     scope: 'project',
     workspace_root: path.join(root, 'private-workspace')
   }, [
     JSON.stringify({ type: 'user.message', ts: firstTurn, text: '测试一下' }),
-    JSON.stringify({ type: 'model.turn.started', ts: '2026-08-08T10:00:01.000Z', turn: 1 }),
-    JSON.stringify({ type: 'tool.intent', ts: '2026-08-08T10:00:02.000Z', turn: 1, name: 'read_file' }),
+    JSON.stringify({ type: 'model.turn.started', ts: localIso(2026, 8, 8, 10, 0, 1), turn: 1 }),
+    JSON.stringify({ type: 'tool.intent', ts: localIso(2026, 8, 8, 10, 0, 2), turn: 1, name: 'read_file' }),
     JSON.stringify({
       type: 'model.final',
-      ts: '2026-08-08T10:00:03.000Z',
+      ts: localIso(2026, 8, 8, 10, 0, 3),
       turn: 1,
       usage: {
         prompt_tokens: 30696,
@@ -82,7 +87,7 @@ test('Reasonix legacy typed model.final compatibility still maps prompts/turns/t
     JSON.stringify({ type: 'user.message', ts: oldTurn, text: '上个月的请求' }),
     JSON.stringify({
       type: 'model.final',
-      ts: '2026-07-31T10:00:03.000Z',
+      ts: localIso(2026, 7, 31, 10, 0, 3),
       turn: 2,
       usage: {
         prompt_tokens: 10,
@@ -133,39 +138,44 @@ test('Reasonix official schema replays replace/append, timestamps messages, and 
   const directory = path.join(stateHome, 'sessions');
   fs.mkdirSync(directory, { recursive: true });
   writeJson(path.join(directory, 'filename-is-not-the-id.jsonl.meta'), { BranchMeta: { ID: 'snapshot-1' } });
+  // Same local clock as the test above, and the epoch literals these messages
+  // used to carry (`1786179601000` = `2026-08-08T09:00:01Z`) name a UTC instant.
+  // Deriving them from local time keeps every message on the clock's local day,
+  // which is the day the today/month reads below assert against.
+  const dayBase = localMs(2026, 8, 8, 9);
   const initial = {
     schema_version: 1,
     type: 'replace',
-    created_at: '2026-08-08T09:00:00.000Z',
+    created_at: localIso(2026, 8, 8, 9),
     messages: [
       { id: 'system', role: 'system', content: 'internal' },
       {
         id: 'user-1',
         role: 'user',
-        createdAt: 1786179601000,
+        createdAt: dayBase + 1_000,
         raw_content: '<response-language>English</response-language><reasoning-language>English</reasoning-language><active-goal>internal</active-goal>\n真实输入<memory-recall>internal recall</memory-recall>',
         content: '<reasoning-language>English</reasoning-language>\nprovider-visible wrapper'
       },
-      { id: 'assistant-1', role: 'assistant', createdAt: 1786179602000, tool_calls: [{ name: 'search' }] },
-      { id: 'tool-1', role: 'tool', createdAt: 1786179602500, name: 'search' },
+      { id: 'assistant-1', role: 'assistant', createdAt: dayBase + 2_000, tool_calls: [{ name: 'search' }] },
+      { id: 'tool-1', role: 'tool', createdAt: dayBase + 2_500, name: 'search' },
       {
         id: 'old-user',
         role: 'user',
-        createdAt: '2026-07-31T10:00:01.000Z',
+        createdAt: localIso(2026, 7, 31, 10, 0, 1),
         raw_content: '上个月的请求',
         content: 'provider old request'
       },
-      { id: 'old-assistant', role: 'assistant', createdAt: '2026-07-31T10:00:02.000Z' }
+      { id: 'old-assistant', role: 'assistant', createdAt: localIso(2026, 7, 31, 10, 0, 2) }
     ]
   };
   const append = {
     schema_version: 1,
     type: 'append',
     message_index: 6,
-    created_at: '2026-08-08T09:01:00.000Z',
+    created_at: localIso(2026, 8, 8, 9, 1),
     messages: [
-      { id: 'user-2', role: 'user', createdAt: 1786179661000, raw_content: '推送远端', content: 'provider request' },
-      { id: 'assistant-2', role: 'assistant', createdAt: 1786179662000, tool_calls: [{ function: { name: 'write_file' } }] }
+      { id: 'user-2', role: 'user', createdAt: dayBase + 61_000, raw_content: '推送远端', content: 'provider request' },
+      { id: 'assistant-2', role: 'assistant', createdAt: dayBase + 62_000, tool_calls: [{ function: { name: 'write_file' } }] }
     ]
   };
   fs.writeFileSync(path.join(directory, 'filename-is-not-the-id.events.jsonl'), `${JSON.stringify(initial)}\n${JSON.stringify(append)}\n`);

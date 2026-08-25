@@ -13,15 +13,18 @@ const path = require('node:path');
 const { performance } = require('node:perf_hooks');
 
 const { emptyPeriod } = require('../../src/shared/usage');
+const { localDayKey } = require('../../src/shared/history');
 const {
   clampTimerDelayMs, SYNC_MIN_INTERVAL_MS, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS
 } = require('../../src/shared/selfSyncThrottle');
 
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
+const { installInProcessWatchHost } = require('../helpers/watchHost');
 
 const collectorPath = require.resolve('../../src/shared/collector');
 
 installSourceEnvGuard(test);
+installInProcessWatchHost(test);
 
 function freshCollector() {
   delete require.cache[collectorPath];
@@ -1324,12 +1327,14 @@ test('watchPathsForClients watches only Proma data that is currently parsed', ()
 });
 
 test('clientDataDirPresence still detects cursor/antigravity via their cache dirs', () => {
-  const tmp = withTmpHome([
-    path.join('.config', 'tokscale', 'cursor-cache'),
-    path.join('.config', 'tokscale', 'antigravity-cache')
-  ]);
+  const tmp = withTmpHome([]);
+  const configDir = path.join(tmp, 'tokscale-config');
+  fs.mkdirSync(path.join(configDir, 'cursor-cache'), { recursive: true });
+  fs.mkdirSync(path.join(configDir, 'antigravity-cache'), { recursive: true });
   const originalHomedir = os.homedir;
+  const previousConfigDir = process.env.TOKSCALE_CONFIG_DIR;
   os.homedir = () => tmp;
+  process.env.TOKSCALE_CONFIG_DIR = configDir;
   try {
     const { clientDataDirPresence } = freshCollector();
     const presence = clientDataDirPresence('cursor,antigravity');
@@ -1337,6 +1342,8 @@ test('clientDataDirPresence still detects cursor/antigravity via their cache dir
     assert.equal(presence.antigravity, true);
   } finally {
     os.homedir = originalHomedir;
+    if (previousConfigDir === undefined) delete process.env.TOKSCALE_CONFIG_DIR;
+    else process.env.TOKSCALE_CONFIG_DIR = previousConfigDir;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -1351,6 +1358,174 @@ test('clientDataDirPresence detects Antigravity native source roots', () => {
     assert.deepEqual(clientDataDirPresence('antigravity'), { antigravity: true });
   } finally {
     os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Kimi Work roots are shared by source checks and watcher attribution', () => {
+  if (!['darwin', 'win32'].includes(process.platform)) return;
+  const originalHomedir = os.homedir;
+  const previousAppData = process.env.APPDATA;
+  const tmp = withTmpHome([]);
+  os.homedir = () => tmp;
+  try {
+    if (process.platform === 'win32') {
+      process.env.APPDATA = path.join(tmp, 'host-appdata');
+      const configPath = path.join(process.env.APPDATA, 'kimi-desktop', 'daimon-storage.json');
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, JSON.stringify({ shareDir: path.join(tmp, 'relocated-share') }));
+    }
+    const { clientSourceRoots, clientSourceChecks, clientsForWatchPath, kimiWorkSessionsRoots, watchPathsForClients } = freshCollector();
+    const kimiWorkRoots = kimiWorkSessionsRoots(tmp, process.platform);
+    for (const root of kimiWorkRoots) fs.mkdirSync(root, { recursive: true });
+    const kimiRoots = clientSourceRoots('kimi').kimi;
+    assert.deepEqual(kimiRoots.filter((root) => root.id === 'kimi-code-sessions').map((root) => root.dir), [
+      path.join(tmp, '.kimi-code', 'sessions'),
+      ...kimiWorkRoots
+    ]);
+    assert.equal(kimiRoots.at(-1).optional, true);
+    for (const root of kimiWorkRoots) assert.ok(watchPathsForClients('kimi').includes(root));
+    assert.deepEqual(clientsForWatchPath(path.join(kimiWorkRoots[0], 'wd_workspace', 'conv-1', 'agents', 'main', 'wire.jsonl'), { kimi: kimiWorkRoots }), ['kimi']);
+    assert.deepEqual(clientSourceChecks('kimi').kimi, [{ id: 'kimi-sessions', exists: false }, { id: 'kimi-code-sessions', exists: true }]);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousAppData === undefined) delete process.env.APPDATA;
+    else process.env.APPDATA = previousAppData;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Kimi sessions gain project identity from sibling state.json', () => {
+  const originalHomedir = os.homedir;
+  const tmp = withTmpHome([]);
+  os.homedir = () => tmp;
+  const previousKimiCodeHome = process.env.KIMI_CODE_HOME;
+  try {
+    delete process.env.KIMI_CODE_HOME;
+    const { applySessionTimestamps } = freshCollector();
+    const period = { sessions: {} };
+    // Kimi Code CLI: ~/.kimi-code/sessions/<workspace>/<session_*>/state.json
+    const cliSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_xyz');
+    fs.mkdirSync(cliSess, { recursive: true });
+    fs.writeFileSync(path.join(cliSess, 'state.json'), JSON.stringify({ workDir: path.join(tmp, 'CliProj') }));
+    period.sessions['kimi:session_xyz'] = { client: 'kimi', sessionId: 'session_xyz', totalTokens: 200 };
+    const fallbackSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_fallback');
+    fs.mkdirSync(fallbackSess, { recursive: true });
+    fs.writeFileSync(path.join(fallbackSess, 'state.json'), JSON.stringify({
+      workDir: '   ',
+      custom: { workspacePath: path.join(tmp, 'FallbackProj') },
+      createdAt: { malformed: true },
+      updatedAt: []
+    }));
+    period.sessions['kimi:session_fallback'] = { client: 'kimi', sessionId: 'session_fallback', totalTokens: 100 };
+    const malformedSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_malformed');
+    fs.mkdirSync(malformedSess, { recursive: true });
+    fs.writeFileSync(path.join(malformedSess, 'state.json'), JSON.stringify({ workDir: { malformed: true } }));
+    period.sessions['kimi:session_malformed'] = { client: 'kimi', sessionId: 'session_malformed', totalTokens: 100 };
+    // Kimi Work: <desktop runtime>/sessions/<workspace>/<conv-*>/state.json,
+    // only reachable on darwin because kimiWorkSessionsRoots follows process.platform.
+    if (process.platform === 'darwin') {
+      const workConv = path.join(tmp, 'Library', 'Application Support', 'kimi-desktop', 'daimon-share', 'daimon', 'runtime', 'kimi-code', 'home', 'sessions', 'wd_work_a', 'conv-abc');
+      fs.mkdirSync(workConv, { recursive: true });
+      fs.writeFileSync(path.join(workConv, 'state.json'), JSON.stringify({
+        workDir: path.join(tmp, 'WorkProj'),
+        custom: { workspacePath: path.join(tmp, 'WorkProj') },
+        createdAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T01:00:00.000Z'
+      }));
+      period.sessions['kimi:conv-abc'] = { client: 'kimi', sessionId: 'conv-abc', totalTokens: 100 };
+    }
+    period.sessions['kimi:conv-missing'] = { client: 'kimi', sessionId: 'conv-missing', totalTokens: 50 };
+
+    applySessionTimestamps({ today: period }, tmp, { resolveProjects: true });
+    assert.equal(period.sessions['kimi:session_xyz'].projectLabel, 'CliProj');
+    assert.ok(period.sessions['kimi:session_xyz'].projectId, 'CLI session_* session should resolve a projectId');
+    assert.equal(period.sessions['kimi:session_fallback'].projectLabel, 'FallbackProj');
+    assert.equal(period.sessions['kimi:session_fallback'].startedAt || '', '', 'malformed timestamps must stay unset');
+    assert.equal(period.sessions['kimi:session_fallback'].lastUsedAt || '', '', 'malformed timestamps must stay unset');
+    assert.equal(period.sessions['kimi:session_malformed'].projectId || '', '', 'non-string project metadata must stay unset');
+    assert.equal(period.sessions['kimi:conv-missing'].projectId || '', '', 'sessions without state.json must stay project-less');
+    if (process.platform === 'darwin') {
+      assert.equal(period.sessions['kimi:conv-abc'].projectLabel, 'WorkProj');
+      assert.ok(period.sessions['kimi:conv-abc'].projectId, 'Kimi Work conv-* session should resolve a projectId');
+    }
+
+    // Projects opt-out must strip identity, not just skip it (issue #182).
+    const disabled = { sessions: { 'kimi:session_xyz': { client: 'kimi', sessionId: 'session_xyz', totalTokens: 100 } } };
+    applySessionTimestamps({ today: disabled }, tmp, { resolveProjects: false });
+    assert.equal(disabled.sessions['kimi:session_xyz'].projectId || '', '', 'resolveProjects=false must not attach a projectId');
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousKimiCodeHome === undefined) delete process.env.KIMI_CODE_HOME;
+    else process.env.KIMI_CODE_HOME = previousKimiCodeHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Kimi metadata discovery indexes session directories instead of probing every requested id', () => {
+  const originalHomedir = os.homedir;
+  const originalStatSync = fs.statSync;
+  const tmp = withTmpHome([]);
+  os.homedir = () => tmp;
+  try {
+    const sessionsRoot = path.join(tmp, '.kimi-code', 'sessions');
+    for (let index = 0; index < 20; index += 1) {
+      fs.mkdirSync(path.join(sessionsRoot, `workspace-${index}`), { recursive: true });
+    }
+    const period = { sessions: {} };
+    for (let index = 0; index < 100; index += 1) {
+      period.sessions[`kimi:missing-${index}`] = { client: 'kimi', sessionId: `missing-${index}`, totalTokens: 1 };
+    }
+    let statCalls = 0;
+    fs.statSync = (...args) => {
+      statCalls += 1;
+      return originalStatSync(...args);
+    };
+    const { applySessionTimestamps } = freshCollector();
+    applySessionTimestamps({ allTime: period }, tmp, { resolveProjects: true });
+    assert.equal(statCalls, 0, 'missing ids should not trigger workspace x session state.json probes');
+  } finally {
+    fs.statSync = originalStatSync;
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('scoped Kimi metadata ignores host Work and KIMI_CODE_HOME roots', () => {
+  const tmp = withTmpHome([]);
+  const scopedHome = path.join(tmp, 'wsl-home');
+  const hostKimiHome = path.join(tmp, 'host-kimi-code');
+  const hostAppData = path.join(tmp, 'host-appdata');
+  const writeState = (root, workspace, sessionId, project) => {
+    const sessionDir = path.join(root, workspace, sessionId);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, 'state.json'), JSON.stringify({
+      workDir: path.join(tmp, project),
+      createdAt: '2026-08-18T00:00:00.000Z'
+    }));
+  };
+  writeState(path.join(hostKimiHome, 'sessions'), 'host-workspace', 'host-only', 'HostOnlyProject');
+  writeState(path.join(hostKimiHome, 'sessions'), 'host-workspace', 'shared-session', 'HostProject');
+  writeState(path.join(scopedHome, '.kimi-code', 'sessions'), 'wsl-workspace', 'shared-session', 'WslProject');
+  const period = { sessions: {
+    'kimi:host-only': { client: 'kimi', sessionId: 'host-only', totalTokens: 1 },
+    'kimi:shared-session': { client: 'kimi', sessionId: 'shared-session', totalTokens: 1 }
+  } };
+  try {
+    const { applySessionTimestamps } = freshCollector();
+    applySessionTimestamps({ allTime: period }, scopedHome, {
+      scopedHome: true,
+      resolveProjects: true,
+      platform: 'win32',
+      env: { APPDATA: hostAppData, KIMI_CODE_HOME: hostKimiHome }
+    });
+    assert.equal(period.sessions['kimi:host-only'].projectId || '', '', 'host-only metadata must stay outside the scoped home');
+    assert.equal(period.sessions['kimi:shared-session'].projectLabel, 'WslProject');
+  } finally {
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -2776,7 +2951,7 @@ test('collector publishes live periods when only Qoder CN history read fails', a
   const originalRows = qoderCnUsage.collectQoderCnRows;
   const originalHistory = qoderCnUsage.buildQoderCnHistoryGraph;
   let failHistory = false;
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = localDayKey();
   qoderCnUsage.collectQoderCnRows = async () => [];
   qoderCnUsage.buildQoderCnHistoryGraph = () => {
     if (failHistory) throw new Error('temporary Qoder CN history read failure');

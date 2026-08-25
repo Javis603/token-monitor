@@ -9,6 +9,8 @@ const {
   codexManagedAccountMatchesIdentity,
   decodeJwtPayload,
   codexAuthIdentity,
+  codexOAuthRequestContext,
+  codexStoredAccountId,
   hashAccountKey,
   preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity
@@ -61,6 +63,70 @@ test('codexAuthIdentity reads nested OpenAI auth claims', () => {
   assert.equal(identity.email, 'nested@example.com');
   assert.equal(identity.accountLabel, 'pro');
   assert.equal(identity.providerAccountId, 'acct_nested');
+});
+
+test('OAuth request context prefers an explicit workspace, then stored account_id, then JWT fallback', () => {
+  const auth = {
+    tokens: {
+      access_token: 'access-token',
+      account_id: 'workspace-current',
+      id_token: jwt({
+        email: 'member@example.com',
+        'https://api.openai.com/auth': {
+          chatgpt_account_id: 'workspace-claimed'
+        }
+      })
+    }
+  };
+
+  assert.equal(codexAuthIdentity(auth).workspaceAccountId, 'workspace-current');
+  assert.deepEqual(codexOAuthRequestContext(auth), {
+    accessToken: 'access-token',
+    accountId: 'workspace-current',
+    isFedrampAccount: false
+  });
+  assert.equal(codexOAuthRequestContext(auth, { accountId: 'workspace-selected' }).accountId, 'workspace-selected');
+  assert.equal(codexOAuthRequestContext({
+    tokens: {
+      access_token: 'access-token',
+      id_token: auth.tokens.id_token
+    }
+  }).accountId, 'workspace-claimed');
+});
+
+test('OAuth request context uses FedRAMP routing only for the claimed workspace', () => {
+  const auth = {
+    tokens: {
+      access_token: 'access-token',
+      account_id: 'workspace-government',
+      id_token: jwt({
+        'https://api.openai.com/auth': {
+          chatgpt_account_id: 'workspace-government',
+          chatgpt_account_is_fedramp: true
+        }
+      })
+    }
+  };
+
+  assert.equal(codexOAuthRequestContext(auth).isFedrampAccount, true);
+  assert.equal(codexOAuthRequestContext(auth, {
+    accountId: 'workspace-commercial'
+  }).isFedrampAccount, false);
+});
+
+test('codexStoredAccountId does not use the JWT workspace fallback', () => {
+  const idToken = jwt({
+    'https://api.openai.com/auth': {
+      chatgpt_account_id: 'workspace-claimed'
+    }
+  });
+  assert.equal(codexStoredAccountId({ tokens: { id_token: idToken } }), '');
+  assert.equal(codexStoredAccountId({
+    tokens: {
+      account_id: 'workspace-stored',
+      id_token: idToken
+    }
+  }), 'workspace-stored');
 });
 
 test('codexAuthIdentity prefers the selected workspace from tokens.account_id', () => {

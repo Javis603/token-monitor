@@ -13,6 +13,9 @@ process.on('exit', () => { try { fs.rmSync(sharedDir, { recursive: true, force: 
 const cursorAuth = require('../../src/shared/cursorAuth');
 const { collectUsageOnce, startCollector } = require('../../src/shared/collector');
 const { createUsageRuntime } = require('../../src/shared/usageRuntime');
+const { installInProcessWatchHost } = require('../helpers/watchHost');
+
+installInProcessWatchHost(test);
 
 function emptyTokscaleResult() {
   return { entries: [] };

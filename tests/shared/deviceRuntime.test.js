@@ -6,8 +6,13 @@ const test = require('node:test');
 const { createDeviceRuntime } = require('../../src/shared/deviceRuntime');
 
 function harness(options = {}) {
-  const { limitsDeps: injectedLimitsDeps = {}, ...runtimeOptions } = options;
+  const {
+    createUsageRuntime: injectedCreateUsageRuntime,
+    limitsDeps: injectedLimitsDeps = {},
+    ...runtimeOptions
+  } = options;
   let usageOptions;
+  const usageOptionsHistory = [];
   let limitsDeps;
   const calls = [];
   const usageHandle = {
@@ -31,6 +36,8 @@ function harness(options = {}) {
   }, {
     createUsageRuntime(next) {
       usageOptions = next;
+      usageOptionsHistory.push(next);
+      if (injectedCreateUsageRuntime) return injectedCreateUsageRuntime(next, usageHandle, calls);
       return usageHandle;
     },
     createLimitsRuntime(_config, nextDeps) {
@@ -39,7 +46,7 @@ function harness(options = {}) {
     },
     limitsDeps: injectedLimitsDeps
   });
-  return { calls, limitsDeps, records, runtime, usageOptions };
+  return { calls, limitsDeps, records, runtime, usageOptions, usageOptionsHistory };
 }
 
 test('usage publishes immediately without waiting for limits and late limits emit a second full record', () => {
@@ -127,6 +134,57 @@ test('stop invalidates both producer callbacks before stopping handles', () => {
   assert.deepEqual(calls, [['usageStop'], ['limitsStop']]);
 });
 
+test('usage reconfigure replaces only usage and rejects callbacks from the superseded runtime', () => {
+  const { calls, limitsDeps, records, runtime, usageOptionsHistory } = harness();
+  const firstUsage = usageOptionsHistory[0];
+
+  assert.equal(runtime.reconfigureUsage({ clients: 'codex' }), true);
+  assert.equal(usageOptionsHistory.length, 2);
+  assert.equal(usageOptionsHistory[1].clients, 'codex');
+  assert.deepEqual(calls, [['usageStop']]);
+
+  firstUsage.onUpdate({ updatedAt: 'stale', today: { totalTokens: 99 } }, 'late');
+  usageOptionsHistory[1].onUpdate({ updatedAt: 'fresh', today: { totalTokens: 7 } }, 'startup');
+  limitsDeps.onUpdate({ updatedAt: 'limits-time', refreshMs: 300000, providers: [] });
+
+  assert.equal(records.length, 2);
+  assert.equal(records[0].record.today.totalTokens, 7);
+  assert.equal(records[1].record.limits.updatedAt, 'limits-time');
+  assert.ok(!calls.some(([name]) => name === 'limitsStop'));
+});
+
+test('usage reconfigure restores the last known-good config when replacement startup throws', () => {
+  const startupError = new Error('replacement startup failed');
+  let attempt = 0;
+  const startedClients = [];
+  const rollbackCalls = [];
+  const { calls, runtime } = harness({
+    usageOptions: { clients: 'claude' },
+    createUsageRuntime(next, defaultHandle) {
+      attempt += 1;
+      startedClients.push(next.clients);
+      if (attempt === 2) throw startupError;
+      if (attempt === 3) {
+        return {
+          ...defaultHandle,
+          tick: (...args) => { rollbackCalls.push(args); return 'rollback-tick'; }
+        };
+      }
+      return defaultHandle;
+    }
+  });
+
+  assert.throws(() => runtime.reconfigureUsage({ clients: 'codex' }), startupError);
+  assert.deepEqual(startedClients, ['claude', 'codex', 'claude']);
+  assert.deepEqual(calls, [['usageStop']]);
+  assert.equal(runtime.tick('manual'), 'rollback-tick');
+  assert.deepEqual(rollbackCalls, [['manual', undefined]]);
+
+  assert.equal(runtime.reconfigureUsage({ clients: 'codex' }), true);
+  assert.deepEqual(startedClients, ['claude', 'codex', 'claude', 'codex']);
+  assert.deepEqual(calls, [['usageStop'], ['usageStop']]);
+});
+
 test('stop suppresses delegated diagnostic callbacks from late producer events', () => {
   const usageEvents = [];
   const limitsEvents = [];
@@ -156,6 +214,30 @@ test('stop suppresses delegated diagnostic callbacks from late producer events',
     usageEvent,
     { subsystem: 'limits', code: 'limits-retry-scheduled', provider: 'kimi' }
   ]);
+});
+
+test('a superseded runtime may still report unconfirmed physical termination', () => {
+  const forwardedEvents = [];
+  const { runtime, usageOptionsHistory } = harness({
+    usageOptions: {},
+    onDiagnosticEvent: (event) => forwardedEvents.push(event)
+  });
+  const firstUsage = usageOptionsHistory[0];
+
+  runtime.reconfigureUsage({ clients: 'codex' });
+  firstUsage.onDiagnosticEvent({ subsystem: 'collector', code: 'late-ordinary-event' });
+  firstUsage.onDiagnosticEvent({
+    subsystem: 'collector',
+    code: 'subprocess-termination-unconfirmed',
+    operation: 'tokscale-scan'
+  });
+
+  assert.deepEqual(forwardedEvents, [{
+    subsystem: 'collector',
+    code: 'subprocess-termination-unconfirmed',
+    operation: 'tokscale-scan'
+  }]);
+  runtime.stop();
 });
 
 test('runtime control methods delegate to the precise producer', () => {
@@ -192,6 +274,7 @@ test('runtime control wrappers do not delegate after stop', async () => {
   assert.equal(await runtime.refreshClient('cursor'), false);
   assert.equal(await runtime.refreshLimits({ provider: 'kimi' }, 'late'), false);
   assert.equal(runtime.reconfigureLimits({ limitsRefreshMs: 60000 }), null);
+  assert.equal(runtime.reconfigureUsage({ clients: 'codex' }), null);
   assert.equal(runtime.clearLimits({ provider: 'kimi' }, 'late'), null);
   await runtime.flush();
 

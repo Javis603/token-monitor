@@ -275,6 +275,7 @@ const PROVIDER_LABELS = Object.freeze({
   opencode: 'OpenCode',
   openrouter: 'OpenRouter',
   qoder: 'Qoder',
+  trae: 'Trae CN',
   workbuddy: 'WorkBuddy',
   thirdparty: 'Third-party APIs',
   volcengine: 'Volcengine',

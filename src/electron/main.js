@@ -79,11 +79,12 @@ const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
-const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
+const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
   codexAuthIdentity,
+  codexAccountKey,
   codexManagedAccountIdentityKey,
   codexManagedAccountMatchesIdentity,
   hashAccountKey,
@@ -91,12 +92,9 @@ const {
   upgradeCodexManagedAccountIdentity
 } = require('../shared/codexAuth');
 const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/codexLogin');
+const { listCodexWorkspaces, normalizeWorkspaceId } = require('../shared/codexWorkspaces');
 const {
-  authWithSelectedCodexWorkspace,
-  listCodexWorkspaces,
-  normalizeWorkspaceId
-} = require('../shared/codexWorkspaces');
-const {
+  codexAuthMaterialForWorkspace,
   codexAccountMatchesIdentity,
   liveCodexAuthPath,
   readCodexAuthMaterial,
@@ -273,11 +271,13 @@ const {
   composeLocalSyncStats
 } = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
+const { createLatestWinsReconciler } = require('./latestWinsReconciler');
 const {
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
+  usageConfigFingerprint,
   usageConfigFromSettings
 } = require('./runtimeConfig');
 const {
@@ -552,6 +552,8 @@ function defaultSettings() {
     volcengineRegion: '',
     qoderCookie: '',
     qoderSite: 'global',
+    traeAccessToken: '',
+    traeDeviceId: '',
     commandcodeCookie: '',
     kimiApiKey: '',
     kimiWebAccessToken: '',
@@ -805,6 +807,18 @@ function currentQoderCookie() {
   return settings?.qoderCookie || qoderCookie(process.env);
 }
 
+function normalizeTraeAccessToken(value) {
+  return traeAccessToken({}, { traeAccessToken: String(value || '') });
+}
+
+function normalizeTraeDeviceId(value) {
+  return traeDeviceId({}, { traeDeviceId: String(value || '') });
+}
+
+function currentTraeAccessToken() {
+  return settings?.traeAccessToken || traeAccessToken(process.env);
+}
+
 function normalizeCommandcodeCookie(value) {
   return commandcodeCookie({}, { commandcodeCookie: String(value || '') });
 }
@@ -978,18 +992,18 @@ function hydrateCodexManagedWorkspaceLabels() {
     let changed = false;
     const accounts = normalizeCodexManagedAccounts(settings?.codexManagedAccounts).map((account) => {
       const resolved = labels.get(account.id);
-      if (
-        !resolved
-        || account.workspaceLabel
-        || account.workspaceKind
-        || account.enabled === false
-        || account.workspaceAccountId !== resolved.workspaceAccountId
-      ) return account;
+      if (!resolved || account.enabled === false || account.workspaceAccountId !== resolved.workspaceAccountId) {
+        return account;
+      }
+      const shouldHydrateLabel = !account.workspaceLabel && !account.workspaceKind;
+      if (!shouldHydrateLabel) return account;
       changed = true;
       return {
         ...account,
-        workspaceLabel: resolved.label,
-        workspaceKind: resolved.workspaceKind,
+        ...(shouldHydrateLabel ? {
+          workspaceLabel: resolved.label,
+          workspaceKind: resolved.workspaceKind
+        } : {}),
         updatedAt: new Date().toISOString()
       };
     });
@@ -1328,7 +1342,7 @@ async function rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal) 
   if (backupHomePath) await fs.promises.rename(backupHomePath, homePath);
 }
 
-async function resolveCodexWorkspaceAfterLogin(auth, homePath, options = {}) {
+async function resolveCodexWorkspaceAfterLogin(auth, _homePath, options = {}) {
   const initialIdentity = codexAuthIdentity(auth);
   let workspaces;
   try {
@@ -1362,15 +1376,14 @@ async function resolveCodexWorkspaceAfterLogin(auth, homePath, options = {}) {
   }
   if (!selected) return { auth, identity: initialIdentity };
 
-  const selectedAuth = authWithSelectedCodexWorkspace(auth, selected.id);
-  await writeCodexAuthFile(
-    path.join(homePath, 'auth.json'),
-    `${JSON.stringify(selectedAuth, null, 2)}\n`
-  );
+  const workspaceAccountId = normalizeWorkspaceId(selected.id);
   return {
-    auth: selectedAuth,
+    auth,
     identity: {
-      ...codexAuthIdentity(selectedAuth),
+      ...initialIdentity,
+      providerAccountId: workspaceAccountId,
+      workspaceAccountId,
+      accountKey: codexAccountKey(initialIdentity.email, workspaceAccountId),
       workspaceLabel: selected.label,
       workspaceKind: selected.workspaceKind
     }
@@ -1532,6 +1545,17 @@ async function switchCodexSystemAccount(id) {
   if (!hasCodexIdentity(targetMaterial.identity)) {
     return { ok: false, error: 'Could not identify the selected Codex account credentials.' };
   }
+  let selectedMaterial;
+  try {
+    selectedMaterial = codexAuthMaterialForWorkspace(targetMaterial, account.workspaceAccountId);
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Could not prepare the selected Codex workspace.' };
+  }
+  const targetIdentity = {
+    ...selectedMaterial.identity,
+    workspaceLabel: account.workspaceLabel,
+    workspaceKind: account.workspaceKind
+  };
 
   const previousAccounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
   const liveAuthPath = liveCodexAuthPath(process.env);
@@ -1543,16 +1567,16 @@ async function switchCodexSystemAccount(id) {
   }
   let preservedLiveAccount = null;
   try {
-    preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount(targetMaterial.identity);
-    await writeCodexAuthFile(liveAuthPath, targetMaterial.data);
+    preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount(targetIdentity);
+    await writeCodexAuthFile(liveAuthPath, selectedMaterial.data);
     const refreshedAccounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
     const refreshed = refreshedAccounts.find((entry) => entry.id === account.id) || account;
-    commitCodexManagedAccount(targetMaterial.identity, refreshed.homePath, refreshed, {
+    commitCodexManagedAccount(targetIdentity, refreshed.homePath, refreshed, {
       enabled: refreshed.enabled !== false,
       restart: false
     });
     void queueLimitInvalidation({ provider: 'codex' }, 'system-account-switch');
-    const activeAccountId = codexAccountId(targetMaterial.identity, refreshed);
+    const activeAccountId = codexAccountId(targetIdentity, refreshed);
     const accountsForRenderer = codexAccountsForRenderer();
     return {
       ok: true,
@@ -2467,6 +2491,19 @@ function withHistoryPreview(stats, devices) {
 
 let mode = 'idle';
 let deviceRuntimeHandle = null;
+const USAGE_RECONFIGURE_SETTLE_MS = 750;
+const USAGE_RECONFIGURE_RETRY_DELAYS_MS = Object.freeze([1000, 3000, 10_000]);
+const usageRuntimeReconciler = createLatestWinsReconciler({
+  delayMs: USAGE_RECONFIGURE_SETTLE_MS,
+  retryDelaysMs: USAGE_RECONFIGURE_RETRY_DELAYS_MS,
+  apply: () => applyUsageRuntimeForMode(),
+  onError: (error) => console.log(`[usage-runtime] settings reconciliation failed: ${error.message}`),
+  onExhausted: ({ attempts }) => recordDiagnosticEvent({
+    subsystem: 'usage-runtime',
+    code: 'usage-reconfigure-exhausted',
+    attempts
+  })
+});
 let localDevice = null;
 let localStats = null;
 let sseAbortController = null;
@@ -3373,6 +3410,8 @@ async function saveSubscriptions(list, base) {
 // `options` is forwarded verbatim to the runtime; the quit path passes
 // `skipCloseWatchers` (see stopAll).
 function stopSyncCollector(options = {}) {
+  usageRuntimeReconciler.cancel();
+  usageRuntimeReconciler.setActiveKey(null);
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
 }
@@ -3404,18 +3443,20 @@ function startSyncCollector() {
     flush: () => syncUploadScheduler.flush(),
     stop: () => syncUploadScheduler.stop()
   };
+  const usageOptions = electronUsageConfig('sync-collector');
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
     transformUsage: summaryWithArchivedClientUsage,
-    usageOptions: electronUsageConfig('sync-collector'),
+    usageOptions,
     sink,
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
   }, {
     limitsDeps: electronLimitsDeps()
   });
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
@@ -3449,18 +3490,20 @@ function startHostCollector() {
       }
     }
   };
+  const usageOptions = electronUsageConfig('host-collector');
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
     transformUsage: summaryWithArchivedClientUsage,
-    usageOptions: electronUsageConfig('host-collector'),
+    usageOptions,
     sink,
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
   }, {
     limitsDeps: electronLimitsDeps()
   });
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
@@ -3914,6 +3957,8 @@ function sendStatus(connected, extra) {
 // `options` is forwarded verbatim to the runtime; the quit path passes
 // `skipCloseWatchers` (see stopAll).
 function stopLocalCollector(options = {}) {
+  usageRuntimeReconciler.cancel();
+  usageRuntimeReconciler.setActiveKey(null);
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
   localDevice = null;
@@ -3999,6 +4044,7 @@ function startLocalCollector() {
   }, {
     limitsDeps: electronLimitsDeps()
   });
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
@@ -4301,6 +4347,11 @@ function settingsForRenderer() {
     : qoderCookie(process.env)
       ? 'env'
       : '';
+  const traeAccessTokenSource = settings?.traeAccessToken
+    ? 'settings'
+    : traeAccessToken(process.env)
+      ? 'env'
+      : '';
   const commandcodeCookieSource = settings?.commandcodeCookie
     ? 'settings'
     : commandcodeCookie(process.env)
@@ -4357,6 +4408,8 @@ function settingsForRenderer() {
     volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
     claudeWebCookie: settings?.claudeWebCookie ? 'set' : '',
     qoderCookie: settings?.qoderCookie ? 'set' : '',
+    traeAccessToken: settings?.traeAccessToken ? 'set' : '',
+    traeDeviceId: settings?.traeDeviceId ? 'set' : '',
     commandcodeCookie: settings?.commandcodeCookie ? 'set' : '',
     ollamaCookie: settings?.ollamaCookie ? 'set' : '',
     // Never ship OpenCode session cookies to the renderer; the UI only needs to
@@ -4391,6 +4444,8 @@ function settingsForRenderer() {
     volcengineCredentialsSource,
     qoderCookieConfigured: Boolean(currentQoderCookie()),
     qoderCookieSource,
+    traeAccessTokenConfigured: Boolean(currentTraeAccessToken()),
+    traeAccessTokenSource,
     commandcodeCookieConfigured: Boolean(currentCommandcodeCookie()),
     commandcodeCookieSource,
     ollamaCookieConfigured: Boolean(currentOllamaCookie()),
@@ -4882,6 +4937,28 @@ function restartDeviceRuntimeForMode() {
   }
   if (effectiveHubConfig().url) startSyncCollector();
   else startLocalCollector();
+}
+
+function usageCollectorNameForMode() {
+  return mode === 'local'
+    ? 'collector'
+    : (settings.hubMode === 'host' && embeddedHub ? 'host-collector' : 'sync-collector');
+}
+
+function usageConfigForMode() {
+  return electronUsageConfig(usageCollectorNameForMode());
+}
+
+function applyUsageRuntimeForMode() {
+  if (!deviceRuntimeHandle?.reconfigureUsage) {
+    restartDeviceRuntimeForMode();
+    return Boolean(deviceRuntimeHandle);
+  }
+  return deviceRuntimeHandle.reconfigureUsage(usageConfigForMode()) === true;
+}
+
+function reconfigureUsageRuntimeForMode() {
+  return usageRuntimeReconciler.schedule(usageConfigFingerprint(usageConfigForMode()));
 }
 
 // Quit-path teardown. Every step here must be synchronous, because performQuit
@@ -5581,6 +5658,7 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'bigmodel.cn' || parsed.hostname === 'www.bigmodel.cn') return true;
   if (parsed.hostname === 'www.volcengine.com' || parsed.hostname === 'console.volcengine.com') return true;
   if (parsed.hostname === 'qoder.com' || parsed.hostname === 'www.qoder.com' || parsed.hostname === 'qoder.com.cn' || parsed.hostname === 'www.qoder.com.cn') return true;
+  if (parsed.hostname === 'trae.cn' || parsed.hostname === 'www.trae.cn') return true;
   if (parsed.hostname === 'commandcode.ai' || parsed.hostname === 'www.commandcode.ai') return true;
   if ((parsed.hostname === 'ollama.com' || parsed.hostname === 'www.ollama.com') && (parsed.pathname === '/settings' || parsed.pathname === '/signin')) return true;
   if ((parsed.hostname === 'kimi.com' || parsed.hostname === 'www.kimi.com') && parsed.pathname.startsWith('/code')) return true;
@@ -6086,6 +6164,8 @@ app.whenReady().then(() => {
     if (patch.volcengineRegion !== undefined) normalizedPatch.volcengineRegion = normalizeVolcengineRegion(patch.volcengineRegion);
     if (patch.qoderCookie !== undefined) normalizedPatch.qoderCookie = normalizeQoderCookie(patch.qoderCookie);
     if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
+    if (patch.traeAccessToken !== undefined) normalizedPatch.traeAccessToken = normalizeTraeAccessToken(patch.traeAccessToken);
+    if (patch.traeDeviceId !== undefined) normalizedPatch.traeDeviceId = normalizeTraeDeviceId(patch.traeDeviceId);
     if (patch.commandcodeCookie !== undefined) normalizedPatch.commandcodeCookie = normalizeCommandcodeCookie(patch.commandcodeCookie);
     if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
     if (patch.kimiWebAccessToken !== undefined) normalizedPatch.kimiWebAccessToken = normalizeKimiWebAccessToken(patch.kimiWebAccessToken);
@@ -6208,6 +6288,8 @@ app.whenReady().then(() => {
       volcengineRegion: patch.volcengineRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineRegion) : (settings.volcengineRegion || ''),
       qoderCookie: patch.qoderCookie !== undefined ? normalizeQoderCookie(patch.qoderCookie) : (settings.qoderCookie || ''),
       qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
+      traeAccessToken: patch.traeAccessToken !== undefined ? normalizeTraeAccessToken(patch.traeAccessToken) : (settings.traeAccessToken || ''),
+      traeDeviceId: patch.traeDeviceId !== undefined ? normalizeTraeDeviceId(patch.traeDeviceId) : (settings.traeDeviceId || ''),
       commandcodeCookie: patch.commandcodeCookie !== undefined ? normalizeCommandcodeCookie(patch.commandcodeCookie) : (settings.commandcodeCookie || ''),
       ollamaCookie: patch.ollamaCookie !== undefined ? normalizeOllamaCookie(patch.ollamaCookie) : (settings.ollamaCookie || ''),
       customModelPricing: patch.customModelPricing !== undefined
@@ -6268,12 +6350,15 @@ app.whenReady().then(() => {
         rememberPendingLimitInvalidation(scope, reason, options);
       }
       startMode();
-    } else if (runtimeChange.usageStructural || runtimeChange.sinkStructural) {
+    } else if (runtimeChange.sinkStructural) {
       for (const { scope, reason, options } of limitInvalidations) {
         rememberPendingLimitInvalidation(scope, reason, options);
       }
       restartDeviceRuntimeForMode();
     } else {
+      if (runtimeChange.usageStructural) {
+        reconfigureUsageRuntimeForMode();
+      }
       if (runtimeChange.limitsReconfigure && deviceRuntimeHandle) {
         deviceRuntimeHandle.reconfigureLimits(electronLimitsConfig());
       }

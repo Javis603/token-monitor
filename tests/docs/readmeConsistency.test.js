@@ -51,7 +51,7 @@ const supportedToolOrder = [
   'Cursor',
   'Antigravity',
   'Cline',
-  'Kimi CLI / Kimi Code',
+  'Kimi CLI / Kimi Code / Kimi Work',
   'Qwen CLI',
   'Grok Build',
   'GitHub Copilot',
@@ -73,6 +73,7 @@ const supportedToolOrder = [
   'Minimax',
   'Volcengine',
   'Ollama',
+  'Trae CN',
   'Third-party APIs'
 ];
 
@@ -107,6 +108,7 @@ const supportedToolIdOrder = [
   'minimax',
   'volcengine',
   'ollama',
+  'trae',
   'newapi'
 ];
 

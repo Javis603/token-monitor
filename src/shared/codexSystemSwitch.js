@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { codexAuthIdentity, codexManagedAccountMatchesIdentity } = require('./codexAuth');
+const { authWithSelectedCodexWorkspace, normalizeWorkspaceId } = require('./codexWorkspaces');
 
 function liveCodexAuthPath(env = process.env, homeDir = os.homedir()) {
   const codexHome = String(env?.CODEX_HOME || '').trim();
@@ -38,6 +39,18 @@ async function readCodexAuthMaterial(authPath, deps = {}) {
   };
 }
 
+function codexAuthMaterialForWorkspace(material, workspaceId) {
+  const selectedWorkspaceId = normalizeWorkspaceId(workspaceId);
+  if (!selectedWorkspaceId) return material;
+  const auth = authWithSelectedCodexWorkspace(material?.auth, selectedWorkspaceId);
+  return {
+    ...material,
+    auth,
+    data: `${JSON.stringify(auth, null, 2)}\n`,
+    identity: codexAuthIdentity(auth)
+  };
+}
+
 async function writeCodexAuthFile(authPath, data, deps = {}) {
   const mkdir = deps.mkdir || fs.promises.mkdir;
   const writeFile = deps.writeFile || fs.promises.writeFile;
@@ -59,6 +72,7 @@ async function writeCodexAuthFile(authPath, data, deps = {}) {
 }
 
 module.exports = {
+  codexAuthMaterialForWorkspace,
   codexAccountMatchesIdentity,
   findMatchingCodexAccount,
   liveCodexAuthPath,
