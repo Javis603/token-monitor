@@ -324,6 +324,10 @@ const {
   normalizeWindowsBackdropMode
 } = require('./windowsBackdropMode');
 const { applyWindowsAccentBlur } = require('./windowsBackdrop');
+const {
+  attachNativeMaterialVisibility,
+  syncNativeMaterialVisibility
+} = require('./nativeMaterialVisibility');
 
 if (!app.isPackaged) loadDotEnv();
 
@@ -380,7 +384,9 @@ const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends']
 const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
 
 let mainWindow = null;
+let mainWindowNativeBlurEnabled = false;
 let dashboardWindow = null;
+let dashboardWindowNativeBlurEnabled = false;
 let settingsPath = null;
 let settings = null;
 let claudeWebCookieMutationRevision = 0;
@@ -2475,20 +2481,22 @@ function nativeBlurEnabled(source = settings) {
 
 function keepNativeBlurActive() {
   if (!mainWindow) return;
-  if (!nativeBlurEnabled()) return;
+  if (!mainWindowNativeBlurEnabled) return;
+  if (!mainWindow.isVisible() || mainWindow.isMinimized()) return;
   if (process.platform === 'darwin' && typeof mainWindow.setVisualEffectState === 'function') {
     mainWindow.setVisualEffectState('active');
   }
 }
 
 function applyNativeMaterial(source = settings) {
-  if (!mainWindow) return;
   const enabled = nativeBlurEnabled(source);
-  if (process.platform === 'darwin' && typeof mainWindow.setVibrancy === 'function') {
-    mainWindow.setVibrancy(enabled ? 'hud' : null);
-    if (typeof mainWindow.setVisualEffectState === 'function') {
-      mainWindow.setVisualEffectState(enabled ? 'active' : 'inactive');
-    }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindowNativeBlurEnabled = enabled;
+    syncNativeMaterialVisibility(mainWindow, enabled);
+  }
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindowNativeBlurEnabled = enabled;
+    syncNativeMaterialVisibility(dashboardWindow, enabled);
   }
   // Windows: backgroundMaterial is locked in at window creation. setBackgroundMaterial('none')
   // does not restore layered-window transparency once DWM SystemBackdrop has been engaged,
@@ -5821,7 +5829,6 @@ function createWindow(boundsOverride, options = {}) {
     // Keeps a popover unmaximizable across rebuilds, which never re-run enterTrayMode().
     ...(settings?.trayMode ? { maximizable: false } : {}),
     ...floatingBubbleWindowChrome(process.platform, collapsedFloatingBubble),
-    ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass && !windowsAccent ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -5867,6 +5874,7 @@ function createWindow(boundsOverride, options = {}) {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
   });
   applyWindowSettings();
+  attachNativeMaterialVisibility(win, () => mainWindowNativeBlurEnabled);
   applyNativeMaterial();
   keepNativeBlurActive();
   win.on('focus', () => {
@@ -5972,7 +5980,6 @@ function createDashboardWindow() {
     backgroundColor: '#00000000',
     ...appWindowIcon(),
     skipTaskbar: false,
-    ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -5981,7 +5988,10 @@ function createDashboardWindow() {
     }
   });
   dashboardWindow = win;
+  dashboardWindowNativeBlurEnabled = glass;
   applyWindowsChrome(win, { round: true });
+  attachNativeMaterialVisibility(win, () => dashboardWindowNativeBlurEnabled);
+  syncNativeMaterialVisibility(win, dashboardWindowNativeBlurEnabled);
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -6003,7 +6013,10 @@ function createDashboardWindow() {
   win.on('unresponsive', () => {
     if (!win.isVisible()) discardFailedDashboardWindow(win, 'renderer became unresponsive while opening');
   });
-  win.on('closed', () => { dashboardWindow = null; });
+  win.on('closed', () => {
+    dashboardWindow = null;
+    dashboardWindowNativeBlurEnabled = false;
+  });
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
     .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
   return win;
