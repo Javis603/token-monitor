@@ -541,7 +541,7 @@ function deviceHistoryRevision(devices) {
 }
 
 module.exports = {
-  num, normalizeTokscaleClientName, sumOutputTokens, sumTokens,
+  hasDisjointReasoning, num, normalizeTokscaleClientName, sumOutputTokens, sumTokens,
   parseGraphResult, computeIntensities, localDayKey, dayKeyAddDays,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
   coerceHistory, historyPreview, historyRevision, deviceHistoryRevision

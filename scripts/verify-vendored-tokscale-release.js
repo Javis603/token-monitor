@@ -146,11 +146,6 @@ function verifyReleaseMetadata(manifest, entries, release) {
   if (release?.tag_name !== manifest.releaseTag) {
     throw new Error(`Release tag is ${release?.tag_name || 'missing'}, expected ${manifest.releaseTag}`);
   }
-  if (release?.target_commitish !== manifest.commit) {
-    throw new Error(
-      `Release target is ${release?.target_commitish || 'missing'}, expected source commit ${manifest.commit}`
-    );
-  }
   if (release.draft || release.prerelease) throw new Error('Vendor Release must be published and non-prerelease');
 
   const assets = Array.isArray(release.assets) ? release.assets : [];

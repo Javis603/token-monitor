@@ -110,23 +110,21 @@ test('release verification downloads and hashes every native asset', async () =>
   assert.deepEqual(downloads, ['SHA256SUMS', 'tokscale-darwin-arm64', 'tokscale-linux-x64-musl']);
 });
 
-test('release verification requires the exact source commit', async () => {
+test('release verification ignores non-authoritative target_commitish metadata', async () => {
   const value = fixture();
   value.release.target_commitish = 'main';
-  await assert.rejects(
-    verifyVendoredTokscaleRelease({
-      manifest: value.manifest,
-      optionalDependencies: value.optionalDependencies,
-      release: value.release,
-      tagCommit: value.manifest.commit,
-      download: async () => { throw new Error('must not download'); },
-      log: () => {}
-    }),
-    /Release target is main, expected source commit/
-  );
+  const result = await verifyVendoredTokscaleRelease({
+    manifest: value.manifest,
+    optionalDependencies: value.optionalDependencies,
+    release: value.release,
+    tagCommit: value.manifest.commit,
+    download: async (_manifest, entry) => value.payloads[entry.asset],
+    log: () => {}
+  });
+  assert.deepEqual(result, { status: 'verified', targets: 2 });
 });
 
-test('release verification rejects a correct target_commitish whose tag resolves elsewhere', async () => {
+test('release verification rejects a tag that resolves elsewhere regardless of target_commitish', async () => {
   const value = fixture();
   await assert.rejects(
     verifyVendoredTokscaleRelease({

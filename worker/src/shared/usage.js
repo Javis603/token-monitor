@@ -7,7 +7,8 @@ const PERIODS = ['today', 'month', 'allTime'];
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
-  coerceHistory, dayKeyAddDays, localDayKey, mergeHistories, normalizeTokscaleClientName
+  coerceHistory, dayKeyAddDays, hasDisjointReasoning, localDayKey, mergeHistories,
+  normalizeTokscaleClientName
 } = require('./history');
 const { REASONIX_CLIENT } = require('./reasonixPaths');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./reasonixSessionGuard');
@@ -36,7 +37,6 @@ const OUTPUT_TOKEN_KEYS = ['output', 'outputTokens', 'output_tokens', 'completio
 const CACHE_READ_TOKEN_KEYS = ['cacheRead', 'cacheReadTokens', 'cache_read_tokens', 'cachedTokens', 'cached_tokens', 'cacheReadInputTokens', 'totalCacheRead'];
 const CACHE_WRITE_TOKEN_KEYS = ['cacheWrite', 'cacheWriteTokens', 'cache_write_tokens', 'cacheCreationInputTokens', 'totalCacheWrite'];
 const REASONING_TOKEN_KEYS = ['reasoning', 'reasoningTokens', 'reasoning_tokens'];
-const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'codex', 'dsh']);
 // Read off tokscale's per-entry `performance` block. `msPer1KTokens` is deliberately ignored:
 // it is a pre-divided ratio, and only raw sums survive being added across rows and devices.
 const TIMED_DURATION_KEYS = ['totalDurationMs', 'total_duration_ms', 'timedDurationMs', 'timed_duration_ms'];
@@ -92,7 +92,7 @@ function tokenValue(obj) {
 // is present.
 function tokenValueForClient(obj, client) {
   const base = tokenValue(obj);
-  if (!TOKSCALE_DISJOINT_REASONING_CLIENTS.has(client)) return base;
+  if (!hasDisjointReasoning(client)) return base;
   const direct = firstNumber(obj, TOKEN_KEYS);
   return direct !== 0 ? base : base + Math.max(0, firstNumber(obj, REASONING_TOKEN_KEYS));
 }
@@ -102,7 +102,7 @@ function tokenValueForClient(obj, client) {
 // cache-miss + output still closes over totalTokens.
 function outputValueForClient(obj, client) {
   const output = Math.max(0, firstNumber(obj, OUTPUT_TOKEN_KEYS));
-  return TOKSCALE_DISJOINT_REASONING_CLIENTS.has(client)
+  return hasDisjointReasoning(client)
     ? output + Math.max(0, firstNumber(obj, REASONING_TOKEN_KEYS))
     : output;
 }
