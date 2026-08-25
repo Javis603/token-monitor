@@ -8,6 +8,7 @@ const test = require('node:test');
 
 const { buildPromaHistoryGraph, buildTokscaleJson, buildPromaPeriods, PROMA_ROOT } = require('../../src/shared/promaUsage');
 const { extractUsageFromTokscale, mergePeriods } = require('../../src/shared/usage');
+const { localIso } = require('../helpers/localTime');
 
 function writeJsonl(filePath, rows) {
   fs.writeFileSync(filePath, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
@@ -121,15 +122,19 @@ test('Proma periods read each session file once before deriving all windows', ()
 
 test('Proma periods preserve JSONL session attribution across models', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'proma-usage-'));
+  const alphaStartedAt = localIso(2026, 7, 9, 10);
+  const alphaLastUsedAt = localIso(2026, 7, 9, 11);
+  const betaStartedAt = localIso(2026, 7, 9, 12);
+  const now = localIso(2026, 7, 9, 13);
   writeJsonl(path.join(root, 'session-alpha.jsonl'), [
-    assistantRow({ id: 'first', model: 'claude-sonnet', createdAt: '2026-07-09T10:00:00.000Z', input: 10 }),
-    assistantRow({ id: 'second', model: 'gpt-5', createdAt: '2026-07-09T11:00:00.000Z', output: 4 })
+    assistantRow({ id: 'first', model: 'claude-sonnet', createdAt: alphaStartedAt, input: 10 }),
+    assistantRow({ id: 'second', model: 'gpt-5', createdAt: alphaLastUsedAt, output: 4 })
   ]);
   writeJsonl(path.join(root, 'session-beta.jsonl'), [
-    assistantRow({ id: 'third', model: 'gpt-5', createdAt: '2026-07-09T12:00:00.000Z', input: 20 })
+    assistantRow({ id: 'third', model: 'gpt-5', createdAt: betaStartedAt, input: 20 })
   ]);
 
-  const periods = buildPromaPeriods({ now: '2026-07-09T13:00:00.000Z', allTimeSince: '2026-01-01', roots: [root] });
+  const periods = buildPromaPeriods({ now, allTimeSince: '2026-01-01', roots: [root] });
   assert.equal(periods.today.groupBy, 'client,session,model');
   const alphaId = periods.today.entries.find((entry) => entry.sessionId.startsWith('session-alpha@')).sessionId;
   const betaId = periods.today.entries.find((entry) => entry.sessionId.startsWith('session-beta@')).sessionId;
@@ -139,22 +144,25 @@ test('Proma periods preserve JSONL session attribution across models', () => {
   assert.equal(usage.sessions[`proma:${alphaId}`].totalTokens, 14);
   assert.equal(usage.sessions[`proma:${alphaId}`].messageCount, 2);
   assert.deepEqual(usage.sessions[`proma:${alphaId}`].models, { 'claude-sonnet': 10, 'gpt-5': 4 });
-  assert.equal(usage.sessions[`proma:${alphaId}`].startedAt, '2026-07-09T10:00:00.000Z');
-  assert.equal(usage.sessions[`proma:${alphaId}`].lastUsedAt, '2026-07-09T11:00:00.000Z');
+  assert.equal(usage.sessions[`proma:${alphaId}`].startedAt, alphaStartedAt);
+  assert.equal(usage.sessions[`proma:${alphaId}`].lastUsedAt, alphaLastUsedAt);
   assert.equal(usage.sessions[`proma:${betaId}`].totalTokens, 20);
 });
 
 test('Proma namespaces equal filenames from separate homes without exposing paths', () => {
   const firstRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'proma-home-a-'));
   const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'proma-home-b-'));
+  const firstCreatedAt = localIso(2026, 7, 9, 10);
+  const secondCreatedAt = localIso(2026, 7, 9, 11);
+  const now = localIso(2026, 7, 9, 13);
   writeJsonl(path.join(firstRoot, 'session.jsonl'), [
-    assistantRow({ id: 'first', createdAt: '2026-07-09T10:00:00.000Z', input: 10 })
+    assistantRow({ id: 'first', createdAt: firstCreatedAt, input: 10 })
   ]);
   writeJsonl(path.join(secondRoot, 'session.jsonl'), [
-    assistantRow({ id: 'second', createdAt: '2026-07-09T11:00:00.000Z', input: 20 })
+    assistantRow({ id: 'second', createdAt: secondCreatedAt, input: 20 })
   ]);
 
-  const options = { now: '2026-07-09T13:00:00.000Z', allTimeSince: '2026-01-01' };
+  const options = { now, allTimeSince: '2026-01-01' };
   const host = extractUsageFromTokscale(buildPromaPeriods({ ...options, roots: [firstRoot] }).today);
   const wsl = extractUsageFromTokscale(buildPromaPeriods({ ...options, roots: [secondRoot] }).today);
   const usage = mergePeriods(host, wsl);
@@ -188,8 +196,10 @@ test('Proma keeps undated usage out of bounded periods and Trends', () => {
 test('Proma history keeps per-day and per-model token attribution', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'proma-usage-'));
   writeJsonl(path.join(root, 'session.jsonl'), [
-    assistantRow({ id: 'first', model: 'Claude-Sonnet', createdAt: '2026-07-08T12:00:00.000Z', input: 10, output: 2 }),
-    assistantRow({ id: 'second', model: 'gpt-5', createdAt: '2026-07-09T12:00:00.000Z', input: 20 })
+    // `contributions` is keyed by local calendar day, so the rows are stated in
+    // local time — a `Z` noon lands on the neighbouring day past ±12.
+    assistantRow({ id: 'first', model: 'Claude-Sonnet', createdAt: localIso(2026, 7, 8, 12), input: 10, output: 2 }),
+    assistantRow({ id: 'second', model: 'gpt-5', createdAt: localIso(2026, 7, 9, 12), input: 20 })
   ]);
   const graph = buildPromaHistoryGraph({ roots: [root] });
   assert.deepEqual(graph.contributions, [

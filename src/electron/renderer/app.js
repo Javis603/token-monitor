@@ -1,6 +1,6 @@
 'use strict';
 
-const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', dsh: 'DeepSeek Harness' };
+const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', dsh: 'DeepSeek Harness', cherrystudio: 'Cherry Studio' };
 const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
@@ -13,8 +13,8 @@ const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh',
-  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'ollama', 'thirdparty', 'hunyuan'
+  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio',
+  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
 
 function osIconFor(platform) {
@@ -35,7 +35,7 @@ function iconKindFor(rowData, breakdown) {
     const vendor = modelVendorFor(rowData.key);
     return vendor && clientsWithIcon.has(vendor)
       ? { kind: 'icon', iconClass: `row-icon-${vendor}` }
-      : { kind: 'dot' };
+      : { kind: 'icon', iconClass: 'row-icon-token-monitor' };
   }
   if (breakdown === 'session') {
     return rowData.client && clientsWithIcon.has(rowData.client)
@@ -73,7 +73,8 @@ const KNOWN_CLIENTS = [
   { id: 'proma', label: 'Proma' },
   { id: 'qodercn', label: 'Qoder CN' },
   { id: 'reasonix', label: 'Reasonix' },
-  { id: 'dsh', label: 'DeepSeek Harness' }
+  { id: 'dsh', label: 'DeepSeek Harness' },
+  { id: 'cherrystudio', label: 'Cherry Studio' }
 ];
 const LIMIT_PROVIDERS = [
   { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
@@ -89,12 +90,14 @@ const LIMIT_PROVIDERS = [
   { id: 'zai', label: 'GLM' },
   { id: 'zaiteam', label: 'GLM Team' },
   { id: 'kiro', label: 'Kiro' },
+  { id: 'workbuddy', label: 'WorkBuddy' },
   { id: 'qoder', label: 'Qoder' },
   { id: 'deepseek', label: 'DeepSeek' },
   { id: 'openrouter', label: 'OpenRouter' },
   { id: 'minimax', label: 'Minimax' },
   { id: 'volcengine', label: 'Volcengine' },
   { id: 'ollama', label: 'Ollama' },
+  { id: 'trae', label: 'Trae CN' },
   { id: 'thirdparty', label: 'Third-party APIs' }
 ];
 const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
@@ -112,6 +115,7 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   minimax: 'minimaxAccountGroup',
   volcengine: 'volcengineAccountGroup',
   qoder: 'qoderAccountGroup',
+  trae: 'traeAccountGroup',
   commandcode: 'commandcodeAccountGroup',
   ollama: 'ollamaAccountGroup',
   thirdparty: 'thirdpartyAccountGroup'
@@ -131,6 +135,7 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   minimax: 'minimaxApiKeyStatus',
   volcengine: 'volcengineAccountStatus',
   qoder: 'qoderAccountStatus',
+  trae: 'traeAccountStatus',
   commandcode: 'commandcodeAccountStatus',
   ollama: 'ollamaAccountStatus',
   thirdparty: 'thirdpartyStatus'
@@ -138,7 +143,8 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
 const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
   grok: 'settings.limits.connection.grok',
-  kiro: 'settings.limits.connection.kiro'
+  kiro: 'settings.limits.connection.kiro',
+  workbuddy: 'settings.limits.connection.workbuddy'
 };
 const TRAY_ICON_VARIANTS = [
   { id: 'claude-brand', label: 'Claude', after: 'claude' },
@@ -206,9 +212,9 @@ const LIMIT_SOURCE_LABELS = { oauth: 'OAuth', cli: 'CLI', web: 'Web', rpc: 'RPC'
 const LIMIT_CAPABILITY_TAG_KEYS = {
   Auto: 'settings.limits.capability.auto',
   'OAuth/CLI': 'settings.limits.capability.oauthCli',
+  'OAuth/App/CLI': 'settings.limits.capability.oauthAppCli',
   'CLI RPC': 'settings.limits.capability.cliRpc',
   'CLI/Web': 'settings.limits.capability.cliWeb',
-  'App/CLI RPC': 'settings.limits.capability.appCliRpc',
   'Manual login': 'settings.limits.capability.manualLogin',
   Web: 'settings.limits.capability.web',
   'Web/API': 'settings.limits.capability.webApi',
@@ -3748,6 +3754,14 @@ function formatLimitAmount(value) {
   return `$${number.toFixed(2)}`;
 }
 
+function formatBalanceAmount(value, source) {
+  return formatMoney(value, source?.currency);
+}
+
+function formatBalanceSpendAmount(value, balance) {
+  return formatBalanceAmount(value, balance);
+}
+
 // Absolute count for windows that expose units (credits). It follows the same
 // display mode as percent bars: remaining/total in quota mode, used/total in
 // used mode.
@@ -3989,14 +4003,13 @@ function limitDetailInfoNode(entries, extraClass = '', ariaLabel = '') {
 function providerSpendNode(balance) {
   const entries = providerSpendEntries(balance);
   if (entries.length === 0) return null;
-  const currency = balance?.currency || 'USD';
   const preferredSummary = entries.filter(([label]) => label === 'Today' || label === 'Month');
   const summaryEntries = preferredSummary.length > 0 ? preferredSummary : entries.slice(0, 2);
-  const formatted = entries.map(([entryLabel, value]) => [entryLabel, formatMoney(value, currency)]);
+  const formatted = entries.map(([entryLabel, value]) => [entryLabel, formatBalanceSpendAmount(value, balance)]);
   return limitNoteRowNode({
     label: 'Spend',
     summary: summaryEntries
-      .map(([label, value]) => `${label} ${formatMoney(value, currency)}`)
+      .map(([label, value]) => `${label} ${formatBalanceSpendAmount(value, balance)}`)
       .join(' · '),
     // Only worth a tooltip when it would say more than the summary already does.
     detailEntries: entries.length > summaryEntries.length ? formatted : null,
@@ -4122,9 +4135,7 @@ function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
 
 function formatHomeLimitWindowValue(window, showUsed) {
   if (window?.planStatus === 'expired') return t('limits.mimo.planExpired');
-  // A credits window's headline value is money. Its percentage denominator is
-  // lifetime spend, which reads as a quota but isn't one.
-  if (window?.metric === 'credits') {
+  if (isCreditsWindow(window)) {
     if (window.remaining == null) {
       return String(window.detail || '').toLowerCase() === 'unlimited'
         ? t('settings.thirdparty.unlimited')
@@ -4134,6 +4145,16 @@ function formatHomeLimitWindowValue(window, showUsed) {
   }
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
   return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
+}
+
+function creditsBalanceValue(provider, credits) {
+  const amount = creditsAmount(provider, credits);
+  if (amount !== null) {
+    return formatCompactMoney(amount, credits?.currency || provider?.balance?.currency);
+  }
+  return String(credits?.detail || '').toLowerCase() === 'unlimited'
+    ? t('settings.thirdparty.unlimited')
+    : '';
 }
 
 function mimoTokenPlanWindowFromBalance(balance) {
@@ -4847,6 +4868,30 @@ function renderProviderWindows(provider, color) {
       );
       node.classList.add('limit-window-wide');
       windows.append(node);
+    }
+  } else if (provider.provider === 'workbuddy' || provider.provider === 'trae') {
+    const credits = windowForKind(provider, 'billing');
+    const balance = provider.balance || null;
+    const value = creditsBalanceValue(provider, credits);
+    if (credits && value) {
+      const displayWindow = {
+        ...credits,
+        label: credits.label || 'Credits'
+      };
+      const node = limitWindowNode(
+        displayWindow.label,
+        displayWindow,
+        color,
+        0.95,
+        value
+      );
+      node.classList.add('limit-window-wide');
+      if (!displayWindow.resetsAt && !displayWindow.resetDescription) {
+        node.classList.add('limit-window-no-reset');
+      }
+      windows.append(node);
+      const spendNode = providerSpendNode(balance);
+      if (spendNode) windows.append(spendNode);
     }
   } else if (provider.provider === 'commandcode') {
     // 5-hour and weekly are rate-limit windows (percent); the monthly grant and
@@ -8488,6 +8533,7 @@ function syncSettingsForm() {
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
+  renderExternalProviderStatus('trae');
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
@@ -10452,7 +10498,12 @@ async function onToolTrackingToggle() {
     .filter((cb) => cb.checked)
     .map((cb) => cb.dataset.client);
   await saveSettings({ clients: checked.join(',') });
-  await refreshStats({ force: true });
+  // `clients` is usage-structural, so settings:update schedules a latest-wins
+  // usage reconciliation and the eventual collector runs its own full tick.
+  // Forcing a refresh here would bypass that settling boundary, duplicate the
+  // scan, and drag an all-provider limits refresh along. The extra stats pushes
+  // would then repaint the whole settings panel under the pointer, which is what
+  // made this checkbox stall while the eye and pin next to it did not (#471).
 }
 
 async function onClientVisibilityToggle(clientId) {
@@ -11594,6 +11645,7 @@ function renderStatsUpdate() {
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
+  renderExternalProviderStatus('trae');
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
@@ -12497,11 +12549,15 @@ function trayComposerWindowChoices(source) {
   const choices = trayLayoutApi.sourceWindowOptions(
     state.stats || {},
     source
-  ).map((entry) => ({
-    value: entry.value,
-    label: trayComposerWindowLabel(entry),
-    preview: trayComposerSourcePreview({ ...source, window: entry.value })
-  }));
+  ).map((entry) => {
+    const selectedWindow = entry.selection?.window || entry.window;
+    return {
+      value: entry.value,
+      label: trayComposerWindowLabel(entry),
+      preview: trayComposerSourcePreview({ ...source, window: entry.value }),
+      credits: selectedWindow?.metric === 'credits'
+    };
+  });
   if (choices.length) return choices;
   return [{
     value: 'primary',
@@ -13337,6 +13393,11 @@ const externalLimitAccountConfig = {
     configuredKey: 'qoderCookieConfigured',
     sourceKey: 'qoderCookieSource',
     pendingKey: 'qoderPendingCheckSince'
+  },
+  trae: {
+    configuredKey: 'traeAccessTokenConfigured',
+    sourceKey: 'traeAccessTokenSource',
+    pendingKey: 'traePendingCheckSince'
   },
   commandcode: {
     configuredKey: 'commandcodeCookieConfigured',
@@ -15666,6 +15727,57 @@ function setupCursorAccountUI() {
     });
   }
 
+  const traeToggle = document.getElementById('traeSettingsToggle');
+  if (traeToggle) {
+    traeToggle.addEventListener('click', () => setExternalAccountExpanded('trae', !state.traeAccountExpanded));
+    setExternalAccountExpanded('trae', false);
+    renderExternalProviderStatus('trae');
+
+    document.getElementById('traeOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal('https://www.trae.cn');
+    });
+    document.getElementById('traeLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ traeAccessToken: '', traeDeviceId: '' });
+      clearExternalProviderCheckPending('trae');
+      clearExternalProviderPendingStatus('trae');
+      renderExternalProviderStatus('trae');
+      await refreshStats({ force: true });
+    });
+    document.getElementById('traeRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+    document.getElementById('traeTokenSubmit').addEventListener('click', async () => {
+      const tokenInput = document.getElementById('traeTokenInput');
+      const deviceIdInput = document.getElementById('traeDeviceIdInput');
+      const errorEl = document.getElementById('traeErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(tokenInput.value || '').trim()) {
+        errorEl.textContent = t('settings.trae.missingAuthorization');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('trae');
+        await saveSettings({
+          traeAccessToken: tokenInput.value,
+          traeDeviceId: deviceIdInput.value,
+          limitProviders: limitProviderSelectionIncluding('trae'),
+          limitsEnabled: true
+        });
+        tokenInput.value = '';
+        deviceIdInput.value = '';
+        renderExternalProviderStatus('trae');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('trae', !externalProviderAccountLinked('trae'));
+        renderExternalProviderStatus('trae');
+      } catch (err) {
+        clearExternalProviderCheckPending('trae');
+        errorEl.textContent = t('settings.trae.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
   const commandcodeToggle = document.getElementById('commandcodeSettingsToggle');
   if (commandcodeToggle) {
     commandcodeToggle.addEventListener('click', () => setExternalAccountExpanded('commandcode', !state.commandcodeAccountExpanded));
@@ -16078,6 +16190,7 @@ function initSettingsAnimationWrappers() {
     '#zaiteamManualPanel',
     '#volcengineManualPanel',
     '#qoderManualPanel',
+    '#traeManualPanel',
     '#commandcodeManualPanel',
     '#kimiManualPanel',
     '#ollamaManualPanel'

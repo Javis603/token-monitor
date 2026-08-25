@@ -27,7 +27,12 @@ const openrouterLimits = require('./openrouterLimits');
 const thirdPartyLimits = require('./thirdPartyLimits');
 const { sharedDataDir } = require('./config');
 const { recordConsumption } = require('./deepseekBalanceHistory');
-const { codexAccountKey, codexAuthIdentity } = require('./codexAuth');
+const {
+  codexAccountKey,
+  codexAuthIdentity,
+  codexOAuthRequestContext,
+  codexStoredAccountId
+} = require('./codexAuth');
 const minimaxLimits = require('./minimaxLimits');
 const { minimaxToken, minimaxBaseUrl, parseMinimaxTiers, fetchMinimaxLimits } = minimaxLimits;
 const mimoLimits = require('./mimoLimits');
@@ -51,6 +56,8 @@ const ollamaLimits = require('./ollamaLimits');
 const { ollamaSessionCookie, fetchOllamaLimits } = ollamaLimits;
 const kimiLimits = require('./kimiLimits');
 const { kimiToken, kimiWebToken, fetchKimiLimits } = kimiLimits;
+const workbuddyLimits = require('./workbuddyLimits');
+const traeLimits = require('./traeLimits');
 const {
   grokCredential,
   readAuthJson,
@@ -82,7 +89,16 @@ const CLAUDE_PREPAID_CACHE_STATE_KEY = 'claude.prepaid-cache';
 const CLAUDE_SESSION_WINDOW_MINUTES = 5 * 60;
 const CLAUDE_WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
 const CODEX_CHATGPT_BASE_URL = 'https://chatgpt.com/backend-api';
-const CODEX_RESET_CREDITS_PATH = '/wham/rate-limit-reset-credits';
+const CODEX_BACKEND_PATHS = Object.freeze({
+  chatgpt: Object.freeze({
+    usage: '/wham/usage',
+    resetCredits: '/wham/rate-limit-reset-credits'
+  }),
+  codex: Object.freeze({
+    usage: '/api/codex/usage',
+    resetCredits: '/api/codex/rate-limit-reset-credits'
+  })
+});
 const CODEX_EMPTY_QUOTA_RETRY_DELAY_MS = 300;
 const CODEX_RPC_TIMEOUT_MS = 20_000;
 const TOKEN_MONITOR_USER_AGENT = `token-monitor/${appVersion()} (+https://github.com/Javis603/token-monitor)`;
@@ -2006,8 +2022,66 @@ function codexRateLimitsById(payload = {}) {
   return payload.rateLimitsByLimitId || payload.rate_limits_by_limit_id || {};
 }
 
+function normalizeCodexUsageWindow(window) {
+  if (!window || typeof window !== 'object') return null;
+  const seconds = Number(window.limitWindowSeconds ?? window.limit_window_seconds);
+  return {
+    ...window,
+    usedPercent: window.usedPercent ?? window.used_percent,
+    resetsAt: window.resetsAt ?? window.resetAt ?? window.reset_at,
+    windowDurationMins: Number.isFinite(seconds) ? seconds / 60 : undefined
+  };
+}
+
+function normalizeCodexUsageRateLimit(rateLimit, meta = {}) {
+  const source = rateLimit && typeof rateLimit === 'object' ? rateLimit : {};
+  const primary = normalizeCodexUsageWindow(source.primaryWindow || source.primary_window);
+  const secondary = normalizeCodexUsageWindow(source.secondaryWindow || source.secondary_window);
+  return {
+    ...(primary ? { primary } : {}),
+    ...(secondary ? { secondary } : {}),
+    ...(meta.limitId ? { limitId: meta.limitId } : {}),
+    ...(meta.limitName ? { limitName: meta.limitName } : {}),
+    planType: meta.planType
+  };
+}
+
+function normalizeCodexUsagePayload(payload = {}) {
+  if (!payload || typeof payload !== 'object') return payload;
+  const hasUsageShape = Object.hasOwn(payload, 'rateLimit')
+    || Object.hasOwn(payload, 'rate_limit')
+    || Object.hasOwn(payload, 'additionalRateLimits')
+    || Object.hasOwn(payload, 'additional_rate_limits');
+  if (!hasUsageShape) return payload;
+
+  const planType = payload.planType ?? payload.plan_type;
+  const rateLimit = payload.rateLimit ?? payload.rate_limit;
+  const rateLimits = normalizeCodexUsageRateLimit(rateLimit, { limitId: 'codex', planType });
+  const rateLimitsByLimitId = { ...codexRateLimitsById(payload), codex: rateLimits };
+  const additional = payload.additionalRateLimits ?? payload.additional_rate_limits;
+  for (const entry of Array.isArray(additional) ? additional : []) {
+    if (!entry || typeof entry !== 'object') continue;
+    const limitId = String(entry.meteredFeature ?? entry.metered_feature ?? '').trim();
+    if (!limitId || limitId === 'codex') continue;
+    rateLimitsByLimitId[limitId] = normalizeCodexUsageRateLimit(
+      entry.rateLimit ?? entry.rate_limit,
+      {
+        limitId,
+        limitName: String(entry.limitName ?? entry.limit_name ?? '').trim(),
+        planType
+      }
+    );
+  }
+
+  return { ...payload, rateLimits, rateLimitsByLimitId };
+}
+
 function codexDirectRateLimits(payload = {}) {
-  return payload.rateLimits || payload.rate_limits || {};
+  const direct = payload.rateLimits || payload.rate_limits;
+  if (direct && typeof direct === 'object') return direct;
+  const wham = payload.rateLimit || payload.rate_limit;
+  if (!wham || typeof wham !== 'object') return {};
+  return normalizeCodexUsageRateLimit(wham, { planType: payload.planType ?? payload.plan_type });
 }
 
 function codexRateLimitWindowSignature(snapshot) {
@@ -2065,11 +2139,16 @@ function unambiguousAlternateCodexRateLimits(rateLimitsById) {
 function codexRateLimitSnapshot(payload = {}) {
   const rateLimitsById = codexRateLimitsById(payload);
   const direct = codexDirectRateLimits(payload);
-  if (hasCodexRateLimitWindows(rateLimitsById.codex)) return rateLimitsById.codex;
+  // An explicit main bucket is authoritative even when it has no windows.
+  // OAuth additional_rate_limits are independent metered-feature quotas; they
+  // must never be promoted into the ordinary Codex session/weekly lanes. The
+  // alternate consensus below remains only for legacy RPC payloads that omit
+  // the canonical `codex` key entirely.
+  if (Object.hasOwn(rateLimitsById, 'codex')) return rateLimitsById.codex || {};
   if (hasCodexRateLimitWindows(direct)) return direct;
   const alternate = unambiguousAlternateCodexRateLimits(rateLimitsById);
   if (alternate) return alternate;
-  return rateLimitsById.codex || direct || {};
+  return direct || {};
 }
 
 function codexResetCreditsSnapshot(payload = {}) {
@@ -2086,8 +2165,55 @@ function codexAccessTokenFromAuth(auth) {
   return String(tokens.access_token || auth?.access_token || '').trim();
 }
 
-function codexProviderAccountIdFromAuth(auth) {
-  return codexAuthIdentity(auth).providerAccountId;
+function codexOAuthRequestHeaders(auth, deps = {}, extra = {}) {
+  const context = codexOAuthRequestContext(auth, {
+    accountId: deps.codexAccountId
+  });
+  const headers = {
+    authorization: `Bearer ${context.accessToken}`,
+    accept: 'application/json',
+    'user-agent': TOKEN_MONITOR_USER_AGENT,
+    ...extra
+  };
+  if (context.accountId) headers['chatgpt-account-id'] = context.accountId;
+  if (context.isFedrampAccount) headers['x-openai-fedramp'] = 'true';
+  return headers;
+}
+
+function readCodexOAuthAuth(deps = {}) {
+  const read = deps.readFileSync || fs.readFileSync;
+  const authPath = deps.codexAuthPath || codexAuthPath(deps.env || process.env);
+  let auth;
+  try {
+    auth = JSON.parse(read(authPath, 'utf8'));
+  } catch (_) {
+    throw errorWithStatus('notConfigured', 'Codex auth.json not found');
+  }
+  const accessToken = codexAccessTokenFromAuth(auth);
+  if (!accessToken) throw errorWithStatus('unauthorized', 'Codex access token not found');
+  return { auth, accessToken };
+}
+
+function codexOAuthAuthSnapshot(deps = {}) {
+  return deps.codexOAuthAuthSnapshot || readCodexOAuthAuth(deps);
+}
+
+async function fetchCodexUsage(deps = {}) {
+  const { auth } = codexOAuthAuthSnapshot(deps);
+  const headers = codexOAuthRequestHeaders(auth, deps);
+  try {
+    const baseUrl = codexChatGptBaseUrl(deps);
+    const usagePath = codexBackendPaths(baseUrl).usage;
+    return await fetchJson(
+      `${baseUrl}${usagePath}`,
+      headers,
+      { ...deps, fetchTimeoutMs: deps.codexUsageTimeoutMs || 30_000 },
+      { forbiddenIsUnauthorized: true }
+    );
+  } catch (error) {
+    if (error?.status === 'unauthorized') error.code = 'CODEX_OAUTH_HTTP_UNAUTHORIZED';
+    throw error;
+  }
 }
 
 function parseCodexChatGptBaseUrl(configContents) {
@@ -2108,6 +2234,14 @@ function normalizeCodexChatGptBaseUrl(value) {
     normalized += '/backend-api';
   }
   return normalized;
+}
+
+function codexBackendPathStyle(baseUrl) {
+  return String(baseUrl || '').includes('/backend-api') ? 'chatgpt' : 'codex';
+}
+
+function codexBackendPaths(baseUrl) {
+  return CODEX_BACKEND_PATHS[codexBackendPathStyle(baseUrl)];
 }
 
 function codexChatGptBaseUrl(deps = {}) {
@@ -2145,32 +2279,19 @@ function parseCodexResetCreditsPayload(payload, nowMs = Date.now()) {
 }
 
 async function fetchCodexResetCredits(deps = {}) {
-  const read = deps.readFileSync || fs.readFileSync;
-  const authPath = deps.codexAuthPath || codexAuthPath(deps.env || process.env);
-  let auth;
-  try {
-    auth = JSON.parse(read(authPath, 'utf8'));
-  } catch (_) {
-    throw errorWithStatus('notConfigured', 'Codex auth.json not found');
-  }
-  const accessToken = codexAccessTokenFromAuth(auth);
-  if (!accessToken) throw errorWithStatus('unauthorized', 'Codex access token not found');
+  const { auth } = codexOAuthAuthSnapshot(deps);
 
   const fetchFn = deps.fetch || fetch;
   const timeoutMs = Number(deps.codexResetCreditsTimeoutMs || 4000);
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
-  const url = `${codexChatGptBaseUrl(deps)}${CODEX_RESET_CREDITS_PATH}`;
-  const accountId = deps.codexAccountId || codexProviderAccountIdFromAuth(auth);
+  const baseUrl = codexChatGptBaseUrl(deps);
+  const url = `${baseUrl}${codexBackendPaths(baseUrl).resetCredits}`;
   try {
-    const headers = {
-      authorization: `Bearer ${accessToken}`,
-      accept: 'application/json',
-      'user-agent': TOKEN_MONITOR_USER_AGENT,
+    const headers = codexOAuthRequestHeaders(auth, deps, {
       'openai-beta': 'codex-1',
       originator: 'Codex Desktop'
-    };
-    if (accountId) headers['chatgpt-account-id'] = accountId;
+    });
     const response = await fetchFn(url, {
       method: 'GET',
       headers,
@@ -2211,10 +2332,11 @@ async function readCodexResetCredits(deps = {}) {
   return fetchCodexResetCredits(deps);
 }
 
-async function withCodexOAuthResetCredits(payload, deps = {}) {
+async function withCodexOAuthResetCredits(payload, deps = {}, oauthAuthSnapshot = null) {
   const existing = codexResetCreditsSnapshot(payload);
   try {
-    const oauthResetCredits = await readCodexResetCredits(deps);
+    const resetDeps = oauthAuthSnapshot ? { ...deps, codexOAuthAuthSnapshot: oauthAuthSnapshot } : deps;
+    const oauthResetCredits = await readCodexResetCredits(resetDeps);
     return {
       ...payload,
       rateLimitResetCredits: mergeCodexResetCredits(oauthResetCredits, existing)
@@ -2702,6 +2824,7 @@ function createJsonRpcClient(child, timeoutMs) {
   let nextId = 1;
   let buffer = '';
   let closed = false;
+  let transportError = null;
   const pending = new Map();
 
   function rejectAll(error) {
@@ -2712,9 +2835,21 @@ function createJsonRpcClient(child, timeoutMs) {
     pending.clear();
   }
 
-  function abort(error) {
+  function failTransport(error) {
+    if (closed) return;
     closed = true;
+    transportError = error;
     rejectAll(error);
+  }
+
+  function failRetryableTransport(error) {
+    const target = error instanceof Error ? error : new Error(String(error || 'codex app-server transport failed'));
+    target.codexTransportFailure = true;
+    failTransport(target);
+  }
+
+  function abort(error) {
+    failTransport(error);
   }
 
   function handleMessage(message) {
@@ -2736,17 +2871,23 @@ function createJsonRpcClient(child, timeoutMs) {
       try { handleMessage(JSON.parse(line)); } catch (_) {}
     }
   });
-  child.on('error', (error) => {
-    closed = true;
-    rejectAll(error);
-  });
-  child.on('close', (code) => {
-    closed = true;
-    rejectAll(new Error(`codex app-server exited ${code}`));
-  });
+  child.on('error', failRetryableTransport);
+  child.on('close', (code) => failRetryableTransport(new Error(`codex app-server exited ${code}`)));
+  child.stdin.on?.('error', failRetryableTransport);
+
+  function writeLine(line) {
+    if (closed) return;
+    try {
+      child.stdin.write(line, (error) => {
+        if (error) failRetryableTransport(error);
+      });
+    } catch (error) {
+      failRetryableTransport(error);
+    }
+  }
 
   function send(method, params) {
-    if (closed) return Promise.reject(new Error('codex app-server is closed'));
+    if (closed) return Promise.reject(transportError || new Error('codex app-server is closed'));
     const id = nextId++;
     const message = params === undefined ? { method, id } : { method, id, params };
     return new Promise((resolve, reject) => {
@@ -2755,18 +2896,19 @@ function createJsonRpcClient(child, timeoutMs) {
         reject(new Error(`${method} timed out`));
       }, timeoutMs);
       pending.set(id, { resolve, reject, timer });
-      child.stdin.write(`${JSON.stringify(message)}\n`);
+      writeLine(`${JSON.stringify(message)}\n`);
     });
   }
 
   function notify(method, params) {
-    if (!closed) child.stdin.write(`${JSON.stringify(params === undefined ? { method } : { method, params })}\n`);
+    writeLine(`${JSON.stringify(params === undefined ? { method } : { method, params })}\n`);
   }
 
   return { abort, send, notify, rejectAll };
 }
 
 function shouldTryNextCodexCommand(error) {
+  if (error?.codexTransportFailure) return true;
   if (error?.code === 'ENOENT') return true;
   const message = String(error?.message || '').toLowerCase();
   return (
@@ -2809,12 +2951,21 @@ async function readCodexRpcWithCommand(command, deps = {}) {
     });
     rpc.notify('initialized', {});
     let rateLimitResult = await rpc.send('account/rateLimits/read');
-    const accountResult = await rpc.send('account/read').catch(() => {
+    let accountReadError = null;
+    const accountResult = await rpc.send('account/read', { refreshToken: false }).catch((error) => {
       if (signal?.aborted) throw abortError(signal);
+      accountReadError = error;
       return null;
     });
     const account = accountResult?.account || null;
     let payload = codexRpcPayload(rateLimitResult, account, command, deps);
+    if (
+      accountReadError &&
+      !hasCodexRateLimitWindows(codexRateLimitSnapshot(payload)) &&
+      accountReadError.codexTransportFailure
+    ) {
+      throw accountReadError;
+    }
     if (deps.codexEmptyQuotaRetry !== false && shouldRetryCodexEmptyQuotaPayload(payload)) {
       await waitForCodexEmptyQuotaRetry(deps);
       try {
@@ -2826,8 +2977,9 @@ async function readCodexRpcWithCommand(command, deps = {}) {
             rateLimitResetCredits: retryPayload.rateLimitResetCredits || payload.rateLimitResetCredits
           };
         }
-      } catch (_) {
+      } catch (error) {
         if (signal?.aborted) throw abortError(signal);
+        if (error?.codexTransportFailure) throw error;
       }
     }
     if (!account && !hasCodexRateLimitWindows(codexRateLimitSnapshot(payload))) {
@@ -2896,10 +3048,10 @@ function resolvedCodexAccountKey(email, workspaceAccountId, fallbackSeed) {
 function managedCodexAccountKey(account, authIdentity = {}, resolvedEmail = '') {
   const email = String(resolvedEmail || authIdentity.email || account.email || '').trim().toLowerCase();
   const workspaceAccountId = String(
-    authIdentity.workspaceAccountId
-    || authIdentity.providerAccountId
-    || account.workspaceAccountId
+    account.workspaceAccountId
     || account.providerAccountId
+    || authIdentity.workspaceAccountId
+    || authIdentity.providerAccountId
     || ''
   ).trim().toLowerCase();
   return resolvedCodexAccountKey(
@@ -2907,6 +3059,97 @@ function managedCodexAccountKey(account, authIdentity = {}, resolvedEmail = '') 
     workspaceAccountId,
     account.accountKey || authIdentity.accountKey || email || account.id || account.homePath
   );
+}
+
+function codexManagedRpcMatchesSelectedWorkspace(deps = {}, oauthAuthSnapshot = null) {
+  const selectedWorkspaceId = String(deps.codexAccountId || '').trim().toLowerCase();
+  if (!selectedWorkspaceId) return true;
+  const storedWorkspaceId = String(
+    codexStoredAccountId(oauthAuthSnapshot?.auth)
+    || deps.codexRpcStoredAccountId
+    || ''
+  ).trim().toLowerCase();
+  return Boolean(storedWorkspaceId && storedWorkspaceId === selectedWorkspaceId);
+}
+
+function codexOAuthCanFallbackToRpc(error, deps = {}, managedRpcIsScoped = false) {
+  if (
+    (deps.codexAccountId && !managedRpcIsScoped)
+    || deps.signal?.aborted
+    || error?.code === 'ABORT_ERR'
+    || error?.name === 'AbortError'
+  ) return false;
+  const httpStatus = Number(error?.httpStatus);
+  if (Number.isFinite(httpStatus)) return httpStatus === 408 || httpStatus >= 500;
+  return !['notConfigured', 'unauthorized', 'sourceRateLimited'].includes(error?.status);
+}
+
+async function readCodexUsageOrRpc(deps = {}) {
+  const oauthReader = deps.readCodexUsage || fetchCodexUsage;
+  const rpcReader = deps.readCodexRpc || readCodexRpc;
+  let latestOAuthAuthSnapshot = null;
+  const readOAuth = async () => {
+    let oauthAuthSnapshot = null;
+    try {
+      oauthAuthSnapshot = readCodexOAuthAuth(deps);
+    } catch (error) {
+      if (oauthReader === fetchCodexUsage) throw error;
+    }
+    latestOAuthAuthSnapshot = oauthAuthSnapshot;
+    const oauthDeps = oauthAuthSnapshot ? { ...deps, codexOAuthAuthSnapshot: oauthAuthSnapshot } : deps;
+    return {
+      payload: normalizeCodexUsagePayload(await oauthReader(oauthDeps)),
+      source: 'oauth',
+      sourceDetail: '',
+      oauthAuthSnapshot
+    };
+  };
+  let oauthError;
+  let transientRpcFallback;
+  try {
+    return await readOAuth();
+  } catch (error) {
+    oauthError = error;
+    transientRpcFallback = codexOAuthCanFallbackToRpc(
+      error,
+      deps,
+      codexManagedRpcMatchesSelectedWorkspace(deps, latestOAuthAuthSnapshot)
+    );
+    if (!['notConfigured', 'unauthorized'].includes(error?.status) && !transientRpcFallback) {
+      error.codexSource = 'oauth';
+      throw error;
+    }
+  }
+
+  let rpcPayload;
+  try {
+    rpcPayload = await rpcReader(deps);
+  } catch (error) {
+    if (transientRpcFallback) {
+      oauthError.codexSource = 'oauth';
+      throw oauthError;
+    }
+    error.codexSource = 'rpc';
+    throw error;
+  }
+  const managedRpcIsScoped = codexManagedRpcMatchesSelectedWorkspace(
+    deps,
+    latestOAuthAuthSnapshot
+  );
+  // A managed app-server result is usable only when its isolated auth snapshot
+  // is already scoped to the selected workspace. Otherwise RPC remains
+  // recovery-only and the explicitly scoped OAuth request must succeed.
+  if (deps.codexAccountId || oauthError?.code === 'CODEX_OAUTH_HTTP_UNAUTHORIZED') {
+    try {
+      return await readOAuth();
+    } catch (retryError) {
+      if (deps.codexAccountId && !managedRpcIsScoped) {
+        retryError.codexSource = 'oauth';
+        throw retryError;
+      }
+    }
+  }
+  return { payload: rpcPayload, source: 'rpc', sourceDetail: rpcPayload.sourceDetail };
 }
 
 async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {}) {
@@ -2919,13 +3162,21 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
   const accountDeps = {
     ...deps,
     env,
-    codexAuthPath: account.authPath || pathApi.join(account.homePath, 'auth.json')
+    codexAuthPath: account.authPath || pathApi.join(account.homePath, 'auth.json'),
+    codexAccountId: account.workspaceAccountId || undefined
   };
-  const reader = deps.readCodexRpc || readCodexRpc;
-  const authIdentity = readLiveCodexIdentity(accountDeps);
+  const initialAuth = readLiveCodexAuth(accountDeps);
+  const initialAuthIdentity = initialAuth
+    ? codexAuthIdentity(initialAuth)
+    : { email: '', accountLabel: '', providerAccountId: '', accountKey: '' };
+  accountDeps.codexRpcStoredAccountId = codexStoredAccountId(initialAuth);
   try {
-    const payload = await withCodexOAuthResetCredits(await reader(accountDeps), accountDeps);
-    const email = authIdentity.email || payload.account?.email || account.email;
+    const result = await readCodexUsageOrRpc(accountDeps);
+    const payload = await withCodexOAuthResetCredits(result.payload, accountDeps, result.oauthAuthSnapshot);
+    const authIdentity = result.oauthAuthSnapshot
+      ? codexAuthIdentity(result.oauthAuthSnapshot.auth)
+      : initialAuthIdentity;
+    const email = account.email || authIdentity.email || payload.account?.email;
     return mapCodexRateLimitsToProvider(payload, {
       accountKey: managedCodexAccountKey(account, authIdentity, email),
       accountEmail: email,
@@ -2933,19 +3184,19 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
       accountName: account.workspaceLabel,
       workspaceKind: account.workspaceKind,
       updatedAt: nowIso(nowMs),
-      source: 'rpc',
+      source: result.source,
       sourceDetail: 'managed'
     });
   } catch (error) {
-    const email = authIdentity.email || account.email;
+    const email = account.email || initialAuthIdentity.email;
     return normalizeLimitProvider({
       provider: 'codex',
-      accountKey: managedCodexAccountKey(account, authIdentity, email),
+      accountKey: managedCodexAccountKey(account, initialAuthIdentity, email),
       accountEmail: email,
       accountLabel: account.accountLabel,
       accountName: account.workspaceLabel,
       workspaceKind: account.workspaceKind,
-      source: 'rpc',
+      source: error.codexSource || 'oauth',
       sourceDetail: 'managed',
       status: providerStatusFromError(error),
       updatedAt: nowIso(nowMs),
@@ -2958,20 +3209,29 @@ async function fetchManagedCodexAccountLimits(account, _options = {}, deps = {})
 // auth.json. The RPC `account/read` often omits the email, so the JWT in
 // auth.json is the reliable source. The shared composite key keeps the live
 // account consistent with managed accounts for cross-device dedup.
-function readLiveCodexIdentity(deps = {}) {
+function readLiveCodexAuth(deps = {}) {
   const read = deps.readFileSync || fs.readFileSync;
   const authPath = deps.codexAuthPath || codexAuthPath(deps.env || process.env);
   try {
-    return codexAuthIdentity(JSON.parse(read(authPath, 'utf8')));
+    return JSON.parse(read(authPath, 'utf8'));
   } catch (_) {
-    return { email: '', accountLabel: '', providerAccountId: '', accountKey: '' };
+    return null;
   }
 }
 
+function readLiveCodexIdentity(deps = {}) {
+  const auth = readLiveCodexAuth(deps);
+  return auth
+    ? codexAuthIdentity(auth)
+    : { email: '', accountLabel: '', providerAccountId: '', accountKey: '' };
+}
+
 async function fetchLiveCodexAccount(deps = {}, nowMs = Date.now(), managedAccounts = []) {
-  const reader = deps.readCodexRpc || readCodexRpc;
-  const payload = await withCodexOAuthResetCredits(await reader(deps), deps);
-  const authIdentity = readLiveCodexIdentity(deps);
+  const result = await readCodexUsageOrRpc(deps);
+  const payload = await withCodexOAuthResetCredits(result.payload, deps, result.oauthAuthSnapshot);
+  const authIdentity = result.oauthAuthSnapshot
+    ? codexAuthIdentity(result.oauthAuthSnapshot.auth)
+    : readLiveCodexIdentity(deps);
   const email = authIdentity.email || payload.account?.email || '';
   const fallbackSeed = payload.account?.email || `${payload.account?.type || 'account'}:${payload.account?.planType || ''}:${deps.codexAuthPath || codexAuthPath(deps.env || process.env)}`;
   const accountKey = resolvedCodexAccountKey(
@@ -2989,8 +3249,8 @@ async function fetchLiveCodexAccount(deps = {}, nowMs = Date.now(), managedAccou
     accountName: matchingManagedAccount?.workspaceLabel || '',
     workspaceKind: matchingManagedAccount?.workspaceKind || '',
     updatedAt: nowIso(nowMs),
-    source: 'rpc',
-    sourceDetail: payload.sourceDetail
+    source: result.source,
+    sourceDetail: result.sourceDetail
   });
 }
 
@@ -3673,6 +3933,8 @@ function providerFetchers(deps = {}) {
     volcengine: (providerOptions, probeDeps) => volcengineLimits.fetchVolcengineLimits(providerOptions, probeDeps),
     commandcode: (providerOptions, probeDeps) => commandcodeLimits.fetchCommandcodeLimits(providerOptions, probeDeps),
     qoder: (providerOptions, probeDeps) => qoderLimits.fetchQoderLimits(providerOptions, probeDeps),
+    trae: (providerOptions, probeDeps) => traeLimits.fetchTraeLimits(providerOptions, probeDeps),
+    workbuddy: (providerOptions, probeDeps) => workbuddyLimits.fetchWorkbuddyLimits(providerOptions, probeDeps),
     ollama: (providerOptions, probeDeps) => ollamaLimits.fetchOllamaLimits(providerOptions, probeDeps),
     kimi: (providerOptions, probeDeps) => kimiLimits.fetchKimiLimits(providerOptions, probeDeps),
     thirdparty: (providerOptions, probeDeps) => thirdPartyLimits.fetchThirdPartyLimits(providerOptions, probeDeps),
@@ -3731,6 +3993,7 @@ function createProbeFetch(fetchFn, context = {}, deps = {}) {
 
 function resolveProviderFetch(provider, deps = {}) {
   if (typeof deps.fetch === 'function') return deps.fetch;
+  if (provider === 'workbuddy' && typeof deps.workbuddyFetch === 'function') return deps.workbuddyFetch;
   if (provider === 'grok') return grokLimits.resolveGrokFetch(deps);
   return fetch;
 }
@@ -4023,6 +4286,10 @@ module.exports = {
   fetchVolcengineLimits,
   qoderCookie,
   fetchQoderLimits,
+  traeAccessToken: traeLimits.traeAccessToken,
+  traeDeviceId: traeLimits.traeDeviceId,
+  fetchTraeLimits: traeLimits.fetchTraeLimits,
+  fetchWorkbuddyLimits: workbuddyLimits.fetchWorkbuddyLimits,
   commandcodeCookie,
   fetchCommandcodeLimits,
   ollamaSessionCookie,

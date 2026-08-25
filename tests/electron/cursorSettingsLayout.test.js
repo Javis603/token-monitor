@@ -599,6 +599,9 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(switchBody, /const previousAccounts = normalizeCodexManagedAccounts\(settings\.codexManagedAccounts\)/);
   assert.match(switchBody, /liveAuthSnapshot = await snapshotCodexAuthFile\(liveAuthPath\)/);
   assert.match(switchBody, /preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount/);
+  assert.match(switchBody, /codexAuthMaterialForWorkspace\(targetMaterial, account\.workspaceAccountId\)/);
+  assert.doesNotMatch(switchBody, /workspaceIsFedramp|codexIsFedramp/);
+  assert.match(switchBody, /writeCodexAuthFile\(liveAuthPath, selectedMaterial\.data\)/);
   assert.match(switchBody, /restart: false/);
   assert.match(switchBody, /settings\.codexManagedAccounts = previousAccounts;/);
   assert.match(switchBody, /restoreCodexAuthFileSnapshot\(liveAuthSnapshot\)/);
@@ -665,19 +668,19 @@ test('API key account entries share styling and Copilot uses the folded token en
   const css = readRendererFile('styles.css');
 
   const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
-  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#kimiManualPanel'/);
+  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#traeManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#kimiManualPanel'/);
   assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
 
   assert.match(css, /#deepseekManualPanel\.hidden,\n#minimaxManualPanel\.hidden,/);
-  assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#commandcodeManualPanel\.hidden,\n#ollamaManualPanel\.hidden,\n#mimoManualPanel\.hidden,\n#kimiManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
+  assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#traeManualPanel\.hidden,\n#commandcodeManualPanel\.hidden,\n#ollamaManualPanel\.hidden,\n#mimoManualPanel\.hidden,\n#kimiManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
   assert.match(css, /#copilotManualPanel\.hidden,\n#copilotManualDetails\.hidden,/);
-  assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#zaiteamErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#commandcodeErrorMessage\.hidden,\n#ollamaErrorMessage\.hidden,\n#kimiErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
-  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#commandcodeManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#zaiteamErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#traeErrorMessage\.hidden,\n#commandcodeErrorMessage\.hidden,\n#ollamaErrorMessage\.hidden,\n#kimiErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
+  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#traeManualPanel,\n#commandcodeManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#traeManualPanel input,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#traeManualPanel input,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
   assert.match(css, /\.thirdparty-field :is\(input, select\)\s*\{[\s\S]*?font-size: 12px;/);
 });
 
@@ -726,11 +729,18 @@ test('Copilot account panel provides GitHub sign-in plus manual token fallback',
   assert.match(flowBody, /return current && incoming === current;/);
 });
 
-test('Z.ai, Volcengine, Qoder, and Ollama account panels are exposed in settings', () => {
+test('Z.ai, Volcengine, Qoder, Trae, and Ollama account panels are exposed in settings', () => {
   const html = readRendererFile('index.html');
   assert.match(html, /<div id="zaiAccountGroup"[\s\S]*?<select id="zaiApiRegionInput">[\s\S]*?<input id="zaiApiKeyInput" type="password"[\s\S]*?<button id="zaiApiKeySubmit"[\s\S]*data-i18n="settings\.zai\.saveApiKey">/);
   assert.match(html, /<div id="volcengineAccountGroup"[\s\S]*?data-i18n="settings\.volcengine\.accessKeyId">API key \/ Access key ID[\s\S]*?<input id="volcengineAccessKeyInput" type="password"[\s\S]*placeholder="ark-\.\.\. or AKLT\.\.\."[\s\S]*?<input id="volcengineSecretAccessKeyInput" type="password"[\s\S]*?<input id="volcengineRegionInput" type="text"[\s\S]*?<button id="volcengineCredentialsSubmit"[\s\S]*data-i18n="settings\.volcengine\.saveCredentials">/);
   assert.match(html, /<div id="qoderAccountGroup"[\s\S]*?<select id="qoderSiteInput">[\s\S]*?<textarea id="qoderCookieInput"[\s\S]*?<button id="qoderCookieSubmit"[\s\S]*data-i18n="settings\.qoder\.saveCookie">/);
+  assert.match(html, /<div id="traeAccountGroup"[\s\S]*?<input id="traeTokenInput" type="password"[\s\S]*?data-i18n-placeholder="settings\.trae\.tokenPlaceholder"[\s\S]*?<input id="traeDeviceIdInput" type="text"[\s\S]*?data-i18n-placeholder="settings\.trae\.deviceIdPlaceholder"[\s\S]*?<button id="traeTokenSubmit"[\s\S]*data-i18n="settings\.trae\.saveCredentials">/);
+  const traeDetails = html.match(/<div id="traeSettingsDetails"[\s\S]*?<div id="traeErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  assert.match(traeDetails, /<strong>1\.<\/strong> <span data-i18n="settings\.trae\.step1">/);
+  assert.match(traeDetails, /<strong>2\.<\/strong> <span data-i18n="settings\.trae\.step2">/);
+  assert.match(traeDetails, /<strong>3\.<\/strong> <span data-i18n="settings\.trae\.step3">/);
+  assert.match(traeDetails, /<strong>4\.<\/strong> <span data-i18n="settings\.trae\.step4">/);
+  assert.doesNotMatch(traeDetails, /settings\.trae\.note/);
   assert.match(html, /<div id="ollamaAccountGroup"[\s\S]*?<textarea id="ollamaCookieInput"[\s\S]*?<button id="ollamaCookieSubmit"[\s\S]*data-i18n="settings\.ollama\.saveCookie">/);
   const ollamaDetails = html.match(/<div id="ollamaSettingsDetails"[\s\S]*?<div id="ollamaErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
   assert.match(ollamaDetails, /<strong>1\.<\/strong> <span data-i18n="settings\.ollama\.step1">/);
@@ -760,6 +770,10 @@ test('Z.ai, Volcengine, Qoder, and Ollama account panels are exposed in settings
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(zaiPlatformUrl\(\)\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(volcenginePlatformUrl\(\)\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(qoderPlatformUrl\(\)\)/);
+  assert.match(setupBody, /const deviceIdInput = document\.getElementById\('traeDeviceIdInput'\);/);
+  assert.match(setupBody, /if \(!String\(tokenInput\.value \|\| ''\)\.trim\(\)\) \{[\s\S]*?settings\.trae\.missingAuthorization/);
+  assert.match(setupBody, /traeAccessToken: tokenInput\.value,[\s\S]*?traeDeviceId: deviceIdInput\.value,[\s\S]*?limitProviders: limitProviderSelectionIncluding\('trae'\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/www\.trae\.cn'\)/);
   assert.match(setupBody, /ollamaCookie: input\.value/);
   assert.match(setupBody, /const validation = await window\.tokenMonitor\.ollama\.validateCookie\(input\.value\);/);
   assert.match(setupBody, /if \(!validation\?\.ok\) \{[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?ollamaValidationError\(validation\);[\s\S]*?return;/);
@@ -1162,6 +1176,10 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(body, /opencodeCookie:[^,}]*\?\s*'set'\s*:\s*''/);
   // Multi-account profile cookies are redacted the same way.
   assert.match(body, /opencodeProfiles: redactOpencodeProfilesForRenderer\(/);
+  assert.match(body, /'workbuddyAccessToken',[\s\S]*'workbuddyDepartmentInfo'/);
+  assert.doesNotMatch(body, /workbuddyLocalApp/);
+  assert.doesNotMatch(main, /workbuddySession|workbuddyBrowserSession/);
+  assert.doesNotMatch(body, /workbuddyBrowserSessionEnabled: settings\?\.workbuddyBrowserSessionEnabled/);
   // That redactor must name the fields it forwards. A spread of the stored
   // profile hands any field added later to the renderer verbatim, which is how
   // the API key would have leaked when profiles gained one.
@@ -1188,6 +1206,32 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(main, /migrateLegacyMimoCredentialFiles\(merged\.mimoManagedAccounts\)/);
   assert.match(main, /if \(!removeMimoCredential\(accountId\)\) return \{ ok: false, error: 'Could not remove stored credential' \};/);
   assert.match(main, /delete result\.account\.cookieHeader/);
+});
+
+test('WorkBuddy settings uses the same automatic provider row as other ambient integrations', () => {
+  const html = readRendererFile('index.html');
+  assert.doesNotMatch(html, /workbuddy(?:Settings|AccountGroup|LocalApp|Open|Refresh|Privacy|OptIn|Error)/);
+
+  const app = readRendererFile('app.js');
+  assert.match(app, /workbuddy: 'settings\.limits\.connection\.workbuddy'/);
+  assert.doesNotMatch(app, /workbuddyAccountGroup|workbuddyAccountStatus|renderWorkbuddyStatus/);
+  assert.doesNotMatch(app, /window\.tokenMonitor\.workbuddy/);
+
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
+  assert.doesNotMatch(preload, /workbuddy:/);
+});
+
+test('WorkBuddy auth is resolved only when its enabled local provider is active', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const limitsConfig = functionBody(main, 'electronLimitsConfig', 'defaultLimitProviders');
+  assert.match(limitsConfig, /settings\?\.limitsEnabled !== false/);
+  assert.match(limitsConfig, /parseLimitProviders\(settings\?\.limitProviders\)\.includes\('workbuddy'\)/);
+  assert.match(limitsConfig, /const workbuddyDesktopSessionSupported = isSupportedWorkbuddyLocalAppPlatform\(\)/);
+  assert.match(limitsConfig, /const workbuddyDesktopSessionEnabled = workbuddyEnabled && workbuddyDesktopSessionSupported/);
+  assert.match(limitsConfig, /workbuddyDesktopSessionSupported,/);
+  assert.match(limitsConfig, /workbuddyDesktopSessionEnabled,/);
+  assert.match(limitsConfig, /workbuddyLocalSession: workbuddyDesktopSessionEnabled \? electronWorkbuddyLocalAuth\.getSessionInfo\(\) : \{\}/);
+  assert.doesNotMatch(limitsConfig, /settings\?\.workbuddyLocalAppEnabled/);
 });
 
 test('legacy credential cleanup retries independently from the migration marker', () => {
@@ -1667,7 +1711,7 @@ test('remote Hub build status is wired as a separate localized sync hint', () =>
   assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.legacy':/g)].length, 0);
 });
 
-test('main settings normalize collection cadence and restart only the device runtime when it changes', () => {
+test('main settings normalize collection cadence and replace only usage when it changes', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const collector = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'collector.js'), 'utf8');
   assert.match(main, /function normalizeCollectionMode/);
@@ -1706,8 +1750,7 @@ test('main settings normalize collection cadence and restart only the device run
   assert.match(updateHandler, /normalizedPatch\.collectionIntervalMs = normalizeCollectionIntervalMs/);
   assert.match(updateHandler, /collectionMode: normalizeCollectionMode/);
   assert.match(updateHandler, /collectionIntervalMs: normalizeCollectionIntervalMs/);
-  assert.match(updateHandler, /runtimeChange\.usageStructural \|\| runtimeChange\.sinkStructural/);
-  assert.match(updateHandler, /restartDeviceRuntimeForMode\(\)/);
+  assert.match(updateHandler, /if \(runtimeChange\.usageStructural\) \{\s*reconfigureUsageRuntimeForMode\(\);\s*\}/);
 });
 
 test('main settings normalize sync upload intervals and restart only the device runtime when it changes', () => {
@@ -1738,8 +1781,7 @@ test('main settings normalize sync upload intervals and restart only the device 
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf("ipcMain.handle('appearance:preview'"));
   assert.match(updateHandler, /normalizedPatch\.syncUploadIntervalMs = normalizeSyncUploadIntervalMs/);
   assert.match(updateHandler, /syncUploadIntervalMs: normalizeSyncUploadIntervalMs/);
-  assert.match(updateHandler, /runtimeChange\.usageStructural \|\| runtimeChange\.sinkStructural/);
-  assert.match(updateHandler, /restartDeviceRuntimeForMode\(\)/);
+  assert.match(updateHandler, /else if \(runtimeChange\.sinkStructural\) \{[\s\S]*?restartDeviceRuntimeForMode\(\);[\s\S]*?\} else \{/);
 });
 
 test('main collectors share one live GUI limit credential resolver in every widget mode', () => {
@@ -1771,6 +1813,14 @@ test('main collectors share one live GUI limit credential resolver in every widg
     'volcengineRegion', 'qoderCookie', 'qoderSite', 'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken',
     'ollamaCookie'
   ]) assert.match(runtimeConfig, new RegExp(`${key}: settings\\.${key}`));
+});
+
+test('WorkBuddy Electron fetch adapter forwards parsed response JSON', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  assert.match(main, /createWorkbuddyLocalAuth\(\{\s*fetch: electronLimitsFetch\(\)/);
+  const limitsDeps = functionBody(main, 'electronLimitsDeps', 'normalizeDeepSeekApiKey');
+  assert.match(limitsDeps, /json: \(\) => result\.json\(\)/);
+  assert.doesNotMatch(limitsDeps, /result\.body/);
 });
 
 test('main settings migrateLimitProviders normalizes without expanding old defaults', () => {

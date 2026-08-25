@@ -46,12 +46,14 @@ test('default provider order follows tracked tools, named services, then third-p
     'zai',
     'zaiteam',
     'kiro',
+    'workbuddy',
     'qoder',
     'deepseek',
     'openrouter',
     'minimax',
     'volcengine',
     'ollama',
+    'trae',
     'thirdparty'
   ]);
 });

@@ -87,6 +87,27 @@ test('exchangeRows sorts by tokens when sortBy=tokens', () => {
   assert.equal(rows[1].value, 20);
 });
 
+test('exchangeRows labels compaction usage without consuming a reply number', () => {
+  const rows = exchangeRows({
+    exchanges: [{
+      promptPreview: 'continue',
+      startedAt: '2026-05-30T06:00:01.000Z',
+      turnCount: 1,
+      tools: [],
+      tokens: { total: 100 },
+      costEstimate: 0.2,
+      turns: [
+        { type: 'compaction-summary', timestamp: '2026-05-30T06:00:02.000Z', tokens: { total: 30 }, tools: [], costEstimate: 0.06 },
+        { type: 'reply', timestamp: '2026-05-30T06:00:03.000Z', tokens: { total: 70 }, tools: [], costEstimate: 0.14 }
+      ]
+    }]
+  }, { now: new Date(2026, 4, 30, 12, 0) });
+
+  assert.match(rows[0].subtitle, /1 turn/);
+  assert.deepEqual(rows[0].turns.map((turn) => turn.label), ['Compaction summary', 'Reply #1']);
+  assert.deepEqual(rows[0].turns.map((turn) => turn.value), [30, 70]);
+});
+
 test('formatToolList dedupes and truncates', () => {
   assert.equal(formatToolList(['Read', 'Read', 'Bash']), 'Read · Bash');
   assert.equal(formatToolList([]), '');

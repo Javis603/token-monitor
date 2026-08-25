@@ -470,8 +470,15 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
     }
 
     function writeJsonLine(value) {
+      if (settled) return;
       const raw = JSON.stringify(value).replace(/\\\//g, '/');
-      child.stdin.write(raw + '\n');
+      try {
+        child.stdin.write(raw + '\n', (error) => {
+          if (error) finish(error);
+        });
+      } catch (error) {
+        finish(error);
+      }
     }
 
     function handleMessage(message) {
@@ -518,6 +525,7 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
       return;
     }
     child.on?.('error', finish);
+    child.stdin?.on?.('error', finish);
     child.on?.('exit', (code) => {
       if (!settled) finish(grokRpcError(`Grok RPC exited before billing response (${code ?? 'unknown'})`));
     });

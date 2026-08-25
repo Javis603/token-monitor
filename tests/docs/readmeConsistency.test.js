@@ -68,10 +68,12 @@ const supportedToolOrder = [
   'Qoder',
   'Reasonix',
   'DeepSeek / DeepSeek Harness',
+  'Cherry Studio',
   'OpenRouter',
   'Minimax',
   'Volcengine',
   'Ollama',
+  'Trae CN',
   'Third-party APIs'
 ];
 
@@ -101,10 +103,12 @@ const supportedToolIdOrder = [
   'qoder',
   'reasonix',
   'deepseek',
+  'cherrystudio',
   'openrouter',
   'minimax',
   'volcengine',
   'ollama',
+  'trae',
   'newapi'
 ];
 

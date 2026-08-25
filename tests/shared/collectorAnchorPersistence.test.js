@@ -20,6 +20,9 @@ const {
 } = require('../../src/shared/collector');
 
 const { emptyPeriod } = require('../../src/shared/usage');
+const { installInProcessWatchHost } = require('../helpers/watchHost');
+
+installInProcessWatchHost(test);
 
 const baseOptions = {
   clients: 'claude',

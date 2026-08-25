@@ -1,12 +1,28 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const test = require('node:test');
+const { referencedTerminationOptions } = require('../helpers/referencedTerminationTimers');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { readActiveAccount, runCursorLogin, runCursorLogout } = require('../../src/shared/cursorAuth');
+const {
+  CURSOR_EXPLICIT_SYNC_TIMEOUT_MS,
+  readActiveAccount,
+  runCursorLogin,
+  runCursorLogout,
+  runCursorSync
+} = require('../../src/shared/cursorAuth');
+
+async function waitFor(predicate, timeoutMs = 2000) {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt >= timeoutMs) throw new Error('Timed out waiting for Cursor subprocess state');
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
 
 function withTempHome(payload) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cursorauth-'));
@@ -113,4 +129,122 @@ test('runCursorLogin throws on empty token', async () => {
   try {
     await assert.rejects(() => runCursorLogin('', { home }), /token/i);
   } finally { cleanup(); }
+});
+
+test('runCursorSync leaves headroom around Tokscale explicit sync timeout', () => {
+  assert.equal(CURSOR_EXPLICIT_SYNC_TIMEOUT_MS, 150_000);
+});
+
+test('runCursorSync rejects when the tokscale stdin pipe breaks', async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {};
+  let killed = false;
+  child.kill = () => { killed = true; };
+  const pending = runCursorSync({
+    spawn: () => child,
+    tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
+    timeoutMs: 60_000
+  });
+  const error = Object.assign(new Error('write EPIPE'), { code: 'EPIPE' });
+
+  child.stdin.emit('error', error);
+  let settled = false;
+  pending.catch(() => { settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, 'stdin failure waits for physical process close');
+  child.emit('close', 1);
+
+  await assert.rejects(pending, (caught) => {
+    assert.match(caught.message, /write EPIPE/);
+    assert.equal(caught.syncFailureStage, 'process-exit');
+    return true;
+  });
+  assert.equal(killed, true);
+});
+
+test('runCursorSync timeout requests termination and waits for child close', async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {};
+  const signals = [];
+  child.kill = (signal) => { signals.push(signal); return true; };
+  const pending = runCursorSync({
+    spawn: () => child,
+    tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
+    timeoutMs: 1
+  });
+  let settled = false;
+  pending.catch(() => { settled = true; });
+
+  await waitFor(() => signals.includes('SIGTERM'));
+  assert.equal(settled, false, 'timeout delivery is not physical process exit');
+  child.emit('close', null, 'SIGTERM');
+
+  await assert.rejects(pending, (caught) => {
+    assert.match(caught.message, /timed out after 1ms/);
+    assert.equal(caught.syncFailureStage, 'timeout');
+    return true;
+  });
+});
+
+test('runCursorSync stops waiting when forced termination never reports close', async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {};
+  const signals = [];
+  const diagnostics = [];
+  child.kill = (signal) => { signals.push(signal); return true; };
+  const pending = runCursorSync({
+    spawn: () => child,
+    tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
+    timeoutMs: 1,
+    terminationOptions: referencedTerminationOptions({ graceMs: 1, closeGraceMs: 1 }),
+    onTerminationUnconfirmed: (error) => diagnostics.push(error.code)
+  });
+
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.code, 'termination-unconfirmed');
+    assert.match(error.cause?.message || '', /timed out after 1ms/);
+    assert.equal(error.syncFailureStage, 'timeout');
+    return true;
+  });
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  assert.deepEqual(diagnostics, ['termination-unconfirmed']);
+
+  child.emit('close', null, 'SIGKILL');
+});
+
+test('runCursorSync kills the child and keeps the abort error when superseded', async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {};
+  let killed = 0;
+  child.kill = () => { killed += 1; };
+  const controller = new AbortController();
+  const reason = new Error('collector stopped');
+  const pending = runCursorSync({
+    signal: controller.signal,
+    spawn: () => child,
+    tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
+    timeoutMs: 60_000
+  });
+  let settled = false;
+  pending.catch(() => { settled = true; });
+
+  controller.abort(reason);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, 'SIGTERM delivery is not physical process exit');
+  child.emit('close', 143);
+
+  await assert.rejects(pending, (caught) => caught === reason);
+  assert.equal(killed, 1);
 });

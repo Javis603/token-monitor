@@ -34,6 +34,8 @@
     zaiteam: { api: 'API' },
     volcengine: { api: 'API' },
     qoder: { web: 'Web' },
+    trae: { api: 'Web' },
+    workbuddy: { local: 'Local', api: 'API' },
     commandcode: { web: 'Web' },
     kimi: { api: 'API', web: 'Web' },
     ollama: { web: 'Web' },
@@ -49,7 +51,7 @@
 
   const CAPABILITY_TAGS = {
     claude: ['Auto', 'OAuth/CLI', 'Web'],
-    codex: ['Auto', 'App/CLI RPC'],
+    codex: ['Auto', 'OAuth/App/CLI'],
     cursor: ['Manual login', 'Web'],
     antigravity: ['App/CLI must be open', 'RPC'],
     opencode: ['Auto', 'API/Web'],
@@ -64,6 +66,8 @@
     zaiteam: ['Team Plan', 'API key'],
     volcengine: ['Coding Plan', 'API key'],
     qoder: ['Manual login', 'Web'],
+    trae: ['Manual login', 'Web'],
+    workbuddy: ['Auto', 'Desktop app'],
     commandcode: ['Manual login', 'Web'],
     kimi: ['Coding Plan', 'Web/API'],
     ollama: ['Manual login', 'Web'],
@@ -258,7 +262,7 @@
       if (providerName === 'thirdparty') return { label: 'Update credential', tone: 'setup' };
       return providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
         ? { label: 'Update API key', tone: 'setup' }
-        : providerName === 'qoder'
+        : providerName === 'qoder' || providerName === 'trae'
           ? { label: 'Sign in again', tone: 'setup' }
           : providerName === 'grok'
           ? { label: 'Re-login', tone: 'setup' }
@@ -271,7 +275,7 @@
     if (status === 'notConfigured') {
       if (providerName === 'kimi') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'antigravity') return { label: 'Open app or CLI', tone: 'setup' };
-      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'qoder' || providerName === 'commandcode' || providerName === 'ollama') return { label: 'Sign in', tone: 'setup' };
+      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi') return { label: 'Add API key', tone: 'setup' };
       if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };

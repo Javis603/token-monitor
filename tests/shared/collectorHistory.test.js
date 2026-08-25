@@ -5,6 +5,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { installInProcessWatchHost } = require('../helpers/watchHost');
+
+installInProcessWatchHost(test);
 
 const {
   localTodayKey, collectHistoryOnce, collectUsageOnce, shouldIncludeHistory, startCollector

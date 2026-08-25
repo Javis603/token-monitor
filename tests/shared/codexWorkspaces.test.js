@@ -11,6 +11,11 @@ const {
   normalizeCodexWorkspaces
 } = require('../../src/shared/codexWorkspaces');
 
+function jwt(payload) {
+  const seg = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+  return `${seg({ alg: 'none' })}.${seg(payload)}.`;
+}
+
 test('codexOAuthCredentials reads snake and camel case token fields', () => {
   assert.deepEqual(codexOAuthCredentials({
     tokens: {
@@ -19,7 +24,8 @@ test('codexOAuthCredentials reads snake and camel case token fields', () => {
     }
   }), {
     accessToken: 'access',
-    accountId: 'workspace-one'
+    accountId: 'workspace-one',
+    isFedrampAccount: false
   });
   assert.deepEqual(codexOAuthCredentials({
     tokens: {
@@ -28,7 +34,8 @@ test('codexOAuthCredentials reads snake and camel case token fields', () => {
     }
   }), {
     accessToken: 'camel',
-    accountId: 'workspace-two'
+    accountId: 'workspace-two',
+    isFedrampAccount: false
   });
   assert.equal(codexOAuthCredentials({ tokens: {} }), null);
 });
@@ -39,12 +46,46 @@ test('normalizeCodexWorkspaces dedupes ids and labels unnamed personal workspace
       { id: ' Workspace-One ', name: ' Team One ' },
       { id: 'workspace-one', name: 'duplicate' },
       { id: 'personal', name: '' },
+      { id: 'fedramp', name: 'Government', chatgpt_account_is_fedramp: true },
       { id: '', name: 'invalid' }
     ]
   }), [
     { id: 'workspace-one', label: 'Team One', workspaceKind: '' },
-    { id: 'personal', label: '', workspaceKind: 'personal' }
+    { id: 'personal', label: '', workspaceKind: 'personal' },
+    { id: 'fedramp', label: 'Government', workspaceKind: '' }
   ]);
+});
+
+test('listCodexWorkspaces adds official FedRAMP routing for the claimed workspace', async () => {
+  let request = null;
+  const workspaces = await listCodexWorkspaces({
+    tokens: {
+      access_token: 'secret-access-token',
+      account_id: 'workspace-current',
+      id_token: jwt({
+        'https://api.openai.com/auth': {
+          chatgpt_account_id: 'workspace-current',
+          chatgpt_account_is_fedramp: true
+        }
+      })
+    }
+  }, {
+    fetch: async (url, options) => {
+      request = { url, options };
+      return {
+        ok: true,
+        json: async () => ({ items: [{ id: 'workspace-current', name: 'Government' }] })
+      };
+    }
+  });
+
+  assert.equal(request.url, CODEX_WORKSPACES_URL);
+  assert.equal(request.options.headers['X-OpenAI-Fedramp'], 'true');
+  assert.deepEqual(workspaces, [{
+    id: 'workspace-current',
+    label: 'Government',
+    workspaceKind: ''
+  }]);
 });
 
 test('listCodexWorkspaces uses the selected account header without exposing credentials', async () => {

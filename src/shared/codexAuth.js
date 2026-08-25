@@ -28,6 +28,16 @@ function normalizeWorkspaceId(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function codexStoredAccountId(auth) {
+  const tokens = auth?.tokens || auth || {};
+  return normalizeWorkspaceId(
+    tokens.account_id
+    || tokens.accountId
+    || auth?.account_id
+    || auth?.accountId
+  );
+}
+
 function managedAccountWorkspaceId(account) {
   return normalizeWorkspaceId(
     account?.workspaceAccountId
@@ -154,11 +164,57 @@ function decodeJwtPayload(token) {
   }
 }
 
-function codexAuthIdentity(auth) {
+function codexAuthClaims(auth) {
   const tokens = auth?.tokens || auth || {};
-  const idToken = tokens.id_token || auth?.id_token || '';
+  const idToken = tokens.id_token || tokens.idToken || auth?.id_token || auth?.idToken || '';
   const payload = decodeJwtPayload(idToken);
   const nested = payload['https://api.openai.com/auth'] || payload['https://api.openai.com/profile'] || {};
+  const claimedAccountId = normalizeWorkspaceId(
+    payload.chatgpt_account_id
+    || nested.chatgpt_account_id
+  );
+  const claimedIsFedrampAccount = (
+    typeof nested.chatgpt_account_is_fedramp === 'boolean'
+      ? nested.chatgpt_account_is_fedramp
+      : typeof payload.chatgpt_account_is_fedramp === 'boolean'
+        ? payload.chatgpt_account_is_fedramp
+        : undefined
+  );
+  return {
+    tokens,
+    payload,
+    nested,
+    claimedAccountId,
+    claimedIsFedrampAccount
+  };
+}
+
+function codexOAuthRequestContext(auth, options = {}) {
+  const { tokens, claimedAccountId, claimedIsFedrampAccount } = codexAuthClaims(auth);
+  const accessToken = String(
+    tokens.access_token
+    || tokens.accessToken
+    || auth?.access_token
+    || auth?.accessToken
+    || ''
+  ).trim();
+  const storedAccountId = codexStoredAccountId(auth);
+  const requestedAccountId = normalizeWorkspaceId(options.accountId);
+  const accountId = requestedAccountId || storedAccountId || claimedAccountId;
+  return {
+    accessToken,
+    accountId,
+    isFedrampAccount: Boolean(
+      accountId
+      && claimedAccountId
+      && accountId === claimedAccountId
+      && claimedIsFedrampAccount === true
+    )
+  };
+}
+
+function codexAuthIdentity(auth) {
+  const { tokens, payload, nested } = codexAuthClaims(auth);
   const email = String(
     payload.email ||
     nested.email ||
@@ -200,6 +256,8 @@ module.exports = {
   preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity,
   decodeJwtPayload,
+  codexStoredAccountId,
+  codexOAuthRequestContext,
   codexAuthIdentity,
   codexAccountKey,
   hashAccountKey

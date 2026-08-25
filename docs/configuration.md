@@ -45,11 +45,23 @@ TOKEN_MONITOR_LIMITS_ENABLED=        # optional — defaults on; 0 skips CLI pro
 TOKEN_MONITOR_LIMIT_PROVIDERS=       # optional — defaults to all supported providers
 TOKEN_MONITOR_LIMITS_REFRESH_MODE=   # optional — fixed (default) or adaptive
 TOKEN_MONITOR_LIMITS_REFRESH_MS=     # optional — interval for fixed mode; defaults to 300000
+# WorkBuddy: the desktop widget auto-detects the signed-in local app when the
+# provider is enabled.
+# The following are an advanced/headless-agent fallback, not normal widget setup.
+# Desktop Local App monitoring is available on macOS and Windows; Linux Local
+# App monitoring is unsupported. Desktop users do
+# not copy a token, and Token Monitor does not store the WorkBuddy app credential.
+TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN= # headless only — explicit billing-session token
+TOKEN_MONITOR_WORKBUDDY_USER_ID=      # headless only — WorkBuddy user ID
+TOKEN_MONITOR_WORKBUDDY_ENTERPRISE_ID= # headless only — selects enterprise billing
+TOKEN_MONITOR_WORKBUDDY_DOMAIN=      # headless only — X-Domain metadata
+TOKEN_MONITOR_WORKBUDDY_DEPARTMENT_INFO= # headless only — enterprise metadata
+TOKEN_MONITOR_WORKBUDDY_LOCALE=       # headless only — en or zh
 ```
 
-Provider credentials (Grok, DeepSeek, Minimax, Copilot, GLM / GLM Team, Volcengine, Qoder, Command Code, Ollama, Kimi, …) and proxy settings live in the same file. **`.env.example` is the complete, authoritative list** — start from it rather than copying keys by hand, since it stays in sync with the code.
+Provider credentials (Grok, DeepSeek, Minimax, Copilot, GLM / GLM Team, Volcengine, Qoder, Command Code, WorkBuddy, Ollama, Kimi, …) and proxy settings live in the same file. **`.env.example` is the complete, authoritative list** — start from it rather than copying keys by hand, since it stays in sync with the code. The desktop widget automatically reads the session owned by the local WorkBuddy app when that provider is enabled; the WorkBuddy token fields above remain only for headless/CLI deployments.
 
-The widget reads these as first-run defaults; the agent and hub take a CLI flag over an env var over the built-in default.
+The widget reads most settings as first-run defaults. WorkBuddy follows the same provider checkbox as other auto-detected integrations on macOS and Windows; Linux local-app monitoring is unsupported. Desktop users do not copy a token, and the WorkBuddy token fields above apply only to the headless agent/CLI. The agent and hub take a CLI flag over an env var over the built-in default.
 
 One-shot run (collect once and exit — useful for cron / launchd):
 

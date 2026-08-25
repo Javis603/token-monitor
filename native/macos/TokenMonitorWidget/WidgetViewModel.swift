@@ -730,6 +730,8 @@ enum WidgetFormat {
         case "minimax": "Minimax"
         case "volcengine": "Volcengine"
         case "qoder": "Qoder"
+        case "trae": "Trae CN"
+        case "workbuddy": "WorkBuddy"
         case "ollama": "Ollama"
         case "thirdparty": "Third-party APIs"
         default: value.capitalized
@@ -737,12 +739,18 @@ enum WidgetFormat {
     }
 
     static func quotaValue(_ provider: WidgetQuotaProvider) -> String {
+        if let window = provider.windows.first,
+           window.metric == "credits",
+           window.detail == "unlimited" {
+            return WidgetL10n.text("Unlimited")
+        }
         if let balance = provider.balance, balance.amount.isFinite {
             let symbol = switch balance.currency.uppercased() {
             case "CNY": "¥"
             case "USD": "$"
             case "TWD": "NT$"
             case "HKD": "HK$"
+            case "CREDITS": ""
             default: "\(balance.currency.uppercased()) "
             }
             let amount = String(
@@ -761,6 +769,7 @@ enum WidgetFormat {
             case "USD": "$"
             case "TWD": "NT$"
             case "HKD": "HK$"
+            case "CREDITS": ""
             case .some(let value): "\(value) "
             case .none: ""
             }

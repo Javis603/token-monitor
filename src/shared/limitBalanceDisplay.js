@@ -81,6 +81,11 @@
     const number = finiteNumber(value);
     if (number === null) return '';
     const code = normalizeCurrencyCode(currency);
+    // Provider Credits are points rather than money. The surrounding window
+    // label already names the unit, so repeating "CREDITS" beside the value
+    // adds noise ("Credits  CREDITS 680.00"). Keep the wire marker while
+    // presenting the same bare amount as the provider's own UI.
+    if (code === 'CREDITS') return number.toFixed(2);
     const symbol = CURRENCY_SYMBOLS[code];
     return symbol ? `${symbol}${number.toFixed(2)}` : `${code} ${number.toFixed(2)}`;
   }
@@ -90,7 +95,7 @@
     if (number === null) return '';
     if (Math.abs(number) < 100_000) return formatMoney(number, currency);
     const code = normalizeCurrencyCode(currency);
-    const prefix = CURRENCY_SYMBOLS[code] || `${code} `;
+    const prefix = code === 'CREDITS' ? '' : (CURRENCY_SYMBOLS[code] || `${code} `);
     return `${prefix}${new Intl.NumberFormat('en-US', {
       notation: 'compact',
       maximumFractionDigits: 2

@@ -30,6 +30,24 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'projectsEnabled',
   'wslScanEnabled'
 ]);
+// Functions and identity fields deliberately stay out: this key answers only
+// whether replacing the active usage runtime would change its collection work.
+// Values arrive from usageConfigFromSettings() after mode-specific normalization.
+const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
+  'clients',
+  'allTimeSince',
+  'intervalMs',
+  'historyEnabled',
+  'dailyHistoryArchiveEnabled',
+  'projectsEnabled',
+  'historyIntervalMs',
+  'watchEnabled',
+  'watchUsePolling',
+  'watchTriggersCollection',
+  'intervalRequiresActivity',
+  'watchDebounceMs',
+  'wslScanEnabled'
+]);
 const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsEnabled',
   'limitProviders',
@@ -49,6 +67,10 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   zaiteam: ['zaiTeamApiKey', 'zaiTeamOrganizationId', 'zaiTeamProjectId'],
   volcengine: ['volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion'],
   qoder: ['qoderCookie', 'qoderSite'],
+  trae: ['traeAccessToken', 'traeDeviceId'],
+  // The desktop widget auto-detects WorkBuddy when the provider itself is
+  // enabled. Token and metadata fields remain available to headless/CLI deployments.
+  workbuddy: ['workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo'],
   commandcode: ['commandcodeCookie'],
   kimi: ['kimiApiKey', 'kimiWebAccessToken'],
   ollama: ['ollamaCookie'],
@@ -66,6 +88,10 @@ function equalSetting(left, right) {
 
 function changedAny(previous, next, keys) {
   return keys.some((key) => !equalSetting(previous?.[key], next?.[key]));
+}
+
+function usageConfigFingerprint(config = {}) {
+  return JSON.stringify(USAGE_CONFIG_FINGERPRINT_KEYS.map((key) => [key, config?.[key] ?? null]));
 }
 
 function normalizeAllTimeSince(value, fallback = DEFAULT_ALL_TIME_SINCE) {
@@ -106,6 +132,14 @@ function usageConfigFromSettings(settings = {}, context = {}) {
 
 function limitsConfigFromSettings(settings = {}, context = {}) {
   const env = context.env || process.env;
+  // The Electron widget uses the WorkBuddy app's local sign-in state. Keep the
+  // raw token fallback available to the headless agent, but never let a desktop
+  // .env or legacy settings value silently bypass the app-owned session.
+  const workbuddySettings = context.workbuddyDesktopSessionOnly === true ? {} : settings;
+  const workbuddyEnv = context.workbuddyDesktopSessionOnly === true ? {} : env;
+  const workbuddyLocalSession = context.workbuddyLocalSession && typeof context.workbuddyLocalSession === 'object'
+    ? context.workbuddyLocalSession
+    : {};
   return {
     limitsEnabled: settings.limitsEnabled !== false,
     limitProviders: settings.limitProviders ?? context.defaultLimitProviders,
@@ -134,7 +168,48 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     volcengineRegion: settings.volcengineRegion || '',
     qoderCookie: settings.qoderCookie || '',
     qoderSite: settings.qoderSite || 'global',
+    traeAccessToken: settings.traeAccessToken
+      || env.TOKEN_MONITOR_TRAE_ACCESS_TOKEN
+      || env.TRAE_ACCESS_TOKEN
+      || '',
+    traeDeviceId: settings.traeDeviceId
+      || env.TOKEN_MONITOR_TRAE_DEVICE_ID
+      || env.TRAE_DEVICE_ID
+      || '',
     commandcodeCookie: settings.commandcodeCookie || '',
+    workbuddyAccessToken: workbuddySettings.workbuddyAccessToken
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN
+      || workbuddyEnv.WORKBUDDY_ACCESS_TOKEN
+      || '',
+    workbuddyUserId: workbuddySettings.workbuddyUserId
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_USER_ID
+      || workbuddyEnv.WORKBUDDY_USER_ID
+      || (context.workbuddyDesktopSessionEnabled === true ? workbuddyLocalSession.userId : '')
+      || '',
+    workbuddyEnterpriseId: workbuddySettings.workbuddyEnterpriseId
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_ENTERPRISE_ID
+      || workbuddyEnv.WORKBUDDY_ENTERPRISE_ID
+      || (context.workbuddyDesktopSessionEnabled === true ? workbuddyLocalSession.enterpriseId : '')
+      || '',
+    workbuddyDomain: workbuddySettings.workbuddyDomain
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_DOMAIN
+      || workbuddyEnv.WORKBUDDY_DOMAIN
+      || (context.workbuddyDesktopSessionEnabled === true ? workbuddyLocalSession.domain : '')
+      || '',
+    workbuddyDepartmentInfo: workbuddySettings.workbuddyDepartmentInfo
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_DEPARTMENT_INFO
+      || workbuddyEnv.WORKBUDDY_DEPARTMENT_INFO
+      || (context.workbuddyDesktopSessionEnabled === true ? workbuddyLocalSession.departmentInfo : '')
+      || '',
+    workbuddyAccountType: context.workbuddyDesktopSessionEnabled === true
+      ? workbuddyLocalSession.accountType || ''
+      : '',
+    workbuddyLocale: workbuddySettings.workbuddyLocale
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_LOCALE
+      || workbuddyEnv.WORKBUDDY_LOCALE
+      || '',
+    workbuddyDesktopSessionSupported: context.workbuddyDesktopSessionSupported !== false,
+    workbuddyDesktopSessionEnabled: context.workbuddyDesktopSessionEnabled === true,
     kimiApiKey: settings.kimiApiKey || '',
     kimiWebAccessToken: settings.kimiWebAccessToken || '',
     ollamaCookie: settings.ollamaCookie || '',
@@ -187,10 +262,12 @@ function classifySettingsChange(previous = {}, next = {}) {
 
 module.exports = {
   LIMIT_PROVIDER_SETTING_KEYS,
+  USAGE_STRUCTURAL_KEYS,
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
   normalizeAllTimeSince,
+  usageConfigFingerprint,
   usageConfigFromSettings
 };
