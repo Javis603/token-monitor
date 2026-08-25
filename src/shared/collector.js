@@ -989,9 +989,17 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
 
   const kimiIds = byClient.get('kimi') || new Set();
   if (kimiIds.size > 0) {
-    const kimiRoots = [kimiWorkSessionsRoot(home), kimiCodeSessionsHome(home)].filter(Boolean);
+    const kimiRoots = [
+      ...(deps.scopedHome ? [] : kimiWorkSessionsRoots(
+        home,
+        deps.platform || process.platform,
+        deps.env || process.env,
+        { readFileSync: deps.readFileSync }
+      )),
+      kimiCodeSessionsHome(home, { env: deps.env, useEnvRoots: !deps.scopedHome })
+    ];
     for (const [sessionId, statePath] of readKimiSessionStateFiles(kimiRoots, kimiIds)) {
-      const raw = kimiStateMetadata(statePath);
+      const raw = kimiStateMetadata(statePath, { resolveProjects });
       const meta = {
         ...(resolveProjects && raw.projectId
           ? { projectId: raw.projectId, projectLabel: raw.projectLabel }
@@ -1976,9 +1984,7 @@ function xdgDataHome(home) {
   return nonBlankEnvPath('XDG_DATA_HOME', path.join(home, '.local', 'share'));
 }
 
-const KIMI_WORK_SESSIONS_SUFFIX = path.join(
-  'kimi-desktop',
-  'daimon-share',
+const KIMI_WORK_RUNTIME_SUFFIX = path.join(
   'daimon',
   'runtime',
   'kimi-code',
@@ -1986,42 +1992,54 @@ const KIMI_WORK_SESSIONS_SUFFIX = path.join(
   'sessions'
 );
 
-function kimiWorkSessionsRoot(home = os.homedir(), platform = process.platform, env = process.env) {
+const KIMI_WORK_SESSIONS_SUFFIX = path.join(
+  'kimi-desktop',
+  'daimon-share',
+  KIMI_WORK_RUNTIME_SUFFIX
+);
+
+function kimiWorkShareDirRoot(appData, options = {}) {
+  const readFileSync = options.readFileSync || fs.readFileSync;
+  let config;
+  try {
+    config = JSON.parse(readFileSync(path.join(appData, 'kimi-desktop', 'daimon-storage.json'), 'utf8'));
+  } catch (_) {
+    return null;
+  }
+  const shareDir = typeof config?.shareDir === 'string' ? config.shareDir : '';
+  return shareDir.trim() ? path.join(shareDir, KIMI_WORK_RUNTIME_SUFFIX) : null;
+}
+
+function kimiWorkSessionsRoots(home = os.homedir(), platform = process.platform, env = process.env, options = {}) {
   if (platform === 'darwin') {
-    return path.join(home, 'Library', 'Application Support', KIMI_WORK_SESSIONS_SUFFIX);
+    return [path.join(home, 'Library', 'Application Support', KIMI_WORK_SESSIONS_SUFFIX)];
   }
   if (platform === 'win32') {
-    const appData = typeof env.APPDATA === 'string' && env.APPDATA.trim()
-      ? env.APPDATA
-      : path.join(home, 'AppData', 'Roaming');
-    return path.join(appData, KIMI_WORK_SESSIONS_SUFFIX);
+    const homeAppData = path.join(home, 'AppData', 'Roaming');
+    const roots = [path.join(homeAppData, KIMI_WORK_SESSIONS_SUFFIX)];
+    if (options.useEnvRoots !== false) {
+      const appData = typeof env.APPDATA === 'string' && env.APPDATA.trim() ? env.APPDATA : homeAppData;
+      roots.push(kimiWorkShareDirRoot(appData, options) || path.join(appData, KIMI_WORK_SESSIONS_SUFFIX));
+    }
+    return [...new Set(roots)];
   }
-  return null;
+  return [];
 }
 
-function kimiWorkScanEnv(clients, flags = [], options = {}) {
+function kimiCodeSessionsHome(home = os.homedir(), options = {}) {
   const env = options.env || process.env;
-  const enabled = new Set(String(clients || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
-  if (!enabled.has('kimi') || flags.includes('--home')) return null;
-  const root = kimiWorkSessionsRoot(options.home || os.homedir(), options.platform || process.platform, env);
-  if (!root) return null;
-  const extra = `kimi:${root}`;
-  const entries = String(env.TOKSCALE_EXTRA_DIRS || '')
-    .split(',')
-    .map((value) => value.trim())
-    .filter(Boolean);
-  if (!entries.includes(extra)) entries.push(extra);
-  return { TOKSCALE_EXTRA_DIRS: entries.join(',') };
-}
-
-function kimiCodeSessionsHome(home = os.homedir()) {
-  return path.join(nonBlankEnvPath('KIMI_CODE_HOME', path.join(home, '.kimi-code')), 'sessions');
+  const configured = options.useEnvRoots === false ? '' : env.KIMI_CODE_HOME;
+  const kimiCodeHome = typeof configured === 'string' && configured.trim()
+    ? configured
+    : path.join(home, '.kimi-code');
+  return path.join(kimiCodeHome, 'sessions');
 }
 
 // Kimi sessions (CLI `session_*`, Work `conv-*`/`ctitle-*`) put their workspace
 // in a sibling state.json (`workDir` / `custom.workspacePath`), not in the wire
 // stream tokscale parses. The session id is the directory name directly under a
-// workspace dir, so a bounded one-level scan per root locates the metadata.
+// workspace dir. Enumerate the on-disk session dirs once instead of probing the
+// workspace x requested-session Cartesian product on the Electron main thread.
 function readKimiSessionStateFiles(roots, sessionIds) {
   const wanted = new Set(sessionIds);
   const found = new Map();
@@ -2029,24 +2047,29 @@ function readKimiSessionStateFiles(roots, sessionIds) {
     if (found.size >= wanted.size) break;
     let workspaceDirs;
     try { workspaceDirs = fs.readdirSync(root, { withFileTypes: true }); } catch (_) { continue; }
-    for (const entry of workspaceDirs) {
-      if (!entry.isDirectory()) continue;
-      for (const sessionId of wanted) {
-        if (found.has(sessionId)) continue;
-        const statePath = path.join(root, entry.name, sessionId, 'state.json');
+    for (const workspace of workspaceDirs) {
+      if (!workspace.isDirectory()) continue;
+      let sessionDirs;
+      try { sessionDirs = fs.readdirSync(path.join(root, workspace.name), { withFileTypes: true }); } catch (_) { continue; }
+      for (const session of sessionDirs) {
+        const sessionId = session.name;
+        if (!session.isDirectory() || !wanted.has(sessionId) || found.has(sessionId)) continue;
+        const statePath = path.join(root, workspace.name, sessionId, 'state.json');
         if (fileExists(statePath)) found.set(sessionId, statePath);
       }
+      if (found.size >= wanted.size) break;
     }
   }
   return found;
 }
 
-function kimiStateMetadata(statePath) {
+function kimiStateMetadata(statePath, options = {}) {
   let state;
   try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (_) { return {}; }
   if (!state || typeof state !== 'object') return {};
-  const projectPath = String(state.workDir || state.custom?.workspacePath || '').trim();
-  const identity = projectIdentity(projectPath);
+  const identity = options.resolveProjects === false
+    ? {}
+    : projectIdentity(String(state.workDir || state.custom?.workspacePath || '').trim());
   // Kimi writes valid ISO strings in state.json; pass them through as-is.
   const startedAt = String(state.createdAt || '').trim();
   const lastUsedAt = String(state.updatedAt || '').trim();
@@ -2185,13 +2208,13 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // A whitespace-only KIMI_CODE_HOME counts as unset, matching tokscale: it
   // joins `sessions` onto the raw value, so a blank export would resolve to the
   // root-level /sessions and hide the real one.
-  const kimiCodeHome = nonBlankEnvPath('KIMI_CODE_HOME', path.join(home, '.kimi-code'));
-  const kimiWorkRoot = kimiWorkSessionsRoot(home);
+  const kimiCodeRoot = kimiCodeSessionsHome(home, { env });
+  const kimiWorkRoots = kimiWorkSessionsRoots(home, platform, env);
   add(
     'kimi',
     ['kimi-sessions', path.join(home, '.kimi', 'sessions')],
-    ['kimi-code-sessions', path.join(kimiCodeHome, 'sessions')],
-    ...(kimiWorkRoot ? [['kimi-code-sessions', kimiWorkRoot, null, true]] : [])
+    ['kimi-code-sessions', kimiCodeRoot],
+    ...kimiWorkRoots.map((root) => ['kimi-code-sessions', root, null, true])
   );
   add('qwen', ['qwen-projects', path.join(home, '.qwen', 'projects')]);
   const grokHome = nonBlankEnvPath('GROK_HOME', path.join(home, '.grok'));
@@ -4166,8 +4189,7 @@ module.exports = {
   resetTokscaleCatalogCache,
   resetTokscaleCapabilityCache,
   tokscalePricingCatalog,
-  kimiWorkSessionsRoot,
-  kimiWorkScanEnv,
+  kimiWorkSessionsRoots,
   resolveWatchUsePolling,
   selfSyncSourceRootsForClients,
   // The process-wide sync throttle this module drives. Exported so a test can

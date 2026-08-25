@@ -1364,27 +1364,34 @@ test('clientDataDirPresence detects Antigravity native source roots', () => {
 });
 
 test('Kimi Work roots are shared by source checks and watcher attribution', () => {
-  // clientSourceRoots keys the Work root off process.platform, which tests cannot
-  // fake, so assert the darwin layout only where that layout is actually produced.
-  if (process.platform !== 'darwin') return;
+  if (!['darwin', 'win32'].includes(process.platform)) return;
   const originalHomedir = os.homedir;
+  const previousAppData = process.env.APPDATA;
   const tmp = withTmpHome([]);
   os.homedir = () => tmp;
   try {
-    const { clientSourceRoots, clientSourceChecks, clientsForWatchPath, kimiWorkSessionsRoot, watchPathsForClients } = freshCollector();
-    const kimiWorkRoot = kimiWorkSessionsRoot(tmp, 'darwin');
-    fs.mkdirSync(kimiWorkRoot, { recursive: true });
+    if (process.platform === 'win32') {
+      process.env.APPDATA = path.join(tmp, 'host-appdata');
+      const configPath = path.join(process.env.APPDATA, 'kimi-desktop', 'daimon-storage.json');
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, JSON.stringify({ shareDir: path.join(tmp, 'relocated-share') }));
+    }
+    const { clientSourceRoots, clientSourceChecks, clientsForWatchPath, kimiWorkSessionsRoots, watchPathsForClients } = freshCollector();
+    const kimiWorkRoots = kimiWorkSessionsRoots(tmp, process.platform);
+    for (const root of kimiWorkRoots) fs.mkdirSync(root, { recursive: true });
     const kimiRoots = clientSourceRoots('kimi').kimi;
     assert.deepEqual(kimiRoots.filter((root) => root.id === 'kimi-code-sessions').map((root) => root.dir), [
       path.join(tmp, '.kimi-code', 'sessions'),
-      kimiWorkRoot
+      ...kimiWorkRoots
     ]);
     assert.equal(kimiRoots.at(-1).optional, true);
-    assert.ok(watchPathsForClients('kimi').includes(kimiWorkRoot));
-    assert.deepEqual(clientsForWatchPath(path.join(kimiWorkRoot, 'wd_workspace', 'conv-1', 'agents', 'main', 'wire.jsonl'), { kimi: [kimiWorkRoot] }), ['kimi']);
+    for (const root of kimiWorkRoots) assert.ok(watchPathsForClients('kimi').includes(root));
+    assert.deepEqual(clientsForWatchPath(path.join(kimiWorkRoots[0], 'wd_workspace', 'conv-1', 'agents', 'main', 'wire.jsonl'), { kimi: kimiWorkRoots }), ['kimi']);
     assert.deepEqual(clientSourceChecks('kimi').kimi, [{ id: 'kimi-sessions', exists: false }, { id: 'kimi-code-sessions', exists: true }]);
   } finally {
     os.homedir = originalHomedir;
+    if (previousAppData === undefined) delete process.env.APPDATA;
+    else process.env.APPDATA = previousAppData;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -1395,10 +1402,8 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
   const tmp = withTmpHome([]);
   os.homedir = () => tmp;
   const previousKimiCodeHome = process.env.KIMI_CODE_HOME;
-  const previousExtraDirs = process.env.TOKSCALE_EXTRA_DIRS;
   try {
     delete process.env.KIMI_CODE_HOME;
-    delete process.env.TOKSCALE_EXTRA_DIRS;
     const { applySessionTimestamps } = freshCollector();
     const period = { sessions: {} };
     // Kimi Code CLI: ~/.kimi-code/sessions/<workspace>/<session_*>/state.json
@@ -1438,8 +1443,72 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
     os.homedir = originalHomedir;
     if (previousKimiCodeHome === undefined) delete process.env.KIMI_CODE_HOME;
     else process.env.KIMI_CODE_HOME = previousKimiCodeHome;
-    if (previousExtraDirs === undefined) delete process.env.TOKSCALE_EXTRA_DIRS;
-    else process.env.TOKSCALE_EXTRA_DIRS = previousExtraDirs;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Kimi metadata discovery indexes session directories instead of probing every requested id', () => {
+  const originalHomedir = os.homedir;
+  const originalStatSync = fs.statSync;
+  const tmp = withTmpHome([]);
+  os.homedir = () => tmp;
+  try {
+    const sessionsRoot = path.join(tmp, '.kimi-code', 'sessions');
+    for (let index = 0; index < 20; index += 1) {
+      fs.mkdirSync(path.join(sessionsRoot, `workspace-${index}`), { recursive: true });
+    }
+    const period = { sessions: {} };
+    for (let index = 0; index < 100; index += 1) {
+      period.sessions[`kimi:missing-${index}`] = { client: 'kimi', sessionId: `missing-${index}`, totalTokens: 1 };
+    }
+    let statCalls = 0;
+    fs.statSync = (...args) => {
+      statCalls += 1;
+      return originalStatSync(...args);
+    };
+    const { applySessionTimestamps } = freshCollector();
+    applySessionTimestamps({ allTime: period }, tmp, { resolveProjects: true });
+    assert.equal(statCalls, 0, 'missing ids should not trigger workspace x session state.json probes');
+  } finally {
+    fs.statSync = originalStatSync;
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('scoped Kimi metadata ignores host Work and KIMI_CODE_HOME roots', () => {
+  const tmp = withTmpHome([]);
+  const scopedHome = path.join(tmp, 'wsl-home');
+  const hostKimiHome = path.join(tmp, 'host-kimi-code');
+  const hostAppData = path.join(tmp, 'host-appdata');
+  const writeState = (root, workspace, sessionId, project) => {
+    const sessionDir = path.join(root, workspace, sessionId);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, 'state.json'), JSON.stringify({
+      workDir: path.join(tmp, project),
+      createdAt: '2026-08-18T00:00:00.000Z'
+    }));
+  };
+  writeState(path.join(hostKimiHome, 'sessions'), 'host-workspace', 'host-only', 'HostOnlyProject');
+  writeState(path.join(hostKimiHome, 'sessions'), 'host-workspace', 'shared-session', 'HostProject');
+  writeState(path.join(scopedHome, '.kimi-code', 'sessions'), 'wsl-workspace', 'shared-session', 'WslProject');
+  const period = { sessions: {
+    'kimi:host-only': { client: 'kimi', sessionId: 'host-only', totalTokens: 1 },
+    'kimi:shared-session': { client: 'kimi', sessionId: 'shared-session', totalTokens: 1 }
+  } };
+  try {
+    const { applySessionTimestamps } = freshCollector();
+    applySessionTimestamps({ allTime: period }, scopedHome, {
+      scopedHome: true,
+      resolveProjects: true,
+      platform: 'win32',
+      env: { APPDATA: hostAppData, KIMI_CODE_HOME: hostKimiHome }
+    });
+    assert.equal(period.sessions['kimi:host-only'].projectId || '', '', 'host-only metadata must stay outside the scoped home');
+    assert.equal(period.sessions['kimi:shared-session'].projectLabel, 'WslProject');
+  } finally {
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }

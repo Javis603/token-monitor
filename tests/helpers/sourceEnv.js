@@ -19,7 +19,6 @@ const SOURCE_ENV_KEYS = Object.freeze([
   'CLINE_DIR',
   'GROK_HOME',
   'KIMI_CODE_HOME',
-  'TOKSCALE_EXTRA_DIRS',
   'GEMINI_CLI_HOME',
   'HERMES_HOME'
 ]);
