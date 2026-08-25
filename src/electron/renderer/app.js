@@ -5939,7 +5939,9 @@ function isSettingsSurfaceVisible() {
 }
 
 function serviceStatusSurfaceVisible() {
-  return visibleStatsSurface() === 'main' && state.breakdown === 'status';
+  return visibleStatsSurface() === 'main'
+    && state.breakdown === 'status'
+    && !els.serviceStatusPanel?.classList.contains('hidden');
 }
 
 function openHomeSettings() {
@@ -5950,6 +5952,7 @@ function openHomeSettings() {
   setSettingsSectionExpanded('main', true);
   state.homeSettingsExpanded = true;
   syncSettingsForm();
+  ensureServiceStatusTicker();
   requestAnimationFrame(() => {
     document.getElementById('homeSettingsContainer')?.scrollIntoView({ block: 'nearest' });
   });
@@ -5963,6 +5966,7 @@ function openTrendSettings() {
   setSettingsSectionExpanded('main', true);
   state.trendSettingsExpanded = true;
   syncSettingsForm();
+  ensureServiceStatusTicker();
   requestAnimationFrame(() => {
     document.getElementById('trendSettingsContainer')?.scrollIntoView({ block: 'nearest' });
   });
@@ -8666,6 +8670,9 @@ function syncSettingsForm() {
   applySettingsTranslations();
   applyInitialBreakdownPreference();
   syncPeriodTabs();
+  applyVendorColorOverrides(state.settings.vendorColors);
+  applyAppearanceSettings(state.settings);
+  if (!isSettingsSurfaceVisible()) return;
   syncHubModeUi();
   if (els.languageInput) els.languageInput.value = currentLanguage();
   if (els.periodMonthModeInput) {
@@ -8793,17 +8800,12 @@ function syncSettingsForm() {
   renderOpenCodeProfiles();
   renderOpenRouterProfiles();
   renderThirdPartyProfiles();
-  applyVendorColorOverrides(state.settings.vendorColors);
-  applyAppearanceSettings(state.settings);
   buildAppearanceColorControls();
   renderTokscaleStatus();
   renderSettingsAppUpdateRow();
   renderCodexAccounts();
   renderCustomPricing();
   renderCursorStatus();
-  applyFloatingBubbleState(state.floatingBubble);
-  if (state.breakdown === 'limits') renderLimits();
-  else render();
 }
 
 function enabledClientSet() {
@@ -11052,6 +11054,7 @@ async function saveSettings(patch) {
     try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
     applyEffectiveCurrencyRates();
     preserveSettingsPanelScroll(syncSettingsForm);
+    if (!isSettingsSurfaceVisible()) statsRenderScheduler.request();
     restartTimer();
     maybeUpdateBarsIcon();
     throw error;
@@ -11063,6 +11066,7 @@ async function saveSettings(patch) {
   // their accordion/switch layout transition.
   if (state.settingsPushRevision === settingsPushRevision) {
     preserveSettingsPanelScroll(syncSettingsForm);
+    if (!isSettingsSurfaceVisible()) statsRenderScheduler.request();
   }
   restartTimer();
   maybeUpdateBarsIcon();
@@ -11826,24 +11830,11 @@ els.appUpdateReleaseNotesButton.addEventListener('click', async () => {
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
   state.settingsPushRevision += 1;
-  const prevMetric = state.settings?.heatmapMetric;
-  const prevLanguage = state.settings?.language;
-  const prevCompactTokenUnits = state.settings?.compactTokenUnits;
-  const prevShowCompactTotalTokens = state.settings?.showCompactTotalTokens;
   state.settings = next;
   applyEffectiveCurrencyRates();
   preserveSettingsPanelScroll(syncSettingsForm);
+  if (!isSettingsSurfaceVisible()) statsRenderScheduler.request();
   maybeUpdateBarsIcon();
-  if ((prevMetric || 'cost') !== (next.heatmapMetric || 'cost')) {
-    render();
-  } else if (
-    prevLanguage !== next.language
-    || prevCompactTokenUnits !== next.compactTokenUnits
-  ) {
-    render();
-  } else if (prevShowCompactTotalTokens !== next.showCompactTotalTokens) {
-    updateTotalCompact(state.currentTotal);
-  }
 });
 
 reducedMotionMedia?.addEventListener?.('change', () => {
@@ -11932,7 +11923,7 @@ document.addEventListener('visibilitychange', () => {
     void refreshHubBuildStatus();
   }
   statsRenderScheduler.flush();
-  if (isSettingsSurfaceVisible()) refreshTrayComposers();
+  if (isSettingsSurfaceVisible()) syncSettingsForm();
   ensureServiceStatusTicker();
 });
 

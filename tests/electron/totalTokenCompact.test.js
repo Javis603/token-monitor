@@ -127,8 +127,7 @@ test('compact total is an opt-in appearance preference', () => {
   assert.doesNotMatch(languageHandler, /render\(\)/);
   assert.doesNotMatch(compactUnitsHandler, /render\(\)/);
   assert.doesNotMatch(compactVisibilityHandler, /updateTotalCompact|renderTokenRate|render\(\)/);
-  assert.match(app, /prevShowCompactTotalTokens !== next\.showCompactTotalTokens\) \{[\s\S]*?updateTotalCompact\(state\.currentTotal\)/);
-  assert.doesNotMatch(app, /prevCompactTokenUnits !== next\.compactTokenUnits[\s\S]*?\|\| prevShowCompactTotalTokens !== next\.showCompactTotalTokens/);
+  assert.match(app, /window\.tokenMonitor\.onSettingsPush[\s\S]*?renderStatsUpdate\(\)/);
   assert.doesNotMatch(i18n, /settings\.tray\.(?:tokensToday|bothToday|tokensTotal|bothTotal)':[^\n]*(?:1\.2M|1\.36B)/);
 });
 

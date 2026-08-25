@@ -1905,11 +1905,15 @@ test('provider option rerenders reuse the existing switch DOM', () => {
 test('settings pushes do not trigger a second full settings sync after save', () => {
   const app = readRendererFile('app.js');
   const save = functionBody(app, 'saveSettings', 'renderHomeIfVisible');
+  const syncSettings = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
   const settingsPush = app.match(/window\.tokenMonitor\.onSettingsPush\?\.\(\(next\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
 
   assert.match(save, /const settingsPushRevision = state\.settingsPushRevision;/);
   assert.match(save, /if \(state\.settingsPushRevision === settingsPushRevision\) \{\s*preserveSettingsPanelScroll\(syncSettingsForm\);/);
   assert.match(settingsPush, /state\.settingsPushRevision \+= 1;/);
+  assert.match(syncSettings, /if \(!isSettingsSurfaceVisible\(\)\) return;/);
+  assert.doesNotMatch(syncSettings, /\b(?:render|renderLimits|applyFloatingBubbleState)\(/);
+  assert.match(settingsPush, /if \(!isSettingsSurfaceVisible\(\)\) statsRenderScheduler\.request\(\);/);
 });
 
 test('main limits rerenders coalesce identical visible provider data', () => {

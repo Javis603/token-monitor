@@ -102,6 +102,7 @@ test('renderer wires visibility scheduling without deferring tray icon updates',
   assert.match(visibilityListener, /cancelTokenRateBoost\(\)/);
   assert.match(visibilityListener, /!document\.hidden[\s\S]*hubBuildStatusRefreshDue\(\)[\s\S]*refreshHubBuildStatus\(\)/);
   assert.match(visibilityListener, /statsRenderScheduler\.flush\(\)/);
+  assert.match(visibilityListener, /if \(isSettingsSurfaceVisible\(\)\) syncSettingsForm\(\);/);
   assert.match(
     statsPush,
     /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);[\s\S]*statsRenderScheduler\.request\(\);[\s\S]*maybeUpdateBarsIcon\(\);/
