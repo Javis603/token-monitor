@@ -8,7 +8,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { readActiveAccount, runCursorLogin, runCursorLogout, runCursorSync } = require('../../src/shared/cursorAuth');
+const {
+  CURSOR_EXPLICIT_SYNC_TIMEOUT_MS,
+  readActiveAccount,
+  runCursorLogin,
+  runCursorLogout,
+  runCursorSync
+} = require('../../src/shared/cursorAuth');
 
 async function waitFor(predicate, timeoutMs = 2000) {
   const startedAt = Date.now();
@@ -123,6 +129,10 @@ test('runCursorLogin throws on empty token', async () => {
   try {
     await assert.rejects(() => runCursorLogin('', { home }), /token/i);
   } finally { cleanup(); }
+});
+
+test('runCursorSync leaves headroom around Tokscale explicit sync timeout', () => {
+  assert.equal(CURSOR_EXPLICIT_SYNC_TIMEOUT_MS, 150_000);
 });
 
 test('runCursorSync rejects when the tokscale stdin pipe breaks', async () => {

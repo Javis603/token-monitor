@@ -178,6 +178,7 @@ function normalizeClientName(value) {
   if (raw.includes('qwen')) return 'qwen';
   if (raw.includes('grok')) return 'grok';
   if (raw.includes('copilot')) return 'copilot';
+  if (raw === 'omp') return 'pi';
   if (/\bpi\b/.test(raw)) return 'pi';
   if (raw.includes('zed')) return 'zed';
   if (raw.includes('kilocode')) return 'kilocode';

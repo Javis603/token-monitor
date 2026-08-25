@@ -822,14 +822,15 @@ test('extractUsageFromTokscale keeps the canonical Command Code client id', () =
   assert.equal(period.clients.commandcode, 19);
 });
 
-test('normalizeClientName keeps kilo distinct from kilocode and maps Oh My Pi to pi', () => {
+test('normalizeClientName keeps kilo distinct from kilocode and maps both Oh My Pi ids to pi', () => {
   const period = extractUsageFromTokscale([
     { client: 'kilo', model: 'x', totalTokens: 5 },
-    { client: 'Oh My Pi', model: 'x', totalTokens: 7 }
+    { client: 'Oh My Pi', model: 'x', totalTokens: 7 },
+    { client: 'omp', model: 'x', totalTokens: 11 }
   ]);
 
   assert.equal(period.clients.kilo, 5);
-  assert.equal(period.clients.pi, 7);
+  assert.equal(period.clients.pi, 18);
   assert.ok(!('kilocode' in period.clients));
 });
 
