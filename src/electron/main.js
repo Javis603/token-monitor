@@ -1810,6 +1810,11 @@ function sendFloatingBubbleState() {
   try { mainWindow.webContents.send('floatingBubble:state', floatingBubblePayload()); } catch (_) {}
 }
 
+function sendMainWindowVisibility(win = mainWindow) {
+  if (!win || win !== mainWindow || win.isDestroyed() || win.webContents.isDestroyed()) return;
+  win.webContents.send('window:visibility', win.isVisible() && !win.isMinimized());
+}
+
 function stopFloatingBubbleAutoCollapseTimer() {
   if (floatingBubbleAutoCollapseTimer) clearTimeout(floatingBubbleAutoCollapseTimer);
   floatingBubbleAutoCollapseTimer = null;
@@ -5901,7 +5906,14 @@ function createWindow(boundsOverride, options = {}) {
     }
   });
   win.webContents.on('before-input-event', handleZoomShortcut);
-  win.webContents.once('did-finish-load', sendFloatingBubbleState);
+  win.on('show', () => sendMainWindowVisibility(win));
+  win.on('hide', () => sendMainWindowVisibility(win));
+  win.on('minimize', () => sendMainWindowVisibility(win));
+  win.on('restore', () => sendMainWindowVisibility(win));
+  win.webContents.once('did-finish-load', () => {
+    sendFloatingBubbleState();
+    sendMainWindowVisibility(win);
+  });
   loadWindowFile(win, {
     waitForContent: options.waitForContent === true,
     inactive: options.inactive === true,
@@ -5913,6 +5925,7 @@ function createWindow(boundsOverride, options = {}) {
         suppressInitialNumberAnimation: options.suppressInitialNumberAnimation === true,
         viewState: rendererViewState
       }),
+      ...(settings?.trayMode ? { windowHidden: '1' } : {}),
       ...(settings?.systemGlass === false ? { systemGlassDisabled: '1' } : {}),
       ...(windowsAccentFallback ? { windowsBackdropFallback: '1' } : {})
     }

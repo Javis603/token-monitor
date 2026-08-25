@@ -1773,7 +1773,7 @@ test('remote Hub build status is wired as a separate localized sync hint', () =>
   assert.match(refreshBody, /const request = \+\+hubBuildStatusRequest/);
   assert.equal([...refreshBody.matchAll(/request !== hubBuildStatusRequest/g)].length, 2);
   assert.match(app, /HUB_BUILD_STATUS_REFRESH_TTL_MS = 5 \* 60 \* 1000/);
-  assert.match(app, /visibilitychange[\s\S]*hubBuildStatusRefreshDue\(\)[\s\S]*void refreshHubBuildStatus\(\)/);
+  assert.match(app, /handleWindowVisibilityChange[\s\S]*hubBuildStatusRefreshDue\(\)[\s\S]*void refreshHubBuildStatus\(\)/);
   assert.match(preload, /getHubBuildStatus: \(\) => ipcRenderer\.invoke\('hub:getBuildStatus'\)/);
   assert.match(main, /ipcMain\.handle\('hub:getBuildStatus'/);
   assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.current':/g)].length, 5);

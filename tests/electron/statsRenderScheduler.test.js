@@ -11,6 +11,7 @@ const {
 } = require('../../src/electron/renderer/statsRenderScheduler');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
+const electronDir = path.join(rendererDir, '..');
 
 test('hidden stats updates coalesce into one render when visibility returns', () => {
   let hidden = true;
@@ -42,6 +43,21 @@ test('visible stats updates continue rendering every push', () => {
   scheduler.request();
   scheduler.request();
   assert.equal(renders, 2);
+});
+
+test('clearing a hidden update prevents a redundant catch-up render', () => {
+  let hidden = true;
+  let renders = 0;
+  const scheduler = createStatsRenderScheduler({
+    isHidden: () => hidden,
+    render: () => { renders += 1; }
+  });
+
+  scheduler.request();
+  scheduler.clear();
+  hidden = false;
+  scheduler.flush();
+  assert.equal(renders, 0);
 });
 
 test('visible stats update only the exposed surface', () => {
@@ -88,8 +104,8 @@ test('renderer wires visibility scheduling without deferring tray icon updates',
   const statsPush = app.match(/window\.tokenMonitor\.onStatsPush\?\.\(\(payload\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
   const schedulerIndex = html.indexOf('<script src="statsRenderScheduler.js"></script>');
   const appIndex = html.indexOf('<script src="app.js"></script>');
-  const visibilityListenerStart = app.indexOf("document.addEventListener('visibilitychange'");
-  const visibilityListenerEnd = app.indexOf('window.tokenMonitor.onStatsPush', visibilityListenerStart);
+  const visibilityListenerStart = app.indexOf('function handleWindowVisibilityChange()');
+  const visibilityListenerEnd = app.indexOf("document.addEventListener('visibilitychange'", visibilityListenerStart);
   const visibilityListener = visibilityListenerStart >= 0 && visibilityListenerEnd > visibilityListenerStart
     ? app.slice(visibilityListenerStart, visibilityListenerEnd)
     : '';
@@ -99,14 +115,47 @@ test('renderer wires visibility scheduling without deferring tray icon updates',
   assert.ok(schedulerIndex < appIndex);
   assert.notEqual(visibilityListenerStart, -1);
   assert.notEqual(visibilityListenerEnd, -1);
+  assert.match(app, /document\.addEventListener\('visibilitychange', handleWindowVisibilityChange\)/);
   assert.match(visibilityListener, /cancelTokenRateBoost\(\)/);
-  assert.match(visibilityListener, /!document\.hidden[\s\S]*hubBuildStatusRefreshDue\(\)[\s\S]*refreshHubBuildStatus\(\)/);
-  assert.match(visibilityListener, /statsRenderScheduler\.flush\(\)/);
-  assert.match(visibilityListener, /if \(isSettingsSurfaceVisible\(\)\) syncSettingsForm\(\);/);
+  assert.match(visibilityListener, /!isRendererWindowHidden\(\)[\s\S]*hubBuildStatusRefreshDue\(\)[\s\S]*refreshHubBuildStatus\(\)/);
+  assert.match(visibilityListener, /if \(isSettingsSurfaceVisible\(\)\)[\s\S]*statsRenderScheduler\.clear\(\)[\s\S]*syncSettingsForm\(\)[\s\S]*else[\s\S]*statsRenderScheduler\.flush\(\)/);
+  assert.match(app, /isHidden: isRendererWindowHidden/);
+  assert.match(app, /onWindowVisibilityPush\?\.\(\(visible\) => \{/);
   assert.match(
     statsPush,
     /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);[\s\S]*statsRenderScheduler\.request\(\);[\s\S]*maybeUpdateBarsIcon\(\);/
   );
+});
+
+test('native window visibility covers a tray window that has never been shown', () => {
+  const main = fs.readFileSync(path.join(electronDir, 'main.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(electronDir, 'preload.js'), 'utf8');
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+
+  assert.match(main, /webContents\.send\('window:visibility'/);
+  assert.match(main, /win\.on\('show',[\s\S]*win\.on\('hide',[\s\S]*win\.on\('minimize',[\s\S]*win\.on\('restore'/);
+  assert.match(main, /settings\?\.trayMode \? \{ windowHidden: '1' \} : \{\}/);
+  assert.match(preload, /onWindowVisibilityPush:[\s\S]*ipcRenderer\.on\('window:visibility'/);
+  assert.match(app, /windowVisible: new URLSearchParams\(window\.location\.search\)\.get\('windowHidden'\) !== '1'/);
+  assert.match(app, /return document\.hidden \|\| !state\.windowVisible;/);
+});
+
+test('hidden event sources defer DOM work and visible surfaces catch up', () => {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const settingsPush = app.match(/window\.tokenMonitor\.onSettingsPush\?\.\(\(next\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
+  const hubPush = app.match(/window\.tokenMonitor\.onHubPush\?\.\(\(payload\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
+  const statsPush = app.match(/window\.tokenMonitor\.onStatsPush\?\.\(\(payload\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
+  const statsRender = app.slice(app.indexOf('function renderStatsUpdate()'), app.indexOf('const statsRenderScheduler ='));
+  const bubbleState = app.slice(app.indexOf('function applyFloatingBubbleState('), app.indexOf('const BUBBLE_CONTENT_VALUES'));
+
+  assert.match(settingsPush, /statsRenderScheduler\.request\(\)/);
+  assert.match(hubPush, /if \(settingsVisible\) renderHubStatus\(\)/);
+  assert.match(hubPush, /const settingsVisible = isSettingsSurfaceVisible\(\)[\s\S]*settingsVisible && els\.hubSecretInput/);
+  assert.doesNotMatch(statsPush, /\b(?:setLiveDot|setStatus|renderSyncClientStatus)\(/);
+  assert.match(statsPush, /if \(isRendererWindowHidden\(\)\) statsRenderScheduler\.request\(\);[\s\S]*else renderConnectionStatus\(\);/);
+  assert.match(statsRender, /renderConnectionStatus\(surface\)/);
+  assert.match(bubbleState, /isSettingsPanelOpen\(\)[\s\S]*syncSettingsForm\(\)[\s\S]*renderStatsUpdate\(\)/);
+  assert.match(bubbleState, /syncSettingsForm\(\);[\s\S]*renderConnectionStatus\('settings'\)/);
 });
 
 test('all stats refreshes use visibility-aware rendering', () => {

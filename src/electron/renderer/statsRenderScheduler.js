@@ -31,7 +31,12 @@
       renderPending = false;
     }
 
+    function clear() {
+      renderPending = false;
+    }
+
     return {
+      clear,
       flush,
       request
     };

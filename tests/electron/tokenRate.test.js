@@ -358,7 +358,7 @@ test('the token-rate hold has release, cancellation, reduced-motion, and click-g
   assert.match(app, /tokenRateBoost\.refresh\(\);\s*const \{ burn, rate \} = currentTokenRateValue\(\)/);
   assert.match(app, /document\.addEventListener\('pointercancel', \(event\) => \{\s*cancelTokenRateBoost\(event\)/);
   assert.match(app, /window\.addEventListener\('blur', \(\) => \{\s*cancelTokenRateBoost\(\)/);
-  assert.match(app, /if \(document\.hidden\) cancelTokenRateBoost\(\)/);
+  assert.match(app, /if \(isRendererWindowHidden\(\)\) cancelTokenRateBoost\(\)/);
   assert.match(tokenRatePresentation, /const enabled = canStart\(\);/);
   assert.match(tokenRatePresentation, /const reduced = prefersReducedMotion\(\);/);
   assert.match(tokenRatePresentation, /if \(!enabled \|\| reduced\) return false/);
