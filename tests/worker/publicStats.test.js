@@ -45,7 +45,14 @@ test('Worker public stats strip every account identity and plan field', async ()
         status: 'ok',
         source: 'web',
         updatedAt: now,
-        windows: []
+        windows: [],
+        usageSummary: {
+          period: 'month',
+          requests: 12,
+          inputTokens: 345,
+          standardCost: 8,
+          actualCost: 3
+        }
       }]
     }
   };
@@ -69,6 +76,7 @@ test('Worker public stats strip every account identity and plan field', async ()
   for (const field of ['accountKey', 'webAccountKey', 'accountKeyAliases', 'accountEmail', 'accountName', 'accountLabel', 'planLabel', 'workspaceKind']) {
     assert.equal(Object.hasOwn(provider, field), false, `${field} should stay private`);
   }
+  assert.equal(Object.hasOwn(provider, 'usageSummary'), false, 'detailed usage should stay private');
   assert.equal(Object.hasOwn(payload, 'devices'), false);
   assert.equal(Object.hasOwn(payload, 'deviceHistoryRevision'), false);
 });

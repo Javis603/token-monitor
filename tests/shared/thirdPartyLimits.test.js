@@ -34,6 +34,7 @@ const {
   normalizeCustomDivisor,
   normalizeCustomEndpointPath,
   normalizeCustomJsonPath,
+  normalizeCanonicalAccountKey,
   normalizeThirdPartyProfile,
   quotaPerUnit,
   readCustomJsonPath,
@@ -493,6 +494,7 @@ test('Sub2API adapter fails closed on business errors and missing balances', asy
 test('Sub2API adapter renews an expired access token once after persisting the rotation', async () => {
   const calls = [];
   const renewals = [];
+  const accountKeys = [];
   let currentAccess = 'expired-jwt';
   const [provider] = await fetchThirdPartyLimits({
     thirdPartyProfiles: {
@@ -535,6 +537,10 @@ test('Sub2API adapter renews an expired access token once after persisting the r
     onThirdPartyCredentialsRenewed: async (renewal) => {
       renewals.push(renewal);
       return true;
+    },
+    onThirdPartyAccountKeyResolved: async (resolution) => {
+      accountKeys.push(resolution);
+      return true;
     }
   });
 
@@ -548,6 +554,12 @@ test('Sub2API adapter renews an expired access token once after persisting the r
     previous: { accessToken: 'expired-jwt', refreshToken: 'refresh-1' },
     next: { accessToken: 'fresh-jwt', refreshToken: 'refresh-2' }
   }]);
+  assert.equal(accountKeys.length, 1);
+  assert.deepEqual(accountKeys[0].previous, {
+    accessToken: 'fresh-jwt',
+    refreshToken: 'refresh-2',
+    canonicalAccountKey: ''
+  });
   assert.deepEqual(calls.filter(([, url]) => !url.startsWith('https://renew.example/api/v1/usage/')), [
     ['GET', 'https://renew.example/api/v1/auth/me'],
     ['POST', 'https://renew.example/api/v1/auth/refresh'],
@@ -598,6 +610,34 @@ test('Sub2API renewal requires a persistence callback and fails closed on refres
   assert.deepEqual(broken.windows, []);
 });
 
+test('Sub2API renewal rejects an incomplete rotated credential pair', async () => {
+  let persisted = false;
+  const [provider] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      dashboard: {
+        adapter: SUB2API_ADAPTER,
+        baseUrl: 'https://partial-refresh.example',
+        accessToken: 'expired-jwt',
+        refreshToken: 'refresh-1'
+      }
+    }
+  }, {
+    env: {},
+    fetch: async (url) => (
+      url.endsWith(SUB2API_REFRESH_PATH)
+        ? response(200, { code: 0, data: { access_token: 'fresh-jwt' } })
+        : response(401, { code: 401, message: 'TOKEN_EXPIRED', data: null })
+    ),
+    onThirdPartyCredentialsRenewed: async () => {
+      persisted = true;
+      return true;
+    }
+  });
+
+  assert.equal(provider.status, 'unauthorized');
+  assert.equal(persisted, false);
+});
+
 test('Sub2API does not retry with a rotated pair that persistence rejected', async () => {
   let retriedWithFreshToken = false;
   const [provider] = await fetchThirdPartyLimits({
@@ -631,43 +671,12 @@ test('Sub2API does not retry with a rotated pair that persistence rejected', asy
   assert.equal(retriedWithFreshToken, false);
 });
 
-test('Sub2API profiles may start from a refresh token and retain both credentials', async () => {
-  const normalized = normalizeThirdPartyProfile({
+test('Sub2API profiles require an access token and may retain a refresh token', () => {
+  assert.equal(normalizeThirdPartyProfile({
     adapter: SUB2API_ADAPTER,
     baseUrl: 'https://refresh-only.example',
     refreshToken: 'refresh-only'
-  });
-  assert.equal(normalized.accessToken, '');
-  assert.equal(normalized.refreshToken, 'refresh-only');
-
-  const [provider] = await fetchThirdPartyLimits({
-    thirdPartyProfiles: {
-      bootstrap: { ...normalized }
-    }
-  }, {
-    env: {},
-    fetch: async (url, init) => {
-      if (url.endsWith(SUB2API_REFRESH_PATH)) {
-        assert.deepEqual(JSON.parse(init.body), { refresh_token: 'refresh-only' });
-        return response(200, {
-          code: 0,
-          message: 'success',
-          data: { access_token: 'minted-jwt', refresh_token: 'refresh-next' }
-        });
-      }
-      if (init.headers.Authorization !== 'Bearer minted-jwt') {
-        return response(401, { code: 401, message: 'UNAUTHORIZED', data: null });
-      }
-      return response(200, {
-        code: 0,
-        message: 'success',
-        data: { id: 5, username: 'bootstrap', balance: 1.25 }
-      });
-    },
-    onThirdPartyCredentialsRenewed: async () => true
-  });
-  assert.equal(provider.status, 'ok');
-  assert.equal(provider.balance.amount, 1.25);
+  }), null);
 
   assert.deepEqual(normalizeThirdPartyProfile({
     adapter: SUB2API_ADAPTER,
@@ -683,32 +692,51 @@ test('Sub2API profiles may start from a refresh token and retain both credential
   });
 });
 
-test('Sub2API account identity stays stable when its access token is replaced', async () => {
-  const collect = async (accessToken) => {
+test('Sub2API account identity follows the canonical user across names and failures', async () => {
+  const resolutions = [];
+  const collect = async (name, accessToken, profile = {}, status = 200, accountId = 42) => {
     const [provider] = await fetchThirdPartyLimits({
       thirdPartyProfiles: {
-        dashboard: {
+        [name]: {
           adapter: SUB2API_ADAPTER,
           baseUrl: 'https://stable.example',
-          accessToken
+          accessToken,
+          ...profile
         }
       }
     }, {
       env: {},
-      fetch: async (url) => (
-        url.includes('/usage/stats')
-          ? response(404, { code: 404, message: 'not found' })
-          : response(200, { code: 0, message: 'success', data: { id: 42, balance: 3.5 } })
-      )
+      fetch: async (url) => {
+        if (url.includes('/usage/stats')) return response(404, { code: 404, message: 'not found' });
+        return status === 200
+          ? response(200, { code: 0, message: 'success', data: { id: accountId, balance: 3.5 } })
+          : response(status, { code: status, message: 'unavailable', data: null });
+      },
+      onThirdPartyAccountKeyResolved: async (resolution) => {
+        resolutions.push(resolution);
+        return true;
+      }
     });
     return provider;
   };
 
-  const before = await collect('dashboard-jwt-before');
-  const after = await collect('dashboard-jwt-after');
+  const before = await collect('dashboard', 'dashboard-jwt-before');
+  const after = await collect('production', 'dashboard-jwt-after');
   assert.equal(before.status, 'ok');
   assert.equal(after.status, 'ok');
   assert.equal(before.accountKey, after.accountKey);
+  assert.equal(resolutions.length, 2);
+  assert.equal(resolutions[0].accountKey, before.accountKey);
+  assert.equal(normalizeCanonicalAccountKey(before.accountKey), before.accountKey);
+
+  const otherAccount = await collect('other', 'other-jwt', {}, 200, 43);
+  assert.notEqual(otherAccount.accountKey, before.accountKey);
+
+  const renamedFailure = await collect('renamed', 'dashboard-jwt-after', {
+    canonicalAccountKey: before.accountKey
+  }, 500);
+  assert.equal(renamedFailure.status, 'unavailable');
+  assert.equal(renamedFailure.accountKey, before.accountKey);
   assert.equal(JSON.stringify([before, after]).includes('dashboard-jwt'), false);
 });
 

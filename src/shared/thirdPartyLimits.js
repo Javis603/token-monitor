@@ -167,6 +167,19 @@ function newapiUserId(env = process.env, explicitUserId = '') {
     || cleanValue(env.TOKEN_MONITOR_NEWAPI_USER_ID);
 }
 
+function normalizeCanonicalAccountKey(value) {
+  const key = cleanValue(value);
+  return /^sha256:[a-f0-9]{64}$/u.test(key) ? key : '';
+}
+
+function normalizeSub2apiAccountId(value) {
+  const raw = typeof value === 'number'
+    ? Number.isSafeInteger(value) && value > 0 ? String(value) : ''
+    : cleanValue(value);
+  if (!/^[0-9]{1,20}$/u.test(raw) || /^0+$/u.test(raw)) return '';
+  return raw.replace(/^0+/u, '');
+}
+
 function finiteNumber(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string' || value.trim() === '') return null;
@@ -416,19 +429,22 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
     normalizeCredentials(profile) {
       const accessToken = cleanValue(profile.accessToken);
       const refreshToken = cleanValue(profile.refreshToken);
-      if (!accessToken && !refreshToken) return null;
+      const canonicalAccountKey = normalizeCanonicalAccountKey(profile.canonicalAccountKey);
+      if (!accessToken) return null;
       return {
         accessToken,
-        ...(refreshToken ? { refreshToken } : {})
+        ...(refreshToken ? { refreshToken } : {}),
+        ...(canonicalAccountKey ? { canonicalAccountKey } : {})
       };
     },
     identity(account) {
       return [account.baseUrl, account.accessToken || account.refreshToken];
     },
-    accountKeyIdentity(account) {
-      // Both dashboard credentials rotate. Keep the runtime identity tied to
-      // the named profile so a renewal or manual replacement cannot leave the
-      // previous last-good row behind.
+    accountKeyIdentity(account, payload) {
+      const accountId = normalizeSub2apiAccountId(sub2apiData(payload)?.id);
+      return accountId ? [account.baseUrl, accountId] : null;
+    },
+    fallbackAccountKeyIdentity(account) {
       return [account.baseUrl, account.name];
     },
     request(account) {
@@ -463,7 +479,7 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
       );
       const data = sub2apiData(payload);
       const accessToken = cleanValue(data?.access_token);
-      const refreshToken = cleanValue(data?.refresh_token) || account.refreshToken;
+      const refreshToken = cleanValue(data?.refresh_token);
       if (!accessToken || !refreshToken) {
         const error = new Error('Sub2API token refresh returned no usable credentials');
         error.status = 'unauthorized';
@@ -473,7 +489,7 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
     },
     quota(payload, _unit, _account, _statusPayload, enrichmentPayloads) {
       const data = sub2apiData(payload);
-      if (!data) return null;
+      if (!data || !normalizeSub2apiAccountId(data.id)) return null;
       const quota = sub2apiAccountQuota(data);
       if (quota) {
         const monthStats = sub2apiData(enrichmentPayloads?.month);
@@ -662,11 +678,29 @@ function accountIdentity(account) {
   return [account.adapter, ...identity].join('\0');
 }
 
-function accountKeyIdentity(account, adapter, quotaPayload) {
+function resolvedAccountKey(account, adapter, quotaPayload) {
   const identity = adapter.accountKeyIdentity?.(account, quotaPayload);
-  return identity
-    ? [account.adapter, ...identity].join('\0')
-    : accountIdentity(account);
+  if (identity) {
+    return {
+      accountKey: hashKey(
+        THIRD_PARTY_PROVIDER_ID,
+        [account.adapter, ...identity].join('\0')
+      ),
+      canonical: true
+    };
+  }
+  const stored = normalizeCanonicalAccountKey(account.canonicalAccountKey);
+  if (stored) return { accountKey: stored, canonical: false };
+  const fallbackIdentity = adapter.fallbackAccountKeyIdentity?.(account);
+  return {
+    accountKey: hashKey(
+      THIRD_PARTY_PROVIDER_ID,
+      fallbackIdentity
+        ? [account.adapter, ...fallbackIdentity].join('\0')
+        : accountIdentity(account)
+    ),
+    canonical: false
+  };
 }
 
 function configuredAccounts(options = {}, deps = {}) {
@@ -752,17 +786,11 @@ async function fetchThirdPartyAccount(account, deps = {}) {
     throw deps.signal.reason || Object.assign(new Error('Third-party API request aborted'), { name: 'AbortError' });
   }
 
+  const fallbackAccountKey = resolvedAccountKey(account, adapter, null).accountKey;
   const common = {
     provider: THIRD_PARTY_PROVIDER_ID,
     adapterId: account.adapter,
-    accountKey: hashKey(
-      THIRD_PARTY_PROVIDER_ID,
-      accountKeyIdentity(
-        account,
-        adapter,
-        quotaResultPayload
-      )
-    ),
+    accountKey: fallbackAccountKey,
     accountName: account.name,
     accountLabel: account.name,
     source: 'api',
@@ -794,8 +822,36 @@ async function fetchThirdPartyAccount(account, deps = {}) {
     });
   }
 
+  const identityAccount = renewedCredentials ? { ...account, ...renewedCredentials } : account;
+  const resolved = resolvedAccountKey(identityAccount, adapter, quotaResultPayload);
+  if (
+    resolved.canonical
+    && resolved.accountKey !== normalizeCanonicalAccountKey(identityAccount.canonicalAccountKey)
+    && typeof deps.onThirdPartyAccountKeyResolved === 'function'
+  ) {
+    try {
+      await deps.onThirdPartyAccountKeyResolved({
+        provider: THIRD_PARTY_PROVIDER_ID,
+        adapter: account.adapter,
+        accountName: account.name,
+        baseUrl: account.baseUrl,
+        previous: {
+          accessToken: identityAccount.accessToken || '',
+          refreshToken: identityAccount.refreshToken || '',
+          canonicalAccountKey: normalizeCanonicalAccountKey(identityAccount.canonicalAccountKey)
+        },
+        accountKey: resolved.accountKey
+      });
+    } catch (_) {
+      // Account-key persistence is best effort. The current successful result
+      // still carries the canonical key; the named fallback remains available
+      // until a later collection can persist it.
+    }
+  }
+
   return normalizeLimitProvider({
     ...common,
+    accountKey: resolved.accountKey,
     planLabel: adapter.planLabel(),
     status: 'ok',
     windows: [quota.window],
@@ -862,6 +918,7 @@ module.exports = {
   normalizeCustomDivisor,
   normalizeCustomEndpointPath,
   normalizeCustomJsonPath,
+  normalizeCanonicalAccountKey,
   normalizeThirdPartyBaseUrl,
   normalizeThirdPartyProfile,
   quotaPerUnit,

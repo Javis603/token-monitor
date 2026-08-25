@@ -79,9 +79,14 @@ test('third-party credentials stay local while renderer metadata is redacted', (
   assert.match(main, /accessToken: profile\?\.accessToken \? 'set' : ''/);
   assert.match(main, /apiKey: profile\?\.apiKey \? 'set' : ''/);
   assert.match(main, /refreshToken: profile\?\.refreshToken \? 'set' : ''/);
-  assert.match(main, /function persistThirdPartyCredentialsRenewal\(renewal = \{\}, fallbackProfile = null\)/);
+  assert.match(main, /function persistThirdPartyCredentialsRenewal\(renewal = \{\}\)/);
+  assert.match(main, /function persistThirdPartyAccountKey\(update = \{\}\)/);
   assert.match(main, /onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal/);
-  assert.match(main, /return persistThirdPartyCredentialsRenewal\(renewal, profile\)/);
+  assert.match(main, /onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey/);
+  assert.match(main, /function thirdPartyProfileWithCanonicalIdentity\(profile, provider\)/);
+  assert.match(main, /canonicalAccountKey: provider\?\.accountKey/);
+  assert.doesNotMatch(main, /persistThirdPartyCredentialsRenewal\(renewal, profile\)/);
+  assert.doesNotMatch(main, /profiles\[accountName\] \|\| fallbackProfile/);
   assert.match(main, /endpointPath: thirdPartyLimits\.normalizeCustomEndpointPath\(profile\?\.endpointPath\)/);
   assert.match(main, /remainingPath: thirdPartyLimits\.normalizeCustomJsonPath\(profile\?\.remainingPath\)/);
   assert.match(main, /delete normalizedPatch\.thirdPartyProfiles/);

@@ -916,6 +916,7 @@ function publicLimits(limits) {
       accountLabel,
       planLabel,
       workspaceKind,
+      usageSummary,
       ...provider
     }) => {
       if (!provider.balance) return provider;
