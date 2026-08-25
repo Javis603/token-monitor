@@ -385,7 +385,7 @@ test('Sub2API adapter attaches rolling-month and all-time spend and survives sta
           data: { total_actual_cost: 18.75 }
         });
       }
-      return url.endsWith(SUB2API_USAGE_STATS_PATH)
+      return url.includes(SUB2API_USAGE_STATS_PATH)
         ? response(200, {
           code: 0,
           message: 'success',
@@ -566,6 +566,67 @@ test('Sub2API adapter renews an expired access token once after persisting the r
     ['GET', 'https://renew.example/api/v1/auth/me']
   ]);
   assert.equal(JSON.stringify(provider).includes('refresh-1'), false);
+});
+
+test('Sub2API adapter never rotates credentials after an HTTP 403', async () => {
+  let refreshCalls = 0;
+  let persistenceCalls = 0;
+  const [provider] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      dashboard: {
+        adapter: SUB2API_ADAPTER,
+        baseUrl: 'https://forbidden.example',
+        accessToken: 'valid-jwt',
+        refreshToken: 'refresh-1'
+      }
+    }
+  }, {
+    env: {},
+    fetch: async (url) => {
+      if (url.endsWith(SUB2API_REFRESH_PATH)) refreshCalls += 1;
+      return response(403, { code: 403, message: 'FORBIDDEN', data: null });
+    },
+    onThirdPartyCredentialsRenewed: async () => {
+      persistenceCalls += 1;
+      return true;
+    }
+  });
+
+  assert.equal(provider.status, 'unauthorized');
+  assert.equal(refreshCalls, 0);
+  assert.equal(persistenceCalls, 0);
+});
+
+test('Sub2API month usage follows the device IANA timezone', async () => {
+  const calls = [];
+  const [provider] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      dashboard: {
+        adapter: SUB2API_ADAPTER,
+        baseUrl: 'https://timezone.example',
+        accessToken: 'dashboard-jwt'
+      }
+    }
+  }, {
+    env: {},
+    timeZone: 'America/New_York',
+    fetch: async (url) => {
+      calls.push(url);
+      if (url.includes('/usage/stats')) {
+        return response(200, { code: 0, data: { total_actual_cost: 1.25 } });
+      }
+      if (url.includes('/usage/dashboard/stats')) {
+        return response(200, { code: 0, data: { total_actual_cost: 4.5 } });
+      }
+      return response(200, { code: 0, data: { id: 7, balance: 8 } });
+    }
+  });
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.balance.monthSpend, 1.25);
+  assert.ok(calls.includes(
+    'https://timezone.example/api/v1/usage/stats?period=month&timezone=America%2FNew_York'
+  ));
 });
 
 test('Sub2API renewal requires a persistence callback and fails closed on refresh errors', async () => {

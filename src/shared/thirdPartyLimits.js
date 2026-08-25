@@ -354,6 +354,24 @@ function statusForHttp(code) {
   return 'unavailable';
 }
 
+function resolvedTimeZone(deps = {}) {
+  let value = cleanValue(deps.timeZone);
+  if (!value) {
+    try {
+      value = cleanValue(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    } catch (_) {
+      return '';
+    }
+  }
+  if (!value || value.length > 128) return '';
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: value }).format(0);
+    return value;
+  } catch (_) {
+    return '';
+  }
+}
+
 const THIRD_PARTY_ADAPTERS = Object.freeze({
   [NEWAPI_ACCOUNT_ADAPTER]: Object.freeze({
     platform: 'newapi',
@@ -457,10 +475,14 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
     },
     // Usage endpoints only enrich the balance. Older deployments may omit
     // either one, so a failed stats response must not hide a valid balance.
-    enrichmentRequests(account) {
+    enrichmentRequests(account, deps) {
       const headers = { Authorization: `Bearer ${account.accessToken}` };
+      const timeZone = resolvedTimeZone(deps);
       return {
-        month: { path: SUB2API_USAGE_STATS_PATH, headers },
+        month: {
+          path: `${SUB2API_USAGE_STATS_PATH}${timeZone ? `&timezone=${encodeURIComponent(timeZone)}` : ''}`,
+          headers
+        },
         allTime: { path: SUB2API_DASHBOARD_STATS_PATH, headers }
       };
     },
@@ -486,6 +508,9 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
         throw error;
       }
       return { accessToken, refreshToken };
+    },
+    shouldRenew(error) {
+      return error?.statusCode === 401;
     },
     quota(payload, _unit, _account, _statusPayload, enrichmentPayloads) {
       const data = sub2apiData(payload);
@@ -591,7 +616,7 @@ async function fetchQuotaWithRenewal(account, adapter, deps) {
   try {
     return { payload: await attempt(null) };
   } catch (error) {
-    const renewable = error?.status === 'unauthorized'
+    const renewable = adapter.shouldRenew?.(error) === true
       && typeof adapter.renewCredentials === 'function'
       && account.refreshToken
       && typeof deps.onThirdPartyCredentialsRenewed === 'function';
@@ -644,7 +669,7 @@ async function requestJson(url, options = {}, deps = {}) {
 }
 
 async function fetchOptionalEnrichments(account, adapter, deps) {
-  const requests = Object.entries(adapter.enrichmentRequests?.(account) || {});
+  const requests = Object.entries(adapter.enrichmentRequests?.(account, deps) || {});
   const results = await Promise.all(requests.map(async ([key, request]) => {
     try {
       const value = await requestJson(
