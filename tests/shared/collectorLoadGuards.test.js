@@ -1327,12 +1327,14 @@ test('watchPathsForClients watches only Proma data that is currently parsed', ()
 });
 
 test('clientDataDirPresence still detects cursor/antigravity via their cache dirs', () => {
-  const tmp = withTmpHome([
-    path.join('.config', 'tokscale', 'cursor-cache'),
-    path.join('.config', 'tokscale', 'antigravity-cache')
-  ]);
+  const tmp = withTmpHome([]);
+  const configDir = path.join(tmp, 'tokscale-config');
+  fs.mkdirSync(path.join(configDir, 'cursor-cache'), { recursive: true });
+  fs.mkdirSync(path.join(configDir, 'antigravity-cache'), { recursive: true });
   const originalHomedir = os.homedir;
+  const previousConfigDir = process.env.TOKSCALE_CONFIG_DIR;
   os.homedir = () => tmp;
+  process.env.TOKSCALE_CONFIG_DIR = configDir;
   try {
     const { clientDataDirPresence } = freshCollector();
     const presence = clientDataDirPresence('cursor,antigravity');
@@ -1340,6 +1342,8 @@ test('clientDataDirPresence still detects cursor/antigravity via their cache dir
     assert.equal(presence.antigravity, true);
   } finally {
     os.homedir = originalHomedir;
+    if (previousConfigDir === undefined) delete process.env.TOKSCALE_CONFIG_DIR;
+    else process.env.TOKSCALE_CONFIG_DIR = previousConfigDir;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }
