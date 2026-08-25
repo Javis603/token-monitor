@@ -69,3 +69,54 @@ test('tracked clients retain source inspection and rescan behavior', async () =>
   assert.deepEqual(calls.revealDirectories, ['/tmp/codex']);
   assert.deepEqual(calls.rescans, ['codex']);
 });
+
+function createUntrackedHandlers({ tracked = ['codex'], present = ['kiro'], throws = false } = {}) {
+  const probes = [];
+  const handlers = createClientSourceIpcHandlers({
+    knownClients: ['codex', 'kiro', 'workbuddy', 'grok'],
+    trackedClients: () => tracked,
+    visibleDiagnosticRoots: (clientsCsv) => {
+      probes.push(clientsCsv);
+      if (throws) throw new Error('probe failed');
+      return Object.fromEntries(String(clientsCsv).split(',').filter(Boolean).map((client) => [
+        client,
+        [{ id: `${client}-data`, dir: `/tmp/${client}`, exists: present.includes(client) }]
+      ]));
+    }
+  });
+  return { probes, handlers };
+}
+
+test('untracked clients with data are reported, tracked ones and empty ones are not', () => {
+  const { probes, handlers } = createUntrackedHandlers({
+    tracked: ['codex'],
+    present: ['kiro', 'workbuddy', 'codex']
+  });
+
+  // codex has data but is already tracked, so it is not something to surface;
+  // grok is untracked with nothing on disk.
+  assert.deepEqual(handlers.untrackedClientsWithData(), ['kiro', 'workbuddy']);
+  // One sweep for the whole untracked set, not one probe per client.
+  assert.deepEqual(probes, ['kiro,workbuddy,grok']);
+});
+
+test('an untracked client whose only root is absent is not reported', () => {
+  const { handlers } = createUntrackedHandlers({ tracked: ['codex'], present: [] });
+
+  assert.deepEqual(handlers.untrackedClientsWithData(), []);
+});
+
+test('tracking every known client probes nothing', () => {
+  const { probes, handlers } = createUntrackedHandlers({
+    tracked: ['codex', 'kiro', 'workbuddy', 'grok']
+  });
+
+  assert.deepEqual(handlers.untrackedClientsWithData(), []);
+  assert.deepEqual(probes, []);
+});
+
+test('a failing probe reports nothing instead of throwing at the IPC boundary', () => {
+  const { handlers } = createUntrackedHandlers({ throws: true });
+
+  assert.deepEqual(handlers.untrackedClientsWithData(), []);
+});
