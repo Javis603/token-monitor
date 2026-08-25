@@ -61,8 +61,10 @@ test('period changes preserve row identity, animate rank changes, and count from
 
 test('live row updates count and resize bars together without slowing the headline', () => {
   const app = read('app.js');
+  const renderRows = app.slice(app.indexOf('function renderRows('), app.indexOf('function deviceLabel('));
 
-  assert.match(app, /const liveMotionSnapshot = !state\.periodMotionActive && !state\.animateBarsFromZero[\s\S]*?captureBreakdownMotion\(\)/);
+  assert.match(renderRows, /const rowsChanged =[\s\S]*?const liveMotionSnapshot = rowsChanged && !state\.periodMotionActive && !state\.animateBarsFromZero[\s\S]*?captureBreakdownMotion\(\)/);
+  assert.ok(renderRows.indexOf('captureBreakdownMotion()') < renderRows.indexOf('if (structureChanged)'));
   assert.match(app, /if \(liveMotionSnapshot\) animateBreakdownFrom\(liveMotionSnapshot, \{ duration: 600 \}\)/);
   assert.match(app, /const animationFrom = numberAnimHandle \? numberAnimValue : state\.currentTotal/);
   assert.match(app, /animateTotalNumber\(els\.totalTokens, animationFrom, nextTotal, state\.periodMotionActive \? 800 : 1000\)/);

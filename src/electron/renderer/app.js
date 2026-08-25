@@ -1955,15 +1955,29 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     return;
   }
   const max = Math.max(1, ...rows.map((row) => row.value));
-  const liveMotionSnapshot = !state.periodMotionActive && !state.animateBarsFromZero
-    ? captureBreakdownMotion()
-    : null;
   const hintText = incompleteHint ? t(incompleteHint) : '';
   const signature = JSON.stringify([state.breakdown, hintText, rows.map((row) => row.key)]);
   const children = Array.from(els.breakdown.children);
   const existingHint = children.find((child) => child.classList.contains('breakdown-incomplete-hint'));
   const existing = new Map(children.filter((child) => child !== existingHint).map((child) => [child.dataset.key, child]));
   const structureChanged = signature !== state.rowSignature;
+  const renderContext = {
+    breakdown: state.breakdown,
+    currency: currentCurrency(),
+    currencyRatesEffective: state.settings?.currencyRatesEffective || null,
+    locale: currentLocale(),
+    showToolIcons: toolIconsEnabled(state.settings?.showToolIcons)
+  };
+  const nextFingerprints = new Map(rows.map((row) => [
+    row.key,
+    rowRenderFingerprint(row, max, renderContext)
+  ]));
+  const rowsChanged = structureChanged || rows.some((row) => (
+    rowRenderFingerprints.get(existing.get(row.key)) !== nextFingerprints.get(row.key)
+  ));
+  const liveMotionSnapshot = rowsChanged && !state.periodMotionActive && !state.animateBarsFromZero
+    ? captureBreakdownMotion()
+    : null;
   if (structureChanged) {
     const nodes = rows.map((row) => existing.get(row.key) || rowTemplate(row));
     if (incompleteHint) {
@@ -1980,17 +1994,10 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
   const current = new Map(Array.from(els.breakdown.children)
     .filter((child) => !child.classList.contains('breakdown-incomplete-hint'))
     .map((child) => [child.dataset.key, child]));
-  const renderContext = {
-    breakdown: state.breakdown,
-    currency: currentCurrency(),
-    currencyRatesEffective: state.settings?.currencyRatesEffective || null,
-    locale: currentLocale(),
-    showToolIcons: toolIconsEnabled(state.settings?.showToolIcons)
-  };
   for (const rowData of rows) {
     const row = current.get(rowData.key);
     if (!row) continue;
-    const fingerprint = rowRenderFingerprint(rowData, max, renderContext);
+    const fingerprint = nextFingerprints.get(rowData.key);
     if (rowRenderFingerprints.get(row) === fingerprint) continue;
     updateRow(row, { ...rowData, max });
     rowRenderFingerprints.set(row, fingerprint);
