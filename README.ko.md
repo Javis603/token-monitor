@@ -51,7 +51,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" /> | Kilo Code | VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — Linux 및 원격/WSL만 | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/` (`projects/`, `cli/db/db.sqlite`) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/` (`projects/`, `cli/db/db.sqlite`; 한도는 자동 감지한 `v2/` 로그인에서 조회) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage 및 `kiro-cli` DB | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code 확장 로그 | ✅ | — | — |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | — |
@@ -83,6 +83,10 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이스에서 읽습니다. Settings → tools에서 활성화합니다(옵트인, 기본 꺼짐). 데이터베이스는 플랫폼별로 자동 감지됩니다: macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`, Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`, Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — `TOKEN_MONITOR_QODER_CN_DB_PATH`로 재정의할 수 있습니다.
 
 고급 로컬 통합입니다: 읽기에는 PATH의 `sqlite3` CLI 또는 플래그 없는 `node:sqlite`를 갖춘 Node 런타임(Node ≥ 23.4, Electron에서는 CLI가 필요할 수 있음)이 필요합니다. 읽기 실패는 로그에 기록되며, 완전한 기존 스냅샷이 있으면 0 사용량으로 덮어쓰지 않고 유지합니다. 비용은 매핑된 각 모델의 models.dev 카탈로그 요금에서 추정됩니다. Qoder가 데이터베이스 스키마를 변경하면 어댑터가 작동하지 않을 수 있습니다.
+
+#### ZCode 한도(자동 감지 로그인)
+
+ZCode 한도 모니터링은 앱에 자격 증명을 입력할 필요가 없습니다: `~/.zcode/v2/` 아래의 로컬 ZCode CLI 로그인을 자동으로 읽습니다. ZCode CLI에서 선택한 플랜에 따라 Start Plan 모델별 일일 할당량 또는 Coding Plan 5시간/주간 사용량을 표시하고, 우선 플랜을 사용할 수 없으면 ZCode가 사용 가능으로 기록한 플랜으로 폴백합니다. 헤드리스 머신에서는 `ZCODE_ACCESS_TOKEN`을 설정할 수 있습니다.
 </details>
 
 ## 쇼케이스
@@ -123,7 +127,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 
 ### 한도·추세·내보내기
 
-- **AI 도구 한도 감지** — Claude Code, Codex, Cursor, OpenRouter, 서드파티 API, GLM, Kimi 등 21개 이상 공급자의 session/weekly/billing/credits, 여러 OpenRouter/서드파티 프로필, DeepSeek 선불 잔액과 사용액
+- **AI 도구 한도 감지** — Claude Code, Codex, Cursor, OpenRouter, 서드파티 API, GLM, ZCode, Kimi 등 21개 이상 공급자의 session/weekly/billing/credits, 여러 OpenRouter/서드파티 프로필, DeepSeek 선불 잔액과 사용액
 - **여러 계정과 Codex 전환** — 한 공급자에서 여러 계정을 추적하고 각각의 한도를 표시. 추적 중인 Codex 계정은 재인증 없이 로컬 계정으로 한 번에 전환 가능
 - **삭제된 세션 사용량 유지** — 많은 도구가 오래된 세션을 정리합니다(Claude Code는 기본적으로 30일 후 트랜스크립트 삭제). 켜면 Token Monitor가 관측한 일별 도구/모델 사용량을 로컬에 보관해, 원본 파일이 사라져도 히트맵과 추세를 유지합니다(아래 [세션 데이터 보존 기간](#세션-데이터-보존-기간) 참고)
 - **사용 추세 & 대시보드** — 홈 화면 활동 히트맵·추세 차트, 연속 일수·기기 전체 도구/모델별 누적 사용(막대·K선) 전용 대시보드 창

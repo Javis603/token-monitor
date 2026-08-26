@@ -51,7 +51,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" /> | Kilo Code | VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`）—— 仅 Linux 与远程/WSL | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/`（`projects/`、`cli/db/db.sqlite`） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/`（`projects/`、`cli/db/db.sqlite`；额度读取自动检测的 `v2/` 登录） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`、Kiro IDE globalStorage 与 `kiro-cli` 数据库 | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 与 IDE / VS Code 扩展日志 | ✅ | — | — |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | ✅ | — |
@@ -83,6 +83,10 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API —— 在 Settings → tools 中启用（可选，默认关闭）。数据库路径按平台自动探测：macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`、Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`、Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` —— 可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆盖。
 
 这是高级本地集成：读取需要 PATH 上的 `sqlite3` CLI，或内置无需 flag 即可用 `node:sqlite` 的 Node 运行时（Node ≥ 23.4；Electron 组件可能需要 CLI）。读取失败会写入日志；若已有完整快照，采集器会保留它而不是用零用量覆盖。成本按每个映射模型在 models.dev 目录中的价格估算；Qoder 若改变数据库 schema，适配器可能失效。
+
+#### ZCode 额度（自动检测登录）
+
+ZCode 额度监控无需在应用内填写凭据：自动读取 `~/.zcode/v2/` 下的本地 ZCode CLI 登录。按 ZCode CLI 中选定的方案展示——Start Plan 每模型每日额度，或 Coding Plan 的 5 小时／每周用量——并在首选方案不可用时回退到 ZCode 标记为可用的其他方案。无头机器可改设 `ZCODE_ACCESS_TOKEN`。
 </details>
 
 ## 界面展示
@@ -123,7 +127,7 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 
 ### 额度、趋势与导出
 
-- **AI 工具额度检测**：涵盖 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 21+ 家提供方的 session、每周、账单与 credits 窗口，支持多个 OpenRouter／第三方 profile，以及 DeepSeek 预付余额与消费
+- **AI 工具额度检测**：涵盖 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、ZCode、Kimi 等 21+ 家提供方的 session、每周、账单与 credits 窗口，支持多个 OpenRouter／第三方 profile，以及 DeepSeek 预付余额与消费
 - **多账号与 Codex 账号切换**：同一提供方可追踪多个账号、各自显示额度；已加入追踪的 Codex 账号还能一键切换为本机使用账号，免重新登录授权
 - **保留已删除会话用量**：许多工具会定期清除旧 session（Claude Code 默认清 30 天前的 transcript），一删就再也算不到。开启后，Token Monitor 会在本地不设期限地归档已观测到的每日工具／模型用量，让热力图与趋势即使在来源文件被清掉后仍然完整（详见下方[〈会话数据保留期〉](#会话数据保留期)）
 - **使用趋势与仪表板**：主页的活跃热力图与趋势图，加上独立的仪表板窗口，提供连续天数，以及跨所有设备、按工具／按模型堆叠的历史（柱状图与 K 线两种视图）

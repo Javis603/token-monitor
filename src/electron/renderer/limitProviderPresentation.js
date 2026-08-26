@@ -32,6 +32,7 @@
     kiro: { cli: 'CLI' },
     zai: { api: 'API' },
     zaiteam: { api: 'API' },
+    zcode: { api: 'API' },
     volcengine: { api: 'API' },
     qoder: { web: 'Web' },
     trae: { api: 'Web' },
@@ -64,6 +65,7 @@
     kiro: ['Auto', 'CLI'],
     zai: ['Coding Plan', 'API key'],
     zaiteam: ['Team Plan', 'API key'],
+    zcode: ['Auto', 'API'],
     volcengine: ['Coding Plan', 'API key'],
     qoder: ['Manual login', 'Web'],
     trae: ['Manual login', 'Web'],
@@ -275,7 +277,7 @@
     if (status === 'notConfigured') {
       if (providerName === 'kimi') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'antigravity') return { label: 'Open app or CLI', tone: 'setup' };
-      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama') return { label: 'Sign in', tone: 'setup' };
+      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama' || providerName === 'zcode') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi') return { label: 'Add API key', tone: 'setup' };
       if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };

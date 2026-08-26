@@ -91,6 +91,7 @@ const LIMIT_PROVIDERS = [
   { id: 'mimo', label: 'MiMo' },
   { id: 'zai', label: 'GLM' },
   { id: 'zaiteam', label: 'GLM Team' },
+  { id: 'zcode', label: 'ZCode' },
   { id: 'kiro', label: 'Kiro' },
   { id: 'workbuddy', label: 'WorkBuddy' },
   { id: 'qoder', label: 'Qoder' },
@@ -146,7 +147,8 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
   grok: 'settings.limits.connection.grok',
   kiro: 'settings.limits.connection.kiro',
-  workbuddy: 'settings.limits.connection.workbuddy'
+  workbuddy: 'settings.limits.connection.workbuddy',
+  zcode: 'settings.limits.connection.zcode'
 };
 const TRAY_ICON_VARIANTS = [
   { id: 'claude-brand', label: 'Claude', after: 'claude' },

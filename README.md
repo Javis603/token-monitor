@@ -51,7 +51,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" /> | Kilo Code | VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — Linux & remote/WSL only | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/` (`projects/`, `cli/db/db.sqlite`) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/` (`projects/`, `cli/db/db.sqlite`; limits via auto-detected `v2/` login) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage & `kiro-cli` DB | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code extension logs | ✅ | — | — |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | — |
@@ -83,6 +83,10 @@ Token Monitor supports token usage, account-limit checks, and session details se
 Qoder CN token usage is read from the app's local SQLite database, not an API — enable it in Settings → tools (opt-in, off by default). The database is auto-detected per platform: macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`, Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`, Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — overridable with `TOKEN_MONITOR_QODER_CN_DB_PATH`.
 
 This is an advanced local integration: reading needs a `sqlite3` CLI on PATH or a Node runtime with unflagged `node:sqlite` (Node ≥ 23.4; the Electron widget may need the CLI). Read failures are logged, and an existing complete snapshot is retained instead of being replaced with zero usage. Costs are estimated from the models.dev catalog for each mapped model; the adapter may break if Qoder changes its database schema.
+
+#### ZCode limits (auto-detected login)
+
+ZCode limit monitoring needs no credentials in the app: it reads the local ZCode CLI login under `~/.zcode/v2/` automatically. The plan selected in the ZCode CLI decides what is reported — Start Plan per-model daily grants, or Coding Plan 5-hour and weekly usage — and Token Monitor falls back through the plans ZCode marks available. Headless machines can set `ZCODE_ACCESS_TOKEN` instead.
 </details>
 
 ## Showcase
@@ -123,7 +127,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Limits, trends & export
 
-- **AI Tool Limits detection** — provider-specific session, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 21+ providers, including multiple OpenRouter/third-party profiles and DeepSeek prepaid balance/spend
+- **AI Tool Limits detection** — provider-specific session, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, ZCode, Kimi, and 21+ providers, including multiple OpenRouter/third-party profiles and DeepSeek prepaid balance/spend
 - **Multiple accounts & Codex switching** — track several accounts per provider, each with its own limits; a tracked Codex account can be switched as the active local account in one click, without re-authenticating
 - **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
 - **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model history (bar and K-line views) across all your devices

@@ -280,7 +280,8 @@ const PROVIDER_LABELS = Object.freeze({
   thirdparty: 'Third-party APIs',
   volcengine: 'Volcengine',
   zai: 'GLM',
-  zaiteam: 'GLM Team'
+  zaiteam: 'GLM Team',
+  zcode: 'ZCode'
 });
 
 function providerLabel(provider) {

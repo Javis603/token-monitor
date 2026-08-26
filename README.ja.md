@@ -51,7 +51,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" /> | Kilo Code | VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — Linux およびリモート/WSL のみ | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/`（`projects/`、`cli/db/db.sqlite`） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/`（`projects/`、`cli/db/db.sqlite`；制限は自動検出した `v2/` ログインから取得） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage および `kiro-cli` DB | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code 拡張ログ | ✅ | — | — |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | — |
@@ -83,6 +83,10 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 Qoder CN のトークン使用量は API ではなくアプリのローカル SQLite データベースから読み取ります。Settings → tools で有効化します（オプトイン、デフォルト無効）。データベースはプラットフォームごとに自動検出されます：macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`、Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`、Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — `TOKEN_MONITOR_QODER_CN_DB_PATH` で上書き可能です。
 
 これは高度なローカル統合です：読み取りには PATH 上の `sqlite3` CLI、またはフラグ不要の `node:sqlite` を備えた Node ランタイム（Node ≥ 23.4、Electron では CLI が必要な場合あり）が必要です。読み取りエラーはログに記録され、完全な既存スナップショットがあればゼロ使用量で上書きせず保持します。コストはマッピングされた各モデルの models.dev カタログ料金から推定されます。Qoder がデータベーススキーマを変更すると動作しなくなる可能性があります。
+
+#### ZCode 制限（自動検出ログイン）
+
+ZCode の制限監視はアプリへの認証情報入力が不要です：`~/.zcode/v2/` 配下のローカル ZCode CLI ログインを自動的に読み取ります。ZCode CLI で選択されたプランに応じて、Start Plan のモデル別日次枠、または Coding Plan の 5 時間／週次使用量を表示し、優先プランが使えなければ ZCode が利用可能と記録したプランへフォールバックします。ヘッドレス環境では `ZCODE_ACCESS_TOKEN` を設定できます。
 </details>
 
 ## ショーケース
@@ -123,7 +127,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 
 ### 制限・トレンド・エクスポート
 
-- **AI ツール制限検出** — Claude Code、Codex、Cursor、OpenRouter、サードパーティAPI、GLM、Kimi など 21+ プロバイダーの session/weekly/billing/credits、複数の OpenRouter／サードパーティプロファイル、DeepSeek プリペイド残高と使用額
+- **AI ツール制限検出** — Claude Code、Codex、Cursor、OpenRouter、サードパーティAPI、GLM、ZCode、Kimi など 21+ プロバイダーの session/weekly/billing/credits、複数の OpenRouter／サードパーティプロファイル、DeepSeek プリペイド残高と使用額
 - **複数アカウントと Codex 切り替え** — 1 つのプロバイダーで複数アカウントを追跡し、それぞれの制限を表示。追跡済みの Codex アカウントは、再認証なしでローカルアカウントとしてワンクリック切り替え可能
 - **削除されたセッション使用量を保持** — 多くのツールは古いセッションを削除します（Claude Code はデフォルトで 30 日後にトランスクリプトを削除）。有効にすると、Token Monitor は観測済みの日別ツール/モデル使用量をローカルにアーカイブし、元ファイルが消えてもヒートマップとトレンドを維持します（下記 [セッションデータの保持期間](#セッションデータの保持期間) を参照）
 - **使用トレンド & ダッシュボード** — ホーム画面のアクティビティヒートマップ・トレンドチャート、連続日数・全デバイス横断のツール/モデル別累積使用（棒・K 線）専用ダッシュボードウィンドウ
