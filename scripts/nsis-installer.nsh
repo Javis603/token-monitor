@@ -17,6 +17,13 @@
 # read/execute to S-1-15-2-2 on our own install directory fixes it with both
 # Chromium sandboxes left enabled. See issue #487 and electron/electron#51761.
 #
+# Microsoft documents this exact grant for unpackaged Win32 apps shipping the
+# fixed-version WebView2 runtime, for the same reason: a renderer moved into an
+# App Container can no longer read the app's own files. They pair it with
+# S-1-15-2-1 (ALL APPLICATION PACKAGES); we deliberately do not. Chromium runs
+# these children as LPAC, where that SID is replaced by S-1-15-2-2, and #487's
+# A/B confirmed S-1-15-2-2 on its own clears both the GPU and renderer crash.
+#
 # Three details are deliberate. The SID literal is used because the display name
 # is localized and would not resolve on a non-English Windows. /grant is
 # additive, never /grant:r, so no existing entry is replaced. And the exit code

@@ -70,7 +70,10 @@ test('the pinned electron-builder runs the install hook after the app files are 
 
   const files = installSection.indexOf('!insertmacro installApplicationFiles');
   const hook = installSection.indexOf('!insertmacro customInstall');
-  const startApp = installSection.indexOf('!macro doStartApp');
+  // The first invocation, not the '!macro doStartApp' definition: the definition
+  // happens to sit right after the hook today, so matching it would pass for the
+  // wrong reason, and would fail if upstream ever hoisted the definition alone.
+  const startApp = installSection.indexOf('!insertmacro doStartApp');
   assert.ok(files >= 0 && startApp >= 0, 'install section landmarks not found upstream');
   // icacls propagates an inheritable ACE to children that already exist, so the
   // hook has to run after the payload is written to pick up the app's files,
