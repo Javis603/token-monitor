@@ -5,6 +5,7 @@ const { createLimitsRuntime } = require('./limitsRuntime');
 const { createUsageRuntime } = require('./usageRuntime');
 
 let nextRuntimeEpoch = 1;
+const SUPERSEDED_USAGE_DIAGNOSTIC_CODES = new Set(['subprocess-termination-unconfirmed']);
 
 function createDeviceRuntime(options = {}, deps = {}) {
   const epoch = nextRuntimeEpoch++;
@@ -13,6 +14,7 @@ function createDeviceRuntime(options = {}, deps = {}) {
   const makeLimitsRuntime = deps.createLimitsRuntime || createLimitsRuntime;
   const sink = options.sink || null;
   let active = true;
+  let usageGeneration = 0;
 
   function forwardDiagnosticEvent(event) {
     if (!active) return;
@@ -52,36 +54,45 @@ function createDeviceRuntime(options = {}, deps = {}) {
     }
   });
 
-  const usageOptions = {
-    ...(options.usageOptions || {}),
-    onUpdate(summary, reason) {
-      if (!active) return;
-      const transformed = options.transformUsage
-        ? options.transformUsage(summary, reason, { preview: false })
-        : summary;
-      deviceState.updateUsage(transformed, reason, { epoch, preview: false });
-      return transformed;
-    },
-    onDiagnosticEvent(event) {
-      if (!active) return;
-      try {
-        options.usageOptions?.onDiagnosticEvent?.(event);
-      } catch (error) {
-        try { options.onError?.(error, 'usage-diagnostic'); } catch (_) {}
+  function usageRuntimeOptions(nextUsageOptions = {}, runtimeOptions = {}) {
+    const generation = ++usageGeneration;
+    const configured = {
+      ...nextUsageOptions,
+      ...runtimeOptions,
+      onUpdate(summary, reason) {
+        if (!active || generation !== usageGeneration) return;
+        const transformed = options.transformUsage
+          ? options.transformUsage(summary, reason, { preview: false })
+          : summary;
+        deviceState.updateUsage(transformed, reason, { epoch, preview: false });
+        return transformed;
+      },
+      onDiagnosticEvent(event) {
+        if (!active) return;
+        if (
+          generation !== usageGeneration
+          && !SUPERSEDED_USAGE_DIAGNOSTIC_CODES.has(event?.code)
+        ) return;
+        try {
+          nextUsageOptions?.onDiagnosticEvent?.(event);
+        } catch (error) {
+          try { options.onError?.(error, 'usage-diagnostic'); } catch (_) {}
+        }
+        forwardDiagnosticEvent(event);
       }
-      forwardDiagnosticEvent(event);
-    }
-  };
-  if (options.progressive === true) {
-    usageOptions.onPreview = (summary, reason = 'progress') => {
-      if (!active) return;
-      const transformed = options.transformUsage
-        ? options.transformUsage(summary, reason, { preview: true })
-        : summary;
-      deviceState.updateUsage(transformed, reason, { epoch, preview: true });
     };
-  } else {
-    delete usageOptions.onPreview;
+    if (options.progressive === true) {
+      configured.onPreview = (summary, reason = 'progress') => {
+        if (!active || generation !== usageGeneration) return;
+        const transformed = options.transformUsage
+          ? options.transformUsage(summary, reason, { preview: true })
+          : summary;
+        deviceState.updateUsage(transformed, reason, { epoch, preview: true });
+      };
+    } else {
+      delete configured.onPreview;
+    }
+    return configured;
   }
   const limitsOptions = {
     ...(options.limitsOptions || {}),
@@ -113,8 +124,47 @@ function createDeviceRuntime(options = {}, deps = {}) {
     }
   };
 
-  const usageRuntime = makeUsageRuntime(usageOptions, deps.usageDeps || {});
+  let activeUsageOptions = options.usageOptions || {};
+  let usageRuntime = makeUsageRuntime(usageRuntimeOptions(activeUsageOptions), deps.usageDeps || {});
   const limitsRuntime = makeLimitsRuntime(limitsOptions, limitsDeps);
+
+  function reconfigureUsage(nextUsageOptions = {}) {
+    if (!active) return null;
+    // Invalidating the generation before starting the replacement makes late
+    // callbacks from a custom or non-cooperative collector harmless even if its
+    // physical work takes longer to stop.
+    usageGeneration += 1;
+    const previousUsageRuntime = usageRuntime;
+    previousUsageRuntime?.stop?.();
+    let startBarrier = null;
+    try {
+      startBarrier = previousUsageRuntime?.whenIdle?.() || null;
+    } catch (error) {
+      try { options.onError?.(error, 'usage-stop'); } catch (_) {}
+    }
+    if (startBarrier) {
+      startBarrier = Promise.resolve(startBarrier).catch((error) => {
+        try { options.onError?.(error, 'usage-stop'); } catch (_) {}
+      });
+    }
+    try {
+      usageRuntime = makeUsageRuntime(
+        usageRuntimeOptions(nextUsageOptions, startBarrier ? { startBarrier } : {}),
+        deps.usageDeps || {}
+      );
+      activeUsageOptions = nextUsageOptions;
+    } catch (error) {
+      // Starting first would overlap the old and new collectors, including
+      // their watcher descriptor sets. Restore the last known-good config
+      // instead so a failed replacement cannot leave usage permanently dead.
+      usageRuntime = makeUsageRuntime(
+        usageRuntimeOptions(activeUsageOptions, startBarrier ? { startBarrier } : {}),
+        deps.usageDeps || {}
+      );
+      throw error;
+    }
+    return true;
+  }
 
   // Clearing `active` first is what severs the downstream callbacks; the child
   // stops are cleanup. `options` reaches the collector only: `skipCloseWatchers`
@@ -138,6 +188,7 @@ function createDeviceRuntime(options = {}, deps = {}) {
       limits: limitsRuntime?.getDiagnostics?.() ?? null
     }),
     getSnapshot: () => deviceState.getSnapshot(),
+    reconfigureUsage,
     reconfigureLimits: (next) => active ? limitsRuntime.reconfigure(next) : null,
     refreshClient: (clientId, refreshOptions) => active
       ? usageRuntime.refreshClient(clientId, refreshOptions)

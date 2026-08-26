@@ -67,6 +67,20 @@ function assistantMessage({ seq, usage, tools = [] }) {
   };
 }
 
+function compactionSummary({ seq, usage }) {
+  return {
+    type: 'compaction/summary',
+    seq,
+    time: BASE_TIME + seq * 1000,
+    data: {
+      message: {
+        source: { kind: 'model', provider: 'opencode-go', model: 'deepseek-v4-flash' }
+      },
+      usage
+    }
+  };
+}
+
 function writeFixture(root, sessionId, lines) {
   const dir = path.join(root, 'proj', sessionId);
   fs.mkdirSync(dir, { recursive: true });
@@ -150,6 +164,55 @@ test('readDshSessionDetail counts reasoning tokens once, matching tokscale total
   assert.equal(detail.totals.totalTokens, 110);
 });
 
+test('readDshSessionDetail counts compaction summaries as real provider calls', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  writeFixture(root, 'session-summary', [
+    sessionHeader({ id: 'session-summary' }),
+    userMessage({ seq: 1, text: 'continue after compacting' }),
+    compactionSummary({ seq: 2, usage: { inputTokens: 10, outputTokens: 20 } }),
+    assistantMessage({ seq: 3, usage: { inputTokens: 30, outputTokens: 40 } })
+  ]);
+
+  const detail = readDshSessionDetail({ sessionId: 'session-summary', sessionsRoot: root, home: '/home/tester', env: {} });
+  assert.equal(detail.exchanges.length, 1);
+  assert.equal(detail.exchanges[0].turnCount, 1);
+  assert.equal(detail.exchanges[0].turns.length, 2);
+  assert.deepEqual(detail.exchanges[0].turns.map((turn) => turn.type), ['compaction-summary', 'reply']);
+  assert.equal(detail.totals.totalTokens, 100);
+  assert.equal(detail.totals.turnCount, 1);
+});
+
+test('readDshSessionDetail namespaces summaries away from matching assistant calls', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  const summary = compactionSummary({ seq: 2, usage: { inputTokens: 10, outputTokens: 20 } });
+  const assistant = assistantMessage({ seq: 2, usage: { inputTokens: 10, outputTokens: 20 } });
+  writeFixture(root, 'session-summary-identity', [
+    sessionHeader({ id: 'session-summary-identity' }),
+    summary,
+    summary,
+    assistant
+  ]);
+
+  const detail = readDshSessionDetail({ sessionId: 'session-summary-identity', sessionsRoot: root, home: '/home/tester', env: {} });
+  assert.equal(detail.exchanges[0].turnCount, 1);
+  assert.equal(detail.exchanges[0].turns.length, 2);
+  assert.equal(detail.totals.totalTokens, 60);
+});
+
+test('readDshSessionDetail retains summary-only paid usage without claiming a reply', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  writeFixture(root, 'session-summary-only', [
+    sessionHeader({ id: 'session-summary-only' }),
+    compactionSummary({ seq: 1, usage: { inputTokens: 10, outputTokens: 20 } })
+  ]);
+
+  const detail = readDshSessionDetail({ sessionId: 'session-summary-only', sessionsRoot: root, home: '/home/tester', env: {} });
+  assert.equal(detail.exchanges.length, 1);
+  assert.equal(detail.exchanges[0].turnCount, 0);
+  assert.equal(detail.exchanges[0].turns.length, 1);
+  assert.equal(detail.totals.totalTokens, 30);
+});
+
 // #419 (the PR this module's discovery/decode primitives were extracted from)
 // pushed a prompt bubble for every user/message with non-empty text, with no
 // check on data.source.kind. Real dsh transcripts inject AGENTS.md, runtime
@@ -179,6 +242,7 @@ test('readDshSessionDetail drops events strictly before seedLength on a forked s
     sessionHeader({ id: 'session-fork', parentSession: 'session-parent', seedLength: 4 }),
     userMessage({ seq: 1, text: 'inherited from parent' }),
     assistantMessage({ seq: 2, usage: { inputTokens: 1000, outputTokens: 1000 } }),
+    compactionSummary({ seq: 3, usage: { inputTokens: 1000, outputTokens: 1000 } }),
     { type: 'session/end-seed', seq: 4, time: BASE_TIME + 4000, data: {} },
     // tokscale's own dsh parser skips strictly `seq < seedLength` (dsh.rs),
     // so the event AT seq === seedLength is the fork's own first new event,
@@ -190,6 +254,19 @@ test('readDshSessionDetail drops events strictly before seedLength on a forked s
   const detail = readDshSessionDetail({ sessionId: 'session-fork', sessionsRoot: root, home: '/home/tester', env: {} });
   assert.equal(detail.exchanges.length, 1);
   assert.equal(detail.exchanges[0].promptPreview, 'the forks own new question');
+  assert.equal(detail.totals.totalTokens, 15);
+});
+
+test('readDshSessionDetail keeps a usage row without seq even when a fork has seedLength', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  const turn = assistantMessage({ seq: 5, usage: { inputTokens: 10, outputTokens: 5 } });
+  delete turn.seq;
+  writeFixture(root, 'session-fork-no-seq', [
+    sessionHeader({ id: 'session-fork-no-seq', parentSession: 'session-parent', seedLength: 4 }),
+    turn
+  ]);
+
+  const detail = readDshSessionDetail({ sessionId: 'session-fork-no-seq', sessionsRoot: root, home: '/home/tester', env: {} });
   assert.equal(detail.totals.totalTokens, 15);
 });
 

@@ -7,13 +7,14 @@
 // for 1820). Every tracked-client change rewrites the watch roots, so on the
 // owning thread that teardown froze the widget for about a second per toggle.
 //
-// One worker per coordinator, reused across collector restarts. That is not an
-// optimisation: it is what preserves the invariant the synchronous close used
-// to provide, namely that the old watcher is fully gone before a new one starts
-// on the same paths. Spawning a second worker per restart would instead overlap
-// two full descriptor sets, and on Linux the inotify budget is per-user and
-// shared with editors, so the overlap could trip the exhaustion fallback, which
-// is deliberately sticky for the process.
+// One worker at a time per coordinator. A collector restart terminates that
+// worker and waits for its exit before applying the latest replacement config.
+// This preserves the invariant the synchronous close used to provide — the old
+// watcher is fully gone before a new one starts — while also releasing the
+// worker's V8/libuv/native allocation high-water. Spawning the replacement
+// before exit would overlap two descriptor sets, and on Linux the inotify budget
+// is per-user and shared with editors, so the overlap could trip the exhaustion
+// fallback, which is deliberately sticky for the process.
 //
 // unwatch() is not an alternative for incremental root edits: it stops event
 // delivery but retains the descriptors (verified: 2613 fds before and after).
@@ -25,8 +26,6 @@
 // watch-behaviour tests drive, since the reaction logic is identical on both.
 
 const WORKER_PATH = require.resolve('./watcherWorker');
-const CLOSE_REPORT_GRACE_MS = 30_000;
-
 function inProcessRequested(env = process.env) {
   const raw = String(env.TOKEN_MONITOR_WATCH_IN_PROCESS ?? '').trim().toLowerCase();
   if (!raw) return false;
@@ -60,11 +59,17 @@ function createInProcessWatcherHost(config = {}, handlers = {}) {
 function createWatcherCoordinator(deps = {}) {
   const WorkerClass = deps.Worker || require('node:worker_threads').Worker;
   const workerPath = deps.workerPath || WORKER_PATH;
-  const setTimer = deps.setTimeout || setTimeout;
-  const clearTimer = deps.clearTimeout || clearTimeout;
+  // A worker thread keeps its V8/libuv/native allocator inside the Electron
+  // browser process. Reusing it after closing a large chokidar tree leaves that
+  // tree's allocation high-water charged to the app even though its descriptors
+  // are gone, so every real owner change recycles the isolation boundary.
 
   let worker = null;
   let workerDisabled = false;
+  // A rejected terminate does not prove the old native descriptors were
+  // released. Once that happens, every later in-process owner must stay on
+  // polling for the rest of this coordinator's lifetime.
+  let forcePollingFallback = false;
   // Per instance rather than one coordinator-wide flag: a flag would let a
   // terminate we asked for mask a genuine failure of the worker that replaced it.
   const expectedExits = new WeakSet();
@@ -74,7 +79,6 @@ function createWatcherCoordinator(deps = {}) {
   // in between is the overlap the normal and watchdog paths both avoid.
   const workerFailures = new WeakMap();
   let revision = 0;
-  let pendingStopRevision = null;
   // Set while a thread is on its way out. `worker = null` happens synchronously
   // but terminate() only settles once the thread has actually exited, so this
   // gate, not the null, is what keeps a replacement from starting inside that
@@ -82,12 +86,9 @@ function createWatcherCoordinator(deps = {}) {
   let terminating = null;
   let current = null;
   let inProcessHost = null;
-  let graceTimer = null;
 
-  function clearGrace() {
-    if (!graceTimer) return;
-    clearTimer(graceTimer);
-    graceTimer = null;
+  function fallbackConfig(config) {
+    return forcePollingFallback ? { ...config, usePolling: true } : config;
   }
 
   function restoreCurrentWatcher() {
@@ -101,8 +102,6 @@ function createWatcherCoordinator(deps = {}) {
   // done with watching entirely; a wedged teardown is not, and the collector
   // that replaced the stopped one still expects a live watcher.
   function forceTerminate({ restore = false } = {}) {
-    clearGrace();
-    pendingStopRevision = null;
     if (!worker) return;
     const dying = worker;
     worker = null;
@@ -122,7 +121,10 @@ function createWatcherCoordinator(deps = {}) {
         // The thread never confirmed it exited, so its descriptors cannot be
         // assumed released. Watching on this thread is worse for latency but
         // it is the one path that does not depend on that thread.
-        if (restore) fallBackToInProcess(error);
+        if (restore) {
+          forcePollingFallback = true;
+          fallBackToInProcess(error);
+        }
       }
     );
   }
@@ -136,29 +138,16 @@ function createWatcherCoordinator(deps = {}) {
     if (failedWorker && worker && worker !== failedWorker) return;
     worker = null;
     workerDisabled = true;
-    clearGrace();
     if (!current) return;
     current.handlers.onHostFallback?.(error);
-    inProcessHost = createInProcessWatcherHost(current.config, current.handlers);
+    // A rejected terminate does not prove the old worker released its native
+    // descriptors. Polling is the only safe fallback on that path; ordinary
+    // startup/crash failures still retain the configured native mode because
+    // their exit event already confirmed release.
+    inProcessHost = createInProcessWatcherHost(fallbackConfig(current.config), current.handlers);
   }
 
   function onMessage(message) {
-    if (message?.type === 'released') {
-      // Routed before the owner lookup: a normal stop clears `current` by
-      // definition, so gating this on an owner meant the ack could never
-      // arrive and the grace timer always fired.
-      //
-      // Compared as a watermark rather than an exact match. Under latest-wins a
-      // stop issued while an earlier teardown is still running never gets its
-      // own ack, so requiring equality left the watchdog armed against a
-      // release that had already happened, and it went on to terminate a
-      // perfectly healthy worker.
-      if (pendingStopRevision === null) return;
-      if (!(Number(message.throughRevision) >= pendingStopRevision)) return;
-      pendingStopRevision = null;
-      clearGrace();
-      return;
-    }
     const owner = current;
     if (!owner) return;
     // A watcher that is still tearing down can emit between the owner moving on
@@ -216,17 +205,12 @@ function createWatcherCoordinator(deps = {}) {
     revision += 1;
     const owned = revision;
     current = { revision: owned, config, handlers };
-    // Deliberately does not disarm a stop that has not been acknowledged yet.
-    // A runtime restart is stop-then-immediate-acquire, so clearing here would
-    // cancel the watchdog in exactly the path where a wedged teardown would
-    // otherwise pin every descriptor with nothing left to notice.
-
     if (inProcessHost) {
       inProcessHost.close();
       inProcessHost = null;
     }
     if (workerDisabled) {
-      inProcessHost = createInProcessWatcherHost(config, handlers);
+      inProcessHost = createInProcessWatcherHost(fallbackConfig(config), handlers);
       return makeHandle(owned, 'in-process');
     }
 
@@ -262,20 +246,10 @@ function createWatcherCoordinator(deps = {}) {
           forceTerminate();
           return;
         }
-        revision += 1;
-        pendingStopRevision = revision;
-        try {
-          worker.postMessage({ type: 'stop', revision });
-        } catch (_) {
-          pendingStopRevision = null;
-          forceTerminate();
-          return;
-        }
-        // Only covers a worker that never answers. A normal stop leaves the
-        // thread idle and reusable, so the next acquire skips spawn cost.
-        clearGrace();
-        graceTimer = setTimer(() => forceTerminate({ restore: true }), CLOSE_REPORT_GRACE_MS);
-        if (typeof graceTimer.unref === 'function') graceTimer.unref();
+        // Confirm the old thread has exited before restoreCurrentWatcher()
+        // applies whichever owner is newest by then. This both bounds native
+        // watcher memory and preserves the no-overlapping-descriptors invariant.
+        forceTerminate({ restore: true });
       }
     };
   }
@@ -286,8 +260,8 @@ function createWatcherCoordinator(deps = {}) {
     inspect: () => ({
       hasWorker: Boolean(worker),
       workerDisabled,
+      forcePollingFallback,
       inProcess: Boolean(inProcessHost),
-      awaitingStopAck: pendingStopRevision !== null,
       terminating: terminating !== null
     })
   };

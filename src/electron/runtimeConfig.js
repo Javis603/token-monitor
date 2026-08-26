@@ -30,6 +30,24 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'projectsEnabled',
   'wslScanEnabled'
 ]);
+// Functions and identity fields deliberately stay out: this key answers only
+// whether replacing the active usage runtime would change its collection work.
+// Values arrive from usageConfigFromSettings() after mode-specific normalization.
+const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
+  'clients',
+  'allTimeSince',
+  'intervalMs',
+  'historyEnabled',
+  'dailyHistoryArchiveEnabled',
+  'projectsEnabled',
+  'historyIntervalMs',
+  'watchEnabled',
+  'watchUsePolling',
+  'watchTriggersCollection',
+  'intervalRequiresActivity',
+  'watchDebounceMs',
+  'wslScanEnabled'
+]);
 const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsEnabled',
   'limitProviders',
@@ -70,6 +88,10 @@ function equalSetting(left, right) {
 
 function changedAny(previous, next, keys) {
   return keys.some((key) => !equalSetting(previous?.[key], next?.[key]));
+}
+
+function usageConfigFingerprint(config = {}) {
+  return JSON.stringify(USAGE_CONFIG_FINGERPRINT_KEYS.map((key) => [key, config?.[key] ?? null]));
 }
 
 function normalizeAllTimeSince(value, fallback = DEFAULT_ALL_TIME_SINCE) {
@@ -240,10 +262,12 @@ function classifySettingsChange(previous = {}, next = {}) {
 
 module.exports = {
   LIMIT_PROVIDER_SETTING_KEYS,
+  USAGE_STRUCTURAL_KEYS,
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
   normalizeAllTimeSince,
+  usageConfigFingerprint,
   usageConfigFromSettings
 };

@@ -353,6 +353,38 @@ function normalizeWorkspaceKind(value) {
   return String(value || '').trim().toLowerCase() === 'personal' ? 'personal' : '';
 }
 
+function normalizeAdapterId(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return /^[a-z0-9-]{1,32}$/u.test(raw) ? raw : '';
+}
+
+function normalizeProviderUsageSummary(input) {
+  if (!input || typeof input !== 'object') return null;
+  const periodValue = String(input.period || '').trim();
+  const period = ['today', 'week', 'month', 'allTime'].includes(periodValue) ? periodValue : '';
+  const count = (value) => {
+    const number = numberOrNull(value);
+    return number === null ? null : Math.max(0, Math.trunc(number));
+  };
+  const nonNegative = (value) => {
+    const number = numberOrNull(value);
+    return number === null ? null : Math.max(0, number);
+  };
+  const summary = {
+    period,
+    requests: count(input.requests),
+    inputTokens: count(input.inputTokens ?? input.input_tokens),
+    outputTokens: count(input.outputTokens ?? input.output_tokens),
+    cacheReadTokens: count(input.cacheReadTokens ?? input.cache_read_tokens),
+    cacheCreationTokens: count(input.cacheCreationTokens ?? input.cache_creation_tokens),
+    totalTokens: count(input.totalTokens ?? input.total_tokens),
+    standardCost: nonNegative(input.standardCost ?? input.standard_cost),
+    actualCost: nonNegative(input.actualCost ?? input.actual_cost),
+    averageDurationMs: nonNegative(input.averageDurationMs ?? input.average_duration_ms)
+  };
+  return Object.values(summary).some((value) => value !== null && value !== '') ? summary : null;
+}
+
 function normalizeOpenCodeAccountKeyAliases(values, accountKey = '') {
   if (!Array.isArray(values)) return [];
   const canonical = String(accountKey || '').trim();
@@ -388,6 +420,8 @@ function normalizeLimitProvider(input) {
     windows.sort((a, b) => WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind));
   }
   const balance = normalizeProviderBalance(input.balance);
+  const adapterId = provider === 'thirdparty' ? normalizeAdapterId(input.adapterId ?? input.adapter_id) : '';
+  const usageSummary = normalizeProviderUsageSummary(input.usageSummary ?? input.usage_summary);
   // Compatibility shim: devices older than the credits-window change post a
   // balance with no window at all, so every renderer would drop the row.
   // Synthesize the window here — the one funnel both the local collector and
@@ -405,6 +439,7 @@ function normalizeLimitProvider(input) {
   }
   return {
     provider,
+    ...(adapterId ? { adapterId } : {}),
     accountKey,
     ...(provider === 'opencode' && input.webAccountKey
       ? { webAccountKey: String(input.webAccountKey) }
@@ -422,6 +457,7 @@ function normalizeLimitProvider(input) {
     windows,
     balanceUsd: numberOrNull(input.balanceUsd),
     balance,
+    ...(usageSummary ? { usageSummary } : {}),
     resetCredits: normalizeProviderResetCredits(input.resetCredits ?? input.rateLimitResetCredits ?? input.rate_limit_reset_credits),
     region: normalizeRegion(input.region)
   };
@@ -880,6 +916,7 @@ function publicLimits(limits) {
       accountLabel,
       planLabel,
       workspaceKind,
+      usageSummary,
       ...provider
     }) => {
       if (!provider.balance) return provider;
@@ -912,6 +949,7 @@ module.exports = {
   normalizeLimitProvider,
   normalizeLimitsSummary,
   normalizeLimitWindow,
+  normalizeProviderUsageSummary,
   openCodeWindowKey,
   publicLimits,
   syncLimits

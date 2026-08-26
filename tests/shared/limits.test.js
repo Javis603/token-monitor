@@ -283,6 +283,7 @@ test('aggregateLimits preserves distinct OpenRouter accounts and public stats sc
 test('aggregateLimits preserves distinct Third-party API accounts while keeping Base URLs off the wire', () => {
   const providers = ['工作', 'personal'].map((accountName, index) => normalizeLimitProvider({
     provider: 'thirdparty',
+    adapterId: index === 0 ? 'sub2api' : 'custom',
     accountKey: `sha256:thirdparty-${index}`,
     accountName,
     accountLabel: accountName,
@@ -305,7 +306,17 @@ test('aggregateLimits preserves distinct Third-party API accounts while keeping 
       requestCount: index + 10,
       quotaGroup: index === 0 ? 'default' : 'vip',
       expiresAt: '2027-01-15T08:00:00.000Z'
-    }
+    },
+    ...(index === 0 ? {
+      usageSummary: {
+        period: 'month',
+        requests: 10,
+        inputTokens: 200,
+        standardCost: 12,
+        actualCost: 3,
+        averageDurationMs: 400
+      }
+    } : {})
   }));
   const aggregate = aggregateLimits([{
     deviceId: 'macbook',
@@ -318,6 +329,8 @@ test('aggregateLimits preserves distinct Third-party API accounts while keeping 
   assert.equal(work.balance.requestCount, 10);
   assert.equal(work.balance.quotaGroup, 'default');
   assert.equal(work.balance.expiresAt, '2027-01-15T08:00:00.000Z');
+  assert.equal(work.adapterId, 'sub2api');
+  assert.equal(work.usageSummary.actualCost, 3);
   assert.equal(JSON.stringify(thirdparty).includes('http'), false);
 
   const publicPayload = publicLimits({ providers: thirdparty });
@@ -325,6 +338,7 @@ test('aggregateLimits preserves distinct Third-party API accounts while keeping 
   assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountName')));
   assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountLabel')));
   assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'planLabel')));
+  assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'usageSummary')));
   assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider.balance, 'quotaGroup')));
   assert.ok(publicPayload.providers.every((provider) => Object.hasOwn(provider.balance, 'requestCount')));
 });

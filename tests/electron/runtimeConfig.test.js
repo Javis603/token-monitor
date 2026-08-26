@@ -6,18 +6,134 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  USAGE_STRUCTURAL_KEYS,
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
   normalizeAllTimeSince,
+  usageConfigFingerprint,
   usageConfigFromSettings
 } = require('../../src/electron/runtimeConfig');
+
+const BASE_USAGE_SETTINGS = Object.freeze({
+  clients: 'claude',
+  allTimeSince: '2024-01-01',
+  collectionIntervalMs: 5 * 60 * 1000,
+  collectionMode: 'smart',
+  historyEnabled: true,
+  historyIntervalMs: 15 * 60 * 1000,
+  sessionUsageArchiveEnabled: true,
+  projectsEnabled: true,
+  wslScanEnabled: true
+});
+
+function fingerprintContext(settings) {
+  const mode = settings.collectionMode;
+  return {
+    intervalMs: mode === 'smart' ? 10 * 60 * 1000 : settings.collectionIntervalMs,
+    historyIntervalMs: settings.historyIntervalMs,
+    watchEnabled: mode !== 'interval',
+    watchTriggersCollection: mode === 'live',
+    intervalRequiresActivity: mode === 'smart'
+  };
+}
+
+function fingerprintForSettings(settings) {
+  return usageConfigFingerprint(usageConfigFromSettings(settings, fingerprintContext(settings)));
+}
 
 test('all-time dates are normalized before entering the usage runtime', () => {
   assert.equal(normalizeAllTimeSince('2026-02-28'), '2026-02-28');
   assert.equal(normalizeAllTimeSince('2026-02-30'), '2024-01-01');
   assert.equal(normalizeAllTimeSince('not-a-date'), '2024-01-01');
+});
+
+test('usage config fingerprint tracks only effective structural values', () => {
+  const base = {
+    clients: 'claude,codex',
+    historyEnabled: true,
+    hiddenClients: 'codex'
+  };
+  const context = {
+    intervalMs: 10 * 60 * 1000,
+    historyIntervalMs: 15 * 60 * 1000,
+    watchEnabled: true,
+    watchTriggersCollection: false,
+    intervalRequiresActivity: true
+  };
+  const baseConfig = usageConfigFromSettings(base, {
+    ...context,
+    onError: () => 'first',
+    logger: () => 'first'
+  });
+  const displayConfig = usageConfigFromSettings({ ...base, hiddenClients: 'claude', glassBlur: 80 }, {
+    ...context,
+    onError: () => 'second',
+    logger: () => 'second'
+  });
+  assert.equal(
+    usageConfigFingerprint(baseConfig),
+    usageConfigFingerprint(displayConfig),
+    'callbacks and display-only settings do not identify collection work'
+  );
+  assert.notEqual(
+    usageConfigFingerprint(usageConfigFromSettings(base, context)),
+    usageConfigFingerprint(usageConfigFromSettings({ ...base, clients: 'claude' }, context))
+  );
+});
+
+test('usage config fingerprint dedupes raw settings with the same effective runtime', () => {
+  const smartContext = {
+    intervalMs: 10 * 60 * 1000,
+    historyIntervalMs: 15 * 60 * 1000,
+    watchEnabled: true,
+    watchTriggersCollection: false,
+    intervalRequiresActivity: true
+  };
+  const omittedDefaults = usageConfigFromSettings({ collectionIntervalMs: 5 * 60 * 1000 }, smartContext);
+  const explicitDefaults = usageConfigFromSettings({
+    collectionIntervalMs: 30 * 60 * 1000,
+    historyEnabled: true,
+    sessionUsageArchiveEnabled: true,
+    projectsEnabled: true,
+    wslScanEnabled: true
+  }, smartContext);
+
+  assert.equal(
+    usageConfigFingerprint(omittedDefaults),
+    usageConfigFingerprint(explicitDefaults),
+    'smart mode ignores raw intervals and explicit true defaults'
+  );
+  assert.notEqual(
+    usageConfigFingerprint(explicitDefaults),
+    usageConfigFingerprint(usageConfigFromSettings({ historyEnabled: false }, smartContext))
+  );
+});
+
+test('every usage structural setting maps to an effective fingerprint change', () => {
+  const cases = {
+    clients: { clients: 'claude,codex' },
+    allTimeSince: { allTimeSince: '2025-01-01' },
+    collectionIntervalMs: {
+      previous: { collectionMode: 'fixed' },
+      next: { collectionMode: 'fixed', collectionIntervalMs: 15 * 60 * 1000 }
+    },
+    collectionMode: { collectionMode: 'live' },
+    historyEnabled: { historyEnabled: false },
+    historyIntervalMs: { historyIntervalMs: 30 * 60 * 1000 },
+    sessionUsageArchiveEnabled: { sessionUsageArchiveEnabled: false },
+    projectsEnabled: { projectsEnabled: false },
+    wslScanEnabled: { wslScanEnabled: false }
+  };
+
+  assert.deepEqual(Object.keys(cases).sort(), [...USAGE_STRUCTURAL_KEYS].sort());
+  for (const [key, entry] of Object.entries(cases)) {
+    const previous = { ...BASE_USAGE_SETTINGS, ...(entry.previous || {}) };
+    const next = { ...previous, ...(entry.next || entry) };
+    assert.equal(classifySettingsChange(previous, next).usageStructural, true, key);
+    assert.notEqual(fingerprintForSettings(previous), fingerprintForSettings(next), key);
+  }
 });
 
 test('diagnostic configuration projects effective normalized values without credentials', () => {

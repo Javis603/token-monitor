@@ -127,6 +127,7 @@
         return {
           key: account.key || String(index),
           providerId: account.providerId || '',
+          iconId: account.iconId || '',
           name: account.name || '',
           color: account.color || '',
           lowestRemaining: Math.min(...windows.map((window) => window.remainingPercent ?? 100)),
@@ -224,7 +225,9 @@
     colors = {},
     limit = 3,
     sort = 'remaining',
-    accountName
+    accountName,
+    accountColor,
+    accountIcon
   } = {}) {
     const enabled = new Set((enabledProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
     const hidden = new Set((hiddenProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
@@ -239,7 +242,10 @@
           key: `${id}:${index}`,
           providerId: id,
           name: typeof accountName === 'function' ? accountName(provider, index, providerEntries) : label,
-          color: colors[id] || colors.default || '',
+          color: typeof accountColor === 'function'
+            ? accountColor(provider, id, colors[id] || colors.default || '')
+            : (colors[id] || colors.default || ''),
+          iconId: typeof accountIcon === 'function' ? accountIcon(provider, id) : id,
           windows: provider.windows || [],
           balance: provider.balance || null
         });

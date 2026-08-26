@@ -16,8 +16,7 @@
     grok: '../../../assets/icons/grok.svg',
     micode: '../../../assets/icons/xiaomi.svg',
     zcode: '../../../assets/icons/zai.svg',
-    zaiteam: '../../../assets/icons/zai.svg',
-    thirdparty: '../../../assets/icons/newapi.svg'
+    zaiteam: '../../../assets/icons/zai.svg'
   };
 
   function trayProviderIconSources(clientIds) {

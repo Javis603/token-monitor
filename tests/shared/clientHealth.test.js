@@ -349,6 +349,25 @@ test('Claude source roots follow CLAUDE_CONFIG_DIR like tokscale', () => {
   }
 });
 
+test('self-synced cache roots follow the Tokscale config dir on Windows', () => {
+  const homeDir = 'C:\\Users\\alice';
+  const appData = 'C:\\Users\\alice\\AppData\\Roaming';
+  const roots = clientSourceRoots('cursor,antigravity', {
+    homeDir,
+    platform: 'win32',
+    env: { APPDATA: appData }
+  });
+
+  assert.deepEqual(roots.cursor, [{
+    id: 'tokscale-cursor-cache',
+    dir: path.join(appData, 'tokscale', 'cursor-cache')
+  }]);
+  assert.deepEqual(roots.antigravity, [{
+    id: 'tokscale-antigravity-cache',
+    dir: path.join(appData, 'tokscale', 'antigravity-cache')
+  }]);
+});
+
 test('labelling roots keeps diagnostics separate from watcher roots', () => {
   const roots = clientSourceRoots(KNOWN_CLIENTS);
   const candidates = clientWatchCandidates(KNOWN_CLIENTS);

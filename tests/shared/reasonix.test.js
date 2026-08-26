@@ -151,7 +151,7 @@ test('Reasonix model prefix normalization is scoped to explicit client context',
   assert.equal(normalized.clientModels.codex['deepseek/deepseek-v3'], 3);
 });
 
-test('Reasonix reasoning is additive without changing other client semantics', () => {
+test('Reasonix and latest Tokscale Codex reasoning close over the public output bucket', () => {
   const reasonix = extractUsageFromTokscale({ entries: [REASONIX_ROW] });
   assert.equal(reasonix.totalTokens, 140);
   assert.equal(reasonix.cacheReadTokens, 20);
@@ -167,16 +167,23 @@ test('Reasonix reasoning is additive without changing other client semantics', (
   assert.equal(reasonix.modelCosts['deepseek-chat'], 0.25);
   assert.equal(reasonix.clientModelCosts.reasonix['deepseek-chat'], 0.25);
 
-  for (const client of ['codex', 'claude']) {
-    const period = extractUsageFromTokscale({ entries: [{
-      ...REASONIX_ROW,
-      client,
-      model: client === 'codex' ? 'gpt-5' : 'claude-sonnet-4'
-    }] });
-    assert.equal(period.totalTokens, 130, `${client} reasoning must remain informational`);
-    assert.equal(period.outputTokens, 30, `${client} output-family must remain unchanged`);
-    assert.equal(period.clientOutputs[client], 30, `${client} output-family must remain unchanged`);
-  }
+  const codex = extractUsageFromTokscale({ entries: [{
+    ...REASONIX_ROW,
+    client: 'codex',
+    model: 'gpt-5'
+  }] });
+  assert.equal(codex.totalTokens, 140);
+  assert.equal(codex.outputTokens, 40);
+  assert.equal(codex.clientOutputs.codex, 40);
+
+  const claude = extractUsageFromTokscale({ entries: [{
+    ...REASONIX_ROW,
+    client: 'claude',
+    model: 'claude-sonnet-4'
+  }] });
+  assert.equal(claude.totalTokens, 130, 'Claude reasoning remains informational');
+  assert.equal(claude.outputTokens, 30);
+  assert.equal(claude.clientOutputs.claude, 30);
 });
 
 test('Reasonix partitions merge exactly across aggregate, client, and model totals', () => {
@@ -190,7 +197,7 @@ test('Reasonix partitions merge exactly across aggregate, client, and model tota
   assert.deepEqual(bundle.byClient.reasonix.sessions, {});
 });
 
-test('Reasonix history uses additive reasoning while existing clients stay unchanged', () => {
+test('history folds latest Tokscale disjoint reasoning for Reasonix and Codex', () => {
   const graph = {
     contributions: [{
       date: '2026-08-07',
@@ -201,25 +208,25 @@ test('Reasonix history uses additive reasoning while existing clients stay uncha
     }]
   };
   const parsed = parseGraphResult(graph);
-  assert.equal(parsed.contributions[0].tokens, 270);
+  assert.equal(parsed.contributions[0].tokens, 280);
   assert.equal(parsed.contributions[0].perClient.reasonix.tokens, 140);
-  assert.equal(parsed.contributions[0].perClient.codex.tokens, 130);
+  assert.equal(parsed.contributions[0].perClient.codex.tokens, 140);
   assert.equal(parsed.contributions[0].perModel['deepseek-chat'].tokens, 140);
-  assert.equal(parsed.contributions[0].perModel['gpt-5'].tokens, 130);
-  assert.equal(parsed.contributions[0].outputTokens, 70);
+  assert.equal(parsed.contributions[0].perModel['gpt-5'].tokens, 140);
+  assert.equal(parsed.contributions[0].outputTokens, 80);
   assert.equal(parsed.contributions[0].perClient.reasonix.outputTokens, 40);
-  assert.equal(parsed.contributions[0].perClient.codex.outputTokens, 30);
+  assert.equal(parsed.contributions[0].perClient.codex.outputTokens, 40);
   assert.equal(parsed.contributions[0].messages, 1);
   assert.equal(parsed.contributions[0].perClient.reasonix.messages, 0);
   assert.equal(parsed.contributions[0].perClient.codex.messages, 1);
   const history = normalizeHistory(parsed, { todayKey: '2026-08-07' });
-  assert.equal(history.daily[0].tokens, 270);
+  assert.equal(history.daily[0].tokens, 280);
   assert.equal(history.daily[0].perClient.reasonix.tokens, 140);
   assert.equal(history.daily[0].perModel['deepseek-chat'].tokens, 140);
   assert.equal(history.daily[0].messages, 1);
   assert.equal(history.daily[0].perClient.reasonix.messages, 0);
   assert.equal(history.summary.messages, 1);
-  assert.equal(history.summary.totalTokens, 270);
+  assert.equal(history.summary.totalTokens, 280);
 });
 
 test('Reasonix daily history archive preserves its additive total', () => {

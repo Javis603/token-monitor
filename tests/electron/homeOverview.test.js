@@ -435,6 +435,24 @@ test('homeLimitAccountsForProviders can preserve configured provider order over 
   assert.deepEqual(rows.map((row) => row.providerId), ['grok', 'claude']);
 });
 
+test('homeLimitAccountsForProviders preserves per-account adapter visuals', () => {
+  const rows = homeLimitAccountsForProviders({
+    providers: [{
+      provider: 'thirdparty',
+      adapterId: 'sub2api',
+      windows: [{ kind: 'billing', metric: 'credits', remaining: 12.5, currency: 'USD' }]
+    }],
+    providerOptions: [{ id: 'thirdparty', label: 'Third-party APIs' }],
+    enabledProviderIds: ['thirdparty'],
+    colors: { thirdparty: '#8090A6' },
+    accountColor: (provider, _id, fallback) => provider.adapterId === 'sub2api' ? '#39D9E7' : fallback,
+    accountIcon: (provider) => provider.adapterId
+  });
+
+  assert.equal(rows[0].color, '#39D9E7');
+  assert.equal(rows[0].iconId, 'sub2api');
+});
+
 test('homeTrendSummary returns the peak value and real date anchors', () => {
   const summary = homeTrendSummary([
     { date: '2026-05-07', tokens: 20 },
