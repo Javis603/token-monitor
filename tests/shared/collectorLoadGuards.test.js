@@ -2257,6 +2257,9 @@ test('collectUsageOnce scans tokscale for antigravity-cli when antigravity is tr
 });
 
 test('cursor sync runs at most once per throttle window across ticks', async () => {
+  const tmp = withTmpHome([]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   childProcess.spawn = recordingSpawn([]);
@@ -2283,11 +2286,16 @@ test('cursor sync runs at most once per throttle window across ticks', async () 
     childProcess.spawn = originalSpawn;
     cursorAuth.readActiveAccount = originalReadActiveAccount;
     cursorAuth.runCursorSync = originalRunCursorSync;
+    os.homedir = originalHomedir;
     delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
 test('cursor sync gets one discovery attempt without saved credentials', async () => {
+  const tmp = withTmpHome([]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   childProcess.spawn = recordingSpawn([]);
@@ -2314,11 +2322,16 @@ test('cursor sync gets one discovery attempt without saved credentials', async (
     childProcess.spawn = originalSpawn;
     cursorAuth.readActiveAccount = originalReadActiveAccount;
     cursorAuth.runCursorSync = originalRunCursorSync;
+    os.homedir = originalHomedir;
     delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
 test('cursor sync failure metadata reaches client health without stderr or paths', async () => {
+  const tmp = withTmpHome([]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   childProcess.spawn = recordingSpawn([]);
@@ -2354,7 +2367,82 @@ test('cursor sync failure metadata reaches client health without stderr or paths
     childProcess.spawn = originalSpawn;
     cursorAuth.readActiveAccount = originalReadActiveAccount;
     cursorAuth.runCursorSync = originalRunCursorSync;
+    os.homedir = originalHomedir;
     delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a Cursor report with implicit sync blocks logout until the report closes', async () => {
+  const tmp = withTmpHome([]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const cursorAuth = require('../../src/shared/cursorAuth');
+  const originalReadActiveAccount = cursorAuth.readActiveAccount;
+  const originalRunCursorSync = cursorAuth.runCursorSync;
+  let reportChild = null;
+  let reportStarted;
+  const reportStart = new Promise((resolve) => { reportStarted = resolve; });
+  let reportCalls = 0;
+  let logoutStarted = false;
+
+  childProcess.spawn = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    reportCalls += 1;
+    if (reportCalls === 1) {
+      reportChild = child;
+      reportStarted();
+    } else {
+      setImmediate(() => {
+        child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+        child.emit('close', 0);
+      });
+    }
+    return child;
+  };
+  cursorAuth.readActiveAccount = () => ({ accessToken: 'token' });
+  cursorAuth.runCursorSync = async () => { throw new Error('explicit sync failed'); };
+
+  try {
+    const { collectUsageOnce } = freshCollector();
+    const collection = collectUsageOnce({
+      clients: 'cursor',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 60_000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      forceSelfSync: true,
+      historyEnabled: false,
+      limitsEnabled: false
+    });
+    await reportStart;
+
+    const logout = cursorAuth.runCursorLogout({
+      home: tmp,
+      accountId: 'user_b',
+      runSubcommand: async () => { logoutStarted = true; }
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(logoutStarted, false, 'logout waits behind a report that may be syncing Cursor');
+
+    reportChild.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+    reportChild.emit('close', 0);
+    await logout;
+    assert.equal(logoutStarted, true);
+    await collection;
+  } finally {
+    childProcess.spawn = originalSpawn;
+    cursorAuth.readActiveAccount = originalReadActiveAccount;
+    cursorAuth.runCursorSync = originalRunCursorSync;
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 

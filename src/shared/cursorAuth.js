@@ -11,44 +11,11 @@ const {
   terminationUnconfirmedError
 } = require('./subprocessTermination');
 const { classifyClientSyncDetailCode } = require('./clientHealth');
+const { withCursorLifecycle } = require('./cursorLifecycle');
 
 const MAX_SYNC_EXIT_CODE = 2 ** 31 - 1;
 const MAX_TOKSCALE_STDERR_LENGTH = 64 * 1024;
 const CURSOR_EXPLICIT_SYNC_TIMEOUT_MS = 150_000;
-
-// Tokscale sync snapshots the credentials store before writing account caches.
-// Keep every credentials/cache mutation in one process-local lane so a stale
-// sync cannot recreate cache files after login or logout changes the account set.
-let cursorLifecycleActive = false;
-const cursorLifecycleQueue = [];
-
-function serializeCursorLifecycle(operation) {
-  return new Promise((resolve, reject) => {
-    const run = () => {
-      cursorLifecycleActive = true;
-      let result;
-      try {
-        result = operation();
-      } catch (error) {
-        finish(reject, error);
-        return;
-      }
-      Promise.resolve(result).then(
-        (value) => finish(resolve, value),
-        (error) => finish(reject, error)
-      );
-    };
-    const finish = (settle, value) => {
-      settle(value);
-      const next = cursorLifecycleQueue.shift();
-      if (next) next();
-      else cursorLifecycleActive = false;
-    };
-
-    if (cursorLifecycleActive) cursorLifecycleQueue.push(run);
-    else run();
-  });
-}
 
 function annotateSyncError(error, failureStage, exitCode = null) {
   const target = error instanceof Error ? error : new Error(String(error || 'Cursor sync failed'));
@@ -293,7 +260,7 @@ async function runCursorLogin(token, { label = '', home = os.homedir() } = {}) {
   const file = credentialsPath(home);
   const trimmedLabel = typeof label === 'string' ? label.trim() : '';
 
-  return serializeCursorLifecycle(() => {
+  return withCursorLifecycle(() => {
     let store = readCredentialsStore({ home });
     if (!store || typeof store.accounts !== 'object' || store.accounts === null) {
       store = { version: 1, activeAccountId: accountId, accounts: {} };
@@ -324,26 +291,30 @@ async function runCursorLogin(token, { label = '', home = os.homedir() } = {}) {
 
     writeCredentialsStoreAtomic(file, store);
     return accountId;
-  });
+  }, { home });
 }
 
 async function runCursorLogout({
   accountId = '',
   label = '',
+  home = os.homedir(),
   timeoutMs = 30000,
   runSubcommand = runTokscaleSubcommand,
   ...options
 } = {}) {
   const target = String(accountId || label || '').trim();
   const args = target ? ['logout', '--name', target] : ['logout'];
-  return serializeCursorLifecycle(() => runSubcommand(args, { ...options, timeoutMs }));
+  return withCursorLifecycle(
+    () => runSubcommand(args, { ...options, timeoutMs }),
+    { home, signal: options.signal }
+  );
 }
 
 async function runCursorSync(options = {}) {
-  return serializeCursorLifecycle(() => runTokscaleSubcommand(
+  return withCursorLifecycle(() => runTokscaleSubcommand(
     ['sync', '--json'],
     { ...options, timeoutMs: options.timeoutMs ?? CURSOR_EXPLICIT_SYNC_TIMEOUT_MS }
-  ));
+  ), { home: options.home, signal: options.signal });
 }
 
 function runCursorStatus(options = {}) {
