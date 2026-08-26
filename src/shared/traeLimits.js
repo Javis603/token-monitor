@@ -74,18 +74,30 @@ function parseTraeEntUsage(body) {
     const rawLimit = pack?.entitlement_base_info?.quota?.credits_limit
       ?? pack?.entitlementBaseInfo?.quota?.creditsLimit;
     const rawUsed = pack?.usage?.credits_amount ?? pack?.usage?.creditsAmount;
+    const quota = pack?.entitlement_base_info?.quota ?? pack?.entitlementBaseInfo?.quota;
     const packLimit = numberOrNull(rawLimit);
     const packUsed = numberOrNull(rawUsed);
 
+    // A pack whose quota carries no credits_limit is a feature entitlement
+    // (free-tier solo toggles), not balance, and contributes nothing. Usage on
+    // such a pack — or a pack with no quota at all — is a shape whose spend we
+    // cannot sum, so a partial aggregate stays unsafe to publish.
+    if (packLimit === null) {
+      if (quota && packUsed === null) continue;
+      throw new Error('Trae credits response contains an unusable active entitlement pack');
+    }
+    // An untouched pack reports an empty usage object: zero consumed, not malformed.
+    const consumed = packUsed === null ? 0 : packUsed;
+
     // Zero-limit rows do not contribute to the spendable balance. Any other
     // unusable row makes a partial aggregate unsafe to publish.
-    if (packLimit === 0 && packUsed === 0) continue;
+    if (packLimit === 0 && consumed === 0) continue;
     activePackCount += 1;
-    if (packLimit === null || packUsed === null || packLimit <= 0 || packUsed < 0) {
+    if (packLimit <= 0 || consumed < 0) {
       throw new Error('Trae credits response contains an unusable active entitlement pack');
     }
     limit += packLimit;
-    used += packUsed;
+    used += consumed;
   }
 
   if (activePackCount === 0) throw new Error('Trae credits response has no usable entitlement packs');

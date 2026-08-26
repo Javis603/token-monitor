@@ -91,6 +91,31 @@ test('parseTraeEntUsage preserves overage while clamping the spendable balance',
   assert.equal(exhausted.window.remainingPercent, 0);
 });
 
+test('parseTraeEntUsage skips feature entitlements and treats untouched packs as unconsumed', () => {
+  // Real-account shape: a free-tier entitlement toggles solo features without a
+  // credits_limit, and a pack nobody has drawn from yet reports an empty usage.
+  const parsed = parseTraeEntUsage({
+    user_entitlement_pack_list: [
+      { entitlement_base_info: { quota: { credits_limit: 2000 } }, usage: {} },
+      { entitlement_base_info: { quota: { credits_limit: 500, enable_solo_lite: true } }, usage: { credits_amount: 500 } },
+      { entitlement_base_info: { quota: { enable_solo_agent: true, enable_solo_lite: true } }, usage: {} }
+    ]
+  });
+  assert.equal(parsed.packCount, 2);
+  assert.equal(parsed.window.limit, 2500);
+  assert.equal(parsed.window.used, 500);
+  assert.equal(parsed.window.remaining, 2000);
+});
+
+test('parseTraeEntUsage fails closed when a feature entitlement reports spend', () => {
+  assert.throws(() => parseTraeEntUsage({
+    user_entitlement_pack_list: [
+      pack(100, 10),
+      { entitlement_base_info: { quota: { enable_solo_lite: true } }, usage: { credits_amount: 5 } }
+    ]
+  }), /unusable active/);
+});
+
 test('fetchTraeLimits returns notConfigured without a token', async () => {
   const provider = await fetchTraeLimits({}, { env: {}, now: () => 0 });
   assert.equal(provider.provider, 'trae');
