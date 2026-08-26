@@ -11,14 +11,16 @@
 # is byte-equivalent to a real release build. Keep them in sync only for as long
 # as this file exists, which should be days.
 #
-# Trigger by pushing a tag, which never matches release.yml's 'v*':
-#   git tag winbuild-1 && git push origin winbuild-1
-# Delete the tag afterwards: git push origin :winbuild-1
+# Trigger by pushing a tag, which never matches release.yml's 'v*'. The pattern
+# is scoped to this issue so no unrelated tag can reach the production signing
+# policy while this file exists:
+#   git tag winbuild-487-1 && git push origin winbuild-487-1
+# Delete the tag afterwards: git push origin :winbuild-487-1
 name: Test signed Windows build
 
 on:
   push:
-    tags: ['winbuild-*']
+    tags: ['winbuild-487-*']
 
 jobs:
   build:
@@ -160,12 +162,14 @@ jobs:
           }
       - name: Verify updater artifact names
         run: npm run verify:release-artifact-names
+      # Installer only. The portable target has no installer step, so it never
+      # gets the ACL grant and would still crash on the affected machine. Handing
+      # the tester a directory containing both invites them to launch the wrong
+      # binary and poison the A/B. The portable exe is still signed above,
+      # because SignPath's artifact configuration requires both in one request.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: token-monitor-win-test
+          name: token-monitor-win-pr522-test
           if-no-files-found: error
           retention-days: 30
-          path: |
-            dist/*.exe
-            dist/latest.yml
-            dist/*.blockmap
+          path: dist/${{ steps.prepare-unsigned-win.outputs.installer }}
