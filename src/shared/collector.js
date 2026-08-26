@@ -42,6 +42,7 @@ const { claudeSessionRoots } = require('./claudePaths');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { buildMinimaxHistoryGraph, buildMinimaxPeriods, collectMinimaxRows } = require('./minimaxUsage');
 const {
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
@@ -1390,6 +1391,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
   }
+  if (options.minimaxGraph) {
+    rawGraphs.push(options.minimaxGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.minimaxGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -1484,6 +1489,7 @@ async function collectUsageOnce(options) {
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
+  const includesMinimax = normalizedClients.split(',').includes('minimax');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -1513,6 +1519,9 @@ async function collectUsageOnce(options) {
   let qoderCnPeriods = null;
   let qoderCnRows = null;
   let qoderCnPricing = null;
+  let minimaxPeriods = null;
+  let minimaxRows = null;
+  let minimaxPricing = null;
   let qoderCnPeriodReadFailed = false;
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
@@ -1557,6 +1566,26 @@ async function collectUsageOnce(options) {
         };
       } catch (err) {
         if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
+      }
+    }
+    // MiniMax records complete per-message usage in its own transcripts, but
+    // tokscale has no reader for them, so parse them here the way Proma is.
+    if (includesMinimax && (!targetRequested || targetClients.includes('minimax'))) {
+      try {
+        minimaxRows = collectMinimaxRows();
+        minimaxPricing = await resolveModelPricing(minimaxRows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        });
+        const minimaxJson = buildMinimaxPeriods({ now: collectedAt, allTimeSince, rows: minimaxRows, pricingByModel: minimaxPricing });
+        minimaxPeriods = {
+          today: extractUsageFromTokscale(minimaxJson.today),
+          month: extractUsageFromTokscale(minimaxJson.month),
+          allTime: extractUsageFromTokscale(minimaxJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`minimax parse failed: ${err.message}`);
       }
     }
     if (includesQoderCn && (!targetRequested || targetClients.includes('qodercn'))) {
@@ -1629,6 +1658,7 @@ async function collectUsageOnce(options) {
         }
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
+      if (minimaxPeriods) freshPartitions.minimax = minimaxPeriods.today;
       if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
       if (qoderCnPeriodReadFailed && anchor.todayPartitions?.qodercn) {
         // A transient local.db read failure must not turn the existing Qoder CN
@@ -1689,6 +1719,12 @@ async function collectUsageOnce(options) {
       propagateTodayProjects(today, [month, allTime]);
     } else {
       decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
+    }
+    if (minimaxPeriods && !anchorUsed) {
+      today = mergePeriods(today, minimaxPeriods.today);
+      month = mergePeriods(month, minimaxPeriods.month);
+      allTime = mergePeriods(allTime, minimaxPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), minimax: minimaxPeriods.today };
     }
     if (promaPeriods && !anchorUsed) {
       today = mergePeriods(today, promaPeriods.today);
@@ -1912,6 +1948,7 @@ async function collectUsageOnce(options) {
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
+      minimaxGraph: includesMinimax ? buildMinimaxHistoryGraph({ rows: minimaxRows || collectMinimaxRows(), pricingByModel: minimaxPricing || {} }) : null,
       qoderCnGraph: historyQoderCnGraph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
@@ -2337,6 +2374,8 @@ function clientSourceRoots(clientsCsv, options = {}) {
   add('workbuddy', ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')]);
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
+  // MiniMax — session transcripts at ~/.minimax/v2/sessions/<Y>/<M>/<D>/<session>/messages.jsonl
+  add('minimax', ['minimax-sessions', path.join(home, '.minimax', 'v2', 'sessions')]);
   // Qoder CN — SQLite DB under the platform Application Support dir.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform: process.platform, env: process.env });
   add('qodercn', ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]));
