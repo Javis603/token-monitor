@@ -10021,14 +10021,6 @@ function renderToolPreferencesNow() {
     name.className = 'tool-preference-name';
     name.textContent = label;
     labelGroup.append(name);
-    const noteKey = TOOL_PREFERENCE_NOTES[id];
-    if (noteKey) {
-      labelGroup.classList.add('has-note');
-      const note = document.createElement('div');
-      note.className = 'tool-preference-note';
-      note.textContent = t(noteKey);
-      labelGroup.append(note);
-    }
     if (enabled.has(id)) {
       // A tracked client with no reported status yet (first collect still running)
       // reads as "waiting for data" rather than a bare blank.
