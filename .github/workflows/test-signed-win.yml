@@ -1,0 +1,171 @@
+# TEMPORARY. Delete this file before #522 is merged.
+#
+# Produces a SignPath-signed Windows installer from a branch so #487's reporter
+# can test the install-directory ACL grant on the machine that actually
+# reproduces the crash. Deliberately a separate file rather than a trigger added
+# to release.yml: this workflow has no publish job, so it cannot create a GitHub
+# release or upload latest.yml no matter what it is pointed at, and removing it
+# is a file deletion instead of an edit to the release pipeline.
+#
+# The Windows steps below are copied verbatim from release.yml so the artifact
+# is byte-equivalent to a real release build. Keep them in sync only for as long
+# as this file exists, which should be days.
+#
+# Trigger by pushing a tag, which never matches release.yml's 'v*':
+#   git tag winbuild-1 && git push origin winbuild-1
+# Delete the tag afterwards: git push origin :winbuild-1
+name: Test signed Windows build
+
+on:
+  push:
+    tags: ['winbuild-*']
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      # Must run before any packaging step: those bundle whatever bytes are on
+      # disk under node_modules/@tokscale at the time they run.
+      - name: Ensure vendored tokscale (DSH bridge)
+        run: node scripts/ensure-vendored-tokscale.js
+      - name: Verify vendored tokscale (DSH bridge)
+        run: node scripts/verify-vendored-tokscale.js
+      - name: Verify Electron packaging version
+        run: |
+          node -e "const config = require('./scripts/electron-builder.config.js'); const installed = require('electron/package.json').version; const effective = config.electronVersion || installed; console.log('Electron packaging version:', effective, '(installed:', installed + ')'); if (effective !== installed) throw new Error('Electron packaging version mismatch: expected ' + installed + ', got ' + effective);"
+      - name: Build unpacked Windows application
+        run: npm run dist:win:dir
+      - name: Write Windows updater configuration
+        run: node scripts/signpath-windows-artifacts.js write-update-config dist/win-unpacked
+      - name: Prepare Windows application for signing
+        id: prepare-unsigned-win-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/signpath-windows-artifacts.js prepare-application \
+            dist/win-unpacked "$RUNNER_TEMP/signpath-application-input" >> "$GITHUB_OUTPUT"
+      - name: Upload unsigned Windows application
+        id: upload-unsigned-win-app
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned-windows-application
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          path: ${{ runner.temp }}/signpath-application-input
+      - name: Code-sign Windows application (SignPath)
+        uses: SignPath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd # v2.2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: 8bf2856b-5fb0-4c78-ba99-90931fcce837
+          project-slug: token-monitor
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: application
+          github-artifact-id: ${{ steps.upload-unsigned-win-app.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: dist/signpath-application-output
+          parameters: |
+            version: ${{ toJSON(steps.prepare-unsigned-win-app.outputs.product_version) }}
+      - name: Apply signed Windows application
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/signpath-windows-artifacts.js apply-application \
+            dist/win-unpacked dist/signpath-application-output
+      - name: Verify Windows application Authenticode signature
+        shell: pwsh
+        run: |
+          $application = Get-Item -LiteralPath (Join-Path 'dist/win-unpacked' '${{ steps.prepare-unsigned-win-app.outputs.application }}') -ErrorAction Stop
+          $signature = Get-AuthenticodeSignature -FilePath $application.FullName
+          $subject = $signature.SignerCertificate.Subject
+          Write-Output "$($application.Name) — Status: $($signature.Status), Signer: $subject"
+          if ($signature.Status -ne 'Valid') {
+            throw "$($application.Name) Authenticode status is $($signature.Status), expected Valid"
+          }
+          if ($subject -notlike '*SignPath Foundation*') {
+            throw "$($application.Name) has unexpected signer: $subject"
+          }
+          if (-not $signature.TimeStamperCertificate) {
+            throw "$($application.Name) has no Authenticode timestamp"
+          }
+      - name: Package signed Windows application
+        run: npm run dist:win:prepackaged
+      - name: Prepare Windows artifacts for signing
+        id: prepare-unsigned-win
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/signpath-windows-artifacts.js prepare-artifacts \
+            dist "$RUNNER_TEMP/signpath-artifact-input" >> "$GITHUB_OUTPUT"
+      - name: Upload unsigned Windows artifacts
+        id: upload-unsigned-win
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned-windows-artifacts
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          path: |
+            ${{ runner.temp }}/signpath-artifact-input/installer/${{ steps.prepare-unsigned-win.outputs.installer }}
+            ${{ runner.temp }}/signpath-artifact-input/portable/${{ steps.prepare-unsigned-win.outputs.portable }}
+      - name: Code-sign Windows artifacts (SignPath)
+        uses: SignPath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd # v2.2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: 8bf2856b-5fb0-4c78-ba99-90931fcce837
+          project-slug: token-monitor
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: initial
+          github-artifact-id: ${{ steps.upload-unsigned-win.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: dist/signpath-artifact-output
+          parameters: |
+            version: ${{ toJSON(steps.prepare-unsigned-win.outputs.version) }}
+      - name: Apply signed Windows artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/signpath-windows-artifacts.js apply-artifacts \
+            dist dist/signpath-artifact-output
+      - name: Verify Windows artifact Authenticode signatures
+        shell: pwsh
+        run: |
+          $expected = @(
+            '${{ steps.prepare-unsigned-win.outputs.installer }}',
+            '${{ steps.prepare-unsigned-win.outputs.portable }}'
+          )
+          foreach ($fileName in $expected) {
+            $artifact = Get-Item -LiteralPath (Join-Path 'dist' $fileName) -ErrorAction Stop
+            $signature = Get-AuthenticodeSignature -FilePath $artifact.FullName
+            $subject = $signature.SignerCertificate.Subject
+            Write-Output "$fileName — Status: $($signature.Status), Signer: $subject"
+            if ($signature.Status -ne 'Valid') {
+              throw "$fileName Authenticode status is $($signature.Status), expected Valid"
+            }
+            if ($subject -notlike '*SignPath Foundation*') {
+              throw "$fileName has unexpected signer: $subject"
+            }
+            if (-not $signature.TimeStamperCertificate) {
+              throw "$fileName has no Authenticode timestamp"
+            }
+          }
+      - name: Verify updater artifact names
+        run: npm run verify:release-artifact-names
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: token-monitor-win-test
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/*.exe
+            dist/latest.yml
+            dist/*.blockmap
