@@ -48,7 +48,7 @@ const supportedToolOrder = [
   'OpenCode',
   'Hermes Agent',
   'OpenClaw',
-  'Cursor',
+  'Cursor IDE / Cursor CLI',
   'Antigravity',
   'Cline',
   'Kimi CLI / Kimi Code / Kimi Work',

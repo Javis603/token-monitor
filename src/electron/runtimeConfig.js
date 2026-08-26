@@ -11,6 +11,15 @@ const { normalizeSyncUploadIntervalMs } = require('../shared/syncUploadInterval'
 
 const DEFAULT_ALL_TIME_SINCE = '2024-01-01';
 
+function normalizeCursorAccountIds(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value
+    .map((id) => String(id || '').trim())
+    .filter((id) => id && id.length <= 256))];
+}
+
+const normalizeCursorDisabledAccountIds = normalizeCursorAccountIds;
+
 const MODE_STRUCTURAL_KEYS = Object.freeze([
   'hubMode',
   'hubUrl',
@@ -53,11 +62,13 @@ const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitProviders',
   'limitsRefreshMode',
   'limitsRefreshMs',
+  'cursorDisabledAccountIds',
   'opencodeLocalLimitsEnabled'
 ]);
 const SINK_STRUCTURAL_KEYS = Object.freeze(['syncUploadIntervalMs']);
 const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   claude: ['claudeWebCookie'],
+  cursor: ['cursorDisabledAccountIds'],
   opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
   openrouter: ['openrouterProfiles'],
   deepseek: ['deepseekApiKey'],
@@ -145,6 +156,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     limitProviders: settings.limitProviders ?? context.defaultLimitProviders,
     limitsRefreshMode: normalizeLimitsRefreshMode(settings.limitsRefreshMode),
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
+    cursorDisabledAccountIds: normalizeCursorDisabledAccountIds(settings.cursorDisabledAccountIds),
     claudeWebCookie: settings.claudeWebCookie
       || env.CLAUDE_WEB_COOKIE
       || '',
@@ -268,6 +280,8 @@ module.exports = {
   envelopeFromSettings,
   limitsConfigFromSettings,
   normalizeAllTimeSince,
+  normalizeCursorAccountIds,
+  normalizeCursorDisabledAccountIds,
   usageConfigFingerprint,
   usageConfigFromSettings
 };

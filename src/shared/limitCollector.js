@@ -4062,9 +4062,15 @@ function createLimitsCollector(options = {}, deps = {}) {
   };
 }
 
-function hashCursorAccountKey(account) {
-  const seed = account.userId || account.id || 'cursor';
-  return hashKey('cursor', seed);
+function hashCursorAccountKey(account, resolvedUserId = '') {
+  const apiUserId = String(resolvedUserId || '').trim();
+  const storedUserId = String(account?.userId || '').trim();
+  const accountId = String(account?.id || '').trim();
+  const canonicalUserId = apiUserId
+    || storedUserId
+    || (/^user_[A-Za-z0-9_]+$/.test(accountId) ? accountId : '');
+  if (canonicalUserId) return hashKey('cursor', canonicalUserId);
+  return hashKey('cursor-local', accountId || 'unknown');
 }
 
 function formatCursorMembership(type) {
@@ -4100,13 +4106,10 @@ function cursorBillingWindow(label, fields = {}) {
   };
 }
 
-async function fetchCursorLimits(_options = {}, deps = {}) {
+async function fetchCursorAccountLimits(account, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const updatedAt = new Date(nowMs).toISOString();
-  const readActiveAccount = deps.readActiveAccount || cursorAuth.readActiveAccount;
   const probe = deps.probe || cursorProbe.probe;
-
-  const account = readActiveAccount();
   if (!account) {
     return {
       provider: 'cursor',
@@ -4223,13 +4226,36 @@ async function fetchCursorLimits(_options = {}, deps = {}) {
 
   return {
     provider: 'cursor',
-    accountKey: hashCursorAccountKey(account),
-    accountLabel: formatCursorMembership(usage.membershipType) || account.label || '',
+    accountKey: hashCursorAccountKey(account, result.user?.sub),
+    accountLabel: result.user?.email || account.label || formatCursorMembership(usage.membershipType) || '',
+    accountEmail: result.user?.email || '',
+    planLabel: formatCursorMembership(usage.membershipType),
     status: 'ok',
     source: 'web',
     updatedAt,
     windows
   };
+}
+
+async function fetchCursorLimits(options = {}, deps = {}) {
+  let accounts;
+  if (typeof deps.listAccounts === 'function') {
+    accounts = deps.listAccounts();
+  } else if (typeof deps.readActiveAccount === 'function') {
+    accounts = [deps.readActiveAccount()].filter(Boolean);
+  } else {
+    accounts = cursorAuth.listAccounts();
+  }
+  if (!Array.isArray(accounts) || accounts.length === 0) {
+    return fetchCursorAccountLimits(null, deps);
+  }
+  const disabled = new Set((Array.isArray(options.cursorDisabledAccountIds) ? options.cursorDisabledAccountIds : [])
+    .map((id) => String(id || '').trim())
+    .filter(Boolean));
+  const enabledAccounts = accounts.filter((account) => !disabled.has(account.id));
+  if (enabledAccounts.length === 0) return fetchCursorAccountLimits(null, deps);
+  const providers = await Promise.all(enabledAccounts.map((account) => fetchCursorAccountLimits(account, deps)));
+  return providers.length === 1 ? providers[0] : providers;
 }
 
 module.exports = {

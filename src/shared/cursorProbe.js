@@ -11,7 +11,7 @@ const REQUEST_USAGE_URL = 'https://cursor.com/api/usage';
 const DEFAULT_HEADERS = {
   'Accept': '*/*',
   'Accept-Language': 'en-US,en;q=0.9',
-  'Referer': 'https://www.cursor.com/settings',
+  'Referer': 'https://cursor.com/dashboard/settings',
   'User-Agent': BROWSER_USER_AGENT
 };
 

@@ -5988,6 +5988,12 @@ html.is-windows .limit-live-badge {
 .opencode-add-details {
   margin-top: 8px;
 }
+/* Cursor sits below both the account list and its own provider copy, so the
+   shared add-details margin doubles the visual step before the first action.
+   The form wrapper already supplies the same separation used by MiMo. */
+#cursorManualDetails {
+  margin-top: 0;
+}
 .opencode-add-body {
   display: flex;
   flex-direction: column;

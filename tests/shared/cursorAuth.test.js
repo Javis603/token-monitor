@@ -10,6 +10,8 @@ const path = require('node:path');
 
 const {
   CURSOR_EXPLICIT_SYNC_TIMEOUT_MS,
+  listAccounts,
+  normalizeCursorSessionToken,
   readActiveAccount,
   runCursorLogin,
   runCursorLogout,
@@ -58,6 +60,22 @@ test('readActiveAccount returns active account when present', () => {
   } finally { cleanup(); }
 });
 
+test('listAccounts returns every account with the Tokscale active account first', () => {
+  const payload = {
+    version: 1,
+    activeAccountId: 'desktop',
+    accounts: {
+      desktop: { sessionToken: 'tok-desktop', userId: 'desktop' },
+      pinned: { sessionToken: 'tok-pinned', userId: 'pinned', label: 'work' }
+    }
+  };
+  const { home, credPath, cleanup } = withTempHome(payload);
+  try {
+    assert.equal(JSON.parse(fs.readFileSync(credPath, 'utf8')).activeAccountId, 'desktop');
+    assert.deepEqual(listAccounts({ home }).map((account) => account.id), ['desktop', 'pinned']);
+  } finally { cleanup(); }
+});
+
 test('readActiveAccount returns null when activeAccountId is missing from accounts map', () => {
   const payload = { version: 1, activeAccountId: 'ghost', accounts: { a1: { sessionToken: 't' } } };
   const { home, cleanup } = withTempHome(payload);
@@ -89,7 +107,7 @@ test('runCursorLogin writes credentials file with extracted user id from "::" de
     await runCursorLogin('user_01HXYZ::tok-value-here', { home });
     const acct = readActiveAccount({ home });
     assert.equal(acct.id, 'user_01HXYZ');
-    assert.equal(acct.sessionToken, 'user_01HXYZ::tok-value-here');
+    assert.equal(acct.sessionToken, 'user_01HXYZ%3A%3Atok-value-here');
     assert.equal(acct.userId, 'user_01HXYZ');
   } finally { cleanup(); }
 });
@@ -114,6 +132,19 @@ test('runCursorLogin handles URL-encoded :: delimiter (%3A%3A)', async () => {
   } finally { cleanup(); }
 });
 
+test('normalizeCursorSessionToken accepts a full cookie header and canonicalizes separators', () => {
+  assert.equal(
+    normalizeCursorSessionToken('Cookie: other=x; WorkosCursorSessionToken=user_01ABC::opaque; next=y'),
+    'user_01ABC%3A%3Aopaque'
+  );
+});
+
+test('normalizeCursorSessionToken converts a local Cursor access-token JWT', () => {
+  const payload = Buffer.from(JSON.stringify({ sub: 'auth0|user_01LOCAL' })).toString('base64url');
+  const jwt = `header.${payload}.signature`;
+  assert.equal(normalizeCursorSessionToken(jwt), `user_01LOCAL%3A%3A${jwt}`);
+});
+
 test('runCursorLogout removes active account and deletes file when empty', async () => {
   const { home, cleanup } = withTempHome(undefined);
   try {
@@ -121,6 +152,17 @@ test('runCursorLogout removes active account and deletes file when empty', async
     assert.equal(readActiveAccount({ home }).id, 'user_x');
     await runCursorLogout({ home });
     assert.equal(readActiveAccount({ home }), null);
+  } finally { cleanup(); }
+});
+
+test('runCursorLogout removes an explicit non-active account', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    await runCursorLogin('user_a::tok-a', { home, label: 'a' });
+    await runCursorLogin('user_b::tok-b', { home, label: 'b' });
+    await runCursorLogout({ home, accountId: 'user_a' });
+    assert.deepEqual(listAccounts({ home }).map((account) => account.id), ['user_b']);
+    assert.equal(readActiveAccount({ home }).id, 'user_b');
   } finally { cleanup(); }
 });
 

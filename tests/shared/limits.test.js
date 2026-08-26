@@ -1088,6 +1088,47 @@ test('collectLimitsOnce flattens multiple providers returned by a provider fetch
   );
 });
 
+test('aggregateLimits preserves distinct Cursor accounts and deduplicates the same account across devices', () => {
+  const cursorProvider = (accountKey, accountEmail, planLabel, usedPercent, updatedAt) => ({
+    provider: 'cursor',
+    accountKey,
+    accountEmail,
+    accountLabel: accountEmail,
+    planLabel,
+    status: 'ok',
+    source: 'web',
+    updatedAt,
+    windows: [{ kind: 'billing', label: 'Total', usedPercent }]
+  });
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'this-mac',
+      limits: {
+        providers: [
+          cursorProvider('sha256:cursor-a', 'a@example.com', 'Free', 10, '2026-08-26T10:00:00.000Z'),
+          cursorProvider('sha256:cursor-b', 'b@example.com', 'Pro', 20, '2026-08-26T10:01:00.000Z')
+        ]
+      }
+    },
+    {
+      deviceId: 'office-pc',
+      limits: {
+        providers: [
+          cursorProvider('sha256:cursor-a', 'a@example.com', 'Free', 30, '2026-08-26T10:02:00.000Z')
+        ]
+      }
+    }
+  ], 0, Date.parse('2026-08-26T10:03:00.000Z'));
+
+  const cursorRows = aggregate.providers.filter((provider) => provider.provider === 'cursor');
+  assert.equal(cursorRows.length, 2);
+  assert.deepEqual(cursorRows.map((provider) => provider.accountEmail), ['a@example.com', 'b@example.com']);
+  assert.deepEqual(cursorRows.map((provider) => provider.planLabel), ['Free', 'Pro']);
+  assert.equal(cursorRows[0].sourceDeviceId, 'office-pc');
+  assert.equal(cursorRows[0].windows[0].usedPercent, 30);
+  assert.equal(cursorRows[1].sourceDeviceId, 'this-mac');
+});
+
 // Regression guard for the renderer's localProviderStatus(): a sync-mode account
 // card (DeepSeek/Minimax/Grok) must read the local device's RAW limits from
 // stats.devices, not stats.limits.providers. This test pins the root cause:

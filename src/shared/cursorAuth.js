@@ -58,6 +58,40 @@ function extractUserId(token) {
   return null;
 }
 
+function userIdFromAccessToken(token) {
+  if (typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    const sub = typeof payload?.sub === 'string' ? payload.sub : '';
+    const match = sub.match(/user_[A-Za-z0-9_]+/);
+    return match?.[0] || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function normalizeCursorSessionToken(input) {
+  let token = String(input || '').trim();
+  if (!token || token.length > 16 * 1024) return '';
+  if (token.toLowerCase().startsWith('cookie:')) token = token.slice(7).trim();
+  const cookieMatch = token.match(/WorkosCursorSessionToken=([^;\s]+)/i);
+  if (cookieMatch) token = cookieMatch[1];
+  if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+    token = token.slice(1, -1).trim();
+  }
+  if (!token || /\s/.test(token)) return '';
+  const separator = token.indexOf('::');
+  if (separator > 0) {
+    token = `${token.slice(0, separator)}%3A%3A${token.slice(separator + 2)}`;
+  } else if (!token.includes('%3A%3A')) {
+    const userId = userIdFromAccessToken(token);
+    if (userId) token = `${userId}%3A%3A${token}`;
+  }
+  return token;
+}
+
 function readCredentialsStore({ home = os.homedir() } = {}) {
   const file = credentialsPath(home);
   let raw;
@@ -78,14 +112,8 @@ function writeCredentialsStoreAtomic(file, store) {
   }
 }
 
-function readActiveAccount({ home = os.homedir() } = {}) {
-  const parsed = readCredentialsStore({ home });
-  if (!parsed) return null;
-  const accounts = parsed.accounts;
-  const id = parsed.activeAccountId;
-  if (!id || !accounts || typeof accounts !== 'object') return null;
-  const acct = accounts[id];
-  if (!acct || typeof acct !== 'object' || typeof acct.sessionToken !== 'string' || !acct.sessionToken) return null;
+function normalizeAccount(id, acct) {
+  if (!id || !acct || typeof acct !== 'object' || typeof acct.sessionToken !== 'string' || !acct.sessionToken) return null;
   return {
     id,
     sessionToken: acct.sessionToken,
@@ -94,6 +122,30 @@ function readActiveAccount({ home = os.homedir() } = {}) {
     createdAt: typeof acct.createdAt === 'string' ? acct.createdAt : null,
     expiresAt: typeof acct.expiresAt === 'string' ? acct.expiresAt : null
   };
+}
+
+function listAccounts({ home = os.homedir() } = {}) {
+  const parsed = readCredentialsStore({ home });
+  if (!parsed?.accounts || typeof parsed.accounts !== 'object') return [];
+  const active = typeof parsed.activeAccountId === 'string' ? parsed.activeAccountId : '';
+  return Object.entries(parsed.accounts)
+    .map(([id, acct]) => normalizeAccount(id, acct))
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftRank = left.id === active ? 0 : 1;
+      const rightRank = right.id === active ? 0 : 1;
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      const leftName = (left.label || left.userId || left.id).toLowerCase();
+      const rightName = (right.label || right.userId || right.id).toLowerCase();
+      return leftName.localeCompare(rightName);
+    });
+}
+
+function readActiveAccount({ home = os.homedir() } = {}) {
+  const parsed = readCredentialsStore({ home });
+  if (!parsed?.accounts || typeof parsed.accounts !== 'object') return null;
+  const id = parsed.activeAccountId;
+  return normalizeAccount(id, parsed.accounts[id]);
 }
 
 function runTokscaleSubcommand(args, {
@@ -192,7 +244,8 @@ function runTokscaleSubcommand(args, {
 }
 
 async function runCursorLogin(token, { label = '', home = os.homedir() } = {}) {
-  if (!token || typeof token !== 'string') {
+  token = normalizeCursorSessionToken(token);
+  if (!token) {
     throw new Error('runCursorLogin: token must be a non-empty string');
   }
   const accountId = deriveAccountId(token);
@@ -232,15 +285,19 @@ async function runCursorLogin(token, { label = '', home = os.homedir() } = {}) {
   return accountId;
 }
 
-async function runCursorLogout({ label = '', home = os.homedir() } = {}) {
+async function runCursorLogout({ accountId = '', label = '', home = os.homedir() } = {}) {
   const file = credentialsPath(home);
   const store = readCredentialsStore({ home });
   if (!store || !store.accounts || typeof store.accounts !== 'object') return;
 
+  const requestedId = typeof accountId === 'string' ? accountId.trim() : '';
   const trimmedLabel = typeof label === 'string' ? label.trim() : '';
   let removeId = null;
 
-  if (trimmedLabel) {
+  if (requestedId) {
+    if (!Object.prototype.hasOwnProperty.call(store.accounts, requestedId)) return;
+    removeId = requestedId;
+  } else if (trimmedLabel) {
     const lcLabel = trimmedLabel.toLowerCase();
     for (const [id, acct] of Object.entries(store.accounts)) {
       if (!acct || typeof acct !== 'object') continue;
@@ -285,6 +342,8 @@ function runCursorStatus(options = {}) {
 module.exports = {
   CURSOR_EXPLICIT_SYNC_TIMEOUT_MS,
   credentialsPath,
+  listAccounts,
+  normalizeCursorSessionToken,
   readActiveAccount,
   runCursorLogin,
   runCursorLogout,

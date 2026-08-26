@@ -2287,6 +2287,37 @@ test('cursor sync runs at most once per throttle window across ticks', async () 
   }
 });
 
+test('cursor sync gets one discovery attempt without saved credentials', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  childProcess.spawn = recordingSpawn([]);
+  const cursorAuth = require('../../src/shared/cursorAuth');
+  const originalReadActiveAccount = cursorAuth.readActiveAccount;
+  const originalRunCursorSync = cursorAuth.runCursorSync;
+  let syncCalls = 0;
+  cursorAuth.readActiveAccount = () => null;
+  cursorAuth.runCursorSync = async () => { syncCalls += 1; };
+  try {
+    const { collectUsageOnce } = freshCollector();
+    const options = {
+      clients: 'cursor',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false
+    };
+    await collectUsageOnce(options);
+    await collectUsageOnce(options);
+    assert.equal(syncCalls, 1);
+  } finally {
+    childProcess.spawn = originalSpawn;
+    cursorAuth.readActiveAccount = originalReadActiveAccount;
+    cursorAuth.runCursorSync = originalRunCursorSync;
+    delete require.cache[collectorPath];
+  }
+});
+
 test('cursor sync failure metadata reaches client health without stderr or paths', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;

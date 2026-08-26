@@ -12,6 +12,7 @@ const {
   envelopeFromSettings,
   limitsConfigFromSettings,
   normalizeAllTimeSince,
+  normalizeCursorAccountIds,
   usageConfigFingerprint,
   usageConfigFromSettings
 } = require('../../src/electron/runtimeConfig');
@@ -26,6 +27,13 @@ const BASE_USAGE_SETTINGS = Object.freeze({
   sessionUsageArchiveEnabled: true,
   projectsEnabled: true,
   wslScanEnabled: true
+});
+
+test('Cursor account metadata ids are trimmed, deduplicated, and bounded', () => {
+  assert.deepEqual(
+    normalizeCursorAccountIds([' work ', 'work', '', 'personal', 'x'.repeat(257)]),
+    ['work', 'personal']
+  );
 });
 
 function fingerprintContext(settings) {
@@ -194,6 +202,7 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
     clients: 'claude,cursor',
     collectionIntervalMs: 300000,
     limitsRefreshMs: 60000,
+    cursorDisabledAccountIds: [' work ', 'work', '', 'personal'],
     claudeWebCookie: 'sessionKey=settings-secret',
     kimiApiKey: 'secret',
     openrouterProfiles: { work: { apiKey: 'openrouter-secret', enabled: true } },
@@ -221,6 +230,7 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
   assert.equal(Object.hasOwn(usage, 'kimiApiKey'), false);
   assert.equal(limits.claudeWebCookie, 'sessionKey=settings-secret');
   assert.equal(limits.kimiApiKey, 'secret');
+  assert.deepEqual(limits.cursorDisabledAccountIds, ['work', 'personal']);
   assert.deepEqual(limits.openrouterProfiles, { work: { apiKey: 'openrouter-secret', enabled: true } });
   assert.deepEqual(limits.thirdPartyProfiles, {
     relay: {
@@ -382,6 +392,15 @@ test('OpenRouter profile changes invalidate only the OpenRouter limits lane', ()
     { openrouterProfiles: { work: { apiKey: 'new', enabled: true } } }
   );
   assert.deepEqual(classification.limitScopes, [{ provider: 'openrouter' }]);
+});
+
+test('Cursor account selection reconfigures limits and invalidates only the Cursor lane', () => {
+  const classification = classifySettingsChange(
+    { cursorDisabledAccountIds: [] },
+    { cursorDisabledAccountIds: ['account-1'] }
+  );
+  assert.equal(classification.limitsReconfigure, true);
+  assert.deepEqual(classification.limitScopes, [{ provider: 'cursor' }]);
 });
 
 test('WorkBuddy provider selection reconfigures the limits runtime', () => {
