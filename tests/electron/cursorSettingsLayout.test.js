@@ -207,6 +207,7 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
   assert.doesNotMatch(setup, /openExternal\('https:\/\/cursor\.com\/dashboard\/settings'\)/);
   assert.match(setup, /cursorAddAccountButton\?\.addEventListener\('click'/);
   assert.match(setup, /cursorManualDetails\?\.classList\.toggle\('hidden', !next\)/);
+  assert.match(setup, /const expanding = !state\.cursorAccountExpanded;[\s\S]*?setCursorAccountExpanded\(expanding\);[\s\S]*?if \(expanding && !state\.cursorAccount\.busy\) void refreshCursorStatus\(\{ discover: true \}\);/);
   assert.doesNotMatch(setup, /cursorRefreshButton|refreshCursorAccounts|cursor\.refresh\(/);
 
   const css = readRendererFile('styles.css');

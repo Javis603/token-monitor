@@ -15255,7 +15255,9 @@ function setupCursorAccountUI() {
   }
 
   document.getElementById('cursorSettingsToggle').addEventListener('click', () => {
-    setCursorAccountExpanded(!state.cursorAccountExpanded);
+    const expanding = !state.cursorAccountExpanded;
+    setCursorAccountExpanded(expanding);
+    if (expanding && !state.cursorAccount.busy) void refreshCursorStatus({ discover: true });
   });
   setCursorAccountExpanded(false);
 

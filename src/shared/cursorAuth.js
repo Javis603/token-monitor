@@ -45,15 +45,22 @@ function deriveAccountId(token) {
   return 'anon-' + digest.slice(0, 12);
 }
 
+function canonicalCursorUserId(value) {
+  const match = String(value || '').match(/user_[A-Za-z0-9_]+/);
+  return match?.[0] || '';
+}
+
 function extractUserId(token) {
   if (typeof token !== 'string') return null;
   if (token.includes('%3A%3A')) {
     const head = token.split('%3A%3A')[0].trim();
-    if (head) return head;
+    const userId = canonicalCursorUserId(head);
+    if (userId) return userId;
   }
   if (token.includes('::')) {
     const head = token.split('::')[0].trim();
-    if (head) return head;
+    const userId = canonicalCursorUserId(head);
+    if (userId) return userId;
   }
   return null;
 }
@@ -65,8 +72,7 @@ function userIdFromAccessToken(token) {
   try {
     const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
     const sub = typeof payload?.sub === 'string' ? payload.sub : '';
-    const match = sub.match(/user_[A-Za-z0-9_]+/);
-    return match?.[0] || null;
+    return canonicalCursorUserId(sub) || null;
   } catch (_) {
     return null;
   }
@@ -285,47 +291,16 @@ async function runCursorLogin(token, { label = '', home = os.homedir() } = {}) {
   return accountId;
 }
 
-async function runCursorLogout({ accountId = '', label = '', home = os.homedir() } = {}) {
-  const file = credentialsPath(home);
-  const store = readCredentialsStore({ home });
-  if (!store || !store.accounts || typeof store.accounts !== 'object') return;
-
-  const requestedId = typeof accountId === 'string' ? accountId.trim() : '';
-  const trimmedLabel = typeof label === 'string' ? label.trim() : '';
-  let removeId = null;
-
-  if (requestedId) {
-    if (!Object.prototype.hasOwnProperty.call(store.accounts, requestedId)) return;
-    removeId = requestedId;
-  } else if (trimmedLabel) {
-    const lcLabel = trimmedLabel.toLowerCase();
-    for (const [id, acct] of Object.entries(store.accounts)) {
-      if (!acct || typeof acct !== 'object') continue;
-      const acctLabel = typeof acct.label === 'string' ? acct.label.trim().toLowerCase() : '';
-      if (acctLabel && acctLabel === lcLabel) { removeId = id; break; }
-    }
-    if (!removeId && Object.prototype.hasOwnProperty.call(store.accounts, trimmedLabel)) {
-      removeId = trimmedLabel;
-    }
-    if (!removeId) return;
-  } else {
-    removeId = store.activeAccountId || null;
-    if (!removeId || !Object.prototype.hasOwnProperty.call(store.accounts, removeId)) return;
-  }
-
-  const wasActive = store.activeAccountId === removeId;
-  delete store.accounts[removeId];
-
-  if (wasActive) {
-    const remainingIds = Object.keys(store.accounts);
-    if (remainingIds.length === 0) {
-      try { fs.unlinkSync(file); } catch (_) { /* ignore */ }
-      return;
-    }
-    store.activeAccountId = remainingIds[0];
-  }
-
-  writeCredentialsStoreAtomic(file, store);
+async function runCursorLogout({
+  accountId = '',
+  label = '',
+  timeoutMs = 30000,
+  runSubcommand = runTokscaleSubcommand,
+  ...options
+} = {}) {
+  const target = String(accountId || label || '').trim();
+  const args = target ? ['logout', '--name', target] : ['logout'];
+  return runSubcommand(args, { ...options, timeoutMs });
 }
 
 async function runCursorSync(options = {}) {
@@ -341,6 +316,7 @@ function runCursorStatus(options = {}) {
 
 module.exports = {
   CURSOR_EXPLICIT_SYNC_TIMEOUT_MS,
+  canonicalCursorUserId,
   credentialsPath,
   listAccounts,
   normalizeCursorSessionToken,

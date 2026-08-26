@@ -4063,12 +4063,10 @@ function createLimitsCollector(options = {}, deps = {}) {
 }
 
 function hashCursorAccountKey(account, resolvedUserId = '') {
-  const apiUserId = String(resolvedUserId || '').trim();
-  const storedUserId = String(account?.userId || '').trim();
   const accountId = String(account?.id || '').trim();
-  const canonicalUserId = apiUserId
-    || storedUserId
-    || (/^user_[A-Za-z0-9_]+$/.test(accountId) ? accountId : '');
+  const canonicalUserId = [resolvedUserId, account?.userId, accountId]
+    .map(cursorAuth.canonicalCursorUserId)
+    .find(Boolean) || '';
   if (canonicalUserId) return hashKey('cursor', canonicalUserId);
   return hashKey('cursor-local', accountId || 'unknown');
 }

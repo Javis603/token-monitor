@@ -3062,6 +3062,9 @@ test('smart collection coalesces watch events into one targeted interval tick', 
   const originalSpawn = childProcess.spawn;
   const calls = [];
   childProcess.spawn = recordingSpawn(calls);
+  const cursorAuth = require('../../src/shared/cursorAuth');
+  const originalRunCursorSync = cursorAuth.runCursorSync;
+  cursorAuth.runCursorSync = async () => {};
 
   let handle = null;
   try {
@@ -3098,6 +3101,7 @@ test('smart collection coalesces watch events into one targeted interval tick', 
     assert.equal(calls.length, 5, 'the acknowledged batch does not repeat');
   } finally {
     if (handle) handle.stop();
+    cursorAuth.runCursorSync = originalRunCursorSync;
     childProcess.spawn = originalSpawn;
     chokidar.watch = originalWatch;
     os.homedir = originalHomedir;
@@ -3217,6 +3221,9 @@ test('smart collection retries a failed activity scan on the next interval', asy
     });
     return child;
   };
+  const cursorAuth = require('../../src/shared/cursorAuth');
+  const originalRunCursorSync = cursorAuth.runCursorSync;
+  cursorAuth.runCursorSync = async () => {};
 
   let handle = null;
   try {
@@ -3254,6 +3261,7 @@ test('smart collection retries a failed activity scan on the next interval', asy
     );
   } finally {
     if (handle) handle.stop();
+    cursorAuth.runCursorSync = originalRunCursorSync;
     childProcess.spawn = originalSpawn;
     chokidar.watch = originalWatch;
     os.homedir = originalHomedir;

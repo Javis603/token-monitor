@@ -108,6 +108,24 @@ test('fetchCursorLimits keys the same Cursor API subject identically across diff
   assert.equal(first.accountEmail, 'same@example.com');
 });
 
+test('fetchCursorLimits keeps prefixed API subjects stable across a failed probe fallback', async () => {
+  const account = { id: 'user_canonical', sessionToken: 'token', userId: 'user_canonical' };
+  const success = await fetchCursorLimits({}, {
+    readActiveAccount: () => account,
+    probe: async () => ({
+      ok: true,
+      usage: { planPercent: 10, membershipType: 'free' },
+      user: { email: 'same@example.com', sub: 'auth0|user_canonical' }
+    })
+  });
+  const unauthorized = await fetchCursorLimits({}, {
+    readActiveAccount: () => account,
+    probe: async () => ({ ok: false, error: { kind: 'unauthorized', message: 'HTTP 401' } })
+  });
+
+  assert.equal(success.accountKey, unauthorized.accountKey);
+});
+
 test('fetchCursorLimits keeps opaque local fallback identities distinct when no canonical user id is available', async () => {
   const result = await fetchCursorLimits({}, {
     listAccounts: () => [

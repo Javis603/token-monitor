@@ -10,6 +10,7 @@ const path = require('node:path');
 
 const {
   CURSOR_EXPLICIT_SYNC_TIMEOUT_MS,
+  canonicalCursorUserId,
   listAccounts,
   normalizeCursorSessionToken,
   readActiveAccount,
@@ -145,25 +146,20 @@ test('normalizeCursorSessionToken converts a local Cursor access-token JWT', () 
   assert.equal(normalizeCursorSessionToken(jwt), `user_01LOCAL%3A%3A${jwt}`);
 });
 
-test('runCursorLogout removes active account and deletes file when empty', async () => {
-  const { home, cleanup } = withTempHome(undefined);
-  try {
-    await runCursorLogin('user_x::tok', { home });
-    assert.equal(readActiveAccount({ home }).id, 'user_x');
-    await runCursorLogout({ home });
-    assert.equal(readActiveAccount({ home }), null);
-  } finally { cleanup(); }
+test('canonicalCursorUserId normalizes Cursor API and stored identities', () => {
+  assert.equal(canonicalCursorUserId('auth0|user_01ABC'), 'user_01ABC');
+  assert.equal(canonicalCursorUserId('user_01ABC'), 'user_01ABC');
+  assert.equal(canonicalCursorUserId('auth0|other'), '');
 });
 
-test('runCursorLogout removes an explicit non-active account', async () => {
-  const { home, cleanup } = withTempHome(undefined);
-  try {
-    await runCursorLogin('user_a::tok-a', { home, label: 'a' });
-    await runCursorLogin('user_b::tok-b', { home, label: 'b' });
-    await runCursorLogout({ home, accountId: 'user_a' });
-    assert.deepEqual(listAccounts({ home }).map((account) => account.id), ['user_b']);
-    assert.equal(readActiveAccount({ home }).id, 'user_b');
-  } finally { cleanup(); }
+test('runCursorLogout delegates account and cache reconciliation to Tokscale', async () => {
+  const calls = [];
+  await runCursorLogout({
+    accountId: 'user_a',
+    timeoutMs: 1234,
+    runSubcommand: async (args, options) => { calls.push({ args, timeoutMs: options.timeoutMs }); }
+  });
+  assert.deepEqual(calls, [{ args: ['logout', '--name', 'user_a'], timeoutMs: 1234 }]);
 });
 
 test('runCursorLogin throws on empty token', async () => {
