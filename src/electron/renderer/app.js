@@ -11922,6 +11922,7 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
   render: renderStatsUpdate
 });
 function handleWindowVisibilityChange() {
+  if (!statsRenderScheduler.visibilityChanged()) return;
   if (isRendererWindowHidden()) cancelTokenRateBoost();
   if (!isRendererWindowHidden() && state.settings?.hubMode === 'client' && hubBuildStatusRefreshDue()) {
     void refreshHubBuildStatus();

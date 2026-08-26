@@ -60,6 +60,31 @@ test('clearing a hidden update prevents a redundant catch-up render', () => {
   assert.equal(renders, 0);
 });
 
+test('page and native visibility signals report each combined edge once', () => {
+  let pageHidden = false;
+  let nativeVisible = true;
+  const scheduler = createStatsRenderScheduler({
+    isHidden: () => pageHidden || !nativeVisible,
+    render: () => {}
+  });
+
+  for (const [nextPageHidden, nextNativeVisible, changed] of [
+    [false, true, false],
+    [true, true, true],
+    [true, false, false],
+    [false, false, false],
+    [false, true, true],
+    [false, false, true],
+    [true, false, false],
+    [true, true, false],
+    [false, true, true]
+  ]) {
+    pageHidden = nextPageHidden;
+    nativeVisible = nextNativeVisible;
+    assert.equal(scheduler.visibilityChanged(), changed);
+  }
+});
+
 test('visible stats update only the exposed surface', () => {
   assert.equal(visibleStatsSurface(false, false, false), 'main');
   assert.equal(visibleStatsSurface(false, false, true), 'settings');
