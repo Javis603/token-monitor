@@ -172,6 +172,10 @@ test('hidden event sources defer DOM work and visible surfaces catch up', () => 
   const statsPush = app.match(/window\.tokenMonitor\.onStatsPush\?\.\(\(payload\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
   const statsRender = app.slice(app.indexOf('function renderStatsUpdate()'), app.indexOf('const statsRenderScheduler ='));
   const bubbleState = app.slice(app.indexOf('function applyFloatingBubbleState('), app.indexOf('const BUBBLE_CONTENT_VALUES'));
+  const settingsSync = app.slice(app.indexOf('function syncSettingsForm()'), app.indexOf('function enabledClientSet()'));
+  const visibilityHandler = app.slice(app.indexOf('function handleWindowVisibilityChange()'), app.indexOf("document.addEventListener('visibilitychange'"));
+  const hiddenGuard = settingsSync.indexOf('if (isRendererWindowHidden())');
+  const hiddenReturn = settingsSync.indexOf('return;', hiddenGuard);
 
   assert.match(settingsPush, /statsRenderScheduler\.request\(\)/);
   assert.match(hubPush, /if \(settingsVisible\) renderHubStatus\(\)/);
@@ -181,6 +185,15 @@ test('hidden event sources defer DOM work and visible surfaces catch up', () => 
   assert.match(statsRender, /renderConnectionStatus\(surface\)/);
   assert.match(bubbleState, /isSettingsPanelOpen\(\)[\s\S]*syncSettingsForm\(\)[\s\S]*renderStatsUpdate\(\)/);
   assert.match(bubbleState, /syncSettingsForm\(\);[\s\S]*renderConnectionStatus\('settings'\)/);
+  assert.ok(hiddenGuard < settingsSync.indexOf('applyInitialBreakdownPreference()'));
+  assert.ok(settingsSync.indexOf('applyInitialBreakdownPreference()') < hiddenReturn);
+  assert.ok(hiddenGuard < settingsSync.indexOf('applyVendorColorOverrides('));
+  assert.ok(settingsSync.indexOf('applyVendorColorOverrides(') < hiddenReturn);
+  for (const domCall of ['applySettingsTranslations()', 'syncPeriodTabs()', 'applyAppearanceSettings(']) {
+    assert.ok(hiddenReturn < settingsSync.indexOf(domCall));
+  }
+  assert.match(settingsSync, /if \(isRendererWindowHidden\(\)\) \{[\s\S]*settingsDomSyncPending = true;[\s\S]*return;/);
+  assert.match(visibilityHandler, /else \{[\s\S]*if \(settingsDomSyncPending\) syncSettingsForm\(\);[\s\S]*statsRenderScheduler\.flush\(\);/);
 });
 
 test('all stats refreshes use visibility-aware rendering', () => {

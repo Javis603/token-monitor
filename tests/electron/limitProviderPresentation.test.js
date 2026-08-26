@@ -1644,6 +1644,7 @@ test('background provider rerenders preserve settings scroll without a focused c
     {
       cancelAnimationFrame: () => {},
       els,
+      isRendererWindowHidden: () => false,
       limitProviderRowDrag: { deferRender: () => false },
       renderLimitProviderCheckboxesNow,
       requestAnimationFrame: (callback) => frames.push(callback)
@@ -1660,6 +1661,37 @@ test('background provider rerenders preserve settings scroll without a focused c
   frames[0]();
   assert.equal(panel.scrollTop, 684);
   assert.equal(panel.scrollLeft, 9);
+});
+
+test('hidden settings rerenders skip settings panel scroll DOM', () => {
+  const app = readRendererFile('app.js');
+  const preserveScroll = functionBody(app, 'preserveSettingsPanelScroll', 'saveSettings');
+  let reads = 0;
+  let writes = 0;
+  const metrics = { callbacks: 0 };
+  const panel = { classList: { contains: () => false } };
+  for (const key of ['scrollTop', 'scrollLeft']) {
+    Object.defineProperty(panel, key, {
+      get() { reads += 1; return 0; },
+      set() { writes += 1; }
+    });
+  }
+
+  vm.runInNewContext(
+    `${preserveScroll}\npreserveSettingsPanelScroll(() => { metrics.callbacks += 1; });`,
+    {
+      els: { settingsPanel: panel },
+      isRendererWindowHidden: () => true,
+      metrics,
+      panel,
+      requestAnimationFrame: () => { throw new Error('hidden render scheduled a frame'); },
+      settingsScrollInteractionRevision: 0
+    }
+  );
+
+  assert.equal(reads, 0);
+  assert.equal(writes, 0);
+  assert.equal(metrics.callbacks, 1);
 });
 
 test('user scrolling wins over a pending provider scroll restore', () => {
@@ -1702,6 +1734,7 @@ renderLimitProviderCheckboxes();`,
       cancelAnimationFrame: () => {},
       document: { querySelectorAll: () => [] },
       els,
+      isRendererWindowHidden: () => false,
       limitProviderRowDrag: { deferRender: () => false },
       renderLimitProviderCheckboxesNow,
       requestAnimationFrame: (callback) => frames.push(callback)
@@ -2800,6 +2833,7 @@ test('deleting a subscription preserves the settings scroll position and renders
   };
   const context = vm.createContext({
     els: { settingsPanel: panel },
+    isRendererWindowHidden: () => false,
     panel,
     settingsScrollInteractionRevision: 0,
     requestAnimationFrame(callback) {

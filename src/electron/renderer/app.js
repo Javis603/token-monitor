@@ -8670,7 +8670,19 @@ function reconcileHubDraftsAfterSave(submitted, submittedRevisions) {
   syncHubDraftFields();
 }
 
+let settingsDomSyncPending = false;
 function syncSettingsForm() {
+  if (isRendererWindowHidden()) {
+    applyInitialBreakdownPreference();
+    applyVendorColorOverrides(state.settings.vendorColors);
+    appliedThemeOverrides = themePresetsApi.normalizeOverrides(
+      state.settings.themeColors,
+      themePresetsApi.INTERFACE_COLOR_KEYS
+    );
+    settingsDomSyncPending = true;
+    return;
+  }
+  settingsDomSyncPending = false;
   applySettingsTranslations();
   applyInitialBreakdownPreference();
   syncPeriodTabs();
@@ -11030,6 +11042,7 @@ async function showAllViews() {
 }
 
 function preserveSettingsPanelScroll(callback) {
+  if (isRendererWindowHidden()) return callback();
   const panel = els.settingsPanel;
   if (!panel || panel.classList.contains('hidden')) return callback();
   const scrollTop = panel.scrollTop;
@@ -11932,6 +11945,7 @@ function handleWindowVisibilityChange() {
     syncSettingsForm();
     renderConnectionStatus('settings');
   } else {
+    if (settingsDomSyncPending) syncSettingsForm();
     statsRenderScheduler.flush();
   }
   ensureServiceStatusTicker();
