@@ -66,7 +66,7 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   zai: ['zaiApiKey', 'zaiApiRegion'],
   zaiteam: ['zaiTeamApiKey', 'zaiTeamOrganizationId', 'zaiTeamProjectId'],
   volcengine: ['volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion'],
-  qoder: ['qoderCookie', 'qoderSite'],
+  qoder: ['qoderCookie', 'qoderAccessToken', 'qoderSite'],
   trae: ['traeAccessToken', 'traeDeviceId'],
   // The desktop widget auto-detects WorkBuddy when the provider itself is
   // enabled. Token and metadata fields remain available to headless/CLI deployments.
@@ -167,6 +167,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
     volcengineRegion: settings.volcengineRegion || '',
     qoderCookie: settings.qoderCookie || '',
+    qoderAccessToken: settings.qoderAccessToken || '',
     qoderSite: settings.qoderSite || 'global',
     traeAccessToken: settings.traeAccessToken
       || env.TOKEN_MONITOR_TRAE_ACCESS_TOKEN

@@ -45,7 +45,8 @@ test('stores credential settings in a versioned provider document', (t) => {
     zaiTeamOrganizationId: 'organization-id',
     traeAccessToken: 'trae-token',
     traeDeviceId: 'trae-device',
-    qoderCookie: ''
+    qoderCookie: '',
+    qoderAccessToken: 'dt-qoder-token'
   });
 
   const document = JSON.parse(fs.readFileSync(path.join(dataDir, 'credentials.json'), 'utf8'));
@@ -63,7 +64,7 @@ test('stores credential settings in a versioned provider document', (t) => {
   assert.equal(document.credentials.providers.zaiTeam.organizationId, 'organization-id');
   assert.equal(document.credentials.providers.trae.accessToken, 'trae-token');
   assert.equal(document.credentials.providers.trae.deviceId, 'trae-device');
-  assert.equal(document.credentials.providers.qoder, undefined);
+  assert.deepEqual(document.credentials.providers.qoder, { accessToken: 'dt-qoder-token' });
   assert.equal(document.migrations.settings, 1);
 
   assert.deepEqual(store.settingsCredentials(), {
@@ -85,7 +86,8 @@ test('stores credential settings in a versioned provider document', (t) => {
     kimiWebAccessToken: 'kimi-web-token',
     zaiTeamOrganizationId: 'organization-id',
     traeAccessToken: 'trae-token',
-    traeDeviceId: 'trae-device'
+    traeDeviceId: 'trae-device',
+    qoderAccessToken: 'dt-qoder-token'
   });
 });
 
@@ -131,6 +133,8 @@ test('renderer redaction defaults new credential fields to hidden with explicit 
   assert.equal(redacted.thirdPartyProfiles, '');
   assert.equal(redacted.kimiApiKey, '');
   assert.equal(redacted.kimiWebAccessToken, '');
+  assert.equal(redacted.qoderCookie, '');
+  assert.equal(redacted.qoderAccessToken, '');
 });
 
 test('migrates legacy settings once and keeps an existing credential authoritative', (t) => {

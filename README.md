@@ -83,6 +83,11 @@ Token Monitor supports token usage, account-limit checks, and session details se
 Qoder CN token usage is read from the app's local SQLite database, not an API — enable it in Settings → tools (opt-in, off by default). The database is auto-detected per platform: macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`, Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`, Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — overridable with `TOKEN_MONITOR_QODER_CN_DB_PATH`.
 
 This is an advanced local integration: reading needs a `sqlite3` CLI on PATH or a Node runtime with unflagged `node:sqlite` (Node ≥ 23.4; the Electron widget may need the CLI). Read failures are logged, and an existing complete snapshot is retained instead of being replaced with zero usage. Costs are estimated from the models.dev catalog for each mapped model; the adapter may break if Qoder changes its database schema.
+
+#### Qoder limits credentials
+
+Qoder limit monitoring works with either of two credentials, both saved in Settings → AI Tool Limits → Qoder: the dashboard session cookie, or a Qoder CN access token (`dt-…`). The token takes precedence over the cookie; the cookie input keeps working unchanged.
+
 </details>
 
 ## Showcase

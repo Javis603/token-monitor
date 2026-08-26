@@ -49,7 +49,7 @@ const { fetchZaiTeamLimits, zaiTeamToken } = zaiTeamLimits;
 const volcengineLimits = require('./volcengineLimits');
 const { volcengineCredentials, fetchVolcengineLimits } = volcengineLimits;
 const qoderLimits = require('./qoderLimits');
-const { qoderCookie, fetchQoderLimits } = qoderLimits;
+const { qoderCookie, qoderAccessToken, fetchQoderLimits } = qoderLimits;
 const commandcodeLimits = require('./commandcodeLimits');
 const { commandcodeCookie, fetchCommandcodeLimits } = commandcodeLimits;
 const ollamaLimits = require('./ollamaLimits');
@@ -4285,6 +4285,7 @@ module.exports = {
   volcengineCredentials,
   fetchVolcengineLimits,
   qoderCookie,
+  qoderAccessToken,
   fetchQoderLimits,
   traeAccessToken: traeLimits.traeAccessToken,
   traeDeviceId: traeLimits.traeDeviceId,

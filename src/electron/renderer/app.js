@@ -10021,6 +10021,14 @@ function renderToolPreferencesNow() {
     name.className = 'tool-preference-name';
     name.textContent = label;
     labelGroup.append(name);
+    const noteKey = TOOL_PREFERENCE_NOTES[id];
+    if (noteKey) {
+      labelGroup.classList.add('has-note');
+      const note = document.createElement('div');
+      note.className = 'tool-preference-note';
+      note.textContent = t(noteKey);
+      labelGroup.append(note);
+    }
     if (enabled.has(id)) {
       // A tracked client with no reported status yet (first collect still running)
       // reads as "waiting for data" rather than a bare blank.
@@ -13390,8 +13398,8 @@ const externalLimitAccountConfig = {
     pendingKey: 'volcenginePendingCheckSince'
   },
   qoder: {
-    configuredKey: 'qoderCookieConfigured',
-    sourceKey: 'qoderCookieSource',
+    configuredKey: 'qoderCredentialConfigured',
+    sourceKey: 'qoderCredentialSource',
     pendingKey: 'qoderPendingCheckSince'
   },
   trae: {
@@ -15690,7 +15698,8 @@ function setupCursorAccountUI() {
     });
 
     document.getElementById('qoderLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ qoderCookie: '' });
+      // Either credential can link the account, so unlinking clears both.
+      await saveSettings({ qoderCookie: '', qoderAccessToken: '' });
       clearExternalProviderCheckPending('qoder');
       clearExternalProviderPendingStatus('qoder');
       renderExternalProviderStatus('qoder');
@@ -15714,6 +15723,31 @@ function setupCursorAccountUI() {
       try {
         markExternalProviderCheckPending('qoder');
         await saveSettings({ qoderCookie: input.value, qoderSite: siteInput?.value || 'global' });
+        input.value = '';
+        renderExternalProviderStatus('qoder');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('qoder', !externalProviderAccountLinked('qoder'));
+        renderExternalProviderStatus('qoder');
+      } catch (err) {
+        clearExternalProviderCheckPending('qoder');
+        errorEl.textContent = t('settings.qoder.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+
+    document.getElementById('qoderAccessTokenSubmit').addEventListener('click', async () => {
+      const input = document.getElementById('qoderAccessTokenInput');
+      const siteInput = document.getElementById('qoderSiteInput');
+      const errorEl = document.getElementById('qoderErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(input.value || '').trim()) {
+        errorEl.textContent = t('settings.qoder.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('qoder');
+        await saveSettings({ qoderAccessToken: input.value, qoderSite: siteInput?.value || 'global' });
         input.value = '';
         renderExternalProviderStatus('qoder');
         await refreshStats({ force: true });

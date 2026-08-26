@@ -1016,6 +1016,14 @@
                   <div class="settings-actions">
                     <button id="qoderCookieSubmit" data-i18n="settings.qoder.saveCookie">Save cookie</button>
                   </div>
+                  <div class="settings-row">
+                    <label for="qoderAccessTokenInput" data-i18n="settings.qoder.accessToken">Access token (optional)</label>
+                    <input id="qoderAccessTokenInput" type="password" spellcheck="false" autocomplete="off" placeholder="dt-..." data-i18n-placeholder="settings.qoder.accessTokenPlaceholder" />
+                  </div>
+                  <p class="settings-note"><span data-i18n="settings.qoder.accessTokenHint">Qoder CN access token (dt- …), used ahead of the Cookie.</span></p>
+                  <div class="settings-actions">
+                    <button id="qoderAccessTokenSubmit" data-i18n="settings.qoder.saveAccessToken">Save token</button>
+                  </div>
                 </div>
                 <div id="qoderErrorMessage" class="settings-note error hidden"></div>
               </div>
