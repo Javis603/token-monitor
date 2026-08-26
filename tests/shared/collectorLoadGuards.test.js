@@ -3147,6 +3147,234 @@ test('collector publishes live periods when only Qoder CN history read fails', a
   }
 });
 
+test('collector preserves Trae CN while publishing other clients when the account API fails', async () => {
+  const tmp = withTmpHome([]);
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const traeCnUsagePath = require.resolve('../../src/shared/traeCnUsage');
+  const traeCnUsage = require(traeCnUsagePath);
+  const originals = {
+    collectTraeCnRows: traeCnUsage.collectTraeCnRows,
+    resolveTraeCnPricing: traeCnUsage.resolveTraeCnPricing,
+    buildTraeCnPeriods: traeCnUsage.buildTraeCnPeriods
+  };
+  let failReads = false;
+  let claudeTokens = 3;
+  traeCnUsage.collectTraeCnRows = async () => {
+    if (failReads) {
+      const error = new Error('trae-cn usage API returned 401 (token rejected)');
+      error.code = 'TRAE_CN_UNAUTHORIZED';
+      throw error;
+    }
+    return [];
+  };
+  traeCnUsage.resolveTraeCnPricing = async () => ({});
+  traeCnUsage.buildTraeCnPeriods = () => ({
+    today: { entries: [{ client: 'trae-cn', model: 'doubao-seed', input: 7 }] },
+    month: { entries: [{ client: 'trae-cn', model: 'doubao-seed', input: 7 }] },
+    allTime: { entries: [{ client: 'trae-cn', model: 'doubao-seed', input: 7 }] }
+  });
+  delete require.cache[collectorPath];
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const previews = [];
+    const updates = [];
+    const collectorOptions = {
+      clients: 'claude,trae-cn',
+      traeAccessToken: 'guard-test-token',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: false,
+      limitsEnabled: false,
+      historyEnabled: false,
+      runTokscale: async () => ({ entries: [{ client: 'claude', model: 'm', input: claudeTokens }] })
+    };
+    handle = startCollector({
+      ...collectorOptions,
+      onPreview: (summary) => previews.push(summary),
+      onUpdate: (summary) => updates.push(summary)
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    const anchorPath = path.join(tmp, 'collector-anchor.json');
+    const firstAnchor = JSON.parse(fs.readFileSync(anchorPath, 'utf8'));
+    assert.equal(firstAnchor.traeCnPeriods.today.clients['trae-cn'], 7);
+    const initialPreviewCount = previews.length;
+    failReads = true;
+    claudeTokens = 5;
+    await handle.tick('manual');
+
+    assert.equal(updates.length, 2, 'a Trae CN failure must not suppress fresh data from other clients');
+    assert.equal(updates.at(-1).today.clients['trae-cn'], 7, 'final update keeps the last Trae CN period');
+    assert.equal(updates.at(-1).today.clients.claude, 5, 'final update publishes the fresh Claude period');
+    const fallbackAnchor = JSON.parse(fs.readFileSync(anchorPath, 'utf8'));
+    assert.equal(fallbackAnchor.fullScanAt, firstAnchor.fullScanAt, 'a fallback is not recorded as a successful full scan');
+    const failedPreviews = previews.slice(initialPreviewCount);
+    assert.equal(failedPreviews.length, 2, 'the failed full scan still emits its two host previews');
+    assert.equal(failedPreviews.at(-1).today.clients['trae-cn'], 7, 'preview keeps the anchored Trae CN today partition');
+    assert.equal('month' in failedPreviews.at(-1), false, 'preview keeps the last complete month while Trae CN is unavailable');
+
+    handle.stop();
+    handle = startCollector({
+      ...collectorOptions,
+      onUpdate: (summary) => updates.push(summary)
+    });
+    await waitForCondition(() => updates.length === 3);
+    assert.equal(updates.at(-1).today.clients['trae-cn'], 7, 'a persisted anchor keeps Trae CN data after restart');
+  } finally {
+    if (handle) handle.stop();
+    Object.assign(traeCnUsage, originals);
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collector treats a missing Trae CN token as not-configured, not as a failed read', async () => {
+  const tmp = withTmpHome([]);
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const traeCnUsagePath = require.resolve('../../src/shared/traeCnUsage');
+  const traeCnUsage = require(traeCnUsagePath);
+  const originals = {
+    collectTraeCnRows: traeCnUsage.collectTraeCnRows,
+    resolveTraeCnPricing: traeCnUsage.resolveTraeCnPricing,
+    buildTraeCnPeriods: traeCnUsage.buildTraeCnPeriods
+  };
+  let apiCalls = 0;
+  traeCnUsage.collectTraeCnRows = async () => {
+    apiCalls += 1;
+    return [];
+  };
+  traeCnUsage.resolveTraeCnPricing = async () => ({});
+  traeCnUsage.buildTraeCnPeriods = () => {
+    throw new Error('buildTraeCnPeriods must not run without a token');
+  };
+  delete require.cache[collectorPath];
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    // No traeAccessToken and no env fallback: the client is tracked but the
+    // account is not connected, which is a clean skip rather than an error.
+    handle = startCollector({
+      clients: 'claude,trae-cn',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: false,
+      limitsEnabled: false,
+      historyEnabled: false,
+      runTokscale: async () => ({ entries: [{ client: 'claude', model: 'm', input: 3 }] }),
+      onUpdate: (summary) => updates.push(summary)
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(apiCalls, 0, 'the account API is never called without a token');
+    assert.equal(updates.at(-1).today.clients.claude, 3, 'other clients publish normally');
+    assert.equal(updates.at(-1).today.clients['trae-cn'] || 0, 0, 'no token means no Trae CN usage, not a failure');
+    const anchor = JSON.parse(fs.readFileSync(path.join(tmp, 'collector-anchor.json'), 'utf8'));
+    assert.equal(anchor.traeCnPeriods, null, 'nothing was collected, so nothing is persisted');
+    assert.notEqual(anchor.fullScanAt, new Date(0).toISOString(), 'a skip is still a successful full scan');
+  } finally {
+    if (handle) handle.stop();
+    Object.assign(traeCnUsage, originals);
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collector publishes live periods when only the Trae CN history read fails', async () => {
+  const tmp = withTmpHome([]);
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const traeCnUsagePath = require.resolve('../../src/shared/traeCnUsage');
+  const traeCnUsage = require(traeCnUsagePath);
+  const originals = {
+    collectTraeCnRows: traeCnUsage.collectTraeCnRows,
+    resolveTraeCnPricing: traeCnUsage.resolveTraeCnPricing,
+    buildTraeCnPeriods: traeCnUsage.buildTraeCnPeriods,
+    buildTraeCnHistoryGraph: traeCnUsage.buildTraeCnHistoryGraph
+  };
+  let failHistory = false;
+  const todayKey = localDayKey();
+  traeCnUsage.collectTraeCnRows = async () => [];
+  traeCnUsage.resolveTraeCnPricing = async () => ({});
+  traeCnUsage.buildTraeCnPeriods = () => ({
+    today: { entries: [{ client: 'trae-cn', model: 'doubao-seed', input: 4 }] },
+    month: { entries: [{ client: 'trae-cn', model: 'doubao-seed', input: 4 }] },
+    allTime: { entries: [{ client: 'trae-cn', model: 'doubao-seed', input: 4 }] }
+  });
+  traeCnUsage.buildTraeCnHistoryGraph = () => {
+    if (failHistory) throw new Error('temporary Trae CN history read failure');
+    return {
+      contributions: [{
+        date: todayKey,
+        clients: [{ client: 'trae-cn', modelId: 'doubao-seed', tokens: { input: 2 }, cost: 0, messages: 1 }]
+      }]
+    };
+  };
+  delete require.cache[collectorPath];
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude,trae-cn',
+      traeAccessToken: 'guard-test-token',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: false,
+      anchorPersistenceEnabled: false,
+      limitsEnabled: false,
+      historyEnabled: true,
+      runTokscale: async () => ({ entries: [{ client: 'claude', model: 'm', input: 3 }] }),
+      runGraph: async () => ({
+        contributions: [{
+          date: todayKey,
+          clients: [{ client: 'claude', modelId: 'm', tokens: { input: 3 }, cost: 0, messages: 1 }]
+        }]
+      }),
+      onUpdate: (summary) => updates.push(summary)
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    failHistory = true;
+    await handle.tick('manual', { forceHistory: true });
+
+    assert.equal(updates.length, 2, 'history-only failure must not suppress fresh live periods');
+    assert.equal(updates.at(-1).history.daily[0].perClient.claude.tokens, 3);
+    assert.equal(updates.at(-1).history.daily[0].perClient['trae-cn'].tokens, 2, 'the last good graph stands in for the failed read');
+    assert.equal(updates.at(-1).today.clients.claude, 3);
+    assert.equal(updates.at(-1).today.clients['trae-cn'], 4);
+  } finally {
+    if (handle) handle.stop();
+    Object.assign(traeCnUsage, originals);
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('smart collection coalesces watch events into one targeted interval tick', async () => {
   const tmp = withTmpHome([
     path.join('.claude', 'projects'),

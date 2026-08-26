@@ -1,6 +1,6 @@
 'use strict';
 
-const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', dsh: 'DeepSeek Harness', cherrystudio: 'Cherry Studio' };
+const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', 'trae-cn': 'Trae CN (Cloud)', reasonix: 'Reasonix', dsh: 'DeepSeek Harness', cherrystudio: 'Cherry Studio' };
 const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
@@ -13,7 +13,7 @@ const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio',
+  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'trae-cn', 'reasonix', 'dsh', 'cherrystudio',
   'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
 const limitMarksWithIcon = new Set([...clientsWithIcon, 'newapi', 'sub2api']);
@@ -76,8 +76,14 @@ const KNOWN_CLIENTS = [
   { id: 'qodercn', label: 'Qoder CN' },
   { id: 'reasonix', label: 'Reasonix' },
   { id: 'dsh', label: 'DeepSeek Harness' },
-  { id: 'cherrystudio', label: 'Cherry Studio' }
+  { id: 'cherrystudio', label: 'Cherry Studio' },
+  { id: 'trae-cn', label: 'Trae CN (Cloud)' }
 ];
+// Opt-in clients whose row needs a setup hint the plain label cannot carry.
+// Keys are i18n keys; clients without an entry render exactly as before.
+const TOOL_PREFERENCE_NOTES = {
+  'trae-cn': 'settings.tools.clientNote.traeCn'
+};
 const LIMIT_PROVIDERS = [
   { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
   { id: 'codex', label: 'Codex' },
@@ -10136,6 +10142,14 @@ function renderToolPreferencesNow() {
     name.className = 'tool-preference-name';
     name.textContent = label;
     labelGroup.append(name);
+    const noteKey = TOOL_PREFERENCE_NOTES[id];
+    if (noteKey) {
+      labelGroup.classList.add('has-note');
+      const note = document.createElement('div');
+      note.className = 'tool-preference-note';
+      note.textContent = t(noteKey);
+      labelGroup.append(note);
+    }
     if (enabled.has(id)) {
       // A tracked client with no reported status yet (first collect still running)
       // reads as "waiting for data" rather than a bare blank.
@@ -13541,8 +13555,8 @@ const externalLimitAccountConfig = {
     pendingKey: 'volcenginePendingCheckSince'
   },
   qoder: {
-    configuredKey: 'qoderCookieConfigured',
-    sourceKey: 'qoderCookieSource',
+    configuredKey: 'qoderCredentialConfigured',
+    sourceKey: 'qoderCredentialSource',
     pendingKey: 'qoderPendingCheckSince'
   },
   trae: {
@@ -15924,7 +15938,8 @@ function setupCursorAccountUI() {
     });
 
     document.getElementById('qoderLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ qoderCookie: '' });
+      // Either credential can link the account, so unlinking clears both.
+      await saveSettings({ qoderCookie: '', qoderAccessToken: '' });
       clearExternalProviderCheckPending('qoder');
       clearExternalProviderPendingStatus('qoder');
       renderExternalProviderStatus('qoder');
@@ -15948,6 +15963,31 @@ function setupCursorAccountUI() {
       try {
         markExternalProviderCheckPending('qoder');
         await saveSettings({ qoderCookie: input.value, qoderSite: siteInput?.value || 'global' });
+        input.value = '';
+        renderExternalProviderStatus('qoder');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('qoder', !externalProviderAccountLinked('qoder'));
+        renderExternalProviderStatus('qoder');
+      } catch (err) {
+        clearExternalProviderCheckPending('qoder');
+        errorEl.textContent = t('settings.qoder.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+
+    document.getElementById('qoderAccessTokenSubmit').addEventListener('click', async () => {
+      const input = document.getElementById('qoderAccessTokenInput');
+      const siteInput = document.getElementById('qoderSiteInput');
+      const errorEl = document.getElementById('qoderErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(input.value || '').trim()) {
+        errorEl.textContent = t('settings.qoder.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('qoder');
+        await saveSettings({ qoderAccessToken: input.value, qoderSite: siteInput?.value || 'global' });
         input.value = '';
         renderExternalProviderStatus('qoder');
         await refreshStats({ force: true });

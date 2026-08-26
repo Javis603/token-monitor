@@ -20,12 +20,15 @@ function rendererClientIds() {
 }
 
 function readmeTrackedClientIds() {
+  // Icon basenames that are not the client id they track: the README row is
+  // keyed by marketing name, KNOWN_CLIENTS by the collector's id.
   const iconToClient = {
     deepseek: 'dsh',
     'hermes-agent': 'hermes',
     xai: 'grok',
     'mimo-code': 'micode',
-    qoder: 'qodercn'
+    qoder: 'qodercn',
+    trae: 'trae-cn'
   };
   return fs.readFileSync(path.join(rootDir, 'README.md'), 'utf8')
     .split('\n')
@@ -63,6 +66,7 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in m
   const known = KNOWN_CLIENTS.split(',');
   assert.ok(known.includes('micode'), 'micode must remain a known client');
   assert.ok(known.includes('qodercn'), 'qodercn must remain a known client');
+  assert.ok(known.includes('trae-cn'), 'trae-cn must remain a known client');
   for (const client of DEFAULT_CLIENTS.split(',')) {
     assert.ok(known.includes(client), `${client} (default-tracked) must also be known`);
   }
@@ -72,7 +76,9 @@ test('tracked client defaults, renderer, and README share one display order', ()
   const known = KNOWN_CLIENTS.split(',');
   assert.deepEqual(rendererClientIds(), known);
   assert.deepEqual(readmeTrackedClientIds(), known);
-  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => !['micode', 'qodercn'].includes(client)));
+  // The opt-in clients: micode (double-counts Claude imports), qodercn and
+  // trae-cn (need a saved account credential before their numbers mean anything).
+  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => !['micode', 'qodercn', 'trae-cn'].includes(client)));
 });
 
 // "default tracked clients are supported by tokscale or a native adapter" —
