@@ -12,7 +12,7 @@ const read = (file) => fs.readFileSync(path.join(rootDir, file), 'utf8');
 const localizedReadmes = ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md'];
 
 // The supported-tools table is what a reader can actually verify, so the prose counts are
-// checked against it — not against LIMIT_PROVIDER_IDS, where zai/zaiteam are two ids but
+// checked against it — not against LIMIT_PROVIDER_IDS, where zai/zaiteam/zcode are three ids but
 // share one table row.
 const supportedToolCounts = (text, file) => {
   const rows = text.split('\n').filter((line) => line.startsWith('| <img'));
@@ -174,11 +174,11 @@ test('localized READMEs list the same supported tools', () => {
 // is exactly how Command Code landed in the wrong slot.
 //
 // The table's icon id is not always the provider id (a tool row is named after
-// its artwork), and GLM/GLM Team share one row, so the two are bridged here.
+// its artwork), and GLM, GLM Team, and ZCode share one row, so the three are bridged here.
 const README_ICON_TO_LIMIT_PROVIDERS = {
   xai: ['grok'],
   'mimo-code': ['mimo'],
-  zcode: ['zai', 'zaiteam']
+  zcode: ['zai', 'zaiteam', 'zcode']
 };
 
 test('limit provider order follows the supported-tools table', () => {

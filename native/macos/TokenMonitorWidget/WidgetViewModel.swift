@@ -723,6 +723,7 @@ enum WidgetFormat {
         case "mimo": "MiMo"
         case "zai": "GLM"
         case "zaiteam": "GLM Team"
+        case "zcode": "ZCode"
         case "kiro": "Kiro"
         case "commandcode": "Command Code"
         case "deepseek": "DeepSeek"

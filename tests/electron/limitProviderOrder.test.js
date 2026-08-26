@@ -45,6 +45,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'mimo',
     'zai',
     'zaiteam',
+    'zcode',
     'kiro',
     'workbuddy',
     'qoder',

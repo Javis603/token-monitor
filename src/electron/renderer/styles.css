@@ -3497,6 +3497,10 @@ html.is-windows .settings-panel select option {
   -webkit-mask-image: url(../../../assets/icons/zai.svg);
   mask-image: url(../../../assets/icons/zai.svg);
 }
+.limit-icon-zcode {
+  -webkit-mask-image: url(../../../assets/icons/zai.svg);
+  mask-image: url(../../../assets/icons/zai.svg);
+}
 .limit-icon-volcengine {
   -webkit-mask-image: url(../../../assets/icons/volcengine.svg);
   mask-image: url(../../../assets/icons/volcengine.svg);
