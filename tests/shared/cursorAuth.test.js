@@ -162,6 +162,68 @@ test('runCursorLogout delegates account and cache reconciliation to Tokscale', a
   assert.deepEqual(calls, [{ args: ['logout', '--name', 'user_a'], timeoutMs: 1234 }]);
 });
 
+test('Cursor sync, logout, and login share one lifecycle lane', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {};
+  child.kill = () => true;
+  const events = [];
+  let releaseLogout;
+  const logoutGate = new Promise((resolve) => { releaseLogout = resolve; });
+
+  try {
+    const sync = runCursorSync({
+      spawn: () => {
+        events.push('sync');
+        return child;
+      },
+      tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
+      timeoutMs: 60_000
+    });
+    await waitFor(() => events.includes('sync'));
+
+    const logout = runCursorLogout({
+      accountId: 'user_b',
+      runSubcommand: async () => {
+        events.push('logout');
+        await logoutGate;
+      }
+    });
+    const login = runCursorLogin('user_a::token-a', { home });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events, ['sync']);
+    assert.equal(readActiveAccount({ home }), null, 'login waits behind the active sync');
+
+    child.emit('close', 0);
+    await waitFor(() => events.includes('logout'));
+    assert.equal(readActiveAccount({ home }), null, 'login waits behind the active logout');
+
+    releaseLogout();
+    await Promise.all([sync, logout, login]);
+    assert.deepEqual(events, ['sync', 'logout']);
+    assert.equal(readActiveAccount({ home }).id, 'user_a');
+  } finally {
+    releaseLogout?.();
+    cleanup();
+  }
+});
+
+test('Cursor lifecycle lane continues after an operation fails', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    await assert.rejects(
+      runCursorLogout({ runSubcommand: async () => { throw new Error('logout failed'); } }),
+      /logout failed/
+    );
+    await runCursorLogin('user_after_failure::token', { home });
+    assert.equal(readActiveAccount({ home }).id, 'user_after_failure');
+  } finally { cleanup(); }
+});
+
 test('runCursorLogin throws on empty token', async () => {
   const { home, cleanup } = withTempHome(undefined);
   try {

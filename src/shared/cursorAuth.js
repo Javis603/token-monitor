@@ -16,6 +16,40 @@ const MAX_SYNC_EXIT_CODE = 2 ** 31 - 1;
 const MAX_TOKSCALE_STDERR_LENGTH = 64 * 1024;
 const CURSOR_EXPLICIT_SYNC_TIMEOUT_MS = 150_000;
 
+// Tokscale sync snapshots the credentials store before writing account caches.
+// Keep every credentials/cache mutation in one process-local lane so a stale
+// sync cannot recreate cache files after login or logout changes the account set.
+let cursorLifecycleActive = false;
+const cursorLifecycleQueue = [];
+
+function serializeCursorLifecycle(operation) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      cursorLifecycleActive = true;
+      let result;
+      try {
+        result = operation();
+      } catch (error) {
+        finish(reject, error);
+        return;
+      }
+      Promise.resolve(result).then(
+        (value) => finish(resolve, value),
+        (error) => finish(reject, error)
+      );
+    };
+    const finish = (settle, value) => {
+      settle(value);
+      const next = cursorLifecycleQueue.shift();
+      if (next) next();
+      else cursorLifecycleActive = false;
+    };
+
+    if (cursorLifecycleActive) cursorLifecycleQueue.push(run);
+    else run();
+  });
+}
+
 function annotateSyncError(error, failureStage, exitCode = null) {
   const target = error instanceof Error ? error : new Error(String(error || 'Cursor sync failed'));
   target.syncFailureStage = failureStage;
@@ -257,38 +291,40 @@ async function runCursorLogin(token, { label = '', home = os.homedir() } = {}) {
   const accountId = deriveAccountId(token);
   const userId = extractUserId(token);
   const file = credentialsPath(home);
-
-  let store = readCredentialsStore({ home });
-  if (!store || typeof store.accounts !== 'object' || store.accounts === null) {
-    store = { version: 1, activeAccountId: accountId, accounts: {} };
-  }
-  if (!store.accounts || typeof store.accounts !== 'object') store.accounts = {};
-
   const trimmedLabel = typeof label === 'string' ? label.trim() : '';
-  if (trimmedLabel) {
-    const lcLabel = trimmedLabel.toLowerCase();
-    for (const [otherId, otherAcct] of Object.entries(store.accounts)) {
-      if (otherId === accountId) continue;
-      if (!otherAcct || typeof otherAcct !== 'object') continue;
-      const otherLabel = typeof otherAcct.label === 'string' ? otherAcct.label.trim().toLowerCase() : '';
-      if (otherLabel && otherLabel === lcLabel) {
-        throw new Error(`Cursor account label already exists: ${trimmedLabel}`);
+
+  return serializeCursorLifecycle(() => {
+    let store = readCredentialsStore({ home });
+    if (!store || typeof store.accounts !== 'object' || store.accounts === null) {
+      store = { version: 1, activeAccountId: accountId, accounts: {} };
+    }
+    if (!store.accounts || typeof store.accounts !== 'object') store.accounts = {};
+
+    if (trimmedLabel) {
+      const lcLabel = trimmedLabel.toLowerCase();
+      for (const [otherId, otherAcct] of Object.entries(store.accounts)) {
+        if (otherId === accountId) continue;
+        if (!otherAcct || typeof otherAcct !== 'object') continue;
+        const otherLabel = typeof otherAcct.label === 'string' ? otherAcct.label.trim().toLowerCase() : '';
+        if (otherLabel && otherLabel === lcLabel) {
+          throw new Error(`Cursor account label already exists: ${trimmedLabel}`);
+        }
       }
     }
-  }
 
-  store.accounts[accountId] = {
-    sessionToken: token,
-    userId: userId || null,
-    createdAt: new Date().toISOString(),
-    expiresAt: null,
-    label: trimmedLabel || null
-  };
-  store.activeAccountId = accountId;
-  if (!store.version) store.version = 1;
+    store.accounts[accountId] = {
+      sessionToken: token,
+      userId: userId || null,
+      createdAt: new Date().toISOString(),
+      expiresAt: null,
+      label: trimmedLabel || null
+    };
+    store.activeAccountId = accountId;
+    if (!store.version) store.version = 1;
 
-  writeCredentialsStoreAtomic(file, store);
-  return accountId;
+    writeCredentialsStoreAtomic(file, store);
+    return accountId;
+  });
 }
 
 async function runCursorLogout({
@@ -300,14 +336,14 @@ async function runCursorLogout({
 } = {}) {
   const target = String(accountId || label || '').trim();
   const args = target ? ['logout', '--name', target] : ['logout'];
-  return runSubcommand(args, { ...options, timeoutMs });
+  return serializeCursorLifecycle(() => runSubcommand(args, { ...options, timeoutMs }));
 }
 
 async function runCursorSync(options = {}) {
-  return runTokscaleSubcommand(
+  return serializeCursorLifecycle(() => runTokscaleSubcommand(
     ['sync', '--json'],
     { ...options, timeoutMs: options.timeoutMs ?? CURSOR_EXPLICIT_SYNC_TIMEOUT_MS }
-  );
+  ));
 }
 
 function runCursorStatus(options = {}) {
