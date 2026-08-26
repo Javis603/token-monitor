@@ -44,6 +44,27 @@ const QODER_CN_READ_MAX_BYTES = 50 * 1024 * 1024;
 const QODER_CN_READ_MAX_ROWS = 100_000;
 const QODER_CN_NEGATIVE_SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000;
 const QODER_CN_READ_BUDGET_ERROR = 'QODER_CN_READ_BUDGET_EXCEEDED';
+// Qoder CN also keeps a live model catalog (code -> displayName) in the
+// VS Code-style state DB next to the app root: ItemTable rows keyed
+// `aicoding.modelConfigs.cache.<surface>`. The catalog ships with the app and
+// changes between releases (gmodel has been GLM-5, GLM-5.2 and GLM-5.3), so the
+// static table above ages while rows keep referencing the current codes. The
+// dynamic catalog wins over the static table; codes absent from both pass
+// through unchanged. `secret://`-prefixed keys in the same table are DPAPI
+// encrypted and deliberately never touched — the three catalog keys are plain.
+const QODER_CN_STATE_DB_SUFFIX = path.join('User', 'globalStorage', 'state.vscdb');
+const QODER_CN_MODEL_CONFIG_CACHE_KEYS = Object.freeze([
+  'aicoding.modelConfigs.cache.quest',
+  'aicoding.modelConfigs.cache.assistant',
+  'aicoding.modelConfigs.cache.experts'
+]);
+// Sub-agent sessions (session_type `agent_sub_*`, parent_session_id pointing at
+// a task-* session) record no model on their messages. They are attributed to
+// the parent task's model with this suffix: the suffixed name matches no
+// pricing entry, so an unpriceable attribution stays unpriced (issue #301:
+// unknown attribution is never costed) while still showing which parent model
+// the usage belongs to.
+const QODER_CN_SUB_AGENT_MODEL_SUFFIX = ' (sub-agent)';
 const QODER_CN_USAGE_SQL = `
 SELECT rowid AS row_id, id, session_id, request_id, token_info, model_info, gmt_create,
   (SELECT cs.project_name FROM chat_session cs WHERE cs.session_id = chat_message.session_id LIMIT 1) AS project_name
@@ -106,6 +127,21 @@ const QODER_CN_CHAT_SESSION_PROBE_SQL = `SELECT 1 FROM sqlite_master
 WHERE type = 'table' AND name = 'chat_session'
   AND EXISTS (SELECT 1 FROM pragma_table_info('chat_session') WHERE name = 'project_name')
 LIMIT 1`;
+// Qoder CN added parent_session_id / preferred_model_info to chat_session
+// alongside the sub-agent session types. Older databases lack the columns, so
+// model inheritance is probed separately and skipped cleanly there.
+const QODER_CN_SESSION_MODEL_PROBE_SQL = `SELECT 1 FROM sqlite_master
+WHERE type = 'table' AND name = 'chat_session'
+  AND EXISTS (SELECT 1 FROM pragma_table_info('chat_session') WHERE name = 'parent_session_id')
+  AND EXISTS (SELECT 1 FROM pragma_table_info('chat_session') WHERE name = 'preferred_model_info')
+LIMIT 1`;
+// The whole session table is small next to chat_message (one row per chat, not
+// per message) and parent sessions can predate the message window being read,
+// so inheritance reads the session mapping independently of the usage query
+// instead of correlating a subquery per message row.
+const QODER_CN_SESSION_MODELS_SQL = `
+SELECT session_id, parent_session_id, preferred_model_info FROM chat_session
+`;
 
 function normalizeQoderCnProjectLabel(value) {
   // '.' is Qoder CN's "no project" sentinel; keep it unattributed so it does
@@ -119,14 +155,15 @@ function normalizeQoderCnProjectLabel(value) {
 // probing every legacy database on every collector tick. Transient probe
 // failures are never cached.
 const qoderCnChatSessionTableCache = new Map();
+const qoderCnSessionModelTableCache = new Map();
 
-// Returns true when chat_session.project_name exists, false when the database
-// was read successfully without it, or null when the probe itself failed.
-async function probeQoderCnChatSessionTable(dbPath, { run, requireFn } = {}) {
-  const probe = QODER_CN_CHAT_SESSION_PROBE_SQL;
+// Runs a boolean sqlite_master/pragma probe: true when the SQL yields a row,
+// false when the database was read successfully without one, or null when the
+// probe itself failed.
+async function probeQoderCnSql(dbPath, sql, { run, requireFn } = {}) {
   try {
     if (run) {
-      const result = await run('sqlite3', ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, probe], {
+      const result = await run('sqlite3', ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, sql], {
         encoding: 'utf8', maxBuffer: 1024 * 1024, timeout: 10_000, windowsHide: true
       });
       const parsed = JSON.parse(String(result?.stdout || '').trim() || '[]');
@@ -139,13 +176,26 @@ async function probeQoderCnChatSessionTable(dbPath, { run, requireFn } = {}) {
     const database = new DatabaseSync(dbPath, { readOnly: true });
     try {
       database.exec('PRAGMA busy_timeout = 250');
-      return database.prepare(probe).get() !== undefined;
+      return database.prepare(sql).get() !== undefined;
     } finally {
       database.close();
     }
   } catch (_) {
     return null;
   }
+}
+
+// Returns true when chat_session.project_name exists, false when the database
+// was read successfully without it, or null when the probe itself failed.
+async function probeQoderCnChatSessionTable(dbPath, options = {}) {
+  return probeQoderCnSql(dbPath, QODER_CN_CHAT_SESSION_PROBE_SQL, options);
+}
+
+// Same contract for the model-inheritance columns (parent_session_id +
+// preferred_model_info); both must exist for the session-model mapping to be
+// usable.
+async function probeQoderCnSessionModelColumns(dbPath, options = {}) {
+  return probeQoderCnSql(dbPath, QODER_CN_SESSION_MODEL_PROBE_SQL, options);
 }
 
 function numeric(value) {
@@ -178,6 +228,41 @@ function sourceId(value) {
 
 function isQoderCnRoutingTier(value) {
   return QODER_CN_ROUTING_TIERS.has(String(value || '').trim().toLowerCase());
+}
+
+// chat_message.model_info is JSON with the model under $.model_key; missing or
+// malformed payloads yield null (the sub-agent inheritance path).
+function qoderCnModelKeyFromInfo(value) {
+  const modelInfo = jsonObject(value);
+  const key = String(modelInfo?.model_key || modelInfo?.modelKey || '').trim();
+  return key || null;
+}
+
+// Dynamic catalog (state.vscdb) wins over the static table; an entry has to be
+// an own property with a non-empty value so prototype names ("constructor",
+// "toString") can never be resolved as display names. Codes absent from both
+// catalogs pass through unchanged to the caller.
+function qoderCnModelDisplayName(code, dynamicNames) {
+  if (dynamicNames) {
+    if (typeof dynamicNames.get === 'function') {
+      const name = dynamicNames.get(code);
+      if (typeof name === 'string' && name.trim()) return name.trim();
+    } else if (Object.prototype.hasOwnProperty.call(dynamicNames, code)) {
+      const name = dynamicNames[code];
+      if (typeof name === 'string' && name.trim()) return name.trim();
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(QODER_CN_MODEL_DISPLAY_NAMES, code)) {
+    return QODER_CN_MODEL_DISPLAY_NAMES[code];
+  }
+  return null;
+}
+
+// Values interpolated into IN (...) lists for the sqlite3 CLI path cannot use
+// bound parameters, so single quotes are doubled — the ids come from the local
+// database itself and only ever need literal escaping.
+function qoderCnSqlStringLiteral(value) {
+  return `'${String(value ?? '').replace(/'/g, "''")}'`;
 }
 
 function estimatedQoderCnRowCost(row, pricingByModel) {
@@ -258,7 +343,13 @@ function resetQoderCnPricingCache() {
   qoderCnPricingCache.clear();
 }
 
-function normalizeQoderCnDbRow(row, source = 'local') {
+// context is optional and supplied by collectQoderCnRows:
+//   modelDisplayNames      — code -> displayName from state.vscdb (dynamic
+//                            catalog, takes precedence over the static table)
+//   inheritedSessionModels — Map<sessionId, parent model code> resolved from
+//                            chat_session for sub-agent sessions whose messages
+//                            record no model of their own
+function normalizeQoderCnDbRow(row, source = 'local', context = {}) {
   const usage = jsonObject(row?.token_info);
   const prompt = numeric(usage?.prompt_tokens);
   const cached = numeric(usage?.cached_tokens ?? 0);
@@ -267,15 +358,24 @@ function normalizeQoderCnDbRow(row, source = 'local') {
 
   const session = String(row?.session_id || row?.request_id || row?.id || row?.row_id || 'unknown');
   const message = String(row?.id || row?.request_id || row?.row_id || `${row?.gmt_create || 0}`);
-  const modelInfo = jsonObject(row?.model_info);
-  const modelKey = String(modelInfo?.model_key || modelInfo?.modelKey || 'qoder-agent');
-  const displayName = Object.prototype.hasOwnProperty.call(QODER_CN_MODEL_DISPLAY_NAMES, modelKey)
-    ? QODER_CN_MODEL_DISPLAY_NAMES[modelKey]
-    : null;
+  const modelKey = qoderCnModelKeyFromInfo(row?.model_info);
+  let model;
+  if (modelKey) {
+    model = qoderCnModelDisplayName(modelKey, context.modelDisplayNames) || modelKey;
+  } else {
+    // No model recorded on the message: sub-agent rows inherit the parent
+    // task's model (suffixed); everything else keeps the generic fallback.
+    const inheritedKey = typeof context.inheritedSessionModels?.get === 'function'
+      ? context.inheritedSessionModels.get(String(row?.session_id || ''))
+      : null;
+    model = inheritedKey
+      ? `${qoderCnModelDisplayName(inheritedKey, context.modelDisplayNames) || inheritedKey}${QODER_CN_SUB_AGENT_MODEL_SUFFIX}`
+      : 'qoder-agent';
+  }
   return {
     sessionId: `qodercn:${source}:${session}`,
     messageId: `qodercn:${source}:${session}:${message}`,
-    model: displayName || modelKey,
+    model,
     projectLabel: normalizeQoderCnProjectLabel(row?.project_name),
     input: Math.max(0, prompt - cached),
     output,
@@ -284,6 +384,22 @@ function normalizeQoderCnDbRow(row, source = 'local') {
     createdAt: timestampMs(row?.gmt_create),
     messages: 1
   };
+}
+
+// <appRoot>\SharedClientCache\cache\db\local.db and
+// <appRoot>\User\globalStorage\state.vscdb share the Qoder CN app root. The
+// suffix is matched case-insensitively: on Windows the drive-letter and
+// directory casing a process reports can differ from the canonical spelling.
+// A db path outside the standard layout yields null so the caller falls back
+// to the app root derived from qoderCnDataPaths().
+function qoderCnStateDbPathFromDbPath(dbPath) {
+  const normalized = path.normalize(String(dbPath || ''));
+  if (!normalized) return null;
+  const suffix = path.normalize(QODER_CN_DB_SUFFIX);
+  if (!normalized.toLowerCase().endsWith(suffix.toLowerCase())) return null;
+  const appRoot = normalized.slice(0, normalized.length - suffix.length);
+  if (!appRoot || appRoot === path.sep) return null;
+  return path.join(appRoot, QODER_CN_STATE_DB_SUFFIX);
 }
 
 function qoderCnDataPaths(options = {}) {
@@ -298,11 +414,13 @@ function qoderCnDataPaths(options = {}) {
     appSupport = (typeof xdg === 'string' && path.isAbsolute(xdg)) ? xdg : path.join(home, '.config');
   }
 
+  const appRoot = path.join(appSupport, 'QoderCN');
   const explicitDb = String(env.TOKEN_MONITOR_QODER_CN_DB_PATH || '').trim();
   return {
     dbPaths: explicitDb
       ? [path.resolve(explicitDb)]
-      : [path.join(appSupport, 'QoderCN', QODER_CN_DB_SUFFIX)]
+      : [path.join(appRoot, QODER_CN_DB_SUFFIX)],
+    stateDbPaths: [path.join(appRoot, QODER_CN_STATE_DB_SUFFIX)]
   };
 }
 
@@ -411,10 +529,221 @@ async function readQoderCnDbRows(dbPath, options = {}) {
   }
 }
 
+// Shared dual-backend reader for the auxiliary reads (state.vscdb catalog,
+// chat_session mapping, per-session message fallback): sqlite3 CLI first, then
+// node:sqlite, with the same row/byte budgets as the usage query. Unlike
+// readQoderCnDbRows this throws to its caller — every consumer here treats the
+// data as best-effort and degrades instead of failing the collection.
+async function readQoderCnSqlRows(dbPath, sql, options = {}) {
+  const run = options.execFile || execFileAsync;
+  const maxReadBytes = positiveInteger(options.maxReadBytes, QODER_CN_READ_MAX_BYTES);
+  const maxReadRows = positiveInteger(options.maxReadRows, QODER_CN_READ_MAX_ROWS);
+  try {
+    const result = await run('sqlite3', ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, sql], {
+      encoding: 'utf8', maxBuffer: maxReadBytes, timeout: 30_000, windowsHide: true
+    });
+    const stdout = String(result?.stdout || '').trim();
+    if (Buffer.byteLength(stdout, 'utf8') > maxReadBytes) throw readBudgetError('bytes', maxReadBytes);
+    const parsed = JSON.parse(stdout || '[]');
+    return boundedRows(Array.isArray(parsed) ? parsed : [], { maxReadBytes, maxReadRows, countBytes: false });
+  } catch (cliError) {
+    if (isReadBudgetError(cliError)) throw cliError;
+    try {
+      const requireFn = options.requireFn || require;
+      const { DatabaseSync } = requireFn('node:sqlite');
+      const database = new DatabaseSync(dbPath, { readOnly: true });
+      try {
+        database.exec('PRAGMA busy_timeout = 250');
+        return boundedRows(database.prepare(sql).iterate(), { maxReadBytes, maxReadRows, countBytes: true });
+      } finally {
+        database.close();
+      }
+    } catch (nodeError) {
+      if (isReadBudgetError(nodeError)) throw nodeError;
+      throw new Error(`qodercn sqlite read failed: sqlite3 CLI: ${cliError.message}; node:sqlite: ${nodeError.message}`, { cause: nodeError });
+    }
+  }
+}
+
+// Reads the live model catalog from state.vscdb. The database is a best-effort
+// cache of the app's model list: a missing file, a missing key, a malformed
+// payload or a locked database silently yields an empty mapping and the static
+// table stays authoritative.
+async function readQoderCnModelDisplayNames(stateDbPath, options = {}) {
+  const names = Object.create(null);
+  if (!stateDbPath || !fs.existsSync(stateDbPath)) return names;
+  try {
+    const literals = QODER_CN_MODEL_CONFIG_CACHE_KEYS.map((key) => qoderCnSqlStringLiteral(key)).join(', ');
+    const sql = `SELECT key, value FROM ItemTable WHERE key IN (${literals})`;
+    const rows = await readQoderCnSqlRows(stateDbPath, sql, options);
+    const valuesByKey = new Map();
+    for (const row of rows) {
+      const key = String(row?.key || '');
+      if (QODER_CN_MODEL_CONFIG_CACHE_KEYS.includes(key) && !valuesByKey.has(key)) valuesByKey.set(key, row?.value);
+    }
+    // Iterate in the fixed key order so a code listed by several surfaces keeps
+    // the first catalog's spelling (the surfaces describe the same models).
+    for (const key of QODER_CN_MODEL_CONFIG_CACHE_KEYS) {
+      const entries = jsonObject(valuesByKey.get(key));
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        const code = String(entry?.name || '').trim();
+        const displayName = String(entry?.displayName || '').trim();
+        if (code && displayName && names[code] === undefined) names[code] = displayName;
+      }
+    }
+  } catch (_) {
+    // Anything unreadable here must never take the usage collection down.
+  }
+  return names;
+}
+
+// Reads the chat_session mapping used for sub-agent model inheritance.
+// Returns null when the columns are absent (probe), the database cannot be
+// read, or the read budget is exceeded — inheritance then simply stays off.
+async function readQoderCnSessionModels(dbPath, options = {}) {
+  if (!dbPath || !fs.existsSync(dbPath)) return null;
+  const run = options.execFile || execFileAsync;
+  const nowMs = options.nowMs ?? Date.now();
+  const negativeSchemaCacheTtlMs = positiveIntegerOrZero(
+    options.negativeSchemaCacheTtlMs,
+    QODER_CN_NEGATIVE_SCHEMA_CACHE_TTL_MS
+  );
+  const cachedProbe = qoderCnSessionModelTableCache.get(dbPath);
+  let probed = cachedProbe?.supported;
+  const negativeCacheFresh = cachedProbe?.supported === false
+    && nowMs - cachedProbe.at < negativeSchemaCacheTtlMs;
+  if (probed === undefined || (probed === false && !negativeCacheFresh)) {
+    probed = await probeQoderCnSessionModelColumns(dbPath, { run, requireFn: options.requireFn });
+    if (probed !== null) qoderCnSessionModelTableCache.set(dbPath, { supported: probed, at: nowMs });
+  }
+  if (probed !== true) return null;
+  try {
+    const rows = await readQoderCnSqlRows(dbPath, QODER_CN_SESSION_MODELS_SQL, options);
+    const sessions = new Map();
+    for (const row of rows) {
+      const sessionId = String(row?.session_id || '').trim();
+      if (!sessionId || sessions.has(sessionId)) continue;
+      const preferred = jsonObject(row?.preferred_model_info);
+      const preferredModel = String(preferred?.preferred_model || preferred?.preferredModel || '').trim();
+      sessions.set(sessionId, {
+        parentSessionId: String(row?.parent_session_id || '').trim() || null,
+        preferredModel: preferredModel || null
+      });
+    }
+    return sessions;
+  } catch (error) {
+    if (typeof options.logger === 'function') options.logger(`qodercn session model read failed: ${error.message}`);
+    return null;
+  }
+}
+
+// Latest message model per session for parents whose preferred_model_info is
+// empty. Only the given sessions are read, newest first, so the first row seen
+// per session is that session's latest model.
+async function readQoderCnLatestSessionModelKeys(dbPath, sessionIds, options = {}) {
+  const latest = new Map();
+  const ids = [...new Set((Array.isArray(sessionIds) ? sessionIds : [])
+    .map((id) => String(id || '').trim())
+    .filter(Boolean))];
+  if (!dbPath || !ids.length || !fs.existsSync(dbPath)) return latest;
+  const literals = ids.map((id) => qoderCnSqlStringLiteral(id)).join(', ');
+  const sql = `SELECT session_id, model_info FROM chat_message
+WHERE session_id IN (${literals})
+  AND model_info IS NOT NULL
+  AND trim(model_info) NOT IN ('', '{}')
+ORDER BY gmt_create DESC, rowid DESC`;
+  try {
+    const rows = await readQoderCnSqlRows(dbPath, sql, options);
+    for (const row of rows) {
+      const sessionId = String(row?.session_id || '').trim();
+      if (!sessionId || latest.has(sessionId)) continue;
+      const code = qoderCnModelKeyFromInfo(row?.model_info);
+      if (code) latest.set(sessionId, code);
+    }
+  } catch (error) {
+    if (typeof options.logger === 'function') options.logger(`qodercn session message model read failed: ${error.message}`);
+  }
+  return latest;
+}
+
+// Walks a session's parent chain: the parent's preferred model first, then its
+// latest known message model, then its own parent. deadEnds (optional)
+// collects the sessions a fallback message query could still resolve.
+function qoderCnSessionModelFromChain(sessionId, sessionModels, latestMaps, deadEnds) {
+  const seen = new Set();
+  let current = sessionModels.get(sessionId)?.parentSessionId || null;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const info = sessionModels.get(current);
+    if (!info) {
+      if (deadEnds) deadEnds.add(current);
+      return null;
+    }
+    if (info.preferredModel) return info.preferredModel;
+    for (const latest of latestMaps) {
+      if (latest.has(current)) return latest.get(current);
+    }
+    if (info.parentSessionId) {
+      current = info.parentSessionId;
+      continue;
+    }
+    if (deadEnds) deadEnds.add(current);
+    return null;
+  }
+  return null;
+}
+
+// Resolves the parent model code for every session that has messages without a
+// model of their own. Parent sessions may predate the message window (and can
+// even carry no token-bearing messages at all), so the mapping comes from
+// chat_session rather than from the rows already read.
+async function resolveQoderCnInheritedSessionModels(dbPath, dbRows, options = {}) {
+  const inherited = new Map();
+  const candidateSessions = new Set();
+  for (const row of dbRows) {
+    if (qoderCnModelKeyFromInfo(row?.model_info)) continue;
+    const sessionId = String(row?.session_id || '').trim();
+    if (sessionId) candidateSessions.add(sessionId);
+  }
+  if (!candidateSessions.size) return inherited;
+
+  const sessionModels = await readQoderCnSessionModels(dbPath, options);
+  if (!sessionModels) return inherited;
+
+  // Latest in-window model per session, for free: the usage query returns rows
+  // oldest-first, so the last write per session is the newest message.
+  const latestRowModels = new Map();
+  for (const row of dbRows) {
+    const sessionId = String(row?.session_id || '').trim();
+    const code = qoderCnModelKeyFromInfo(row?.model_info);
+    if (sessionId && code) latestRowModels.set(sessionId, code);
+  }
+
+  const deadEnds = new Set();
+  for (const sessionId of candidateSessions) {
+    const code = qoderCnSessionModelFromChain(sessionId, sessionModels, [latestRowModels], deadEnds);
+    if (code) inherited.set(sessionId, code);
+  }
+  if (deadEnds.size) {
+    const latestDbModels = await readQoderCnLatestSessionModelKeys(dbPath, [...deadEnds], options);
+    if (latestDbModels.size) {
+      for (const sessionId of candidateSessions) {
+        if (inherited.has(sessionId)) continue;
+        const code = qoderCnSessionModelFromChain(sessionId, sessionModels, [latestRowModels, latestDbModels], null);
+        if (code) inherited.set(sessionId, code);
+      }
+    }
+  }
+  return inherited;
+}
+
 async function collectQoderCnRows(options = {}) {
   const paths = qoderCnDataPaths(options);
-  const dbPaths = Array.isArray(options.dbPaths) ? options.dbPaths : paths.dbPaths;
+  const injectedDbPaths = Array.isArray(options.dbPaths);
+  const dbPaths = injectedDbPaths ? options.dbPaths : paths.dbPaths;
   const readDbRows = options.readDbRows || readQoderCnDbRows;
+  const readModelDisplayNames = options.readModelDisplayNames || readQoderCnModelDisplayNames;
   const sinceMs = options.sinceMs;
   const rows = [];
 
@@ -422,8 +751,23 @@ async function collectQoderCnRows(options = {}) {
     if (!options.readDbRows && !fs.existsSync(dbPath)) continue;
     const source = sourceId(dbPath);
     const dbRows = await readDbRows(dbPath, { ...options, sinceMs });
+    // The dynamic catalog lives next to the database (same app root); it is
+    // read once per collection and shared by every row, never re-read per row.
+    // An injected db path keeps the collection hermetic: only a standard
+    // SharedClientCache layout (or an explicit stateDbPath) opts into the
+    // local app root.
+    const stateDbPath = options.stateDbPath
+      || qoderCnStateDbPathFromDbPath(dbPath)
+      || (injectedDbPaths ? null : paths.stateDbPaths[0]);
+    let modelDisplayNames = null;
+    try {
+      const names = await readModelDisplayNames(stateDbPath, options);
+      if (names && typeof names === 'object') modelDisplayNames = names;
+    } catch (_) { /* a failing catalog read keeps the static table */ }
+    const inheritedSessionModels = await resolveQoderCnInheritedSessionModels(dbPath, dbRows, options);
+    const context = { modelDisplayNames, inheritedSessionModels };
     for (const dbRow of dbRows) {
-      const row = normalizeQoderCnDbRow(dbRow, source);
+      const row = normalizeQoderCnDbRow(dbRow, source, context);
       if (row) rows.push(row);
     }
   }
@@ -519,8 +863,14 @@ module.exports = {
   collectQoderCnRows,
   normalizeQoderCnDbRow,
   qoderCnDataPaths,
+  qoderCnStateDbPathFromDbPath,
   readQoderCnDbRows,
+  readQoderCnModelDisplayNames,
+  readQoderCnSessionModels,
   resolveQoderCnPricing,
   resetQoderCnPricingCache,
-  resetQoderCnChatSessionProbe() { qoderCnChatSessionTableCache.clear(); }
+  resetQoderCnChatSessionProbe() {
+    qoderCnChatSessionTableCache.clear();
+    qoderCnSessionModelTableCache.clear();
+  }
 };

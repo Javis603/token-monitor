@@ -16,7 +16,9 @@ const {
   collectQoderCnRows,
   normalizeQoderCnDbRow,
   qoderCnDataPaths,
+  qoderCnStateDbPathFromDbPath,
   readQoderCnDbRows,
+  readQoderCnModelDisplayNames,
   resolveQoderCnPricing,
   resetQoderCnChatSessionProbe,
   resetQoderCnPricingCache
@@ -25,6 +27,97 @@ const {
 const { localMs } = require('../helpers/localTime');
 
 const QODER_CN_DB_FIXTURE = path.join(__dirname, '..', 'fixtures', 'qoder-cn-local.db');
+
+// Builds a Qoder CN app-root layout in a temp dir:
+//   <appRoot>/SharedClientCache/cache/db/local.db   (chat usage)
+//   <appRoot>/User/globalStorage/state.vscdb        (live model catalog)
+// so the state DB is discovered from the local.db path, exactly like on disk.
+function createQoderCnAppRoot(prefix, { withStateDb = true } = {}) {
+  const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const dbPath = path.join(appRoot, 'SharedClientCache', 'cache', 'db', 'local.db');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const stateDbPath = path.join(appRoot, 'User', 'globalStorage', 'state.vscdb');
+  if (withStateDb) fs.mkdirSync(path.dirname(stateDbPath), { recursive: true });
+  return { appRoot, dbPath, stateDbPath };
+}
+
+// Writes the live model catalog into a state.vscdb the way Qoder CN does:
+// ItemTable rows keyed `aicoding.modelConfigs.cache.<surface>`.
+function writeQoderCnStateCatalog(stateDbPath, catalogs) {
+  const database = new sqlite.DatabaseSync(stateDbPath);
+  try {
+    database.exec('CREATE TABLE ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)');
+    const insert = database.prepare('INSERT INTO ItemTable (key, value) VALUES (?, ?)');
+    for (const [key, entries] of Object.entries(catalogs)) {
+      insert.run(key, JSON.stringify(entries));
+    }
+    database.close();
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+}
+
+// Creates a local.db with the chat_message + chat_session tables Qoder CN
+// ships today (project_name, parent_session_id and preferred_model_info all
+// present), so both probes pass and the sub-agent inheritance path is live.
+function createQoderCnUsageDb(dbPath, sessions, messages) {
+  const database = new sqlite.DatabaseSync(dbPath);
+  try {
+    database.exec(`CREATE TABLE chat_message (
+      id varchar(64) primary key,
+      session_id VARCHAR(64),
+      request_id VARCHAR(64),
+      role VARCHAR(64),
+      content text,
+      token_info text,
+      model_info text,
+      gmt_create INTEGER
+    )`);
+    database.exec(`CREATE TABLE chat_session (
+      session_id varchar(64) primary key,
+      session_title varchar(256) not null,
+      project_id varchar(64) not null,
+      project_name varchar(64),
+      gmt_create INTEGER,
+      gmt_modified INTEGER,
+      session_type VARCHAR(64) DEFAULT '',
+      preferred_model_info TEXT DEFAULT '',
+      parent_session_id VARCHAR(64) DEFAULT ''
+    )`);
+    const insertSession = database.prepare(`INSERT INTO chat_session
+      (session_id, session_title, project_id, project_name, session_type, preferred_model_info, parent_session_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    for (const session of sessions) {
+      insertSession.run(
+        session.sessionId,
+        session.title || 'session',
+        'project-1',
+        session.projectName || '',
+        session.sessionType || '',
+        session.preferredModelInfo || '',
+        session.parentSessionId || ''
+      );
+    }
+    const insertMessage = database.prepare(`INSERT INTO chat_message
+      (id, session_id, request_id, role, token_info, model_info, gmt_create)
+      VALUES (?, ?, ?, 'assistant', ?, ?, ?)`);
+    for (const message of messages) {
+      insertMessage.run(
+        message.id,
+        message.sessionId,
+        `request-${message.id}`,
+        message.tokenInfo === undefined ? JSON.stringify({ prompt_tokens: 100, cached_tokens: 0, completion_tokens: 10 }) : message.tokenInfo,
+        message.modelInfo === undefined ? '' : message.modelInfo,
+        message.gmtCreate === undefined ? 1_785_286_800_000 : message.gmtCreate
+      );
+    }
+    database.close();
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+}
 
 test('QODER_CN_MODEL_DISPLAY_NAMES covers every official model code and the retired preview', () => {
   // Official codes from Qoder CN.app i18n `modelSelector.item.*` plus the
@@ -513,4 +606,285 @@ test('reads survive a database without the chat_session table (fallback SQL)', a
   }
   assert.equal(rows.length, 1, 'fallback query still returns rows');
   assert.equal(rows[0].project_name, undefined, 'no project column in fallback');
+});
+
+test('normalizeQoderCnDbRow prefers dynamic catalog names over the static table', () => {
+  // gmodel is GLM-5 in the static table but GLM-5.3 in the live catalog; the
+  // catalog wins for both plain-object and Map shapes.
+  const row = (modelKey) => ({
+    row_id: 1,
+    id: 'm1',
+    session_id: 's1',
+    token_info: JSON.stringify({ prompt_tokens: 10, completion_tokens: 2 }),
+    model_info: JSON.stringify({ model_key: modelKey })
+  });
+  assert.equal(normalizeQoderCnDbRow(row('gmodel'), 'cn', { modelDisplayNames: { gmodel: 'GLM-5.3' } }).model, 'GLM-5.3');
+  assert.equal(normalizeQoderCnDbRow(row('gmodel'), 'cn', { modelDisplayNames: new Map([['gmodel', 'GLM-5.3']]) }).model, 'GLM-5.3');
+  // An empty dynamic entry is not a mapping; the static table stays in charge.
+  assert.equal(normalizeQoderCnDbRow(row('gmodel'), 'cn', { modelDisplayNames: { gmodel: '' } }).model, 'GLM-5');
+});
+
+test('normalizeQoderCnDbRow falls back to the static table when the dynamic catalog misses', () => {
+  const row = (modelKey) => ({
+    row_id: 1,
+    id: 'm1',
+    session_id: 's1',
+    token_info: JSON.stringify({ prompt_tokens: 10, completion_tokens: 2 }),
+    model_info: JSON.stringify({ model_key: modelKey })
+  });
+  const modelDisplayNames = { qmodel_38max: 'Qwen3.8-Max' };
+  assert.equal(normalizeQoderCnDbRow(row('gmodel'), 'cn', { modelDisplayNames }).model, 'GLM-5');
+  assert.equal(normalizeQoderCnDbRow(row('qmodel_38max'), 'cn', { modelDisplayNames }).model, 'Qwen3.8-Max');
+  assert.equal(normalizeQoderCnDbRow(row('gmodel'), 'cn', {}).model, 'GLM-5', 'no catalog at all keeps the static table');
+});
+
+test('unmapped model codes pass through unchanged from both catalogs', () => {
+  const row = {
+    row_id: 1,
+    id: 'm1',
+    session_id: 's1',
+    token_info: JSON.stringify({ prompt_tokens: 10, completion_tokens: 2 }),
+    model_info: JSON.stringify({ model_key: 'custom_model_xyz' })
+  };
+  assert.equal(normalizeQoderCnDbRow(row, 'cn', { modelDisplayNames: { gmodel: 'GLM-5.3' } }).model, 'custom_model_xyz');
+  assert.equal(normalizeQoderCnDbRow(row, 'cn').model, 'custom_model_xyz');
+});
+
+test('sub-agent rows inherit the parent model with the (sub-agent) suffix', () => {
+  const subAgentRow = {
+    row_id: 1,
+    id: 'm1',
+    session_id: 'sub-1',
+    token_info: JSON.stringify({ prompt_tokens: 10, completion_tokens: 2 }),
+    model_info: '' // sub-agent sessions record no model on their messages
+  };
+  const inheritedSessionModels = new Map([['sub-1', 'gmodel']]);
+  // Dynamic catalog, static table and bare code all resolve before the suffix.
+  assert.equal(
+    normalizeQoderCnDbRow(subAgentRow, 'cn', { modelDisplayNames: { gmodel: 'GLM-5.3' }, inheritedSessionModels }).model,
+    'GLM-5.3 (sub-agent)'
+  );
+  assert.equal(
+    normalizeQoderCnDbRow(subAgentRow, 'cn', { inheritedSessionModels }).model,
+    'GLM-5 (sub-agent)'
+  );
+  assert.equal(
+    normalizeQoderCnDbRow({ ...subAgentRow, session_id: 'sub-2' }, 'cn', {
+      inheritedSessionModels: new Map([['sub-2', 'brand_new_code']])
+    }).model,
+    'brand_new_code (sub-agent)'
+  );
+});
+
+test('rows without a resolvable parent session keep the qoder-agent fallback', () => {
+  const noModelRow = {
+    row_id: 1,
+    id: 'm1',
+    session_id: 'plain-1',
+    token_info: JSON.stringify({ prompt_tokens: 10, completion_tokens: 2 }),
+    model_info: ''
+  };
+  assert.equal(normalizeQoderCnDbRow(noModelRow, 'cn').model, 'qoder-agent');
+  assert.equal(normalizeQoderCnDbRow(noModelRow, 'cn', { inheritedSessionModels: new Map() }).model, 'qoder-agent');
+  // A parent resolution for a different session must not leak into this row.
+  assert.equal(
+    normalizeQoderCnDbRow(noModelRow, 'cn', { inheritedSessionModels: new Map([['sub-9', 'gmodel']]) }).model,
+    'qoder-agent'
+  );
+});
+
+test('qoderCnStateDbPathFromDbPath derives state.vscdb from the local.db layout', () => {
+  const appRoot = path.join(os.tmpdir(), 'qoder-app-root');
+  const dbPath = path.join(appRoot, 'SharedClientCache', 'cache', 'db', 'local.db');
+  assert.equal(
+    qoderCnStateDbPathFromDbPath(dbPath),
+    path.join(appRoot, 'User', 'globalStorage', 'state.vscdb')
+  );
+  // Only the standard layout carries the app root; anything else opts out.
+  assert.equal(qoderCnStateDbPathFromDbPath('/virtual/qoder.db'), null);
+  assert.equal(qoderCnStateDbPathFromDbPath(''), null);
+  assert.equal(qoderCnStateDbPathFromDbPath(null), null);
+});
+
+test('qoderCnDataPaths exposes the state.vscdb path per platform', () => {
+  const stateSuffix = path.join('QoderCN', 'User', 'globalStorage', 'state.vscdb');
+  const darwin = qoderCnDataPaths({ homeDir: '/Users/test', platform: 'darwin', env: {} });
+  assert.deepEqual(darwin.stateDbPaths, [path.join('/Users/test', 'Library', 'Application Support', stateSuffix)]);
+  const win = qoderCnDataPaths({ homeDir: '/home/test', platform: 'win32', env: { APPDATA: '/home/test/AppData/Roaming' } });
+  assert.deepEqual(win.stateDbPaths, [path.join('/home/test/AppData/Roaming', stateSuffix)]);
+  const linux = qoderCnDataPaths({ homeDir: '/home/test', platform: 'linux', env: {} });
+  assert.deepEqual(linux.stateDbPaths, [path.join('/home/test/.config', stateSuffix)]);
+});
+
+test('collectQoderCnRows reads the dynamic catalog once per collection', async () => {
+  let catalogReads = 0;
+  let catalogStateDbPath;
+  const rows = await collectQoderCnRows({
+    readDbRows: async () => [{
+      row_id: 1,
+      id: 'm1',
+      session_id: 's1',
+      token_info: JSON.stringify({ prompt_tokens: 12, completion_tokens: 3 }),
+      model_info: JSON.stringify({ model_key: 'gmodel' })
+    }, {
+      row_id: 2,
+      id: 'm2',
+      session_id: 's2',
+      token_info: JSON.stringify({ prompt_tokens: 12, completion_tokens: 3 }),
+      model_info: JSON.stringify({ model_key: 'qmodel_38max' })
+    }],
+    readModelDisplayNames: async (stateDbPath) => {
+      catalogReads += 1;
+      catalogStateDbPath = stateDbPath;
+      return { gmodel: 'GLM-5.3', qmodel_38max: 'Qwen3.8-Max' };
+    },
+    dbPaths: ['/virtual/qoder.db']
+  });
+  assert.equal(catalogReads, 1, 'the catalog is read once, never per row');
+  // An injected db path outside the standard layout must not reach into the
+  // real app root of the machine running the tests.
+  assert.equal(catalogStateDbPath, null);
+  assert.deepEqual(rows.map((row) => row.model), ['GLM-5.3', 'Qwen3.8-Max']);
+});
+
+(sqlite ? test : test.skip)('readQoderCnModelDisplayNames merges the three catalog keys first-key-wins', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-state-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const stateDbPath = path.join(tmp, 'state.vscdb');
+  writeQoderCnStateCatalog(stateDbPath, {
+    'aicoding.modelConfigs.cache.quest': [
+      { name: 'gmodel', displayName: 'GLM-5.3' },
+      { name: 'qmodel_38max', displayName: 'Qwen3.8-Max' },
+      { name: '', displayName: 'No Code' },
+      { name: 'nameless', displayName: '' }
+    ],
+    'aicoding.modelConfigs.cache.assistant': [
+      { name: 'gmodel', displayName: 'GLM-5.3-Assistant' },
+      { name: 'kmodel', displayName: 'Kimi-K2.7-Code' }
+    ],
+    'aicoding.modelConfigs.cache.experts': [
+      { name: 'emmodel', displayName: 'EM-Model' }
+    ]
+  });
+  const names = await readQoderCnModelDisplayNames(stateDbPath);
+  assert.equal(names.gmodel, 'GLM-5.3', 'the first catalog holding a code wins');
+  assert.equal(names.qmodel_38max, 'Qwen3.8-Max');
+  assert.equal(names.kmodel, 'Kimi-K2.7-Code');
+  assert.equal(names.emmodel, 'EM-Model');
+  assert.equal(names.nameless, undefined, 'entries without a display name are skipped');
+  assert.equal(Object.keys(names).length, 4);
+});
+
+test('readQoderCnModelDisplayNames returns an empty mapping for unreadable state databases', async () => {
+  const missing = await readQoderCnModelDisplayNames(path.join(os.tmpdir(), 'qoder-state-missing', 'state.vscdb'));
+  assert.equal(Object.keys(missing).length, 0);
+  assert.equal((await readQoderCnModelDisplayNames(null)).gmodel, undefined);
+});
+
+(sqlite ? test : test.skip)('a corrupt state.vscdb silently yields no dynamic catalog', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-state-corrupt-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const stateDbPath = path.join(tmp, 'state.vscdb');
+  fs.writeFileSync(stateDbPath, 'this is not a sqlite database');
+  const names = await readQoderCnModelDisplayNames(stateDbPath);
+  assert.equal(Object.keys(names).length, 0);
+});
+
+(sqlite ? test : test.skip)('an unreadable state.vscdb never takes the collection down', async (t) => {
+  const { appRoot, dbPath } = createQoderCnAppRoot('qoder-no-state-');
+  t.after(() => { fs.rmSync(appRoot, { recursive: true, force: true }); resetQoderCnChatSessionProbe(); });
+  createQoderCnUsageDb(dbPath, [{ sessionId: 's1', projectName: 'proj' }], [
+    { id: 'm1', sessionId: 's1', modelInfo: JSON.stringify({ model_key: 'gmodel' }) }
+  ]);
+  const collect = () => collectQoderCnRows({ dbPaths: [dbPath], homeDir: appRoot, platform: 'win32', env: {} });
+  const withoutStateDb = await collect();
+  assert.deepEqual(withoutStateDb.map((row) => row.model), ['GLM-5'], 'static table stays authoritative');
+
+  fs.mkdirSync(path.dirname(path.join(appRoot, 'User', 'globalStorage', 'state.vscdb')), { recursive: true });
+  fs.writeFileSync(path.join(appRoot, 'User', 'globalStorage', 'state.vscdb'), 'corrupt bytes');
+  const withCorruptStateDb = await collect();
+  assert.deepEqual(withCorruptStateDb.map((row) => row.model), ['GLM-5'], 'a corrupt catalog is skipped silently');
+});
+
+(sqlite ? test : test.skip)('sub-agent rows inherit the parent preferred model end to end', async (t) => {
+  const { appRoot, dbPath, stateDbPath } = createQoderCnAppRoot('qoder-subagent-');
+  t.after(() => { fs.rmSync(appRoot, { recursive: true, force: true }); resetQoderCnChatSessionProbe(); });
+  createQoderCnUsageDb(dbPath, [
+    { sessionId: 'task-1.session.execution', sessionType: 'quest', preferredModelInfo: JSON.stringify({ preferred_model: 'qmodel_38max' }) },
+    { sessionId: 'sub-1', sessionType: 'agent_sub_computeruse', parentSessionId: 'task-1.session.execution' },
+    { sessionId: 'plain-1', sessionType: 'chat' }
+  ], [
+    { id: 'm-parent', sessionId: 'task-1.session.execution', modelInfo: JSON.stringify({ model_key: 'gmodel' }) },
+    { id: 'm-sub-1', sessionId: 'sub-1' },
+    { id: 'm-sub-2', sessionId: 'sub-1' },
+    { id: 'm-plain', sessionId: 'plain-1' }
+  ]);
+  writeQoderCnStateCatalog(stateDbPath, {
+    'aicoding.modelConfigs.cache.quest': [
+      { name: 'gmodel', displayName: 'GLM-5.3' },
+      { name: 'qmodel_38max', displayName: 'Qwen3.8-Max' }
+    ]
+  });
+
+  const rows = await collectQoderCnRows({ dbPaths: [dbPath], homeDir: appRoot, platform: 'win32', env: {} });
+  const byMessage = new Map(rows.map((row) => [row.messageId.split(':').pop(), row.model]));
+  // The parent session's preferred model beats its own message models, and the
+  // sub-agent rows carry the suffixed, deliberately unpriceable attribution.
+  assert.equal(byMessage.get('m-parent'), 'GLM-5.3');
+  assert.equal(byMessage.get('m-sub-1'), 'Qwen3.8-Max (sub-agent)');
+  assert.equal(byMessage.get('m-sub-2'), 'Qwen3.8-Max (sub-agent)');
+  assert.equal(byMessage.get('m-plain'), 'qoder-agent');
+});
+
+(sqlite ? test : test.skip)('sub-agent rows resolve parents outside the message window', async (t) => {
+  const { appRoot, dbPath, stateDbPath } = createQoderCnAppRoot('qoder-subagent-window-');
+  t.after(() => { fs.rmSync(appRoot, { recursive: true, force: true }); resetQoderCnChatSessionProbe(); });
+  // Parent A only exists in chat_session (no messages at all, e.g. a task whose
+  // own turns predate the window); parent B has messages, but only ones without
+  // token_info, so they never enter the usage rows.
+  createQoderCnUsageDb(dbPath, [
+    { sessionId: 'task-a.session.execution', sessionType: 'quest', preferredModelInfo: JSON.stringify({ preferred_model: 'gmodel' }) },
+    { sessionId: 'task-b.session.execution', sessionType: 'quest' },
+    { sessionId: 'sub-a', sessionType: 'agent_sub_computeruse', parentSessionId: 'task-a.session.execution' },
+    { sessionId: 'sub-b', sessionType: 'agent_sub_computeruse', parentSessionId: 'task-b.session.execution' }
+  ], [
+    { id: 'm-sub-a', sessionId: 'sub-a' },
+    { id: 'm-sub-b', sessionId: 'sub-b' },
+    { id: 'm-parent-b-old', sessionId: 'task-b.session.execution', modelInfo: JSON.stringify({ model_key: 'dmodel' }), tokenInfo: null, gmtCreate: 1_785_286_800_000 },
+    { id: 'm-parent-b-new', sessionId: 'task-b.session.execution', modelInfo: JSON.stringify({ model_key: 'kmodel' }), tokenInfo: null, gmtCreate: 1_785_286_801_000 }
+  ]);
+  writeQoderCnStateCatalog(stateDbPath, {
+    'aicoding.modelConfigs.cache.quest': [{ name: 'gmodel', displayName: 'GLM-5.3' }]
+  });
+
+  const rows = await collectQoderCnRows({ dbPaths: [dbPath], homeDir: appRoot, platform: 'win32', env: {} });
+  const byMessage = new Map(rows.map((row) => [row.messageId.split(':').pop(), row.model]));
+  assert.equal(byMessage.get('m-sub-a'), 'GLM-5.3 (sub-agent)', 'preferred_model of a message-less parent resolves');
+  assert.equal(byMessage.get('m-sub-b'), 'Kimi-K2.7-Code (sub-agent)', 'latest parent message model resolves');
+});
+
+(sqlite ? test : test.skip)('sub-agent inheritance degrades when chat_session lacks the model columns', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-subagent-legacy-'));
+  t.after(() => { fs.rmSync(tmp, { recursive: true, force: true }); resetQoderCnChatSessionProbe(); });
+  const dbPath = path.join(tmp, 'local.db');
+  const database = new sqlite.DatabaseSync(dbPath);
+  try {
+    // Legacy schema: chat_session predates parent_session_id and
+    // preferred_model_info, so no parent link can exist to inherit from.
+    database.exec(`CREATE TABLE chat_message (
+      id TEXT, session_id TEXT, request_id TEXT, role TEXT, token_info TEXT, model_info TEXT, gmt_create INTEGER
+    )`);
+    database.exec(`CREATE TABLE chat_session (
+      session_id TEXT PRIMARY KEY, project_name TEXT
+    )`);
+    database.prepare(`INSERT INTO chat_message VALUES ('m1','sub-1','r1','assistant','{"prompt_tokens":10,"completion_tokens":2}','',1785286800000)`).run();
+    database.prepare(`INSERT INTO chat_session VALUES ('sub-1','proj')`).run();
+    database.close();
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+  resetQoderCnChatSessionProbe();
+  const rows = await collectQoderCnRows({ dbPaths: [dbPath], homeDir: tmp, platform: 'win32', env: {} });
+  assert.deepEqual(rows.map((row) => row.model), ['qoder-agent']);
 });
