@@ -222,7 +222,7 @@ test('AI limit capability labels stay compact in Chinese', () => {
   assert.equal(translate('zh-TW', 'settings.limits.capability.web'), 'Web');
   assert.equal(translate('zh-TW', 'settings.limits.capability.webApi'), 'Web/API');
   assert.equal(translate('zh-TW', 'settings.limits.capability.codingPlan'), 'Coding Plan');
-  assert.equal(translate('zh-TW', 'settings.kimi.step3'), '找到 kimi-auth，複製它的 Value。');
+  assert.equal(translate('zh-TW', 'settings.kimi.step3'), '找到 access_token 並複製它的 Value；也可複製 refresh_token，它會自動續期約 90 天。（舊的 kimi-auth Cookie 已不再由網站更新。）');
   assert.equal(translate('zh-TW', 'settings.kimi.apiFallback'), '選用：Kimi Code API 備援');
   assert.equal(translate('zh-CN', 'settings.limits.capability.appMustBeOpen'), '需打开 App 或 CLI');
   assert.equal(translate('zh-CN', 'settings.limits.capability.oauthAppCli'), 'OAuth/App/CLI');

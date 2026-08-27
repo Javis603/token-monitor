@@ -14630,7 +14630,10 @@ function copilotAccountStatusText(provider, configured, source, enabled = true) 
 function apiKeyAccountStatusText(providerName, provider, configured, source, enabled = true) {
   const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
   if (accountStatus === 'linked') {
-    return t(source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`);
+    // Only the Kimi credential chain produces a 'desktop' source (the Kimi
+    // Work desktop app session picked up automatically on Windows).
+    const statusKey = source === 'env' ? 'statusEnv' : source === 'desktop' ? 'statusDesktop' : 'statusSet';
+    return t(`settings.${providerName}.${statusKey}`);
   }
   if (accountStatus === 'invalid') return t(`settings.${providerName}.statusInvalid`);
   if (accountStatus === 'notConfigured') return t(`settings.${providerName}.statusNotSet`);
@@ -17235,7 +17238,7 @@ function setupCursorAccountUI() {
     });
 
     document.getElementById('kimiLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ kimiApiKey: '', kimiWebAccessToken: '' });
+      await saveSettings({ kimiApiKey: '', kimiWebAccessToken: '', kimiWebRefreshToken: '' });
       clearExternalProviderCheckPending('kimi');
       clearExternalProviderPendingStatus('kimi');
       renderExternalProviderStatus('kimi');
