@@ -36,6 +36,15 @@ function withTempHome(payload) {
   return { home: tmp, credPath, cleanup: () => fs.rmSync(tmp, { recursive: true, force: true }) };
 }
 
+function sqliteReturning(value) {
+  return {
+    DatabaseSync: class {
+      prepare() { return { get: () => ({ value }) }; }
+      close() {}
+    }
+  };
+}
+
 test('readActiveAccount returns null when file is missing', () => {
   const { home, cleanup } = withTempHome(undefined);
   try {
@@ -183,6 +192,56 @@ test('runCursorDiscover reports a signed-out desktop without mutating credential
     assert.deepEqual(result, { discovered: false, reason: 'not-signed-in' });
     assert.equal(loginCalls, 0);
     assert.equal(readActiveAccount({ home }), null);
+  } finally { cleanup(); }
+});
+
+test('runCursorDiscover keeps an existing valid active account', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  const dbPath = path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.writeFileSync(dbPath, 'fixture');
+  const payload = Buffer.from(JSON.stringify({ sub: 'auth0|user_01DESKTOP_B' })).toString('base64url');
+  const accessToken = `header.${payload}.signature`;
+
+  try {
+    await runCursorLogin('user_01ACTIVE_A%3A%3Atoken-a', { home });
+    await runCursorDiscover({ home, platform: 'linux', sqlite: sqliteReturning(accessToken) });
+    assert.equal(readActiveAccount({ home }).id, 'user_01ACTIVE_A');
+    assert.deepEqual(
+      listAccounts({ home }).map((account) => account.id),
+      ['user_01ACTIVE_A', 'user_01DESKTOP_B']
+    );
+  } finally { cleanup(); }
+});
+
+test('runCursorDiscover refreshes a token without replacing account metadata', async () => {
+  const createdAt = '2026-01-02T03:04:05.000Z';
+  const accountId = 'user_01DESKTOP';
+  const { home, credPath, cleanup } = withTempHome({
+    version: 1,
+    activeAccountId: accountId,
+    accounts: {
+      [accountId]: {
+        sessionToken: `${accountId}%3A%3Aold-token`,
+        userId: accountId,
+        createdAt,
+        expiresAt: null,
+        label: 'work'
+      }
+    }
+  });
+  const dbPath = path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.writeFileSync(dbPath, 'fixture');
+  const payload = Buffer.from(JSON.stringify({ sub: `auth0|${accountId}` })).toString('base64url');
+  const accessToken = `header.${payload}.refreshed`;
+
+  try {
+    await runCursorDiscover({ home, platform: 'linux', sqlite: sqliteReturning(accessToken) });
+    const account = JSON.parse(fs.readFileSync(credPath, 'utf8')).accounts[accountId];
+    assert.equal(account.sessionToken, `${accountId}%3A%3A${accessToken}`);
+    assert.equal(account.label, 'work');
+    assert.equal(account.createdAt, createdAt);
   } finally { cleanup(); }
 });
 

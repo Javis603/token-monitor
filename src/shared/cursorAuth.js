@@ -292,7 +292,11 @@ function runTokscaleSubcommand(args, {
   });
 }
 
-async function runCursorLogin(token, { label = '', home = os.homedir() } = {}) {
+async function runCursorLogin(token, {
+  label = '',
+  home = os.homedir(),
+  activate = true
+} = {}) {
   token = normalizeCursorSessionToken(token);
   if (!token) {
     throw new Error('runCursorLogin: token must be a non-empty string');
@@ -321,14 +325,22 @@ async function runCursorLogin(token, { label = '', home = os.homedir() } = {}) {
       }
     }
 
+    const existing = store.accounts[accountId];
+    const activeIsValid = Boolean(normalizeAccount(
+      store.activeAccountId,
+      store.accounts[store.activeAccountId]
+    ));
+    const existingCreatedAt = typeof existing?.createdAt === 'string' ? existing.createdAt : '';
+    const existingLabel = typeof existing?.label === 'string' ? existing.label : null;
+
     store.accounts[accountId] = {
       sessionToken: token,
       userId: userId || null,
-      createdAt: new Date().toISOString(),
+      createdAt: existingCreatedAt || new Date().toISOString(),
       expiresAt: null,
-      label: trimmedLabel || null
+      label: trimmedLabel || existingLabel
     };
-    store.activeAccountId = accountId;
+    if (activate || !activeIsValid) store.activeAccountId = accountId;
     if (!store.version) store.version = 1;
 
     writeCredentialsStoreAtomic(file, store);
@@ -345,7 +357,10 @@ async function runCursorDiscover(options = {}) {
     error.code = 'CURSOR_DESKTOP_TOKEN_INVALID';
     throw error;
   }
-  const accountId = await (options.runLogin || runCursorLogin)(sessionToken, { home: options.home });
+  const accountId = await (options.runLogin || runCursorLogin)(sessionToken, {
+    home: options.home,
+    activate: false
+  });
   return { discovered: true, accountId };
 }
 

@@ -2287,7 +2287,7 @@ test('cursor sync runs at most once per throttle window across ticks', async () 
   }
 });
 
-test('cursor sync gets one discovery attempt without saved credentials', async () => {
+test('forced Cursor sync bypasses signed-out throttling without saved credentials', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   childProcess.spawn = recordingSpawn([]);
@@ -2313,7 +2313,7 @@ test('cursor sync gets one discovery attempt without saved credentials', async (
     };
     await collectUsageOnce(options);
     await collectUsageOnce(options);
-    assert.equal(syncCalls, 1);
+    assert.equal(syncCalls, 2);
   } finally {
     childProcess.spawn = originalSpawn;
     cursorAuth.readActiveAccount = originalReadActiveAccount;

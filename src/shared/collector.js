@@ -1161,33 +1161,25 @@ function applySessionTimestamps(periods, home, deps = {}) {
 // createSelfSyncThrottle() and drives that directly, rather than threading one
 // back in here.
 const selfSyncThrottle = createSelfSyncThrottle();
-let cursorDiscoveryRetryAt = 0;
-const CURSOR_DISCOVERY_RETRY_MS = 60 * 60 * 1000;
 
 async function maybeSyncCursor(clientsCsv, logger, options = {}) {
   throwIfAborted(options.signal);
   const enabled = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
   if (!enabled.has('cursor')) return;
-  const hadAccount = Boolean(cursorAuth.readActiveAccount());
-  if (!hadAccount && Date.now() < cursorDiscoveryRetryAt) return;
   if (!selfSyncThrottle.claim('cursor', options.minIntervalMs)) return;
   const attempt = selfSyncThrottle.beginAttempt('cursor');
   const cancelAttempt = () => selfSyncThrottle.cancelAttempt('cursor', attempt);
   options.signal?.addEventListener('abort', cancelAttempt, { once: true });
   if (options.signal?.aborted) cancelAttempt();
   try {
-    const result = await cursorAuth.runCursorSync({
+    await cursorAuth.runCursorSync({
       signal: options.signal,
       timeoutMs: options.timeoutMs,
       terminationOptions: options.terminationOptions,
       onTerminationUnconfirmed: options.onTerminationUnconfirmed
     });
-    cursorDiscoveryRetryAt = !hadAccount && result?.notAuthenticated
-      ? Date.now() + CURSOR_DISCOVERY_RETRY_MS
-      : 0;
     selfSyncThrottle.completeAttempt('cursor', attempt, false);
   } catch (err) {
-    if (!hadAccount) cursorDiscoveryRetryAt = 0;
     if (options.signal?.aborted) {
       cancelAttempt();
       throw abortReason(options.signal);
