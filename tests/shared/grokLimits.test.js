@@ -11,6 +11,7 @@ const test = require('node:test');
 const {
   GROK_WEB_BILLING_GRPC_URL,
   resolveGrokHome,
+  resolveGrokCredential,
   isRetryableNetworkError,
   validateGrokGrpcStatus
 } = require('../../src/shared/grokLimits');
@@ -199,6 +200,50 @@ test('grokCredential returns null when nothing is configured', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-test-'));
   const c = grokCredential({}, { grokHome: path.join(tmp, 'no-such-dir') });
   assert.equal(c, null);
+});
+
+test('resolveGrokCredential selects the newest native or running-WSL auth.json on Windows', async () => {
+  const nativePath = path.join(os.homedir(), '.grok', 'auth.json');
+  const wslHomeRoot = '\\\\wsl$\\Ubuntu\\home';
+  const wslPath = `${wslHomeRoot}\\alice\\.grok\\auth.json`;
+  const rootPath = '\\\\wsl$\\Ubuntu\\root\\.grok\\auth.json';
+  const credential = await resolveGrokCredential({}, {}, {
+    platform: 'win32',
+    listRunningWslDistros: () => ['Ubuntu'],
+    readdirSync: (target) => {
+      assert.equal(target, wslHomeRoot);
+      return ['alice'];
+    },
+    stat: async (target) => {
+      if (target === nativePath) return { mtimeMs: 100 };
+      if (target === wslPath) return { mtimeMs: 200 };
+      if (target === rootPath) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      throw new Error(`unexpected stat: ${target}`);
+    },
+    readFileSync: (target) => {
+      if (target === nativePath) return JSON.stringify({ 'https://auth.x.ai::client': { key: 'native-token' } });
+      if (target === wslPath) return JSON.stringify({ 'https://auth.x.ai::client': { key: 'wsl-token' } });
+      throw new Error(`unexpected read: ${target}`);
+    }
+  });
+
+  assert.equal(credential.token, 'wsl-token');
+  assert.equal(credential.path, wslPath);
+  assert.equal(credential.wsl, true);
+});
+
+test('resolveGrokCredential keeps explicit GROK_HOME ahead of WSL discovery', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-explicit-home-'));
+  writeAuthJson(home, { 'https://auth.x.ai::client': { key: 'explicit-home-token' } });
+  const credential = await resolveGrokCredential({ GROK_HOME: home }, {}, {
+    platform: 'win32',
+    listRunningWslDistros: () => {
+      throw new Error('WSL discovery should not run for explicit GROK_HOME');
+    }
+  });
+
+  assert.equal(credential.token, 'explicit-home-token');
+  assert.equal(credential.wsl, undefined);
 });
 
 test('readAuthJson prefers OIDC scope entries', () => {
@@ -741,6 +786,46 @@ test('fetchGrokLimits falls back to ~/.grok/auth.json when no env or settings', 
     }
   );
   assert.equal(capturedAuth, 'Bearer eyJfromfile.signature');
+});
+
+test('fetchGrokLimits uses a WSL auth.json without requiring a Windows Grok CLI', async () => {
+  const wslHomeRoot = '\\\\wsl$\\Ubuntu\\home';
+  const wslPath = `${wslHomeRoot}\\alice\\.grok\\auth.json`;
+  let webCredential = null;
+  const result = await fetchGrokLimits({}, {
+    env: {},
+    platform: 'win32',
+    listRunningWslDistros: () => ['Ubuntu'],
+    readdirSync: () => ['alice'],
+    stat: async (target) => {
+      if (target === wslPath) return { mtimeMs: 200 };
+      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    },
+    readFileSync: (target) => {
+      assert.equal(target, wslPath);
+      return JSON.stringify({
+        'https://auth.x.ai::client': { key: 'wsl-token', email: 'wsl@example.com' }
+      });
+    },
+    spawn: () => {
+      throw new Error('Windows Grok CLI should not run for a WSL credential');
+    },
+    fetchWebGrpcBilling: async (credential) => {
+      webCredential = credential;
+      return [{
+        kind: 'billing',
+        label: 'Monthly',
+        usedPercent: 42,
+        resetsAt: '2026-09-01T00:00:00.000Z',
+        showMeter: true
+      }];
+    }
+  });
+
+  assert.equal(webCredential.token, 'wsl-token');
+  assert.equal(result.status, 'ok');
+  assert.equal(result.source, 'web');
+  assert.equal(result.accountEmail, 'wsl@example.com');
 });
 
 test('fetchGrokLimits returns notConfigured when real ~/.grok/auth.json has no usable key', async () => {

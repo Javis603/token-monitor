@@ -18,6 +18,7 @@ const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { createOutboundFetch } = require('./outboundFetch');
 const { abortError } = require('./probeDeadline');
+const { listRunningWslDistros } = require('./wslUsage');
 
 const GROK_WEB_BILLING_GRPC_URL = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig';
 const GROK_KEY_NAMES = ['GROK_BEARER_TOKEN'];
@@ -29,6 +30,12 @@ function resolveGrokHome(env = process.env) {
     return path.resolve(env.GROK_HOME.trim());
   }
   return path.join(os.homedir(), '.grok');
+}
+
+function grokAuthPath(home) {
+  return String(home).startsWith('\\\\wsl$\\')
+    ? `${home}\\auth.json`
+    : path.join(home, 'auth.json');
 }
 
 function cleanSecret(value) {
@@ -48,7 +55,7 @@ function cleanSecret(value) {
 // just needs the data ready before issuing the HTTP fetch.
 function readAuthJson(env = process.env, deps = {}) {
   const home = deps.grokHome || resolveGrokHome(env);
-  const filePath = path.join(home, 'auth.json');
+  const filePath = grokAuthPath(home);
   let raw;
   try {
     raw = (deps.readFileSync || fs.readFileSync)(filePath, 'utf8');
@@ -73,10 +80,7 @@ function readAuthJson(env = process.env, deps = {}) {
   };
 }
 
-function grokCredential(env = process.env, options = {}) {
-  // Priority: explicit settings > env > ~/.grok/auth.json (auto).
-  // The widget GUI no longer exposes a token field; env var and auth.json
-  // cover headless / CLI flows.
+function explicitGrokCredential(env = process.env, options = {}) {
   if (options && options.grokBearerToken) {
     const raw = cleanSecret(options.grokBearerToken);
     if (raw) return { token: raw, source: 'settings' };
@@ -85,7 +89,61 @@ function grokCredential(env = process.env, options = {}) {
     const raw = cleanSecret(env[name]);
     if (raw) return { token: raw, source: 'env' };
   }
+  return null;
+}
+
+function grokCredential(env = process.env, options = {}) {
+  // Priority: explicit settings > env > ~/.grok/auth.json (auto).
+  // The widget GUI no longer exposes a token field; env var and auth.json
+  // cover headless / CLI flows.
+  const explicit = explicitGrokCredential(env, options);
+  if (explicit) return explicit;
   return readAuthJson(env, options);
+}
+
+function wslGrokHomes(deps = {}) {
+  const readdirSync = deps.readdirSync || fs.readdirSync;
+  const runningDistros = deps.listRunningWslDistros || listRunningWslDistros;
+  const homes = [];
+  for (const distro of runningDistros(deps)) {
+    const homeRoot = `\\\\wsl$\\${distro}\\home`;
+    try {
+      for (const user of readdirSync(homeRoot)) homes.push(`${homeRoot}\\${user}\\.grok`);
+    } catch (_) { /* distro has no /home or it is unreadable */ }
+    homes.push(`\\\\wsl$\\${distro}\\root\\.grok`);
+  }
+  return homes;
+}
+
+async function resolveGrokCredential(env = process.env, options = {}, deps = {}) {
+  const explicit = explicitGrokCredential(env, options);
+  if (explicit) return explicit;
+
+  const configuredHome = deps.grokHome || options.grokHome;
+  if (configuredHome || (typeof env.GROK_HOME === 'string' && env.GROK_HOME.trim())) {
+    return readAuthJson(env, { ...deps, grokHome: configuredHome || resolveGrokHome(env) });
+  }
+
+  if ((deps.platform || process.platform) !== 'win32') return readAuthJson(env, deps);
+
+  const candidates = [
+    { home: resolveGrokHome(env), wsl: false },
+    ...wslGrokHomes(deps).map((home) => ({ home, wsl: true }))
+  ];
+  const stat = deps.stat || fs.promises.stat;
+  const ranked = [];
+  for (const candidate of candidates) {
+    try {
+      const metadata = await stat(grokAuthPath(candidate.home));
+      ranked.push({ ...candidate, mtimeMs: metadata.mtimeMs });
+    } catch (_) { /* missing or unreadable credential */ }
+  }
+  ranked.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  for (const candidate of ranked) {
+    const credential = readAuthJson(env, { ...deps, grokHome: candidate.home });
+    if (credential) return { ...credential, wsl: candidate.wsl };
+  }
+  return null;
 }
 
 function numberOrNull(value) {
@@ -563,7 +621,8 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
 
 function shouldTryGrokRpc(credential, deps = {}) {
   if (typeof deps.fetchRpcBilling === 'function') return true;
-  return credential && typeof credential.source === 'string' && credential.source.startsWith('auth.json');
+  return credential && !credential.wsl
+    && typeof credential.source === 'string' && credential.source.startsWith('auth.json');
 }
 
 function unauthorizedGrokProvider(updatedAt, source = 'web', sourceDetail = '') {
@@ -654,7 +713,7 @@ async function fetchGrokLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
-  const credential = grokCredential(env, { ...options, ...(deps.grokHome ? { grokHome: deps.grokHome } : {}) });
+  const credential = await resolveGrokCredential(env, options, deps);
   if (shouldTryGrokRpc(credential, deps)) {
     try {
       const rpcBody = await (deps.fetchRpcBilling || fetchGrokRpcBilling)(options, deps);
@@ -746,6 +805,8 @@ module.exports = {
   resolveGrokHome,
   readAuthJson,
   grokCredential,
+  wslGrokHomes,
+  resolveGrokCredential,
   parseGrokBilling,
   parseGrokGrpcWebBilling,
   resolveGrokFetch,
