@@ -1171,23 +1171,24 @@ async function maybeSyncCursor(clientsCsv, logger, options = {}) {
   const hadAccount = Boolean(cursorAuth.readActiveAccount());
   if (!hadAccount && Date.now() < cursorDiscoveryRetryAt) return;
   if (!selfSyncThrottle.claim('cursor', options.minIntervalMs)) return;
-  if (!hadAccount) cursorDiscoveryRetryAt = Date.now() + CURSOR_DISCOVERY_RETRY_MS;
-  else cursorDiscoveryRetryAt = 0;
   const attempt = selfSyncThrottle.beginAttempt('cursor');
   const cancelAttempt = () => selfSyncThrottle.cancelAttempt('cursor', attempt);
   options.signal?.addEventListener('abort', cancelAttempt, { once: true });
   if (options.signal?.aborted) cancelAttempt();
   try {
-    await cursorAuth.runCursorSync({
+    const result = await cursorAuth.runCursorSync({
       signal: options.signal,
       timeoutMs: options.timeoutMs,
       terminationOptions: options.terminationOptions,
       onTerminationUnconfirmed: options.onTerminationUnconfirmed
     });
+    cursorDiscoveryRetryAt = !hadAccount && result?.notAuthenticated
+      ? Date.now() + CURSOR_DISCOVERY_RETRY_MS
+      : 0;
     selfSyncThrottle.completeAttempt('cursor', attempt, false);
   } catch (err) {
+    if (!hadAccount) cursorDiscoveryRetryAt = 0;
     if (options.signal?.aborted) {
-      if (!hadAccount) cursorDiscoveryRetryAt = 0;
       cancelAttempt();
       throw abortReason(options.signal);
     }

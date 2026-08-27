@@ -14,6 +14,7 @@ const {
   listAccounts,
   normalizeCursorSessionToken,
   readActiveAccount,
+  runCursorDiscover,
   runCursorLogin,
   runCursorLogout,
   runCursorSync
@@ -146,6 +147,45 @@ test('normalizeCursorSessionToken converts a local Cursor access-token JWT', () 
   assert.equal(normalizeCursorSessionToken(jwt), `user_01LOCAL%3A%3A${jwt}`);
 });
 
+test('runCursorDiscover imports the local desktop account without syncing usage', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  const dbPath = path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.writeFileSync(dbPath, 'fixture');
+  const payload = Buffer.from(JSON.stringify({ sub: 'auth0|user_01DESKTOP' })).toString('base64url');
+  const accessToken = `header.${payload}.signature`;
+  let closed = false;
+  const sqlite = {
+    DatabaseSync: class {
+      prepare() { return { get: () => ({ value: accessToken }) }; }
+      close() { closed = true; }
+    }
+  };
+
+  try {
+    const result = await runCursorDiscover({ home, platform: 'linux', sqlite });
+    assert.deepEqual(result, { discovered: true, accountId: 'user_01DESKTOP' });
+    assert.equal(readActiveAccount({ home }).sessionToken, `user_01DESKTOP%3A%3A${accessToken}`);
+    assert.equal(closed, true);
+    assert.equal(fs.existsSync(path.join(home, '.config', 'tokscale', 'cursor-cache')), false);
+  } finally { cleanup(); }
+});
+
+test('runCursorDiscover reports a signed-out desktop without mutating credentials', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  let loginCalls = 0;
+  try {
+    const result = await runCursorDiscover({
+      home,
+      platform: 'linux',
+      runLogin: async () => { loginCalls += 1; }
+    });
+    assert.deepEqual(result, { discovered: false, reason: 'not-signed-in' });
+    assert.equal(loginCalls, 0);
+    assert.equal(readActiveAccount({ home }), null);
+  } finally { cleanup(); }
+});
+
 test('canonicalCursorUserId normalizes Cursor API and stored identities', () => {
   assert.equal(canonicalCursorUserId('auth0|user_01ABC'), 'user_01ABC');
   assert.equal(canonicalCursorUserId('user_01ABC'), 'user_01ABC');
@@ -198,6 +238,7 @@ test('Cursor sync, logout, and login share one lifecycle lane', async () => {
     assert.deepEqual(events, ['sync']);
     assert.equal(readActiveAccount({ home }), null, 'login waits behind the active sync');
 
+    child.stdout.emit('data', Buffer.from('{"synced":true,"rows":0,"error":null}'));
     child.emit('close', 0);
     await waitFor(() => events.includes('logout'));
     assert.equal(readActiveAccount({ home }), null, 'login waits behind the active logout');
@@ -238,6 +279,7 @@ test('an aborted Cursor lifecycle waiter leaves the local queue immediately', as
   await assert.rejects(logout, (error) => error === reason);
   assert.equal(logoutStarted, false);
 
+  child.stdout.emit('data', Buffer.from('{"synced":true,"rows":0,"error":null}'));
   child.emit('close', 0);
   await sync;
 });
@@ -263,6 +305,24 @@ test('runCursorLogin throws on empty token', async () => {
 
 test('runCursorSync leaves headroom around Tokscale explicit sync timeout', () => {
   assert.equal(CURSOR_EXPLICIT_SYNC_TIMEOUT_MS, 150_000);
+});
+
+test('runCursorSync distinguishes no account from transient JSON failures', async () => {
+  const signedOut = await runCursorSync({
+    runSubcommand: async () => JSON.stringify({ synced: false, rows: 0, error: 'Not authenticated' })
+  });
+  assert.equal(signedOut.notAuthenticated, true);
+
+  await assert.rejects(
+    runCursorSync({
+      runSubcommand: async () => JSON.stringify({ synced: false, rows: 0, error: 'network request timed out' })
+    }),
+    (error) => {
+      assert.equal(error.syncFailureStage, 'unknown');
+      assert.equal(error.syncDetailCode, 'network-timeout');
+      return true;
+    }
+  );
 });
 
 test('runCursorSync rejects when the tokscale stdin pipe breaks', async () => {

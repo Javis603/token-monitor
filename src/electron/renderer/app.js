@@ -14807,6 +14807,10 @@ function renderCursorStatus() {
   }
 
   const accounts = Array.isArray(status.accounts) ? status.accounts : [];
+  const managementBlocked = status.managementBlocked === true;
+  document.getElementById('cursorAgentActiveNote')?.classList.toggle('hidden', !managementBlocked);
+  const addButton = document.getElementById('cursorAddAccountButton');
+  if (addButton) addButton.disabled = managementBlocked;
   const summary = accounts.length === 0
     ? t('settings.cursor.notLoggedIn')
     : t('settings.cursor.connected', { linked: status.linkedCount || 0, total: accounts.length });
@@ -14864,7 +14868,7 @@ function renderCursorStatus() {
             : planLabel;
       info.title = info.textContent;
       right.append(info);
-      if (account.removable === true) {
+      if (account.removable === true && !managementBlocked) {
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'managed-account-remove';
@@ -14884,7 +14888,10 @@ function renderCursorStatus() {
           remove.disabled = true;
           const result = await window.tokenMonitor.cursor.logout(account.id);
           if (!result?.ok) {
-            state.cursorAccount = { ...state.cursorAccount, error: result?.error || t('settings.cursor.removeFailed') };
+            const message = result?.code === 'EXTERNAL_AGENT_ACTIVE'
+              ? t('settings.cursor.agentActive')
+              : result?.error || t('settings.cursor.removeFailed');
+            state.cursorAccount = { ...state.cursorAccount, error: message };
           } else {
             state.cursorAccount = { status: result.status, error: '', busy: false };
             refreshStats({ force: true }).catch(() => {});
@@ -15284,7 +15291,10 @@ function setupCursorAccountUI() {
     errorEl.classList.add('hidden');
     const result = await window.tokenMonitor.cursor.loginManual(input.value);
     if (!result.ok) {
-      errorEl.textContent = t('settings.cursor.loginFailed', { message: result.error });
+      const message = result.code === 'EXTERNAL_AGENT_ACTIVE'
+        ? t('settings.cursor.agentActive')
+        : result.error;
+      errorEl.textContent = t('settings.cursor.loginFailed', { message });
       errorEl.classList.remove('hidden');
       return;
     }

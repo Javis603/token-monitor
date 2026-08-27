@@ -180,6 +180,7 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
   assert.match(details, /<svg class="add-icon"/);
   assert.doesNotMatch(details, /cursorRefreshButton|>Refresh<|>重新整理</);
   assert.match(details, /id="cursorAccountList" class="managed-account-list"/);
+  assert.match(details, /id="cursorAgentActiveNote" class="settings-note hidden" data-i18n="settings\.cursor\.agentActive"/);
   assert.match(details, /<div id="cursorManualPanel" class="opencode-add-form">/);
   assert.match(details, /<div id="cursorManualDetails" class="opencode-add-details accordion-animated-container hidden">/);
   assert.match(details, /data-i18n="settings\.cursor\.addManual">Add account<\/span>/);
@@ -197,7 +198,7 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
   assert.match(body, /const planLabel = account\.membershipType/);
   assert.match(body, /: planLabel;/);
   assert.doesNotMatch(body, /managed-account-detail|settings\.cursor\.linked/);
-  assert.match(body, /if \(account\.removable === true\)/);
+  assert.match(body, /if \(account\.removable === true && !managementBlocked\)/);
   assert.match(body, /remove\.className = 'managed-account-remove'/);
   assert.match(body, /window\.tokenMonitor\.cursor\.logout\(account\.id\)/);
   assert.doesNotMatch(body, /cursor-account-row|radio|selectedAccountId|selectAccount/);
@@ -220,13 +221,20 @@ test('Cursor removal is available only for accounts added manually in Token Moni
   assert.match(main, /removable: manual\.has\(account\.id\)/);
   assert.match(main, /settings\.cursorManualAccountIds = normalizeCursorAccountIds\(\[/);
   assert.match(main, /Only manually added Cursor accounts can be removed/);
+  assert.match(main, /ipcMain\.handle\('cursor:loginManual'[\s\S]*?if \(isExternalAgentActive\(\)\)/);
+  assert.match(main, /ipcMain\.handle\('cursor:logout'[\s\S]*?if \(isExternalAgentActive\(\)\)/);
+  const body = functionBody(readRendererFile('app.js'), 'renderCursorStatus', 'refreshCursorStatus');
+  assert.match(body, /addButton\.disabled = managementBlocked/);
+  assert.match(body, /cursorAgentActiveNote'[\s\S]*?toggle\('hidden', !managementBlocked\)/);
 });
 
 test('Cursor account discovery runs automatically without a separate refresh action', () => {
   const main = readRendererFile('../main.js');
   const statusBody = functionBody(main, 'cursorStatusValue', 'rebuildWindow');
-  assert.match(statusBody, /if \(discover\) \{/);
-  assert.match(statusBody, /await cursorAuth\.runCursorSync\(\)/);
+  assert.match(statusBody, /if \(discover && !managementBlocked\) \{/);
+  assert.match(statusBody, /await cursorAuth\.runCursorDiscover\(\)/);
+  assert.doesNotMatch(statusBody, /runCursorSync/);
+  assert.match(statusBody, /managementBlocked/);
   assert.match(main, /options\?\.discover !== true/);
   assert.doesNotMatch(main, /ipcMain\.handle\('cursor:refresh'/);
 

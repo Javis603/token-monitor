@@ -16,6 +16,7 @@ const { withCursorLifecycle } = require('./cursorLifecycle');
 const MAX_SYNC_EXIT_CODE = 2 ** 31 - 1;
 const MAX_TOKSCALE_STDERR_LENGTH = 64 * 1024;
 const CURSOR_EXPLICIT_SYNC_TIMEOUT_MS = 150_000;
+const CURSOR_DESKTOP_TOKEN_KEY = 'cursorAuth/accessToken';
 
 function annotateSyncError(error, failureStage, exitCode = null) {
   const target = error instanceof Error ? error : new Error(String(error || 'Cursor sync failed'));
@@ -29,6 +30,47 @@ function annotateSyncError(error, failureStage, exitCode = null) {
 
 function credentialsPath(home = os.homedir()) {
   return path.join(home, '.config', 'tokscale', 'cursor-credentials.json');
+}
+
+function cursorDesktopStateCandidates({ home = os.homedir(), platform = process.platform, env = process.env } = {}) {
+  if (platform === 'darwin') {
+    return [path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb')];
+  }
+  if (platform === 'win32') {
+    const candidates = [];
+    const appData = String(env?.APPDATA || '').trim();
+    if (appData) candidates.push(path.join(appData, 'Cursor', 'User', 'globalStorage', 'state.vscdb'));
+    candidates.push(path.join(home, 'AppData', 'Roaming', 'Cursor', 'User', 'globalStorage', 'state.vscdb'));
+    return candidates;
+  }
+  return [path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb')];
+}
+
+function readCursorDesktopAccessToken(options = {}) {
+  const fsApi = options.fs || fs;
+  const dbPath = cursorDesktopStateCandidates(options).find((candidate) => {
+    try { return fsApi.statSync(candidate).isFile(); } catch (_) { return false; }
+  });
+  if (!dbPath) return null;
+
+  let sqlite = options.sqlite;
+  if (sqlite === undefined) {
+    try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
+  }
+  if (typeof sqlite?.DatabaseSync !== 'function') {
+    const error = new Error('Cursor desktop discovery requires node:sqlite');
+    error.code = 'CURSOR_DESKTOP_DISCOVERY_UNAVAILABLE';
+    throw error;
+  }
+
+  const database = new sqlite.DatabaseSync(dbPath, { readOnly: true });
+  try {
+    const row = database.prepare('SELECT value FROM ItemTable WHERE key = ?').get(CURSOR_DESKTOP_TOKEN_KEY);
+    const token = typeof row?.value === 'string' ? row.value.trim() : '';
+    return token || null;
+  } finally {
+    database.close();
+  }
 }
 
 function deriveAccountId(token) {
@@ -294,6 +336,19 @@ async function runCursorLogin(token, { label = '', home = os.homedir() } = {}) {
   });
 }
 
+async function runCursorDiscover(options = {}) {
+  const accessToken = readCursorDesktopAccessToken(options);
+  if (!accessToken) return { discovered: false, reason: 'not-signed-in' };
+  const sessionToken = normalizeCursorSessionToken(accessToken);
+  if (!sessionToken || !extractUserId(sessionToken)) {
+    const error = new Error('Cursor desktop access token has an invalid account identity');
+    error.code = 'CURSOR_DESKTOP_TOKEN_INVALID';
+    throw error;
+  }
+  const accountId = await (options.runLogin || runCursorLogin)(sessionToken, { home: options.home });
+  return { discovered: true, accountId };
+}
+
 async function runCursorLogout({
   accountId = '',
   label = '',
@@ -309,11 +364,36 @@ async function runCursorLogout({
   );
 }
 
+function parseCursorSyncResult(stdout) {
+  let result;
+  try { result = JSON.parse(String(stdout || '')); } catch (error) {
+    throw annotateSyncError(new Error(`tokscale cursor sync returned invalid JSON: ${error.message}`), 'unknown');
+  }
+  if (!result || typeof result !== 'object' || typeof result.synced !== 'boolean') {
+    throw annotateSyncError(new Error('tokscale cursor sync returned an invalid result'), 'unknown');
+  }
+  const errorText = typeof result.error === 'string' ? result.error.trim() : '';
+  const notAuthenticated = !result.synced && /not authenticated/i.test(errorText);
+  if (!result.synced && !notAuthenticated) {
+    throw annotateSyncError(new Error(errorText || 'Cursor sync failed'), 'unknown');
+  }
+  return {
+    synced: result.synced,
+    rows: Number.isFinite(Number(result.rows)) ? Math.max(0, Number(result.rows)) : 0,
+    error: errorText || null,
+    notAuthenticated
+  };
+}
+
 async function runCursorSync(options = {}) {
-  return withCursorLifecycle(() => runTokscaleSubcommand(
-    ['sync', '--json'],
-    { ...options, timeoutMs: options.timeoutMs ?? CURSOR_EXPLICIT_SYNC_TIMEOUT_MS }
-  ), { signal: options.signal });
+  const { runSubcommand = runTokscaleSubcommand, ...subprocessOptions } = options;
+  return withCursorLifecycle(async () => {
+    const stdout = await runSubcommand(
+      ['sync', '--json'],
+      { ...subprocessOptions, timeoutMs: options.timeoutMs ?? CURSOR_EXPLICIT_SYNC_TIMEOUT_MS }
+    );
+    return parseCursorSyncResult(stdout);
+  }, { signal: options.signal });
 }
 
 function runCursorStatus(options = {}) {
@@ -327,6 +407,8 @@ module.exports = {
   listAccounts,
   normalizeCursorSessionToken,
   readActiveAccount,
+  readCursorDesktopAccessToken,
+  runCursorDiscover,
   runCursorLogin,
   runCursorLogout,
   runCursorSync,

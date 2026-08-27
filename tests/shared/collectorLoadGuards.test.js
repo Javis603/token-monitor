@@ -2296,7 +2296,10 @@ test('cursor sync gets one discovery attempt without saved credentials', async (
   const originalRunCursorSync = cursorAuth.runCursorSync;
   let syncCalls = 0;
   cursorAuth.readActiveAccount = () => null;
-  cursorAuth.runCursorSync = async () => { syncCalls += 1; };
+  cursorAuth.runCursorSync = async () => {
+    syncCalls += 1;
+    return { synced: false, notAuthenticated: true };
+  };
   try {
     const { collectUsageOnce } = freshCollector();
     const options = {
@@ -2305,11 +2308,48 @@ test('cursor sync gets one discovery attempt without saved credentials', async (
       commandTimeoutMs: 1000,
       deviceId: 'test-device',
       agentVersion: 'test',
+      forceSelfSync: true,
       limitsEnabled: false
     };
     await collectUsageOnce(options);
     await collectUsageOnce(options);
     assert.equal(syncCalls, 1);
+  } finally {
+    childProcess.spawn = originalSpawn;
+    cursorAuth.readActiveAccount = originalReadActiveAccount;
+    cursorAuth.runCursorSync = originalRunCursorSync;
+    delete require.cache[collectorPath];
+  }
+});
+
+test('cursor discovery retries after a transient sync failure', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  childProcess.spawn = recordingSpawn([]);
+  const cursorAuth = require('../../src/shared/cursorAuth');
+  const originalReadActiveAccount = cursorAuth.readActiveAccount;
+  const originalRunCursorSync = cursorAuth.runCursorSync;
+  let syncCalls = 0;
+  cursorAuth.readActiveAccount = () => null;
+  cursorAuth.runCursorSync = async () => {
+    syncCalls += 1;
+    if (syncCalls === 1) throw new Error('temporary network failure');
+    return { synced: false, notAuthenticated: true };
+  };
+  try {
+    const { collectUsageOnce } = freshCollector();
+    const options = {
+      clients: 'cursor',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      forceSelfSync: true,
+      limitsEnabled: false
+    };
+    await collectUsageOnce(options);
+    await collectUsageOnce(options);
+    assert.equal(syncCalls, 2);
   } finally {
     childProcess.spawn = originalSpawn;
     cursorAuth.readActiveAccount = originalReadActiveAccount;

@@ -6019,15 +6019,17 @@ async function getDashboardHistory(options = {}) {
 let cursorStatusCache = { value: null, at: 0 };
 let opencodeStatusCache = { value: null, at: 0 };
 const CURSOR_STATUS_TTL_MS = 30 * 1000;
+const CURSOR_EXTERNAL_AGENT_ERROR = 'Stop the headless agent before managing Cursor accounts.';
 
 function normalizeManualCookie(input) {
   return cursorAuth.normalizeCursorSessionToken(input);
 }
 
 async function cursorStatusValue({ discover = false } = {}) {
+  const managementBlocked = isExternalAgentActive();
   let accounts = cursorAuth.listAccounts();
-  if (discover) {
-    try { await cursorAuth.runCursorSync(); } catch (_) { /* signed-out or unavailable Cursor app */ }
+  if (discover && !managementBlocked) {
+    try { await cursorAuth.runCursorDiscover(); } catch (_) { /* signed-out or unavailable Cursor app */ }
     accounts = cursorAuth.listAccounts();
   }
   const disabled = new Set(normalizeCursorDisabledAccountIds(settings?.cursorDisabledAccountIds));
@@ -6048,7 +6050,8 @@ async function cursorStatusValue({ discover = false } = {}) {
   return {
     loggedIn: safeAccounts.length > 0,
     accounts: safeAccounts,
-    linkedCount: safeAccounts.filter((account) => account.enabled && !account.expired && !account.error).length
+    linkedCount: safeAccounts.filter((account) => account.enabled && !account.expired && !account.error).length,
+    managementBlocked
   };
 }
 
@@ -6723,6 +6726,9 @@ app.whenReady().then(() => {
   ipcMain.handle('appUpdate:install', () => installDownloadedAppUpdate());
   ipcMain.handle('appUpdate:dismiss', (_event, version) => dismissAppUpdateVersion(version));
   ipcMain.handle('cursor:loginManual', async (_event, raw) => {
+    if (isExternalAgentActive()) {
+      return { ok: false, code: 'EXTERNAL_AGENT_ACTIVE', error: CURSOR_EXTERNAL_AGENT_ERROR };
+    }
     const token = normalizeManualCookie(raw);
     if (!token) return { ok: false, error: 'Empty or malformed token' };
     try {
@@ -6869,6 +6875,9 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('cursor:logout', async (_event, accountId) => {
+    if (isExternalAgentActive()) {
+      return { ok: false, code: 'EXTERNAL_AGENT_ACTIVE', error: CURSOR_EXTERNAL_AGENT_ERROR };
+    }
     try {
       const removeId = String(accountId || '').trim();
       const manual = new Set(normalizeCursorAccountIds(settings.cursorManualAccountIds));
