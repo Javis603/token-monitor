@@ -134,6 +134,18 @@ function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = 
         periods: {}
       };
       const nextSession = clone(session);
+      const previousSession = entry.periods?.[periodName];
+      if (!nextSession.accountKey && previousSession?.accountKey) {
+        nextSession.accountKey = String(previousSession.accountKey);
+      }
+      if (
+        !nextSession.accountLabel
+        && previousSession?.accountLabel
+        && previousSession.accountKey
+        && nextSession.accountKey === String(previousSession.accountKey)
+      ) {
+        nextSession.accountLabel = String(previousSession.accountLabel).trim().slice(0, 128);
+      }
       const window = entry.periodWindows?.[periodName] || {};
       const sameWindow = periodName === 'today'
         ? window.day === localDay(captureDate)

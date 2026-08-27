@@ -470,6 +470,12 @@ test('Trae and WorkBuddy account switches retain every prior account in the perm
     client: 'workbuddy', accountKey: 'workbuddy-b',
     sessionId: 'work-session-b', tokens: 40
   }), new Date('2026-08-27T10:20:00.000Z'));
+  // A refresh from an older collector can carry the stable key without the
+  // friendly label. Capturing it must not erase metadata already archived.
+  archive = captureSessionUsageArchive(archive, accountSummary({
+    client: 'trae-cn', accountKey: traeA,
+    sessionId: `trae-cn:api:${traeA}:session-a`, tokens: 125
+  }), new Date('2026-08-27T10:25:00.000Z'));
 
   const visible = applySessionUsageArchive({ allTime: { sessions: {} } }, archive, {
     now: new Date('2026-08-27T10:30:00.000Z')
