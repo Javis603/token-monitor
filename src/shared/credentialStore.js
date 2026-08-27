@@ -17,6 +17,7 @@ const CREDENTIAL_SETTING_PATHS = Object.freeze({
   factoryApiKey: ['providers', 'factory', 'apiKey'],
   kimiApiKey: ['providers', 'kimi', 'apiKey'],
   kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
+  kimiWebRefreshToken: ['providers', 'kimi', 'webRefreshToken'],
   copilotApiToken: ['providers', 'copilot', 'apiToken'],
   zedCookie: ['providers', 'zed', 'cookie'],
   commandcodeCookie: ['providers', 'commandcode', 'cookie'],
