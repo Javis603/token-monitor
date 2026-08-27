@@ -13927,7 +13927,8 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
   const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
   if (accountStatus === 'linked') {
     // A ZCode-discovered login is an OAuth-style link, not a pasted API key,
-    // so it reads as connected the way Zed's linked sessions do.
+    // so it reads as connected the way Zed's linked sessions do. Same idea for
+    // a Factory Droid env credential.
     const linkedKey = providerName === 'zai' && source === 'zcode-auto'
       ? 'settings.zai.statusLinked'
       : providerName === 'factory' && source === 'droid-env'
@@ -13935,6 +13936,10 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
         : providerName === 'cline' && source === 'cline-signin'
           ? 'settings.cline.statusSignin'
           : null;
+    return t(linkedKey || (source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`));
+    // Only the Kimi credential chain produces a 'desktop' source (the Kimi
+    // Work desktop app session picked up automatically on Windows).
+    if (source === 'desktop') return t(`settings.${providerName}.statusDesktop`);
     return t(linkedKey || (source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`));
   }
   if (accountStatus === 'invalid') {

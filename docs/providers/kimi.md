@@ -95,3 +95,33 @@ for Kimi.
 - **The desktop app writes more than sessions.** `server/` (its embedded host) and the root indexes
   sit outside the watched root; `sessions/.index-dirty/` sits inside it, so indexing can trigger a
   targeted scan. Neither changes what is counted: `wire.jsonl` is the only usage source.
+
+## Limits credentials
+
+Kimi web credentials deserve their own note because every obvious path is a trap. The website no
+longer refreshes the legacy `kimi-auth` cookie (it dies 30 days after login, and the Kimi frontend
+bundle does not reference it at all), and the localStorage `access_token` lives ~15 minutes. The
+durable source is the Kimi Work desktop app: `%APPDATA%kimi-desktopridge-store	oken-store.json`
+holds a rotating access/refresh pair, safeStorage-encrypted (`v10` AES-GCM under a DPAPI-protected
+key from its `Local State`). `src/shared/providers/kimi/desktopSession.js` reads it as a zero-setup
+default on Windows when no manual token is set.
+
+The app's TokenStore loads that file once at startup into memory (no file watcher), rotates the
+refresh token on every refresh, and escalates any 401/403 to `clear()` — wiping the session and
+logging the user out. That makes refresh ownership the load-bearing constraint: while
+`kimi-desktopKimi.exe` is running, the app must stay the sole refresh owner and Token Monitor is
+read-only (an idle-running app past the 15-minute access-token life reports `unavailable`,
+self-healing on the app's next use); while the app is closed, Token Monitor refreshes the pair
+itself via `auth.kimi.com/api/account.gateway.v1.AuthService/RefreshToken` and writes the rotated
+pair back in the app's exact format, which the app's next start picks up transparently. Writes go
+through a temp file and an atomic rename; a rejected refresh token never clears the store — the
+app's own next sign-in self-heals.
+
+A manual token shadows the desktop session entirely, and the reader is Windows-only because
+macOS/Linux safeStorage cannot be read cross-app. The GUI's single paste box classifies what it
+receives (access tokens live minutes, refresh tokens live days) and a pasted refresh token
+(`KIMI_REFRESH_TOKEN` for headless) becomes a self-renewing manual session whose rotated pair
+persists in `sharedDataDir/kimi-manual-session.json` — the pasted seed stays in the credential
+store, the cache file is collector-owned, and every rotation rewrites it atomically. Kimi web
+credentials are single-consumer: once the widget owns a token pair, using the same account's web
+console signs that browser session out on the next refresh.
