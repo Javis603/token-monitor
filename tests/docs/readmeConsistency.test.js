@@ -178,8 +178,7 @@ test('localized READMEs list the same supported tools', () => {
 const README_ICON_TO_LIMIT_PROVIDERS = {
   xai: ['grok'],
   'mimo-code': ['mimo'],
-  zcode: ['zai', 'zaiteam'],
-  volcengine: ['volcengine', 'volcagent']
+  zcode: ['zai', 'zaiteam']
 };
 
 test('limit provider order follows the supported-tools table', () => {

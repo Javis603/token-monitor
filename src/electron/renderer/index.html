@@ -975,7 +975,7 @@
                   <button id="volcengineRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
                 </div>
                 <div id="volcengineManualPanel">
-                  <p class="settings-note" data-i18n="settings.volcengine.note">Paste an Ark API key, or use a Volcengine access key ID with the secret field for Coding Plan usage.</p>
+                  <p class="settings-note" data-i18n="settings.volcengine.note">Paste an Ark API key, or use a Volcengine access key ID with the secret field. An access key reads both the Coding Plan and the Agent Plan.</p>
                   <div class="settings-row">
                     <label for="volcengineAccessKeyInput" data-i18n="settings.volcengine.accessKeyId">API key / Access key ID</label>
                     <input id="volcengineAccessKeyInput" type="password" spellcheck="false" placeholder="ark-... or AKLT..." data-i18n-placeholder="settings.volcengine.accessKeyPlaceholder" />
@@ -988,46 +988,37 @@
                     <label for="volcengineRegionInput" data-i18n="settings.volcengine.region">Region (optional)</label>
                     <input id="volcengineRegionInput" type="text" spellcheck="false" placeholder="cn-beijing" data-i18n-placeholder="settings.volcengine.regionPlaceholder" />
                   </div>
+                  <div id="volcengineAgentPanel" class="opencode-add-form">
+                    <button id="volcengineAgentToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="volcengineAgentDetails">
+                      <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      </svg>
+                      <span data-i18n="settings.volcengine.agentToggle">Agent Plan is on a different account</span>
+                      <span id="volcengineAgentConfigured" class="tool-status-tag tool-status-tag-ok hidden" data-i18n="settings.volcengine.agentConfigured">Set</span>
+                    </button>
+                    <div id="volcengineAgentDetails" class="opencode-add-details accordion-animated-container hidden">
+                      <div class="accordion-animation-inner opencode-add-body">
+                        <p class="settings-note" data-i18n="settings.volcengine.agentNote">Leave empty to read the Agent Plan with the access key above. Fill these in only when the Agent Plan was bought on a different Volcengine account.</p>
+                        <div class="settings-row">
+                          <label for="volcengineAgentAccessKeyInput" data-i18n="settings.volcengine.agentAccessKeyId">Agent access key ID</label>
+                          <input id="volcengineAgentAccessKeyInput" type="password" spellcheck="false" placeholder="AKLT..." data-i18n-placeholder="settings.volcengine.agentAccessKeyPlaceholder" />
+                        </div>
+                        <div class="settings-row">
+                          <label for="volcengineAgentSecretAccessKeyInput" data-i18n="settings.volcengine.agentSecretAccessKey">Agent secret access key</label>
+                          <input id="volcengineAgentSecretAccessKeyInput" type="password" spellcheck="false" placeholder="..." data-i18n-placeholder="settings.volcengine.secretKeyPlaceholder" />
+                        </div>
+                        <div class="settings-row">
+                          <label for="volcengineAgentRegionInput" data-i18n="settings.volcengine.agentRegion">Agent region (optional)</label>
+                          <input id="volcengineAgentRegionInput" type="text" spellcheck="false" placeholder="cn-beijing" data-i18n-placeholder="settings.volcengine.regionPlaceholder" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                   <div class="settings-actions">
                     <button id="volcengineCredentialsSubmit" data-i18n="settings.volcengine.saveCredentials">Save credentials</button>
                   </div>
                 </div>
                 <div id="volcengineErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="volcagentAccountGroup" class="settings-group cursor-account-group">
-              <button id="volcagentSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="volcagentSettingsDetails">
-                <span data-i18n="settings.volcagent.title">Volcengine Agent Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="volcagentAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="volcagentSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="volcagentOpenBrowser" data-i18n="settings.volcagent.openBrowser">Open Volcengine Agent Plan console</button>
-                  <button id="volcagentLogoutButton" class="hidden" data-i18n="settings.volcagent.clearCredentials">Clear credentials</button>
-                  <button id="volcagentRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="volcagentManualPanel">
-                  <p class="settings-note" data-i18n="settings.volcagent.note">Uses the same Volcengine access key as the Coding Plan account above — leave empty to reuse it. Required only if the Agent Plan is on a different account.</p>
-                  <div class="settings-row">
-                    <label for="volcagentAccessKeyInput" data-i18n="settings.volcagent.accessKeyId">API key / Access key ID</label>
-                    <input id="volcagentAccessKeyInput" type="password" spellcheck="false" placeholder="AKLT..." data-i18n-placeholder="settings.volcagent.accessKeyPlaceholder" />
-                  </div>
-                  <div class="settings-row">
-                    <label for="volcagentSecretAccessKeyInput" data-i18n="settings.volcagent.secretAccessKey">Secret access key</label>
-                    <input id="volcagentSecretAccessKeyInput" type="password" spellcheck="false" placeholder="..." data-i18n-placeholder="settings.volcagent.secretKeyPlaceholder" />
-                  </div>
-                  <div class="settings-row">
-                    <label for="volcagentRegionInput" data-i18n="settings.volcagent.region">Region (optional)</label>
-                    <input id="volcagentRegionInput" type="text" spellcheck="false" placeholder="cn-beijing" data-i18n-placeholder="settings.volcagent.regionPlaceholder" />
-                  </div>
-                  <div class="settings-actions">
-                    <button id="volcagentCredentialsSubmit" data-i18n="settings.volcagent.saveCredentials">Save credentials</button>
-                  </div>
-                </div>
-                <div id="volcagentErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
             <div id="qoderAccountGroup" class="settings-group cursor-account-group">

@@ -14,7 +14,7 @@ const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio',
-  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'volcagent', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
+  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
 const limitMarksWithIcon = new Set([...clientsWithIcon, 'newapi', 'sub2api']);
 
@@ -98,7 +98,6 @@ const LIMIT_PROVIDERS = [
   { id: 'openrouter', label: 'OpenRouter' },
   { id: 'minimax', label: 'Minimax' },
   { id: 'volcengine', label: 'Volcengine' },
-  { id: 'volcagent', label: 'Volcengine Agent' },
   { id: 'ollama', label: 'Ollama' },
   { id: 'trae', label: 'Trae CN' },
   { id: 'thirdparty', label: 'Third-party APIs' }
@@ -117,7 +116,6 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   openrouter: 'openrouterAccountGroup',
   minimax: 'minimaxAccountGroup',
   volcengine: 'volcengineAccountGroup',
-  volcagent: 'volcagentAccountGroup',
   qoder: 'qoderAccountGroup',
   trae: 'traeAccountGroup',
   commandcode: 'commandcodeAccountGroup',
@@ -138,7 +136,6 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   openrouter: 'openrouterStatus',
   minimax: 'minimaxApiKeyStatus',
   volcengine: 'volcengineAccountStatus',
-  volcagent: 'volcagentAccountStatus',
   qoder: 'qoderAccountStatus',
   trae: 'traeAccountStatus',
   commandcode: 'commandcodeAccountStatus',
@@ -317,7 +314,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcagentAccountExpanded: false, volcagentPendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
@@ -4857,7 +4854,7 @@ function renderProviderWindows(provider, color) {
       mcpNode.classList.add('limit-window-wide');
       windows.append(mcpNode);
     }
-  } else if (provider.provider === 'volcengine' || provider.provider === 'volcagent') {
+  } else if (provider.provider === 'volcengine') {
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
     const monthly = windowForKind(provider, 'billing');
@@ -5065,7 +5062,8 @@ const LIMIT_ACCOUNT_TITLES = {
   codex: codexAccountTitle,
   opencode: opencodeAccountTitle,
   openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
-  thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty')
+  thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
+  volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers)
 };
 
 function limitAccountTitle(id, provider, index, providerEntries = [provider]) {
@@ -5239,6 +5237,21 @@ function namedApiAccountTitle(provider, index, providerId) {
   return accountName || `Account ${index + 1}`;
 }
 
+// Both Volcengine plans sit on one account, so the row title carries the plan
+// name from accountLabel. accountTitleLabel reads accountName/accountEmail,
+// neither of which these rows have, so without this they would all render as
+// "Account N".
+function volcenginePlanAccountTitle(provider, index, providers) {
+  return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
+}
+
+// '' while healthy, because the title already shows the plan and there is no
+// second fact to put here; undefined once it is not, so the head falls back to
+// the status label the same way thirdPartyPlanText does.
+function volcenginePlanRowText(provider) {
+  return provider?.status === 'ok' ? '' : undefined;
+}
+
 function thirdPartyPlanText(provider) {
   if (provider?.status !== 'ok') return undefined;
   const adapterId = String(provider?.adapterId || '').toLowerCase();
@@ -5327,6 +5340,15 @@ function renderThirdPartyAccountGroup(label, providers, color) {
     ...(sharedFamily === null
       ? { markIdForProvider: (provider) => thirdPartyAdapterVisual(provider, color).markId }
       : {})
+  });
+}
+
+// The Coding Plan and the Agent Plan are two subscriptions on one Volcengine
+// account, so they are rows of one card rather than two provider cards.
+function renderVolcengineAccountGroup(label, providers, color) {
+  return renderNamedApiAccountGroup('volcengine', label, providers, color, {
+    groupPlanText: t('settings.volcengine.nPlans', { count: providers.length }),
+    planTextForProvider: volcenginePlanRowText
   });
 }
 
@@ -5419,6 +5441,10 @@ function renderLimits() {
     }
     if (id === 'cursor' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderCursorAccountGroup(label, visibleProviders, color));
+      continue;
+    }
+    if (id === 'volcengine' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderVolcengineAccountGroup(label, visibleProviders, color));
       continue;
     }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
@@ -8650,7 +8676,6 @@ function syncSettingsForm() {
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
-  renderExternalProviderStatus('volcagent');
   renderExternalProviderStatus('qoder');
   renderExternalProviderStatus('trae');
   renderExternalProviderStatus('commandcode');
@@ -11763,7 +11788,6 @@ function renderStatsUpdate() {
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
-  renderExternalProviderStatus('volcagent');
   renderExternalProviderStatus('qoder');
   renderExternalProviderStatus('trae');
   renderExternalProviderStatus('commandcode');
@@ -13545,11 +13569,6 @@ const externalLimitAccountConfig = {
     sourceKey: 'volcengineCredentialsSource',
     pendingKey: 'volcenginePendingCheckSince'
   },
-  volcagent: {
-    configuredKey: 'volcagentCredentialsConfigured',
-    sourceKey: 'volcagentCredentialsSource',
-    pendingKey: 'volcagentPendingCheckSince'
-  },
   qoder: {
     configuredKey: 'qoderCookieConfigured',
     sourceKey: 'qoderCookieSource',
@@ -13716,10 +13735,6 @@ function volcenginePlatformUrl() {
   return 'https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe';
 }
 
-function volcagentPlatformUrl() {
-  return 'https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=agentPlan';
-}
-
 function claudePlatformUrl() {
   return 'https://claude.ai/settings/usage';
 }
@@ -13792,6 +13807,7 @@ function renderExternalProviderStatus(providerName) {
     const regionInput = document.getElementById('zaiApiRegionInput');
     if (regionInput) regionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
   }
+  if (providerName === 'volcengine') renderVolcengineAgentOverrideState();
   if (providerName === 'qoder') {
     const siteInput = document.getElementById('qoderSiteInput');
     if (siteInput) siteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
@@ -13804,13 +13820,30 @@ function renderExternalProviderStatus(providerName) {
   manualPanel.classList.toggle('hidden', linked);
   openBtn.classList.toggle('hidden', linked);
   const canClearConfiguredClaude = providerName === 'claude' && configured;
-  // volcagent may inherit the Coding Plan account's credentials, in which case
-  // there is nothing provider-specific to clear — only show Clear when the
-  // Agent Plan fields were set explicitly.
-  const canClearVolcagent = providerName === 'volcagent' && state.settings?.volcagentAccessKeyId === 'set';
-  logoutBtn.classList.toggle('hidden', source !== 'settings' || (!linked && !canClearConfiguredClaude && !canClearVolcagent));
+  logoutBtn.classList.toggle('hidden', source !== 'settings' || (!linked && !canClearConfiguredClaude));
   refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();
+}
+
+// The override inputs are password fields, cleared after every save and never
+// repopulated, so this tag is the only thing that tells a stored second account
+// apart from one that was never filled in. It reads the redacted 'set' marker
+// rather than volcengineAgentCredentials, which falls back to the Coding Plan
+// key and is therefore truthy for every Coding-only user.
+function renderVolcengineAgentOverrideState() {
+  const tag = document.getElementById('volcengineAgentConfigured');
+  if (!tag) return;
+  tag.classList.toggle('hidden', state.settings?.volcengineAgentAccessKeyId !== 'set');
+}
+
+// The Agent Plan override is collapsed by default: it only matters when the two
+// plans were bought on different Volcengine accounts.
+function setVolcengineAgentExpanded(expanded) {
+  const next = Boolean(expanded);
+  state.volcengineAgentExpanded = next;
+  document.getElementById('volcengineAgentToggle')?.setAttribute('aria-expanded', next ? 'true' : 'false');
+  document.getElementById('volcengineAgentDetails')?.classList.toggle('hidden', !next);
+  document.getElementById('volcengineAgentPanel')?.classList.toggle('expanded', next);
 }
 
 function setMinimaxAccountExpanded(expanded) {
@@ -15800,8 +15833,16 @@ function setupCursorAccountUI() {
       window.tokenMonitor.openExternal(volcenginePlatformUrl());
     });
 
+    document.getElementById('volcengineAgentToggle')?.addEventListener('click', () => {
+      setVolcengineAgentExpanded(document.getElementById('volcengineAgentDetails')?.classList.contains('hidden'));
+    });
+    setVolcengineAgentExpanded(false);
+
     document.getElementById('volcengineLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ volcengineAccessKeyId: '', volcengineSecretAccessKey: '', volcengineRegion: '' });
+      await saveSettings({
+        volcengineAccessKeyId: '', volcengineSecretAccessKey: '', volcengineRegion: '',
+        volcengineAgentAccessKeyId: '', volcengineAgentSecretAccessKey: '', volcengineAgentRegion: ''
+      });
       clearExternalProviderCheckPending('volcengine');
       clearExternalProviderPendingStatus('volcengine');
       renderExternalProviderStatus('volcengine');
@@ -15816,6 +15857,9 @@ function setupCursorAccountUI() {
       const accessKeyInput = document.getElementById('volcengineAccessKeyInput');
       const secretInput = document.getElementById('volcengineSecretAccessKeyInput');
       const regionInput = document.getElementById('volcengineRegionInput');
+      const agentAccessKeyInput = document.getElementById('volcengineAgentAccessKeyInput');
+      const agentSecretInput = document.getElementById('volcengineAgentSecretAccessKeyInput');
+      const agentRegionInput = document.getElementById('volcengineAgentRegionInput');
       const errorEl = document.getElementById('volcengineErrorMessage');
       errorEl.classList.add('hidden');
       const accessKeyValue = String(accessKeyInput.value || '').trim();
@@ -15825,15 +15869,31 @@ function setupCursorAccountUI() {
         errorEl.classList.remove('hidden');
         return;
       }
+      // Only sent when the user actually filled the override in, so saving the
+      // Coding Plan key again cannot silently wipe a separate Agent account.
+      const agentAccessKeyValue = String(agentAccessKeyInput?.value || '').trim();
+      const agentSecretValue = String(agentSecretInput?.value || '').trim();
+      if (agentAccessKeyValue && !agentSecretValue) {
+        errorEl.textContent = t('settings.volcengine.agentSecretRequired');
+        errorEl.classList.remove('hidden');
+        return;
+      }
       try {
         markExternalProviderCheckPending('volcengine');
         await saveSettings({
           volcengineAccessKeyId: accessKeyInput.value,
           volcengineSecretAccessKey: secretInput.value,
-          volcengineRegion: regionInput.value || 'cn-beijing'
+          volcengineRegion: regionInput.value || 'cn-beijing',
+          ...(agentAccessKeyValue ? {
+            volcengineAgentAccessKeyId: agentAccessKeyValue,
+            volcengineAgentSecretAccessKey: agentSecretValue,
+            volcengineAgentRegion: agentRegionInput?.value || 'cn-beijing'
+          } : {})
         });
         accessKeyInput.value = '';
         secretInput.value = '';
+        if (agentAccessKeyInput) agentAccessKeyInput.value = '';
+        if (agentSecretInput) agentSecretInput.value = '';
         renderExternalProviderStatus('volcengine');
         await refreshStats({ force: true });
         setExternalAccountExpanded('volcengine', !externalProviderAccountLinked('volcengine'));
@@ -15841,62 +15901,6 @@ function setupCursorAccountUI() {
       } catch (err) {
         clearExternalProviderCheckPending('volcengine');
         errorEl.textContent = t('settings.volcengine.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const volcagentToggle = document.getElementById('volcagentSettingsToggle');
-  if (volcagentToggle) {
-    volcagentToggle.addEventListener('click', () => setExternalAccountExpanded('volcagent', !state.volcagentAccountExpanded));
-    setExternalAccountExpanded('volcagent', false);
-    renderExternalProviderStatus('volcagent');
-
-    document.getElementById('volcagentOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(volcagentPlatformUrl());
-    });
-
-    document.getElementById('volcagentLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ volcagentAccessKeyId: '', volcagentSecretAccessKey: '', volcagentRegion: '' });
-      clearExternalProviderCheckPending('volcagent');
-      clearExternalProviderPendingStatus('volcagent');
-      renderExternalProviderStatus('volcagent');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('volcagentRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('volcagentCredentialsSubmit').addEventListener('click', async () => {
-      const accessKeyInput = document.getElementById('volcagentAccessKeyInput');
-      const secretInput = document.getElementById('volcagentSecretAccessKeyInput');
-      const regionInput = document.getElementById('volcagentRegionInput');
-      const errorEl = document.getElementById('volcagentErrorMessage');
-      errorEl.classList.add('hidden');
-      const accessKeyValue = String(accessKeyInput.value || '').trim();
-      const secretValue = String(secretInput.value || '').trim();
-      if (!accessKeyValue || (/^AKLT/i.test(accessKeyValue) && !secretValue)) {
-        errorEl.textContent = t('settings.volcagent.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('volcagent');
-        await saveSettings({
-          volcagentAccessKeyId: accessKeyInput.value,
-          volcagentSecretAccessKey: secretInput.value,
-          volcagentRegion: regionInput.value || 'cn-beijing'
-        });
-        accessKeyInput.value = '';
-        secretInput.value = '';
-        renderExternalProviderStatus('volcagent');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('volcagent', !externalProviderAccountLinked('volcagent'));
-        renderExternalProviderStatus('volcagent');
-      } catch (err) {
-        clearExternalProviderCheckPending('volcagent');
-        errorEl.textContent = t('settings.volcagent.saveFailed', { message: err.message });
         errorEl.classList.remove('hidden');
       }
     });
@@ -16497,7 +16501,6 @@ function initSettingsAnimationWrappers() {
     '#zaiManualPanel',
     '#zaiteamManualPanel',
     '#volcengineManualPanel',
-    '#volcagentManualPanel',
     '#qoderManualPanel',
     '#traeManualPanel',
     '#commandcodeManualPanel',

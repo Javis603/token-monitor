@@ -737,19 +737,19 @@ test('API key account entries share styling and Copilot uses the folded token en
   const css = readRendererFile('styles.css');
 
   const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
-  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#volcagentManualPanel',\n\s*'#qoderManualPanel',\n\s*'#traeManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#kimiManualPanel'/);
+  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#traeManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#kimiManualPanel'/);
   assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
 
   assert.match(css, /#deepseekManualPanel\.hidden,\n#minimaxManualPanel\.hidden,/);
-  assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#volcagentManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#traeManualPanel\.hidden,\n#commandcodeManualPanel\.hidden,\n#ollamaManualPanel\.hidden,\n#mimoManualPanel\.hidden,\n#kimiManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
+  assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#traeManualPanel\.hidden,\n#commandcodeManualPanel\.hidden,\n#ollamaManualPanel\.hidden,\n#mimoManualPanel\.hidden,\n#kimiManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
   assert.match(css, /#copilotManualPanel\.hidden,\n#copilotManualDetails\.hidden,/);
-  assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#zaiteamErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#volcagentErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#traeErrorMessage\.hidden,\n#commandcodeErrorMessage\.hidden,\n#ollamaErrorMessage\.hidden,\n#kimiErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
-  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#volcagentManualPanel,\n#qoderManualPanel,\n#traeManualPanel,\n#commandcodeManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#volcagentManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#zaiteamErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#traeErrorMessage\.hidden,\n#commandcodeErrorMessage\.hidden,\n#ollamaErrorMessage\.hidden,\n#kimiErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
+  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#traeManualPanel,\n#commandcodeManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#volcagentManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#traeManualPanel input,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#volcagentManualPanel input,\n#qoderManualPanel textarea,\n#traeManualPanel input,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#traeManualPanel input,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#traeManualPanel input,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
 
   assert.match(css, /\.thirdparty-field :is\(input, select\)\s*\{[\s\S]*?font-size: 12px;/);
 });
@@ -1029,7 +1029,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   const statusBody = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
   assert.match(statusBody, /const canClearConfiguredClaude = providerName === 'claude' && configured;/);
   assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked\)/);
-  assert.match(statusBody, /source !== 'settings' \|\| \(!linked && !canClearConfiguredClaude && !canClearVolcagent\)/);
+  assert.match(statusBody, /source !== 'settings' \|\| \(!linked && !canClearConfiguredClaude\)/);
   const urlBody = functionBody(app, 'claudePlatformUrl', 'selectedQoderSite');
   assert.match(urlBody, /return 'https:\/\/claude\.ai\/settings\/usage';/);
 
@@ -1922,6 +1922,41 @@ test('Limits groups multiple Cursor accounts with separate identity and plan row
   assert.match(groupBody, /renderLimitProviderRow\('cursor', limitAccountTitle\('cursor', provider, index, providers\), provider, color/);
   assert.match(renderLimitsBody, /if \(id === 'cursor' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
   assert.match(renderLimitsBody, /nodes\.push\(renderCursorAccountGroup\(label, visibleProviders, color\)\);/);
+});
+
+test('Limits groups the Volcengine Coding and Agent plans as rows of one card', () => {
+  const app = readRendererFile('app.js');
+  const groupBody = functionBody(app, 'renderVolcengineAccountGroup', 'renderLimits');
+  const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+  // Both plans are subscriptions on one account, so the rows are titled by the
+  // plan rather than by an account identity the record does not carry.
+  assert.match(groupBody, /renderNamedApiAccountGroup\('volcengine', label, providers, color/);
+  assert.match(groupBody, /groupPlanText: t\('settings\.volcengine\.nPlans', \{ count: providers\.length \}\)/);
+  assert.match(renderLimitsBody, /if \(id === 'volcengine' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
+  assert.match(renderLimitsBody, /nodes\.push\(renderVolcengineAccountGroup\(label, visibleProviders, color\)\);/);
+  // Without an entry here the rows fall back to "Account 1"/"Account 2", since
+  // accountTitleLabel reads accountName/accountEmail and these rows carry
+  // neither — only accountLabel, which holds the plan name.
+  assert.match(app, /volcengine: \(provider, index, providers\) => volcenginePlanAccountTitle\(provider, index, providers\)/);
+});
+
+test('the Volcengine Agent override shows that it is set, from the one flag that means it', () => {
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const statusBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
+  const overrideBody = functionBody(app, 'renderVolcengineAgentOverrideState', 'setVolcengineAgentExpanded');
+
+  // Password inputs are cleared after saving and never repopulated, so without
+  // this the panel looks identical whether or not a second account is stored.
+  assert.match(statusBody, /if \(providerName === 'volcengine'\) renderVolcengineAgentOverrideState\(\);/);
+  assert.match(overrideBody, /state\.settings\?\.volcengineAgentAccessKeyId/);
+  assert.match(overrideBody, /'set'/);
+
+  // volcengineAgentCredentials falls back to the Coding Plan key, so a
+  // "configured" flag derived from it is true for every Coding-only user and
+  // would light this indicator up for all of them.
+  assert.doesNotMatch(main, /volcengineAgentCredentialsConfigured/);
+  assert.doesNotMatch(main, /volcengineAgentCredentialsSource/);
 });
 
 test('a zero-config OpenCode machine is not reported as unconfigured', () => {

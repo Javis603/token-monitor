@@ -938,7 +938,7 @@ test('compact provider windows choose the lowest pool when no aggregate exists',
 });
 
 test('compact window policy covers every supported limits provider shape', () => {
-  const sessionWeekly = ['claude', 'codex', 'minimax', 'zai', 'zaiteam', 'volcengine', 'volcagent', 'kimi', 'ollama'];
+  const sessionWeekly = ['claude', 'codex', 'minimax', 'zai', 'zaiteam', 'volcengine', 'kimi', 'ollama'];
   const billing = ['cursor', 'mimo', 'grok', 'copilot', 'kiro', 'qoder'];
 
   for (const provider of sessionWeekly) {

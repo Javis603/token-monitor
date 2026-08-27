@@ -8,6 +8,7 @@ const { runWithProbeDeadline } = require('./probeDeadline');
 const VOLCENGINE_FETCH_TIMEOUT_MS = 12_000;
 
 const VOLCENGINE_CODING_PLAN_URL = 'https://open.volcengineapi.com/?Action=GetCodingPlanUsage&Version=2024-01-01';
+const VOLCENGINE_AGENT_PLAN_URL = 'https://open.volcengineapi.com/?Action=GetAFPUsage&Version=2024-01-01';
 const VOLCENGINE_ARK_CHAT_COMPLETIONS_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions';
 const VOLCENGINE_DEFAULT_REGION = 'cn-beijing';
 const VOLCENGINE_SESSION_WINDOW_MINUTES = 5 * 60;
@@ -361,20 +362,145 @@ function fetchJsonWithDeadline(url, init, deps = {}) {
   );
 }
 
+// The Agent Plan and the Coding Plan are two subscriptions that normally sit on
+// the SAME Volcengine account, so the Agent credentials are optional and fall
+// back to the Coding Plan AK/SK. They only need filling in when the two plans
+// were bought on different accounts. GetAFPUsage is OpenAPI-only: a plain Ark
+// API key cannot sign it, so an ark-mode credential never reaches this path.
+function volcengineAgentCredentials(env = process.env, options = {}) {
+  const own = volcengineCredentials({
+    VOLCENGINE_ACCESS_KEY_ID: pickFirst(env, ['VOLCENGINE_AGENT_ACCESS_KEY_ID', 'VOLC_AGENT_ACCESS_KEY_ID']),
+    VOLCENGINE_SECRET_ACCESS_KEY: pickFirst(env, ['VOLCENGINE_AGENT_SECRET_ACCESS_KEY', 'VOLC_AGENT_SECRET_ACCESS_KEY']),
+    VOLCENGINE_REGION: pickFirst(env, ['VOLCENGINE_AGENT_REGION'])
+  }, {
+    volcengineAccessKeyId: options.volcengineAgentAccessKeyId,
+    volcengineSecretAccessKey: options.volcengineAgentSecretAccessKey,
+    volcengineRegion: options.volcengineAgentRegion
+  });
+  // `explicit` records which of the two it is. An inherited key that cannot see
+  // an Agent Plan is the normal case and stays silent; a key the user actually
+  // typed in is a claim that a second account exists, so its failure is shown.
+  if (own && own.mode === 'signed') return { ...own, explicit: true };
+  const shared = volcengineCredentials(env, options);
+  return shared && shared.mode === 'signed' ? { ...shared, explicit: false } : null;
+}
+
+function volcengineAgentAccountKey(credentials) {
+  // Distinct from the Coding Plan key so `provider:accountKey` dedupe keeps both
+  // rows, and derived from the key actually used so a separate Agent account
+  // still gets a stable cross-device identity.
+  return hashKey('volcengine', credentials.accessKeyId, credentials.region, 'agent-plan');
+}
+
+// Carries the real status on the Agent Plan's own identity. Without its own
+// accountKey the runtime would read a bare failure row as the whole provider's
+// and smear it onto the Coding Plan row that succeeded.
+function volcengineAgentFailureRow(credentials, error, updatedAt) {
+  return normalizeLimitProvider({
+    provider: 'volcengine',
+    accountKey: volcengineAgentAccountKey(credentials),
+    accountLabel: 'Agent Plan',
+    source: 'api',
+    status: error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable',
+    updatedAt,
+    windows: [],
+    region: credentials.region
+  });
+}
+
+// GetAFPUsage reports absolute quota (Quota/Used/ResetTime) per window instead
+// of the Coding Plan's percentages. AFPDaily is deliberately not mapped: the
+// shared limits schema only carries session/weekly/billing, so a daily window
+// would be dropped by normalizeWindowKind anyway.
+const VOLCENGINE_AGENT_PLAN_WINDOWS = Object.freeze([
+  ['AFPFiveHour', 'session', '5-hour', VOLCENGINE_SESSION_WINDOW_MINUTES],
+  ['AFPWeekly', 'weekly', 'Weekly', VOLCENGINE_WEEKLY_WINDOW_MINUTES],
+  ['AFPMonthly', 'billing', 'Monthly', VOLCENGINE_MONTHLY_WINDOW_MINUTES]
+]);
+
+function volcengineAgentPlanLabel(result) {
+  for (const field of ['PlanType', 'planType', 'PlanName', 'planName', 'ProductName', 'productName']) {
+    const label = displayPlanText(result?.[field]);
+    if (label) return label;
+  }
+  return '';
+}
+
+function parseVolcengineAgentPlanUsage(body) {
+  const result = body?.Result || body?.result || {};
+  const windows = [];
+  for (const [field, kind, label, windowMinutes] of VOLCENGINE_AGENT_PLAN_WINDOWS) {
+    const window = result[field] || result[field.toLowerCase()];
+    // Quota <= 0 means this plan tier does not include the window at all.
+    const quota = numberOrNull(window?.Quota ?? window?.quota);
+    if (quota === null || quota <= 0) continue;
+    const used = numberOrNull(window?.Used ?? window?.used);
+    const usedPercent = used === null ? null : clampPercent((used / quota) * 100);
+    windows.push({
+      kind,
+      label,
+      used,
+      limit: quota,
+      remaining: used === null ? null : Math.max(0, quota - used),
+      usedPercent,
+      resetsAt: epochToIso(window?.ResetTime ?? window?.resetTime ?? window?.resetTimestamp),
+      windowMinutes,
+      showMeter: usedPercent !== null
+    });
+  }
+  return { plan: volcengineAgentPlanLabel(result), windows };
+}
+
+// Returns null rather than an error row when the account has no Agent Plan, so
+// Coding-Plan-only users do not grow a permanently failing second row.
+async function fetchVolcengineAgentPlanLimits(credentials, deps, now, updatedAt) {
+  const signed = signVolcengineRequest({
+    url: VOLCENGINE_AGENT_PLAN_URL,
+    method: 'POST',
+    body: '',
+    date: new Date(now),
+    ...credentials
+  });
+  const { response, body } = await fetchJsonWithDeadline(VOLCENGINE_AGENT_PLAN_URL, {
+    method: 'POST',
+    headers: signed.headers,
+    body: signed.body
+  }, deps);
+  if (!response.ok) {
+    const error = new Error(`Volcengine Agent Plan returned ${response.status}`);
+    error.status = response.status === 401 || response.status === 403
+      ? 'unauthorized'
+      : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
+    throw error;
+  }
+  const usage = parseVolcengineAgentPlanUsage(body);
+  if (!usage.windows.length) return null;
+  return normalizeLimitProvider({
+    provider: 'volcengine',
+    accountKey: volcengineAgentAccountKey(credentials),
+    accountLabel: usage.plan ? `Agent Plan ${usage.plan}` : 'Agent Plan',
+    source: 'api',
+    status: 'ok',
+    updatedAt,
+    windows: usage.windows,
+    region: credentials.region
+  });
+}
+
 async function fetchVolcengineLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
+  const statusRow = (status) => normalizeLimitProvider({
+    provider: 'volcengine',
+    source: 'api',
+    status,
+    updatedAt,
+    windows: [],
+    ...(credentials ? { region: credentials.region } : {})
+  });
   const credentials = volcengineCredentials(env, options);
-  if (!credentials) {
-    return normalizeLimitProvider({
-      provider: 'volcengine',
-      source: 'api',
-      status: 'notConfigured',
-      updatedAt,
-      windows: []
-    });
-  }
+  if (!credentials) return [statusRow('notConfigured')];
 
   const tryArkFallback = async () => {
     if (!credentials.apiKey) throw new Error('Volcengine Ark API key is not configured');
@@ -382,22 +508,49 @@ async function fetchVolcengineLimits(options = {}, deps = {}) {
   };
 
   try {
-    if (credentials.mode === 'ark') return await tryArkFallback();
-    try {
-      return await fetchVolcengineCodingPlanLimits(credentials, deps, now, updatedAt);
-    } catch (error) {
-      if (!credentials.apiKey) throw error;
-      return await tryArkFallback();
+    if (credentials.mode === 'ark') return [await tryArkFallback()];
+
+    // Coding Plan and Agent Plan are independent subscriptions on the same
+    // account, so query both and report whichever ones carry quota. Neither is
+    // allowed to fail the other: an account with only one of them is normal.
+    const agentCredentials = volcengineAgentCredentials(env, options);
+    const [coding, agent] = await Promise.allSettled([
+      fetchVolcengineCodingPlanLimits(credentials, deps, now, updatedAt),
+      agentCredentials
+        ? fetchVolcengineAgentPlanLimits(agentCredentials, deps, now, updatedAt)
+        : Promise.resolve(null)
+    ]);
+
+    const agentRow = agent.status === 'fulfilled'
+      ? agent.value
+      : (agentCredentials?.explicit
+        ? volcengineAgentFailureRow(agentCredentials, agent.reason, updatedAt)
+        : null);
+    const codingRow = coding.status === 'fulfilled' && coding.value.windows.length ? coding.value : null;
+    if (codingRow) return agentRow ? [codingRow, agentRow] : [codingRow];
+
+    if (agentRow) {
+      // The Agent Plan answered, so a Coding lane with nothing to report is not
+      // worth a row of its own — unless an Ark key can still answer for it.
+      if (coding.status === 'rejected' && credentials.apiKey) {
+        try {
+          return [await tryArkFallback(), agentRow];
+        } catch {
+          return [agentRow];
+        }
+      }
+      return [agentRow];
     }
+
+    // Neither plan reported quota: keep the pre-Agent-Plan single-row behaviour
+    // so existing Coding-Plan setups see exactly what they saw before.
+    if (coding.status === 'rejected') {
+      if (!credentials.apiKey) throw coding.reason;
+      return [await tryArkFallback()];
+    }
+    return [coding.value];
   } catch (error) {
-    return normalizeLimitProvider({
-      provider: 'volcengine',
-      source: 'api',
-      status: error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable',
-      updatedAt,
-      windows: [],
-      region: credentials.region
-    });
+    return [statusRow(error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable')];
   }
 }
 
@@ -505,15 +658,10 @@ module.exports = {
   VOLCENGINE_FETCH_TIMEOUT_MS,
   VOLCENGINE_CODING_PLAN_URL,
   VOLCENGINE_ARK_CHAT_COMPLETIONS_URL,
-  clampPercent,
-  displayPlanText,
-  epochToIso,
-  fetchJsonWithDeadline,
-  numberOrNull,
   volcengineCredentials,
   parseVolcengineArkUsage,
   parseVolcengineCodingPlanUsage,
+  parseVolcengineAgentPlanUsage,
   signVolcengineRequest,
-  volcenginePlanLabel,
   fetchVolcengineLimits
 };

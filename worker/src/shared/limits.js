@@ -522,7 +522,11 @@ function providerCollapseKey(provider) {
       || provider.provider === 'openrouter'
       || provider.provider === 'thirdparty'
       || provider.provider === 'mimo'
-      || provider.provider === 'cursor')
+      || provider.provider === 'cursor'
+      // Volcengine's accountKey comes from the AK/SK and region, so it is the
+      // same on every platform. Two keys mean the Coding/Agent plan split, not
+      // one account hashed twice.
+      || provider.provider === 'volcengine')
     && isConfiguredProvider(provider)
   ) {
     return providerAggregateKey(provider);

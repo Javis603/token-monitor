@@ -20,7 +20,8 @@ const TITLE_FUNCTIONS = [
   'limitAccountDefaultTitle',
   'codexAccountTitle',
   'opencodeAccountTitle',
-  'namedApiAccountTitle'
+  'namedApiAccountTitle',
+  'volcenginePlanAccountTitle'
 ];
 
 function readRendererFile(name) {

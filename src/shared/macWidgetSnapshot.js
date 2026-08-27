@@ -279,7 +279,6 @@ const PROVIDER_LABELS = Object.freeze({
   workbuddy: 'WorkBuddy',
   thirdparty: 'Third-party APIs',
   volcengine: 'Volcengine',
-  volcagent: 'Volcengine Agent',
   zai: 'GLM',
   zaiteam: 'GLM Team'
 });

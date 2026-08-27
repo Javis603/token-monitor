@@ -1449,7 +1449,6 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
     ['openrouter', 'openrouterAccountGroup', 'openrouterStatus'],
     ['minimax', 'minimaxAccountGroup', 'minimaxApiKeyStatus'],
     ['volcengine', 'volcengineAccountGroup', 'volcengineAccountStatus'],
-    ['volcagent', 'volcagentAccountGroup', 'volcagentAccountStatus'],
     ['qoder', 'qoderAccountGroup', 'qoderAccountStatus'],
     ['trae', 'traeAccountGroup', 'traeAccountStatus'],
     ['ollama', 'ollamaAccountGroup', 'ollamaAccountStatus'],
@@ -1619,7 +1618,6 @@ test('dynamic account summaries are never reset by the static translation pass',
     'zaiAccountStatus',
     'zaiteamAccountStatus',
     'volcengineAccountStatus',
-    'volcagentAccountStatus',
     'qoderAccountStatus',
     'traeAccountStatus',
     'ollamaAccountStatus',
@@ -2057,15 +2055,13 @@ test('copilot setup status asks for sign-in instead of an API key', () => {
 
 test('Z.ai, Volcengine, Qoder, Trae, WorkBuddy, and Ollama source labels and setup statuses', () => {
   assert.deepEqual(presentation.limitProviderCapabilityTags('zai'), ['Coding Plan', 'API key']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Coding Plan', 'API key']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('volcagent'), ['Agent Plan', 'API key']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Coding/Agent Plan', 'API key']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Auto', 'Desktop app']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'Web']);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zai', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'api' }), 'API');
-  assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcagent', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'qoder', source: 'web' }), 'Web');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'trae', source: 'api' }), 'Web');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'workbuddy', source: 'local' }), 'Local');

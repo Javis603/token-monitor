@@ -662,6 +662,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .settings-panel .settings-item.hidden { display: none; }
 #windowsBackdropNote.hidden { display: none; }
 #limitsRefreshAdaptiveNote.hidden { display: none; }
+#volcengineAgentConfigured.hidden { display: none; }
 .settings-item-text {
   flex: 1 1 auto;
   min-width: 0;
@@ -3417,7 +3418,6 @@ html.is-windows .settings-panel select option {
 .row-icon-minimax    { -webkit-mask-image: url(../../../assets/icons/minimax.svg);       mask-image: url(../../../assets/icons/minimax.svg); }
 .row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
 .row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
-.row-icon-volcagent      { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
 .row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
 .row-icon-trae       { -webkit-mask-image: url(../../../assets/icons/trae.svg);          mask-image: url(../../../assets/icons/trae.svg); }
 .row-icon-qodercn    { -webkit-mask-image: url(../../../assets/icons/qodercn.svg);      mask-image: url(../../../assets/icons/qodercn.svg); }
@@ -3499,10 +3499,6 @@ html.is-windows .settings-panel select option {
   mask-image: url(../../../assets/icons/zai.svg);
 }
 .limit-icon-volcengine {
-  -webkit-mask-image: url(../../../assets/icons/volcengine.svg);
-  mask-image: url(../../../assets/icons/volcengine.svg);
-}
-.limit-icon-volcagent {
   -webkit-mask-image: url(../../../assets/icons/volcengine.svg);
   mask-image: url(../../../assets/icons/volcengine.svg);
 }
@@ -5065,7 +5061,6 @@ html.is-windows .limit-live-badge {
 #zaiManualPanel.hidden,
 #zaiteamManualPanel.hidden,
 #volcengineManualPanel.hidden,
-#volcagentManualPanel.hidden,
 #qoderManualPanel.hidden,
 #traeManualPanel.hidden,
 #commandcodeManualPanel.hidden,
@@ -5090,7 +5085,6 @@ html.is-windows .limit-live-badge {
 #zaiErrorMessage.hidden,
 #zaiteamErrorMessage.hidden,
 #volcengineErrorMessage.hidden,
-#volcagentErrorMessage.hidden,
 #qoderErrorMessage.hidden,
 #traeErrorMessage.hidden,
 #commandcodeErrorMessage.hidden,
@@ -5106,7 +5100,6 @@ html.is-windows .limit-live-badge {
 #zaiManualPanel,
 #zaiteamManualPanel,
 #volcengineManualPanel,
-#volcagentManualPanel,
 #qoderManualPanel,
 #traeManualPanel,
 #commandcodeManualPanel,
@@ -5124,7 +5117,6 @@ html.is-windows .limit-live-badge {
 #zaiManualPanel > .accordion-animation-inner,
 #zaiteamManualPanel > .accordion-animation-inner,
 #volcengineManualPanel > .accordion-animation-inner,
-#volcagentManualPanel > .accordion-animation-inner,
 #qoderManualPanel > .accordion-animation-inner,
 #traeManualPanel > .accordion-animation-inner,
 #commandcodeManualPanel > .accordion-animation-inner,
@@ -5158,7 +5150,6 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel input,
 #zaiApiRegionInput,
 #volcengineManualPanel input,
-#volcagentManualPanel input,
 #qoderManualPanel textarea,
 #qoderManualPanel select,
 #traeManualPanel input,
@@ -5191,7 +5182,6 @@ html.is-windows .limit-live-badge {
 #zaiManualPanel input,
 #zaiteamManualPanel input,
 #volcengineManualPanel input,
-#volcagentManualPanel input,
 #qoderManualPanel textarea,
 #traeManualPanel input,
 #commandcodeManualPanel textarea,
@@ -6033,6 +6023,20 @@ html.is-windows .limit-live-badge {
   height: 30px;
   box-sizing: border-box;
   font-size: 12px;
+}
+/* The Agent Plan override borrows the disclosure chrome above, but that form's
+   rows put a short label beside its input, and these labels are full field
+   names, so the three inputs ended up at three different widths. Fall back to
+   the stacked row the rest of the Volcengine card already uses. */
+#volcengineAgentDetails .settings-row {
+  display: block;
+}
+#volcengineAgentDetails .settings-row label {
+  white-space: normal;
+}
+#volcengineAgentDetails .settings-row :is(input, select) {
+  height: auto;
+  font-size: inherit;
 }
 .opencode-add-body textarea {
   width: 100%;

@@ -1129,6 +1129,46 @@ test('aggregateLimits preserves distinct Cursor accounts and deduplicates the sa
   assert.equal(cursorRows[1].sourceDeviceId, 'this-mac');
 });
 
+// The collapse-by-name pass exists because one OAuth account hashes differently
+// per platform. Volcengine's accountKey is derived from the AK/SK and the
+// region, so it is identical on every device — the only way one account yields
+// two keys is the Coding/Agent plan split, which must survive to the hub.
+test('aggregateLimits keeps the Volcengine Coding and Agent plans as two rows', () => {
+  const now = '2026-06-24T10:00:00.000Z';
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'this-mac',
+      limits: {
+        updatedAt: now,
+        providers: [
+          {
+            provider: 'volcengine',
+            accountKey: 'sha256:volc-coding',
+            accountLabel: 'Coding Plan',
+            status: 'ok',
+            source: 'api',
+            updatedAt: now,
+            windows: [{ kind: 'session', label: '5-hour', usedPercent: 34 }]
+          },
+          {
+            provider: 'volcengine',
+            accountKey: 'sha256:volc-agent',
+            accountLabel: 'Agent Plan Medium',
+            status: 'ok',
+            source: 'api',
+            updatedAt: now,
+            windows: [{ kind: 'weekly', label: 'Weekly', usedPercent: 20 }]
+          }
+        ]
+      }
+    }
+  ], 0, Date.parse('2026-06-24T10:02:00.000Z'));
+
+  const volcengineRows = aggregate.providers.filter((provider) => provider.provider === 'volcengine');
+  assert.equal(volcengineRows.length, 2);
+  assert.deepEqual(volcengineRows.map((provider) => provider.accountLabel), ['Agent Plan Medium', 'Coding Plan']);
+});
+
 // Regression guard for the renderer's localProviderStatus(): a sync-mode account
 // card (DeepSeek/Minimax/Grok) must read the local device's RAW limits from
 // stats.devices, not stats.limits.providers. This test pins the root cause:

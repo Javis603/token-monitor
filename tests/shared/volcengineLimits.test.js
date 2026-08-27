@@ -6,6 +6,7 @@ const test = require('node:test');
 const {
   volcengineCredentials,
   parseVolcengineCodingPlanUsage,
+  parseVolcengineAgentPlanUsage,
   signVolcengineRequest,
   fetchVolcengineLimits
 } = require('../../src/shared/volcengineLimits');
@@ -113,7 +114,7 @@ test('signVolcengineRequest signs host without sending it as a wire header', () 
 });
 
 test('fetchVolcengineLimits returns notConfigured without AK/SK credentials', async () => {
-  const provider = await fetchVolcengineLimits({}, { env: {}, now: () => Date.parse('2026-07-06T00:00:00Z') });
+  const [provider] = await fetchVolcengineLimits({}, { env: {}, now: () => Date.parse('2026-07-06T00:00:00Z') });
   assert.equal(provider.provider, 'volcengine');
   assert.equal(provider.source, 'api');
   assert.equal(provider.status, 'notConfigured');
@@ -121,7 +122,7 @@ test('fetchVolcengineLimits returns notConfigured without AK/SK credentials', as
 
 test('fetchVolcengineLimits posts the signed Volcengine Coding Plan request', async () => {
   const requests = [];
-  const provider = await fetchVolcengineLimits(
+  const [provider] = await fetchVolcengineLimits(
     { volcengineAccessKeyId: 'AKLT-test', volcengineSecretAccessKey: 'sk', volcengineRegion: 'cn-beijing' },
     {
       env: {},
@@ -156,7 +157,7 @@ test('fetchVolcengineLimits posts the signed Volcengine Coding Plan request', as
 
 test('fetchVolcengineLimits probes Ark API key request headers', async () => {
   const requests = [];
-  const provider = await fetchVolcengineLimits(
+  const [provider] = await fetchVolcengineLimits(
     { volcengineAccessKeyId: 'ark-test' },
     {
       env: {},
@@ -197,7 +198,7 @@ test('fetchVolcengineLimits probes Ark API key request headers', async () => {
 
 test('fetchVolcengineLimits omits ambiguous repeated Ark zero remaining windows', async () => {
   const requests = [];
-  const provider = await fetchVolcengineLimits(
+  const [provider] = await fetchVolcengineLimits(
     { volcengineAccessKeyId: 'ark-test' },
     {
       env: {},
@@ -229,7 +230,7 @@ test('fetchVolcengineLimits omits ambiguous repeated Ark zero remaining windows'
 
 test('fetchVolcengineLimits preserves exhausted Ark quota when confirmation is rate limited', async () => {
   const requests = [];
-  const provider = await fetchVolcengineLimits(
+  const [provider] = await fetchVolcengineLimits(
     { volcengineAccessKeyId: 'ark-test' },
     {
       env: {},
@@ -265,7 +266,7 @@ test('fetchVolcengineLimits preserves exhausted Ark quota when confirmation is r
 
 test('fetchVolcengineLimits falls back from signed Coding Plan to Ark API key', async () => {
   const requests = [];
-  const provider = await fetchVolcengineLimits(
+  const [provider] = await fetchVolcengineLimits(
     { volcengineAccessKeyId: 'AKLT-test', volcengineSecretAccessKey: 'sk' },
     {
       env: { ARK_API_KEY: 'ark-env' },
@@ -294,14 +295,17 @@ test('fetchVolcengineLimits falls back from signed Coding Plan to Ark API key', 
 
   assert.equal(provider.status, 'ok');
   assert.equal(provider.accountLabel, 'Ark API');
-  assert.equal(requests.length, 2);
-  assert.equal(requests[0].url, 'https://open.volcengineapi.com/?Action=GetCodingPlanUsage&Version=2024-01-01');
-  assert.equal(requests[1].url, 'https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions');
+  assert.equal(requests.length, 3);
+  const urls = requests.map((request) => request.url);
+  assert.ok(urls.includes('https://open.volcengineapi.com/?Action=GetCodingPlanUsage&Version=2024-01-01'));
+  assert.ok(urls.includes('https://open.volcengineapi.com/?Action=GetAFPUsage&Version=2024-01-01'));
+  // The Ark probe only runs once both OpenAPI actions have failed.
+  assert.equal(urls.at(-1), 'https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions');
 });
 
 test('fetchVolcengineLimits physically aborts a hung request within its configured bound', async () => {
   let signal;
-  const provider = await fetchVolcengineLimits(
+  const [provider] = await fetchVolcengineLimits(
     { volcengineAccessKeyId: 'AKLT-hung', volcengineSecretAccessKey: 'sk' },
     {
       env: {},
@@ -319,7 +323,7 @@ test('fetchVolcengineLimits physically aborts a hung request within its configur
 
 test('fetchVolcengineLimits keeps the response body read inside the deadline', async () => {
   let signal;
-  const provider = await fetchVolcengineLimits(
+  const [provider] = await fetchVolcengineLimits(
     { volcengineAccessKeyId: 'AKLT-hung-body', volcengineSecretAccessKey: 'sk' },
     {
       env: {},
@@ -339,4 +343,242 @@ test('fetchVolcengineLimits keeps the response body read inside the deadline', a
 
   assert.equal(provider.status, 'unavailable');
   assert.equal(signal.aborted, true);
+});
+
+// --- Agent Plan (GetAFPUsage) ------------------------------------------------
+// Coding Plan and Agent Plan are two subscriptions on ONE Volcengine account and
+// share the AK/SK, so fetchVolcengineLimits reports them as two rows of a single
+// provider rather than as two providers.
+
+test('parseVolcengineAgentPlanUsage maps the Agent Plan windows the schema carries', () => {
+  const usage = parseVolcengineAgentPlanUsage({
+    Result: {
+      PlanType: 'Medium',
+      AFPFiveHour: { Quota: 200, Used: 50, ResetTime: 1_783_314_000 },
+      AFPDaily: { Quota: 1000, Used: 250, ResetTime: 1_783_382_400 },
+      AFPWeekly: { Quota: 5000, Used: 1000, ResetTime: 1_783_900_800 },
+      AFPMonthly: { Quota: 20000, Used: 2000, ResetTime: 1_785_542_400 }
+    }
+  });
+
+  assert.equal(usage.plan, 'Medium');
+  // AFPDaily is intentionally absent: normalizeWindowKind only accepts
+  // session/weekly/billing, so a daily row would be dropped downstream anyway.
+  assert.deepEqual(usage.windows.map((w) => w.kind), ['session', 'weekly', 'billing']);
+  assert.deepEqual(usage.windows.map((w) => w.label), ['5-hour', 'Weekly', 'Monthly']);
+  const weekly = usage.windows[1];
+  assert.equal(weekly.used, 1000);
+  assert.equal(weekly.limit, 5000);
+  assert.equal(weekly.remaining, 4000);
+  assert.equal(weekly.usedPercent, 20);
+  assert.equal(weekly.resetsAt, '2026-07-13T00:00:00.000Z');
+});
+
+test('parseVolcengineAgentPlanUsage drops windows the plan tier does not include', () => {
+  const usage = parseVolcengineAgentPlanUsage({
+    Result: {
+      PlanType: 'Lite',
+      AFPFiveHour: { Quota: 100, Used: 10, ResetTime: 1_783_314_000 },
+      AFPDaily: { Quota: 0, Used: 0 },
+      AFPWeekly: { Quota: -1, Used: 0 }
+    }
+  });
+
+  assert.deepEqual(usage.windows.map((w) => w.kind), ['session']);
+});
+
+test('fetchVolcengineLimits reports Coding Plan and Agent Plan as separate rows', async () => {
+  const requests = [];
+  const providers = await fetchVolcengineLimits(
+    { volcengineAccessKeyId: 'AKLT-test', volcengineSecretAccessKey: 'sk' },
+    {
+      env: {},
+      now: () => Date.parse('2026-07-06T00:00:00Z'),
+      fetch: async (url) => {
+        requests.push(String(url));
+        const body = String(url).includes('GetAFPUsage')
+          ? { Result: { PlanType: 'Medium', AFPFiveHour: { Quota: 200, Used: 50, ResetTime: 1_783_314_000 } } }
+          : {
+            Result: {
+              Status: 'Active',
+              UpdateTimestamp: 1_783_296_000,
+              QuotaUsage: [{ Level: 'session', Percent: 10, ResetTimestamp: 1_783_314_000 }]
+            }
+          };
+        return { ok: true, status: 200, json: async () => body };
+      }
+    }
+  );
+
+  assert.equal(providers.length, 2);
+  assert.deepEqual(providers.map((p) => p.provider), ['volcengine', 'volcengine']);
+  assert.equal(providers[0].accountLabel, 'Coding Plan');
+  assert.equal(providers[1].accountLabel, 'Agent Plan Medium');
+  // Both rows must survive dedupe, which keys on `provider:accountKey`.
+  assert.notEqual(providers[0].accountKey, providers[1].accountKey);
+  assert.ok(requests.some((url) => url.includes('GetCodingPlanUsage')));
+  assert.ok(requests.some((url) => url.includes('GetAFPUsage')));
+});
+
+// An override that was actually typed in is a claim that a second account
+// exists. Swallowing its failure leaves the user with no way to tell a wrong
+// key from an account that simply has no Agent Plan.
+test('fetchVolcengineLimits surfaces a failure of explicitly configured Agent credentials', async () => {
+  const providers = await fetchVolcengineLimits(
+    {
+      volcengineAccessKeyId: 'AKLT-coding',
+      volcengineSecretAccessKey: 'sk',
+      volcengineAgentAccessKeyId: 'AKLT-agent',
+      volcengineAgentSecretAccessKey: 'agent-sk'
+    },
+    {
+      env: {},
+      now: () => Date.parse('2026-07-06T00:00:00Z'),
+      fetch: async (url) => {
+        if (String(url).includes('GetAFPUsage')) {
+          return { ok: false, status: 401, json: async () => ({}) };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            Result: {
+              Status: 'Active',
+              UpdateTimestamp: 1_783_296_000,
+              QuotaUsage: [{ Level: 'session', Percent: 10, ResetTimestamp: 1_783_314_000 }]
+            }
+          })
+        };
+      }
+    }
+  );
+
+  assert.equal(providers.length, 2);
+  assert.equal(providers[0].status, 'ok');
+  assert.equal(providers[1].status, 'unauthorized');
+  // Its own identity, so the runtime cannot smear the Agent failure onto the
+  // Coding Plan row that succeeded.
+  assert.ok(providers[1].accountKey);
+  assert.notEqual(providers[0].accountKey, providers[1].accountKey);
+});
+
+test('fetchVolcengineLimits stays silent when the inherited key has no Agent Plan', async () => {
+  const providers = await fetchVolcengineLimits(
+    { volcengineAccessKeyId: 'AKLT-test', volcengineSecretAccessKey: 'sk' },
+    {
+      env: {},
+      now: () => Date.parse('2026-07-06T00:00:00Z'),
+      fetch: async (url) => {
+        if (String(url).includes('GetAFPUsage')) {
+          return { ok: false, status: 401, json: async () => ({}) };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            Result: {
+              Status: 'Active',
+              UpdateTimestamp: 1_783_296_000,
+              QuotaUsage: [{ Level: 'session', Percent: 10, ResetTimestamp: 1_783_314_000 }]
+            }
+          })
+        };
+      }
+    }
+  );
+
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].accountLabel, 'Coding Plan');
+});
+
+test('fetchVolcengineLimits omits the Agent Plan row when the account has no Agent subscription', async () => {
+  const providers = await fetchVolcengineLimits(
+    { volcengineAccessKeyId: 'AKLT-test', volcengineSecretAccessKey: 'sk' },
+    {
+      env: {},
+      now: () => Date.parse('2026-07-06T00:00:00Z'),
+      fetch: async (url) => {
+        if (String(url).includes('GetAFPUsage')) {
+          return { ok: false, status: 404, json: async () => ({}) };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            Result: {
+              Status: 'Active',
+              UpdateTimestamp: 1_783_296_000,
+              QuotaUsage: [{ Level: 'session', Percent: 10, ResetTimestamp: 1_783_314_000 }]
+            }
+          })
+        };
+      }
+    }
+  );
+
+  // A missing Agent Plan is not an error: existing Coding Plan users must not
+  // grow a permanently failing second row.
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].accountLabel, 'Coding Plan');
+});
+
+test('fetchVolcengineLimits queries the Agent Plan with its own credentials when they are set', async () => {
+  const authorizations = [];
+  await fetchVolcengineLimits(
+    {
+      volcengineAccessKeyId: 'AKLT-coding',
+      volcengineSecretAccessKey: 'coding-sk',
+      volcengineAgentAccessKeyId: 'AKLT-agent',
+      volcengineAgentSecretAccessKey: 'agent-sk'
+    },
+    {
+      env: {},
+      now: () => Date.parse('2026-07-06T00:00:00Z'),
+      fetch: async (url, init) => {
+        authorizations.push({ url: String(url), auth: init.headers.Authorization });
+        return { ok: true, status: 200, json: async () => ({ Result: {} }) };
+      }
+    }
+  );
+
+  const coding = authorizations.find((r) => r.url.includes('GetCodingPlanUsage'));
+  const agent = authorizations.find((r) => r.url.includes('GetAFPUsage'));
+  assert.match(coding.auth, /Credential=AKLT-coding\//);
+  assert.match(agent.auth, /Credential=AKLT-agent\//);
+});
+
+test('fetchVolcengineLimits signs the Agent Plan with the Coding Plan key when no override is set', async () => {
+  const authorizations = [];
+  await fetchVolcengineLimits(
+    { volcengineAccessKeyId: 'AKLT-shared', volcengineSecretAccessKey: 'shared-sk' },
+    {
+      env: {},
+      now: () => Date.parse('2026-07-06T00:00:00Z'),
+      fetch: async (url, init) => {
+        authorizations.push({ url: String(url), auth: init.headers.Authorization });
+        return { ok: true, status: 200, json: async () => ({ Result: {} }) };
+      }
+    }
+  );
+
+  const agent = authorizations.find((r) => r.url.includes('GetAFPUsage'));
+  assert.match(agent.auth, /Credential=AKLT-shared\//);
+});
+
+test('fetchVolcengineLimits never queries the Agent Plan with an Ark API key', async () => {
+  const requests = [];
+  await fetchVolcengineLimits(
+    { volcengineAccessKeyId: 'ark-test' },
+    {
+      env: {},
+      now: () => Date.parse('2026-07-06T00:00:00Z'),
+      fetch: async (url) => {
+        requests.push(String(url));
+        return { ok: true, status: 200, json: async () => ({ choices: [] }), headers: { get: () => null } };
+      }
+    }
+  );
+
+  // GetAFPUsage is OpenAPI-only; an Ark key cannot sign it.
+  assert.ok(!requests.some((url) => url.includes('GetAFPUsage')));
 });
