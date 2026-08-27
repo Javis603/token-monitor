@@ -8,9 +8,10 @@
     : (typeof window !== 'undefined' ? window.TokenMonitorLimitBalanceDisplay : null);
   const windowPriority = new Map([
     ['session', 0],
-    ['weekly', 1],
-    ['billing', 2],
-    ['monthly', 3]
+    ['daily', 1],
+    ['weekly', 2],
+    ['billing', 3],
+    ['monthly', 4]
   ]);
 
   function finiteNumber(value) {

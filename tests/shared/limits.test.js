@@ -1253,6 +1253,21 @@ test('normalizeLimitWindow normalizes the window currency', () => {
   assert.equal(normalizeLimitWindow({ kind: 'billing' }).currency, null);
 });
 
+test('normalizeLimitProvider preserves daily windows in canonical order', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'volcengine',
+    status: 'ok',
+    windows: [
+      { kind: 'billing', label: 'Monthly', usedPercent: 40 },
+      { kind: 'daily', label: 'Daily', usedPercent: 20 },
+      { kind: 'weekly', label: 'Weekly', usedPercent: 30 },
+      { kind: 'session', label: '5-hour', usedPercent: 10 }
+    ]
+  });
+
+  assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'daily', 'weekly', 'billing']);
+});
+
 test('normalizeLimitWindow preserves only documented component sources', () => {
   assert.equal(normalizeLimitWindow({ kind: 'session', source: ' local ' }).source, 'local');
   assert.equal(normalizeLimitWindow({ kind: 'weekly', source: 'WEB' }).source, 'web');

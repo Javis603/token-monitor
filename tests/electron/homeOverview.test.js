@@ -185,6 +185,22 @@ test('homeLimitAccounts keeps account windows together and sorts lowest remainin
   assert.equal(rows[1].lowestRemaining, 70);
 });
 
+test('Home keeps Volcengine 5-hour and Daily as its two compact windows', () => {
+  const [row] = homeLimitAccounts([{
+    key: 'volcengine:0',
+    providerId: 'volcengine',
+    name: 'Agent Plan Medium',
+    windows: [
+      { kind: 'billing', remainingPercent: 40 },
+      { kind: 'weekly', remainingPercent: 50 },
+      { kind: 'daily', remainingPercent: 60 },
+      { kind: 'session', remainingPercent: 70 }
+    ]
+  }]);
+
+  assert.deepEqual(row.windows.map((window) => window.kind), ['session', 'daily']);
+});
+
 test('homeLimitAccounts keeps a real billing remaining percentage fallback', () => {
   const rows = homeLimitAccounts([
     {

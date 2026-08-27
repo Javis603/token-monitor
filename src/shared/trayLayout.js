@@ -51,7 +51,7 @@
   const COST_FORMATS = new Set(['compact', 'full']);
   const USAGE_SCOPES = new Set(['all', 'recent']);
   const PERIODS = new Set(['today', 'month', 'allTime']);
-  const WINDOW_PRESETS = new Set(['primary', 'secondary', 'session', 'weekly', 'billing']);
+  const WINDOW_PRESETS = new Set(['primary', 'secondary', 'session', 'daily', 'weekly', 'billing']);
 
   function clean(value, max = 160) {
     return String(value || '').trim().slice(0, max);
@@ -704,10 +704,11 @@
     if (normalized.startsWith('exact|')) {
       return meteredWindows(provider).find((window) => windowKey(window) === normalized) || null;
     }
-    if (normalized === 'session' || normalized === 'weekly' || normalized === 'billing') {
+    if (normalized === 'session' || normalized === 'daily' || normalized === 'weekly' || normalized === 'billing') {
       return preferredWindow(provider, normalized);
     }
     const primary = preferredWindow(provider, 'session')
+      || preferredWindow(provider, 'daily')
       || preferredWindow(provider, 'weekly')
       || preferredWindow(provider, 'billing')
       || meteredWindows(provider)[0]

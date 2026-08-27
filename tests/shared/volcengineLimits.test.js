@@ -350,7 +350,7 @@ test('fetchVolcengineLimits keeps the response body read inside the deadline', a
 // share the AK/SK, so fetchVolcengineLimits reports them as two rows of a single
 // provider rather than as two providers.
 
-test('parseVolcengineAgentPlanUsage maps the Agent Plan windows the schema carries', () => {
+test('parseVolcengineAgentPlanUsage maps every Agent Plan quota window', () => {
   const usage = parseVolcengineAgentPlanUsage({
     Result: {
       PlanType: 'Medium',
@@ -362,11 +362,15 @@ test('parseVolcengineAgentPlanUsage maps the Agent Plan windows the schema carri
   });
 
   assert.equal(usage.plan, 'Medium');
-  // AFPDaily is intentionally absent: normalizeWindowKind only accepts
-  // session/weekly/billing, so a daily row would be dropped downstream anyway.
-  assert.deepEqual(usage.windows.map((w) => w.kind), ['session', 'weekly', 'billing']);
-  assert.deepEqual(usage.windows.map((w) => w.label), ['5-hour', 'Weekly', 'Monthly']);
-  const weekly = usage.windows[1];
+  assert.deepEqual(usage.windows.map((w) => w.kind), ['session', 'daily', 'weekly', 'billing']);
+  assert.deepEqual(usage.windows.map((w) => w.label), ['5-hour', 'Daily', 'Weekly', 'Monthly']);
+  const daily = usage.windows[1];
+  assert.equal(daily.used, 250);
+  assert.equal(daily.limit, 1000);
+  assert.equal(daily.remaining, 750);
+  assert.equal(daily.usedPercent, 25);
+  assert.equal(daily.windowMinutes, 1440);
+  const weekly = usage.windows[2];
   assert.equal(weekly.used, 1000);
   assert.equal(weekly.limit, 5000);
   assert.equal(weekly.remaining, 4000);

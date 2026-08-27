@@ -12,6 +12,7 @@ const VOLCENGINE_AGENT_PLAN_URL = 'https://open.volcengineapi.com/?Action=GetAFP
 const VOLCENGINE_ARK_CHAT_COMPLETIONS_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions';
 const VOLCENGINE_DEFAULT_REGION = 'cn-beijing';
 const VOLCENGINE_SESSION_WINDOW_MINUTES = 5 * 60;
+const VOLCENGINE_DAILY_WINDOW_MINUTES = 24 * 60;
 const VOLCENGINE_WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
 const VOLCENGINE_MONTHLY_WINDOW_MINUTES = 30 * 24 * 60;
 const VOLCENGINE_SERVICE = 'ark';
@@ -440,11 +441,10 @@ function volcengineAgentFailureRow(credentials, error, updatedAt) {
 }
 
 // GetAFPUsage reports absolute quota (Quota/Used/ResetTime) per window instead
-// of the Coding Plan's percentages. AFPDaily is deliberately not mapped: the
-// shared limits schema only carries session/weekly/billing, so a daily window
-// would be dropped by normalizeWindowKind anyway.
+// of the Coding Plan's percentages.
 const VOLCENGINE_AGENT_PLAN_WINDOWS = Object.freeze([
   ['AFPFiveHour', 'session', '5-hour', VOLCENGINE_SESSION_WINDOW_MINUTES],
+  ['AFPDaily', 'daily', 'Daily', VOLCENGINE_DAILY_WINDOW_MINUTES],
   ['AFPWeekly', 'weekly', 'Weekly', VOLCENGINE_WEEKLY_WINDOW_MINUTES],
   ['AFPMonthly', 'billing', 'Monthly', VOLCENGINE_MONTHLY_WINDOW_MINUTES]
 ]);

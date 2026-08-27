@@ -11,7 +11,7 @@ const KNOWN_LIMIT_STATUSES = new Set([
   'ok', 'disabled', 'notConfigured', 'unauthorized', 'rateLimited',
   'sourceRateLimited', 'unavailable', 'error'
 ]);
-const KNOWN_WINDOW_KINDS = new Set(['session', 'weekly', 'billing']);
+const KNOWN_WINDOW_KINDS = new Set(['session', 'daily', 'weekly', 'billing']);
 const CURRENCIES = Object.freeze({ USD: '$', TWD: 'NT$', HKD: 'HK$', CNY: '¥' });
 
 function finiteNumber(value, fallback = 0) {
