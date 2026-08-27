@@ -625,3 +625,302 @@ test('fetchKimiLimits physically aborts a hung request within its configured bou
   assert.equal(provider.status, 'unavailable');
   assert.equal(signal.aborted, true);
 });
+
+function desktopSession(overrides = {}) {
+  const now = Date.parse('2026-08-24T00:00:00Z');
+  return {
+    accessToken: 'desktop-access.body.sig',
+    refreshToken: 'desktop-refresh.body.sig',
+    userId: 'user-1',
+    accessExpiresAtMs: now + 15 * 60 * 1000,
+    accessIsStale: false,
+    refreshExpiresAtMs: now + 90 * 24 * 60 * 60 * 1000,
+    refreshIsDead: false,
+    ...overrides
+  };
+}
+
+function webUsageResponse() {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      usages: [
+        {
+          scope: 'FEATURE_CODING',
+          detail: { limit: '100', remaining: '60', resetTime: '2026-08-24T08:00:00Z' },
+          limits: [
+            { window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', remaining: '60' } }
+          ]
+        }
+      ]
+    })
+  };
+}
+
+test('fetchKimiLimits borrows the desktop app session when no manual token is configured', async () => {
+  const now = Date.parse('2026-08-24T00:00:00Z');
+  const requests = [];
+  const provider = await fetchKimiLimits(
+    {},
+    {
+      env: {},
+      now: () => now,
+      kimiDesktopSession: async () => desktopSession(),
+      fetch: async (url, init) => {
+        requests.push({ url: String(url), init });
+        return webUsageResponse();
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'web');
+  assert.equal(provider.sourceDetail, 'app');
+  assert.equal(provider.accountKey, hashKey('kimi', 'desktop:user-1'));
+  const usages = requests.find((request) => request.url === KIMI_WEB_USAGES_URL);
+  assert.ok(usages, 'GetUsages is called with the desktop session token');
+  assert.equal(usages.init.headers.Authorization, 'Bearer desktop-access.body.sig');
+  assert.equal(usages.init.headers.Cookie, 'kimi-auth=desktop-access.body.sig');
+});
+
+test('fetchKimiLimits reports unavailable without a round trip when a running desktop app holds a stale token', async () => {
+  const now = Date.parse('2026-08-24T00:00:00Z');
+  let fetched = 0;
+  const provider = await fetchKimiLimits(
+    {},
+    {
+      env: {},
+      now: () => now,
+      kimiDesktopSession: async () => desktopSession({ accessIsStale: true }),
+      kimiDesktopAppRunning: async () => true,
+      fetch: async () => {
+        fetched += 1;
+        return webUsageResponse();
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(fetched, 0, 'a stale session must not spend a doomed request');
+});
+
+test('fetchKimiLimits refreshes a stale desktop session while the app is closed', async () => {
+  const now = Date.parse('2026-08-24T00:00:00Z');
+  const requests = [];
+  const provider = await fetchKimiLimits(
+    {},
+    {
+      env: {},
+      now: () => now,
+      kimiDesktopSession: async () => desktopSession({ accessIsStale: true }),
+      kimiDesktopAppRunning: async () => false,
+      kimiDesktopSessionRefresh: async () => desktopSession({ accessToken: 'rotated-access.body.sig' }),
+      fetch: async (url, init) => {
+        requests.push({ url: String(url), init });
+        return webUsageResponse();
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'web');
+  const usages = requests.find((request) => request.url === KIMI_WEB_USAGES_URL);
+  assert.ok(usages, 'the refreshed token reaches GetUsages');
+  assert.equal(usages.init.headers.Authorization, 'Bearer rotated-access.body.sig');
+  assert.equal(provider.accountKey, hashKey('kimi', 'desktop:user-1'), 'the account id survives rotation');
+});
+
+test('fetchKimiLimits surfaces unauthorized when the desktop refresh token is rejected', async () => {
+  const now = Date.parse('2026-08-24T00:00:00Z');
+  let fetched = 0;
+  const provider = await fetchKimiLimits(
+    {},
+    {
+      env: {},
+      now: () => now,
+      kimiDesktopSession: async () => desktopSession({ accessIsStale: true }),
+      kimiDesktopAppRunning: async () => false,
+      kimiDesktopSessionRefresh: async () => {
+        const error = new Error('Kimi refresh token rejected');
+        error.status = 'unauthorized';
+        throw error;
+      },
+      fetch: async () => {
+        fetched += 1;
+        return webUsageResponse();
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'unauthorized');
+  assert.equal(fetched, 0, 'a rejected refresh token must not trigger quota requests');
+});
+
+test('fetchKimiLimits still falls back to the Code API key when the desktop token is stale', async () => {
+  const now = Date.parse('2026-08-24T00:00:00Z');
+  const requests = [];
+  const provider = await fetchKimiLimits(
+    { kimiApiKey: 'kimi-key' },
+    {
+      env: {},
+      now: () => now,
+      kimiDesktopSession: async () => desktopSession({ accessIsStale: true }),
+      kimiDesktopAppRunning: async () => true,
+      fetch: async (url, init) => {
+        requests.push({ url: String(url), init });
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ limits: [{ detail: { used: 10, limit: 100 }, window: { duration: 5, timeUnit: 'HOUR' } }] })
+        };
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'api');
+  assert.deepEqual(requests.map((request) => request.url), [KIMI_CODE_USAGES_URL]);
+});
+
+test('fetchKimiLimits prefers a manual web token over the desktop app session', async () => {
+  const now = Date.parse('2026-08-24T00:00:00Z');
+  let sessionReads = 0;
+  const requests = [];
+  const provider = await fetchKimiLimits(
+    { kimiWebAccessToken: 'manual-token' },
+    {
+      env: {},
+      now: () => now,
+      kimiDesktopSession: async () => {
+        sessionReads += 1;
+        return desktopSession();
+      },
+      fetch: async (url, init) => {
+        requests.push({ url: String(url), init });
+        return webUsageResponse();
+      }
+    }
+  );
+
+  assert.equal(sessionReads, 0, 'a manual token must shadow the desktop session entirely');
+  const usages = requests.find((request) => request.url === KIMI_WEB_USAGES_URL);
+  assert.equal(usages.init.headers.Authorization, 'Bearer manual-token');
+  assert.equal(provider.accountKey, hashKey('kimi', 'manual-token'));
+  assert.notEqual(provider.sourceDetail, 'app');
+});
+
+test('fetchKimiLimits ignores a desktop session whose refresh token is dead', async () => {
+  const now = Date.parse('2026-08-24T00:00:00Z');
+  const signedOut = await fetchKimiLimits(
+    {},
+    {
+      env: {},
+      now: () => now,
+      kimiDesktopSession: async () => desktopSession({ refreshIsDead: true }),
+      fetch: async () => webUsageResponse()
+    }
+  );
+  assert.equal(signedOut.status, 'notConfigured');
+
+  const apiKeyOnly = await fetchKimiLimits(
+    { kimiApiKey: 'kimi-key' },
+    {
+      env: {},
+      now: () => now,
+      kimiDesktopSession: async () => desktopSession({ refreshIsDead: true }),
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ limits: [{ detail: { used: 10, limit: 100 }, window: { duration: 5, timeUnit: 'HOUR' } }] })
+      })
+    }
+  );
+  assert.equal(apiKeyOnly.status, 'ok');
+  assert.equal(apiKeyOnly.source, 'api');
+});
+
+test('fetchKimiLimits runs a pasted refresh token as a self-renewing session', async () => {
+  const now = Date.parse('2026-08-24T00:00:00Z');
+  const requests = [];
+  const provider = await fetchKimiLimits(
+    { kimiWebRefreshToken: 'seed-refresh.body.sig' },
+    {
+      env: {},
+      now: () => now,
+      kimiManualSession: async () => desktopSession({ accessToken: 'manual-rotated.body.sig', userId: 'manual-user' }),
+      fetch: async (url, init) => {
+        requests.push({ url: String(url), init });
+        return webUsageResponse();
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'web');
+  const usages = requests.find((request) => request.url === KIMI_WEB_USAGES_URL);
+  assert.equal(usages.init.headers.Authorization, 'Bearer manual-rotated.body.sig');
+  assert.equal(provider.accountKey, hashKey('kimi', 'manual:manual-user'));
+});
+
+test('fetchKimiLimits prefers the manual refresh session over the desktop app session', async () => {
+  const now = Date.parse('2026-08-24T00:00:00Z');
+  let desktopReads = 0;
+  const provider = await fetchKimiLimits(
+    { kimiWebRefreshToken: 'seed-refresh.body.sig' },
+    {
+      env: {},
+      now: () => now,
+      kimiManualSession: async () => desktopSession({ accessToken: 'manual-rotated.body.sig', userId: 'manual-user' }),
+      kimiDesktopSession: async () => {
+        desktopReads += 1;
+        return desktopSession();
+      },
+      fetch: async () => webUsageResponse()
+    }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(desktopReads, 0, 'a manual refresh token shadows the desktop session entirely');
+  assert.equal(provider.accountKey, hashKey('kimi', 'manual:manual-user'));
+});
+
+test('fetchKimiLimits reads the refresh token seed from KIMI_REFRESH_TOKEN', async () => {
+  const now = Date.parse('2026-08-24T00:00:00Z');
+  let seeds = [];
+  const provider = await fetchKimiLimits(
+    {},
+    {
+      env: { KIMI_REFRESH_TOKEN: 'env-seed.body.sig' },
+      now: () => now,
+      kimiManualSession: async (seed) => {
+        seeds.push(seed);
+        return desktopSession({ accessToken: 'env-rotated.body.sig', userId: 'env-user' });
+      },
+      fetch: async () => webUsageResponse()
+    }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.deepEqual(seeds, ['env-seed.body.sig']);
+  assert.equal(provider.accountKey, hashKey('kimi', 'manual:env-user'));
+});
+
+test('fetchKimiLimits reports unauthorized when the pasted refresh token is rejected', async () => {
+  const now = Date.parse('2026-08-24T00:00:00Z');
+  const provider = await fetchKimiLimits(
+    { kimiWebRefreshToken: 'dead-refresh.body.sig' },
+    {
+      env: {},
+      now: () => now,
+      kimiManualSession: async () => {
+        const error = new Error('Kimi manual refresh token rejected');
+        error.status = 'unauthorized';
+        throw error;
+      },
+      fetch: async () => webUsageResponse()
+    }
+  );
+
+  assert.equal(provider.status, 'unauthorized');
+});

@@ -91,7 +91,7 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   // enabled. Token and metadata fields remain available to headless/CLI deployments.
   workbuddy: ['workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo'],
   commandcode: ['commandcodeCookie'],
-  kimi: ['kimiApiKey', 'kimiWebAccessToken'],
+  kimi: ['kimiApiKey', 'kimiWebAccessToken', 'kimiWebRefreshToken'],
   ollama: ['ollamaCookie'],
   codex: ['codexManagedAccounts'],
   mimo: ['mimoManagedAccounts'],
@@ -242,6 +242,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     workbuddyDesktopSessionEnabled: context.workbuddyDesktopSessionEnabled === true,
     kimiApiKey: settings.kimiApiKey || '',
     kimiWebAccessToken: settings.kimiWebAccessToken || '',
+    kimiWebRefreshToken: settings.kimiWebRefreshToken || '',
     ollamaCookie: settings.ollamaCookie || '',
     codexManagedAccounts: context.codexManagedAccounts ?? settings.codexManagedAccounts ?? [],
     antigravityManagedAccounts: context.antigravityManagedAccounts ?? settings.antigravityManagedAccounts ?? [],

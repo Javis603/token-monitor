@@ -15718,7 +15718,11 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
     // A ZCode-discovered login is an OAuth-style link, not a pasted API key,
     // so it reads as connected the way Zed's linked sessions do.
     const linkedKey = providerName === 'zai' && source === 'zcode-auto' ? 'settings.zai.statusLinked' : null;
-    return t(linkedKey || (source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`));
+    if (linkedKey) return t(linkedKey);
+    // Only the Kimi credential chain produces a 'desktop' source (the Kimi
+    // Work desktop app session picked up automatically on Windows).
+    if (source === 'desktop') return t(`settings.${providerName}.statusDesktop`);
+    return t(source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`);
   }
   if (accountStatus === 'invalid') return t(`settings.${providerName}.statusInvalid`);
   if (accountStatus === 'notConfigured') return t(`settings.${providerName}.statusNotSet`);
@@ -18466,7 +18470,7 @@ function setupCursorAccountUI() {
     });
 
     document.getElementById('kimiLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ kimiApiKey: '', kimiWebAccessToken: '' });
+      await saveSettings({ kimiApiKey: '', kimiWebAccessToken: '', kimiWebRefreshToken: '' });
       clearExternalProviderCheckPending('kimi');
       clearExternalProviderPendingStatus('kimi');
       renderExternalProviderStatus('kimi');
