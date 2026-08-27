@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  CREDENTIAL_SETTING_PATHS,
   CredentialStore,
   credentialSettingsForRenderer,
   hasCredentialSettings,
@@ -308,4 +309,60 @@ test('stores, migrates, and removes MiMo account cookies in the unified store', 
   assert.equal(store.removeMimoCredential('account-1'), true);
   assert.equal(store.readMimoCredential('account-1'), '');
   assert.equal(store.writeMimoCredential('__proto__', 'serviceToken=unsafe'), false);
+});
+
+test('round-trips an imported Codex access token without exposing it to the renderer', (t) => {
+  const dataDir = tempDataDir(t);
+  const store = new CredentialStore(dataDir);
+  const accountId = 'codex-abc123def456';
+  const token = 'eyJhbGciOi.example-codex-access-token';
+
+  // The pasted token persists under the codex provider, mirroring MiMo cookies.
+  assert.equal(store.writeCodexAccountToken(accountId, token), true);
+  assert.equal(store.readCodexAccountToken(accountId), token);
+
+  // It is durably on disk under the codex provider path.
+  const document = JSON.parse(fs.readFileSync(path.join(dataDir, 'credentials.json'), 'utf8'));
+  assert.equal(document.credentials.providers.codex.accounts[accountId].accessToken, token);
+
+  // It is NOT a fixed credential setting path, so the redacted settings view the renderer receives
+  // never carries the raw token (no allowlist entry exposes it).
+  const redacted = credentialSettingsForRenderer({ codexManagedAccounts: [{ id: accountId, email: 'a@b.com' }] });
+  assert.ok(!JSON.stringify(redacted).includes(token));
+  assert.equal(redacted.codexAccessToken, undefined);
+
+  // Removal clears the token and prunes the account node.
+  assert.equal(store.removeCodexAccountToken(accountId), true);
+  assert.equal(store.readCodexAccountToken(accountId), '');
+
+  // Empty / unsafe ids are rejected.
+  assert.equal(store.writeCodexAccountToken('__proto__', token), false);
+  assert.equal(store.writeCodexAccountToken(accountId, ''), false);
+  assert.equal(store.readCodexAccountToken(''), '');
+});
+
+test('the redacted renderer view never emits an imported Codex token even when it is present in settings', () => {
+  const token = 'codex-secret-accessToken-XYZ';
+  // Place the raw secret everywhere a future regression could route it: nested under the codex
+  // provider, on a managed-account record, and as a top-level codex credential-setting key.
+  const settingsWithSecret = {
+    hubHostSecret: 'host-secret',
+    secret: 'client-secret',
+    codexManagedAccounts: [{ id: 'codex-abc', email: 'a@b.com', accessToken: token, homePath: '/x' }],
+    providers: { codex: { accounts: { 'codex-abc': { accessToken: token } } } },
+    codexAccessToken: token
+  };
+  // This is the exact expose list settingsForRenderer uses (only the two hub secrets the sync UI needs).
+  const redacted = credentialSettingsForRenderer(settingsWithSecret, { expose: ['hubHostSecret', 'secret'] });
+
+  // The raw token must not appear anywhere in the redacted view...
+  assert.ok(!JSON.stringify(redacted).includes(token), 'redacted view leaked the Codex access token');
+  // ...the hypothetical codex credential key is not a known credential-setting path, so it is absent...
+  assert.equal(redacted.codexAccessToken, undefined);
+  // ...and structurally, no Codex credential is wired through CREDENTIAL_SETTING_PATHS at all, so the
+  // allowlist can never expose one. This is the guard against the token leaking via that surface.
+  assert.ok(
+    !Object.keys(CREDENTIAL_SETTING_PATHS).some((key) => /codex/i.test(key)),
+    'a Codex credential must never be a fixed credential-setting path'
+  );
 });

@@ -250,6 +250,73 @@ function codexAuthIdentity(auth) {
   };
 }
 
+// Normalizes parsed auth into the text shape writeCodexAuthFile/commitCodexManagedAccount store
+// for a web-login account, so an imported account is semantically interchangeable with one (same
+// parsed object; the collector re-parses JSON, so byte-for-byte identity with codex's own bytes is
+// not required and not guaranteed — import re-serializes, a no-workspace-select web login preserves
+// codex's original bytes verbatim).
+function codexAuthJsonData(auth) {
+  return `${JSON.stringify(auth, null, 2)}\n`;
+}
+
+function hasCodexIdentity(identity) {
+  return Boolean(identity && (identity.accountKey || identity.email));
+}
+
+// Parses a pasted/read ~/.codex/auth.json into the same { auth, identity } the web-login path
+// produces (it runs the identical codexAuthIdentity over the parsed object). Throws a clear,
+// user-facing error for empty, non-JSON, or identity-less input so the UI can surface it.
+function parseCodexAuthJson(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) throw new Error('Codex auth.json is empty.');
+  let auth;
+  try {
+    auth = JSON.parse(trimmed);
+  } catch (error) {
+    const parseError = new Error('Codex auth.json is not valid JSON.');
+    parseError.cause = error;
+    throw parseError;
+  }
+  if (!auth || typeof auth !== 'object' || Array.isArray(auth)) {
+    throw new Error('Codex auth.json must contain a JSON object.');
+  }
+  const identity = codexAuthIdentity(auth);
+  if (!hasCodexIdentity(identity)) {
+    throw new Error('Could not identify a Codex account in this auth.json.');
+  }
+  return { auth, identity, data: codexAuthJsonData(auth), source: 'authJson' };
+}
+
+// Accepts either a pasted full auth.json (JSON object) or a bare Codex access token. A bare token
+// is only useful when it is itself the JWT carrying the email/account claims codexAuthIdentity
+// reads (ChatGPT access tokens are); an opaque token yields no identity and is rejected with a
+// clear error rather than silently producing an unnamed account.
+//
+// Limitation: a bare access token carries no refresh_token, so the constructed auth.json cannot
+// refresh once the short-lived access JWT expires. Limits then surface an unauthorized status on
+// the Limits page (the collector reads tokens.access_token directly); for persistent tracking,
+// importing the full ~/.codex/auth.json (file picker) is preferred, since it carries refresh_token.
+function authFromCodexAccessToken(token) {
+  const trimmed = String(token || '').trim();
+  if (!trimmed) throw new Error('Access token is empty.');
+  if (trimmed.startsWith('{')) {
+    // A pasted full auth.json: delegate to the structured parser for a consistent result.
+    return parseCodexAuthJson(trimmed);
+  }
+  const auth = { tokens: { access_token: trimmed } };
+  const payload = decodeJwtPayload(trimmed);
+  if (payload && Object.keys(payload).length > 0) {
+    // The access token is the JWT that carries the identity claims, so feed it through the same
+    // id_token path codexAuthIdentity reads.
+    auth.tokens.id_token = trimmed;
+  }
+  const identity = codexAuthIdentity(auth);
+  if (!hasCodexIdentity(identity)) {
+    throw new Error('Could not identify the account from this access token. Paste a Codex access token (JWT) or the full auth.json.');
+  }
+  return { auth, identity, data: codexAuthJsonData(auth), source: 'token' };
+}
+
 module.exports = {
   codexManagedAccountIdentityKey,
   codexManagedAccountMatchesIdentity,
@@ -260,5 +327,8 @@ module.exports = {
   codexOAuthRequestContext,
   codexAuthIdentity,
   codexAccountKey,
-  hashAccountKey
+  hashAccountKey,
+  hasCodexIdentity,
+  parseCodexAuthJson,
+  authFromCodexAccessToken
 };

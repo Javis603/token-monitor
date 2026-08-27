@@ -83,11 +83,13 @@ const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCoo
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
+  authFromCodexAccessToken,
   codexAuthIdentity,
   codexAccountKey,
   codexManagedAccountIdentityKey,
   codexManagedAccountMatchesIdentity,
   hashAccountKey,
+  parseCodexAuthJson,
   preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity
 } = require('../shared/codexAuth');
@@ -100,6 +102,10 @@ const {
   readCodexAuthMaterial,
   writeCodexAuthFile
 } = require('../shared/codexSystemSwitch');
+const {
+  commitManagedCodexAccountFromMaterial,
+  removeManagedCodexAccountRecord
+} = require('../shared/codexAccountImport');
 const {
   normalizeClientDisplayOrder,
   normalizeHiddenClients,
@@ -1496,23 +1502,61 @@ async function addCodexManagedAccount(onOutput, options = {}) {
   }
 }
 
+// Import counterpart of addCodexManagedAccount: the auth material (a read/pasted auth.json, or a
+// constructed one built from a pasted token) already identifies the account, so the OAuth/workspace
+// dance is skipped and the auth.json is placed in a managed home exactly as a finished web login
+// leaves it. The committed record is identical to the web-login path — same id/email/keys — because
+// it funnels through the same commitCodexManagedAccount + codexAuthIdentity pipeline. The placement
+// + snapshot/restore rollback lives in the shared, dep-injected commitManagedCodexAccountFromMaterial.
+async function addCodexManagedAccountFromMaterial({ identity, data }) {
+  const previousAccounts = settings.codexManagedAccounts;
+  return commitManagedCodexAccountFromMaterial({ identity, data }, {
+    accounts: normalizeCodexManagedAccounts(settings.codexManagedAccounts),
+    resolveHomePath: (accountId) => codexManagedHomePath(accountId),
+    ensureRoot: async () => { await fs.promises.mkdir(codexManagedRoot(), { recursive: true }); },
+    fs: {
+      mkdir: (homePath) => fs.promises.mkdir(homePath, { recursive: true }),
+      stat: (homePath) => fs.promises.stat(homePath)
+    },
+    snapshot: (authPath) => snapshotCodexAuthFile(authPath),
+    writeAuth: (authPath, authData) => writeCodexAuthFile(authPath, authData),
+    restore: (snapshot, options) => restoreCodexAuthFileSnapshot(snapshot, options),
+    removeHome: (homePath) => removeManagedHomeIfSafe(homePath),
+    commit: (ident, homePath, existing) => commitCodexManagedAccount(ident, homePath, existing, { restart: false }),
+    onSettingsRollback: async () => {
+      settings.codexManagedAccounts = previousAccounts;
+      try { saveSettings(); } catch (rollbackError) {
+        console.warn('Could not restore Codex account settings:', rollbackError?.message || rollbackError);
+      }
+    },
+    invalidate: (account) => {
+      void queueLimitInvalidation({
+        provider: 'codex',
+        accountId: account.id,
+        accountKey: account.accountKey || ''
+      }, 'account-imported');
+    }
+  });
+}
+
 async function removeCodexManagedAccount(id) {
   const accountId = String(id || '').trim();
-  const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  settings.codexManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (error) {
-    return { ok: false, error: error?.message || 'Could not persist account removal' };
-  }
-  await removeManagedHomeIfSafe(account.homePath);
-  void queueLimitInvalidation({ provider: 'codex', accountId, accountKey: account.accountKey || '' }, 'account-removed', {
-    clear: true,
-    refresh: false
+  return removeManagedCodexAccountRecord(accountId, {
+    accounts: normalizeCodexManagedAccounts(settings.codexManagedAccounts),
+    persist: async (nextAccounts) => {
+      settings.codexManagedAccounts = nextAccounts;
+      saveSettings({ throwOnError: true });
+    },
+    removeHome: (homePath) => removeManagedHomeIfSafe(homePath),
+    removeToken: (tokenId) => { ensureCredentialStore().removeCodexAccountToken(tokenId); },
+    invalidate: (acctId, accountKey) => {
+      void queueLimitInvalidation({ provider: 'codex', accountId: acctId, accountKey }, 'account-removed', {
+        clear: true,
+        refresh: false
+      });
+    },
+    rendererAccounts: () => codexAccountsForRenderer()
   });
-  return { ok: true, accounts: codexAccountsForRenderer() };
 }
 
 function setCodexManagedAccountEnabled(id, enabled) {
@@ -7620,6 +7664,64 @@ app.whenReady().then(() => {
         codexLoginCanCancel = false;
       }
     }
+  });
+  ipcMain.handle('codex:importAuthFile', async () => {
+    const defaultAuthPath = liveCodexAuthPath(process.env);
+    const result = await dialog.showOpenDialog({
+      title: 'Import Codex auth.json',
+      defaultPath: defaultAuthPath,
+      filters: [{ name: 'Codex auth', extensions: ['json'] }],
+      properties: ['openFile']
+    });
+    if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
+    let text;
+    try {
+      text = readRegularFileNoFollow(result.filePaths[0], {
+        fs,
+        description: 'Codex auth.json',
+        encoding: 'utf8'
+      });
+    } catch (error) {
+      return { ok: false, error: `Could not read the selected file: ${error?.message || error}` };
+    }
+    let material;
+    try {
+      material = parseCodexAuthJson(text);
+    } catch (error) {
+      return { ok: false, error: error?.message || 'The selected file is not a valid Codex auth.json.' };
+    }
+    try {
+      return await addCodexManagedAccountFromMaterial(material);
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not import the Codex account.' };
+    }
+  });
+  ipcMain.handle('codex:importAccessToken', async (_event, token) => {
+    let material;
+    try {
+      material = authFromCodexAccessToken(token);
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not read the access token.' };
+    }
+    let result;
+    try {
+      result = await addCodexManagedAccountFromMaterial(material);
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Could not import the Codex account.' };
+    }
+    if (result.ok && result.account && material.source === 'token') {
+      // A pasted bare access token is a GUI-entered raw secret, so it is persisted in the credential
+      // store (never settings.json or the redacted renderer view); the managed-home auth.json above
+      // is the working copy the collector reads. A pasted full auth.json is a complete credential file
+      // — its canonical copy is the managed-home auth.json, same as the file-import path — so it is
+      // not additionally stuffed into the token field.
+      try {
+        ensureCredentialStore().writeCodexAccountToken(result.account.id, String(token || '').trim());
+      } catch (error) {
+        console.warn('Could not persist the imported Codex access token:', error?.message || error);
+      }
+    }
+    return result;
   });
   ipcMain.handle('codex:selectWorkspace', (event, request = {}) => {
     const flowId = String(request?.flowId || '').trim();
