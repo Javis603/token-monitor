@@ -3802,6 +3802,120 @@ function scheduleMacWidgetSnapshot(stats, producerOwner) {
 // push that lands mid-load is already covered by the refreshStats() the renderer
 // runs on init, so deferring every one of them would only queue a listener per
 // frame against a slow load and then replay a burst of superseded stats.
+// Tracks which provider+window combinations have already fired a session alert
+// in the current window period. Key: `${provider}:${accountKey||index}:session`.
+// Cleared per-key when that window's remainingPercent returns above the threshold
+// (i.e. the session reset), so every feature re-arms on recovery.
+const sessionAlertedKeys = new Set();
+
+function sendSessionAlertIpc(active, triggered) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('alert:sessionLow', { active, triggered }); } catch (_) {}
+}
+
+// Sends a push notification to an ntfy.sh topic.
+// rawTopic must be in the form "ntfy.sh/<topic>" (https:// prefix is also accepted).
+// allWindows is an array of { kind, remainingPercent } for all quota windows on
+// this provider, so the message can include weekly/billing info alongside the session.
+async function sendNtfyNotification(rawTopic, providerName, sessionRemaining, allWindows) {
+  const normalized = String(rawTopic || '').trim().replace(/^https?:\/\//, '');
+  if (!normalized.startsWith('ntfy.sh/')) return;
+  const url = `https://${normalized}`;
+
+  // Build a human-readable summary of all windows with a known percentage.
+  const windowParts = (allWindows || [])
+    .filter((w) => Number.isFinite(Number(w?.remainingPercent)))
+    .map((w) => `${String(w.kind || 'unknown')}: ${Math.round(Number(w.remainingPercent))}% remaining`)
+    .join('\n');
+  const body = windowParts || `session: ${sessionRemaining}% remaining`;
+
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Title': `Token Monitor \u2014 ${providerName} session low`,
+        'Priority': 'high',
+        'Content-Type': 'text/plain; charset=utf-8'
+      },
+      body
+    });
+  } catch (err) {
+    console.warn(`[ntfy] notification to ${url} failed:`, err?.message);
+  }
+}
+
+function checkSessionAlerts(stats) {
+  const alertEnabled = Boolean(settings?.sessionAlertEnabled);
+  const ntfyEnabled = Boolean(settings?.ntfyEnabled);
+  const ntfyTopic = String(settings?.ntfyTopic || '').trim();
+  const ntfyActive = ntfyEnabled && ntfyTopic.startsWith('ntfy.sh/');
+
+  // Nothing to do — clear any lingering visual state.
+  if (!alertEnabled && !ntfyActive) {
+    if (sessionAlertedKeys.size > 0) {
+      sessionAlertedKeys.clear();
+      sendSessionAlertIpc(false, []);
+    }
+    return;
+  }
+
+  const threshold = Number(settings?.sessionAlertThreshold ?? 10);
+  if (!Number.isFinite(threshold) || threshold <= 0) return;
+
+  const providers = stats?.limits?.providers || [];
+  const triggered = [];
+  let anyActive = false;
+
+  for (const provider of providers) {
+    const providerName = String(provider?.provider || '');
+    const windows = Array.isArray(provider?.windows) ? provider.windows : [];
+    // Snapshot all windows with a readable percentage for the ntfy message body.
+    const allWindowInfo = windows
+      .filter((w) => Number.isFinite(Number(w?.remainingPercent)))
+      .map((w) => ({ kind: String(w.kind || ''), remainingPercent: Math.round(Number(w.remainingPercent)) }));
+
+    windows.forEach((win, i) => {
+      if (String(win?.kind || '') !== 'session') return;
+      const remaining = Number(win?.remainingPercent);
+      if (!Number.isFinite(remaining)) return;
+      const key = `${providerName}:${provider.accountKey || i}:session`;
+      if (remaining < threshold) {
+        anyActive = true;
+        if (!sessionAlertedKeys.has(key)) {
+          // Newly crossed — record and queue for notification.
+          sessionAlertedKeys.add(key);
+          triggered.push({ provider: providerName, remaining: Math.round(remaining), windows: allWindowInfo });
+        }
+      } else {
+        // Session reset — re-arm so the alert fires again next crossing.
+        sessionAlertedKeys.delete(key);
+      }
+    });
+  }
+
+  // OS notification (only when alertEnabled).
+  if (triggered.length > 0 && alertEnabled && Notification.isSupported()) {
+    const providerNames = triggered.map((p) => p.provider).join(', ');
+    const lowestRemaining = Math.min(...triggered.map((p) => p.remaining));
+    new Notification({
+      title: 'Session Limit Low',
+      body: `${providerNames}: ${lowestRemaining}% remaining`
+    }).show();
+  }
+
+  // Visual state pushed to renderer (only when alertEnabled).
+  if (alertEnabled) {
+    sendSessionAlertIpc(anyActive, triggered);
+  }
+
+  // ntfy push notification — fires independently of alertEnabled.
+  if (triggered.length > 0 && ntfyActive) {
+    for (const p of triggered) {
+      void sendNtfyNotification(ntfyTopic, p.provider, p.remaining, p.windows);
+    }
+  }
+}
+
 function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   let rendererPayload = payload;
@@ -3816,6 +3930,7 @@ function sendPush(payload, options = {}) {
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
     syncTrayCodexActiveAccount();
     updateTrayDisplay();
+    checkSessionAlerts(latestStats);
     if (!options.skipExport && settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
       lastExportAt = Date.now();
       writeExportTo(settings.exportDir, payload.data.stats.periods, { skipUnchanged: true })

@@ -487,6 +487,14 @@ Object.assign(els, {
   sessionDetail: document.getElementById('session-detail'),
   sessionDetailHead: document.getElementById('session-detail-head')
 });
+Object.assign(els, {
+  sessionAlertEnabledInput: document.getElementById('sessionAlertEnabledInput'),
+  sessionAlertThresholdRow: document.getElementById('sessionAlertThresholdRow'),
+  sessionAlertThresholdInput: document.getElementById('sessionAlertThresholdInput'),
+  ntfyAlertEnabledInput: document.getElementById('ntfyAlertEnabledInput'),
+  ntfyTopicRow: document.getElementById('ntfyTopicRow'),
+  ntfyTopicInput: document.getElementById('ntfyTopicInput')
+});
 
 function toggleAccordionRow(row) {
   const isExpanded = row.classList.contains('expanded');
@@ -8579,6 +8587,27 @@ function syncSettingsForm() {
   }
   els.showLimitSourceInput.checked = Boolean(state.settings.showLimitSource);
   els.maskLimitAccountEmailsInput.checked = Boolean(state.settings.maskLimitAccountEmails);
+  if (els.sessionAlertEnabledInput) {
+    els.sessionAlertEnabledInput.checked = Boolean(state.settings.sessionAlertEnabled);
+  }
+  if (els.ntfyAlertEnabledInput) {
+    els.ntfyAlertEnabledInput.checked = Boolean(state.settings.ntfyEnabled);
+  }
+  // Show the threshold input whenever either alert type is active.
+  const anyAlertActive = Boolean(state.settings.sessionAlertEnabled) || Boolean(state.settings.ntfyEnabled);
+  if (els.sessionAlertThresholdRow) {
+    els.sessionAlertThresholdRow.classList.toggle('hidden', !anyAlertActive);
+  }
+  if (els.sessionAlertThresholdInput) {
+    const threshold = Number(state.settings.sessionAlertThreshold);
+    els.sessionAlertThresholdInput.value = String(threshold > 0 ? threshold : 10);
+  }
+  if (els.ntfyTopicRow) {
+    els.ntfyTopicRow.classList.toggle('hidden', !state.settings.ntfyEnabled);
+  }
+  if (els.ntfyTopicInput) {
+    els.ntfyTopicInput.value = String(state.settings.ntfyTopic || '');
+  }
   renderSubscriptionSettings();
   const showLimitUsed = state.settings.showLimitUsed ? 'used' : 'remaining';
   for (const input of els.showLimitUsedInputs || []) input.checked = input.value === showLimitUsed;
@@ -11322,6 +11351,21 @@ els.maskLimitAccountEmailsInput.addEventListener('change', async () => {
   await saveSettings({ maskLimitAccountEmails: els.maskLimitAccountEmailsInput.checked });
   renderLimits();
 });
+els.sessionAlertEnabledInput?.addEventListener('change', async () => {
+  await saveSettings({ sessionAlertEnabled: els.sessionAlertEnabledInput.checked });
+});
+els.sessionAlertThresholdInput?.addEventListener('change', async () => {
+  const v = parseInt(els.sessionAlertThresholdInput.value, 10);
+  if (Number.isFinite(v) && v >= 1 && v <= 99) {
+    await saveSettings({ sessionAlertThreshold: v });
+  }
+});
+els.ntfyAlertEnabledInput?.addEventListener('change', async () => {
+  await saveSettings({ ntfyEnabled: els.ntfyAlertEnabledInput.checked });
+});
+els.ntfyTopicInput?.addEventListener('change', async () => {
+  await saveSettings({ ntfyTopic: els.ntfyTopicInput.value.trim() });
+});
 els.subscriptionAddToggle?.addEventListener('click', () => {
   const opening = els.subscriptionAddDetails?.classList.contains('hidden');
   if (opening) {
@@ -11856,6 +11900,10 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     maybeUpdateBarsIcon();
   }
   restartTimer();
+});
+
+window.tokenMonitor.onSessionAlert?.((payload) => {
+  els.shell?.classList.toggle('session-alert-active', Boolean(payload?.active));
 });
 
 function pickWorstProvider(stats) {

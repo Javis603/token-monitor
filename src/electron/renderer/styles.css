@@ -6767,3 +6767,18 @@ html.is-windows .limit-live-badge {
   .tool-preference-row { transition: none; }
   .tool-preference-main .cursor-disclosure-icon { transition: none; }
 }
+
+/* Session threshold alert: red border + glow on the widget shell */
+.shell.session-alert-active {
+  box-shadow: inset 0 0 0 2px rgba(244, 119, 136, 0.85),
+              0 0 20px rgba(244, 119, 136, 0.35);
+  animation: session-alert-pulse 2s ease-in-out infinite;
+}
+@keyframes session-alert-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 2px rgba(244,119,136,.85), 0 0 12px rgba(244,119,136,.30); }
+  50%       { box-shadow: inset 0 0 0 2px rgba(244,119,136,1),   0 0 28px rgba(244,119,136,.65); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shell.session-alert-active { animation: none; }
+}
+#sessionAlertThresholdRow.hidden { display: none; }
