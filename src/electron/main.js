@@ -558,6 +558,7 @@ function defaultSettings() {
     qoderSite: 'global',
     traeAccessToken: '',
     traeDeviceId: '',
+    doubaoCdpPort: '',
     commandcodeCookie: '',
     kimiApiKey: '',
     kimiWebAccessToken: '',
@@ -818,6 +819,12 @@ function normalizeTraeAccessToken(value) {
 
 function normalizeTraeDeviceId(value) {
   return traeDeviceId({}, { traeDeviceId: String(value || '') });
+}
+
+function normalizeDoubaoCdpPort(value) {
+  const raw = String(value ?? '').trim();
+  if (raw === '') return '';
+  return /^\d+$/.test(raw) && Number(raw) > 0 && Number(raw) <= 65535 ? String(Number(raw)) : '';
 }
 
 function currentTraeAccessToken() {
@@ -6247,6 +6254,7 @@ app.whenReady().then(() => {
     if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
     if (patch.traeAccessToken !== undefined) normalizedPatch.traeAccessToken = normalizeTraeAccessToken(patch.traeAccessToken);
     if (patch.traeDeviceId !== undefined) normalizedPatch.traeDeviceId = normalizeTraeDeviceId(patch.traeDeviceId);
+    if (patch.doubaoCdpPort !== undefined) normalizedPatch.doubaoCdpPort = normalizeDoubaoCdpPort(patch.doubaoCdpPort);
     if (patch.commandcodeCookie !== undefined) normalizedPatch.commandcodeCookie = normalizeCommandcodeCookie(patch.commandcodeCookie);
     if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
     if (patch.kimiWebAccessToken !== undefined) normalizedPatch.kimiWebAccessToken = normalizeKimiWebAccessToken(patch.kimiWebAccessToken);
@@ -6371,6 +6379,7 @@ app.whenReady().then(() => {
       qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
       traeAccessToken: patch.traeAccessToken !== undefined ? normalizeTraeAccessToken(patch.traeAccessToken) : (settings.traeAccessToken || ''),
       traeDeviceId: patch.traeDeviceId !== undefined ? normalizeTraeDeviceId(patch.traeDeviceId) : (settings.traeDeviceId || ''),
+      doubaoCdpPort: patch.doubaoCdpPort !== undefined ? normalizeDoubaoCdpPort(patch.doubaoCdpPort) : normalizeDoubaoCdpPort(settings.doubaoCdpPort || ''),
       commandcodeCookie: patch.commandcodeCookie !== undefined ? normalizeCommandcodeCookie(patch.commandcodeCookie) : (settings.commandcodeCookie || ''),
       ollamaCookie: patch.ollamaCookie !== undefined ? normalizeOllamaCookie(patch.ollamaCookie) : (settings.ollamaCookie || ''),
       customModelPricing: patch.customModelPricing !== undefined

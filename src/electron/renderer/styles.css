@@ -3509,6 +3509,10 @@ html.is-windows .settings-panel select option {
   -webkit-mask-image: url(../../../assets/icons/trae.svg);
   mask-image: url(../../../assets/icons/trae.svg);
 }
+.limit-icon-doubao {
+  -webkit-mask-image: url(../../../assets/icons/doubao.svg);
+  mask-image: url(../../../assets/icons/doubao.svg);
+}
 .limit-icon-workbuddy {
   -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);
   mask-image: url(../../../assets/icons/workbuddy.svg);

@@ -726,6 +726,7 @@ enum WidgetFormat {
         case "kiro": "Kiro"
         case "commandcode": "Command Code"
         case "deepseek": "DeepSeek"
+        case "doubao": "Doubao Work"
         case "openrouter": "OpenRouter"
         case "minimax": "Minimax"
         case "volcengine": "Volcengine"
