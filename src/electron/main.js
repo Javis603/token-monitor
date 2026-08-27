@@ -79,7 +79,7 @@ const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
-const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
+const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, qoderAccessToken, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
@@ -555,6 +555,7 @@ function defaultSettings() {
     volcengineSecretAccessKey: '',
     volcengineRegion: '',
     qoderCookie: '',
+    qoderAccessToken: '',
     qoderSite: 'global',
     traeAccessToken: '',
     traeDeviceId: '',
@@ -802,6 +803,10 @@ function normalizeQoderCookie(value) {
   return qoderCookie({}, { qoderCookie: String(value || '') });
 }
 
+function normalizeQoderAccessToken(value) {
+  return qoderAccessToken({}, { qoderAccessToken: String(value || '') });
+}
+
 function normalizeQoderSite(value) {
   const raw = String(value || '').trim().toLowerCase();
   if (raw === 'cn' || raw === 'china' || raw.includes('qoder.com.cn')) return 'cn';
@@ -810,6 +815,10 @@ function normalizeQoderSite(value) {
 
 function currentQoderCookie() {
   return settings?.qoderCookie || qoderCookie(process.env);
+}
+
+function currentQoderAccessToken() {
+  return settings?.qoderAccessToken || qoderAccessToken(process.env);
 }
 
 function normalizeTraeAccessToken(value) {
@@ -4405,6 +4414,11 @@ function settingsForRenderer() {
     : qoderCookie(process.env)
       ? 'env'
       : '';
+  const qoderAccessTokenSource = settings?.qoderAccessToken
+    ? 'settings'
+    : qoderAccessToken(process.env)
+      ? 'env'
+      : '';
   const traeAccessTokenSource = settings?.traeAccessToken
     ? 'settings'
     : traeAccessToken(process.env)
@@ -4466,6 +4480,7 @@ function settingsForRenderer() {
     volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
     claudeWebCookie: settings?.claudeWebCookie ? 'set' : '',
     qoderCookie: settings?.qoderCookie ? 'set' : '',
+    qoderAccessToken: settings?.qoderAccessToken ? 'set' : '',
     traeAccessToken: settings?.traeAccessToken ? 'set' : '',
     traeDeviceId: settings?.traeDeviceId ? 'set' : '',
     commandcodeCookie: settings?.commandcodeCookie ? 'set' : '',
@@ -4502,6 +4517,12 @@ function settingsForRenderer() {
     volcengineCredentialsSource,
     qoderCookieConfigured: Boolean(currentQoderCookie()),
     qoderCookieSource,
+    qoderAccessTokenConfigured: Boolean(currentQoderAccessToken()),
+    qoderAccessTokenSource,
+    // Either credential links the account: the dt- access token is preferred by
+    // the provider, the cookie stays as the dashboard-session fallback.
+    qoderCredentialConfigured: Boolean(currentQoderAccessToken() || currentQoderCookie()),
+    qoderCredentialSource: qoderAccessTokenSource || qoderCookieSource,
     traeAccessTokenConfigured: Boolean(currentTraeAccessToken()),
     traeAccessTokenSource,
     commandcodeCookieConfigured: Boolean(currentCommandcodeCookie()),
@@ -6244,6 +6265,7 @@ app.whenReady().then(() => {
     if (patch.volcengineSecretAccessKey !== undefined) normalizedPatch.volcengineSecretAccessKey = normalizeSecretSetting(patch.volcengineSecretAccessKey);
     if (patch.volcengineRegion !== undefined) normalizedPatch.volcengineRegion = normalizeVolcengineRegion(patch.volcengineRegion);
     if (patch.qoderCookie !== undefined) normalizedPatch.qoderCookie = normalizeQoderCookie(patch.qoderCookie);
+    if (patch.qoderAccessToken !== undefined) normalizedPatch.qoderAccessToken = normalizeQoderAccessToken(patch.qoderAccessToken);
     if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
     if (patch.traeAccessToken !== undefined) normalizedPatch.traeAccessToken = normalizeTraeAccessToken(patch.traeAccessToken);
     if (patch.traeDeviceId !== undefined) normalizedPatch.traeDeviceId = normalizeTraeDeviceId(patch.traeDeviceId);
@@ -6368,6 +6390,7 @@ app.whenReady().then(() => {
       volcengineSecretAccessKey: patch.volcengineSecretAccessKey !== undefined ? normalizeSecretSetting(patch.volcengineSecretAccessKey) : (settings.volcengineSecretAccessKey || ''),
       volcengineRegion: patch.volcengineRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineRegion) : (settings.volcengineRegion || ''),
       qoderCookie: patch.qoderCookie !== undefined ? normalizeQoderCookie(patch.qoderCookie) : (settings.qoderCookie || ''),
+      qoderAccessToken: patch.qoderAccessToken !== undefined ? normalizeQoderAccessToken(patch.qoderAccessToken) : (settings.qoderAccessToken || ''),
       qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
       traeAccessToken: patch.traeAccessToken !== undefined ? normalizeTraeAccessToken(patch.traeAccessToken) : (settings.traeAccessToken || ''),
       traeDeviceId: patch.traeDeviceId !== undefined ? normalizeTraeDeviceId(patch.traeDeviceId) : (settings.traeDeviceId || ''),
