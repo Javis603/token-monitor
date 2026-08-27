@@ -207,6 +207,7 @@ test('collectUsageOnce handles qodercn-only tracking without spawning tokscale',
 
 test('collectUsageOnce handles trae-cn-only tracking without spawning tokscale', async () => {
   let tokscaleCalls = 0;
+  const collectedOptions = [];
   const traeCnUsagePath = require.resolve('../../src/shared/traeCnUsage');
   const traeCnUsage = require(traeCnUsagePath);
   const originals = {
@@ -214,7 +215,10 @@ test('collectUsageOnce handles trae-cn-only tracking without spawning tokscale',
     resolveTraeCnPricing: traeCnUsage.resolveTraeCnPricing,
     buildTraeCnPeriods: traeCnUsage.buildTraeCnPeriods
   };
-  traeCnUsage.collectTraeCnRows = async () => [];
+  traeCnUsage.collectTraeCnRows = async (options) => {
+    collectedOptions.push(options);
+    return [];
+  };
   traeCnUsage.resolveTraeCnPricing = async () => ({});
   traeCnUsage.buildTraeCnPeriods = () => ({
     today: { entries: [{ client: 'trae-cn', model: 'doubao-seed', input: 12, output: 3 }] },
@@ -228,7 +232,13 @@ test('collectUsageOnce handles trae-cn-only tracking without spawning tokscale',
     const { collectUsageOnce } = require(collectorPath);
     const summary = await collectUsageOnce({
       clients: 'trae-cn',
-      traeAccessToken: 'collector-test-token',
+      traeAccessToken: 'stale-configured-token',
+      readTraeLocalAccount: () => ({
+        accessToken: 'current-local-token',
+        accountKey: 'sha256:current-account',
+        accountLabel: 'Current Trae account',
+        tokenExpiresAt: '2099-01-01T00:00:00.000Z'
+      }),
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1000,
       deviceId: 'test-device',
@@ -245,6 +255,9 @@ test('collectUsageOnce handles trae-cn-only tracking without spawning tokscale',
     assert.equal(summary.today.clients['trae-cn'], 15);
     assert.equal(summary.month.clients['trae-cn'], 20);
     assert.equal(summary.allTime.clients['trae-cn'], 30);
+    assert.equal(collectedOptions[0].accessToken, 'current-local-token');
+    assert.equal(collectedOptions[0].accountKey, 'sha256:current-account');
+    assert.equal(collectedOptions[0].accountLabel, 'Current Trae account');
   } finally {
     Object.assign(traeCnUsage, originals);
     delete require.cache[collectorPath];

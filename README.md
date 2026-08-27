@@ -64,7 +64,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" /> | Minimax | Minimax API key (Token Plan quota via Minimax API) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key or Volcengine AK/SK (Ark Coding Plan quota via Volcengine API) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/ollama.png" width="28" alt="Ollama" /> | Ollama | Ollama Cloud cookie (session/weekly usage via ollama.com/settings) | — | ✅ | — |
-| <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Trae CN access token (Trae CN / SOLO credits + cloud usage via trae.cn) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Current Trae desktop sign-in (automatic cloud usage); Trae CN access token fallback / credits | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.png" width="28" alt="Third-party APIs" /> | Third-party APIs | New API / Sub2API-compatible account presets (including compatible One API forks), a New API API-key preset, and a Custom balance endpoint | — | ✅ | — |
 
 <details>
@@ -91,7 +91,7 @@ Qoder limit monitoring works with either of two credentials, both saved in Setti
 
 #### Trae CN (cloud usage)
 
-Trae CN token usage is collected from the Trae CN API, not local files — enable the client in Settings → tools (opt-in, off by default). It reports the account's per-session cloud usage and needs a Trae CN access token saved in Settings → AI Tool Limits → Trae CN (shared with the Trae CN limits provider).
+Trae CN token usage is collected from the Trae CN API, not the encrypted agent database — enable the client in Settings → tools (opt-in, off by default). Token Monitor automatically reads the current Trae desktop sign-in in process, derives a stable non-secret account key, and never keeps credentials for accounts that have been signed out. A saved Trae CN access token remains an optional fallback. Per-session usage is archived under the account that earned it, so switching accounts preserves old account history in the Account view.
 </details>
 
 ## Showcase

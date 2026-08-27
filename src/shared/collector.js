@@ -59,6 +59,8 @@ const {
   traeCnAccessToken,
   traeCnDataPaths
 } = require('./traeCnUsage');
+const { traeAccountKey } = require('./traeAccount');
+const { readTraeLocalAccount } = require('./traeLocalAuth');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./dshPaths');
 const { indexDshSessionHeaders, readDshSessionHeader, resolveDshSessionsRoot } = require('./dshSessionFiles');
@@ -1550,7 +1552,28 @@ async function collectUsageOnce(options) {
   // failed. Resolving it here (rather than inside each collect call) lets both
   // the period block and the history graph below treat "nothing to collect" as
   // empty the way a qodercn install without its database does.
-  const traeCnToken = includesTraeCn ? traeCnAccessToken(options) : '';
+  const configuredTraeCnToken = includesTraeCn ? traeCnAccessToken(options) : '';
+  const traeCnLocalAccount = includesTraeCn && options.traePreferLocalAuth !== false
+    ? (options.readTraeLocalAccount || readTraeLocalAccount)({
+      homeDir: options.homeDir,
+      env: options.env || process.env,
+      platform: options.platform || process.platform
+    })
+    : null;
+  const localTokenExpiresAt = Date.parse(String(traeCnLocalAccount?.tokenExpiresAt || ''));
+  const localTokenUsable = Boolean(
+    traeCnLocalAccount?.accessToken
+    && (!Number.isFinite(localTokenExpiresAt) || localTokenExpiresAt > Date.now())
+  );
+  // The desktop app owns the current login. Reading this record on every tick
+  // means a Trae sign-out/sign-in switch changes account identity without Token
+  // Monitor retaining the old credential. A manually saved token remains the
+  // fallback for unsupported or future local storage formats.
+  const traeCnToken = localTokenUsable ? traeCnLocalAccount.accessToken : configuredTraeCnToken;
+  const traeCnAccountKey = localTokenUsable
+    ? traeCnLocalAccount.accountKey
+    : traeAccountKey(traeCnToken);
+  const traeCnAccountLabel = localTokenUsable ? traeCnLocalAccount.accountLabel : '';
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     const progress = { ...periods };
@@ -1632,7 +1655,12 @@ async function collectUsageOnce(options) {
           // No homeDir: this is the account API, not a local file scan. The
           // 5-minute snapshot cache inside collectTraeCnRows absorbs the extra
           // watch-triggered ticks, so only the interval refreshes the account.
-          traeCnRows = await collectTraeCnRows({ accessToken: traeCnToken, sinceMs: traeCnSinceMs });
+          traeCnRows = await collectTraeCnRows({
+            accessToken: traeCnToken,
+            accountKey: traeCnAccountKey,
+            accountLabel: traeCnAccountLabel,
+            sinceMs: traeCnSinceMs
+          });
           traeCnPricing = await resolveTraeCnPricing(traeCnRows, {
             lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
             commandTimeoutMs: options.pricingTimeoutMs,
@@ -1999,7 +2027,11 @@ async function collectUsageOnce(options) {
     let traeCnHistoryReadFailed = false;
     if (includesTraeCn && traeCnToken) {
       try {
-        const rows = (!anchorUsed && traeCnRows) ? traeCnRows : await collectTraeCnRows({ accessToken: traeCnToken });
+        const rows = (!anchorUsed && traeCnRows) ? traeCnRows : await collectTraeCnRows({
+          accessToken: traeCnToken,
+          accountKey: traeCnAccountKey,
+          accountLabel: traeCnAccountLabel
+        });
         const pricing = (!anchorUsed && traeCnPricing) ? traeCnPricing : await resolveTraeCnPricing(rows, {
           lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
           commandTimeoutMs: options.pricingTimeoutMs,

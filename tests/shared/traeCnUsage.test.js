@@ -19,11 +19,13 @@ const {
   traeCnDataPaths,
   traeCnUsageUrl
 } = require('../../src/shared/traeCnUsage');
+const { traeAccountKey } = require('../../src/shared/traeAccount');
 const { extractUsageFromTokscale } = require('../../src/shared/usage');
 
 const { localMs } = require('../helpers/localTime');
 
 const TOKEN = 'test-trae-token';
+const ACCOUNT_KEY = traeAccountKey(TOKEN);
 
 // A minimal fetch double for the usage endpoint. `pages` is a list of page
 // bodies in call order; every call is recorded so tests can assert on the
@@ -79,7 +81,7 @@ function row(sessionId, model, input, output, createdAt, extra = {}) {
 }
 
 // Every test that collects with a token resets the snapshot cache first: the
-// cache is keyed by the token prefix and shared across the whole process.
+// cache is keyed by stable account identity and shared across the whole process.
 function freshCollect(options) {
   resetTraeCnSnapshotCache();
   return collectTraeCnRows({ ...options, accessToken: TOKEN });
@@ -124,6 +126,14 @@ test('normalizeTraeCnSession maps epoch seconds and defaults like the API shape'
   assert.equal(ms.sessionId, 'trae-cn:api:unknown');
   assert.equal(ms.model, 'trae-agent');
   assert.equal(ms.cacheRead, 0, 'absent cache fields default to zero');
+
+  const attributed = normalizeTraeCnSession(
+    apiSession('s2', 'doubao-seed', 2, 1, usageTimeSec),
+    { accountKey: 'sha256:account-a', accountLabel: 'Account A' }
+  );
+  assert.equal(attributed.sessionId, 'trae-cn:api:sha256:account-a:s2');
+  assert.equal(attributed.accountKey, 'sha256:account-a');
+  assert.equal(attributed.accountLabel, 'Account A');
 });
 
 test('normalizeTraeCnSession rejects rows without usable token counts', () => {
@@ -180,7 +190,7 @@ test('collectTraeCnRows deduplicates sessions repeated across pages', async () =
   const pageTwo = usageBody([shared, apiSession('tail', 'm', 1, 1, 1_785_286_900)], 51);
   const rows = await freshCollect({ fetch: usageFetch([pageOne, pageTwo]) });
   assert.equal(rows.length, 51, 'the repeated session counts once');
-  assert.equal(rows.filter((r) => r.sessionId === 'trae-cn:api:dup').length, 1);
+  assert.equal(rows.filter((r) => r.sessionId === `trae-cn:api:${ACCOUNT_KEY}:dup`).length, 1);
 });
 
 test('collectTraeCnRows surfaces 401/403 as an unauthorized error code', async () => {
@@ -257,7 +267,7 @@ test('the snapshot cache serves repeated ticks and sinceMs filters client-side',
   assert.equal(forced.length, 2);
 
   const since = await collectTraeCnRows({ accessToken: TOKEN, fetch, sinceMs: midnight });
-  assert.deepEqual(since.map((r) => r.sessionId), ['trae-cn:api:new'], 'anchored ticks only keep rows that can still land today');
+  assert.deepEqual(since.map((r) => r.sessionId), [`trae-cn:api:${ACCOUNT_KEY}:new`], 'anchored ticks only keep rows that can still land today');
 });
 
 test('buildTraeCnPeriods keeps local day and month boundaries', () => {
@@ -457,7 +467,11 @@ test('the whole Trae CN chain produces tokscale-shaped periods from an API page'
     apiSession('s1', 'doubao-seed', 200, 30, Math.floor((midnight + 3_600_000) / 1000), { cacheRead: 60 }),
     apiSession('s2', 'kimi-k2', 50, 10, Math.floor((midnight + 7_200_000) / 1000))
   ];
-  const rows = await freshCollect({ fetch: usageFetch([usageBody(sessions, 3)]), nowMs: localMs(2026, 7, 29, 12) });
+  const rows = await freshCollect({
+    fetch: usageFetch([usageBody(sessions, 3)]),
+    accountLabel: 'Current Trae account',
+    nowMs: localMs(2026, 7, 29, 12)
+  });
 
   const pricing = await resolveTraeCnPricing(rows, {
     lookupModelPricing: async (modelId) => ({
@@ -480,6 +494,10 @@ test('the whole Trae CN chain produces tokscale-shaped periods from an API page'
   assert.equal(today.cacheReadTokens, 60);
   assert.equal(month.totalTokens, 510);
   assert.equal(allTime.totalTokens, 510);
+  assert.ok(today.sessions[`${TRAE_CN_CLIENT_ID}:trae-cn:api:${ACCOUNT_KEY}:s1`], 'the account namespace survives the generic usage adapter');
+  const accountEntry = periods.today.entries.find((entry) => entry.sessionId === `trae-cn:api:${ACCOUNT_KEY}:s1`);
+  assert.equal(accountEntry.accountKey, ACCOUNT_KEY);
+  assert.equal(accountEntry.accountLabel, 'Current Trae account');
   assert.equal(today.costUsd, 200 * 0.5 + 30 * 1 + 60 * 0.1 + 50 * 0.25 + 10 * 0.5);
   assert.equal(graph.contributions.length, 2, 'the pre-midnight row lands on the previous day');
   assert.deepEqual(

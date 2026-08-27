@@ -3264,10 +3264,13 @@ test('collector treats a missing Trae CN token as not-configured, not as a faile
   try {
     const { startCollector } = freshCollector();
     const updates = [];
-    // No traeAccessToken and no env fallback: the client is tracked but the
-    // account is not connected, which is a clean skip rather than an error.
+    // No local desktop account, traeAccessToken, or env fallback: the client is
+    // tracked but the account is not connected, which is a clean skip rather
+    // than an error. Stub local discovery so this hermetic test never reads the
+    // developer machine's real Trae sign-in.
     handle = startCollector({
       clients: 'claude,trae-cn',
+      readTraeLocalAccount: () => null,
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1000,
       deviceId: 'test-device',

@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { runWithProbeDeadline } = require('./probeDeadline');
 const { BROWSER_USER_AGENT } = require('./browserUserAgent');
+const { traeAccountKey } = require('./traeAccount');
 
 // Trae CN (Trae Work / TRAE SOLO CN) usage collection over the account's cloud
 // session-usage API — the same `Cloud-IDE-JWT` credential the Trae CN credits
@@ -106,7 +107,7 @@ function traeCnError(code, message) {
   return error;
 }
 
-function normalizeTraeCnSession(session) {
+function normalizeTraeCnSession(session, options = {}) {
   if (!session || typeof session !== 'object') return null;
   const usage = session.extra_info && typeof session.extra_info === 'object'
     ? session.extra_info
@@ -119,9 +120,13 @@ function normalizeTraeCnSession(session) {
   const sessionId = String(session.session_id || '').trim() || 'unknown';
   const createdAt = timestampMs(session.usage_time);
   const model = String(session.model_name || '').trim() || 'trae-agent';
+  const accountKey = String(options.accountKey || '').trim();
+  const accountLabel = String(options.accountLabel || '').trim().slice(0, 128);
+  const accountPrefix = accountKey ? `${accountKey}:` : '';
   return {
-    sessionId: `trae-cn:api:${sessionId}`,
-    messageId: `trae-cn:api:${sessionId}:${createdAt}:${model}`,
+    sessionId: `trae-cn:api:${accountPrefix}${sessionId}`,
+    messageId: `trae-cn:api:${accountPrefix}${sessionId}:${createdAt}:${model}`,
+    ...(accountKey ? { accountKey, accountLabel } : {}),
     model,
     projectLabel: '',
     input,
@@ -182,6 +187,8 @@ async function fetchTraeCnSnapshot(options = {}) {
   if (!accessToken) {
     throw traeCnError(TRAE_CN_ERROR_CODES.MISSING_TOKEN, 'trae-cn usage needs an access token (Settings → Trae CN Account)');
   }
+  const accountKey = String(options.accountKey || '').trim() || traeAccountKey(accessToken);
+  const accountLabel = String(options.accountLabel || '').trim().slice(0, 128);
   const nowMs = options.nowMs ?? Date.now();
   const startTimeSec = Math.floor(
     options.startMs !== undefined
@@ -207,7 +214,7 @@ async function fetchTraeCnSnapshot(options = {}) {
     );
     if (total === null) total = pageTotal;
     for (const session of sessions) {
-      const row = normalizeTraeCnSession(session);
+      const row = normalizeTraeCnSession(session, { accountKey, accountLabel });
       if (!row || seen.has(row.messageId)) continue;
       seen.add(row.messageId);
       rows.push(row);
@@ -217,7 +224,7 @@ async function fetchTraeCnSnapshot(options = {}) {
     pageNum += 1;
   }
   rows.sort((a, b) => a.createdAt - b.createdAt);
-  return { rows, at: nowMs, accessToken };
+  return { rows, at: nowMs, accountKey, accountLabel };
 }
 
 async function collectTraeCnRows(options = {}) {
@@ -227,7 +234,10 @@ async function collectTraeCnRows(options = {}) {
   const nowMs = options.nowMs ?? Date.now();
   const cacheTtlMs = options.cacheTtlMs ?? TRAE_CN_CACHE_TTL_MS;
   const forceRefresh = options.forceRefresh === true;
-  const cacheKey = accessToken ? accessToken.slice(0, 64) : '';
+  // Cache by stable account identity instead of retaining a credential fragment
+  // in memory. Switching accounts gets a separate snapshot; token refreshes for
+  // the same account reuse the normal short-lived cache.
+  const cacheKey = String(options.accountKey || '').trim() || traeAccountKey(accessToken);
   const startMs = options.startMs !== undefined
     ? options.startMs
     : (() => {
@@ -361,6 +371,7 @@ function buildTraeCnTokscaleJson(startMs, rows, pricingByModel, includeUndated =
 
   const entries = [...grouped.values()].map((row) => ({
     client: TRAE_CN_CLIENT_ID, mergedClients: null, sessionId: row.sessionId, model: row.model, provider: TRAE_CN_CLIENT_ID,
+    accountKey: row.accountKey || '', accountLabel: row.accountLabel || '',
     input: row.input, output: row.output, cacheRead: row.cacheRead, cacheWrite: row.cacheWrite,
     reasoning: 0, messageCount: row.messages, cost: row.cost,
     startedAt: row.startedAt ? new Date(row.startedAt).toISOString() : '',
