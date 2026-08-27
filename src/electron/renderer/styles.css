@@ -4842,9 +4842,11 @@ html.is-windows .limit-live-badge {
 .view-icon-device { -webkit-mask-image: url("icons/views/device.svg"); mask-image: url("icons/views/device.svg"); }
 .view-icon-model { -webkit-mask-image: url("icons/views/model.svg"); mask-image: url("icons/views/model.svg"); }
 .view-icon-project { -webkit-mask-image: url("icons/views/project.svg"); mask-image: url("icons/views/project.svg"); }
+.view-icon-account { -webkit-mask-image: url("icons/views/account.svg"); mask-image: url("icons/views/account.svg"); }
 .view-icon-session { -webkit-mask-image: url("icons/views/session.svg"); mask-image: url("icons/views/session.svg"); }
 
 .row-icon-project { -webkit-mask-image: url("icons/views/project-row.svg"); mask-image: url("icons/views/project-row.svg"); }
+.row-icon-account { -webkit-mask-image: url("icons/views/account-row.svg"); mask-image: url("icons/views/account-row.svg"); }
 .view-icon-limits { -webkit-mask-image: url("icons/views/limits.svg"); mask-image: url("icons/views/limits.svg"); }
 .view-icon-trends { -webkit-mask-image: url("icons/views/trends.svg"); mask-image: url("icons/views/trends.svg"); }
 .mode-button { width: auto; max-width: 52%; min-width: 0; height: 30px; padding: 0 10px; overflow: hidden; color: var(--muted); text-align: left; text-overflow: ellipsis; white-space: nowrap; }

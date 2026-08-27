@@ -44,6 +44,11 @@ function iconKindFor(rowData, breakdown) {
       : { kind: 'dot' };
   }
   if (breakdown === 'project') return { kind: 'icon', iconClass: 'row-icon-project' };
+  if (breakdown === 'account') {
+    return rowData.client && clientsWithIcon.has(rowData.client)
+      ? { kind: 'icon', iconClass: `row-icon-${rowData.client}` }
+      : { kind: 'icon', iconClass: 'row-icon-account' };
+  }
   const iconSet = breakdown === 'limits' ? limitMarksWithIcon : clientsWithIcon;
   return iconSet.has(rowData.key)
     ? { kind: 'icon', iconClass: `row-icon-${rowData.key}` }
@@ -205,6 +210,7 @@ const {
 const deviceBreakdownApi = window.TokenMonitorDeviceBreakdown;
 const usageAttributionRowsApi = window.TokenMonitorUsageAttributionRows;
 const projectRowsApi = window.TokenMonitorProjectRows;
+const accountRowsApi = window.TokenMonitorAccountRows;
 const sessionDetailApi = window.TokenMonitorSessionDetail;
 const windowShortcutApi = window.TokenMonitorWindowShortcut;
 const LIMIT_REFRESH_OPTIONS = [60000, 120000, 300000, 900000, 1800000];
@@ -256,7 +262,7 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
 };
 const deviceAccent = '#73bdf5';
 const deviceStaleColor = '#8c97a7';
-const baseBreakdownOrder = ['tool', 'device', 'model', 'project', 'session'];
+const baseBreakdownOrder = ['tool', 'device', 'model', 'project', 'account', 'session'];
 const VIEW_DISPLAY_OPTIONS = [
   { id: 'home', labelKey: 'views.home' },
   { id: 'tool', labelKey: 'views.tool' },
@@ -264,6 +270,7 @@ const VIEW_DISPLAY_OPTIONS = [
   { id: 'device', labelKey: 'views.device' },
   { id: 'model', labelKey: 'views.model' },
   { id: 'project', labelKey: 'views.project' },
+  { id: 'account', labelKey: 'views.account' },
   { id: 'session', labelKey: 'views.session' },
   { id: 'limits', labelKey: 'views.limits' },
   { id: 'trends', labelKey: 'views.trends' }
@@ -286,6 +293,7 @@ const VIEW_ICON_CLASSES = {
   device: 'view-icon-device',
   model: 'view-icon-model',
   project: 'view-icon-project',
+  account: 'view-icon-account',
   session: 'view-icon-session',
   limits: 'view-icon-limits',
   trends: 'view-icon-trends'
@@ -2171,11 +2179,20 @@ function projectRowsForPeriod(period) {
   });
 }
 
+function accountRowsForPeriod(period) {
+  return accountRowsApi.accountRowsForPeriod(period, {
+    clientLabels,
+    stableColor,
+    fallbackColors: fallbackModelColors
+  });
+}
+
 function rowsForPeriod(period) {
   if (state.breakdown === 'device') return deviceRowsForPeriod();
   if (state.breakdown === 'model') return modelRowsForPeriod(period);
   if (state.breakdown === 'session') return sessionRowsForPeriod(period);
   if (state.breakdown === 'project') return projectRowsForPeriod(period);
+  if (state.breakdown === 'account') return accountRowsForPeriod(period);
   return toolRowsForPeriod(period);
 }
 
@@ -6104,6 +6121,7 @@ function fixedPeriodMessage(snapshot, breakdown = '') {
   if (snapshot?.status === 'loading') return t('periodRange.loading');
   if (breakdown === 'session') return t('periodRange.sessionUnavailable');
   if (breakdown === 'project') return t('periodRange.projectUnavailable');
+  if (breakdown === 'account') return t('periodRange.accountUnavailable');
   if (snapshot?.reason === 'historyDisabled') return t('periodRange.historyDisabled');
   if (snapshot?.reason === 'historyUnavailable') return t('periodRange.historyUnavailable');
   return t('periodRange.historyUnavailable');

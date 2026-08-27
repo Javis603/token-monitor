@@ -134,6 +134,18 @@ function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = 
         periods: {}
       };
       const nextSession = clone(session);
+      const previousSession = entry.periods?.[periodName];
+      if (!nextSession.accountKey && previousSession?.accountKey) {
+        nextSession.accountKey = String(previousSession.accountKey);
+      }
+      if (
+        !nextSession.accountLabel
+        && previousSession?.accountLabel
+        && previousSession.accountKey
+        && nextSession.accountKey === String(previousSession.accountKey)
+      ) {
+        nextSession.accountLabel = String(previousSession.accountLabel).trim().slice(0, 128);
+      }
       const window = entry.periodWindows?.[periodName] || {};
       const sameWindow = periodName === 'today'
         ? window.day === localDay(captureDate)
@@ -208,7 +220,23 @@ function addSessionBreakdown(period, session) {
 function addArchivedSession(period, session) {
   if (isReasonixSyntheticSession(session)) return;
   const key = sessionKey(session.client, session.sessionId);
-  if (!key || period.sessions[key]) return;
+  if (!key) return;
+  const existing = period.sessions[key];
+  if (existing) {
+    // A live/anchored copy already owns the counters, but an older copy can
+    // still be missing durable identity metadata. Hydrate only metadata here
+    // so archive replay never double-counts the session's tokens.
+    if (!existing.accountKey && session.accountKey) existing.accountKey = String(session.accountKey);
+    if (
+      !existing.accountLabel
+      && session.accountLabel
+      && session.accountKey
+      && existing.accountKey === String(session.accountKey)
+    ) {
+      existing.accountLabel = String(session.accountLabel).trim().slice(0, 128);
+    }
+    return;
+  }
 
   const archived = { ...clone(session), archived: true };
   period.sessions[key] = archived;

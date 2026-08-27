@@ -10,6 +10,7 @@ const {
   mergeDeviceRecord,
   mergePeriods,
   normalizeClientName,
+  normalizePeriod,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('../../src/shared/usage');
 
@@ -1024,6 +1025,178 @@ test('aggregateDevices keeps a zero-usage live session unarchived in either merg
 
   assert.equal(aggregateDevices([live, archived], 0).periods.allTime.sessions['codex:s1'].archived, undefined);
   assert.equal(aggregateDevices([archived, live], 0).periods.allTime.sessions['codex:s1'].archived, undefined);
+});
+
+test('period account rollup books each account separately and leaves unattributed sessions out', () => {
+  const aggregate = aggregateDevices([
+    {
+      deviceId: 'one',
+      updatedAt: '2026-05-30T00:00:00.000Z',
+      receivedAt: '2026-05-30T00:00:00.000Z',
+      allTime: {
+        totalTokens: 30,
+        costUsd: 0.3,
+        clients: { workbuddy: 30 },
+        clientCosts: { workbuddy: 0.3 },
+        sessions: {
+          'workbuddy:s1': {
+            client: 'workbuddy',
+            sessionId: 's1',
+            accountKey: 'user-a',
+            accountLabel: 'Personal',
+            totalTokens: 10,
+            costUsd: 0.1,
+            models: { 'glm-5': 10 }
+          },
+          'workbuddy:s2': {
+            client: 'workbuddy',
+            sessionId: 's2',
+            accountKey: 'user-b',
+            totalTokens: 15,
+            costUsd: 0.15,
+            models: { 'glm-5': 15 }
+          },
+          'workbuddy:s3': {
+            client: 'workbuddy',
+            sessionId: 's3',
+            totalTokens: 5,
+            costUsd: 0.05,
+            models: { 'glm-5': 5 }
+          }
+        }
+      }
+    }
+  ], 0);
+
+  const accounts = aggregate.periods.allTime.accounts;
+  assert.equal(Object.keys(accounts).length, 2);
+  assert.equal(accounts['workbuddy:user-a'].tokens, 10);
+  assert.equal(accounts['workbuddy:user-a'].costUsd, 0.1);
+  assert.equal(accounts['workbuddy:user-a'].accountLabel, 'Personal');
+  assert.equal(accounts['workbuddy:user-b'].tokens, 15);
+  assert.equal(accounts['workbuddy:user-b'].costUsd, 0.15);
+  // The unattributed session still counts toward the tool totals.
+  assert.equal(aggregate.periods.allTime.clients.workbuddy, 30);
+});
+
+test('legacy Trae session ids recover account attribution and retain labels', () => {
+  const accountKey = `sha256:${'a'.repeat(64)}`;
+  const sessionId = `trae-cn:api:${accountKey}:session-1`;
+  const period = normalizePeriod({
+    sessions: {
+      legacy: {
+        client: 'trae-cn',
+        sessionId,
+        accountLabel: 'Old Trae account',
+        totalTokens: 123,
+        costUsd: 0
+      }
+    }
+  });
+
+  assert.equal(period.sessions[`trae-cn:${sessionId}`].accountKey, accountKey);
+  assert.equal(period.accounts[`trae-cn:${accountKey}`].tokens, 123);
+  assert.equal(period.accounts[`trae-cn:${accountKey}`].accountLabel, 'Old Trae account');
+});
+
+test('session merges keep the first account key instead of letting an unattributed copy erase it', () => {
+  const aggregate = aggregateDevices([
+    {
+      deviceId: 'tagged',
+      updatedAt: '2026-05-30T00:00:00.000Z',
+      receivedAt: '2026-05-30T00:00:00.000Z',
+      allTime: {
+        sessions: {
+          'workbuddy:s1': { client: 'workbuddy', sessionId: 's1', accountKey: 'user-a', totalTokens: 10, costUsd: 0 }
+        }
+      }
+    },
+    {
+      deviceId: 'untagged',
+      updatedAt: '2026-05-30T00:00:00.000Z',
+      receivedAt: '2026-05-30T00:00:00.000Z',
+      allTime: {
+        sessions: {
+          'workbuddy:s1': { client: 'workbuddy', sessionId: 's1', totalTokens: 5, costUsd: 0 }
+        }
+      }
+    }
+  ], 0);
+
+  const session = aggregate.periods.allTime.sessions['workbuddy:s1'];
+  assert.equal(session.accountKey, 'user-a');
+  assert.equal(session.totalTokens, 15);
+  // Rollups merge additively from each device's precomputed accounts (same
+  // contract as project rollups): the unattributed copy contributes nothing,
+  // so the account books stay at the attributed device's 10 while the session
+  // itself keeps its merged total.
+  assert.equal(aggregate.periods.allTime.accounts['workbuddy:user-a'].tokens, 10);
+});
+
+test('account rollups merge across devices and survive period merges', () => {
+  const aggregate = aggregateDevices([
+    {
+      deviceId: 'one',
+      updatedAt: '2026-05-30T00:00:00.000Z',
+      receivedAt: '2026-05-30T00:00:00.000Z',
+      today: {
+        sessions: {
+          'workbuddy:s1': { client: 'workbuddy', sessionId: 's1', accountKey: 'user-a', totalTokens: 10, costUsd: 0.1 }
+        }
+      }
+    },
+    {
+      deviceId: 'two',
+      updatedAt: '2026-05-30T00:00:00.000Z',
+      receivedAt: '2026-05-30T00:00:00.000Z',
+      today: {
+        sessions: {
+          'workbuddy:s2': { client: 'workbuddy', sessionId: 's2', accountKey: 'user-a', totalTokens: 7, costUsd: 0.07 },
+          'workbuddy:s3': { client: 'workbuddy', sessionId: 's3', accountKey: 'user-b', totalTokens: 3, costUsd: 0.03 }
+        }
+      }
+    }
+  ], 0, Date.parse('2026-05-30T00:01:00.000Z'));
+
+  assert.equal(aggregate.periods.today.accounts['workbuddy:user-a'].tokens, 17);
+  assert.equal(aggregate.periods.today.accounts['workbuddy:user-a'].costUsd, 0.17);
+  assert.equal(aggregate.periods.today.accounts['workbuddy:user-b'].tokens, 3);
+});
+
+test('applyAccountRollups recomputes accounts after archived sessions are merged in', () => {
+  const { applyAccountRollups } = require('../../src/shared/usage');
+
+  const summary = {
+    periods: {
+      allTime: {
+        totalTokens: 10,
+        costUsd: 0.1,
+        clients: { workbuddy: 10 },
+        sessions: {
+          'workbuddy:s1': { client: 'workbuddy', sessionId: 's1', accountKey: 'user-a', totalTokens: 10, costUsd: 0.1 }
+        }
+      }
+    }
+  };
+  // An archived session that the live scan no longer sees (source rows gone).
+  const period = summary.periods.allTime;
+  period.sessions['workbuddy:s2'] = {
+    client: 'workbuddy',
+    sessionId: 's2',
+    accountKey: 'user-b',
+    totalTokens: 4,
+    costUsd: 0.04,
+    archived: true
+  };
+  period.totalTokens += 4;
+  period.costUsd += 0.04;
+  period.clients.workbuddy += 4;
+  // The stale rollup only knows the first account.
+  period.accounts = { 'workbuddy:user-a': { client: 'workbuddy', accountKey: 'user-a', tokens: 10, costUsd: 0.1 } };
+
+  const updated = applyAccountRollups(summary);
+  assert.equal(updated.periods.allTime.accounts['workbuddy:user-a'].tokens, 10);
+  assert.equal(updated.periods.allTime.accounts['workbuddy:user-b'].tokens, 4);
 });
 
 const { normalizeDeviceRecord, aggregateHistory, carryDeviceHistory } = require('../../src/shared/usage');

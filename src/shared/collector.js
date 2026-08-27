@@ -50,6 +50,7 @@ const {
   qoderCnDataPaths,
   resolveQoderCnPricing
 } = require('./qoderCnUsage');
+const { applyWorkbuddyAccountKeys, readWorkbuddyAccountMap } = require('./workbuddyAccounts');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./dshPaths');
 const { indexDshSessionHeaders, readDshSessionHeader, resolveDshSessionsRoot } = require('./dshSessionFiles');
@@ -1493,6 +1494,7 @@ async function collectUsageOnce(options) {
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
+  const includesWorkbuddy = normalizedClients.split(',').includes('workbuddy');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -1715,6 +1717,22 @@ async function collectUsageOnce(options) {
     // Partition metadata is internal but must remain as complete as the public
     // period: a later targeted tick re-merges these sessions into `today`.
     propagateTodayProjects(today, Object.values(todayPartitions));
+  }
+
+  // WorkBuddy account attribution. Tagging happens before the periods are
+  // captured into the tick anchor, so anchored (watch) ticks keep attributing
+  // month/allTime sessions from the anchor without re-reading the database —
+  // and `applyWorkbuddyAccountKeys` skips sessions that already carry a key,
+  // keeping the attribution alive after the source rows are deleted. A locked
+  // or missing database leaves the sessions unattributed; that must never
+  // fail the tick.
+  if (includesWorkbuddy) {
+    try {
+      const workbuddyAccountMap = await readWorkbuddyAccountMap({ homeDir: options.homeDir });
+      applyWorkbuddyAccountKeys([today, month, allTime], workbuddyAccountMap);
+    } catch (error) {
+      if (typeof options.logger === 'function') options.logger(`workbuddy account map failed: ${error.message}`);
+    }
   }
 
   // WSL contribution (Windows only; no-op elsewhere). Full tick scans running WSL
