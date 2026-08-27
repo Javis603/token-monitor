@@ -965,15 +965,15 @@ test('Kimi account panel stores web access separately and opens the allowlisted 
   const html = readRendererFile('index.html');
   assert.match(html, /data-i18n="settings\.kimi\.title">Kimi Account<\/span>/);
   assert.match(html, /data-i18n="settings\.kimi\.openBrowser">Open Kimi Code Console<\/button>/);
-  assert.match(html, /settings\.kimi\.step2[\s\S]*Application\/Storage[\s\S]*Cookies[\s\S]*www\.kimi\.com/);
-  assert.match(html, /settings\.kimi\.step3[\s\S]*Find kimi-auth and copy its Value/);
-  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off"[\s\S]*placeholder="kimi-auth=\.\.\."[\s\S]*?<button id="kimiWebAccessTokenSubmit"[\s\S]*?<details class="kimi-api-fallback">[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?<button id="kimiApiKeySubmit"[\s\S]*data-i18n="settings\.kimi\.saveApiKey">/);
+  assert.match(html, /settings\.kimi\.step2[\s\S]*Application -> Local Storage[\s\S]*www\.kimi\.com/);
+  assert.match(html, /settings\.kimi\.step3[\s\S]*Find access_token and copy its Value/);
+  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off"[\s\S]*placeholder="access_token \/ refresh_token=\.\.\."[\s\S]*?<button id="kimiWebAccessTokenSubmit"[\s\S]*?<details class="kimi-api-fallback">[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?<button id="kimiApiKeySubmit"[\s\S]*data-i18n="settings\.kimi\.saveApiKey">/);
 
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
   assert.match(setupBody, /saveSettings\(\{ kimiApiKey: input\.value \}\)/);
   assert.match(setupBody, /saveSettings\(\{ kimiWebAccessToken: input\.value \}\)/);
-  assert.match(setupBody, /saveSettings\(\{ kimiApiKey: '', kimiWebAccessToken: '' \}\)/);
+  assert.match(setupBody, /saveSettings\(\{ kimiApiKey: '', kimiWebAccessToken: '', kimiWebRefreshToken: '' \}\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(kimiPlatformUrl\(\)\)/);
   const urlBody = functionBody(app, 'kimiPlatformUrl', 'renderExternalProviderStatus');
   assert.match(urlBody, /return 'https:\/\/www\.kimi\.com\/code\/console';/);
@@ -1314,6 +1314,7 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(opencodeRedactor, /cookie: profile\?\.cookie \? 'set' : ''/);
   assert.match(opencodeRedactor, /apiKey: profile\?\.apiKey \? 'set' : ''/);
   assert.match(credentialStore, /kimiWebAccessToken: \['providers', 'kimi', 'webAccessToken'\]/);
+  assert.match(credentialStore, /kimiWebRefreshToken: \['providers', 'kimi', 'webRefreshToken'\]/);
   assert.match(body, /kimiWebAccessTokenConfigured: Boolean\(currentKimiWebAccessToken\(\)\)/);
   const mimoRendererShape = main.slice(
     main.indexOf('function mimoAccountsForRenderer'),
