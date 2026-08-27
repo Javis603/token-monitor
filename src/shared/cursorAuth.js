@@ -291,13 +291,12 @@ async function runCursorLogin(token, { label = '', home = os.homedir() } = {}) {
 
     writeCredentialsStoreAtomic(file, store);
     return accountId;
-  }, { home });
+  });
 }
 
 async function runCursorLogout({
   accountId = '',
   label = '',
-  home = os.homedir(),
   timeoutMs = 30000,
   runSubcommand = runTokscaleSubcommand,
   ...options
@@ -306,7 +305,7 @@ async function runCursorLogout({
   const args = target ? ['logout', '--name', target] : ['logout'];
   return withCursorLifecycle(
     () => runSubcommand(args, { ...options, timeoutMs }),
-    { home, signal: options.signal }
+    { signal: options.signal }
   );
 }
 
@@ -314,7 +313,7 @@ async function runCursorSync(options = {}) {
   return withCursorLifecycle(() => runTokscaleSubcommand(
     ['sync', '--json'],
     { ...options, timeoutMs: options.timeoutMs ?? CURSOR_EXPLICIT_SYNC_TIMEOUT_MS }
-  ), { home: options.home, signal: options.signal });
+  ), { signal: options.signal });
 }
 
 function runCursorStatus(options = {}) {

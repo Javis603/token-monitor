@@ -2257,9 +2257,6 @@ test('collectUsageOnce scans tokscale for antigravity-cli when antigravity is tr
 });
 
 test('cursor sync runs at most once per throttle window across ticks', async () => {
-  const tmp = withTmpHome([]);
-  const originalHomedir = os.homedir;
-  os.homedir = () => tmp;
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   childProcess.spawn = recordingSpawn([]);
@@ -2286,16 +2283,11 @@ test('cursor sync runs at most once per throttle window across ticks', async () 
     childProcess.spawn = originalSpawn;
     cursorAuth.readActiveAccount = originalReadActiveAccount;
     cursorAuth.runCursorSync = originalRunCursorSync;
-    os.homedir = originalHomedir;
     delete require.cache[collectorPath];
-    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
 test('cursor sync gets one discovery attempt without saved credentials', async () => {
-  const tmp = withTmpHome([]);
-  const originalHomedir = os.homedir;
-  os.homedir = () => tmp;
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   childProcess.spawn = recordingSpawn([]);
@@ -2322,16 +2314,11 @@ test('cursor sync gets one discovery attempt without saved credentials', async (
     childProcess.spawn = originalSpawn;
     cursorAuth.readActiveAccount = originalReadActiveAccount;
     cursorAuth.runCursorSync = originalRunCursorSync;
-    os.homedir = originalHomedir;
     delete require.cache[collectorPath];
-    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
 test('cursor sync failure metadata reaches client health without stderr or paths', async () => {
-  const tmp = withTmpHome([]);
-  const originalHomedir = os.homedir;
-  os.homedir = () => tmp;
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   childProcess.spawn = recordingSpawn([]);
@@ -2367,22 +2354,17 @@ test('cursor sync failure metadata reaches client health without stderr or paths
     childProcess.spawn = originalSpawn;
     cursorAuth.readActiveAccount = originalReadActiveAccount;
     cursorAuth.runCursorSync = originalRunCursorSync;
-    os.homedir = originalHomedir;
     delete require.cache[collectorPath];
-    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
 test('a Cursor report with implicit sync blocks logout until the report closes', async () => {
-  const tmp = withTmpHome([]);
-  const originalHomedir = os.homedir;
-  os.homedir = () => tmp;
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const cursorAuth = require('../../src/shared/cursorAuth');
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
-  let reportChild = null;
+  let reportChild;
   let reportStarted;
   const reportStart = new Promise((resolve) => { reportStarted = resolve; });
   let reportCalls = 0;
@@ -2424,12 +2406,11 @@ test('a Cursor report with implicit sync blocks logout until the report closes',
     await reportStart;
 
     const logout = cursorAuth.runCursorLogout({
-      home: tmp,
       accountId: 'user_b',
       runSubcommand: async () => { logoutStarted = true; }
     });
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(logoutStarted, false, 'logout waits behind a report that may be syncing Cursor');
+    assert.equal(logoutStarted, false);
 
     reportChild.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
     reportChild.emit('close', 0);
@@ -2440,9 +2421,7 @@ test('a Cursor report with implicit sync blocks logout until the report closes',
     childProcess.spawn = originalSpawn;
     cursorAuth.readActiveAccount = originalReadActiveAccount;
     cursorAuth.runCursorSync = originalRunCursorSync;
-    os.homedir = originalHomedir;
     delete require.cache[collectorPath];
-    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
