@@ -225,6 +225,8 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     kimiApiKey: settings.kimiApiKey || '',
     kimiWebAccessToken: settings.kimiWebAccessToken || '',
     ollamaCookie: settings.ollamaCookie || '',
+    grokRefreshToken: settings.grokRefreshToken || '',
+    grokClientId: settings.grokClientId || '',
     codexManagedAccounts: context.codexManagedAccounts ?? settings.codexManagedAccounts ?? [],
     mimoManagedAccounts: context.mimoManagedAccounts ?? settings.mimoManagedAccounts ?? [],
     thirdPartyProfiles: settings.thirdPartyProfiles || {}
