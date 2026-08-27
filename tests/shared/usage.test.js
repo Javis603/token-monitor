@@ -10,6 +10,7 @@ const {
   mergeDeviceRecord,
   mergePeriods,
   normalizeClientName,
+  normalizePeriod,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('../../src/shared/usage');
 
@@ -1042,6 +1043,7 @@ test('period account rollup books each account separately and leaves unattribute
             client: 'workbuddy',
             sessionId: 's1',
             accountKey: 'user-a',
+            accountLabel: 'Personal',
             totalTokens: 10,
             costUsd: 0.1,
             models: { 'glm-5': 10 }
@@ -1070,10 +1072,31 @@ test('period account rollup books each account separately and leaves unattribute
   assert.equal(Object.keys(accounts).length, 2);
   assert.equal(accounts['workbuddy:user-a'].tokens, 10);
   assert.equal(accounts['workbuddy:user-a'].costUsd, 0.1);
+  assert.equal(accounts['workbuddy:user-a'].accountLabel, 'Personal');
   assert.equal(accounts['workbuddy:user-b'].tokens, 15);
   assert.equal(accounts['workbuddy:user-b'].costUsd, 0.15);
   // The unattributed session still counts toward the tool totals.
   assert.equal(aggregate.periods.allTime.clients.workbuddy, 30);
+});
+
+test('legacy Trae session ids recover account attribution and retain labels', () => {
+  const accountKey = `sha256:${'a'.repeat(64)}`;
+  const sessionId = `trae-cn:api:${accountKey}:session-1`;
+  const period = normalizePeriod({
+    sessions: {
+      legacy: {
+        client: 'trae-cn',
+        sessionId,
+        accountLabel: 'Old Trae account',
+        totalTokens: 123,
+        costUsd: 0
+      }
+    }
+  });
+
+  assert.equal(period.sessions[`trae-cn:${sessionId}`].accountKey, accountKey);
+  assert.equal(period.accounts[`trae-cn:${accountKey}`].tokens, 123);
+  assert.equal(period.accounts[`trae-cn:${accountKey}`].accountLabel, 'Old Trae account');
 });
 
 test('session merges keep the first account key instead of letting an unattributed copy erase it', () => {

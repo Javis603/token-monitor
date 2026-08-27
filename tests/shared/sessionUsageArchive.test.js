@@ -22,6 +22,7 @@ const {
 } = archiveApi;
 
 const { localDate } = require('../helpers/localTime');
+const { applyAccountRollups } = require('../../src/shared/usage');
 
 function liveSummary() {
   return {
@@ -422,6 +423,66 @@ test('multi-model archive classification is independent of map property order', 
   assert.deepEqual(forward.modelCacheWrites, reverse.modelCacheWrites);
   assert.deepEqual(forward.modelOutputs, reverse.modelOutputs);
   assert.deepEqual(forward.modelUnclassifiedTokens, reverse.modelUnclassifiedTokens);
+});
+
+test('Trae and WorkBuddy account switches retain every prior account in the permanent archive', () => {
+  const accountSummary = ({ client, accountKey, accountLabel, sessionId, tokens }) => ({
+    deviceId: 'windows',
+    allTime: {
+      totalTokens: tokens,
+      costUsd: 0,
+      clients: { [client]: tokens },
+      sessions: {
+        [`${client}:${sessionId}`]: {
+          client,
+          sessionId,
+          accountKey,
+          ...(accountLabel ? { accountLabel } : {}),
+          totalTokens: tokens,
+          costUsd: 0,
+          models: { model: tokens }
+        }
+      }
+    }
+  });
+
+  const traeA = `sha256:${'a'.repeat(64)}`;
+  const traeB = `sha256:${'b'.repeat(64)}`;
+  let archive = {};
+  archive = captureSessionUsageArchive(archive, accountSummary({
+    client: 'trae-cn', accountKey: traeA, accountLabel: 'Trae A',
+    sessionId: `trae-cn:api:${traeA}:session-a`, tokens: 100
+  }), new Date('2026-08-27T10:00:00.000Z'));
+  archive = captureSessionUsageArchive(archive, accountSummary({
+    client: 'trae-cn', accountKey: traeB, accountLabel: 'Trae B',
+    sessionId: `trae-cn:api:${traeB}:session-b`, tokens: 200
+  }), new Date('2026-08-27T10:05:00.000Z'));
+  // Switching back to A updates A's own session without touching B.
+  archive = captureSessionUsageArchive(archive, accountSummary({
+    client: 'trae-cn', accountKey: traeA, accountLabel: 'Trae A',
+    sessionId: `trae-cn:api:${traeA}:session-a`, tokens: 125
+  }), new Date('2026-08-27T10:10:00.000Z'));
+  archive = captureSessionUsageArchive(archive, accountSummary({
+    client: 'workbuddy', accountKey: 'workbuddy-a',
+    sessionId: 'work-session-a', tokens: 30
+  }), new Date('2026-08-27T10:15:00.000Z'));
+  archive = captureSessionUsageArchive(archive, accountSummary({
+    client: 'workbuddy', accountKey: 'workbuddy-b',
+    sessionId: 'work-session-b', tokens: 40
+  }), new Date('2026-08-27T10:20:00.000Z'));
+
+  const visible = applySessionUsageArchive({ allTime: { sessions: {} } }, archive, {
+    now: new Date('2026-08-27T10:30:00.000Z')
+  });
+  applyAccountRollups(visible);
+
+  assert.equal(visible.allTime.accounts[`trae-cn:${traeA}`].tokens, 125);
+  assert.equal(visible.allTime.accounts[`trae-cn:${traeA}`].accountLabel, 'Trae A');
+  assert.equal(visible.allTime.accounts[`trae-cn:${traeB}`].tokens, 200);
+  assert.equal(visible.allTime.accounts[`trae-cn:${traeB}`].accountLabel, 'Trae B');
+  assert.equal(visible.allTime.accounts['workbuddy:workbuddy-a'].tokens, 30);
+  assert.equal(visible.allTime.accounts['workbuddy:workbuddy-b'].tokens, 40);
+  assert.equal(Object.keys(visible.allTime.sessions).length, 4);
 });
 
 test('reapplies a large session archive without repeatedly normalizing growing periods', () => {

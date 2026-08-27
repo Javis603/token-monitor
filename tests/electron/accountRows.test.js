@@ -20,7 +20,7 @@ test('accountRowsForPeriod builds one row per account from the rollup', () => {
     accounts: {
       'workbuddy:user-a': { client: 'workbuddy', accountKey: 'user-a', tokens: 100, costUsd: 0.5 },
       'workbuddy:user-b': { client: 'workbuddy', accountKey: 'user-b', tokens: 40, costUsd: 0.2 },
-      'trae:user-c': { client: 'trae', accountKey: 'user-c', tokens: 10, costUsd: 0 }
+      'trae:user-c': { client: 'trae', accountKey: 'user-c', accountLabel: 'Trae account', tokens: 10, costUsd: 0 }
     }
   }, { clientLabels: { workbuddy: 'WorkBuddy' }, stableColor, fallbackColors: colors });
 
@@ -36,6 +36,17 @@ test('accountRowsForPeriod builds one row per account from the rollup', () => {
   // Client without a known label falls back to the raw client id.
   const traeRow = rows.find((row) => row.client === 'trae');
   assert.equal(traeRow.subtitle, 'trae');
+  assert.equal(traeRow.name, 'Trae account');
+});
+
+test('accountRowsForPeriod shortens an unlabeled hashed account key', () => {
+  const accountKey = `sha256:${'a'.repeat(64)}`;
+  const rows = accountRowsForPeriod({
+    accounts: {
+      [`trae-cn:${accountKey}`]: { client: 'trae-cn', accountKey, tokens: 12, costUsd: 0 }
+    }
+  }, { stableColor, fallbackColors: colors });
+  assert.equal(rows[0].name, `…${'a'.repeat(12)}`);
 });
 
 test('accountRowsForPeriod falls back to sessions when the rollup is absent', () => {

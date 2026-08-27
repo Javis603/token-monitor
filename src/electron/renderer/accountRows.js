@@ -28,8 +28,11 @@
     return `${clientName}:${account}`;
   }
 
-  function accountLabel(accountKey) {
+  function accountLabel(accountKey, explicitLabel = '') {
+    const label = String(explicitLabel || '').trim();
+    if (label) return label;
     const raw = String(accountKey || '').trim();
+    if (/^sha256:[a-f0-9]{64}$/i.test(raw)) return `…${raw.slice(-12)}`;
     return raw;
   }
 
@@ -39,13 +42,15 @@
   function accountRowsForPeriod(period, options = {}) {
     if (!period || typeof period !== 'object') return [];
     const rows = new Map();
-    const addAccount = (client, accountKey, tokens, costUsd) => {
+    const addAccount = (client, accountKey, explicitLabel, tokens, costUsd) => {
       const key = accountRowKey(client, accountKey);
       if (!key) return;
       if (!rows.has(key)) {
         rows.set(key, { key, client, accountKey, value: 0, cost: 0 });
       }
       const row = rows.get(key);
+      const label = String(explicitLabel || '').trim();
+      if (label && !row.accountLabel) row.accountLabel = label;
       row.value += Math.max(0, finiteNumber(tokens));
       row.cost += finiteNumber(costUsd);
     };
@@ -54,12 +59,12 @@
     if (rollup) {
       for (const entry of Object.values(rollup)) {
         if (!entry || typeof entry !== 'object') continue;
-        addAccount(entry.client, entry.accountKey, entry.tokens, entry.costUsd);
+        addAccount(entry.client, entry.accountKey, entry.accountLabel, entry.tokens, entry.costUsd);
       }
     } else {
       for (const session of Object.values(period.sessions || {})) {
         if (!session || typeof session !== 'object') continue;
-        addAccount(session.client, session.accountKey, session.totalTokens, session.costUsd);
+        addAccount(session.client, session.accountKey, session.accountLabel, session.totalTokens, session.costUsd);
       }
     }
 
@@ -74,7 +79,7 @@
           : '';
         return {
           ...row,
-          name: accountLabel(row.accountKey),
+          name: accountLabel(row.accountKey, row.accountLabel),
           subtitle: clientLabel,
           detail: '',
           color,
