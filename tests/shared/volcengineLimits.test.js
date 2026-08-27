@@ -462,6 +462,93 @@ test('fetchVolcengineLimits surfaces a failure of explicitly configured Agent cr
   assert.notEqual(providers[0].accountKey, providers[1].accountKey);
 });
 
+// A 429 or a socket failure says nothing about whether the account owns an Agent
+// Plan, so suppressing it would make a real Agent Plan blink out of the card the
+// first time Volcengine throttles the probe.
+test('fetchVolcengineLimits keeps an Agent row when an inherited key hits a transient failure', async () => {
+  const codingResponse = {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      Result: {
+        Status: 'Active',
+        UpdateTimestamp: 1_783_296_000,
+        QuotaUsage: [{ Level: 'session', Percent: 10, ResetTimestamp: 1_783_314_000 }]
+      }
+    })
+  };
+
+  const throttled = await fetchVolcengineLimits(
+    { volcengineAccessKeyId: 'AKLT-test', volcengineSecretAccessKey: 'sk' },
+    {
+      env: {},
+      now: () => Date.parse('2026-07-06T00:00:00Z'),
+      fetch: async (url) => (String(url).includes('GetAFPUsage')
+        ? { ok: false, status: 429, json: async () => ({}) }
+        : codingResponse)
+    }
+  );
+
+  assert.equal(throttled.length, 2);
+  assert.equal(throttled[1].status, 'sourceRateLimited');
+
+  const broken = await fetchVolcengineLimits(
+    { volcengineAccessKeyId: 'AKLT-test', volcengineSecretAccessKey: 'sk' },
+    {
+      env: {},
+      now: () => Date.parse('2026-07-06T00:00:00Z'),
+      fetch: async (url) => {
+        if (String(url).includes('GetAFPUsage')) throw new Error('socket hang up');
+        return codingResponse;
+      }
+    }
+  );
+
+  assert.equal(broken.length, 2);
+  assert.equal(broken[1].status, 'unavailable');
+});
+
+// An Ark API key cannot sign the OpenAPI request, so an override holding one
+// resolves to no signed credential. Falling back to the Coding Plan key would
+// report a different account's Agent Plan while the settings panel still shows
+// the override as set.
+test('fetchVolcengineLimits refuses an Agent override that cannot sign the request', async () => {
+  const requests = [];
+  const providers = await fetchVolcengineLimits(
+    {
+      volcengineAccessKeyId: 'AKLT-coding',
+      volcengineSecretAccessKey: 'sk',
+      volcengineAgentAccessKeyId: 'ark-not-an-access-key',
+      volcengineAgentSecretAccessKey: 'agent-sk'
+    },
+    {
+      env: {},
+      now: () => Date.parse('2026-07-06T00:00:00Z'),
+      fetch: async (url) => {
+        requests.push(String(url));
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            Result: {
+              Status: 'Active',
+              UpdateTimestamp: 1_783_296_000,
+              QuotaUsage: [{ Level: 'session', Percent: 10, ResetTimestamp: 1_783_314_000 }]
+            }
+          })
+        };
+      }
+    }
+  );
+
+  assert.equal(providers.length, 2);
+  assert.equal(providers[1].accountLabel, 'Agent Plan');
+  assert.equal(providers[1].status, 'unauthorized');
+  // Never signed with the Coding Plan key, which would have reported the wrong
+  // account as though the override had worked.
+  assert.equal(requests.filter((url) => url.includes('GetAFPUsage')).length, 0);
+});
+
 test('fetchVolcengineLimits stays silent when the inherited key has no Agent Plan', async () => {
   const providers = await fetchVolcengineLimits(
     { volcengineAccessKeyId: 'AKLT-test', volcengineSecretAccessKey: 'sk' },

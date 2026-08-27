@@ -1940,6 +1940,25 @@ test('Limits groups the Volcengine Coding and Agent plans as rows of one card', 
   assert.match(app, /volcengine: \(provider, index, providers\) => volcenginePlanAccountTitle\(provider, index, providers\)/);
 });
 
+// Re-saving with the Agent fields empty deliberately preserves the stored
+// override, so without a dedicated control the only way back to the main account
+// is the provider logout, which also clears the Coding Plan credentials.
+test('the Volcengine Agent override can be cleared without clearing the Coding Plan', () => {
+  const app = readRendererFile('app.js');
+  const html = readRendererFile('index.html');
+  const overrideBody = functionBody(app, 'renderVolcengineAgentOverrideState', 'setVolcengineAgentExpanded');
+
+  assert.match(html, /<button id="volcengineAgentClearButton" class="hidden" data-i18n="settings\.volcengine\.agentClear">/);
+  assert.match(overrideBody, /volcengineAgentClearButton/);
+  const clearHandler = app.slice(app.indexOf("getElementById('volcengineAgentClearButton')?.addEventListener"));
+  const saveCall = clearHandler.slice(0, clearHandler.indexOf('});'));
+  assert.match(saveCall, /volcengineAgentAccessKeyId: ''/);
+  assert.match(saveCall, /volcengineAgentSecretAccessKey: ''/);
+  assert.match(saveCall, /volcengineAgentRegion: ''/);
+  // The Coding Plan credentials must not ride along; that is what logout is for.
+  assert.doesNotMatch(saveCall, /volcengineAccessKeyId: ''/);
+});
+
 test('the Volcengine Agent override shows that it is set, from the one flag that means it', () => {
   const app = readRendererFile('app.js');
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');

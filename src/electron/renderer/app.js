@@ -13831,9 +13831,12 @@ function renderExternalProviderStatus(providerName) {
 // rather than volcengineAgentCredentials, which falls back to the Coding Plan
 // key and is therefore truthy for every Coding-only user.
 function renderVolcengineAgentOverrideState() {
-  const tag = document.getElementById('volcengineAgentConfigured');
-  if (!tag) return;
-  tag.classList.toggle('hidden', state.settings?.volcengineAgentAccessKeyId !== 'set');
+  const stored = state.settings?.volcengineAgentAccessKeyId === 'set';
+  document.getElementById('volcengineAgentConfigured')?.classList.toggle('hidden', !stored);
+  // Saving with the override fields empty deliberately keeps the stored one, so
+  // without this there is no way back to the main account short of clearing the
+  // Coding Plan credentials too.
+  document.getElementById('volcengineAgentClearButton')?.classList.toggle('hidden', !stored);
 }
 
 // The Agent Plan override is collapsed by default: it only matters when the two
@@ -15837,6 +15840,14 @@ function setupCursorAccountUI() {
       setVolcengineAgentExpanded(document.getElementById('volcengineAgentDetails')?.classList.contains('hidden'));
     });
     setVolcengineAgentExpanded(false);
+
+    document.getElementById('volcengineAgentClearButton')?.addEventListener('click', async () => {
+      await saveSettings({
+        volcengineAgentAccessKeyId: '', volcengineAgentSecretAccessKey: '', volcengineAgentRegion: ''
+      });
+      renderExternalProviderStatus('volcengine');
+      await refreshStats({ force: true });
+    });
 
     document.getElementById('volcengineLogoutButton').addEventListener('click', async () => {
       await saveSettings({

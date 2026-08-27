@@ -381,8 +381,30 @@ function volcengineAgentCredentials(env = process.env, options = {}) {
   // an Agent Plan is the normal case and stays silent; a key the user actually
   // typed in is a claim that a second account exists, so its failure is shown.
   if (own && own.mode === 'signed') return { ...own, explicit: true };
+  // The override fields hold something that cannot sign the OpenAPI request: an
+  // Ark API key, or only one half of the pair. Falling through to the Coding
+  // Plan key here would silently report a different account's Agent Plan while
+  // the settings panel still shows the override as set, so refuse instead.
+  if (volcengineAgentOverrideFilled(env, options)) {
+    return {
+      unusable: true,
+      explicit: true,
+      region: cleanSecret(options.volcengineAgentRegion)
+        || pickFirst(env, ['VOLCENGINE_AGENT_REGION'])
+        || VOLCENGINE_DEFAULT_REGION
+    };
+  }
   const shared = volcengineCredentials(env, options);
   return shared && shared.mode === 'signed' ? { ...shared, explicit: false } : null;
+}
+
+function volcengineAgentOverrideFilled(env = process.env, options = {}) {
+  return Boolean(
+    cleanSecret(options.volcengineAgentAccessKeyId)
+    || cleanSecret(options.volcengineAgentSecretAccessKey)
+    || pickFirst(env, ['VOLCENGINE_AGENT_ACCESS_KEY_ID', 'VOLC_AGENT_ACCESS_KEY_ID'])
+    || pickFirst(env, ['VOLCENGINE_AGENT_SECRET_ACCESS_KEY', 'VOLC_AGENT_SECRET_ACCESS_KEY'])
+  );
 }
 
 function volcengineAgentAccountKey(credentials) {
@@ -395,6 +417,15 @@ function volcengineAgentAccountKey(credentials) {
 // Carries the real status on the Agent Plan's own identity. Without its own
 // accountKey the runtime would read a bare failure row as the whole provider's
 // and smear it onto the Coding Plan row that succeeded.
+// Only an answer from the API itself means "this key sees no Agent Plan": 401 and
+// 403 because the key cannot read one, 404 because there is none. A 429, a 5xx,
+// a timeout or a socket error says nothing about the subscription, so those keep
+// their row rather than dropping an Agent Plan the account really has.
+function volcengineAgentPlanUnseen(error) {
+  const httpStatus = Number(error?.httpStatus);
+  return httpStatus === 401 || httpStatus === 403 || httpStatus === 404;
+}
+
 function volcengineAgentFailureRow(credentials, error, updatedAt) {
   return normalizeLimitProvider({
     provider: 'volcengine',
@@ -471,6 +502,10 @@ async function fetchVolcengineAgentPlanLimits(credentials, deps, now, updatedAt)
     error.status = response.status === 401 || response.status === 403
       ? 'unauthorized'
       : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
+    // Kept so the caller can tell "this key sees no Agent Plan" (a normal answer
+    // for a Coding-only account) from a transient upstream failure, which must
+    // not silently erase the row of an account that does have the plan.
+    error.httpStatus = response.status;
     throw error;
   }
   const usage = parseVolcengineAgentPlanUsage(body);
@@ -516,16 +551,18 @@ async function fetchVolcengineLimits(options = {}, deps = {}) {
     const agentCredentials = volcengineAgentCredentials(env, options);
     const [coding, agent] = await Promise.allSettled([
       fetchVolcengineCodingPlanLimits(credentials, deps, now, updatedAt),
-      agentCredentials
+      agentCredentials && !agentCredentials.unusable
         ? fetchVolcengineAgentPlanLimits(agentCredentials, deps, now, updatedAt)
         : Promise.resolve(null)
     ]);
 
-    const agentRow = agent.status === 'fulfilled'
-      ? agent.value
-      : (agentCredentials?.explicit
-        ? volcengineAgentFailureRow(agentCredentials, agent.reason, updatedAt)
-        : null);
+    const agentRow = agentCredentials?.unusable
+      ? volcengineAgentFailureRow(agentCredentials, { status: 'unauthorized' }, updatedAt)
+      : agent.status === 'fulfilled'
+        ? agent.value
+        : (agentCredentials.explicit || !volcengineAgentPlanUnseen(agent.reason)
+          ? volcengineAgentFailureRow(agentCredentials, agent.reason, updatedAt)
+          : null);
     const codingRow = coding.status === 'fulfilled' && coding.value.windows.length ? coding.value : null;
     if (codingRow) return agentRow ? [codingRow, agentRow] : [codingRow];
 
