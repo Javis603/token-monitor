@@ -35,6 +35,7 @@
     volcengine: { api: 'API' },
     qoder: { web: 'Web' },
     trae: { api: 'Web' },
+    doubao: { local: 'App' },
     workbuddy: { local: 'Local', api: 'API' },
     commandcode: { web: 'Web' },
     kimi: { api: 'API', web: 'Web' },
@@ -67,6 +68,7 @@
     volcengine: ['Coding Plan', 'API key'],
     qoder: ['Manual login', 'Web'],
     trae: ['Manual login', 'Web'],
+    doubao: ['Auto', 'Desktop app'],
     workbuddy: ['Auto', 'Desktop app'],
     commandcode: ['Manual login', 'Web'],
     kimi: ['Coding Plan', 'Web/API'],
@@ -275,6 +277,7 @@
     if (status === 'notConfigured') {
       if (providerName === 'kimi') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'antigravity') return { label: 'Open app or CLI', tone: 'setup' };
+      if (providerName === 'doubao') return { label: 'Open app', tone: 'setup' };
       if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi') return { label: 'Add API key', tone: 'setup' };

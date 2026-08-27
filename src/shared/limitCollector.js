@@ -58,6 +58,7 @@ const kimiLimits = require('./kimiLimits');
 const { kimiToken, kimiWebToken, fetchKimiLimits } = kimiLimits;
 const workbuddyLimits = require('./workbuddyLimits');
 const traeLimits = require('./traeLimits');
+const doubaoLimits = require('./doubaoLimits');
 const {
   grokCredential,
   readAuthJson,
@@ -3934,6 +3935,7 @@ function providerFetchers(deps = {}) {
     commandcode: (providerOptions, probeDeps) => commandcodeLimits.fetchCommandcodeLimits(providerOptions, probeDeps),
     qoder: (providerOptions, probeDeps) => qoderLimits.fetchQoderLimits(providerOptions, probeDeps),
     trae: (providerOptions, probeDeps) => traeLimits.fetchTraeLimits(providerOptions, probeDeps),
+    doubao: (providerOptions, probeDeps) => doubaoLimits.fetchDoubaoLimits(providerOptions, probeDeps),
     workbuddy: (providerOptions, probeDeps) => workbuddyLimits.fetchWorkbuddyLimits(providerOptions, probeDeps),
     ollama: (providerOptions, probeDeps) => ollamaLimits.fetchOllamaLimits(providerOptions, probeDeps),
     kimi: (providerOptions, probeDeps) => kimiLimits.fetchKimiLimits(providerOptions, probeDeps),
@@ -4313,6 +4315,8 @@ module.exports = {
   traeAccessToken: traeLimits.traeAccessToken,
   traeDeviceId: traeLimits.traeDeviceId,
   fetchTraeLimits: traeLimits.fetchTraeLimits,
+  doubaoCdpPort: doubaoLimits.doubaoCdpPort,
+  fetchDoubaoLimits: doubaoLimits.fetchDoubaoLimits,
   fetchWorkbuddyLimits: workbuddyLimits.fetchWorkbuddyLimits,
   commandcodeCookie,
   fetchCommandcodeLimits,

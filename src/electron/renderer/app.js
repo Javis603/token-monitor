@@ -100,6 +100,7 @@ const LIMIT_PROVIDERS = [
   { id: 'volcengine', label: 'Volcengine' },
   { id: 'ollama', label: 'Ollama' },
   { id: 'trae', label: 'Trae CN' },
+  { id: 'doubao', label: 'Doubao Work' },
   { id: 'thirdparty', label: 'Third-party APIs' }
 ];
 const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
@@ -146,7 +147,8 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
   grok: 'settings.limits.connection.grok',
   kiro: 'settings.limits.connection.kiro',
-  workbuddy: 'settings.limits.connection.workbuddy'
+  workbuddy: 'settings.limits.connection.workbuddy',
+  doubao: 'settings.limits.connection.doubao'
 };
 const TRAY_ICON_VARIANTS = [
   { id: 'claude-brand', label: 'Claude', after: 'claude' },

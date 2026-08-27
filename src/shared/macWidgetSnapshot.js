@@ -266,6 +266,7 @@ const PROVIDER_LABELS = Object.freeze({
   copilot: 'GitHub Copilot',
   cursor: 'Cursor',
   deepseek: 'DeepSeek',
+  doubao: 'Doubao Work',
   grok: 'Grok',
   kiro: 'Kiro',
   kimi: 'Kimi',

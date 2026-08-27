@@ -79,6 +79,9 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   volcengine: ['volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion'],
   qoder: ['qoderCookie', 'qoderSite'],
   trae: ['traeAccessToken', 'traeDeviceId'],
+  // Doubao Work is detected through its built-in local debug endpoint; the
+  // port override exists for non-default installs only.
+  doubao: ['doubaoCdpPort'],
   // The desktop widget auto-detects WorkBuddy when the provider itself is
   // enabled. Token and metadata fields remain available to headless/CLI deployments.
   workbuddy: ['workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo'],
@@ -187,6 +190,10 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     traeDeviceId: settings.traeDeviceId
       || env.TOKEN_MONITOR_TRAE_DEVICE_ID
       || env.TRAE_DEVICE_ID
+      || '',
+    doubaoCdpPort: settings.doubaoCdpPort
+      || env.TOKEN_MONITOR_DOUBAO_CDP_PORT
+      || env.DOUBAO_CDP_PORT
       || '',
     commandcodeCookie: settings.commandcodeCookie || '',
     workbuddyAccessToken: workbuddySettings.workbuddyAccessToken
