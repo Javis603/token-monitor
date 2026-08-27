@@ -483,6 +483,21 @@ test('Trae and WorkBuddy account switches retain every prior account in the perm
   assert.equal(visible.allTime.accounts['workbuddy:workbuddy-a'].tokens, 30);
   assert.equal(visible.allTime.accounts['workbuddy:workbuddy-b'].tokens, 40);
   assert.equal(Object.keys(visible.allTime.sessions).length, 4);
+
+  // An anchored/live copy may already carry the stable account key but predate
+  // account labels. Archive replay must hydrate the friendly label without
+  // adding the same session's tokens a second time.
+  const liveTraeAWithoutLabel = accountSummary({
+    client: 'trae-cn', accountKey: traeA,
+    sessionId: `trae-cn:api:${traeA}:session-a`, tokens: 125
+  });
+  const hydrated = applySessionUsageArchive(liveTraeAWithoutLabel, archive, {
+    now: new Date('2026-08-27T10:30:00.000Z')
+  });
+  applyAccountRollups(hydrated);
+  assert.equal(hydrated.allTime.totalTokens, 395);
+  assert.equal(hydrated.allTime.accounts[`trae-cn:${traeA}`].tokens, 125);
+  assert.equal(hydrated.allTime.accounts[`trae-cn:${traeA}`].accountLabel, 'Trae A');
 });
 
 test('reapplies a large session archive without repeatedly normalizing growing periods', () => {
