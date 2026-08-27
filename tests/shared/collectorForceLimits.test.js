@@ -205,6 +205,65 @@ test('collectUsageOnce handles qodercn-only tracking without spawning tokscale',
   });
 });
 
+test('collectUsageOnce handles trae-cn-only tracking without spawning tokscale', async () => {
+  let tokscaleCalls = 0;
+  const collectedOptions = [];
+  const traeCnUsagePath = require.resolve('../../src/shared/traeCnUsage');
+  const traeCnUsage = require(traeCnUsagePath);
+  const originals = {
+    collectTraeCnRows: traeCnUsage.collectTraeCnRows,
+    resolveTraeCnPricing: traeCnUsage.resolveTraeCnPricing,
+    buildTraeCnPeriods: traeCnUsage.buildTraeCnPeriods
+  };
+  traeCnUsage.collectTraeCnRows = async (options) => {
+    collectedOptions.push(options);
+    return [];
+  };
+  traeCnUsage.resolveTraeCnPricing = async () => ({});
+  traeCnUsage.buildTraeCnPeriods = () => ({
+    today: { entries: [{ client: 'trae-cn', model: 'doubao-seed', input: 12, output: 3 }] },
+    month: { entries: [{ client: 'trae-cn', model: 'doubao-seed', input: 20 }] },
+    allTime: { entries: [{ client: 'trae-cn', model: 'doubao-seed', input: 30 }] }
+  });
+  const collectorPath = require.resolve('../../src/shared/collector');
+  delete require.cache[collectorPath];
+
+  try {
+    const { collectUsageOnce } = require(collectorPath);
+    const summary = await collectUsageOnce({
+      clients: 'trae-cn',
+      traeAccessToken: 'stale-configured-token',
+      readTraeLocalAccount: () => ({
+        accessToken: 'current-local-token',
+        accountKey: 'sha256:current-account',
+        accountLabel: 'Current Trae account',
+        tokenExpiresAt: '2099-01-01T00:00:00.000Z'
+      }),
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false,
+      runTokscale: async () => {
+        tokscaleCalls += 1;
+        throw new Error('tokscale should not run for trae-cn-only tracking');
+      }
+    });
+
+    assert.equal(tokscaleCalls, 0);
+    assert.deepEqual(summary.trackedClients, ['trae-cn']);
+    assert.equal(summary.today.clients['trae-cn'], 15);
+    assert.equal(summary.month.clients['trae-cn'], 20);
+    assert.equal(summary.allTime.clients['trae-cn'], 30);
+    assert.equal(collectedOptions[0].accessToken, 'current-local-token');
+    assert.equal(collectedOptions[0].accountKey, 'sha256:current-account');
+    assert.equal(collectedOptions[0].accountLabel, 'Current Trae account');
+  } finally {
+    Object.assign(traeCnUsage, originals);
+    delete require.cache[collectorPath];
+  }
+});
+
 test('anchored Proma refresh derives broader windows from the combined fresh today period', async () => {
   const promaPath = require.resolve('../../src/shared/promaUsage');
   const collectorPath = require.resolve('../../src/shared/collector');

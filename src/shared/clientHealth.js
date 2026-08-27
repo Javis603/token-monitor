@@ -45,6 +45,10 @@ const CLIENT_SOURCE_STATES = Object.freeze(['detected', 'missing', 'unknown']);
 // `direct` is the common case: tokscale parses the client's own files and there
 // is no fetch step to succeed or fail. Only the self-synced clients
 // (cursor / antigravity) ever report `idle` / `pending` / `ok` / `failed`.
+// The account-API adapter (trae-cn) reports `direct` too: it does fetch, but
+// not through a self-sync subprocess this record could observe, and the enum
+// has no third shape — its only honest signals here are the source-root check
+// (is Trae CN installed) and `data.liveTokens` (what the API returned).
 //
 // `unknown` is never produced — it is where an unrecognised value lands. It must
 // exist as its own state precisely because `direct` is a positive claim: a
@@ -202,6 +206,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'qwen-projects',
   'tokscale-antigravity-cache',
   'tokscale-cursor-cache',
+  'trae-cn-app-data',
   'vscode-workspace-storage',
   'workbuddy-projects',
   'zcode-cli-db',

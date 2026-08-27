@@ -17,7 +17,9 @@ function rendererStyles() {
 function clientLabelIds(source) {
   const match = source.match(/const clientLabels = \{([^}]+)\};/);
   assert.ok(match, 'clientLabels declaration should exist');
-  return new Set([...match[1].matchAll(/([a-z0-9_-]+)\s*:/g)].map((item) => item[1]));
+  // Keys are unquoted when they are plain identifiers and quoted when they
+  // contain a hyphen ('trae-cn'), so accept both spellings.
+  return new Set([...match[1].matchAll(/'?([a-z0-9_-]+)'?\s*:/g)].map((item) => item[1]));
 }
 
 function knownClientIds(source) {

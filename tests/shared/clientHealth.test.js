@@ -418,6 +418,37 @@ test('Qoder CN source health requires local.db, not only its watch parent', () =
   }
 });
 
+// Trae CN counts usage through the account API, so neither of its two install
+// dirs is a usage source — they are only the "is it installed here" evidence the
+// health record needs, collapsed into a single check like every other client.
+test('Trae CN source health collapses both install dirs into one app-data check', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-trae-cn-health-'));
+  const originalHomedir = os.homedir;
+  const previousAppdata = process.env.APPDATA;
+  const previousXdg = process.env.XDG_CONFIG_HOME;
+  os.homedir = () => tempRoot;
+  if (process.platform === 'win32') process.env.APPDATA = path.join(tempRoot, 'AppData', 'Roaming');
+  if (process.platform === 'linux') process.env.XDG_CONFIG_HOME = path.join(tempRoot, '.config');
+  try {
+    assert.deepEqual(clientSourceChecks('trae-cn')['trae-cn'], [{ id: 'trae-cn-app-data', exists: false }]);
+
+    const appSupport = process.platform === 'win32'
+      ? process.env.APPDATA
+      : process.platform === 'darwin'
+        ? path.join(tempRoot, 'Library', 'Application Support')
+        : process.env.XDG_CONFIG_HOME;
+    fs.mkdirSync(path.join(appSupport, 'TRAE SOLO CN'), { recursive: true });
+    assert.deepEqual(clientSourceChecks('trae-cn')['trae-cn'], [{ id: 'trae-cn-app-data', exists: true }]);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousAppdata === undefined) delete process.env.APPDATA;
+    else process.env.APPDATA = previousAppdata;
+    if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = previousXdg;
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('diagnostic roots expose antigravity native sources without treating them as watch roots', () => {
   const diagnostics = clientDiagnosticRoots('antigravity').antigravity;
   assert.deepEqual(diagnostics.map(({ id }) => id), [

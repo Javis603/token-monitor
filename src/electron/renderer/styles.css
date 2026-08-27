@@ -1812,6 +1812,21 @@ span.settings-note.settings-item-desc {
 .tool-preference-label .tool-preference-name {
   flex: 0 1 auto;
 }
+/* Only rows that carry a setup hint wrap; every other row keeps the single
+   name + status-tag line, so the wrap can never change its layout. */
+.tool-preference-label.has-note {
+  flex-wrap: wrap;
+  row-gap: 1px;
+}
+.tool-preference-note {
+  flex: 1 1 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tool-status-tag {
   flex: 0 0 auto;
   max-width: 100%;
@@ -3420,6 +3435,7 @@ html.is-windows .settings-panel select option {
 .row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
 .row-icon-trae       { -webkit-mask-image: url(../../../assets/icons/trae.svg);          mask-image: url(../../../assets/icons/trae.svg); }
 .row-icon-qodercn    { -webkit-mask-image: url(../../../assets/icons/qodercn.svg);      mask-image: url(../../../assets/icons/qodercn.svg); }
+.row-icon-trae-cn    { -webkit-mask-image: url(../../../assets/icons/trae-cn.svg);      mask-image: url(../../../assets/icons/trae-cn.svg); }
 .row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
 .row-icon-thirdparty { -webkit-mask-image: url(../../../assets/icons/thirdparty.svg);      mask-image: url(../../../assets/icons/thirdparty.svg); }
 .row-icon-newapi    { -webkit-mask-image: url(../../../assets/icons/newapi.svg);           mask-image: url(../../../assets/icons/newapi.svg); }

@@ -50,6 +50,17 @@ const {
   qoderCnDataPaths,
   resolveQoderCnPricing
 } = require('./qoderCnUsage');
+const {
+  TRAE_CN_CLIENT_ID,
+  buildTraeCnHistoryGraph,
+  buildTraeCnPeriods,
+  collectTraeCnRows,
+  resolveTraeCnPricing,
+  traeCnAccessToken,
+  traeCnDataPaths
+} = require('./traeCnUsage');
+const { traeAccountKey } = require('./traeAccount');
+const { readTraeLocalAccount } = require('./traeLocalAuth');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./dshPaths');
 const { indexDshSessionHeaders, readDshSessionHeader, resolveDshSessionsRoot } = require('./dshSessionFiles');
@@ -1399,6 +1410,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
   }
+  if (options.traeCnGraph) {
+    rawGraphs.push(options.traeCnGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.traeCnGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -1493,6 +1508,7 @@ async function collectUsageOnce(options) {
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
+  const includesTraeCn = normalizedClients.split(',').includes(TRAE_CN_CLIENT_ID);
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -1504,6 +1520,11 @@ async function collectUsageOnce(options) {
   if (qoderCnReadState) {
     qoderCnReadState.periodFailed = false;
     qoderCnReadState.fallbackUsed = false;
+  }
+  const traeCnReadState = options.traeCnReadState;
+  if (traeCnReadState) {
+    traeCnReadState.periodFailed = false;
+    traeCnReadState.fallbackUsed = false;
   }
   let today = emptyPeriod();
   let month = emptyPeriod();
@@ -1523,11 +1544,43 @@ async function collectUsageOnce(options) {
   let qoderCnRows = null;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
+  let traeCnPeriods = null;
+  let traeCnRows = null;
+  let traeCnPricing = null;
+  let traeCnPeriodReadFailed = false;
+  // API collection: no token saved is a not-configured state, not a read that
+  // failed. Resolving it here (rather than inside each collect call) lets both
+  // the period block and the history graph below treat "nothing to collect" as
+  // empty the way a qodercn install without its database does.
+  const configuredTraeCnToken = includesTraeCn ? traeCnAccessToken(options) : '';
+  const traeCnLocalAccount = includesTraeCn && options.traePreferLocalAuth !== false
+    ? (options.readTraeLocalAccount || readTraeLocalAccount)({
+      homeDir: options.homeDir,
+      env: options.env || process.env,
+      platform: options.platform || process.platform
+    })
+    : null;
+  const localTokenExpiresAt = Date.parse(String(traeCnLocalAccount?.tokenExpiresAt || ''));
+  const localTokenUsable = Boolean(
+    traeCnLocalAccount?.accessToken
+    && (!Number.isFinite(localTokenExpiresAt) || localTokenExpiresAt > Date.now())
+  );
+  // The desktop app owns the current login. Reading this record on every tick
+  // means a Trae sign-out/sign-in switch changes account identity without Token
+  // Monitor retaining the old credential. A manually saved token remains the
+  // fallback for unsupported or future local storage formats.
+  const traeCnToken = localTokenUsable ? traeCnLocalAccount.accessToken : configuredTraeCnToken;
+  const traeCnAccountKey = localTokenUsable
+    ? traeCnLocalAccount.accountKey
+    : traeAccountKey(traeCnToken);
+  const traeCnAccountLabel = localTokenUsable ? traeCnLocalAccount.accountLabel : '';
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     const progress = { ...periods };
     if (qoderCnPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, qoderCnPeriods.today);
     if (qoderCnPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, qoderCnPeriods.month);
+    if (traeCnPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, traeCnPeriods.today);
+    if (traeCnPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, traeCnPeriods.month);
     try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
   };
   if (normalizedClients) {
@@ -1593,6 +1646,43 @@ async function collectUsageOnce(options) {
         qoderCnPeriods = options.qoderCnFallbackPeriods || null;
       }
     }
+    if (includesTraeCn && (!targetRequested || targetClients.includes(TRAE_CN_CLIENT_ID))) {
+      if (!traeCnToken) {
+        if (typeof options.logger === 'function') options.logger('trae-cn usage skipped: no access token saved');
+      } else {
+        try {
+          const traeCnSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
+          // No homeDir: this is the account API, not a local file scan. The
+          // 5-minute snapshot cache inside collectTraeCnRows absorbs the extra
+          // watch-triggered ticks, so only the interval refreshes the account.
+          traeCnRows = await collectTraeCnRows({
+            accessToken: traeCnToken,
+            accountKey: traeCnAccountKey,
+            accountLabel: traeCnAccountLabel,
+            sinceMs: traeCnSinceMs
+          });
+          traeCnPricing = await resolveTraeCnPricing(traeCnRows, {
+            lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+            commandTimeoutMs: options.pricingTimeoutMs,
+            pricingRevision: options.pricingRevision
+          });
+          const traeCnJson = buildTraeCnPeriods({ now: collectedAt, allTimeSince, rows: traeCnRows, pricingByModel: traeCnPricing });
+          traeCnPeriods = {
+            today: extractUsageFromTokscale(traeCnJson.today),
+            month: extractUsageFromTokscale(traeCnJson.month),
+            allTime: extractUsageFromTokscale(traeCnJson.allTime)
+          };
+        } catch (err) {
+          if (typeof options.logger === 'function') options.logger(`trae-cn parse failed: ${err.message}`);
+          traeCnPeriodReadFailed = true;
+          if (traeCnReadState) {
+            traeCnReadState.periodFailed = true;
+            traeCnReadState.fallbackUsed = Boolean(options.traeCnFallbackPeriods);
+          }
+          traeCnPeriods = options.traeCnFallbackPeriods || null;
+        }
+      }
+    }
     throwIfAborted(options.signal);
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
@@ -1643,6 +1733,12 @@ async function collectUsageOnce(options) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
         freshPartitions.qodercn = anchor.todayPartitions.qodercn;
+      }
+      if (traeCnPeriods) freshPartitions[TRAE_CN_CLIENT_ID] = traeCnPeriods.today;
+      if (traeCnPeriodReadFailed && anchor.todayPartitions?.[TRAE_CN_CLIENT_ID]) {
+        // Same rule for a transient API failure (expired token, network): the
+        // anchor's partition stays instead of draining month/allTime.
+        freshPartitions[TRAE_CN_CLIENT_ID] = anchor.todayPartitions[TRAE_CN_CLIENT_ID];
       }
       if (!useTargetedPartitions) {
         // The fallback rebuilds every Tokscale partition, but parse-local
@@ -1710,6 +1806,12 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, qoderCnPeriods.month);
       allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), qodercn: qoderCnPeriods.today };
+    }
+    if (traeCnPeriods && !anchorUsed) {
+      today = mergePeriods(today, traeCnPeriods.today);
+      month = mergePeriods(month, traeCnPeriods.month);
+      allTime = mergePeriods(allTime, traeCnPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), [TRAE_CN_CLIENT_ID]: traeCnPeriods.today };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1877,6 +1979,7 @@ async function collectUsageOnce(options) {
       windowsPeriods,
       todayPartitions,
       qoderCnPeriods,
+      traeCnPeriods,
       wslBundle,
       wslStatus,
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
@@ -1917,11 +2020,38 @@ async function collectUsageOnce(options) {
     const historyQoderCnGraph = qoderCnHistoryReadFailed
       ? options.qoderCnHistoryFallbackGraph
       : qoderCnGraph;
+    // Same full-read rule as Qoder CN, with one difference: the second fetch is
+    // served by the 5-minute snapshot cache, so an anchored history refresh does
+    // not pay for another API round trip unless the cache has gone cold.
+    let traeCnGraph = null;
+    let traeCnHistoryReadFailed = false;
+    if (includesTraeCn && traeCnToken) {
+      try {
+        const rows = (!anchorUsed && traeCnRows) ? traeCnRows : await collectTraeCnRows({
+          accessToken: traeCnToken,
+          accountKey: traeCnAccountKey,
+          accountLabel: traeCnAccountLabel
+        });
+        const pricing = (!anchorUsed && traeCnPricing) ? traeCnPricing : await resolveTraeCnPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs,
+          pricingRevision: options.pricingRevision
+        });
+        traeCnGraph = buildTraeCnHistoryGraph({ rows, pricingByModel: pricing });
+      } catch (err) {
+        traeCnHistoryReadFailed = true;
+        if (typeof options.logger === 'function') options.logger(`trae-cn history parse failed: ${err.message}`);
+      }
+    }
+    const historyTraeCnGraph = traeCnHistoryReadFailed
+      ? options.traeCnHistoryFallbackGraph
+      : traeCnGraph;
     throwIfAborted(options.signal);
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
       qoderCnGraph: historyQoderCnGraph || null,
+      traeCnGraph: historyTraeCnGraph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1939,6 +2069,9 @@ async function collectUsageOnce(options) {
     if (history) summary.history = history;
     if (!qoderCnHistoryReadFailed && qoderCnGraph && typeof options.onQoderCnHistoryGraph === 'function') {
       options.onQoderCnHistoryGraph(qoderCnGraph);
+    }
+    if (!traeCnHistoryReadFailed && traeCnGraph && typeof options.onTraeCnHistoryGraph === 'function') {
+      options.onTraeCnHistoryGraph(traeCnGraph);
     }
   }
   // After history, so `lastActivityDay` can come from the daily buckets this
@@ -2349,6 +2482,12 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // Qoder CN — SQLite DB under the platform Application Support dir.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform: process.platform, env: process.env });
   add('qodercn', ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]));
+  // Trae CN — usage itself comes from the account API, but the install dirs are
+  // still probed: they answer "is Trae CN installed on this machine" for the
+  // health record, and their watch events are the "the app is in use right now"
+  // signal that refreshes the cached API snapshot between interval ticks.
+  const traeCnPaths = traeCnDataPaths({ homeDir: home, platform, env });
+  add(TRAE_CN_CLIENT_ID, ...traeCnPaths.storagePaths.map((dir) => ['trae-cn-app-data', dir]));
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
     resolveReasonixStatsDir({ env: process.env, homeDir: home, platform: process.platform, cwdDir: process.cwd() })
@@ -2772,6 +2911,13 @@ function watchPolicyEntries(clientsCsv) {
   bound('kiro', withBasename('kiro', 'kiro-cli'), directChildOnly((name) => KIRO_DB_WATCH_PATTERN.test(name)));
   bound('zed', withBasename('zed', 'threads'), directChildOnly((name) => ZED_DB_WATCH_PATTERN.test(name)));
   bound('codebuddy', withBasename('codebuddy', 'Logs'), (parts) => !CODEBUDDY_EXTENSION_SOURCE_DIRS.has(parts[0]));
+
+  // Trae CN usage is an API read, so the only event worth waking for is "the
+  // app just ran": a new logs/<timestamp> run dir. The rest of an Electron
+  // userData tree (Cache/, Code Cache/, GPUCache/ …) is runtime churn that must
+  // be pruned before chokidar descends into it — the Hermes runaway of issue
+  // #38, but with no usage file anywhere inside to justify the watches.
+  bound(TRAE_CN_CLIENT_ID, candidates[TRAE_CN_CLIENT_ID] || [], (parts) => parts[0] !== 'logs' || parts.length > 2);
 
   // Everything left is a recursive transcript tree: tokscale walks it, so every
   // path inside it is a potential source. Copilot is excluded wholesale because
@@ -3333,6 +3479,7 @@ function startCollector(options) {
   // later full/history tick instead of losing it at the tick boundary.
   let liveDailyHistoryDays = {};
   let qoderCnHistoryGraph = null;
+  let traeCnHistoryGraph = null;
   let lastFullScanAt = 0;
   let pendingWaiters = [];
   let debounceTimer = null;
@@ -3437,6 +3584,7 @@ function startCollector(options) {
           month: saved.month,
           allTime: saved.allTime,
           qoderCnPeriods: saved.qoderCnPeriods || null,
+          traeCnPeriods: saved.traeCnPeriods || null,
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -3518,6 +3666,7 @@ function startCollector(options) {
     try {
       let captured = null;
       const qoderCnReadState = { periodFailed: false };
+      const traeCnReadState = { periodFailed: false };
       const summary = await collectUsageOnce({
         ...options,
         signal: runtimeSignal,
@@ -3563,8 +3712,12 @@ function startCollector(options) {
         qoderCnFallbackPeriods: anchor?.qoderCnPeriods || null,
         qoderCnHistoryFallbackGraph: qoderCnHistoryGraph,
         qoderCnReadState,
+        traeCnFallbackPeriods: anchor?.traeCnPeriods || null,
+        traeCnHistoryFallbackGraph: traeCnHistoryGraph,
+        traeCnReadState,
         onAnchorComputed: (x) => { captured = x; },
         onQoderCnHistoryGraph: (graph) => { qoderCnHistoryGraph = graph; },
+        onTraeCnHistoryGraph: (graph) => { traeCnHistoryGraph = graph; },
         onProgress: (partial) => {
           if (!partial.today) return;
           try {
@@ -3575,6 +3728,14 @@ function startCollector(options) {
               const qoderCnAnchorToday = qoderCnReadState.periodFailed && !qoderCnReadState.fallbackUsed
                 ? anchor?.todayPartitions?.qodercn
                 : null;
+              const traeCnAnchorToday = traeCnReadState.periodFailed && !traeCnReadState.fallbackUsed
+                ? anchor?.todayPartitions?.[TRAE_CN_CLIENT_ID]
+                : null;
+              // Today only from sources that are still valid: the partial scan,
+              // any parse-local partition whose read failed this tick (kept from
+              // the anchor rather than shown as zero), and the frozen WSL
+              // snapshot when it is still the same calendar day.
+              const anchoredTodays = [qoderCnAnchorToday, traeCnAnchorToday, wsl.today].filter(Boolean);
               const preview = {
                 deviceId, hostname: os.hostname(),
                 platform: `${process.platform}-${process.arch}`,
@@ -3583,32 +3744,27 @@ function startCollector(options) {
                 updatedAt: partial.updatedAt,
                 agentVersion, agentRuntime,
                 trackedClients: (clients || '').split(',').filter(Boolean),
-                // Merge the frozen WSL snapshot into today (as month/allTime do
-                // below) so the today card keeps its WSL contribution during a
-                // warm scan instead of dropping to host-only until the final tick.
-                // The upstream wsl.today guard is preserved: non-WSL machines
-                // keep the identity pass-through instead of a normalize round
-                // trip on this shared preview path.
-                today: qoderCnAnchorToday
-                  ? mergePeriods(partial.today, qoderCnAnchorToday, wsl.today)
-                  : (wsl.today ? mergePeriods(partial.today, wsl.today) : partial.today)
+                today: anchoredTodays.length > 0
+                  ? mergePeriods(partial.today, ...anchoredTodays)
+                  : partial.today
               };
               // Only include month/allTime when actually scanned. During warm
               // full scans the main.js handler carries the previous values
               // forward for omitted fields, so these cards don't flash empty.
-              if (partial.month && !qoderCnReadState.periodFailed) {
+              const periodReadFailed = qoderCnReadState.periodFailed || traeCnReadState.periodFailed;
+              if (partial.month && !periodReadFailed) {
                 preview.month = wsl.month
                   ? mergePeriods(partial.month, wsl.month)
                   : partial.month;
               }
-              if (partial.allTime && !qoderCnReadState.periodFailed) {
+              if (partial.allTime && !periodReadFailed) {
                 preview.allTime = wslAnchor
                   ? mergePeriods(partial.allTime, wslAnchor.allTime)
                   : partial.allTime;
               }
               // Only derive clientStatus when allTime is available; warm
               // scans carry the previous status forward in main.js.
-              if (partial.allTime && !qoderCnReadState.periodFailed) {
+              if (partial.allTime && !periodReadFailed) {
                 preview.clientStatus = deriveClientStatus(clients, partial.allTime);
               }
               onPreview(preview);
@@ -3637,12 +3793,13 @@ function startCollector(options) {
           allTime: captured.windowsPeriods.allTime,
           todayPartitions: captured.todayPartitions,
           qoderCnPeriods: captured.qoderCnPeriods,
+          traeCnPeriods: captured.traeCnPeriods,
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {})
         };
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
-        if (!qoderCnReadState.periodFailed) lastFullScanAt = Date.now();
+        if (!qoderCnReadState.periodFailed && !traeCnReadState.periodFailed) lastFullScanAt = Date.now();
         if (options.anchorPersistenceEnabled !== false) {
           try {
             fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
@@ -3652,6 +3809,7 @@ function startCollector(options) {
               month: anchor.month,
               allTime: anchor.allTime,
               qoderCnPeriods: anchor.qoderCnPeriods,
+              traeCnPeriods: anchor.traeCnPeriods,
               wslBundle: wslAnchor,
               wslStatus: wslStatusAnchor,
               ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
@@ -3672,6 +3830,13 @@ function startCollector(options) {
             allTime: applyPeriodDelta(anchor.qoderCnPeriods.allTime, captured.qoderCnPeriods.today, anchor.qoderCnPeriods.today)
           };
         }
+        if (!traeCnReadState.periodFailed && captured.traeCnPeriods?.today && anchor.traeCnPeriods) {
+          anchor.traeCnPeriods = {
+            today: captured.traeCnPeriods.today,
+            month: applyPeriodDelta(anchor.traeCnPeriods.month, captured.traeCnPeriods.today, anchor.traeCnPeriods.today),
+            allTime: applyPeriodDelta(anchor.traeCnPeriods.allTime, captured.traeCnPeriods.today, anchor.traeCnPeriods.today)
+          };
+        }
         if (captured.nativeSessions) anchor.nativeSessions = captured.nativeSessions;
         if (captured.nativeProjects) anchor.nativeProjects = captured.nativeProjects;
         if (refreshWsl) {
@@ -3679,7 +3844,7 @@ function startCollector(options) {
           wslStatusAnchor = captured.wslStatus || null;
         }
       }
-      if (qoderCnReadState.periodFailed) scheduledWatchNeedsFullScan = true;
+      if (qoderCnReadState.periodFailed || traeCnReadState.periodFailed) scheduledWatchNeedsFullScan = true;
       const transformedSummary = await onUpdate?.(summary, reason);
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'
         ? transformedSummary

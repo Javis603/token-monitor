@@ -118,6 +118,26 @@ test('the cold-start seed accepts an anchor configured for Qoder CN', () => {
   assert.deepEqual(record.trackedClients, ['claude', 'qodercn']);
 });
 
+// Trae CN has no local database to pin into the fingerprint — the clients csv
+// itself is the whole identity of an API client, so an anchor written while it
+// was tracked seeds exactly like any other configuration.
+test('the cold-start seed accepts an anchor configured for Trae CN', () => {
+  const clients = 'claude,trae-cn';
+  const anchor = anchorFixture({
+    configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true),
+    traeCnPeriods: { today: periodWith(1_000), month: periodWith(30_000), allTime: periodWith(900_000) }
+  });
+
+  const record = deviceRecordFromAnchor(anchor, seedOptions({ clients }));
+  assert.equal(record.today.totalTokens, 1_000, 'the merged anchor periods seed the widget');
+  assert.deepEqual(record.trackedClients, ['claude', 'trae-cn']);
+
+  // And the seed is invalidated exactly like for a local client when the
+  // tracked set changes under it: an anchor without trae-cn must not be reused.
+  const stale = deviceRecordFromAnchor(anchor, seedOptions({ clients: 'claude,qodercn' }));
+  assert.equal(stale, null, 'a changed clients csv invalidates the anchor for API clients too');
+});
+
 test('the seed carries local-only native Reasonix views when the anchor has them', () => {
   const nativeSessions = { today: { 'reasonix:session': { client: 'reasonix', totalTokens: 12 } }, month: {}, allTime: {} };
   const nativeProjects = { today: { 'token monitor': { label: 'Token Monitor', tokens: 12, clients: { reasonix: 12 } } }, month: {}, allTime: {} };
