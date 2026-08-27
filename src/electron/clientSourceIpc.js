@@ -72,6 +72,28 @@ function createClientSourceIpcHandlers(options = {}) {
     }
   }
 
+  // Which known-but-untracked tools have data on this machine. Without it the
+  // settings list shows an unchecked row and nothing else, so a tool the user
+  // has been running for months looks exactly like one they never installed —
+  // its tokens are simply absent from every total, with nothing on screen
+  // saying so.
+  //
+  // Answered for the whole untracked set in one sweep rather than per row: the
+  // roots table is keyed by client and takes a list, so asking once costs one
+  // traversal instead of one per client. Returns ids only — the absolute paths
+  // stay in this process, like every other answer in this module.
+  function untrackedClientsWithData() {
+    const tracked = trackedClients();
+    const untracked = [...knownClients()].filter((client) => !tracked.has(client));
+    if (!untracked.length) return [];
+    try {
+      const roots = visibleDiagnosticRoots(untracked.join(','));
+      return untracked.filter((client) => (roots[client] || []).some((root) => root.exists === true));
+    } catch (_) {
+      return [];
+    }
+  }
+
   async function rescanClient(clientId) {
     const client = normalizeClientId(clientId);
     if (!canRescanClient(client) || !canRunRescan()) return false;
@@ -87,6 +109,7 @@ function createClientSourceIpcHandlers(options = {}) {
     canInspectClient,
     canRescanClient,
     clientSources,
+    untrackedClientsWithData,
     revealClientSource,
     rescanClient
   };
