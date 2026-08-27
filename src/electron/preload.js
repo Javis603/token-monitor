@@ -120,8 +120,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   setTrayIcons: (icons) => ipcRenderer.invoke('tray:setIcons', icons),
   cursor: {
     loginManual: (token) => ipcRenderer.invoke('cursor:loginManual', token),
-    logout: () => ipcRenderer.invoke('cursor:logout'),
-    status: () => ipcRenderer.invoke('cursor:status')
+    setAccountEnabled: (accountId, enabled) => ipcRenderer.invoke('cursor:setAccountEnabled', accountId, enabled),
+    logout: (accountId) => ipcRenderer.invoke('cursor:logout', accountId),
+    status: (options = {}) => ipcRenderer.invoke('cursor:status', options)
   },
   claude: {
     saveCookie: (cookie) => ipcRenderer.invoke('claude:saveCookie', cookie)

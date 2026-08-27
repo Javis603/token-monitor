@@ -683,21 +683,32 @@
                 </span>
               </button>
               <div id="cursorSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="cursorLoginButton" data-i18n="settings.cursor.openBrowser">Open cursor.com in browser</button>
-                  <button id="cursorLogoutButton" class="hidden" data-i18n="settings.common.logout">Logout</button>
-                  <button id="cursorRefreshButton" class="hidden" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="cursorManualPanel">
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.cursor.step1Before">Open</span> <code>cursor.com/settings</code> <span data-i18n="settings.cursor.step1After">in your browser (button above).</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.cursor.step2Before">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -></span> cursor.com.<br>
-                    <strong>3.</strong> <span data-i18n="settings.cursor.step3Before">Copy the</span> <code>WorkosCursorSessionToken</code> <span data-i18n="settings.cursor.step3After">value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.cursor.step4">Paste it below and click Save.</span>
-                  </p>
-                  <textarea id="cursorManualInput" rows="3" spellcheck="false" placeholder="WorkosCursorSessionToken=..." data-i18n-placeholder="settings.cursor.manualPlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="cursorManualSubmit" data-i18n="settings.cursor.saveToken">Save token</button>
+                <p class="settings-note" data-i18n="settings.cursor.accountsNote">Token Monitor automatically detects accounts signed in through the Cursor desktop app. Uncheck an account to stop monitoring its limits; account-level token usage still includes every saved account.</p>
+                <p id="cursorAgentActiveNote" class="settings-note hidden" data-i18n="settings.cursor.agentActive">Stop the headless agent before adding or removing Cursor accounts.</p>
+                <div id="cursorAccountList" class="managed-account-list"></div>
+                <div id="cursorManualPanel" class="opencode-add-form">
+                  <button id="cursorAddAccountButton" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="cursorManualDetails">
+                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span data-i18n="settings.cursor.addManual">Add account</span>
+                  </button>
+                  <div id="cursorManualDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body">
+                      <div class="settings-actions">
+                        <button id="cursorLoginButton" data-i18n="settings.cursor.openBrowser">Open Cursor dashboard</button>
+                      </div>
+                      <p class="settings-note">
+                        <strong>1.</strong> <span data-i18n="settings.cursor.step1Before">Open</span> <code>cursor.com/dashboard</code> <span data-i18n="settings.cursor.step1After">in your browser using the button above, then sign in.</span><br>
+                        <strong>2.</strong> <span data-i18n="settings.cursor.step2Before">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -></span> cursor.com.<br>
+                        <strong>3.</strong> <span data-i18n="settings.cursor.step3Before">Copy the</span> <code>WorkosCursorSessionToken</code> <span data-i18n="settings.cursor.step3After">value.</span><br>
+                        <strong>4.</strong> <span data-i18n="settings.cursor.step4">Paste it below and click Save.</span>
+                      </p>
+                      <textarea id="cursorManualInput" rows="3" spellcheck="false" placeholder="WorkosCursorSessionToken=..." data-i18n-placeholder="settings.cursor.manualPlaceholder" aria-label="Cursor token" data-i18n-aria-label="settings.cursor.tokenLabel"></textarea>
+                      <div class="settings-actions">
+                        <button id="cursorManualSubmit" data-i18n="settings.cursor.saveToken">Save token</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div id="cursorErrorMessage" class="settings-note error hidden"></div>
@@ -1292,6 +1303,7 @@
                           <label for="thirdpartyPlatformInput" data-i18n="settings.thirdparty.preset">Preset</label>
                           <select id="thirdpartyPlatformInput">
                             <option value="newapi" data-i18n="settings.thirdparty.presetNewApi">New API-compatible</option>
+                            <option value="sub2api" data-i18n="settings.thirdparty.presetSub2Api">Sub2API-compatible</option>
                             <option value="custom" data-i18n="settings.thirdparty.presetCustom">Custom</option>
                           </select>
                         </div>
@@ -1313,10 +1325,20 @@
                         <input id="thirdpartyBaseUrlInput" type="url" inputmode="url" spellcheck="false" data-i18n-placeholder="settings.thirdparty.baseUrlPlaceholder" placeholder="https://api.example.com">
                       </div>
                       <p id="thirdpartyHttpWarning" class="settings-note hub-warning hidden" role="status" data-i18n="settings.thirdparty.httpWarning">HTTP sends credentials without transport encryption. Use HTTPS unless you trust the network.</p>
+                      <p id="thirdpartySub2ApiSteps" class="settings-note hidden">
+                        <strong>1.</strong> <span data-i18n="settings.thirdparty.sub2ApiStep1">Open the configured Sub2API Base URL in your browser and sign in.</span><br>
+                        <strong>2.</strong> <span data-i18n="settings.thirdparty.sub2ApiStep2">Open DevTools → Application → Local storage, then select the dashboard origin.</span><br>
+                        <strong>3.</strong> <span data-i18n="settings.thirdparty.sub2ApiStep3">Copy the value of auth_token below. You can also copy refresh_token for automatic renewal.</span><br>
+                        <strong>4.</strong> <span data-i18n="settings.thirdparty.sub2ApiStep4">Save the account. Prefer a dedicated dashboard session because renewing refresh_token may sign the source browser out.</span>
+                      </p>
                       <div id="thirdpartyCredentialGrid" class="thirdparty-credential-grid">
                         <div id="thirdpartyAccessTokenRow" class="thirdparty-field">
-                          <label for="thirdpartyAccessTokenInput" data-i18n="settings.thirdparty.accessToken">Access token</label>
+                          <label id="thirdpartyAccessTokenLabel" for="thirdpartyAccessTokenInput" data-i18n="settings.thirdparty.accessToken">Access token</label>
                           <input id="thirdpartyAccessTokenInput" type="password" spellcheck="false" data-i18n-placeholder="settings.thirdparty.accessTokenPlaceholder" placeholder="Account access token">
+                        </div>
+                        <div id="thirdpartyRefreshTokenRow" class="thirdparty-field hidden">
+                          <label id="thirdpartyRefreshTokenLabel" for="thirdpartyRefreshTokenInput" data-i18n="settings.thirdparty.refreshToken">Refresh token (optional)</label>
+                          <input id="thirdpartyRefreshTokenInput" type="password" spellcheck="false" data-i18n-placeholder="settings.thirdparty.refreshTokenPlaceholder" placeholder="Renews the access token automatically">
                         </div>
                         <div id="thirdpartyUserIdRow" class="thirdparty-field">
                           <label for="thirdpartyUserIdInput" data-i18n="settings.thirdparty.userId">User ID (New API only)</label>

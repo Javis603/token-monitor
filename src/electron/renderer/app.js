@@ -16,6 +16,7 @@ const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio',
   'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'volcagent', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
+const limitMarksWithIcon = new Set([...clientsWithIcon, 'newapi', 'sub2api']);
 
 function osIconFor(platform) {
   const prefix = String(platform || '').toLowerCase().split('-')[0];
@@ -43,7 +44,8 @@ function iconKindFor(rowData, breakdown) {
       : { kind: 'dot' };
   }
   if (breakdown === 'project') return { kind: 'icon', iconClass: 'row-icon-project' };
-  return clientsWithIcon.has(rowData.key)
+  const iconSet = breakdown === 'limits' ? limitMarksWithIcon : clientsWithIcon;
+  return iconSet.has(rowData.key)
     ? { kind: 'icon', iconClass: `row-icon-${rowData.key}` }
     : { kind: 'dot' };
 }
@@ -4022,8 +4024,10 @@ function providerSpendNode(balance) {
 
 function thirdPartySpendNode(provider, quotaWindow) {
   const balance = provider?.balance || null;
+  const usage = provider?.usageSummary || null;
   const currency = balance?.currency || 'USD';
   const allTimeSpend = optionalFiniteNumber(balance?.allTimeSpend);
+  const monthSpend = optionalFiniteNumber(balance?.monthSpend);
   const entries = [];
   const total = optionalFiniteNumber(quotaWindow?.limit);
   const requestCount = optionalFiniteNumber(balance?.requestCount);
@@ -4037,12 +4041,39 @@ function thirdPartySpendNode(provider, quotaWindow) {
   if (expiresAt && !Number.isNaN(expiresAt.getTime())) {
     entries.push([t('settings.thirdparty.expires'), expiresAt.toLocaleDateString()]);
   }
-  if (allTimeSpend === null && entries.length === 0) return null;
+  const usageCountEntry = (key, value) => {
+    const number = optionalFiniteNumber(value);
+    if (number !== null) entries.push([t(key), Math.max(0, Math.trunc(number)).toLocaleString()]);
+  };
+  if (usage) {
+    usageCountEntry('settings.thirdparty.monthRequests', usage.requests);
+    usageCountEntry('settings.thirdparty.monthTokens', usage.totalTokens);
+    usageCountEntry('settings.thirdparty.inputTokens', usage.inputTokens);
+    usageCountEntry('settings.thirdparty.outputTokens', usage.outputTokens);
+    const cacheTokens = [usage.cacheReadTokens, usage.cacheCreationTokens]
+      .map(optionalFiniteNumber)
+      .filter((value) => value !== null)
+      .reduce((sum, value) => sum + value, 0);
+    if (cacheTokens > 0) usageCountEntry('settings.thirdparty.cacheTokens', cacheTokens);
+    const averageDurationMs = optionalFiniteNumber(usage.averageDurationMs);
+    if (averageDurationMs !== null) {
+      const duration = averageDurationMs < 1000
+        ? `${Math.round(averageDurationMs)} ms`
+        : `${(averageDurationMs / 1000).toFixed(averageDurationMs < 10000 ? 1 : 0)} s`;
+      entries.push([t('settings.thirdparty.avgResponse'), duration]);
+    }
+    const standardCost = optionalFiniteNumber(usage.standardCost);
+    if (standardCost !== null) entries.push([t('settings.thirdparty.standardCost'), formatMoney(standardCost, currency)]);
+  }
+  if (allTimeSpend === null && monthSpend === null && entries.length === 0) return null;
   // Without a spend figure the row has nothing to summarize, so it retitles
   // itself and leans entirely on the tooltip.
-  const summary = allTimeSpend === null ? '' : `All time ${formatMoney(allTimeSpend, currency)}`;
+  const summary = [
+    ...(monthSpend !== null ? [`Month ${formatMoney(monthSpend, currency)}`] : []),
+    ...(allTimeSpend !== null ? [`All time ${formatMoney(allTimeSpend, currency)}`] : [])
+  ].join(' · ');
   return limitNoteRowNode({
-    label: allTimeSpend === null ? 'Details' : 'Spend',
+    label: summary ? 'Spend' : 'Details',
     summary,
     detailEntries: entries,
     ariaParts: [
@@ -4259,7 +4290,7 @@ function providersByLimitProviderId(providers) {
 
 function renderLimitProviderMark(id, color) {
   const mark = document.createElement('span');
-  if (clientsWithIcon.has(id)) {
+  if (limitMarksWithIcon.has(id)) {
     mark.className = `limit-icon limit-icon-${id}`;
   } else {
     mark.className = 'dot';
@@ -4410,7 +4441,7 @@ function renderLimitProviderHead(id, label, provider, color, options = {}) {
   titleBlock.className = 'limit-title';
   const name = document.createElement('div');
   name.className = 'limit-name';
-  if (options.showIcon !== false) name.append(renderLimitProviderMark(id, color));
+  if (options.showIcon !== false) name.append(renderLimitProviderMark(options.markId || id, color));
   const title = document.createElement('span');
   title.className = 'limit-name-title';
   title.textContent = options.title || label;
@@ -4705,9 +4736,18 @@ function renderProviderWindows(provider, color) {
     const balanceLabel = quotaWindow?.label || 'Balance';
     if (balanceAmount !== null) {
       const balanceValue = formatMoney(balanceAmount, currency);
+      // Balance presets without a fixed quota denominator (Sub2API reports the
+      // remaining USD balance plus an observed monthSpend) get the same
+      // display-layer meter DeepSeek uses: balance / (balance + month spend).
+      // Windows that already carry provider percentages pass through unchanged.
+      const meterPercent = creditsMeterPercent(provider, quotaWindow);
       const balanceNode = limitWindowNode(
         balanceLabel,
-        { ...(quotaWindow || { showMeter: false }), label: balanceLabel },
+        {
+          ...(quotaWindow || { showMeter: false }),
+          label: balanceLabel,
+          ...(meterPercent !== null ? { remainingPercent: meterPercent, showMeter: true } : {})
+        },
         color,
         0.95,
         balanceValue
@@ -5131,6 +5171,27 @@ function renderMimoAccountGroup(label, providers, color) {
   return row;
 }
 
+function renderCursorAccountGroup(label, providers, color) {
+  const row = document.createElement('div');
+  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
+  const groupProvider = { provider: 'cursor', status: 'ok', windows: [], accountGroup: true };
+  const head = renderLimitProviderHead('cursor', label, groupProvider, color, {
+    planText: t('settings.cursor.nAccounts', { count: providers.length }),
+    hideMeta: true
+  });
+  const accountList = document.createElement('div');
+  accountList.className = 'limit-account-list';
+  providers.forEach((provider, index) => {
+    accountList.append(renderLimitProviderRow('cursor', limitAccountTitle('cursor', provider, index, providers), provider, color, {
+      accountRow: true,
+      accountTitle: true,
+      showIcon: false
+    }));
+  });
+  row.append(head, accountList);
+  return row;
+}
+
 function opencodeAccountTitle(provider, index) {
   const name = String(provider?.accountName || '').trim();
   // The collector's canonical name is shown as-is. This column holds account
@@ -5180,11 +5241,41 @@ function namedApiAccountTitle(provider, index, providerId) {
 
 function thirdPartyPlanText(provider) {
   if (provider?.status !== 'ok') return undefined;
+  const adapterId = String(provider?.adapterId || '').toLowerCase();
+  if (adapterId === 'newapi-account') return 'New API · Account';
+  if (adapterId === 'newapi-token') return 'New API · API key';
+  if (adapterId === 'sub2api') return 'Sub2API · Account';
+  if (adapterId === 'custom') return 'Custom';
   const planLabel = String(provider?.planLabel || '').toLowerCase();
   if (planLabel === 'account') return 'Account';
   if (planLabel === 'api key') return 'API key';
   if (planLabel === 'custom') return 'Custom';
   return undefined;
+}
+
+const THIRD_PARTY_ADAPTER_VISUALS = Object.freeze({
+  'newapi-account': { color: '#C738FB', markId: 'newapi' },
+  'newapi-token': { color: '#C738FB', markId: 'newapi' },
+  sub2api: { color: '#39D9E7', markId: 'sub2api' },
+  custom: { color: '#8A96A8', markId: 'thirdparty' }
+});
+
+function thirdPartyAdapterVisual(provider, fallbackColor) {
+  return THIRD_PARTY_ADAPTER_VISUALS[String(provider?.adapterId || '').toLowerCase()]
+    || { color: fallbackColor, markId: 'thirdparty' };
+}
+
+function thirdPartyAdapterFamily(provider) {
+  const adapterId = String(provider?.adapterId || '').toLowerCase();
+  if (adapterId === 'newapi-account' || adapterId === 'newapi-token') return 'newapi';
+  if (adapterId === 'sub2api') return 'sub2api';
+  if (adapterId === 'custom') return 'thirdparty';
+  return '';
+}
+
+function thirdPartySharedAdapterFamily(providers) {
+  const families = new Set((providers || []).map(thirdPartyAdapterFamily));
+  return families.size === 1 ? [...families][0] : null;
 }
 
 function renderNamedApiAccountGroup(providerId, label, providers, color, options = {}) {
@@ -5193,19 +5284,23 @@ function renderNamedApiAccountGroup(providerId, label, providers, color, options
   const groupProvider = { provider: providerId, status: 'ok', windows: [], accountGroup: true };
   const head = renderLimitProviderHead(providerId, label, groupProvider, color, {
     planText: options.groupPlanText,
-    hideMeta: true
+    hideMeta: true,
+    ...(options.groupMarkId ? { markId: options.groupMarkId } : {})
   });
   const accountList = document.createElement('div');
   accountList.className = 'limit-account-list';
   providers.forEach((provider, index) => {
+    const providerColor = options.colorForProvider?.(provider) || color;
+    const markId = options.markIdForProvider?.(provider);
     accountList.append(renderLimitProviderRow(
       providerId,
       limitAccountTitle(providerId, provider, index, providers),
       provider,
-      color,
+      providerColor,
       {
         accountRow: true,
-        showIcon: false,
+        showIcon: Boolean(markId),
+        ...(markId ? { markId } : {}),
         ...(options.planTextForProvider
           ? { planText: options.planTextForProvider(provider) }
           : {})
@@ -5223,9 +5318,15 @@ function renderOpenRouterAccountGroup(label, providers, color) {
 }
 
 function renderThirdPartyAccountGroup(label, providers, color) {
+  const sharedFamily = thirdPartySharedAdapterFamily(providers);
   return renderNamedApiAccountGroup('thirdparty', label, providers, color, {
     groupPlanText: t('settings.thirdparty.nAccounts', { count: providers.length }),
-    planTextForProvider: thirdPartyPlanText
+    groupMarkId: sharedFamily || 'thirdparty',
+    planTextForProvider: thirdPartyPlanText,
+    colorForProvider: (provider) => thirdPartyAdapterVisual(provider, color).color,
+    ...(sharedFamily === null
+      ? { markIdForProvider: (provider) => thirdPartyAdapterVisual(provider, color).markId }
+      : {})
   });
 }
 
@@ -5316,13 +5417,21 @@ function renderLimits() {
       nodes.push(renderMimoAccountGroup(label, visibleProviders, color));
       continue;
     }
+    if (id === 'cursor' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderCursorAccountGroup(label, visibleProviders, color));
+      continue;
+    }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
+    const thirdPartyVisual = id === 'thirdparty' ? thirdPartyAdapterVisual(provider, color) : null;
     const rowOptions = id === 'codex'
       ? { accountTitle: true, allowSystemSwitch: true }
       : id === 'thirdparty'
-        ? { planText: thirdPartyPlanText(provider) }
+        ? {
+            planText: thirdPartyPlanText(provider),
+            markId: thirdPartyVisual.markId
+          }
         : undefined;
-    nodes.push(renderLimitProviderRow(id, label, provider, color, rowOptions));
+    nodes.push(renderLimitProviderRow(id, label, provider, thirdPartyVisual?.color || color, rowOptions));
   }
   els.limitsPanel.replaceChildren(...nodes);
 }
@@ -6302,6 +6411,12 @@ function homeLimitRows() {
     colors: clientColors,
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
+    accountColor: (provider, id, fallbackColor) => (
+      id === 'thirdparty' ? thirdPartyAdapterVisual(provider, fallbackColor).color : fallbackColor
+    ),
+    accountIcon: (provider, id) => (
+      id === 'thirdparty' ? thirdPartyAdapterVisual(provider, clientColors.thirdparty).markId : id
+    ),
     accountName: (provider, index, providerEntries) => {
       const id = String(provider?.provider || '').trim().toLowerCase();
       const option = providerOptions.find((entry) => entry.id === id);
@@ -6350,7 +6465,7 @@ function renderHomeLimitModule() {
     const account = document.createElement('div');
     account.className = 'home-limit-account-head';
     const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ key: row.providerId || row.key }, 'limits'), row.color);
+    applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.name;
@@ -10502,13 +10617,12 @@ async function onToolTrackingToggle() {
     .filter((cb) => cb.checked)
     .map((cb) => cb.dataset.client);
   await saveSettings({ clients: checked.join(',') });
-  // `clients` is usage-structural, so settings:update already restarts the usage
-  // runtime and its new collector runs a full tick on start. Forcing a refresh on
-  // top lands while that tick is in flight, so runTick coalesces it into a second
-  // full scan back-to-back — and drags an all-provider limits refresh along. The
-  // extra stats pushes then repaint the whole settings panel under the pointer,
-  // which is what made this checkbox stall while the eye and pin next to it did
-  // not (#471).
+  // `clients` is usage-structural, so settings:update schedules a latest-wins
+  // usage reconciliation and the eventual collector runs its own full tick.
+  // Forcing a refresh here would bypass that settling boundary, duplicate the
+  // scan, and drag an all-provider limits refresh along. The extra stats pushes
+  // would then repaint the whole settings panel under the pointer, which is what
+  // made this checkbox stall while the eye and pin next to it did not (#471).
 }
 
 async function onClientVisibilityToggle(clientId) {
@@ -12926,6 +13040,7 @@ function selectedThirdPartyAdapter() {
   const platform = String(document.getElementById('thirdpartyPlatformInput')?.value || 'newapi');
   const mode = String(document.getElementById('thirdpartyModeInput')?.value || 'account');
   if (platform === 'custom') return 'custom';
+  if (platform === 'sub2api') return 'sub2api';
   return mode === 'token' ? 'newapi-token' : 'newapi-account';
 }
 
@@ -12946,15 +13061,20 @@ function updateThirdPartyHttpWarning() {
 function setThirdPartyAdapterFields() {
   const adapter = selectedThirdPartyAdapter();
   const customMode = adapter === 'custom';
-  const accountMode = adapter === 'newapi-account';
+  const sub2apiMode = adapter === 'sub2api';
+  const singleChoiceField = customMode || sub2apiMode;
+  const accountMode = adapter === 'newapi-account' || sub2apiMode;
   const newApiAccountMode = adapter === 'newapi-account';
-  document.getElementById('thirdpartyChoiceGrid')?.classList.toggle('single-field', customMode);
-  document.getElementById('thirdpartyModeField')?.classList.toggle('hidden', customMode);
+  const pairedCredentials = newApiAccountMode;
+  document.getElementById('thirdpartyChoiceGrid')?.classList.toggle('single-field', singleChoiceField);
+  document.getElementById('thirdpartyModeField')?.classList.toggle('hidden', singleChoiceField);
   document.getElementById('thirdpartyCredentialGrid')?.classList.toggle(
     'single-field',
-    !newApiAccountMode
+    !pairedCredentials
   );
   document.getElementById('thirdpartyAccessTokenRow')?.classList.toggle('hidden', !accountMode);
+  document.getElementById('thirdpartyRefreshTokenRow')?.classList.toggle('hidden', !sub2apiMode);
+  document.getElementById('thirdpartySub2ApiSteps')?.classList.toggle('hidden', !sub2apiMode);
   document.getElementById('thirdpartyUserIdRow')?.classList.toggle('hidden', !newApiAccountMode);
   document.getElementById('thirdpartyApiKeyRow')?.classList.toggle('hidden', accountMode);
   document.getElementById('thirdpartyCustomConfig')?.classList.toggle('hidden', !customMode);
@@ -12962,10 +13082,40 @@ function setThirdPartyAdapterFields() {
   if (hint) {
     const hintKey = customMode
       ? 'settings.thirdparty.hintCustom'
-      : adapter === 'newapi-token'
-      ? 'settings.thirdparty.hintNewApiToken'
-      : 'settings.thirdparty.hintNewApiAccount';
+      : sub2apiMode
+        ? 'settings.thirdparty.hintSub2Api'
+        : adapter === 'newapi-token'
+          ? 'settings.thirdparty.hintNewApiToken'
+          : 'settings.thirdparty.hintNewApiAccount';
     hint.textContent = t(hintKey);
+  }
+  const accessTokenLabel = document.getElementById('thirdpartyAccessTokenLabel');
+  const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
+  const refreshTokenLabel = document.getElementById('thirdpartyRefreshTokenLabel');
+  const refreshTokenInput = document.getElementById('thirdpartyRefreshTokenInput');
+  const accessTokenKey = 'settings.thirdparty.accessToken';
+  const accessTokenPlaceholderKey = sub2apiMode
+    ? 'settings.thirdparty.sub2ApiAccessTokenPlaceholder'
+    : 'settings.thirdparty.accessTokenPlaceholder';
+  const refreshTokenKey = 'settings.thirdparty.refreshToken';
+  const refreshTokenPlaceholderKey = sub2apiMode
+    ? 'settings.thirdparty.sub2ApiRefreshTokenPlaceholder'
+    : 'settings.thirdparty.refreshTokenPlaceholder';
+  if (accessTokenLabel) {
+    accessTokenLabel.dataset.i18n = accessTokenKey;
+    accessTokenLabel.textContent = t(accessTokenKey);
+  }
+  if (accessTokenInput) {
+    accessTokenInput.dataset.i18nPlaceholder = accessTokenPlaceholderKey;
+    accessTokenInput.placeholder = t(accessTokenPlaceholderKey);
+  }
+  if (refreshTokenLabel) {
+    refreshTokenLabel.dataset.i18n = refreshTokenKey;
+    refreshTokenLabel.textContent = t(refreshTokenKey);
+  }
+  if (refreshTokenInput) {
+    refreshTokenInput.dataset.i18nPlaceholder = refreshTokenPlaceholderKey;
+    refreshTokenInput.placeholder = t(refreshTokenPlaceholderKey);
   }
 }
 
@@ -14386,12 +14536,18 @@ function openrouterProfileErrorText(result) {
   return result?.error || t('settings.openrouter.saveFailedShort');
 }
 
-function thirdPartyProfileErrorText(result) {
+function thirdPartyProfileErrorText(result, adapter = '') {
   if (result?.errorCode === 'invalidName') return t('settings.thirdparty.invalidName');
   if (result?.errorCode === 'invalidAdapter') return t('settings.thirdparty.invalidAdapter');
   if (result?.errorCode === 'invalidBaseUrl') return t('settings.thirdparty.invalidBaseUrl');
+  if (result?.errorCode === 'missingAccessToken' && adapter === 'sub2api') {
+    return t('settings.thirdparty.missingSub2ApiToken');
+  }
   if (result?.errorCode === 'missingAccessToken') return t('settings.thirdparty.missingAccessToken');
   if (result?.errorCode === 'missingApiKey') return t('settings.thirdparty.missingApiKey');
+  if (result?.errorCode === 'invalidCredential' && adapter === 'sub2api') {
+    return t('settings.thirdparty.sub2ApiCredentialRejected');
+  }
   if (result?.errorCode === 'invalidEndpointPath') return t('settings.thirdparty.invalidEndpointPath');
   if (result?.errorCode === 'invalidAuthMode') return t('settings.thirdparty.invalidAuthMode');
   if (result?.errorCode === 'invalidJsonPath') return t('settings.thirdparty.invalidJsonPath');
@@ -14631,7 +14787,9 @@ function renderThirdPartyProfiles() {
         ? t('settings.thirdparty.detailNewApiKey')
         : profile?.adapter === 'custom'
           ? t('settings.thirdparty.detailCustom')
-          : t('settings.thirdparty.detailNewApiAccount');
+          : profile?.adapter === 'sub2api'
+            ? t('settings.thirdparty.detailSub2Api')
+            : t('settings.thirdparty.detailNewApiAccount');
       let host = '';
       try { host = new URL(String(profile?.baseUrl || '')).host; } catch (_) {}
       return [adapter, host].filter(Boolean).join(' · ');
@@ -14641,12 +14799,9 @@ function renderThirdPartyProfiles() {
 
 function renderCursorStatus() {
   const statusEl = document.getElementById('cursorAccountStatus');
-  const loginBtn = document.getElementById('cursorLoginButton');
-  const logoutBtn = document.getElementById('cursorLogoutButton');
-  const refreshBtn = document.getElementById('cursorRefreshButton');
-  const manualPanel = document.getElementById('cursorManualPanel');
+  const listEl = document.getElementById('cursorAccountList');
   const errorEl = document.getElementById('cursorErrorMessage');
-  if (!statusEl || !loginBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
+  if (!statusEl || !listEl || !errorEl) return;
 
   errorEl.classList.add('hidden');
   errorEl.textContent = '';
@@ -14655,11 +14810,7 @@ function renderCursorStatus() {
     setCursorStatusText(statusEl, t('settings.common.error'));
     errorEl.textContent = t('settings.cursor.statusCheckFailed', { message: state.cursorAccount.error });
     errorEl.classList.remove('hidden');
-    loginBtn.classList.remove('hidden');
-    logoutBtn.classList.add('hidden');
-    refreshBtn.classList.remove('hidden');
-    manualPanel.classList.remove('hidden');
-    setCursorCheckboxesEnabled(false);
+    setCursorCheckboxesEnabled(Boolean(state.cursorAccount.status?.accounts?.length));
     setSettingsSectionExpanded('limits', true);
     setCursorAccountExpanded(true);
     renderSettingsSummaries();
@@ -14673,46 +14824,115 @@ function renderCursorStatus() {
     return;
   }
 
-  if (!status.loggedIn) {
-    setCursorStatusText(statusEl, t('settings.cursor.notLoggedIn'));
-    loginBtn.classList.remove('hidden');
-    logoutBtn.classList.add('hidden');
-    refreshBtn.classList.add('hidden');
-    manualPanel.classList.remove('hidden');
-    setCursorCheckboxesEnabled(false);
-    renderSettingsSummaries();
-    return;
-  }
-  if (status.expired) {
-    setCursorStatusText(statusEl, t('settings.cursor.expired'));
-    loginBtn.classList.remove('hidden');
-    logoutBtn.classList.remove('hidden');
-    refreshBtn.classList.remove('hidden');
-    manualPanel.classList.remove('hidden');
-    setCursorCheckboxesEnabled(false);
-    setSettingsSectionExpanded('limits', true);
-    setCursorAccountExpanded(true);
-    renderSettingsSummaries();
-    return;
-  }
-  const summary = status.email || t('settings.cursor.loggedIn');
+  const accounts = Array.isArray(status.accounts) ? status.accounts : [];
+  const managementBlocked = status.managementBlocked === true;
+  document.getElementById('cursorAgentActiveNote')?.classList.toggle('hidden', !managementBlocked);
+  const addButton = document.getElementById('cursorAddAccountButton');
+  if (addButton) addButton.disabled = managementBlocked;
+  const summary = accounts.length === 0
+    ? t('settings.cursor.notLoggedIn')
+    : t('settings.cursor.connected', { linked: status.linkedCount || 0, total: accounts.length });
   setCursorStatusText(statusEl, summary);
-  loginBtn.classList.add('hidden');
-  logoutBtn.classList.remove('hidden');
-  refreshBtn.classList.remove('hidden');
-  manualPanel.classList.add('hidden');
-  setCursorCheckboxesEnabled(true);
+  setCursorCheckboxesEnabled(accounts.some((account) => !account.expired && !account.error));
+  listEl.replaceChildren();
+  if (accounts.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'settings-note';
+    empty.textContent = t('settings.cursor.empty');
+    listEl.append(empty);
+  } else {
+    for (const account of accounts) {
+      const enabled = account.enabled !== false;
+      const row = document.createElement('div');
+      row.className = 'managed-account-row';
+      row.classList.toggle('disabled', !enabled);
+      const fallbackId = String(account.id || '');
+      const accountName = account.email || account.label || (fallbackId ? `…${fallbackId.slice(-8)}` : t('settings.cursor.unnamedAccount'));
+      const input = document.createElement('input');
+      input.className = 'managed-account-checkbox';
+      input.type = 'checkbox';
+      input.checked = enabled;
+      input.setAttribute('aria-label', t('settings.cursor.toggleAccount', { account: accountName }));
+      const main = document.createElement('div');
+      main.className = 'managed-account-main';
+      const name = document.createElement('div');
+      name.className = 'managed-account-email';
+      name.textContent = accountName;
+      main.append(name);
+      const planLabel = account.membershipType
+        ? limitProviderPresentationApi.limitProviderDisplayLabel(account.membershipType)
+        : t('settings.cursor.webAccount');
+      input.addEventListener('change', async () => {
+        input.disabled = true;
+        const result = await window.tokenMonitor.cursor.setAccountEnabled(account.id, input.checked);
+        if (!result?.ok) {
+          state.cursorAccount = { ...state.cursorAccount, error: result?.error || t('settings.cursor.toggleFailed') };
+        } else {
+          state.cursorAccount = { status: result.status, error: '', busy: false };
+          refreshStats({ force: true }).catch(() => {});
+        }
+        renderCursorStatus();
+      });
+      const right = document.createElement('span');
+      right.className = 'managed-account-right';
+      const info = document.createElement('div');
+      info.className = 'managed-account-info';
+      info.textContent = !enabled
+        ? t('settings.cursor.disabled')
+        : account.expired
+          ? t('settings.cursor.expiredShort')
+          : account.error
+            ? t('settings.common.error')
+            : planLabel;
+      info.title = info.textContent;
+      right.append(info);
+      if (account.removable === true && !managementBlocked) {
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'managed-account-remove';
+        remove.textContent = '✕';
+        remove.title = t('settings.cursor.remove');
+        remove.setAttribute('aria-label', t('settings.cursor.remove'));
+        let confirmingRemove = false;
+        remove.addEventListener('click', async () => {
+          if (!confirmingRemove) {
+            confirmingRemove = true;
+            remove.classList.add('confirming');
+            remove.textContent = '✓';
+            remove.title = t('settings.cursor.removeConfirm', { account: accountName });
+            remove.setAttribute('aria-label', remove.title);
+            return;
+          }
+          remove.disabled = true;
+          const result = await window.tokenMonitor.cursor.logout(account.id);
+          if (!result?.ok) {
+            const message = result?.code === 'EXTERNAL_AGENT_ACTIVE'
+              ? t('settings.cursor.agentActive')
+              : result?.error || t('settings.cursor.removeFailed');
+            state.cursorAccount = { ...state.cursorAccount, error: message };
+          } else {
+            state.cursorAccount = { status: result.status, error: '', busy: false };
+            refreshStats({ force: true }).catch(() => {});
+          }
+          renderCursorStatus();
+        });
+        right.append(remove);
+      }
+      row.append(input, main, right);
+      listEl.append(row);
+    }
+  }
   renderSettingsSummaries();
 }
 
-async function refreshCursorStatus() {
-  state.cursorAccount = { status: null, error: '' };
+async function refreshCursorStatus({ force = false, discover = false } = {}) {
+  state.cursorAccount = { status: null, error: '', busy: true };
   renderCursorStatus();
   try {
-    const status = await window.tokenMonitor.cursor.status();
-    state.cursorAccount = { status, error: '' };
+    const status = await window.tokenMonitor.cursor.status({ force, discover });
+    state.cursorAccount = { status, error: '', busy: false };
   } catch (err) {
-    state.cursorAccount = { status: null, error: err.message };
+    state.cursorAccount = { status: null, error: err.message, busy: false };
   }
   renderCursorStatus();
 }
@@ -15060,22 +15280,27 @@ function setupCursorAccountUI() {
   }
 
   document.getElementById('cursorSettingsToggle').addEventListener('click', () => {
-    setCursorAccountExpanded(!state.cursorAccountExpanded);
+    const expanding = !state.cursorAccountExpanded;
+    setCursorAccountExpanded(expanding);
+    if (expanding && !state.cursorAccount.busy) void refreshCursorStatus({ discover: true });
   });
   setCursorAccountExpanded(false);
 
+  const cursorAddAccountButton = document.getElementById('cursorAddAccountButton');
+  const cursorManualDetails = document.getElementById('cursorManualDetails');
+  function setCursorManualExpanded(expanded) {
+    const next = Boolean(expanded);
+    cursorAddAccountButton?.setAttribute('aria-expanded', next ? 'true' : 'false');
+    cursorManualDetails?.classList.toggle('hidden', !next);
+    document.getElementById('cursorManualPanel')?.classList.toggle('expanded', next);
+  }
+  cursorAddAccountButton?.addEventListener('click', () => {
+    setCursorManualExpanded(cursorManualDetails?.classList.contains('hidden'));
+  });
+  setCursorManualExpanded(false);
+
   document.getElementById('cursorLoginButton').addEventListener('click', () => {
-    window.tokenMonitor.openExternal('https://cursor.com/settings');
-  });
-
-  document.getElementById('cursorLogoutButton').addEventListener('click', async () => {
-    await window.tokenMonitor.cursor.logout();
-    await refreshCursorStatus();
-    await refreshStats({ force: true });
-  });
-
-  document.getElementById('cursorRefreshButton').addEventListener('click', () => {
-    refreshCursorStatus();
+    window.tokenMonitor.openExternal('https://cursor.com/dashboard');
   });
 
   document.getElementById('cursorManualSubmit').addEventListener('click', async () => {
@@ -15084,17 +15309,21 @@ function setupCursorAccountUI() {
     errorEl.classList.add('hidden');
     const result = await window.tokenMonitor.cursor.loginManual(input.value);
     if (!result.ok) {
-      errorEl.textContent = t('settings.cursor.loginFailed', { message: result.error });
+      const message = result.code === 'EXTERNAL_AGENT_ACTIVE'
+        ? t('settings.cursor.agentActive')
+        : result.error;
+      errorEl.textContent = t('settings.cursor.loginFailed', { message });
       errorEl.classList.remove('hidden');
       return;
     }
     input.value = '';
-    await refreshCursorStatus();
-    setCursorAccountExpanded(false);
+    state.cursorAccount = { status: result.status, error: '', busy: false };
+    renderCursorStatus();
+    setCursorManualExpanded(false);
     await refreshStats({ force: true });
   });
 
-  refreshCursorStatus();
+  refreshCursorStatus({ discover: true });
 
   const opencodeToggle = document.getElementById('opencodeSettingsToggle');
   if (opencodeToggle) {
@@ -15302,6 +15531,7 @@ function setupCursorAccountUI() {
     document.getElementById('thirdpartyProfileSubmit')?.addEventListener('click', async () => {
       const nameInput = document.getElementById('thirdpartyProfileName');
       const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
+      const refreshTokenInput = document.getElementById('thirdpartyRefreshTokenInput');
       const userIdInput = document.getElementById('thirdpartyUserIdInput');
       const keyInput = document.getElementById('thirdpartyApiKeyInput');
       const endpointPathInput = document.getElementById('thirdpartyEndpointPathInput');
@@ -15316,6 +15546,7 @@ function setupCursorAccountUI() {
       const adapter = selectedThirdPartyAdapter();
       const baseUrl = String(baseUrlInput?.value || '').trim();
       const accessToken = String(accessTokenInput?.value || '').trim();
+      const refreshToken = String(refreshTokenInput?.value || '').trim();
       const userId = String(userIdInput?.value || '').trim();
       const apiKey = String(keyInput?.value || '').trim();
       errorEl?.classList.add('hidden');
@@ -15324,6 +15555,7 @@ function setupCursorAccountUI() {
         adapter,
         baseUrl,
         accessToken,
+        refreshToken,
         userId,
         apiKey,
         endpointPath: String(endpointPathInput?.value || '').trim(),
@@ -15339,6 +15571,7 @@ function setupCursorAccountUI() {
         baseUrlInput.value = '';
         updateThirdPartyHttpWarning();
         accessTokenInput.value = '';
+        refreshTokenInput.value = '';
         userIdInput.value = '';
         keyInput.value = '';
         endpointPathInput.value = '/user/balance';
@@ -15351,7 +15584,7 @@ function setupCursorAccountUI() {
         renderThirdPartyProfiles();
         await refreshStats({ force: true });
       } else if (errorEl) {
-        errorEl.textContent = thirdPartyProfileErrorText(result);
+        errorEl.textContent = thirdPartyProfileErrorText(result, adapter);
         errorEl.classList.remove('hidden');
       }
     });

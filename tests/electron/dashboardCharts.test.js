@@ -53,6 +53,9 @@ test('modelVendorFor maps families and modelColor falls back deterministically',
   assert.equal(modelVendorFor('gpt-5'), 'codex');
   assert.equal(modelVendorFor('kimi-k2'), 'kimi');
   assert.equal(modelVendorFor('moonshot-v1'), 'kimi');
+  assert.equal(modelVendorFor('k2d6-agent'), 'kimi');
+  assert.equal(modelVendorFor('k3-agent'), 'kimi');
+  assert.equal(modelVendorFor('k3-agent-swarm'), 'kimi');
   assert.equal(modelVendorFor('doubao-seed-1.6'), 'doubao');
   assert.equal(modelVendorFor('hy3'), 'hunyuan');
   assert.equal(modelVendorFor('hunyuan-t1'), 'hunyuan');

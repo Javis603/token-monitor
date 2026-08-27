@@ -48,10 +48,10 @@ const supportedToolOrder = [
   'OpenCode',
   'Hermes Agent',
   'OpenClaw',
-  'Cursor',
+  'Cursor IDE / Cursor CLI',
   'Antigravity',
   'Cline',
-  'Kimi CLI / Kimi Code',
+  'Kimi CLI / Kimi Code / Kimi Work',
   'Qwen CLI',
   'Grok Build',
   'GitHub Copilot',
@@ -109,7 +109,7 @@ const supportedToolIdOrder = [
   'volcengine',
   'ollama',
   'trae',
-  'newapi'
+  'thirdparty'
 ];
 
 // Exact counts, not "at least": a floor check would still pass after new tools land, which is
@@ -179,8 +179,7 @@ const README_ICON_TO_LIMIT_PROVIDERS = {
   xai: ['grok'],
   'mimo-code': ['mimo'],
   zcode: ['zai', 'zaiteam'],
-  volcengine: ['volcengine', 'volcagent'],
-  newapi: ['thirdparty']
+  volcengine: ['volcengine', 'volcagent']
 };
 
 test('limit provider order follows the supported-tools table', () => {

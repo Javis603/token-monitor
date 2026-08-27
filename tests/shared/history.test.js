@@ -35,9 +35,13 @@ test('num coerces finite numbers and strings, else 0', () => {
   assert.equal(num(undefined), 0);
 });
 
-test('sumTokens adds the additive components and excludes reasoning', () => {
+test('sumTokens adds disjoint Tokscale reasoning only for opted-in clients', () => {
   const b = { input: 10, output: 20, cacheRead: 100, cacheWrite: 5, reasoning: 999 };
   assert.equal(sumTokens(b), 135);
+  assert.equal(sumTokens(b, 'codex'), 1134);
+  assert.equal(sumTokens(b, 'dsh'), 1134);
+  assert.equal(sumTokens(b, 'reasonix'), 1134);
+  assert.equal(sumTokens(b, 'claude'), 135);
   assert.equal(sumTokens({}), 0);
   assert.equal(sumTokens(null), 0);
 });
@@ -95,6 +99,31 @@ test('parseGraphResult folds client rows into perClient/perModel and derives day
     unclassifiedTokens: 0,
     cacheReadTokens: 2, cacheWriteTokens: 1, outputTokens: 5
   });
+});
+
+test('parseGraphResult folds OMP graph rows into the existing Pi history identity', () => {
+  const { contributions } = parseGraphResult({
+    contributions: [{
+      date: '2026-08-25',
+      clients: [
+        {
+          client: 'pi', modelId: 'gpt-5',
+          tokens: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+          cost: 1, messages: 1
+        },
+        {
+          client: 'omp', modelId: 'gpt-5',
+          tokens: { input: 20, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+          cost: 2, messages: 1
+        }
+      ]
+    }]
+  });
+
+  assert.deepEqual(contributions[0].perClient, {
+    pi: { tokens: 30, cost: 3, messages: 2, unclassifiedTokens: 0 }
+  });
+  assert.equal(Object.hasOwn(contributions[0].perClient, 'omp'), false);
 });
 
 test('parseGraphResult is defensive about missing/garbage input', () => {

@@ -4,8 +4,10 @@ name: Vendored tokscale
 # exercises ensure-vendored-tokscale.js / verify-vendored-tokscale.js on any
 # platform before a real release. This gate runs those steps (no
 # electron-builder, no signing) on the same 4 targets release.yml packages,
-# so a broken asset, checksum, or DSH regression fails fast on a PR instead
-# of at release time.
+# so an executable or DSH regression fails fast on a PR instead of at release
+# time. A separate job verifies that every native target declared by the
+# upstream npm package exists in the immutable vendor Release and matches its
+# manifest checksum, including targets that cannot execute on these runners.
 #
 # This is also the only place "does tokscale support client X" gets checked
 # against the binary Token Monitor actually ships. A client can be merged
@@ -31,11 +33,13 @@ on:
       - 'scripts/ensure-vendored-tokscale.js'
       - 'scripts/verify-vendored-tokscale.js'
       - 'scripts/verify-vendored-tokscale-clients.js'
+      - 'scripts/verify-vendored-tokscale-release.js'
       - 'scripts/vendoredTokscale.js'
       - 'src/shared/tokscaleCapabilities.js'
       - 'src/shared/collector.js'
       - 'tests/shared/tokscaleCapabilities.test.js'
       - 'tests/shared/ensureVendoredTokscale.test.js'
+      - 'tests/shared/verifyVendoredTokscaleRelease.test.js'
       - 'tests/shared/vendoredScriptContract.test.js'
       - 'tests/shared/collectorCapabilityFallback.test.js'
       - '.github/workflows/release.yml'
@@ -48,6 +52,24 @@ on:
     paths: *vendor_tokscale_paths
 
 jobs:
+  verify-release-assets:
+    name: verify all release assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Verify every upstream native target and published asset
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/verify-vendored-tokscale-release.js
+
   verify:
     strategy:
       fail-fast: false

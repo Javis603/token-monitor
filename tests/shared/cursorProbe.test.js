@@ -120,7 +120,7 @@ test('probe includes legacy request usage when auth returns a user id', async ()
   const calls = [];
   const fakeHttps = {
     request(opts, cb) {
-      calls.push(opts.path);
+      calls.push({ path: opts.path, referer: opts.headers.Referer });
       let payload;
       if (opts.path === '/api/usage-summary') {
         payload = {
@@ -151,7 +151,11 @@ test('probe includes legacy request usage when auth returns a user id', async ()
   assert.equal(result.ok, true);
   assert.equal(result.usage.requestsUsed, 4);
   assert.equal(result.usage.requestsLimit, 8);
-  assert.deepEqual(calls.sort(), ['/api/auth/me', '/api/usage-summary', '/api/usage?user=user_1'].sort());
+  assert.deepEqual(
+    calls.map((call) => call.path).sort(),
+    ['/api/auth/me', '/api/usage-summary', '/api/usage?user=user_1'].sort()
+  );
+  assert.deepEqual(new Set(calls.map((call) => call.referer)), new Set(['https://cursor.com/dashboard']));
 });
 
 test('probe destroys in-flight HTTPS requests when the parent signal aborts', async () => {

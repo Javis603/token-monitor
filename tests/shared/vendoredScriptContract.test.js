@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 const packageJson = require('../../package.json');
 
@@ -52,4 +54,11 @@ test('only the mac-widget CI structural build opts out of a strict cross-arch en
   for (const name of ['dist:mac:x64', 'dist:mac:widget:x64', 'dist:mac', 'dist:mac:widget', 'dist:win', 'dist:win:dir', 'dist:linux', 'pack', 'pack:mac:widget']) {
     assert.doesNotMatch(packageJson.scripts[name], /--allow-missing-target-package/, name);
   }
+});
+
+test('vendored CI keeps the complete Release asset verifier wired in', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'vendor-tokscale.yml'), 'utf8');
+  assert.match(workflow, /verify-release-assets:/);
+  assert.match(workflow, /node scripts\/verify-vendored-tokscale-release\.js/);
+  assert.match(workflow, /'scripts\/verify-vendored-tokscale-release\.js'/);
 });

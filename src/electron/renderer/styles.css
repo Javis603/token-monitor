@@ -3422,7 +3422,9 @@ html.is-windows .settings-panel select option {
 .row-icon-trae       { -webkit-mask-image: url(../../../assets/icons/trae.svg);          mask-image: url(../../../assets/icons/trae.svg); }
 .row-icon-qodercn    { -webkit-mask-image: url(../../../assets/icons/qodercn.svg);      mask-image: url(../../../assets/icons/qodercn.svg); }
 .row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
-.row-icon-thirdparty { -webkit-mask-image: url(../../../assets/icons/newapi.svg);         mask-image: url(../../../assets/icons/newapi.svg); }
+.row-icon-thirdparty { -webkit-mask-image: url(../../../assets/icons/thirdparty.svg);      mask-image: url(../../../assets/icons/thirdparty.svg); }
+.row-icon-newapi    { -webkit-mask-image: url(../../../assets/icons/newapi.svg);           mask-image: url(../../../assets/icons/newapi.svg); }
+.row-icon-sub2api   { -webkit-mask-image: url(../../../assets/icons/sub2api.svg);          mask-image: url(../../../assets/icons/sub2api.svg); }
 .row-icon-token-monitor { -webkit-mask-image: url(../../../assets/icons/token-monitor.svg); mask-image: url(../../../assets/icons/token-monitor.svg); }
 .row-icon-os-apple   { -webkit-mask-image: url(../../../assets/icons/os-apple.svg);      mask-image: url(../../../assets/icons/os-apple.svg); }
 .row-icon-os-linux   { -webkit-mask-image: url(../../../assets/icons/os-linux.svg);      mask-image: url(../../../assets/icons/os-linux.svg); }
@@ -3530,8 +3532,16 @@ html.is-windows .settings-panel select option {
   mask-image: url(../../../assets/icons/xiaomi.svg);
 }
 .limit-icon-thirdparty {
+  -webkit-mask-image: url(../../../assets/icons/thirdparty.svg);
+  mask-image: url(../../../assets/icons/thirdparty.svg);
+}
+.limit-icon-newapi {
   -webkit-mask-image: url(../../../assets/icons/newapi.svg);
   mask-image: url(../../../assets/icons/newapi.svg);
+}
+.limit-icon-sub2api {
+  -webkit-mask-image: url(../../../assets/icons/sub2api.svg);
+  mask-image: url(../../../assets/icons/sub2api.svg);
 }
 .row-label {
   display: grid;
@@ -5068,7 +5078,9 @@ html.is-windows .limit-live-badge {
 #opencodeErrorMessage.hidden,
 #openrouterErrorMessage.hidden,
 #thirdpartyErrorMessage.hidden,
+#thirdpartySub2ApiSteps.hidden,
 #thirdpartyAccessTokenRow.hidden,
+#thirdpartyRefreshTokenRow.hidden,
 #thirdpartyUserIdRow.hidden,
 #thirdpartyApiKeyRow.hidden,
 #thirdpartyModeField.hidden,
@@ -5986,6 +5998,12 @@ html.is-windows .limit-live-badge {
 }
 .opencode-add-details {
   margin-top: 8px;
+}
+/* Cursor sits below both the account list and its own provider copy, so the
+   shared add-details margin doubles the visual step before the first action.
+   The form wrapper already supplies the same separation used by MiMo. */
+#cursorManualDetails {
+  margin-top: 0;
 }
 .opencode-add-body {
   display: flex;

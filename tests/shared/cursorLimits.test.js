@@ -53,7 +53,7 @@ test('fetchCursorLimits returns ok with Cursor billing dimensions when probe suc
   assert.equal(result.windows[3].resetDescription, '');
 });
 
-test('fetchCursorLimits humanizes underscored membership types for the account label', async () => {
+test('fetchCursorLimits prefers account identity over the plan for the account label', async () => {
   const result = await fetchCursorLimits({}, {
     readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
     probe: async () => ({
@@ -63,7 +63,107 @@ test('fetchCursorLimits humanizes underscored membership types for the account l
     })
   });
   assert.equal(result.status, 'ok');
-  assert.equal(result.accountLabel, 'Pro Student');
+  assert.equal(result.accountLabel, 'a@b.com');
+});
+
+test('fetchCursorLimits probes every saved account and uses API email labels', async () => {
+  const calls = [];
+  const result = await fetchCursorLimits({}, {
+    listAccounts: () => [
+      { id: 'b', sessionToken: 'tok-b', userId: 'user-b', label: 'work' },
+      { id: 'a', sessionToken: 'tok-a', userId: 'user-a', label: 'personal' }
+    ],
+    probe: async (token) => {
+      calls.push(token);
+      return {
+        ok: true,
+        usage: { planPercent: token === 'tok-b' ? 20 : 40, membershipType: 'pro' },
+        user: { email: `${token}@example.com`, sub: token }
+      };
+    }
+  });
+  assert.deepEqual(calls, ['tok-b', 'tok-a']);
+  assert.deepEqual(result.map((provider) => provider.accountLabel), ['tok-b@example.com', 'tok-a@example.com']);
+  assert.deepEqual(result.map((provider) => provider.accountEmail), ['tok-b@example.com', 'tok-a@example.com']);
+  assert.deepEqual(result.map((provider) => provider.planLabel), ['Pro', 'Pro']);
+  assert.equal(new Set(result.map((provider) => provider.accountKey)).size, 2);
+});
+
+test('fetchCursorLimits keys the same Cursor API subject identically across different local stores', async () => {
+  const probe = async () => ({
+    ok: true,
+    usage: { planPercent: 10, membershipType: 'free' },
+    user: { email: 'same@example.com', sub: 'user_canonical' }
+  });
+  const first = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'anon-local-a', sessionToken: 'token-a', userId: null }),
+    probe
+  });
+  const second = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'anon-local-b', sessionToken: 'token-b', userId: null }),
+    probe
+  });
+
+  assert.equal(first.accountKey, second.accountKey);
+  assert.equal(first.accountEmail, 'same@example.com');
+});
+
+test('fetchCursorLimits keeps prefixed API subjects stable across a failed probe fallback', async () => {
+  const account = { id: 'user_canonical', sessionToken: 'token', userId: 'user_canonical' };
+  const success = await fetchCursorLimits({}, {
+    readActiveAccount: () => account,
+    probe: async () => ({
+      ok: true,
+      usage: { planPercent: 10, membershipType: 'free' },
+      user: { email: 'same@example.com', sub: 'auth0|user_canonical' }
+    })
+  });
+  const unauthorized = await fetchCursorLimits({}, {
+    readActiveAccount: () => account,
+    probe: async () => ({ ok: false, error: { kind: 'unauthorized', message: 'HTTP 401' } })
+  });
+
+  assert.equal(success.accountKey, unauthorized.accountKey);
+});
+
+test('fetchCursorLimits keeps opaque local fallback identities distinct when no canonical user id is available', async () => {
+  const result = await fetchCursorLimits({}, {
+    listAccounts: () => [
+      { id: 'anon-local-a', sessionToken: 'token-a', userId: null },
+      { id: 'anon-local-b', sessionToken: 'token-b', userId: null }
+    ],
+    probe: async () => ({ ok: false, error: { kind: 'unauthorized', message: 'HTTP 401' } })
+  });
+
+  assert.equal(result.length, 2);
+  assert.equal(new Set(result.map((provider) => provider.accountKey)).size, 2);
+});
+
+test('fetchCursorLimits probes only enabled Cursor accounts', async () => {
+  const calls = [];
+  const deps = {
+    listAccounts: () => [
+      { id: 'work', sessionToken: 'tok-work', userId: 'user-work' },
+      { id: 'personal', sessionToken: 'tok-personal', userId: 'user-personal' }
+    ],
+    probe: async (token) => {
+      calls.push(token);
+      return {
+        ok: true,
+        usage: { planPercent: 10, membershipType: 'pro' },
+        user: { email: `${token}@example.com`, sub: token }
+      };
+    }
+  };
+
+  const result = await fetchCursorLimits({ cursorDisabledAccountIds: ['work'] }, deps);
+  assert.deepEqual(calls, ['tok-personal']);
+  assert.equal(result.accountLabel, 'tok-personal@example.com');
+
+  calls.length = 0;
+  const disabled = await fetchCursorLimits({ cursorDisabledAccountIds: ['work', 'personal'] }, deps);
+  assert.equal(disabled.status, 'notConfigured');
+  assert.deepEqual(calls, []);
 });
 
 test('fetchCursorLimits includes team pool when Cursor reports pooled usage', async () => {

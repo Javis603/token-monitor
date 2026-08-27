@@ -139,7 +139,7 @@ async function ensureVendoredTokscale({
     throw new Error(
       `Installed ${entry.package} is ${installedVersion}, but this vendor override was built against ` +
         `${manifest.baseVersion}. The tokscale dependency has moved — update scripts/vendor/tokscale.json to a ` +
-        'new pinned build, or set its "mode" to "upstream" if the installed version already includes DSH support.'
+        'new pinned build, or set its "mode" to "upstream" if the installed version already includes the pinned source commit.'
     );
   }
 
