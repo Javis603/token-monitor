@@ -166,6 +166,7 @@ function emptyPeriod() {
     clientModels: {},
     clientModelCosts: {},
     projects: Object.create(null),
+    accounts: Object.create(null),
     sessions: {}
   };
 }
@@ -298,6 +299,78 @@ function applyProjectRollups(summary) {
   return summary;
 }
 
+// ---------------------------------------------------------------------------
+// Account attribution — the per-account analogue of the project rollup. A
+// session that carries an accountKey (WorkBuddy's database user id, a Trae CN
+// account id, ...) books its tokens on `client:accountKey`, so an account that
+// was signed out and replaced keeps its own history while the per-tool totals
+// stay the sum of every account.
+
+function accountRollupKey(client, accountKey) {
+  const clientKey = normalizeClientName(client) || String(client || '').trim();
+  const account = String(accountKey || '').trim();
+  if (!clientKey || !account) return '';
+  return `${clientKey}:${account}`;
+}
+
+function emptyAccount(client, accountKey) {
+  return {
+    client: normalizeClientName(client) || String(client || '').trim(),
+    accountKey: String(accountKey || '').trim(),
+    tokens: 0,
+    costUsd: 0
+  };
+}
+
+function addAccountInto(accounts, rawKey, source) {
+  const key = String(rawKey || '').trim();
+  if (!key || !source || typeof source !== 'object') return;
+  if (!hasOwn(accounts, key)) {
+    accounts[key] = emptyAccount(source.client, source.accountKey || key);
+  }
+  const account = accounts[key];
+  account.tokens += Math.max(0, Math.round(asNumber(source.tokens)));
+  account.costUsd += asNumber(source.costUsd);
+}
+
+function normalizeAccounts(value) {
+  const accounts = Object.create(null);
+  for (const [rawKey, source] of Object.entries(value || {})) {
+    const key = accountRollupKey(source?.client, source?.accountKey) || String(rawKey || '').trim();
+    if (!key) continue;
+    addAccountInto(accounts, key, source);
+  }
+  return accounts;
+}
+
+function accountRollupFromSessions(sessions) {
+  const accounts = Object.create(null);
+  for (const session of Object.values(sessions || {})) {
+    if (isReasonixSyntheticSession(session)) continue;
+    const accountKey = String(session?.accountKey || '').trim();
+    if (!accountKey) continue;
+    const key = accountRollupKey(session.client, accountKey);
+    if (!key) continue;
+    addAccountInto(accounts, key, {
+      client: session.client,
+      accountKey,
+      tokens: Math.max(0, Math.round(asNumber(session.totalTokens))),
+      costUsd: asNumber(session.costUsd)
+    });
+  }
+  return accounts;
+}
+
+function applyAccountRollups(summary) {
+  if (!summary || typeof summary !== 'object') return summary;
+  for (const periodName of PERIODS) {
+    const period = summary.periods?.[periodName] || summary[periodName];
+    if (!period || typeof period !== 'object') continue;
+    period.accounts = accountRollupFromSessions(period.sessions);
+  }
+  return summary;
+}
+
 function normalizeTrackedClients(value) {
   const values = Array.isArray(value) ? value : String(value ?? '').split(',');
   return Array.from(new Set(values.map(normalizeClientName).filter(Boolean)));
@@ -421,6 +494,7 @@ function emptySession(client, id) {
   return {
     client,
     sessionId: id,
+    accountKey: '',
     totalTokens: 0,
     costUsd: 0,
     messageCount: 0,
@@ -442,6 +516,10 @@ function emptySession(client, id) {
 const sessionsWithLiveSource = new WeakSet();
 
 function mergeSession(target, source) {
+  // First writer wins: the collector tags the account once at scan time and
+  // the archive keeps it, so a later merge with an unattributed copy must not
+  // erase the account that earned the tokens.
+  if (!target.accountKey && source.accountKey) target.accountKey = String(source.accountKey);
   target.totalTokens += Math.max(0, Math.round(asNumber(source.totalTokens)));
   target.costUsd += asNumber(source.costUsd);
   target.messageCount += Math.max(0, Math.round(asNumber(source.messageCount)));
@@ -499,6 +577,7 @@ function sessionFromRow(row) {
   const id = detectSessionId(row);
   if (!id) return null;
   const session = emptySession(client, id);
+  session.accountKey = String(row.accountKey || row.account_key || '').trim();
   session.totalTokens = Math.max(0, Math.round(tokenValueForClient(row, client)));
   session.costUsd = costValue(row);
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
@@ -524,6 +603,7 @@ function normalizeSession(input, fallbackKey) {
   const id = normalizeSessionId(input.sessionId || input.session_id || input.session || input.conversationId || input.conversation_id || input.threadId || input.thread_id || fallbackKey);
   if (!client || client === REASONIX_CLIENT || !id) return null;
   const session = emptySession(client, id);
+  session.accountKey = String(input.accountKey || input.account_key || '').trim();
   const components = sessionTokenComponents(input);
   Object.assign(session, components);
   const componentTotal = components.inputTokens + components.outputTokens + components.cacheReadTokens + components.cacheWriteTokens; // reasoning is a subset of output — see TOKEN_COMPONENT_KEYS
@@ -702,6 +782,12 @@ function normalizePeriod(input, options = {}) {
   period.projects = projectsEnabled
     ? (hasOwn(input, 'projects') ? normalizeProjects(input.projects) : projectRollupFromSessions(period.sessions))
     : Object.create(null);
+  // Account attribution is independent of the projects opt-out: it costs one
+  // pass over the session map and only sessions that actually carry an account
+  // key (WorkBuddy, Trae CN, ...) produce entries.
+  period.accounts = hasOwn(input, 'accounts')
+    ? normalizeAccounts(input.accounts)
+    : accountRollupFromSessions(period.sessions);
   if (
     period.unclassifiedTokens > 0
     || Object.keys(period.clientUnclassifiedTokens).length > 0
@@ -1261,6 +1347,7 @@ function addPeriodInto(target, source) {
     }
   }
   for (const [key, project] of Object.entries(source.projects || {})) addProjectInto(target.projects, key, project);
+  for (const [key, account] of Object.entries(source.accounts || {})) addAccountInto(target.accounts, key, account);
   for (const session of Object.values(source.sessions)) addSession(target, session);
   return target;
 }
@@ -1447,6 +1534,7 @@ module.exports = {
   addPeriodInto,
   aggregateDevices,
   aggregateHistory,
+  applyAccountRollups,
   applyPeriodDelta,
   applyProjectRollups,
   canonicalProjectKey,

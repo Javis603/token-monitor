@@ -203,7 +203,7 @@ const {
   writeSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
-const { aggregateDevices, aggregateHistory, applyProjectRollups } = require('../shared/usage');
+const { aggregateDevices, aggregateHistory, applyAccountRollups, applyProjectRollups } = require('../shared/usage');
 const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const {
@@ -370,7 +370,7 @@ const SMART_COLLECTION_INTERVAL_MS = 10 * 60 * 1000;
 const DEFAULT_COLLECTION_INTERVAL_MS = 5 * 60 * 1000;
 const HUB_DEFAULT_PORT = 17321;
 const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
-const DEFAULT_VIEW_LIST = ['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'].map((id) => ({ id }));
+const DEFAULT_VIEW_LIST = ['home', 'tool', 'status', 'device', 'model', 'project', 'account', 'session', 'limits', 'trends'].map((id) => ({ id }));
 const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends'].map((id) => ({ id }));
 const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
 
@@ -2388,7 +2388,10 @@ function summaryWithArchivesApplied(summary, sessionArchive, now) {
   const visibleSummary = settings?.sessionUsageArchiveEnabled === false
     ? withArchivedClients
     : applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
-  return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
+  // Archived sessions carry their account key, so the account rollup must be
+  // recomputed after they are merged in — same contract as the project rollup.
+  const withAccountRollups = applyAccountRollups(visibleSummary);
+  return settings?.projectsEnabled === false ? withAccountRollups : applyProjectRollups(withAccountRollups);
 }
 
 function summaryWithArchivedClientUsage(summary) {

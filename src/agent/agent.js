@@ -13,7 +13,7 @@ const {
   parseLimitProviders
 } = require('../shared/limitCollector');
 const { postSyncPayload } = require('../shared/syncPayload');
-const { applyProjectRollups } = require('../shared/usage');
+const { applyAccountRollups, applyProjectRollups } = require('../shared/usage');
 const { runAgent, runAgentOnce } = require('./runtime');
 const {
   applySessionUsageArchive,
@@ -114,7 +114,10 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
     }
     visibleSummary = applySessionUsageArchive(summary, next, { now: archiveDate });
   }
-  return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
+  // Archived sessions carry their account key, so the account rollup must be
+  // recomputed after they are merged in — same contract as the project rollup.
+  const withAccountRollups = applyAccountRollups(visibleSummary);
+  return projectsEnabled ? applyProjectRollups(withAccountRollups) : withAccountRollups;
 }
 
 async function postUsage(summary) {

@@ -142,7 +142,8 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Interface & surfaces
 
-- **Breakdown views** — grouped by tool, device, model, session, project, or account limits
+- **Per-account usage attribution** — tools that stamp sessions with an account id (WorkBuddy today) keep usage booked to the account that earned it, so signing out and switching to a new account keeps each account's history separate in the Accounts view while tool totals stay the sum of every account
+- **Breakdown views** — grouped by tool, device, model, project, account, session, or account limits
 - **Menu bar (macOS) and system tray (Windows) popover** — live cost, tokens, or the closest-to-empty provider limit % next to the icon
 - **Floating Bubble mode** — collapses the widget into a draggable mini-window with click or hover preview and tray-style content
 - **Menu bar layout composer** — the menu bar and the floating bubble can use a built-in preset or a layout you build yourself: pick "Custom…" to add AI tool icons, quota bars, percentages, reset times, cost, or custom text, drag to reorder against a live preview, and give each item its own AI tool, account, quota window, and typeface
