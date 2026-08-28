@@ -756,13 +756,34 @@ test('configured session quota picks surface every account of a multi-account pr
     }
   };
 
-  // Round one keeps the historical per-provider representative (lowest
-  // remaining); the second account is appended as an extra entry instead of
-  // being dropped — that entry is what the two-row tray icon renders.
+  // Without an order table the stats order is preserved; the second account
+  // is appended as an extra entry instead of being dropped — that entry is
+  // what the two-row tray icon renders.
   const picks = pickConfiguredSessionLimits(limitStats, {
     limitProviderOrder: 'minimax',
     limitProviders: 'minimax',
     showLimitUsed: false
+  });
+  assert.deepEqual(picks.map((pick) => pick.providerRecord.accountKey), ['a', 'b']);
+});
+
+test('multi-account tray entries follow the configured account order, not the remaining quota', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'minimax', status: 'ok', accountKey: 'a', windows: [{ kind: 'session', remainingPercent: 80 }] },
+        { provider: 'minimax', status: 'ok', accountKey: 'b', windows: [{ kind: 'session', remainingPercent: 30 }] }
+      ]
+    }
+  };
+
+  // 用户把 b 排在第一位时，托盘两行的顺序就是 b 在上、a 在下——与谁剩
+  // 得多无关。
+  const picks = pickConfiguredSessionLimits(limitStats, {
+    limitProviderOrder: 'minimax',
+    limitProviders: 'minimax',
+    showLimitUsed: false,
+    accountOrderByProvider: { minimax: ['b', 'a'] }
   });
   assert.deepEqual(picks.map((pick) => pick.providerRecord.accountKey), ['b', 'a']);
 });
@@ -877,7 +898,7 @@ test('session bar mode falls back to weekly only when no session exists', () => 
   assert.equal(sessionPick.primaryWindow.kind, 'session');
 });
 
-test('configured provider account selection prefers session over fallback windows', () => {
+test('configured provider account selection keeps the stats order without an order table', () => {
   const limitStats = {
     limits: {
       providers: [
@@ -887,12 +908,15 @@ test('configured provider account selection prefers session over fallback window
     }
   };
 
-  const [pick] = pickConfiguredLimitProviders(limitStats, {
+  // 账号顺序语义：无顺序表时保持 stats 顺序（不再按窗口 kind / 剩余
+  // 重排）——两个账号条目都入选，各自按自己的主窗口展示。
+  const picks = pickConfiguredLimitProviders(limitStats, {
     limitProviderOrder: 'codex',
     limitProviders: 'codex'
   });
-  assert.equal(pick.providerRecord.accountLabel, 'session');
-  assert.equal(pick.primaryWindow.kind, 'session');
+  assert.deepEqual(picks.map((pick) => pick.providerRecord.accountLabel), ['weekly', 'session']);
+  assert.equal(picks[0].primaryWindow.kind, 'weekly');
+  assert.equal(picks[1].primaryWindow.kind, 'session');
 });
 
 test('configured provider selection preserves an explicit empty filter', () => {
@@ -1040,7 +1064,7 @@ test('kind-specific resolver can select billing from a mixed-window provider', (
   assert.equal(pick.remaining, 9);
 });
 
-test('tray session quota text keeps lowest-remaining account selection when showing used percent', () => {
+test('tray session quota text keeps the configured account order when showing used percent', () => {
   const limitStats = {
     limits: {
       providers: [
@@ -1051,13 +1075,15 @@ test('tray session quota text keeps lowest-remaining account selection when show
     }
   };
 
+  // 账号顺序语义：title 取前两个条目 = codex 第一个账号（main，已用
+  // 20%）+ claude（已用 60%），不再把剩余最低的 work 顶到前面。
   assert.equal(
     formatTrayText(limitStats, 'limitsAllSessions', 'USD', {
       limitProviderOrder: 'codex,claude',
       limitProviders: 'codex,claude',
       showLimitUsed: true
     }),
-    '70% · 60%'
+    '20% · 60%'
   );
 });
 

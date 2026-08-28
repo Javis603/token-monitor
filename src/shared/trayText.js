@@ -324,18 +324,22 @@
         weeklyPercent: selection.secondaryWindow?.kind === 'weekly' ? secondaryPercent : null
       };
     };
-    // 供应商内的条目排序沿用旧规则：主窗口 kind 优先（session>weekly>
-    // billing），同级取剩余最低。
-    const byWindowKindThenRemaining = (a, b) => {
-      const rank = (candidate) => ['session', 'weekly', 'billing'].indexOf(candidate.primaryWindow.kind);
-      return rank(a) - rank(b) || a.remaining - b.remaining;
+    // 供应商内的条目顺序：多账号供应商按用户在设置里维护的账号顺序
+    //（options.accountOrderByProvider: provider → accountKey 列表）稳定
+    // 排列——托盘上两行账号的位置不随剩余额度浮动；不在顺序表里的行
+    //（其他设备同步来的账号、单 key 兼容行）排在已知账号之后，保持
+    // 原相对顺序。单账号供应商只有一条候选，不受影响。
+    const accountOrderRank = (id, candidate) => {
+      const order = options.accountOrderByProvider?.[id];
+      if (!order) return Number.MAX_SAFE_INTEGER;
+      const index = order.indexOf(candidate.providerRecord.accountKey);
+      return index === -1 ? Number.MAX_SAFE_INTEGER : index;
     };
 
-    // 账号条目分两轮入选：第一轮每供应商取一条代表条（与旧版「每供应
-    // 商择一」完全一致），第二轮把多账号供应商的其余账号条目按同序补
-    // 在末尾——MiniMax 双账号这类场景两条都能进入候选，而单账号供应商
-    // 的展示顺序与截断行为保持不变。不再在此截断到两家：title 与托盘
-    // 位图各自决定取几条（前 2）。
+    // 账号条目分两轮入选：第一轮每供应商取一条代表条，第二轮把多账号
+    // 供应商的其余账号条目按同序补在末尾——MiniMax 双账号这类场景两条
+    // 都能进入候选，且顺序与设置页一致。不再在此截断到两家：title 与
+    // 托盘位图各自决定取几条（前 2）。
     const picks = [];
     const extras = [];
     for (const id of configuredProviderOrder(providers, options)) {
@@ -345,10 +349,10 @@
         if (candidate) candidates.push(candidate);
       }
       if (!candidates.length) continue;
-      candidates.sort(byWindowKindThenRemaining);
+      candidates.sort((a, b) => accountOrderRank(id, a) - accountOrderRank(id, b));
       picks.push(candidates[0]);
       if (candidates.length > 1) {
-        extras.push(...candidates.slice(1).sort(byWindowKindThenRemaining));
+        extras.push(...candidates.slice(1));
       }
     }
     return [...picks, ...extras];

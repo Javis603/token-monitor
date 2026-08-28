@@ -11952,10 +11952,20 @@ function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors =
 }
 
 function pickConfiguredSessionProviders(stats, configOrder) {
+  // 托盘账号条目的顺序 = 用户在设置里维护的账号顺序（跨多账号供应商），
+  // 与剩余额度无关；单账号供应商不提供顺序表。
+  const accountOrderByProvider = {};
+  for (const provider of ['mimo', 'minimax', 'deepseek', 'zai', 'codex']) {
+    const accounts = state.settings?.[`${provider}ManagedAccounts`];
+    if (Array.isArray(accounts) && accounts.length > 1) {
+      accountOrderByProvider[provider] = accounts.map((account) => account.accountKey);
+    }
+  }
   return window.TokenMonitorTrayText.pickConfiguredLimitProviders(stats, {
     limitProviderOrder: configOrder,
     limitProviders: configOrder,
-    showLimitUsed: Boolean(state.settings?.showLimitUsed)
+    showLimitUsed: Boolean(state.settings?.showLimitUsed),
+    accountOrderByProvider
   });
 }
 
