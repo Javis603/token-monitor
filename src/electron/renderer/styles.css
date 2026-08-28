@@ -1238,6 +1238,31 @@ span.settings-note.settings-item-desc {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+.managed-account-grip {
+  flex: 0 0 auto;
+  width: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: grab;
+  opacity: 0.45;
+  user-select: none;
+  transition: opacity 0.15s, color 0.15s;
+}
+.managed-account-row:hover .managed-account-grip {
+  opacity: 0.85;
+}
+.managed-account-grip:active {
+  cursor: grabbing;
+  color: var(--text);
+}
+/* 拖拽插入位置指示：目标行的上/下边缘高亮 */
+.managed-account-row.drag-over-top {
+  box-shadow: 0 -2px 0 0 var(--accent, #1688f8);
+}
+.managed-account-row.drag-over-bottom {
+  box-shadow: 0 2px 0 0 var(--accent, #1688f8);
+}
 .managed-account-rename {
   flex: 0 0 auto;
   width: 18px;

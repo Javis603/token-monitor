@@ -13336,11 +13336,11 @@ function localProviderStatuses(name) {
   return providers.filter((provider) => provider.provider === name);
 }
 
-// 设置页托管账号列表的共用渲染（MiMo / MiniMax）。骨架完全同构：状态
-// pill（x/y linked）、账号行（启停勾选、标题、副信息、二次确认删除）、
-// 空态与错误条。差异只在 i18n 文案 key、账号标题/副信息派生、settings
-// 数组与 IPC 通道，经 config 注入；i18n key 在调用点写字面量，保持可
-// 被文案扫描工具识别。
+// 设置页托管账号列表的共用渲染（MiMo / MiniMax / DeepSeek / Z.ai）。
+// 骨架完全同构：状态 pill（x/y linked）、账号行（可选拖拽把手、启停
+// 勾选、标题、副信息、二次确认删除）、空态与错误条。差异只在 i18n
+// 文案 key、账号标题/副信息派生、settings 数组与 IPC 通道，经 config
+// 注入；i18n key 在调用点写字面量，保持可被文案扫描工具识别。
 function renderManagedAccountList(config) {
   const statusEl = document.getElementById(config.statusElId);
   const listEl = document.getElementById(config.listElId);
@@ -13359,12 +13359,75 @@ function renderManagedAccountList(config) {
   emptyEl.classList.toggle('hidden', accounts.length > 0);
 
   listEl.replaceChildren();
+  // 拖拽排序（config.reorderAccounts 存在时启用）：把手固定在行首，
+  // 只从把手启动拖拽，避免干扰行内的勾选/按钮交互。拖拽中在目标行
+  // 的上/下半侧画插入指示线；松手后按完整 id 顺序幂等重排。
+  let draggingAccountId = '';
+  const clearDragFeedback = () => {
+    listEl.querySelectorAll('.drag-over-top,.drag-over-bottom').forEach((node) => {
+      node.classList.remove('drag-over-top', 'drag-over-bottom');
+    });
+  };
   for (const [index, account] of accounts.entries()) {
     const enabled = account.enabled !== false;
     const accountName = config.accountTitle(account, index);
     const row = document.createElement('div');
     row.className = 'managed-account-row';
     row.classList.toggle('disabled', !enabled);
+
+    if (config.reorderAccounts) {
+      const grip = document.createElement('span');
+      grip.className = 'managed-account-grip';
+      grip.textContent = '⠿';
+      grip.title = t('settings.managedAccounts.reorder');
+      grip.setAttribute('aria-label', t('settings.managedAccounts.reorder'));
+      grip.draggable = true;
+      grip.addEventListener('dragstart', (event) => {
+        draggingAccountId = account.id;
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', account.id);
+      });
+      grip.addEventListener('dragend', () => {
+        draggingAccountId = '';
+        clearDragFeedback();
+      });
+      row.append(grip);
+
+      row.addEventListener('dragover', (event) => {
+        if (!draggingAccountId || draggingAccountId === account.id) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        clearDragFeedback();
+        const before = event.offsetY < row.offsetHeight / 2;
+        row.classList.add(before ? 'drag-over-top' : 'drag-over-bottom');
+      });
+      row.addEventListener('dragleave', () => {
+        row.classList.remove('drag-over-top', 'drag-over-bottom');
+      });
+      row.addEventListener('drop', async (event) => {
+        if (!draggingAccountId || draggingAccountId === account.id) return;
+        event.preventDefault();
+        const before = event.offsetY < row.offsetHeight / 2;
+        clearDragFeedback();
+        const current = config.accounts();
+        const moved = current.find((entry) => entry.id === draggingAccountId);
+        if (!moved) return;
+        const targetIndex = current.findIndex((entry) => entry.id === account.id);
+        const next = current.filter((entry) => entry.id !== draggingAccountId);
+        next.splice(targetIndex === -1 ? next.length : (before ? targetIndex : targetIndex + 1), 0, moved);
+        draggingAccountId = '';
+        const result = await config.reorderAccounts(next.map((entry) => entry.id));
+        if (!result?.ok) {
+          state[config.errorStateKey] = result?.error || t('settings.managedAccounts.reorderFailed');
+        } else {
+          state[config.errorStateKey] = '';
+          config.applyAccounts(result.accounts || []);
+        }
+        config.rerender();
+        // 顺序是托盘账号条目的排序源，触发一次 stats 推送让位图立即重画。
+        refreshStats({ force: false }).catch(() => {});
+      });
+    }
 
     const input = document.createElement('input');
     input.className = 'managed-account-checkbox';
@@ -13836,6 +13899,7 @@ function renderApiKeyAccountStatus(provider) {
     accountTitle: apiKeyAccountTitle,
     accountInfo: apiKeyAccountInfo,
     api: window.tokenMonitor[provider],
+    reorderAccounts: (orderedIds) => window.tokenMonitor[provider].reorderAccounts(orderedIds),
     beginEdit: (account) => openApiKeyAccountEditor(provider, account),
     rerender: () => renderApiKeyAccountStatus(provider),
     textKeys: {

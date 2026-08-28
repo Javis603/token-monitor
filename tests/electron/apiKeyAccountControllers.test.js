@@ -177,3 +177,31 @@ test('migrateLegacyKey keeps the legacy path when the settings write fails', () 
   assert.equal(state.settings.minimaxApiKey, KEY_A, 'legacy key preserved');
   assert.deepEqual(state.settings.minimaxManagedAccounts, []);
 });
+
+test('reorderAccounts rewrites the display order and tolerates partial input', async () => {
+  const { state, controller } = createHarness();
+  const first = await controller.addAccount(KEY_A, '');
+  const second = await controller.addAccount(KEY_B, '');
+  const third = await controller.addAccount('sk-cp-cccc', '');
+  const ids = first.accounts.map((entry) => entry.id);
+
+  // 把第二个账号拖到最前：完整 id 顺序幂等重排。
+  const secondId = second.accounts.find((entry) => entry.keySuffix === 'bbbb').id;
+  const thirdId = third.accounts.find((entry) => entry.keySuffix === 'cccc').id;
+  const result = await controller.reorderAccounts([secondId, ...ids]);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.accounts.map((entry) => entry.keySuffix), ['bbbb', 'aaaa', 'cccc']);
+  assert.equal(state.settings.minimaxManagedAccounts.map((entry) => entry.keySuffix).join(''), 'bbbbaaaacccc');
+
+  // 漏传的账号保持在尾部，未知 id 被忽略——重排永远收敛。
+  const partial = await controller.reorderAccounts([thirdId, 'unknown-id']);
+  assert.equal(partial.ok, true);
+  assert.deepEqual(partial.accounts.map((entry) => entry.keySuffix), ['cccc', 'bbbb', 'aaaa']);
+
+  // 顺序未变时跳过持久化。
+  state.persisted = 0;
+  const unchanged = await controller.reorderAccounts(partial.accounts.map((entry) => entry.id));
+  assert.equal(unchanged.ok, true);
+  assert.equal(state.persisted, 0);
+});

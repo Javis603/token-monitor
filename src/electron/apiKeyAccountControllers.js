@@ -221,11 +221,43 @@ function createApiKeyAccountController(config) {
     }
   }
 
-  // 标准托管账号 channel 之外的两条供应商特有通道（add 带标签参数、
-  // update 带三参），与 registerManagedAccountIpc 的三条一起注册。
+  // 拖拽排序：完整 id 顺序幂等重排（顺序是展示顺序的源头——设置页列表、
+  // limits 页组内、托盘多账号行的顺序都读它）。纯展示变更：不触碰凭据、
+  // 不需要 limits 失效；漏传/未知的 id 容错处理（未知忽略、漏掉的保持
+  // 在尾部），保证重排永远收敛。
+  function reorderAccounts(orderedIds) {
+    const ids = (Array.isArray(orderedIds) ? orderedIds : []).map((id) => String(id || '').trim()).filter(Boolean);
+    const accounts = readAccounts();
+    const byId = new Map(accounts.map((entry) => [entry.id, entry]));
+    const next = [];
+    for (const id of ids) {
+      const entry = byId.get(id);
+      if (entry) {
+        next.push(entry);
+        byId.delete(id);
+      }
+    }
+    for (const remaining of byId.values()) next.push(remaining);
+    if (next.length === accounts.length && next.every((entry, index) => entry.id === accounts[index].id)) {
+      return { ok: true, accounts: accountsForRenderer() };
+    }
+    writeAccounts(next);
+    try {
+      persistSettings();
+    } catch (_) {
+      return { ok: false, error: 'Could not persist account order' };
+    }
+    broadcastChange();
+    return { ok: true, accounts: accountsForRenderer() };
+  }
+
+  // 标准托管账号 channel 之外的三条供应商特有通道（add 带标签参数、
+  // update 带三参、reorder 带完整顺序），与 registerManagedAccountIpc 的
+  // 三条一起注册。
   function registerIpc(ipcMain) {
     ipcMain.handle(`${provider}:addAccount`, (_event, apiKey, accountLabel) => addAccount(apiKey, accountLabel));
     ipcMain.handle(`${provider}:updateAccount`, (_event, id, apiKey, accountLabel) => updateAccount(id, apiKey, accountLabel));
+    ipcMain.handle(`${provider}:reorderAccounts`, (_event, orderedIds) => reorderAccounts(orderedIds));
     registerManagedAccountIpc(ipcMain, provider, {
       listAccounts: accountsForRenderer,
       setAccountEnabled: lifecycle.setAccountEnabled,
@@ -238,6 +270,7 @@ function createApiKeyAccountController(config) {
     managedAccountsForCollector,
     addAccount,
     updateAccount,
+    reorderAccounts,
     migrateLegacyKey,
     lifecycle,
     registerIpc,

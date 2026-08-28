@@ -29,7 +29,7 @@ function factoryChannels(source) {
   const providerTable = source.match(/const apiKeyAccountProviders = \{[\s\S]*?\};/);
   if (providerTable) {
     for (const match of providerTable[0].matchAll(/^\s{2}(minimax|deepseek|zai):\s*\{/gm)) {
-      for (const suffix of ['accounts', 'addAccount', 'updateAccount', 'setAccountEnabled', 'removeAccount']) {
+      for (const suffix of ['accounts', 'addAccount', 'updateAccount', 'reorderAccounts', 'setAccountEnabled', 'removeAccount']) {
         channels.push(`${match[1]}:${suffix}`);
       }
     }

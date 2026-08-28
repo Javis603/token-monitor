@@ -93,6 +93,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     accounts: () => ipcRenderer.invoke('minimax:accounts'),
     addAccount: (apiKey, accountLabel) => ipcRenderer.invoke('minimax:addAccount', apiKey, accountLabel),
     updateAccount: (id, apiKey, accountLabel) => ipcRenderer.invoke('minimax:updateAccount', id, apiKey, accountLabel),
+    reorderAccounts: (orderedIds) => ipcRenderer.invoke('minimax:reorderAccounts', orderedIds),
     removeAccount: (id) => ipcRenderer.invoke('minimax:removeAccount', id),
     setAccountEnabled: (id, enabled) => ipcRenderer.invoke('minimax:setAccountEnabled', id, enabled),
     onAccounts: (callback) => {
@@ -105,6 +106,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     accounts: () => ipcRenderer.invoke('deepseek:accounts'),
     addAccount: (apiKey, accountLabel) => ipcRenderer.invoke('deepseek:addAccount', apiKey, accountLabel),
     updateAccount: (id, apiKey, accountLabel) => ipcRenderer.invoke('deepseek:updateAccount', id, apiKey, accountLabel),
+    reorderAccounts: (orderedIds) => ipcRenderer.invoke('deepseek:reorderAccounts', orderedIds),
     removeAccount: (id) => ipcRenderer.invoke('deepseek:removeAccount', id),
     setAccountEnabled: (id, enabled) => ipcRenderer.invoke('deepseek:setAccountEnabled', id, enabled),
     onAccounts: (callback) => {
@@ -117,6 +119,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     accounts: () => ipcRenderer.invoke('zai:accounts'),
     addAccount: (apiKey, accountLabel) => ipcRenderer.invoke('zai:addAccount', apiKey, accountLabel),
     updateAccount: (id, apiKey, accountLabel) => ipcRenderer.invoke('zai:updateAccount', id, apiKey, accountLabel),
+    reorderAccounts: (orderedIds) => ipcRenderer.invoke('zai:reorderAccounts', orderedIds),
     removeAccount: (id) => ipcRenderer.invoke('zai:removeAccount', id),
     setAccountEnabled: (id, enabled) => ipcRenderer.invoke('zai:setAccountEnabled', id, enabled),
     onAccounts: (callback) => {
