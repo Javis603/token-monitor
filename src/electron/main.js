@@ -571,7 +571,13 @@ function defaultSettings() {
       lastCheckedAt: null,
       lastKnownLatest: null,
       dismissedVersion: null
-    }
+    },
+    // Session-quota alert: pulse the widget border and send OS/ntfy notifications
+    // when a provider's remaining session quota falls below the threshold.
+    sessionAlertEnabled: false,
+    sessionAlertThreshold: 10,
+    ntfyEnabled: false,
+    ntfyTopic: ''
   };
 }
 
@@ -3818,7 +3824,9 @@ function sendSessionAlertIpc(active, triggered, activeAlerts) {
 // allWindows is an array of { kind, remainingPercent, resetsAt } for all quota
 // windows on this provider, so the message includes weekly/billing info and
 // the time until each window resets alongside the session percentage.
-async function sendNtfyNotification(url, providerName, sessionRemaining, allWindows) {
+// fetchFn defaults to the global fetch but callers should pass electronLimitsFetch()
+// so OS proxy settings are honoured (the same transport every provider uses).
+async function sendNtfyNotification(url, providerName, sessionRemaining, allWindows, fetchFn) {
   // Build a human-readable summary of all windows with a known percentage.
   const windowParts = (allWindows || [])
     .filter((w) => Number.isFinite(Number(w?.remainingPercent)))
@@ -3831,7 +3839,8 @@ async function sendNtfyNotification(url, providerName, sessionRemaining, allWind
   const body = windowParts || `session: ${sessionRemaining}% remaining`;
 
   try {
-    await fetch(url, {
+    const doFetch = typeof fetchFn === 'function' ? fetchFn : fetch;
+    await doFetch(url, {
       method: 'POST',
       headers: {
         'Title': `Token Monitor - ${providerName} session low`,
@@ -3874,7 +3883,7 @@ function checkSessionAlerts(stats) {
   // ntfy push notification — fires independently of alertEnabled.
   if (triggered.length > 0 && ntfyUrl) {
     for (const p of triggered) {
-      void sendNtfyNotification(ntfyUrl, p.provider, p.remaining, p.windows);
+      void sendNtfyNotification(ntfyUrl, p.provider, p.remaining, p.windows, electronLimitsFetch());
     }
   }
 }
