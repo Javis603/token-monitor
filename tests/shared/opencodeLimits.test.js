@@ -5,7 +5,14 @@ const test = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { DatabaseSync } = require('node:sqlite');
+
+// node:sqlite is stable on Node >=22.15.0 and Node >=23.5.0; older 23.x builds
+// need --experimental-sqlite. Guard the import so the whole suite does not crash
+// on those versions — tests that need a real DB are skipped automatically.
+let DatabaseSync = null;
+try { ({ DatabaseSync } = require('node:sqlite')); } catch (_) {}
+const sqliteAvailable = DatabaseSync != null;
+const sqliteSkip = sqliteAvailable ? false : 'node:sqlite unavailable (run with --experimental-sqlite on Node <23.5)';
 
 const oc = require('../../src/shared/opencodeLimits');
 
@@ -96,7 +103,7 @@ test('sumCost only counts rows in [start, end)', () => {
 // ---------------------------------------------------------------------------
 // Test 5: discoverDbPaths respects OPENCODE_DB env pointing at an existing file
 // ---------------------------------------------------------------------------
-test('discoverDbPaths respects OPENCODE_DB override', () => {
+test('discoverDbPaths respects OPENCODE_DB override', { skip: sqliteSkip }, () => {
   const file = makeDb([]);
   const result = oc.discoverDbPaths({ OPENCODE_DB: file });
   assert.deepStrictEqual(result, [file]);
@@ -128,7 +135,7 @@ test('discoverDbPaths scans data dir and filters filenames correctly', () => {
 // ---------------------------------------------------------------------------
 // Test 7: collectGo sums opencode-go cost, ignores opencode
 // ---------------------------------------------------------------------------
-test('collectGo sums opencode-go cost into session/weekly/monthly windows', () => {
+test('collectGo sums opencode-go cost into session/weekly/monthly windows', { skip: sqliteSkip }, () => {
   const now = Date.UTC(2026, 5, 4, 12, 0, 0);
   const file = makeDb([
     { providerID: 'opencode-go', cost: 3, createdMs: now - 60 * 60 * 1000 },         // 1h ago → in session
@@ -152,7 +159,7 @@ test('collectGo sums opencode-go cost into session/weekly/monthly windows', () =
 // ---------------------------------------------------------------------------
 // Test 8: collectGo → notConfigured when only non-go usage exists
 // ---------------------------------------------------------------------------
-test('collectGo returns notConfigured when only opencode (non-go) usage exists', () => {
+test('collectGo returns notConfigured when only opencode (non-go) usage exists', { skip: sqliteSkip }, () => {
   const now = Date.UTC(2026, 5, 4, 12, 0, 0);
   const file = makeDb([
     { providerID: 'opencode', cost: 5, createdMs: now - 1000 }
@@ -164,7 +171,7 @@ test('collectGo returns notConfigured when only opencode (non-go) usage exists',
 // ---------------------------------------------------------------------------
 // Test 8b: collectGo → unavailable when node:sqlite is absent
 // ---------------------------------------------------------------------------
-test('collectGo returns unavailable when sqlite module is absent', () => {
+test('collectGo returns unavailable when sqlite module is absent', { skip: sqliteSkip }, () => {
   const file = makeDb([{ providerID: 'opencode-go', cost: 1, createdMs: Date.now() }]);
   const result = oc.collectGo({ env: { OPENCODE_DB: file }, now: () => Date.now(), sqlite: null });
   assert.strictEqual(result.status, 'unavailable');
