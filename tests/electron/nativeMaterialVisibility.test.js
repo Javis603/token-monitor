@@ -12,7 +12,6 @@ const {
 
 function fakeWindow() {
   const listeners = new Map();
-  const states = [];
   const materials = [];
   let visible = false;
   let minimized = false;
@@ -25,9 +24,7 @@ function fakeWindow() {
     on(event, callback) { listeners.set(event, callback); },
     setMinimized(value) { minimized = value; },
     setVisible(value) { visible = value; },
-    setVibrancy(value) { materials.push(value); },
-    setVisualEffectState(value) { states.push(value); },
-    states
+    setVibrancy(value) { materials.push(value); }
   };
 }
 
@@ -43,7 +40,6 @@ test('native material is active only for a visible non-minimized macOS window', 
   syncNativeMaterialVisibility(win, true, 'win32');
 
   assert.deepEqual(win.materials, ['hud', null, null]);
-  assert.deepEqual(win.states, ['active', 'inactive', 'inactive']);
 });
 
 test('window lifecycle suspends and restores the latest material preference', () => {
@@ -60,12 +56,30 @@ test('window lifecycle suspends and restores the latest material preference', ()
   win.emit('restore');
 
   assert.deepEqual(win.materials, ['hud', null, null]);
-  assert.deepEqual(win.states, ['active', 'inactive', 'inactive']);
+});
+
+test('an unchanged material preference does not re-apply to the Dashboard', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const applyMaterial = main.slice(
+    main.indexOf('function applyNativeMaterial(source = settings)'),
+    main.indexOf('function createWindow(')
+  );
+
+  // applyNativeMaterial() runs on every floating-bubble collapse/expand, which
+  // carries no information about the Dashboard.
+  assert.match(
+    applyMaterial,
+    /dashboardWindowNativeBlurEnabled !== enabled\) \{\s*dashboardWindowNativeBlurEnabled = enabled;\s*syncNativeMaterialVisibility\(dashboardWindow, enabled\);/
+  );
 });
 
 test('main and Dashboard windows use the visibility-aware material lifecycle', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   assert.equal([...main.matchAll(/attachNativeMaterialVisibility\(win,/g)].length, 2);
-  assert.doesNotMatch(main, /vibrancy:\s*'hud'/);
+  // Electron has no setVisualEffectState, so 'active' can only be set at
+  // construction. Losing it makes macOS fall back to followWindow, which greys
+  // the glass out whenever the window is not key.
+  assert.equal([...main.matchAll(/visualEffectState: 'active'/g)].length, 2);
+  assert.doesNotMatch(main, /\.setVisualEffectState\(/);
   assert.equal([...main.matchAll(/syncNativeMaterialVisibility\((?:mainWindow|dashboardWindow),/g)].length, 2);
 });

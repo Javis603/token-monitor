@@ -2484,22 +2484,16 @@ function nativeBlurEnabled(source = settings) {
   return floatingBubbleNativeGlassEnabled(source);
 }
 
-function keepNativeBlurActive() {
-  if (!mainWindow) return;
-  if (!mainWindowNativeBlurEnabled) return;
-  if (!mainWindow.isVisible() || mainWindow.isMinimized()) return;
-  if (process.platform === 'darwin' && typeof mainWindow.setVisualEffectState === 'function') {
-    mainWindow.setVisualEffectState('active');
-  }
-}
-
 function applyNativeMaterial(source = settings) {
   const enabled = nativeBlurEnabled(source);
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindowNativeBlurEnabled = enabled;
     syncNativeMaterialVisibility(mainWindow, enabled);
   }
-  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+  // The Dashboard has its own lifecycle. This also runs on every floating-bubble
+  // collapse/expand, which says nothing about the Dashboard, so re-applying an
+  // unchanged material there would rebuild its native effect view for nothing.
+  if (dashboardWindow && !dashboardWindow.isDestroyed() && dashboardWindowNativeBlurEnabled !== enabled) {
     dashboardWindowNativeBlurEnabled = enabled;
     syncNativeMaterialVisibility(dashboardWindow, enabled);
   }
@@ -5834,6 +5828,13 @@ function createWindow(boundsOverride, options = {}) {
     // Keeps a popover unmaximizable across rebuilds, which never re-run enterTrayMode().
     ...(settings?.trayMode ? { maximizable: false } : {}),
     ...floatingBubbleWindowChrome(process.platform, collapsedFloatingBubble),
+    // visualEffectState is construction-time only — Electron exposes no setter for
+    // it (verified: BrowserWindow has setVibrancy but no setVisualEffectState), and
+    // it is what keeps the material vibrant while the window is not key. Without
+    // it macOS falls back to followWindow and the glass greys out on blur. The
+    // vibrancy here is immediately re-evaluated by applyNativeMaterial() below, so
+    // a window that is not on screen still ends up with no material attached.
+    ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass && !windowsAccent ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -5881,13 +5882,10 @@ function createWindow(boundsOverride, options = {}) {
   applyWindowSettings();
   attachNativeMaterialVisibility(win, () => mainWindowNativeBlurEnabled);
   applyNativeMaterial();
-  keepNativeBlurActive();
   win.on('focus', () => {
     stopFloatingBubbleAutoCollapseTimer();
-    keepNativeBlurActive();
   });
   win.on('blur', () => {
-    keepNativeBlurActive();
     if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) hidePopover();
     else if (!quitRequested) scheduleFloatingBubbleAutoCollapse();
   });
@@ -5912,7 +5910,14 @@ function createWindow(boundsOverride, options = {}) {
   win.on('restore', () => sendMainWindowVisibility(win));
   win.webContents.once('did-finish-load', () => {
     sendFloatingBubbleState();
-    sendMainWindowVisibility(win);
+    // Only report a window that is already on screen. A window still awaiting its
+    // reveal reports isVisible() === false, and loadWindowFile({ waitForContent })
+    // reveals it *because* the renderer painted real content — pushing "hidden"
+    // here stops that render, so the reveal could only come from the 2.5s
+    // fallback. Electron reports visibilityState 'visible' for a show:false
+    // window, which is the default the renderer keeps; trayMode instead seeds the
+    // hidden state through the windowHidden query flag.
+    if (win.isVisible()) sendMainWindowVisibility(win);
   });
   loadWindowFile(win, {
     waitForContent: options.waitForContent === true,
@@ -5993,6 +5998,7 @@ function createDashboardWindow() {
     backgroundColor: '#00000000',
     ...appWindowIcon(),
     skipTaskbar: false,
+    ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

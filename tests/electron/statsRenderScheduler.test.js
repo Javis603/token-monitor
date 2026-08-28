@@ -165,6 +165,55 @@ test('native window visibility covers a tray window that has never been shown', 
   assert.match(app, /return document\.hidden \|\| !state\.windowVisible;/);
 });
 
+test('a window awaiting its content-ready reveal is not reported as hidden', () => {
+  const main = fs.readFileSync(path.join(electronDir, 'main.js'), 'utf8');
+  const createWindow = main.slice(main.indexOf('function createWindow('), main.indexOf('function handleZoomShortcut('));
+  const finishLoad = createWindow.slice(createWindow.indexOf("win.webContents.once('did-finish-load'"));
+
+  // loadWindowFile({ waitForContent }) reveals on window:contentReady, which the
+  // renderer only sends once it renders — and it does not render while it
+  // believes it is hidden. Reporting the pre-reveal isVisible() === false here
+  // would leave the 2.5s fallback as the only way a replaced window can appear.
+  assert.match(finishLoad, /if \(win\.isVisible\(\)\) sendMainWindowVisibility\(win\);/);
+  assert.doesNotMatch(finishLoad, /^\s*sendMainWindowVisibility\(win\);/m);
+  assert.match(main, /win\.on\('show', \(\) => sendMainWindowVisibility\(win\)\)/);
+});
+
+test('a window revealed straight into Settings still reports painted content', () => {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const visibilityHandler = app.slice(
+    app.indexOf('function handleWindowVisibilityChange()'),
+    app.indexOf("document.addEventListener('visibilitychange'")
+  );
+  const settingsBranch = visibilityHandler.slice(
+    visibilityHandler.indexOf('if (isSettingsSurfaceVisible())'),
+    visibilityHandler.indexOf('} else {')
+  );
+
+  // clear() drops the catch-up render that would otherwise have signalled, and
+  // syncSettingsForm() is not a stats render, so the signal has to be explicit.
+  assert.match(settingsBranch, /statsRenderScheduler\.clear\(\)/);
+  assert.match(settingsBranch, /signalContentReady\(\);/);
+});
+
+test('the closed-Settings guard does not strand main-surface controls', () => {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const body = app.slice(app.indexOf('function syncSettingsForm()'), app.indexOf('function enabledClientSet()'));
+  const guard = body.indexOf('if (!isSettingsSurfaceVisible()) return;');
+
+  // The pin button lives in the header and is clickable while Settings is closed,
+  // so the only thing that redraws it has to run before the guard. Behind it, the
+  // icon silently keeps the previous mode while the window behaviour changes.
+  assert.ok(guard > 0);
+  assert.ok(body.indexOf('syncWindowBehaviorControls()') < guard);
+
+  // Nothing reached after the guard may write main-surface DOM.
+  const after = body.slice(guard);
+  for (const el of ['pinButton', 'shell', 'totalTokens', 'breakdown', 'homePanel', 'viewSwitcher']) {
+    assert.doesNotMatch(after, new RegExp(`els\\.${el}\\b`), `syncSettingsForm writes els.${el} behind the Settings guard`);
+  }
+});
+
 test('hidden event sources defer DOM work and visible surfaces catch up', () => {
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   const settingsPush = app.match(/window\.tokenMonitor\.onSettingsPush\?\.\(\(next\) => \{[\s\S]*?\n\}\);/)?.[0] || '';

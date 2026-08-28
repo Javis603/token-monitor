@@ -1,11 +1,13 @@
 'use strict';
 
+// Attaches or detaches the native material only. The active/inactive state of the
+// material is a construction-time BrowserWindow property (visualEffectState);
+// Electron ships no setVisualEffectState method, so calling one here would be a
+// silent no-op that reads as if the state were being managed.
 function syncNativeMaterialVisibility(win, enabled, platform = process.platform) {
   if (!win || win.isDestroyed?.() || platform !== 'darwin') return;
   const active = Boolean(enabled) && win.isVisible() && !win.isMinimized();
-  if (!active) win.setVisualEffectState?.('inactive');
   win.setVibrancy?.(active ? 'hud' : null);
-  if (active) win.setVisualEffectState?.('active');
 }
 
 function attachNativeMaterialVisibility(win, isEnabled, platform = process.platform) {

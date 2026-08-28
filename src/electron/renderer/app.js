@@ -8688,6 +8688,10 @@ function syncSettingsForm() {
   syncPeriodTabs();
   applyVendorColorOverrides(state.settings.vendorColors);
   applyAppearanceSettings(state.settings);
+  // Drives the header pin button as well as the Settings select, so it has to run
+  // whenever the window is on screen — the pin button is reachable, and changes,
+  // while the Settings panel is closed.
+  syncWindowBehaviorControls();
   if (!isSettingsSurfaceVisible()) return;
   syncHubModeUi();
   if (els.languageInput) els.languageInput.value = currentLanguage();
@@ -8763,7 +8767,6 @@ function syncSettingsForm() {
   );
   els.swapSettingsRefreshInput.checked = state.settings.settingsInTitlebar === true;
   els.discordRpcInput.checked = Boolean(state.settings.discordRpcEnabled);
-  syncWindowBehaviorControls();
   els.floatingBubbleInput.checked = state.settings.floatingBubbleEnabled === true;
   const floatingBubbleTrigger = state.settings.floatingBubbleTrigger === 'hover' ? 'hover' : 'click';
   for (const input of els.floatingBubbleTriggerInputs || []) input.checked = input.value === floatingBubbleTrigger;
@@ -11944,6 +11947,10 @@ function handleWindowVisibilityChange() {
     statsRenderScheduler.clear();
     syncSettingsForm();
     renderConnectionStatus('settings');
+    // syncSettingsForm() covers what the dropped catch-up render would have
+    // drawn, but it is not a stats render and never reaches signalContentReady().
+    // A window revealed straight into Settings must still report it has painted.
+    signalContentReady();
   } else {
     if (settingsDomSyncPending) syncSettingsForm();
     statsRenderScheduler.flush();
