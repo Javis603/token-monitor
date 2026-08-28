@@ -1196,6 +1196,10 @@ span.settings-note.settings-item-desc {
   border-radius: 6px;
   background: rgba(var(--sunken-rgb), 0.36);
 }
+/* 带拖拽把手的行多一列（把手 | 勾选 | 主体 | 右侧） */
+.managed-account-row.reorderable {
+  grid-template-columns: 14px 20px minmax(0, 1fr) auto;
+}
 .managed-account-row.disabled .managed-account-email,
 .managed-account-row.disabled .managed-account-info {
   color: var(--muted);
@@ -1256,12 +1260,11 @@ span.settings-note.settings-item-desc {
   cursor: grabbing;
   color: var(--text);
 }
-/* 拖拽插入位置指示：目标行的上/下边缘高亮 */
-.managed-account-row.drag-over-top {
-  box-shadow: 0 -2px 0 0 var(--accent, #1688f8);
-}
-.managed-account-row.drag-over-bottom {
-  box-shadow: 0 2px 0 0 var(--accent, #1688f8);
+/* 拖拽中的行：半透明「提起」，其余行由 FLIP 动画滑动让位 */
+.managed-account-row.dragging {
+  opacity: 0.4;
+  background: transparent;
+  border-style: dashed;
 }
 .managed-account-rename {
   flex: 0 0 auto;

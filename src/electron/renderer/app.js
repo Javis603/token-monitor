@@ -13359,14 +13359,37 @@ function renderManagedAccountList(config) {
   emptyEl.classList.toggle('hidden', accounts.length > 0);
 
   listEl.replaceChildren();
-  // 拖拽排序（config.reorderAccounts 存在时启用）：把手固定在行首，
-  // 只从把手启动拖拽，避免干扰行内的勾选/按钮交互。拖拽中在目标行
-  // 的上/下半侧画插入指示线；松手后按完整 id 顺序幂等重排。
-  let draggingAccountId = '';
-  const clearDragFeedback = () => {
-    listEl.querySelectorAll('.drag-over-top,.drag-over-bottom').forEach((node) => {
-      node.classList.remove('drag-over-top', 'drag-over-bottom');
-    });
+  // 拖拽排序（config.reorderAccounts 存在时启用）：把手固定在行首，只有
+  // 把手可启动拖拽。拖拽影像是整行（setDragImage），被拖行半透明「提起」；
+  // dragover 中实时重排 DOM，并用 FLIP 动画让其余行平滑滑动让位——
+  // 即「被挤走」的效果。松手（dragend）按最终 DOM 顺序一次性提交，
+  // 顺序未变化时不发请求。
+  // 立即取消所有行进行中的动画。挤开动画走 Web Animations API——动画
+  // 状态由浏览器管理、不写内联样式，取消即瞬时定格，不可能在松手后
+  // 残留缓动（旧的内联 transition 方案会因 dragend/rAF 时序产生慢速
+  // 回弹）。
+  const settleRowAnimations = () => {
+    for (const child of listEl.children) {
+      for (const animation of child.getAnimations()) animation.cancel();
+    }
+  };
+  const flipAnimate = (mutate) => {
+    settleRowAnimations();
+    const previousTops = new Map();
+    for (const child of listEl.children) {
+      previousTops.set(child, child.getBoundingClientRect().top);
+    }
+    mutate();
+    for (const child of listEl.children) {
+      const previousTop = previousTops.get(child);
+      if (previousTop === undefined) continue;
+      const delta = previousTop - child.getBoundingClientRect().top;
+      if (!delta) continue;
+      child.animate(
+        [{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }],
+        { duration: 160, easing: 'ease' }
+      );
+    }
   };
   for (const [index, account] of accounts.entries()) {
     const enabled = account.enabled !== false;
@@ -13376,6 +13399,7 @@ function renderManagedAccountList(config) {
     row.classList.toggle('disabled', !enabled);
 
     if (config.reorderAccounts) {
+      row.dataset.accountId = account.id;
       const grip = document.createElement('span');
       grip.className = 'managed-account-grip';
       grip.textContent = '⠿';
@@ -13383,49 +13407,85 @@ function renderManagedAccountList(config) {
       grip.setAttribute('aria-label', t('settings.managedAccounts.reorder'));
       grip.draggable = true;
       grip.addEventListener('dragstart', (event) => {
-        draggingAccountId = account.id;
+        row.classList.add('dragging');
         event.dataTransfer.effectAllowed = 'move';
         event.dataTransfer.setData('text/plain', account.id);
+        // 拖走的是整行：以行内按点为锚，让快照与光标相对位置一致。
+        const rect = row.getBoundingClientRect();
+        event.dataTransfer.setDragImage(row, event.clientX - rect.left, event.clientY - rect.top);
       });
       grip.addEventListener('dragend', () => {
-        draggingAccountId = '';
-        clearDragFeedback();
+        settleRowAnimations();
+        row.classList.remove('dragging');
+        const current = config.accounts();
+        const orderedIds = [...listEl.querySelectorAll('.managed-account-row')]
+          .map((node) => node.dataset.accountId);
+        const currentIds = current.map((entry) => entry.id);
+        if (orderedIds.length !== currentIds.length
+          || orderedIds.every((id, position) => id === currentIds[position])) return;
+        // 乐观更新：松手瞬间先本地重排并同步重渲染。IPC 往返期间到来的
+        // 任何重渲染（stats 推送等）都基于新序，列表不会闪回旧位置；
+        // 提交失败才回滚为拖动前的顺序。
+        const byId = new Map(current.map((entry) => [entry.id, entry]));
+        const optimistic = orderedIds.map((id) => byId.get(id)).filter(Boolean);
+        for (const entry of current) {
+          if (!optimistic.includes(entry)) optimistic.push(entry);
+        }
+        config.applyAccounts(optimistic);
+        config.rerender();
+        void (async () => {
+          const result = await config.reorderAccounts(orderedIds);
+          if (!result?.ok) {
+            state[config.errorStateKey] = result?.error || t('settings.managedAccounts.reorderFailed');
+            config.applyAccounts(current);
+          } else {
+            state[config.errorStateKey] = '';
+            config.applyAccounts(result.accounts || []);
+          }
+          config.rerender();
+          // 顺序是托盘账号条目的排序源，触发一次 stats 推送让位图立即重画。
+          refreshStats({ force: false }).catch(() => {});
+        })();
       });
+      row.classList.add('reorderable');
       row.append(grip);
 
       row.addEventListener('dragover', (event) => {
-        if (!draggingAccountId || draggingAccountId === account.id) return;
+        const draggingRow = listEl.querySelector('.managed-account-row.dragging');
+        if (!draggingRow || draggingRow === row) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = 'move';
-        clearDragFeedback();
-        const before = event.offsetY < row.offsetHeight / 2;
-        row.classList.add(before ? 'drag-over-top' : 'drag-over-bottom');
+        const rect = row.getBoundingClientRect();
+        const before = event.clientY < rect.top + rect.height / 2;
+        // 已处于该插入位置则跳过，避免重复触发动画。
+        if (before ? draggingRow.nextElementSibling === row : row.nextElementSibling === draggingRow) return;
+        flipAnimate(() => {
+          listEl.insertBefore(draggingRow, before ? row : row.nextElementSibling);
+        });
       });
-      row.addEventListener('dragleave', () => {
-        row.classList.remove('drag-over-top', 'drag-over-bottom');
-      });
-      row.addEventListener('drop', async (event) => {
-        if (!draggingAccountId || draggingAccountId === account.id) return;
+
+      // 必须显式接受放置：否则 macOS 会把整行快照（setDragImage）用系统
+      // 动画「飘回」拖动起点——看起来像行弹回原位，其实 DOM 已在新位置。
+      // 提交逻辑在 dragend 里，这里只负责接受。
+      row.addEventListener('drop', (event) => {
+        if (!listEl.querySelector('.managed-account-row.dragging')) return;
         event.preventDefault();
-        const before = event.offsetY < row.offsetHeight / 2;
-        clearDragFeedback();
-        const current = config.accounts();
-        const moved = current.find((entry) => entry.id === draggingAccountId);
-        if (!moved) return;
-        const targetIndex = current.findIndex((entry) => entry.id === account.id);
-        const next = current.filter((entry) => entry.id !== draggingAccountId);
-        next.splice(targetIndex === -1 ? next.length : (before ? targetIndex : targetIndex + 1), 0, moved);
-        draggingAccountId = '';
-        const result = await config.reorderAccounts(next.map((entry) => entry.id));
-        if (!result?.ok) {
-          state[config.errorStateKey] = result?.error || t('settings.managedAccounts.reorderFailed');
-        } else {
-          state[config.errorStateKey] = '';
-          config.applyAccounts(result.accounts || []);
-        }
-        config.rerender();
-        // 顺序是托盘账号条目的排序源，触发一次 stats 推送让位图立即重画。
-        refreshStats({ force: false }).catch(() => {});
+      });
+    }
+
+    // 列表整体也是有效放置区（松手在行间隙时不再回落），插入位置保持
+    // 拖动中最后一次重排的结果。listEl 是跨渲染存活的元素，用 dataset
+    // 标记保证监听器只绑一次。
+    if (config.reorderAccounts && listEl.dataset.reorderBound !== '1') {
+      listEl.dataset.reorderBound = '1';
+      listEl.addEventListener('dragover', (event) => {
+        if (!listEl.querySelector('.managed-account-row.dragging')) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+      });
+      listEl.addEventListener('drop', (event) => {
+        if (!listEl.querySelector('.managed-account-row.dragging')) return;
+        event.preventDefault();
       });
     }
 

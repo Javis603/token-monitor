@@ -105,12 +105,18 @@ test('preference drag only selects sortable rows, not nested controls', () => {
 
 // The handle-based lists still reorder by moving DOM nodes as the pointer
 // travels, with no transform animation. The two whole-row lists moved to the
-// transform model and carry their own guards in limitProviderDrag.test.js.
+// transform model and carry their own guards in limitProviderDrag.test.js, and
+// the managed-account list animates its own FLIP via WAAPI — so the translateY
+// ban is scoped to the preference-drag implementation, not the whole file.
 test('handle-based preference drag does not animate row transforms during pointer movement', () => {
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
-  assert.doesNotMatch(app, /animatePreferenceOrderChange/);
-  assert.doesNotMatch(app, /translateY\(/);
+  const dragImplementation = [
+    functionBody(app, 'preferenceRows', 'renderViewPreferences'),
+    functionBody(app, 'startPreferenceDrag', 'createPreferenceOrderHandle')
+  ].join('\n');
+  assert.doesNotMatch(dragImplementation, /animatePreferenceOrderChange/);
+  assert.doesNotMatch(dragImplementation, /translateY\(/);
   assert.doesNotMatch(cssRule(css, '.view-preference-row'), /transform/);
   assert.doesNotMatch(cssRule(css, '.preference-order-handle'), /transition:\s*transform/);
 });
