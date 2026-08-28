@@ -3858,8 +3858,11 @@ function checkSessionAlerts(stats) {
   const { triggered, anyActive, activeAlerts, clearVisual, ntfyUrl } =
     evaluateSessionAlerts(stats, settings, sessionAlertedKeys);
 
-  if (clearVisual) {
+  if (clearVisual || !settings?.sessionAlertEnabled) {
     sendSessionAlertIpc(false, []);
+  }
+
+  if (clearVisual) {
     return;
   }
 
