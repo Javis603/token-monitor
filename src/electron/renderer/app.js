@@ -11358,6 +11358,7 @@ els.sessionAlertThresholdInput?.addEventListener('change', async () => {
   const v = parseInt(els.sessionAlertThresholdInput.value, 10);
   if (Number.isFinite(v) && v >= 1 && v <= 99) {
     await saveSettings({ sessionAlertThreshold: v });
+    await refreshStats({ force: true });
   }
 });
 els.ntfyAlertEnabledInput?.addEventListener('change', async () => {
@@ -11903,7 +11904,24 @@ window.tokenMonitor.onStatsPush?.((payload) => {
 });
 
 window.tokenMonitor.onSessionAlert?.((payload) => {
-  els.shell?.classList.toggle('session-alert-active', Boolean(payload?.active));
+  const shell = els.shell;
+  if (!shell) return;
+  const isActive = Boolean(payload?.active);
+  shell.classList.toggle('session-alert-active', isActive);
+  if (isActive) {
+    // Compute pulse duration from the lowest remaining% across all active alerts.
+    // Linear interpolation: 5 s when just barely under threshold → 0.5 s at 0%.
+    const threshold = Math.max(1, Number(state.settings?.sessionAlertThreshold ?? 10));
+    const alerts = Array.isArray(payload?.activeAlerts) ? payload.activeAlerts : [];
+    const lowestRemaining = alerts.length > 0
+      ? Math.min(...alerts.map((a) => Number(a.remaining)))
+      : 0;
+    const ratio = Math.max(0, Math.min(1, lowestRemaining / threshold));
+    const duration = (0.5 + 4.5 * ratio).toFixed(2);
+    shell.style.setProperty('--pulse-duration', `${duration}s`);
+  } else {
+    shell.style.removeProperty('--pulse-duration');
+  }
 });
 
 function pickWorstProvider(stats) {

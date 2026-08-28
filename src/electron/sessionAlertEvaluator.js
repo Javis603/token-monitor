@@ -67,6 +67,7 @@ function evaluateSessionAlerts(stats, settings, alertedKeys) {
 
   const providers = stats?.limits?.providers || [];
   const triggered = [];
+  const activeAlerts = []; // rebuilt every call — all sessions currently below threshold
   let anyActive = false;
 
   for (const provider of providers) {
@@ -93,6 +94,9 @@ function evaluateSessionAlerts(stats, settings, alertedKeys) {
 
       if (remaining < threshold) {
         anyActive = true;
+        // Always track the current below-threshold state so the renderer can
+        // update the pulse speed proportionally (activeAlerts is rebuilt every call).
+        activeAlerts.push({ provider: providerName, remaining: Math.round(remaining) });
         if (!alertedKeys.has(key)) {
           // Newly crossed — record and queue for notification.
           alertedKeys.add(key);
@@ -109,7 +113,7 @@ function evaluateSessionAlerts(stats, settings, alertedKeys) {
     });
   }
 
-  return { triggered, anyActive, clearVisual: false, ntfyUrl: resolvedNtfyUrl };
+  return { triggered, anyActive, activeAlerts, clearVisual: false, ntfyUrl: resolvedNtfyUrl };
 }
 
 /**

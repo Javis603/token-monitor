@@ -58,6 +58,31 @@ test('normalizeNtfyUrl: ntfy.sh/ with no topic → null', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Pulse duration formula (mirrors app.js onSessionAlert logic)
+// ---------------------------------------------------------------------------
+
+function pulseDuration(remaining, threshold) {
+  const ratio = Math.max(0, Math.min(1, remaining / threshold));
+  return 0.5 + 4.5 * ratio;
+}
+
+test('pulse duration is 5 s when just at threshold boundary', () => {
+  assert.strictEqual(pulseDuration(10, 10), 5.0);
+});
+
+test('pulse duration is 0.5 s at 0% remaining', () => {
+  assert.strictEqual(pulseDuration(0, 10), 0.5);
+});
+
+test('pulse duration is 2.75 s at half the threshold', () => {
+  assert.strictEqual(pulseDuration(5, 10), 2.75);
+});
+
+test('pulse duration clamps below 0.5 for negative remaining', () => {
+  assert.strictEqual(pulseDuration(-5, 10), 0.5);
+});
+
+// ---------------------------------------------------------------------------
 // evaluateSessionAlerts — features disabled
 // ---------------------------------------------------------------------------
 
@@ -89,20 +114,24 @@ test('evaluateSessionAlerts: fires when session is below threshold', () => {
   const keys = new Set();
   const settings = { sessionAlertEnabled: true, sessionAlertThreshold: 10 };
   const stats = makeStats([provider('claude', [sessionWindow(5)])]);
-  const { triggered, anyActive } = evaluateSessionAlerts(stats, settings, keys);
+  const { triggered, anyActive, activeAlerts } = evaluateSessionAlerts(stats, settings, keys);
   assert.strictEqual(triggered.length, 1);
   assert.strictEqual(triggered[0].provider, 'claude');
   assert.strictEqual(triggered[0].remaining, 5);
   assert.strictEqual(anyActive, true);
+  // activeAlerts always reflects current below-threshold state for pulse speed
+  assert.strictEqual(activeAlerts.length, 1);
+  assert.strictEqual(activeAlerts[0].remaining, 5);
 });
 
 test('evaluateSessionAlerts: does not fire when session is at or above threshold', () => {
   const keys = new Set();
   const settings = { sessionAlertEnabled: true, sessionAlertThreshold: 10 };
   const stats = makeStats([provider('claude', [sessionWindow(10)])]);
-  const { triggered, anyActive } = evaluateSessionAlerts(stats, settings, keys);
+  const { triggered, anyActive, activeAlerts } = evaluateSessionAlerts(stats, settings, keys);
   assert.strictEqual(triggered.length, 0);
   assert.strictEqual(anyActive, false);
+  assert.strictEqual(activeAlerts.length, 0);
 });
 
 test('evaluateSessionAlerts: does not fire twice for the same session crossing', () => {
@@ -116,6 +145,9 @@ test('evaluateSessionAlerts: does not fire twice for the same session crossing',
   const second = evaluateSessionAlerts(stats, settings, keys);
   assert.strictEqual(second.triggered.length, 0);
   assert.strictEqual(second.anyActive, true); // still below, just not "newly" triggered
+  // activeAlerts still reports the current remaining so pulse speed stays live
+  assert.strictEqual(second.activeAlerts.length, 1);
+  assert.strictEqual(second.activeAlerts[0].remaining, 3);
 });
 
 test('evaluateSessionAlerts: re-arms after session recovers above threshold', () => {

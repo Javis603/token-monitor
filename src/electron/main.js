@@ -3809,9 +3809,9 @@ function scheduleMacWidgetSnapshot(stats, producerOwner) {
 const sessionAlertedKeys = new Set();
 const { evaluateSessionAlerts, formatResetsIn } = require('./sessionAlertEvaluator');
 
-function sendSessionAlertIpc(active, triggered) {
+function sendSessionAlertIpc(active, triggered, activeAlerts) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send('alert:sessionLow', { active, triggered }); } catch (_) {}
+  try { mainWindow.webContents.send('alert:sessionLow', { active, triggered, activeAlerts }); } catch (_) {}
 }
 
 // Sends a push notification to a pre-resolved ntfy.sh HTTPS URL.
@@ -3846,7 +3846,7 @@ async function sendNtfyNotification(url, providerName, sessionRemaining, allWind
 }
 
 function checkSessionAlerts(stats) {
-  const { triggered, anyActive, clearVisual, ntfyUrl } =
+  const { triggered, anyActive, activeAlerts, clearVisual, ntfyUrl } =
     evaluateSessionAlerts(stats, settings, sessionAlertedKeys);
 
   if (clearVisual) {
@@ -3868,7 +3868,7 @@ function checkSessionAlerts(stats) {
 
   // Visual state pushed to renderer (only when alertEnabled).
   if (alertEnabled) {
-    sendSessionAlertIpc(anyActive, triggered);
+    sendSessionAlertIpc(anyActive, triggered, activeAlerts);
   }
 
   // ntfy push notification — fires independently of alertEnabled.
