@@ -253,12 +253,12 @@ test('evaluateSessionAlerts: ntfyUrl is resolved when ntfy is enabled with valid
   const settings = {
     sessionAlertEnabled: false,
     ntfyEnabled: true,
-    ntfyTopic: 'https://ntfy.sh/token-monitor-matroad',
+    ntfyTopic: 'https://ntfy.sh/test-topic',
     sessionAlertThreshold: 10
   };
   const stats = makeStats([provider('claude', [sessionWindow(5)])]);
   const { triggered, ntfyUrl } = evaluateSessionAlerts(stats, settings, keys);
-  assert.strictEqual(ntfyUrl, 'https://ntfy.sh/token-monitor-matroad');
+  assert.strictEqual(ntfyUrl, 'https://ntfy.sh/test-topic');
   assert.strictEqual(triggered.length, 1);
 });
 

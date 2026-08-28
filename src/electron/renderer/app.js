@@ -302,7 +302,7 @@ const TOKEN_MONITOR_ISSUES_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/issues/new/cho
 const TOKEN_MONITOR_WEBSITE_URL = 'https://javis-ai.com/token-monitor/';
 const TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/blob/main/docs/wsl-sqlite-setup.md`;
 const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProviderPreferences;
-const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'sync'];
+const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'alerts', 'subscriptions', 'sync'];
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
 const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;
 const initialFloatingBubble = window.__TOKEN_MONITOR_INITIAL_FLOATING_BUBBLE__ || { collapsed: false, side: null };
@@ -454,6 +454,7 @@ Object.assign(els, {
   syncSettingsSummary: document.getElementById('syncSettingsSummary'),
   toolsSettingsSummary: document.getElementById('toolsSettingsSummary'),
   limitsSettingsSummary: document.getElementById('limitsSettingsSummary'),
+  alertsSettingsSummary: document.getElementById('alertsSettingsSummary'),
   generalSettingsSummary: document.getElementById('generalSettingsSummary'),
   mainSettingsSummary: document.getElementById('mainSettingsSummary'),
   windowSettingsSummary: document.getElementById('windowSettingsSummary'),
@@ -738,6 +739,15 @@ function settingsSectionSummary(section) {
       enabled: enabledLimitProviderSet().size,
       refresh: limitsRefreshSummaryLabel(state.settings)
     });
+  }
+  if (section === 'alerts') {
+    const visual = Boolean(state.settings?.sessionAlertEnabled);
+    const ntfy = Boolean(state.settings?.ntfyEnabled);
+    if (!visual && !ntfy) return t('settings.summary.alertsOff');
+    const parts = [];
+    if (visual) parts.push(t('settings.summary.alertsVisual'));
+    if (ntfy) parts.push(t('settings.summary.alertsNtfy'));
+    return parts.join(', ');
   }
   if (section === 'subscriptions') {
     const list = subscriptionList();
