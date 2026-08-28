@@ -44,6 +44,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     ipcRenderer.on('stats:push', listener);
     return () => ipcRenderer.removeListener('stats:push', listener);
   },
+  onSessionAlert: (callback) => {
+    const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
+    ipcRenderer.on('alert:sessionLow', listener);
+    return () => ipcRenderer.removeListener('alert:sessionLow', listener);
+  },
   onSettingsPush: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
     ipcRenderer.on('settings:push', listener);

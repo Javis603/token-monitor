@@ -302,7 +302,7 @@ const TOKEN_MONITOR_ISSUES_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/issues/new/cho
 const TOKEN_MONITOR_WEBSITE_URL = 'https://javis-ai.com/token-monitor/';
 const TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/blob/main/docs/wsl-sqlite-setup.md`;
 const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProviderPreferences;
-const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'sync'];
+const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'alerts', 'subscriptions', 'sync'];
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
 const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;
 const initialFloatingBubble = window.__TOKEN_MONITOR_INITIAL_FLOATING_BUBBLE__ || { collapsed: false, side: null };
@@ -454,6 +454,7 @@ Object.assign(els, {
   syncSettingsSummary: document.getElementById('syncSettingsSummary'),
   toolsSettingsSummary: document.getElementById('toolsSettingsSummary'),
   limitsSettingsSummary: document.getElementById('limitsSettingsSummary'),
+  alertsSettingsSummary: document.getElementById('alertsSettingsSummary'),
   generalSettingsSummary: document.getElementById('generalSettingsSummary'),
   mainSettingsSummary: document.getElementById('mainSettingsSummary'),
   windowSettingsSummary: document.getElementById('windowSettingsSummary'),
@@ -486,6 +487,14 @@ Object.assign(els, {
   resetVendorColorsButton: document.getElementById('resetVendorColorsButton'),
   sessionDetail: document.getElementById('session-detail'),
   sessionDetailHead: document.getElementById('session-detail-head')
+});
+Object.assign(els, {
+  sessionAlertEnabledInput: document.getElementById('sessionAlertEnabledInput'),
+  sessionAlertThresholdRow: document.getElementById('sessionAlertThresholdRow'),
+  sessionAlertThresholdInput: document.getElementById('sessionAlertThresholdInput'),
+  ntfyAlertEnabledInput: document.getElementById('ntfyAlertEnabledInput'),
+  ntfyTopicRow: document.getElementById('ntfyTopicRow'),
+  ntfyTopicInput: document.getElementById('ntfyTopicInput')
 });
 
 function toggleAccordionRow(row) {
@@ -730,6 +739,15 @@ function settingsSectionSummary(section) {
       enabled: enabledLimitProviderSet().size,
       refresh: limitsRefreshSummaryLabel(state.settings)
     });
+  }
+  if (section === 'alerts') {
+    const visual = Boolean(state.settings?.sessionAlertEnabled);
+    const ntfy = Boolean(state.settings?.ntfyEnabled);
+    if (!visual && !ntfy) return t('settings.summary.alertsOff');
+    const parts = [];
+    if (visual) parts.push(t('settings.summary.alertsVisual'));
+    if (ntfy) parts.push(t('settings.summary.alertsNtfy'));
+    return parts.join(', ');
   }
   if (section === 'subscriptions') {
     const list = subscriptionList();
@@ -8578,6 +8596,27 @@ function syncSettingsForm() {
   }
   els.showLimitSourceInput.checked = Boolean(state.settings.showLimitSource);
   els.maskLimitAccountEmailsInput.checked = Boolean(state.settings.maskLimitAccountEmails);
+  if (els.sessionAlertEnabledInput) {
+    els.sessionAlertEnabledInput.checked = Boolean(state.settings.sessionAlertEnabled);
+  }
+  if (els.ntfyAlertEnabledInput) {
+    els.ntfyAlertEnabledInput.checked = Boolean(state.settings.ntfyEnabled);
+  }
+  // Show the threshold input whenever either alert type is active.
+  const anyAlertActive = Boolean(state.settings.sessionAlertEnabled) || Boolean(state.settings.ntfyEnabled);
+  if (els.sessionAlertThresholdRow) {
+    els.sessionAlertThresholdRow.classList.toggle('hidden', !anyAlertActive);
+  }
+  if (els.sessionAlertThresholdInput) {
+    const threshold = Number(state.settings.sessionAlertThreshold);
+    els.sessionAlertThresholdInput.value = String(threshold > 0 ? threshold : 10);
+  }
+  if (els.ntfyTopicRow) {
+    els.ntfyTopicRow.classList.toggle('hidden', !state.settings.ntfyEnabled);
+  }
+  if (els.ntfyTopicInput) {
+    els.ntfyTopicInput.value = String(state.settings.ntfyTopic || '');
+  }
   renderSubscriptionSettings();
   const showLimitUsed = state.settings.showLimitUsed ? 'used' : 'remaining';
   for (const input of els.showLimitUsedInputs || []) input.checked = input.value === showLimitUsed;
@@ -11321,6 +11360,22 @@ els.maskLimitAccountEmailsInput.addEventListener('change', async () => {
   await saveSettings({ maskLimitAccountEmails: els.maskLimitAccountEmailsInput.checked });
   renderLimits();
 });
+els.sessionAlertEnabledInput?.addEventListener('change', async () => {
+  await saveSettings({ sessionAlertEnabled: els.sessionAlertEnabledInput.checked });
+});
+els.sessionAlertThresholdInput?.addEventListener('change', async () => {
+  const v = parseInt(els.sessionAlertThresholdInput.value, 10);
+  if (Number.isFinite(v) && v >= 1 && v <= 99) {
+    await saveSettings({ sessionAlertThreshold: v });
+    await refreshStats({ force: true });
+  }
+});
+els.ntfyAlertEnabledInput?.addEventListener('change', async () => {
+  await saveSettings({ ntfyEnabled: els.ntfyAlertEnabledInput.checked });
+});
+els.ntfyTopicInput?.addEventListener('change', async () => {
+  await saveSettings({ ntfyTopic: els.ntfyTopicInput.value.trim() });
+});
 els.subscriptionAddToggle?.addEventListener('click', () => {
   const opening = els.subscriptionAddDetails?.classList.contains('hidden');
   if (opening) {
@@ -11855,6 +11910,27 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     maybeUpdateBarsIcon();
   }
   restartTimer();
+});
+
+window.tokenMonitor.onSessionAlert?.((payload) => {
+  const shell = els.shell;
+  if (!shell) return;
+  const isActive = Boolean(payload?.active);
+  shell.classList.toggle('session-alert-active', isActive);
+  if (isActive) {
+    // Compute pulse duration from the lowest remaining% across all active alerts.
+    // Linear interpolation: 5 s when just barely under threshold → 0.5 s at 0%.
+    const threshold = Math.max(1, Number(state.settings?.sessionAlertThreshold ?? 10));
+    const alerts = Array.isArray(payload?.activeAlerts) ? payload.activeAlerts : [];
+    const lowestRemaining = alerts.length > 0
+      ? Math.min(...alerts.map((a) => Number(a.remaining)))
+      : 0;
+    const ratio = Math.max(0, Math.min(1, lowestRemaining / threshold));
+    const duration = (0.5 + 4.5 * ratio).toFixed(2);
+    shell.style.setProperty('--pulse-duration', `${duration}s`);
+  } else {
+    shell.style.removeProperty('--pulse-duration');
+  }
 });
 
 function pickWorstProvider(stats) {

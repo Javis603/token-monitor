@@ -608,6 +608,37 @@
           </div>
         </div>
 
+        <div class="settings-group settings-collapsible-group settings-alerts-group">
+          <button class="settings-section-toggle" type="button" data-settings-section="alerts" aria-expanded="false" aria-controls="alertsSettingsDetails">
+            <span class="settings-section-heading"><span class="settings-section-icon settings-section-icon-alerts" aria-hidden="true"></span><span data-i18n="settings.sections.alerts">Alerts</span></span>
+            <span class="settings-section-meta"><span id="alertsSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
+          </button>
+          <div id="alertsSettingsDetails" class="settings-section-details hidden">
+            <label class="checkbox-label settings-item">
+              <span class="settings-item-text">
+                <span class="settings-item-title" data-i18n="settings.alerts.sessionEnabled">Session threshold alerts</span>
+                <span class="settings-item-desc" data-i18n="settings.alerts.sessionEnabledDesc">Notify and highlight the window when a session quota falls below the threshold.</span>
+              </span>
+              <input id="sessionAlertEnabledInput" type="checkbox" />
+            </label>
+            <label id="sessionAlertThresholdRow" class="settings-item hidden">
+              <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.alerts.sessionThreshold">Alert threshold (%)</span></span>
+              <input id="sessionAlertThresholdInput" type="number" min="1" max="99" step="1" value="10" style="width:5em;" />
+            </label>
+            <label class="checkbox-label settings-item">
+              <span class="settings-item-text">
+                <span class="settings-item-title" data-i18n="settings.alerts.ntfyEnabled">ntfy.sh push notification</span>
+                <span class="settings-item-desc" data-i18n="settings.alerts.ntfyEnabledDesc">Send a push to ntfy.sh when a session limit is crossed (one notification per session).</span>
+              </span>
+              <input id="ntfyAlertEnabledInput" type="checkbox" />
+            </label>
+            <label id="ntfyTopicRow" class="settings-item hidden">
+              <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.alerts.ntfyTopic">ntfy topic</span></span>
+              <input id="ntfyTopicInput" type="text" placeholder="ntfy.sh/your-topic" style="width:13em;" />
+            </label>
+          </div>
+        </div>
+
         <div id="accountsSettingsDetails" class="hidden" aria-hidden="true">
             <div id="claudeAccountGroup" class="settings-group cursor-account-group">
               <button id="claudeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="claudeSettingsDetails">
