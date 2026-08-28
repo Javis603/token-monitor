@@ -10,15 +10,21 @@ const THIRD_PARTY_PROVIDER_ID = 'thirdparty';
 const THIRD_PARTY_ENV_ACCOUNT_NAME = 'environment';
 const NEWAPI_ACCOUNT_ADAPTER = 'newapi-account';
 const NEWAPI_TOKEN_ADAPTER = 'newapi-token';
+const SUB2API_ADAPTER = 'sub2api';
 const CUSTOM_BALANCE_ADAPTER = 'custom';
 const THIRD_PARTY_ADAPTER_IDS = Object.freeze([
   NEWAPI_ACCOUNT_ADAPTER,
   NEWAPI_TOKEN_ADAPTER,
+  SUB2API_ADAPTER,
   CUSTOM_BALANCE_ADAPTER
 ]);
 const NEWAPI_STATUS_PATH = '/api/status';
 const NEWAPI_ACCOUNT_PATH = '/api/user/self';
 const NEWAPI_TOKEN_USAGE_PATH = '/api/usage/token/';
+const SUB2API_ME_PATH = '/api/v1/auth/me';
+const SUB2API_REFRESH_PATH = '/api/v1/auth/refresh';
+const SUB2API_USAGE_STATS_PATH = '/api/v1/usage/stats?period=month';
+const SUB2API_DASHBOARD_STATS_PATH = '/api/v1/usage/dashboard/stats';
 const DEFAULT_CUSTOM_ENDPOINT_PATH = '/user/balance';
 const DEFAULT_CUSTOM_CURRENCY = 'USD';
 const DEFAULT_CUSTOM_DIVISOR = 1;
@@ -161,6 +167,19 @@ function newapiUserId(env = process.env, explicitUserId = '') {
     || cleanValue(env.TOKEN_MONITOR_NEWAPI_USER_ID);
 }
 
+function normalizeCanonicalAccountKey(value) {
+  const key = cleanValue(value);
+  return /^sha256:[a-f0-9]{64}$/u.test(key) ? key : '';
+}
+
+function normalizeSub2apiAccountId(value) {
+  const raw = typeof value === 'number'
+    ? Number.isSafeInteger(value) && value > 0 ? String(value) : ''
+    : cleanValue(value);
+  if (!/^[0-9]{1,20}$/u.test(raw) || /^0+$/u.test(raw)) return '';
+  return raw.replace(/^0+/u, '');
+}
+
 function finiteNumber(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string' || value.trim() === '') return null;
@@ -279,6 +298,38 @@ function newapiTokenQuota(tokenData, unit) {
   });
 }
 
+function sub2apiData(payload) {
+  const code = finiteNumber(payload?.code);
+  if (code === null || code !== 0) return null;
+  return responseData(payload);
+}
+
+function sub2apiAccountQuota(meData) {
+  const balance = finiteNumber(meData?.balance);
+  return balance === null
+    ? null
+    : quotaResult({
+      label: 'Balance',
+      remaining: balance
+    });
+}
+
+function sub2apiUsageSummary(stats) {
+  if (!stats || typeof stats !== 'object') return null;
+  return {
+    period: 'month',
+    requests: stats.total_requests,
+    inputTokens: stats.total_input_tokens,
+    outputTokens: stats.total_output_tokens,
+    cacheReadTokens: stats.total_cache_read_tokens,
+    cacheCreationTokens: stats.total_cache_creation_tokens,
+    totalTokens: stats.total_tokens,
+    standardCost: stats.total_cost,
+    actualCost: stats.total_actual_cost,
+    averageDurationMs: stats.average_duration_ms
+  };
+}
+
 function customBalanceQuota(payload, account) {
   if (payload?.success === false || payload?.code === false) return null;
   const divisor = account.divisor;
@@ -301,6 +352,24 @@ function statusForHttp(code) {
   if (code === 401 || code === 403) return 'unauthorized';
   if (code === 429) return 'sourceRateLimited';
   return 'unavailable';
+}
+
+function resolvedTimeZone(deps = {}) {
+  let value = cleanValue(deps.timeZone);
+  if (!value) {
+    try {
+      value = cleanValue(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    } catch (_) {
+      return '';
+    }
+  }
+  if (!value || value.length > 128) return '';
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: value }).format(0);
+    return value;
+  } catch (_) {
+    return '';
+  }
 }
 
 const THIRD_PARTY_ADAPTERS = Object.freeze({
@@ -370,6 +439,96 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
     },
     planLabel() {
       return 'API key';
+    }
+  }),
+  [SUB2API_ADAPTER]: Object.freeze({
+    platform: 'sub2api',
+    mode: 'account',
+    normalizeCredentials(profile) {
+      const accessToken = cleanValue(profile.accessToken);
+      const refreshToken = cleanValue(profile.refreshToken);
+      const canonicalAccountKey = normalizeCanonicalAccountKey(profile.canonicalAccountKey);
+      if (!accessToken) return null;
+      return {
+        accessToken,
+        ...(refreshToken ? { refreshToken } : {}),
+        ...(canonicalAccountKey ? { canonicalAccountKey } : {})
+      };
+    },
+    identity(account) {
+      return [account.baseUrl, account.accessToken || account.refreshToken];
+    },
+    accountKeyIdentity(account, payload) {
+      const accountId = normalizeSub2apiAccountId(sub2apiData(payload)?.id);
+      return accountId ? [account.baseUrl, accountId] : null;
+    },
+    fallbackAccountKeyIdentity(account) {
+      return [account.baseUrl, account.name];
+    },
+    request(account) {
+      return {
+        path: SUB2API_ME_PATH,
+        headers: {
+          Authorization: `Bearer ${account.accessToken}`
+        }
+      };
+    },
+    // Usage endpoints only enrich the balance. Older deployments may omit
+    // either one, so a failed stats response must not hide a valid balance.
+    enrichmentRequests(account, deps) {
+      const headers = { Authorization: `Bearer ${account.accessToken}` };
+      const timeZone = resolvedTimeZone(deps);
+      return {
+        month: {
+          path: `${SUB2API_USAGE_STATS_PATH}${timeZone ? `&timezone=${encodeURIComponent(timeZone)}` : ''}`,
+          headers
+        },
+        allTime: { path: SUB2API_DASHBOARD_STATS_PATH, headers }
+      };
+    },
+    unit() {
+      return 1;
+    },
+    async renewCredentials(account, deps) {
+      const payload = await requestJson(
+        endpoint(account.baseUrl, SUB2API_REFRESH_PATH),
+        {
+          method: 'POST',
+          body: JSON.stringify({ refresh_token: account.refreshToken }),
+          headers: {}
+        },
+        deps
+      );
+      const data = sub2apiData(payload);
+      const accessToken = cleanValue(data?.access_token);
+      const refreshToken = cleanValue(data?.refresh_token);
+      if (!accessToken || !refreshToken) {
+        const error = new Error('Sub2API token refresh returned no usable credentials');
+        error.status = 'unauthorized';
+        throw error;
+      }
+      return { accessToken, refreshToken };
+    },
+    shouldRenew(error) {
+      return error?.statusCode === 401;
+    },
+    quota(payload, _unit, _account, _statusPayload, enrichmentPayloads) {
+      const data = sub2apiData(payload);
+      if (!data || !normalizeSub2apiAccountId(data.id)) return null;
+      const quota = sub2apiAccountQuota(data);
+      if (quota) {
+        const monthStats = sub2apiData(enrichmentPayloads?.month);
+        const allTimeStats = sub2apiData(enrichmentPayloads?.allTime);
+        const monthSpend = finiteNumber(monthStats?.total_actual_cost);
+        const allTimeSpend = finiteNumber(allTimeStats?.total_actual_cost);
+        if (monthSpend !== null) quota.balance.monthSpend = monthSpend;
+        if (allTimeSpend !== null) quota.balance.allTimeSpend = allTimeSpend;
+        quota.usageSummary = sub2apiUsageSummary(monthStats);
+      }
+      return quota;
+    },
+    planLabel() {
+      return 'Account';
     }
   }),
   [CUSTOM_BALANCE_ADAPTER]: Object.freeze({
@@ -443,14 +602,60 @@ function endpoint(baseUrl, path) {
   return `${baseUrl}${path}`;
 }
 
+// A Sub2API refresh token is single-use. Only rotate when the caller owns a
+// persistence callback, and require that callback to durably accept the new
+// pair before retrying the quota request. A failed compare-and-swap therefore
+// cannot make a stale collection cycle look successful with credentials that
+// the next cycle cannot recover.
+async function fetchQuotaWithRenewal(account, adapter, deps) {
+  const attempt = async (credentials) => {
+    const effective = credentials ? { ...account, ...credentials } : account;
+    const request = adapter.request(effective);
+    return requestJson(endpoint(effective.baseUrl, request.path), { headers: request.headers }, deps);
+  };
+  try {
+    return { payload: await attempt(null) };
+  } catch (error) {
+    const renewable = adapter.shouldRenew?.(error) === true
+      && typeof adapter.renewCredentials === 'function'
+      && account.refreshToken
+      && typeof deps.onThirdPartyCredentialsRenewed === 'function';
+    if (!renewable) throw error;
+    const next = await adapter.renewCredentials(account, deps);
+    const renewal = {
+      provider: THIRD_PARTY_PROVIDER_ID,
+      adapter: account.adapter,
+      accountName: account.name,
+      baseUrl: account.baseUrl,
+      previous: { accessToken: account.accessToken || '', refreshToken: account.refreshToken },
+      next
+    };
+    let persisted;
+    try {
+      persisted = await deps.onThirdPartyCredentialsRenewed(renewal);
+    } catch (_) {
+      persisted = false;
+    }
+    if (persisted !== true) {
+      const persistenceError = new Error('Sub2API renewed credentials could not be persisted');
+      persistenceError.status = 'unavailable';
+      persistenceError.code = 'credentialPersistenceFailed';
+      throw persistenceError;
+    }
+    return { payload: await attempt(next), renewal };
+  }
+}
+
 async function requestJson(url, options = {}, deps = {}) {
   const fetchFn = createOutboundFetch(deps.env || process.env, deps);
   const response = await fetchFn(url, {
-    method: 'GET',
+    method: options.method || 'GET',
     headers: {
       Accept: 'application/json',
+      ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...(options.headers || {})
     },
+    ...(options.body !== undefined ? { body: options.body } : {}),
     redirect: 'error',
     signal: deps.signal
   });
@@ -461,6 +666,23 @@ async function requestJson(url, options = {}, deps = {}) {
     throw error;
   }
   return response.json();
+}
+
+async function fetchOptionalEnrichments(account, adapter, deps) {
+  const requests = Object.entries(adapter.enrichmentRequests?.(account, deps) || {});
+  const results = await Promise.all(requests.map(async ([key, request]) => {
+    try {
+      const value = await requestJson(
+        endpoint(account.baseUrl, request.path),
+        { headers: request.headers },
+        deps
+      );
+      return [key, value];
+    } catch (_) {
+      return null;
+    }
+  }));
+  return Object.fromEntries(results.filter(Boolean));
 }
 
 function normalizeThirdPartyProfile(profile = {}) {
@@ -481,6 +703,31 @@ function accountIdentity(account) {
   return [account.adapter, ...identity].join('\0');
 }
 
+function resolvedAccountKey(account, adapter, quotaPayload) {
+  const identity = adapter.accountKeyIdentity?.(account, quotaPayload);
+  if (identity) {
+    return {
+      accountKey: hashKey(
+        THIRD_PARTY_PROVIDER_ID,
+        [account.adapter, ...identity].join('\0')
+      ),
+      canonical: true
+    };
+  }
+  const stored = normalizeCanonicalAccountKey(account.canonicalAccountKey);
+  if (stored) return { accountKey: stored, canonical: false };
+  const fallbackIdentity = adapter.fallbackAccountKeyIdentity?.(account);
+  return {
+    accountKey: hashKey(
+      THIRD_PARTY_PROVIDER_ID,
+      fallbackIdentity
+        ? [account.adapter, ...fallbackIdentity].join('\0')
+        : accountIdentity(account)
+    ),
+    canonical: false
+  };
+}
+
 function configuredAccounts(options = {}, deps = {}) {
   const accounts = [];
   const seen = new Set();
@@ -488,9 +735,10 @@ function configuredAccounts(options = {}, deps = {}) {
     const profileName = thirdPartyProfileName(name);
     const normalized = normalizeThirdPartyProfile(profile);
     if (!profileName || !normalized?.enabled) continue;
-    const identity = accountIdentity(normalized);
+    const account = { name: profileName, ...normalized };
+    const identity = accountIdentity(account);
     if (seen.has(identity)) continue;
-    accounts.push({ name: profileName, ...normalized });
+    accounts.push(account);
     seen.add(identity);
   }
 
@@ -536,34 +784,51 @@ async function fetchThirdPartyAccount(account, deps = {}) {
       windows: []
     });
   }
-  const request = adapter.request(account);
   const statusRequest = adapter.statusRequest?.(account);
-  const [quotaResponse, statusResponse] = await Promise.allSettled([
-    requestJson(endpoint(account.baseUrl, request.path), { headers: request.headers }, deps),
-    statusRequest
-      ? requestJson(endpoint(account.baseUrl, statusRequest.path), { headers: statusRequest.headers }, deps)
-      : Promise.resolve(null)
-  ]);
+  const statusPromise = statusRequest
+    ? requestJson(endpoint(account.baseUrl, statusRequest.path), { headers: statusRequest.headers }, deps)
+      .then(
+        (value) => ({ fulfilled: true, value }),
+        (reason) => ({ fulfilled: false, reason })
+      )
+    : Promise.resolve(null);
+  const enrichmentPromise = fetchOptionalEnrichments(account, adapter, deps);
+  let quotaResultPayload = null;
+  let renewedCredentials = null;
+  let quotaError = null;
+  try {
+    const quotaResult = await fetchQuotaWithRenewal(account, adapter, deps);
+    quotaResultPayload = quotaResult.payload;
+    renewedCredentials = quotaResult.renewal?.next || null;
+  } catch (error) {
+    quotaError = error;
+  }
+  const statusResponse = await statusPromise;
+  const enrichmentPayloads = renewedCredentials
+    ? await fetchOptionalEnrichments({ ...account, ...renewedCredentials }, adapter, deps)
+    : await enrichmentPromise;
   if (deps.signal?.aborted) {
     throw deps.signal.reason || Object.assign(new Error('Third-party API request aborted'), { name: 'AbortError' });
   }
 
+  const fallbackAccountKey = resolvedAccountKey(account, adapter, null).accountKey;
   const common = {
     provider: THIRD_PARTY_PROVIDER_ID,
-    accountKey: hashKey(THIRD_PARTY_PROVIDER_ID, accountIdentity(account)),
+    adapterId: account.adapter,
+    accountKey: fallbackAccountKey,
     accountName: account.name,
     accountLabel: account.name,
     source: 'api',
     updatedAt
   };
-  if (quotaResponse.status === 'rejected') {
+  if (quotaError) {
     return normalizeLimitProvider({
       ...common,
-      status: quotaResponse.reason?.status || 'unavailable',
+      status: quotaError.status || 'unavailable',
       windows: []
     });
   }
-  if (statusRequest && statusResponse.status === 'rejected') {
+  if (statusRequest && statusResponse && !statusResponse.fulfilled && adapter.optionalStatus !== true) {
     return normalizeLimitProvider({
       ...common,
       status: 'unavailable',
@@ -571,10 +836,9 @@ async function fetchThirdPartyAccount(account, deps = {}) {
     });
   }
 
-  const unit = adapter.unit(
-    statusResponse.status === 'fulfilled' ? statusResponse.value : null
-  );
-  const quota = adapter.quota(quotaResponse.value, unit, account);
+  const statusPayload = statusResponse && statusResponse.fulfilled ? statusResponse.value : null;
+  const unit = adapter.unit(statusPayload);
+  const quota = adapter.quota(quotaResultPayload, unit, account, statusPayload, enrichmentPayloads);
   if (!quota) {
     return normalizeLimitProvider({
       ...common,
@@ -583,12 +847,41 @@ async function fetchThirdPartyAccount(account, deps = {}) {
     });
   }
 
+  const identityAccount = renewedCredentials ? { ...account, ...renewedCredentials } : account;
+  const resolved = resolvedAccountKey(identityAccount, adapter, quotaResultPayload);
+  if (
+    resolved.canonical
+    && resolved.accountKey !== normalizeCanonicalAccountKey(identityAccount.canonicalAccountKey)
+    && typeof deps.onThirdPartyAccountKeyResolved === 'function'
+  ) {
+    try {
+      await deps.onThirdPartyAccountKeyResolved({
+        provider: THIRD_PARTY_PROVIDER_ID,
+        adapter: account.adapter,
+        accountName: account.name,
+        baseUrl: account.baseUrl,
+        previous: {
+          accessToken: identityAccount.accessToken || '',
+          refreshToken: identityAccount.refreshToken || '',
+          canonicalAccountKey: normalizeCanonicalAccountKey(identityAccount.canonicalAccountKey)
+        },
+        accountKey: resolved.accountKey
+      });
+    } catch (_) {
+      // Account-key persistence is best effort. The current successful result
+      // still carries the canonical key; the named fallback remains available
+      // until a later collection can persist it.
+    }
+  }
+
   return normalizeLimitProvider({
     ...common,
+    accountKey: resolved.accountKey,
     planLabel: adapter.planLabel(),
     status: 'ok',
     windows: [quota.window],
-    balance: quota.balance
+    balance: quota.balance,
+    usageSummary: quota.usageSummary
   });
 }
 
@@ -625,6 +918,11 @@ module.exports = {
   NEWAPI_STATUS_PATH,
   NEWAPI_TOKEN_ADAPTER,
   NEWAPI_TOKEN_USAGE_PATH,
+  SUB2API_ADAPTER,
+  SUB2API_DASHBOARD_STATS_PATH,
+  SUB2API_ME_PATH,
+  SUB2API_REFRESH_PATH,
+  SUB2API_USAGE_STATS_PATH,
   THIRD_PARTY_ADAPTER_IDS,
   THIRD_PARTY_ADAPTERS,
   THIRD_PARTY_ENV_ACCOUNT_NAME,
@@ -645,6 +943,7 @@ module.exports = {
   normalizeCustomDivisor,
   normalizeCustomEndpointPath,
   normalizeCustomJsonPath,
+  normalizeCanonicalAccountKey,
   normalizeThirdPartyBaseUrl,
   normalizeThirdPartyProfile,
   quotaPerUnit,

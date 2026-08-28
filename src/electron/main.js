@@ -23,7 +23,12 @@ const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
+const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./claudeWebFetch');
+const {
+  createWorkbuddyLocalAuth,
+  isSupportedWorkbuddyLocalAppPlatform
+} = require('./workbuddyLocalAuth');
 const { createElectronLimitsFetch } = require('./limitsFetch');
 const {
   expandedBoundsForCollapse,
@@ -43,6 +48,9 @@ const {
 // event and Electron pops a "JavaScript error in the main process" dialog.
 installSafeStdout();
 const electronClaudeWebFetch = createClaudeWebFetch(net);
+const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
+  fetch: electronLimitsFetch()
+});
 // One transport for every widget provider call that resolves through
 // `deps.fetch` — see limitsFetch.js for why the branch and the request options
 // are what they are. Probes that build their own transport inherit neither
@@ -71,11 +79,12 @@ const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
-const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
+const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
   codexAuthIdentity,
+  codexAccountKey,
   codexManagedAccountIdentityKey,
   codexManagedAccountMatchesIdentity,
   hashAccountKey,
@@ -83,12 +92,9 @@ const {
   upgradeCodexManagedAccountIdentity
 } = require('../shared/codexAuth');
 const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/codexLogin');
+const { listCodexWorkspaces, normalizeWorkspaceId } = require('../shared/codexWorkspaces');
 const {
-  authWithSelectedCodexWorkspace,
-  listCodexWorkspaces,
-  normalizeWorkspaceId
-} = require('../shared/codexWorkspaces');
-const {
+  codexAuthMaterialForWorkspace,
   codexAccountMatchesIdentity,
   liveCodexAuthPath,
   readCodexAuthMaterial,
@@ -241,6 +247,7 @@ const {
   pickUsageTrayIconId,
   parseWindowsSystemUsesLightTheme,
   popoverBounds,
+  prepareTrayIconForPlatform,
   reconcileCodexAccountSelection,
   runTrayMenuAction,
   watchSystemDarkUi,
@@ -264,11 +271,15 @@ const {
   composeLocalSyncStats
 } = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
+const { createLatestWinsReconciler } = require('./latestWinsReconciler');
 const {
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
+  normalizeCursorAccountIds,
+  normalizeCursorDisabledAccountIds,
+  usageConfigFingerprint,
   usageConfigFromSettings
 } = require('./runtimeConfig');
 const {
@@ -313,6 +324,22 @@ if (!app.isPackaged) loadDotEnv();
 
 const APP_NAME = 'Token Monitor';
 const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
+const WINDOWS_APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-win.png');
+
+// Electron's own documentation says a window given no icon falls back to the
+// executable's, and recommends ICO on Windows; electron-builder already
+// converts `win.icon` into the ICO embedded in that executable, which is the
+// icon built for this platform rather than one PNG scaled at runtime. So a
+// packaged window deliberately sets
+// nothing here: whatever it set could only override that, which is exactly what
+// naming the macOS artwork was doing to the taskbar button and Alt-Tab entry
+// (it carries the Dock's inset margin — see WINDOWS_ICON_PATH in tray.js). An
+// unpackaged run has no icon of ours inside electron.exe to inherit, so it names
+// the same full-bleed artwork the installer is built from.
+function appWindowIcon() {
+  if (process.platform !== 'win32') return { icon: APP_ICON_PATH };
+  return app.isPackaged ? {} : { icon: WINDOWS_APP_ICON_PATH };
+}
 
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
@@ -475,6 +502,8 @@ function defaultSettings() {
     homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
     limitsRefreshMode: normalizeLimitsRefreshMode(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE),
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
+    cursorDisabledAccountIds: [],
+    cursorManualAccountIds: [],
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
@@ -525,8 +554,13 @@ function defaultSettings() {
     volcengineAccessKeyId: '',
     volcengineSecretAccessKey: '',
     volcengineRegion: '',
+    volcengineAgentAccessKeyId: '',
+    volcengineAgentSecretAccessKey: '',
+    volcengineAgentRegion: '',
     qoderCookie: '',
     qoderSite: 'global',
+    traeAccessToken: '',
+    traeDeviceId: '',
     commandcodeCookie: '',
     kimiApiKey: '',
     kimiWebAccessToken: '',
@@ -626,8 +660,16 @@ function electronUsageConfig(errorPrefix) {
 }
 
 function electronLimitsConfig() {
+  const workbuddyEnabled = settings?.limitsEnabled !== false
+    && parseLimitProviders(settings?.limitProviders).includes('workbuddy');
+  const workbuddyDesktopSessionSupported = isSupportedWorkbuddyLocalAppPlatform();
+  const workbuddyDesktopSessionEnabled = workbuddyEnabled && workbuddyDesktopSessionSupported;
   return limitsConfigFromSettings(settings, {
     env: process.env,
+    workbuddyDesktopSessionOnly: true,
+    workbuddyDesktopSessionSupported,
+    workbuddyDesktopSessionEnabled,
+    workbuddyLocalSession: workbuddyDesktopSessionEnabled ? electronWorkbuddyLocalAuth.getSessionInfo() : {},
     defaultLimitProviders: defaultLimitProviders(),
     codexManagedAccounts: codexManagedAccountsForCollector(),
     mimoManagedAccounts: mimoManagedAccountsForCollector()
@@ -679,8 +721,18 @@ function electronLimitsDeps() {
   return {
     fetch: electronLimitsFetch(),
     claudeWebFetch: electronClaudeWebFetch,
+    workbuddyFetch: async (url, init = {}, expectedSession = null) => {
+      const result = await electronWorkbuddyLocalAuth.request(url, init, expectedSession);
+      return {
+        status: result.status,
+        ok: result.ok,
+        json: () => result.json()
+      };
+    },
     resolveConfigSnapshot: () => electronLimitsConfig(),
-    onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal
+    onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
+    onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
+    onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey
   };
 }
 
@@ -761,6 +813,18 @@ function normalizeQoderSite(value) {
 
 function currentQoderCookie() {
   return settings?.qoderCookie || qoderCookie(process.env);
+}
+
+function normalizeTraeAccessToken(value) {
+  return traeAccessToken({}, { traeAccessToken: String(value || '') });
+}
+
+function normalizeTraeDeviceId(value) {
+  return traeDeviceId({}, { traeDeviceId: String(value || '') });
+}
+
+function currentTraeAccessToken() {
+  return settings?.traeAccessToken || traeAccessToken(process.env);
 }
 
 function normalizeCommandcodeCookie(value) {
@@ -936,18 +1000,18 @@ function hydrateCodexManagedWorkspaceLabels() {
     let changed = false;
     const accounts = normalizeCodexManagedAccounts(settings?.codexManagedAccounts).map((account) => {
       const resolved = labels.get(account.id);
-      if (
-        !resolved
-        || account.workspaceLabel
-        || account.workspaceKind
-        || account.enabled === false
-        || account.workspaceAccountId !== resolved.workspaceAccountId
-      ) return account;
+      if (!resolved || account.enabled === false || account.workspaceAccountId !== resolved.workspaceAccountId) {
+        return account;
+      }
+      const shouldHydrateLabel = !account.workspaceLabel && !account.workspaceKind;
+      if (!shouldHydrateLabel) return account;
       changed = true;
       return {
         ...account,
-        workspaceLabel: resolved.label,
-        workspaceKind: resolved.workspaceKind,
+        ...(shouldHydrateLabel ? {
+          workspaceLabel: resolved.label,
+          workspaceKind: resolved.workspaceKind
+        } : {}),
         updatedAt: new Date().toISOString()
       };
     });
@@ -1286,7 +1350,7 @@ async function rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal) 
   if (backupHomePath) await fs.promises.rename(backupHomePath, homePath);
 }
 
-async function resolveCodexWorkspaceAfterLogin(auth, homePath, options = {}) {
+async function resolveCodexWorkspaceAfterLogin(auth, _homePath, options = {}) {
   const initialIdentity = codexAuthIdentity(auth);
   let workspaces;
   try {
@@ -1320,15 +1384,14 @@ async function resolveCodexWorkspaceAfterLogin(auth, homePath, options = {}) {
   }
   if (!selected) return { auth, identity: initialIdentity };
 
-  const selectedAuth = authWithSelectedCodexWorkspace(auth, selected.id);
-  await writeCodexAuthFile(
-    path.join(homePath, 'auth.json'),
-    `${JSON.stringify(selectedAuth, null, 2)}\n`
-  );
+  const workspaceAccountId = normalizeWorkspaceId(selected.id);
   return {
-    auth: selectedAuth,
+    auth,
     identity: {
-      ...codexAuthIdentity(selectedAuth),
+      ...initialIdentity,
+      providerAccountId: workspaceAccountId,
+      workspaceAccountId,
+      accountKey: codexAccountKey(initialIdentity.email, workspaceAccountId),
       workspaceLabel: selected.label,
       workspaceKind: selected.workspaceKind
     }
@@ -1490,6 +1553,17 @@ async function switchCodexSystemAccount(id) {
   if (!hasCodexIdentity(targetMaterial.identity)) {
     return { ok: false, error: 'Could not identify the selected Codex account credentials.' };
   }
+  let selectedMaterial;
+  try {
+    selectedMaterial = codexAuthMaterialForWorkspace(targetMaterial, account.workspaceAccountId);
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Could not prepare the selected Codex workspace.' };
+  }
+  const targetIdentity = {
+    ...selectedMaterial.identity,
+    workspaceLabel: account.workspaceLabel,
+    workspaceKind: account.workspaceKind
+  };
 
   const previousAccounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
   const liveAuthPath = liveCodexAuthPath(process.env);
@@ -1501,16 +1575,16 @@ async function switchCodexSystemAccount(id) {
   }
   let preservedLiveAccount = null;
   try {
-    preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount(targetMaterial.identity);
-    await writeCodexAuthFile(liveAuthPath, targetMaterial.data);
+    preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount(targetIdentity);
+    await writeCodexAuthFile(liveAuthPath, selectedMaterial.data);
     const refreshedAccounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
     const refreshed = refreshedAccounts.find((entry) => entry.id === account.id) || account;
-    commitCodexManagedAccount(targetMaterial.identity, refreshed.homePath, refreshed, {
+    commitCodexManagedAccount(targetIdentity, refreshed.homePath, refreshed, {
       enabled: refreshed.enabled !== false,
       restart: false
     });
     void queueLimitInvalidation({ provider: 'codex' }, 'system-account-switch');
-    const activeAccountId = codexAccountId(targetMaterial.identity, refreshed);
+    const activeAccountId = codexAccountId(targetIdentity, refreshed);
     const accountsForRenderer = codexAccountsForRenderer();
     return {
       ok: true,
@@ -2099,6 +2173,7 @@ function readSettings() {
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
     merged.opencodeLocalLimitsEnabled = parseBoolean(merged.opencodeLocalLimitsEnabled, false);
+    delete merged.workbuddyLocalAppEnabled;
     merged.windowMaximized = parseBoolean(merged.windowMaximized, false);
     merged.automaticAppUpdates = parseBoolean(merged.automaticAppUpdates, false);
     if (saved.homeLimitProviderOrder !== undefined) {
@@ -2152,8 +2227,11 @@ function readSettings() {
     merged.language = normalizeLanguageSetting(merged.language);
     merged.currency = normalizeCurrency(merged.currency);
     merged.currencyRates = normalizeCurrencyOverrides(merged.currencyRates);
+    merged.cursorDisabledAccountIds = normalizeCursorDisabledAccountIds(merged.cursorDisabledAccountIds);
+    merged.cursorManualAccountIds = normalizeCursorAccountIds(merged.cursorManualAccountIds);
     merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
+    delete merged.workbuddyEndpoint;
     merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
     merged.archivedClientUsage = normalizeArchivedClientUsage(merged.archivedClientUsage);
     delete merged.edgeDrawerEnabled;
@@ -2423,6 +2501,19 @@ function withHistoryPreview(stats, devices) {
 
 let mode = 'idle';
 let deviceRuntimeHandle = null;
+const USAGE_RECONFIGURE_SETTLE_MS = 750;
+const USAGE_RECONFIGURE_RETRY_DELAYS_MS = Object.freeze([1000, 3000, 10_000]);
+const usageRuntimeReconciler = createLatestWinsReconciler({
+  delayMs: USAGE_RECONFIGURE_SETTLE_MS,
+  retryDelaysMs: USAGE_RECONFIGURE_RETRY_DELAYS_MS,
+  apply: () => applyUsageRuntimeForMode(),
+  onError: (error) => console.log(`[usage-runtime] settings reconciliation failed: ${error.message}`),
+  onExhausted: ({ attempts }) => recordDiagnosticEvent({
+    subsystem: 'usage-runtime',
+    code: 'usage-reconfigure-exhausted',
+    attempts
+  })
+});
 let localDevice = null;
 let localStats = null;
 let sseAbortController = null;
@@ -3329,6 +3420,8 @@ async function saveSubscriptions(list, base) {
 // `options` is forwarded verbatim to the runtime; the quit path passes
 // `skipCloseWatchers` (see stopAll).
 function stopSyncCollector(options = {}) {
+  usageRuntimeReconciler.cancel();
+  usageRuntimeReconciler.setActiveKey(null);
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
 }
@@ -3360,18 +3453,20 @@ function startSyncCollector() {
     flush: () => syncUploadScheduler.flush(),
     stop: () => syncUploadScheduler.stop()
   };
+  const usageOptions = electronUsageConfig('sync-collector');
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
     transformUsage: summaryWithArchivedClientUsage,
-    usageOptions: electronUsageConfig('sync-collector'),
+    usageOptions,
     sink,
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
   }, {
     limitsDeps: electronLimitsDeps()
   });
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
@@ -3405,18 +3500,20 @@ function startHostCollector() {
       }
     }
   };
+  const usageOptions = electronUsageConfig('host-collector');
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
     transformUsage: summaryWithArchivedClientUsage,
-    usageOptions: electronUsageConfig('host-collector'),
+    usageOptions,
     sink,
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
   }, {
     limitsDeps: electronLimitsDeps()
   });
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
@@ -3870,6 +3967,8 @@ function sendStatus(connected, extra) {
 // `options` is forwarded verbatim to the runtime; the quit path passes
 // `skipCloseWatchers` (see stopAll).
 function stopLocalCollector(options = {}) {
+  usageRuntimeReconciler.cancel();
+  usageRuntimeReconciler.setActiveKey(null);
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
   localDevice = null;
@@ -3955,6 +4054,7 @@ function startLocalCollector() {
   }, {
     limitsDeps: electronLimitsDeps()
   });
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
@@ -4176,10 +4276,95 @@ function redactThirdPartyProfilesForRenderer(profiles) {
           }
         : {}),
       accessToken: profile?.accessToken ? 'set' : '',
-      apiKey: profile?.apiKey ? 'set' : ''
+      apiKey: profile?.apiKey ? 'set' : '',
+      refreshToken: profile?.refreshToken ? 'set' : ''
     };
   }
   return out;
+}
+
+// Sub2API rotates its single-use refresh token on every renewal. Persist the
+// new pair with a compare-and-swap before the collector retries with it.
+// New profiles require a current access token and are never persisted from a
+// renewal callback while their save probe is still in flight.
+function persistThirdPartyCredentialsRenewal(renewal = {}) {
+  const accountName = String(renewal.accountName || '').trim();
+  const adapter = thirdPartyLimits.normalizeAdapterId(renewal.adapter);
+  const profiles = settings?.thirdPartyProfiles || {};
+  const profile = profiles[accountName];
+  if (!accountName || !profile || profile.adapter !== adapter) return false;
+  const previousAccessToken = String(renewal.previous?.accessToken || '');
+  const previousRefreshToken = String(renewal.previous?.refreshToken || '');
+  if (
+    String(profile.accessToken || '') !== previousAccessToken
+    || String(profile.refreshToken || '') !== previousRefreshToken
+  ) return false;
+  const normalized = thirdPartyLimits.normalizeThirdPartyProfile({
+    ...profile,
+    accessToken: renewal.next?.accessToken,
+    refreshToken: renewal.next?.refreshToken
+  });
+  if (!normalized) return false;
+  settings.thirdPartyProfiles = {
+    ...profiles,
+    [accountName]: { ...normalized, enabled: profile.enabled !== false }
+  };
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (error) {
+    // Keep the rotated pair in memory so this process can recover on a later
+    // settings write, but tell the caller not to present this renewal as durable.
+    console.log(`[thirdparty] credential renewal persist failed: ${error?.message || error}`);
+    return false;
+  }
+  return true;
+}
+
+function persistThirdPartyAccountKey(update = {}) {
+  const accountName = String(update.accountName || '').trim();
+  const adapter = thirdPartyLimits.normalizeAdapterId(update.adapter);
+  const accountKey = thirdPartyLimits.normalizeCanonicalAccountKey(update.accountKey);
+  const profiles = settings?.thirdPartyProfiles || {};
+  const profile = profiles[accountName];
+  if (
+    !accountName
+    || adapter !== thirdPartyLimits.SUB2API_ADAPTER
+    || !accountKey
+    || !profile
+    || profile.adapter !== adapter
+  ) return false;
+  const baseUrl = thirdPartyLimits.normalizeThirdPartyBaseUrl(update.baseUrl);
+  if (thirdPartyLimits.normalizeThirdPartyBaseUrl(profile.baseUrl) !== baseUrl) return false;
+  if (
+    String(profile.accessToken || '') !== String(update.previous?.accessToken || '')
+    || String(profile.refreshToken || '') !== String(update.previous?.refreshToken || '')
+  ) return false;
+  if (thirdPartyLimits.normalizeCanonicalAccountKey(profile.canonicalAccountKey) === accountKey) {
+    return true;
+  }
+  const normalized = thirdPartyLimits.normalizeThirdPartyProfile({
+    ...profile,
+    canonicalAccountKey: accountKey
+  });
+  if (!normalized) return false;
+  settings.thirdPartyProfiles = {
+    ...profiles,
+    [accountName]: { ...normalized, enabled: profile.enabled !== false }
+  };
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (error) {
+    console.log(`[thirdparty] account identity persist failed: ${error?.message || error}`);
+    return false;
+  }
+  return true;
+}
+
+function thirdPartyProfileWithCanonicalIdentity(profile, provider) {
+  return thirdPartyLimits.normalizeThirdPartyProfile({
+    ...profile,
+    canonicalAccountKey: provider?.accountKey
+  });
 }
 
 function settingsForRenderer() {
@@ -4223,6 +4408,11 @@ function settingsForRenderer() {
     : qoderCookie(process.env)
       ? 'env'
       : '';
+  const traeAccessTokenSource = settings?.traeAccessToken
+    ? 'settings'
+    : traeAccessToken(process.env)
+      ? 'env'
+      : '';
   const commandcodeCookieSource = settings?.commandcodeCookie
     ? 'settings'
     : commandcodeCookie(process.env)
@@ -4249,8 +4439,17 @@ function settingsForRenderer() {
   const redactedCredentials = credentialSettingsForRenderer(settings, {
     expose: ['hubHostSecret', 'secret']
   });
+  const rendererSettings = { ...settings };
+  for (const key of [
+    'workbuddyAccessToken',
+    'workbuddyUserId',
+    'workbuddyEnterpriseId',
+    'workbuddyLocale',
+    'workbuddyDomain',
+    'workbuddyDepartmentInfo'
+  ]) delete rendererSettings[key];
   return {
-    ...settings,
+    ...rendererSettings,
     locale: trayMenuLocale(),
     ...redactedCredentials,
     // On a hub the shared list is the truth; settings.subscriptions is only the
@@ -4268,8 +4467,11 @@ function settingsForRenderer() {
     zaiTeamOrganizationId: settings?.zaiTeamOrganizationId ? 'set' : '',
     zaiTeamProjectId: settings?.zaiTeamProjectId ? 'set' : '',
     volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
+    volcengineAgentAccessKeyId: settings?.volcengineAgentAccessKeyId ? 'set' : '',
     claudeWebCookie: settings?.claudeWebCookie ? 'set' : '',
     qoderCookie: settings?.qoderCookie ? 'set' : '',
+    traeAccessToken: settings?.traeAccessToken ? 'set' : '',
+    traeDeviceId: settings?.traeDeviceId ? 'set' : '',
     commandcodeCookie: settings?.commandcodeCookie ? 'set' : '',
     ollamaCookie: settings?.ollamaCookie ? 'set' : '',
     // Never ship OpenCode session cookies to the renderer; the UI only needs to
@@ -4304,6 +4506,8 @@ function settingsForRenderer() {
     volcengineCredentialsSource,
     qoderCookieConfigured: Boolean(currentQoderCookie()),
     qoderCookieSource,
+    traeAccessTokenConfigured: Boolean(currentTraeAccessToken()),
+    traeAccessTokenSource,
     commandcodeCookieConfigured: Boolean(currentCommandcodeCookie()),
     commandcodeCookieSource,
     ollamaCookieConfigured: Boolean(currentOllamaCookie()),
@@ -4795,6 +4999,28 @@ function restartDeviceRuntimeForMode() {
   }
   if (effectiveHubConfig().url) startSyncCollector();
   else startLocalCollector();
+}
+
+function usageCollectorNameForMode() {
+  return mode === 'local'
+    ? 'collector'
+    : (settings.hubMode === 'host' && embeddedHub ? 'host-collector' : 'sync-collector');
+}
+
+function usageConfigForMode() {
+  return electronUsageConfig(usageCollectorNameForMode());
+}
+
+function applyUsageRuntimeForMode() {
+  if (!deviceRuntimeHandle?.reconfigureUsage) {
+    restartDeviceRuntimeForMode();
+    return Boolean(deviceRuntimeHandle);
+  }
+  return deviceRuntimeHandle.reconfigureUsage(usageConfigForMode()) === true;
+}
+
+function reconfigureUsageRuntimeForMode() {
+  return usageRuntimeReconciler.schedule(usageConfigFingerprint(usageConfigForMode()));
 }
 
 // Quit-path teardown. Every step here must be synchronous, because performQuit
@@ -5494,6 +5720,7 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'bigmodel.cn' || parsed.hostname === 'www.bigmodel.cn') return true;
   if (parsed.hostname === 'www.volcengine.com' || parsed.hostname === 'console.volcengine.com') return true;
   if (parsed.hostname === 'qoder.com' || parsed.hostname === 'www.qoder.com' || parsed.hostname === 'qoder.com.cn' || parsed.hostname === 'www.qoder.com.cn') return true;
+  if (parsed.hostname === 'trae.cn' || parsed.hostname === 'www.trae.cn') return true;
   if (parsed.hostname === 'commandcode.ai' || parsed.hostname === 'www.commandcode.ai') return true;
   if ((parsed.hostname === 'ollama.com' || parsed.hostname === 'www.ollama.com') && (parsed.pathname === '/settings' || parsed.pathname === '/signin')) return true;
   if ((parsed.hostname === 'kimi.com' || parsed.hostname === 'www.kimi.com') && parsed.pathname.startsWith('/code')) return true;
@@ -5583,7 +5810,7 @@ function createWindow(boundsOverride, options = {}) {
     resizable: !collapsedFloatingBubble,
     show: false,
     backgroundColor: '#00000000',
-    icon: APP_ICON_PATH,
+    ...appWindowIcon(),
     skipTaskbar: collapsedFloatingBubble || Boolean(settings?.trayMode),
     ...(collapsedFloatingBubble ? { fullscreenable: false, maximizable: false, minimizable: false } : {}),
     // Keeps a popover unmaximizable across rebuilds, which never re-run enterTrayMode().
@@ -5738,7 +5965,7 @@ function createDashboardWindow() {
     transparent: !(process.platform === 'win32' && glass),
     show: false,
     backgroundColor: '#00000000',
-    icon: APP_ICON_PATH,
+    ...appWindowIcon(),
     skipTaskbar: false,
     ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass ? { backgroundMaterial: 'acrylic' } : {}),
@@ -5796,17 +6023,40 @@ async function getDashboardHistory(options = {}) {
 let cursorStatusCache = { value: null, at: 0 };
 let opencodeStatusCache = { value: null, at: 0 };
 const CURSOR_STATUS_TTL_MS = 30 * 1000;
+const CURSOR_EXTERNAL_AGENT_ERROR = 'Stop the headless agent before managing Cursor accounts.';
 
 function normalizeManualCookie(input) {
-  let s = String(input || '').trim();
-  if (!s) return '';
-  if (s.toLowerCase().startsWith('cookie:')) s = s.slice(7).trim();
-  // If they pasted the full cookie header, extract the WorkosCursorSessionToken= value.
-  const match = s.match(/WorkosCursorSessionToken=([^;\s]+)/);
-  if (match) return match[1];
-  // Otherwise assume the whole string is the raw token value.
-  if (/\s/.test(s)) return '';
-  return s;
+  return cursorAuth.normalizeCursorSessionToken(input);
+}
+
+async function cursorStatusValue({ discover = false } = {}) {
+  const managementBlocked = isExternalAgentActive();
+  let accounts = cursorAuth.listAccounts();
+  if (discover && !managementBlocked) {
+    try { await cursorAuth.runCursorDiscover(); } catch (_) { /* signed-out or unavailable Cursor app */ }
+    accounts = cursorAuth.listAccounts();
+  }
+  const disabled = new Set(normalizeCursorDisabledAccountIds(settings?.cursorDisabledAccountIds));
+  const manual = new Set(normalizeCursorAccountIds(settings?.cursorManualAccountIds));
+  const safeAccounts = await Promise.all(accounts.map(async (account) => {
+    const probeResult = await cursorProbe.probe(account.sessionToken);
+    return {
+      id: account.id,
+      enabled: !disabled.has(account.id),
+      removable: manual.has(account.id),
+      email: probeResult.ok ? probeResult.user?.email || '' : '',
+      label: account.label || '',
+      membershipType: probeResult.ok ? probeResult.usage.membershipType || '' : '',
+      expired: !probeResult.ok && probeResult.error?.kind === 'unauthorized',
+      error: probeResult.ok ? '' : probeResult.error?.message || ''
+    };
+  }));
+  return {
+    loggedIn: safeAccounts.length > 0,
+    accounts: safeAccounts,
+    linkedCount: safeAccounts.filter((account) => account.enabled && !account.expired && !account.error).length,
+    managementBlocked
+  };
 }
 
 function rebuildWindow() {
@@ -5958,6 +6208,14 @@ app.whenReady().then(() => {
     delete normalizedPatch.windowMaximized;
     delete normalizedPatch.codexManagedAccounts;
     delete normalizedPatch.mimoManagedAccounts;
+    delete normalizedPatch.workbuddyAccessToken;
+    delete normalizedPatch.workbuddyUserId;
+    delete normalizedPatch.workbuddyEnterpriseId;
+    delete normalizedPatch.workbuddyEndpoint;
+    delete normalizedPatch.workbuddyLocale;
+    delete normalizedPatch.workbuddyDomain;
+    delete normalizedPatch.workbuddyDepartmentInfo;
+    delete normalizedPatch.workbuddyLocalAppEnabled;
     delete normalizedPatch.openrouterProfiles;
     delete normalizedPatch.thirdPartyProfiles;
     delete normalizedPatch.customModelPricing;
@@ -5989,8 +6247,13 @@ app.whenReady().then(() => {
     if (patch.volcengineAccessKeyId !== undefined) normalizedPatch.volcengineAccessKeyId = normalizeSecretSetting(patch.volcengineAccessKeyId);
     if (patch.volcengineSecretAccessKey !== undefined) normalizedPatch.volcengineSecretAccessKey = normalizeSecretSetting(patch.volcengineSecretAccessKey);
     if (patch.volcengineRegion !== undefined) normalizedPatch.volcengineRegion = normalizeVolcengineRegion(patch.volcengineRegion);
+    if (patch.volcengineAgentAccessKeyId !== undefined) normalizedPatch.volcengineAgentAccessKeyId = normalizeSecretSetting(patch.volcengineAgentAccessKeyId);
+    if (patch.volcengineAgentSecretAccessKey !== undefined) normalizedPatch.volcengineAgentSecretAccessKey = normalizeSecretSetting(patch.volcengineAgentSecretAccessKey);
+    if (patch.volcengineAgentRegion !== undefined) normalizedPatch.volcengineAgentRegion = normalizeVolcengineRegion(patch.volcengineAgentRegion);
     if (patch.qoderCookie !== undefined) normalizedPatch.qoderCookie = normalizeQoderCookie(patch.qoderCookie);
     if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
+    if (patch.traeAccessToken !== undefined) normalizedPatch.traeAccessToken = normalizeTraeAccessToken(patch.traeAccessToken);
+    if (patch.traeDeviceId !== undefined) normalizedPatch.traeDeviceId = normalizeTraeDeviceId(patch.traeDeviceId);
     if (patch.commandcodeCookie !== undefined) normalizedPatch.commandcodeCookie = normalizeCommandcodeCookie(patch.commandcodeCookie);
     if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
     if (patch.kimiWebAccessToken !== undefined) normalizedPatch.kimiWebAccessToken = normalizeKimiWebAccessToken(patch.kimiWebAccessToken);
@@ -6111,8 +6374,13 @@ app.whenReady().then(() => {
       volcengineAccessKeyId: patch.volcengineAccessKeyId !== undefined ? normalizeSecretSetting(patch.volcengineAccessKeyId) : (settings.volcengineAccessKeyId || ''),
       volcengineSecretAccessKey: patch.volcengineSecretAccessKey !== undefined ? normalizeSecretSetting(patch.volcengineSecretAccessKey) : (settings.volcengineSecretAccessKey || ''),
       volcengineRegion: patch.volcengineRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineRegion) : (settings.volcengineRegion || ''),
+      volcengineAgentAccessKeyId: patch.volcengineAgentAccessKeyId !== undefined ? normalizeSecretSetting(patch.volcengineAgentAccessKeyId) : (settings.volcengineAgentAccessKeyId || ''),
+      volcengineAgentSecretAccessKey: patch.volcengineAgentSecretAccessKey !== undefined ? normalizeSecretSetting(patch.volcengineAgentSecretAccessKey) : (settings.volcengineAgentSecretAccessKey || ''),
+      volcengineAgentRegion: patch.volcengineAgentRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineAgentRegion) : (settings.volcengineAgentRegion || ''),
       qoderCookie: patch.qoderCookie !== undefined ? normalizeQoderCookie(patch.qoderCookie) : (settings.qoderCookie || ''),
       qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
+      traeAccessToken: patch.traeAccessToken !== undefined ? normalizeTraeAccessToken(patch.traeAccessToken) : (settings.traeAccessToken || ''),
+      traeDeviceId: patch.traeDeviceId !== undefined ? normalizeTraeDeviceId(patch.traeDeviceId) : (settings.traeDeviceId || ''),
       commandcodeCookie: patch.commandcodeCookie !== undefined ? normalizeCommandcodeCookie(patch.commandcodeCookie) : (settings.commandcodeCookie || ''),
       ollamaCookie: patch.ollamaCookie !== undefined ? normalizeOllamaCookie(patch.ollamaCookie) : (settings.ollamaCookie || ''),
       customModelPricing: patch.customModelPricing !== undefined
@@ -6173,12 +6441,15 @@ app.whenReady().then(() => {
         rememberPendingLimitInvalidation(scope, reason, options);
       }
       startMode();
-    } else if (runtimeChange.usageStructural || runtimeChange.sinkStructural) {
+    } else if (runtimeChange.sinkStructural) {
       for (const { scope, reason, options } of limitInvalidations) {
         rememberPendingLimitInvalidation(scope, reason, options);
       }
       restartDeviceRuntimeForMode();
     } else {
+      if (runtimeChange.usageStructural) {
+        reconfigureUsageRuntimeForMode();
+      }
       if (runtimeChange.limitsReconfigure && deviceRuntimeHandle) {
         deviceRuntimeHandle.reconfigureLimits(electronLimitsConfig());
       }
@@ -6318,8 +6589,16 @@ app.whenReady().then(() => {
       const img = nativeImage.createFromDataURL(dataUrl);
       if (img.isEmpty()) continue;
       // Resize by height only; aspect ratio is preserved, so wide bar-style
-      // icons keep their width while square provider icons stay 20x20.
-      const sized = img.resize({ height: 20, quality: 'best' });
+      // icons keep their width while square provider icons stay square.
+      // Windows targets its own small-icon metric (16px x the display scale
+      // factor) rather than the macOS menubar height, so a single high-quality
+      // downscale of the 44px-tall renderer source stays crisp in the
+      // notification area instead of the old fixed 20px-for-all blur, and its
+      // square cell gets the bitmap trimmed to the pixels the renderer drew.
+      const sized = prepareTrayIconForPlatform(img, {
+        platform: process.platform,
+        scaleFactor: screen.getPrimaryDisplay().scaleFactor
+      });
       if (shouldUseTemplateTrayIcon(id, process.platform, settings?.showTrayProviderBadge)) sized.setTemplateImage(true);
       providerTrayIcons[id] = sized;
     }
@@ -6401,63 +6680,29 @@ app.whenReady().then(() => {
       journalOmittedCount: report.journalOmittedCount
     };
   });
-  // Where each tracked tool's data is read from on THIS machine. The absolute
+  // Where each known tool's data is read from on THIS machine. The absolute
   // paths stay local by design — they carry the user's home directory and never
   // go on the wire — so the renderer asks the main process for them instead.
   //
   // Probe only the client whose detail panel is open. The renderer caches the
-  // result for the current health snapshot, avoiding both eager filesystem work
-  // and path flicker when a stats tick rebuilds the panel.
-  ipcMain.handle('usage:clientSources', (_event, clientId) => {
-    const client = String(clientId || '').trim().toLowerCase();
-    const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
-    if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return null;
-    try {
-      const seen = new Set();
-      const all = (visibleDiagnosticRoots(client)[client] || [])
-        .filter((root) => {
-          const key = `${root.id}\0${root.dir}`;
-          return !seen.has(key) && seen.add(key);
-        })
-        .map((root) => ({ id: root.id, dir: root.dir, exists: root.exists === true }));
-      const sources = all.slice(0, 32);
-      return { sources, omittedCount: all.length - sources.length };
-    } catch (_) {
-      return null;
-    }
+  // result for the current health snapshot, or for the current device/client
+  // pair when the tool is not tracked, avoiding eager filesystem work.
+  const clientSourceIpcHandlers = createClientSourceIpcHandlers({
+    knownClients: KNOWN_CLIENTS,
+    trackedClients: () => trackedClientSet(clientsCsvForSetting(settings?.clients)),
+    visibleDiagnosticRoots,
+    clientDiagnosticRoots,
+    showItemInFolder: (target) => shell.showItemInFolder(target),
+    openPath: (target) => shell.openPath(target),
+    canRunRescan: () => ownsUsageRuntime(),
+    rescanClient: (client) => refreshUsageClient(client, { forceSync: true }),
+    onRescanError: (error) => console.log(`[usage-runtime] rescan failed: ${error.message}`)
   });
-  // Reveals one of those paths. The renderer sends a client id, never a path:
-  // anything it could send would otherwise become an arbitrary filesystem open.
-  ipcMain.handle('usage:revealClientSource', async (_event, clientId) => {
-    const client = String(clientId || '').trim().toLowerCase();
-    const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
-    if (!KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) return false;
-    try {
-      const roots = clientDiagnosticRoots(client)[client] || [];
-      const target = roots.find((root) => root.exists);
-      if (!target) return false;
-      // An exact-file source would otherwise be handed to openPath, which opens
-      // the file in whatever app claims .db/.jsonl. Select it in its folder
-      // instead — the user asked where the data lives, not to open it.
-      if (target.sourcePath) {
-        shell.showItemInFolder(target.sourcePath);
-        return true;
-      }
-      return await shell.openPath(target.dir) === '';
-    } catch (_) {
-      return false;
-    }
-  });
-  ipcMain.handle('usage:rescanClient', async (_event, clientId) => {
-    const client = String(clientId || '').trim().toLowerCase();
-    if (!client || !ownsUsageRuntime()) return false;
-    try {
-      return await refreshUsageClient(client, { forceSync: true }) === true;
-    } catch (error) {
-      console.log(`[usage-runtime] rescan failed: ${error.message}`);
-      return false;
-    }
-  });
+  ipcMain.handle('usage:clientSources', (_event, clientId) => clientSourceIpcHandlers.clientSources(clientId));
+  // The renderer sends a client id, never a path: anything it could send would
+  // otherwise become an arbitrary filesystem open.
+  ipcMain.handle('usage:revealClientSource', (_event, clientId) => clientSourceIpcHandlers.revealClientSource(clientId));
+  ipcMain.handle('usage:rescanClient', (_event, clientId) => clientSourceIpcHandlers.rescanClient(clientId));
   ipcMain.handle('clipboard:write', (_event, text) => {
     clipboard.writeText(String(text || ''));
     return true;
@@ -6491,16 +6736,31 @@ app.whenReady().then(() => {
   ipcMain.handle('appUpdate:install', () => installDownloadedAppUpdate());
   ipcMain.handle('appUpdate:dismiss', (_event, version) => dismissAppUpdateVersion(version));
   ipcMain.handle('cursor:loginManual', async (_event, raw) => {
+    if (isExternalAgentActive()) {
+      return { ok: false, code: 'EXTERNAL_AGENT_ACTIVE', error: CURSOR_EXTERNAL_AGENT_ERROR };
+    }
     const token = normalizeManualCookie(raw);
     if (!token) return { ok: false, error: 'Empty or malformed token' };
     try {
       const probeResult = await cursorProbe.probe(token);
       if (!probeResult.ok) return { ok: false, error: probeResult.error?.message || 'Cursor rejected the token' };
-      await cursorAuth.runCursorLogin(token);
+      const accountId = await cursorAuth.runCursorLogin(token);
+      const disabled = normalizeCursorDisabledAccountIds(settings.cursorDisabledAccountIds)
+        .filter((id) => id !== accountId);
+      const limitsChanged = disabled.length !== settings.cursorDisabledAccountIds.length;
+      settings.cursorDisabledAccountIds = disabled;
+      settings.cursorManualAccountIds = normalizeCursorAccountIds([
+        ...settings.cursorManualAccountIds,
+        accountId
+      ]);
+      saveSettings({ throwOnError: true });
+      if (limitsChanged) {
+        deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      }
       cursorStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'cursor' }, 'login', { clear: true });
       bestEffortTrackedUsageRefresh('cursor', { forceSync: true });
-      return { ok: true, email: probeResult.user.email };
+      return { ok: true, email: probeResult.user.email, status: await cursorStatusValue() };
     } catch (err) {
       return { ok: false, error: err.message };
     }
@@ -6605,13 +6865,49 @@ app.whenReady().then(() => {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('cursor:logout', async () => {
+  ipcMain.handle('cursor:setAccountEnabled', async (_event, accountId, enabled) => {
     try {
-      await cursorAuth.runCursorLogout();
+      const id = String(accountId || '').trim();
+      if (!id || !cursorAuth.listAccounts().some((account) => account.id === id)) {
+        return { ok: false, error: 'Cursor account not found' };
+      }
+      const disabled = new Set(normalizeCursorDisabledAccountIds(settings.cursorDisabledAccountIds));
+      if (enabled) disabled.delete(id);
+      else disabled.add(id);
+      settings.cursorDisabledAccountIds = [...disabled];
+      saveSettings({ throwOnError: true });
+      cursorStatusCache = { value: null, at: 0 };
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      void queueLimitInvalidation({ provider: 'cursor' }, 'account-toggle', { clear: true });
+      return { ok: true, status: await cursorStatusValue() };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+  ipcMain.handle('cursor:logout', async (_event, accountId) => {
+    if (isExternalAgentActive()) {
+      return { ok: false, code: 'EXTERNAL_AGENT_ACTIVE', error: CURSOR_EXTERNAL_AGENT_ERROR };
+    }
+    try {
+      const removeId = String(accountId || '').trim();
+      const manual = new Set(normalizeCursorAccountIds(settings.cursorManualAccountIds));
+      if (!removeId || !manual.has(removeId)) {
+        return { ok: false, error: 'Only manually added Cursor accounts can be removed' };
+      }
+      await cursorAuth.runCursorLogout({ accountId: removeId });
+      const disabled = normalizeCursorDisabledAccountIds(settings.cursorDisabledAccountIds)
+        .filter((id) => id !== removeId);
+      const limitsChanged = disabled.length !== settings.cursorDisabledAccountIds.length;
+      settings.cursorDisabledAccountIds = disabled;
+      settings.cursorManualAccountIds = [...manual].filter((id) => id !== removeId);
+      saveSettings({ throwOnError: true });
+      if (limitsChanged) {
+        deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      }
       cursorStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'cursor' }, 'logout', { clear: true });
       bestEffortTrackedUsageRefresh('cursor', { forceSync: true });
-      return { ok: true };
+      return { ok: true, status: await cursorStatusValue() };
     } catch (err) {
       return { ok: false, error: err.message };
     }
@@ -6628,27 +6924,12 @@ app.whenReady().then(() => {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('cursor:status', async () => {
+  ipcMain.handle('cursor:status', async (_event, options = {}) => {
     const now = Date.now();
-    if (cursorStatusCache.value && now - cursorStatusCache.at < CURSOR_STATUS_TTL_MS) {
+    if (options?.force !== true && options?.discover !== true && cursorStatusCache.value && now - cursorStatusCache.at < CURSOR_STATUS_TTL_MS) {
       return cursorStatusCache.value;
     }
-    const account = cursorAuth.readActiveAccount();
-    if (!account) {
-      const value = { loggedIn: false };
-      cursorStatusCache = { value, at: now };
-      return value;
-    }
-    const probeResult = await cursorProbe.probe(account.sessionToken);
-    const value = probeResult.ok
-      ? {
-          loggedIn: true,
-          email: probeResult.user.email,
-          membershipType: probeResult.usage.membershipType,
-          billingCycleEnd: probeResult.usage.billingCycleEnd,
-          expired: false
-        }
-      : { loggedIn: true, expired: probeResult.error?.kind === 'unauthorized', error: probeResult.error?.message };
+    const value = await cursorStatusValue({ discover: options?.discover === true });
     cursorStatusCache = { value, at: now };
     return value;
   });
@@ -7159,6 +7440,10 @@ app.whenReady().then(() => {
       && !thirdPartyLimits.newapiAccessToken({}, rawProfile.accessToken)
     ) return { ok: false, errorCode: 'missingAccessToken' };
     if (
+      adapter === thirdPartyLimits.SUB2API_ADAPTER
+      && !thirdPartyLimits.newapiAccessToken({}, rawProfile.accessToken)
+    ) return { ok: false, errorCode: 'missingAccessToken' };
+    if (
       [thirdPartyLimits.NEWAPI_TOKEN_ADAPTER, thirdPartyLimits.CUSTOM_BALANCE_ADAPTER].includes(adapter)
       && !thirdPartyLimits.newapiApiKey({}, rawProfile.apiKey)
     ) return { ok: false, errorCode: 'missingApiKey' };
@@ -7210,9 +7495,10 @@ app.whenReady().then(() => {
           errorCode: provider?.status === 'unauthorized' ? 'invalidCredential' : 'unavailable'
         };
       }
+      const storedProfile = thirdPartyProfileWithCanonicalIdentity(profile, provider) || profile;
       settings.thirdPartyProfiles = {
         ...(settings.thirdPartyProfiles || {}),
-        [name]: profile
+        [name]: storedProfile
       };
       saveSettings({ throwOnError: true });
       void queueLimitInvalidation({ provider: 'thirdparty', accountName: name }, 'profile-save');
@@ -7455,6 +7741,7 @@ app.on('before-quit', () => {
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
   unregisterWindowToggleShortcut();
+  electronWorkbuddyLocalAuth.dispose();
   if (skipForcedQuit) return;
   performQuit();
 });

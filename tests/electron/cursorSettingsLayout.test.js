@@ -79,7 +79,7 @@ function runRendererFunctions(source, names, expression, context = {}) {
   return vm.runInNewContext(`${snippets}\n${expression}`, context);
 }
 
-test('Cursor account status stays inline with an email-only summary', () => {
+test('Cursor account status stays inline with the linked-account summary', () => {
   const html = readRendererFile('index.html');
   const toggle = html.match(/<button id="cursorSettingsToggle"[\s\S]*?<\/button>/)?.[0] || '';
   assert.match(
@@ -163,14 +163,83 @@ test('Hub secret input stays masked and exposes an accessible paste button', () 
   const pasteBody = app.slice(start, end);
   assert.match(pasteBody, /const text = await navigator\.clipboard\.readText\(\);/);
   assert.match(pasteBody, /els\.secretInput\.value = text\.trim\(\);/);
-  assert.doesNotMatch(pasteBody, /dispatchEvent\(new Event\('input'/);
+  assert.match(pasteBody, /markHubDraftDirty\('secret'\);/);
 });
 
-test('Cursor account header omits plan and reset details', () => {
+test('Cursor account header uses the shared linked-account summary', () => {
   const body = functionBody(readRendererFile('app.js'), 'renderCursorStatus', 'refreshCursorStatus');
-  assert.match(body, /const summary = status\.email \|\| t\('settings\.cursor\.loggedIn'\);/);
+  assert.match(body, /t\('settings\.cursor\.connected', \{ linked: status\.linkedCount \|\| 0, total: accounts\.length \}\)/);
   assert.match(body, /setCursorStatusText\(statusEl, summary\);/);
-  assert.doesNotMatch(body, /membershipType|billingCycleEnd|billingResets/);
+  assert.doesNotMatch(body, /status\.email|billingCycleEnd|billingResets|selectedAccountId/);
+});
+
+test('Cursor settings use the shared multi-account rows and inline add flow', () => {
+  const html = readRendererFile('index.html');
+  const details = html.match(/<div id="cursorSettingsDetails"[\s\S]*?<div id="cursorErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  assert.match(details, /id="cursorAddAccountButton" class="opencode-add-summary"[^>]*aria-expanded="false"[^>]*aria-controls="cursorManualDetails"/);
+  assert.match(details, /<svg class="add-icon"/);
+  assert.doesNotMatch(details, /cursorRefreshButton|>Refresh<|>重新整理</);
+  assert.match(details, /id="cursorAccountList" class="managed-account-list"/);
+  assert.match(details, /id="cursorAgentActiveNote" class="settings-note hidden" data-i18n="settings\.cursor\.agentActive"/);
+  assert.match(details, /<div id="cursorManualPanel" class="opencode-add-form">/);
+  assert.match(details, /<div id="cursorManualDetails" class="opencode-add-details accordion-animated-container hidden">/);
+  assert.match(details, /data-i18n="settings\.cursor\.addManual">Add account<\/span>/);
+  assert.match(details, /using the button above, then sign in/);
+  assert.match(details, /cursor\.com\/dashboard/);
+  assert.doesNotMatch(details, /cursor\.com\/dashboard\/settings/);
+  assert.doesNotMatch(details, /Tokscale|Add an account manually/);
+  assert.doesNotMatch(details, /<details|<summary|cursorDetectButton|cursorManualLabel|accountLabel/);
+
+  const body = functionBody(readRendererFile('app.js'), 'renderCursorStatus', 'refreshCursorStatus');
+  assert.match(body, /input\.className = 'managed-account-checkbox'/);
+  assert.match(body, /window\.tokenMonitor\.cursor\.setAccountEnabled\(account\.id, input\.checked\)/);
+  assert.match(body, /right\.className = 'managed-account-right'/);
+  assert.match(body, /info\.className = 'managed-account-info'/);
+  assert.match(body, /const planLabel = account\.membershipType/);
+  assert.match(body, /: planLabel;/);
+  assert.doesNotMatch(body, /managed-account-detail|settings\.cursor\.linked/);
+  assert.match(body, /if \(account\.removable === true && !managementBlocked\)/);
+  assert.match(body, /remove\.className = 'managed-account-remove'/);
+  assert.match(body, /window\.tokenMonitor\.cursor\.logout\(account\.id\)/);
+  assert.doesNotMatch(body, /cursor-account-row|radio|selectedAccountId|selectAccount/);
+
+  const setup = readRendererFile('app.js');
+  assert.match(setup, /openExternal\('https:\/\/cursor\.com\/dashboard'\)/);
+  assert.doesNotMatch(setup, /openExternal\('https:\/\/cursor\.com\/dashboard\/settings'\)/);
+  assert.match(setup, /cursorAddAccountButton\?\.addEventListener\('click'/);
+  assert.match(setup, /cursorManualDetails\?\.classList\.toggle\('hidden', !next\)/);
+  assert.match(setup, /const expanding = !state\.cursorAccountExpanded;[\s\S]*?setCursorAccountExpanded\(expanding\);[\s\S]*?if \(expanding && !state\.cursorAccount\.busy\) void refreshCursorStatus\(\{ discover: true \}\);/);
+  assert.doesNotMatch(setup, /cursorRefreshButton|refreshCursorAccounts|cursor\.refresh\(/);
+
+  const css = readRendererFile('styles.css');
+  assert.equal(declaration(cssRule(css, '#cursorManualDetails'), 'margin-top'), '0');
+});
+
+test('Cursor removal is available only for accounts added manually in Token Monitor', () => {
+  const main = readRendererFile('../main.js');
+  assert.match(main, /cursorManualAccountIds: \[\]/);
+  assert.match(main, /removable: manual\.has\(account\.id\)/);
+  assert.match(main, /settings\.cursorManualAccountIds = normalizeCursorAccountIds\(\[/);
+  assert.match(main, /Only manually added Cursor accounts can be removed/);
+  assert.match(main, /ipcMain\.handle\('cursor:loginManual'[\s\S]*?if \(isExternalAgentActive\(\)\)/);
+  assert.match(main, /ipcMain\.handle\('cursor:logout'[\s\S]*?if \(isExternalAgentActive\(\)\)/);
+  const body = functionBody(readRendererFile('app.js'), 'renderCursorStatus', 'refreshCursorStatus');
+  assert.match(body, /addButton\.disabled = managementBlocked/);
+  assert.match(body, /cursorAgentActiveNote'[\s\S]*?toggle\('hidden', !managementBlocked\)/);
+});
+
+test('Cursor account discovery runs automatically without a separate refresh action', () => {
+  const main = readRendererFile('../main.js');
+  const statusBody = functionBody(main, 'cursorStatusValue', 'rebuildWindow');
+  assert.match(statusBody, /if \(discover && !managementBlocked\) \{/);
+  assert.match(statusBody, /await cursorAuth\.runCursorDiscover\(\)/);
+  assert.doesNotMatch(statusBody, /runCursorSync/);
+  assert.match(statusBody, /managementBlocked/);
+  assert.match(main, /options\?\.discover !== true/);
+  assert.doesNotMatch(main, /ipcMain\.handle\('cursor:refresh'/);
+
+  const preload = readRendererFile('../preload.js');
+  assert.doesNotMatch(preload, /cursor:refresh/);
 });
 
 test('OpenCode account panel provides multi-profile management', () => {
@@ -599,6 +668,9 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(switchBody, /const previousAccounts = normalizeCodexManagedAccounts\(settings\.codexManagedAccounts\)/);
   assert.match(switchBody, /liveAuthSnapshot = await snapshotCodexAuthFile\(liveAuthPath\)/);
   assert.match(switchBody, /preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount/);
+  assert.match(switchBody, /codexAuthMaterialForWorkspace\(targetMaterial, account\.workspaceAccountId\)/);
+  assert.doesNotMatch(switchBody, /workspaceIsFedramp|codexIsFedramp/);
+  assert.match(switchBody, /writeCodexAuthFile\(liveAuthPath, selectedMaterial\.data\)/);
   assert.match(switchBody, /restart: false/);
   assert.match(switchBody, /settings\.codexManagedAccounts = previousAccounts;/);
   assert.match(switchBody, /restoreCodexAuthFileSnapshot\(liveAuthSnapshot\)/);
@@ -626,7 +698,7 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.doesNotMatch(refreshBody, /collectLimitsOnce/);
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   assert.match(renderLimits, /const rowOptions = id === 'codex'\s*\? \{ accountTitle: true, allowSystemSwitch: true \}/s);
-  assert.match(renderLimits, /renderLimitProviderRow\(id, label, provider, color, rowOptions\)/);
+  assert.match(renderLimits, /renderLimitProviderRow\(id, label, provider, thirdPartyVisual\?\.color \|\| color, rowOptions\)/);
   assert.doesNotMatch(
     renderLimits,
     /renderLimitProviderRow\(id, label, provider, color, id === 'codex' \? \{[\s\S]*?showActiveBadge: true/
@@ -665,19 +737,21 @@ test('API key account entries share styling and Copilot uses the folded token en
   const css = readRendererFile('styles.css');
 
   const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
-  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#kimiManualPanel'/);
+  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#traeManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#kimiManualPanel'/);
   assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
 
   assert.match(css, /#deepseekManualPanel\.hidden,\n#minimaxManualPanel\.hidden,/);
-  assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#commandcodeManualPanel\.hidden,\n#ollamaManualPanel\.hidden,\n#mimoManualPanel\.hidden,\n#kimiManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
+  assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#traeManualPanel\.hidden,\n#commandcodeManualPanel\.hidden,\n#ollamaManualPanel\.hidden,\n#mimoManualPanel\.hidden,\n#kimiManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
   assert.match(css, /#copilotManualPanel\.hidden,\n#copilotManualDetails\.hidden,/);
-  assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#zaiteamErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#commandcodeErrorMessage\.hidden,\n#ollamaErrorMessage\.hidden,\n#kimiErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
-  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#commandcodeManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#zaiteamErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#traeErrorMessage\.hidden,\n#commandcodeErrorMessage\.hidden,\n#ollamaErrorMessage\.hidden,\n#kimiErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
+  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#traeManualPanel,\n#commandcodeManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#traeManualPanel input,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#traeManualPanel input,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
+
+  assert.match(css, /\.thirdparty-field :is\(input, select\)\s*\{[\s\S]*?font-size: 12px;/);
 });
 
 test('Copilot account panel provides GitHub sign-in plus manual token fallback', () => {
@@ -725,11 +799,18 @@ test('Copilot account panel provides GitHub sign-in plus manual token fallback',
   assert.match(flowBody, /return current && incoming === current;/);
 });
 
-test('Z.ai, Volcengine, Qoder, and Ollama account panels are exposed in settings', () => {
+test('Z.ai, Volcengine, Qoder, Trae, and Ollama account panels are exposed in settings', () => {
   const html = readRendererFile('index.html');
   assert.match(html, /<div id="zaiAccountGroup"[\s\S]*?<select id="zaiApiRegionInput">[\s\S]*?<input id="zaiApiKeyInput" type="password"[\s\S]*?<button id="zaiApiKeySubmit"[\s\S]*data-i18n="settings\.zai\.saveApiKey">/);
-  assert.match(html, /<div id="volcengineAccountGroup"[\s\S]*?data-i18n="settings\.volcengine\.accessKeyId">API key \/ Access key ID[\s\S]*?<input id="volcengineAccessKeyInput" type="password"[\s\S]*placeholder="ark-\.\.\. or AKLT\.\.\."[\s\S]*?<input id="volcengineSecretAccessKeyInput" type="password"[\s\S]*?<input id="volcengineRegionInput" type="text"[\s\S]*?<button id="volcengineCredentialsSubmit"[\s\S]*data-i18n="settings\.volcengine\.saveCredentials">/);
+  assert.match(html, /<div id="volcengineAccountGroup"[\s\S]*?data-i18n="settings\.volcengine\.accessKeyId">Access key ID \/ API key[\s\S]*?<input id="volcengineAccessKeyInput" type="password"[\s\S]*placeholder="AKLT\.\.\. or ark-\.\.\."[\s\S]*?<input id="volcengineSecretAccessKeyInput" type="password"[\s\S]*?<input id="volcengineRegionInput" type="text"[\s\S]*?<button id="volcengineCredentialsSubmit"[\s\S]*data-i18n="settings\.volcengine\.saveCredentials">/);
   assert.match(html, /<div id="qoderAccountGroup"[\s\S]*?<select id="qoderSiteInput">[\s\S]*?<textarea id="qoderCookieInput"[\s\S]*?<button id="qoderCookieSubmit"[\s\S]*data-i18n="settings\.qoder\.saveCookie">/);
+  assert.match(html, /<div id="traeAccountGroup"[\s\S]*?<input id="traeTokenInput" type="password"[\s\S]*?data-i18n-placeholder="settings\.trae\.tokenPlaceholder"[\s\S]*?<input id="traeDeviceIdInput" type="text"[\s\S]*?data-i18n-placeholder="settings\.trae\.deviceIdPlaceholder"[\s\S]*?<button id="traeTokenSubmit"[\s\S]*data-i18n="settings\.trae\.saveCredentials">/);
+  const traeDetails = html.match(/<div id="traeSettingsDetails"[\s\S]*?<div id="traeErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  assert.match(traeDetails, /<strong>1\.<\/strong> <span data-i18n="settings\.trae\.step1">/);
+  assert.match(traeDetails, /<strong>2\.<\/strong> <span data-i18n="settings\.trae\.step2">/);
+  assert.match(traeDetails, /<strong>3\.<\/strong> <span data-i18n="settings\.trae\.step3">/);
+  assert.match(traeDetails, /<strong>4\.<\/strong> <span data-i18n="settings\.trae\.step4">/);
+  assert.doesNotMatch(traeDetails, /settings\.trae\.note/);
   assert.match(html, /<div id="ollamaAccountGroup"[\s\S]*?<textarea id="ollamaCookieInput"[\s\S]*?<button id="ollamaCookieSubmit"[\s\S]*data-i18n="settings\.ollama\.saveCookie">/);
   const ollamaDetails = html.match(/<div id="ollamaSettingsDetails"[\s\S]*?<div id="ollamaErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
   assert.match(ollamaDetails, /<strong>1\.<\/strong> <span data-i18n="settings\.ollama\.step1">/);
@@ -759,6 +840,10 @@ test('Z.ai, Volcengine, Qoder, and Ollama account panels are exposed in settings
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(zaiPlatformUrl\(\)\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(volcenginePlatformUrl\(\)\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(qoderPlatformUrl\(\)\)/);
+  assert.match(setupBody, /const deviceIdInput = document\.getElementById\('traeDeviceIdInput'\);/);
+  assert.match(setupBody, /if \(!String\(tokenInput\.value \|\| ''\)\.trim\(\)\) \{[\s\S]*?settings\.trae\.missingAuthorization/);
+  assert.match(setupBody, /traeAccessToken: tokenInput\.value,[\s\S]*?traeDeviceId: deviceIdInput\.value,[\s\S]*?limitProviders: limitProviderSelectionIncluding\('trae'\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/www\.trae\.cn'\)/);
   assert.match(setupBody, /ollamaCookie: input\.value/);
   assert.match(setupBody, /const validation = await window\.tokenMonitor\.ollama\.validateCookie\(input\.value\);/);
   assert.match(setupBody, /if \(!validation\?\.ok\) \{[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?ollamaValidationError\(validation\);[\s\S]*?return;/);
@@ -909,6 +994,10 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     declaration(rule, 'background') === 'rgba(var(--sunken-rgb), 0.48)'
       && declaration(rule, 'color') === 'var(--text)'
       && declaration(rule, 'border') === '1px solid var(--line)'
+  )));
+  const textareaFocusRules = cssRulesForSelector(css, '.settings-panel textarea:focus');
+  assert.ok(textareaFocusRules.some(rule => (
+    declaration(rule, 'border-color') === 'rgba(115, 189, 245, 0.72)'
   )));
   const collapsedRules = cssRulesForSelector(css, '.accordion-animated-container.hidden');
   assert.ok(collapsedRules.some(rule => (
@@ -1157,6 +1246,10 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(body, /opencodeCookie:[^,}]*\?\s*'set'\s*:\s*''/);
   // Multi-account profile cookies are redacted the same way.
   assert.match(body, /opencodeProfiles: redactOpencodeProfilesForRenderer\(/);
+  assert.match(body, /'workbuddyAccessToken',[\s\S]*'workbuddyDepartmentInfo'/);
+  assert.doesNotMatch(body, /workbuddyLocalApp/);
+  assert.doesNotMatch(main, /workbuddySession|workbuddyBrowserSession/);
+  assert.doesNotMatch(body, /workbuddyBrowserSessionEnabled: settings\?\.workbuddyBrowserSessionEnabled/);
   // That redactor must name the fields it forwards. A spread of the stored
   // profile hands any field added later to the renderer verbatim, which is how
   // the API key would have leaked when profiles gained one.
@@ -1183,6 +1276,32 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(main, /migrateLegacyMimoCredentialFiles\(merged\.mimoManagedAccounts\)/);
   assert.match(main, /if \(!removeMimoCredential\(accountId\)\) return \{ ok: false, error: 'Could not remove stored credential' \};/);
   assert.match(main, /delete result\.account\.cookieHeader/);
+});
+
+test('WorkBuddy settings uses the same automatic provider row as other ambient integrations', () => {
+  const html = readRendererFile('index.html');
+  assert.doesNotMatch(html, /workbuddy(?:Settings|AccountGroup|LocalApp|Open|Refresh|Privacy|OptIn|Error)/);
+
+  const app = readRendererFile('app.js');
+  assert.match(app, /workbuddy: 'settings\.limits\.connection\.workbuddy'/);
+  assert.doesNotMatch(app, /workbuddyAccountGroup|workbuddyAccountStatus|renderWorkbuddyStatus/);
+  assert.doesNotMatch(app, /window\.tokenMonitor\.workbuddy/);
+
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
+  assert.doesNotMatch(preload, /workbuddy:/);
+});
+
+test('WorkBuddy auth is resolved only when its enabled local provider is active', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const limitsConfig = functionBody(main, 'electronLimitsConfig', 'defaultLimitProviders');
+  assert.match(limitsConfig, /settings\?\.limitsEnabled !== false/);
+  assert.match(limitsConfig, /parseLimitProviders\(settings\?\.limitProviders\)\.includes\('workbuddy'\)/);
+  assert.match(limitsConfig, /const workbuddyDesktopSessionSupported = isSupportedWorkbuddyLocalAppPlatform\(\)/);
+  assert.match(limitsConfig, /const workbuddyDesktopSessionEnabled = workbuddyEnabled && workbuddyDesktopSessionSupported/);
+  assert.match(limitsConfig, /workbuddyDesktopSessionSupported,/);
+  assert.match(limitsConfig, /workbuddyDesktopSessionEnabled,/);
+  assert.match(limitsConfig, /workbuddyLocalSession: workbuddyDesktopSessionEnabled \? electronWorkbuddyLocalAuth\.getSessionInfo\(\) : \{\}/);
+  assert.doesNotMatch(limitsConfig, /settings\?\.workbuddyLocalAppEnabled/);
 });
 
 test('legacy credential cleanup retries independently from the migration marker', () => {
@@ -1341,12 +1460,299 @@ test('sync upload interval setting is exposed in the Multi-device Sync panel', (
   assert.match(syncBody, /state\.settings\.syncUploadIntervalMs/);
   assert.match(syncBody, /Array\.from\(els\.syncUploadIntervalInput\.options/);
   assert.doesNotMatch(syncBody, /const allowed = \[0, 600000, 1200000, 1800000\]/);
+  const listenerStart = app.indexOf("els.syncUploadIntervalInput?.addEventListener('change'");
+  const listenerEnd = app.indexOf("els.collectionCadenceInput?.addEventListener('change'", listenerStart);
+  assert.notEqual(listenerStart, -1, 'sync upload interval listener should exist');
+  assert.notEqual(listenerEnd, -1, 'collection cadence listener should follow sync upload listener');
+  assert.match(app.slice(listenerStart, listenerEnd), /saveSettings\(\{\s*syncUploadIntervalMs:/);
+});
 
-  const listenerSlice = app.slice(
-    app.indexOf("els.syncUploadIntervalInput?.addEventListener('change'"),
-    app.indexOf("els.collectionCadenceInput?.addEventListener('change'")
+// Run the shipped event wiring against controls that model a settings push:
+// an auto-saved interval updates persisted state while the Hub fields keep
+// their local drafts until the explicit Hub Save commits them.
+function fakeHubControl(value = '') {
+  const listeners = new Map();
+  return {
+    value,
+    addEventListener(type, listener) {
+      const current = listeners.get(type) || [];
+      current.push(listener);
+      listeners.set(type, current);
+    },
+    async dispatch(type) {
+      for (const listener of listeners.get(type) || []) await listener({ target: this });
+    }
+  };
+}
+
+function loadHubSettingsWiring(els, context) {
+  const app = readRendererFile('app.js');
+  const modeStart = app.indexOf('function syncHubModeUi()');
+  const modeEnd = app.indexOf('function renderHubStatus()', modeStart);
+  const draftStart = app.indexOf('const HUB_DRAFT_FIELDS = [');
+  const draftEnd = app.indexOf('function syncSettingsForm()', draftStart);
+  const saveStart = app.indexOf("els.saveSettingsButton.addEventListener('click'");
+  const saveEnd = app.indexOf("els.hubModeOptions.addEventListener('change'", saveStart);
+  const intervalStart = app.indexOf('for (const input of els.showLimitUsedInputs || [])', saveEnd);
+  const intervalEnd = app.indexOf("els.collectionCadenceInput?.addEventListener('change'", intervalStart);
+  assert.notEqual(modeStart, -1, 'Hub mode UI sync should exist');
+  assert.notEqual(modeEnd, -1, 'Hub mode UI sync should precede Hub status rendering');
+  assert.notEqual(draftStart, -1, 'Hub draft tracking should exist');
+  assert.notEqual(draftEnd, -1, 'Hub draft tracking should precede settings sync');
+  assert.notEqual(saveStart, -1, 'Hub Save handler should exist');
+  assert.notEqual(saveEnd, -1, 'Hub mode handler should follow Hub Save');
+  assert.notEqual(intervalStart, -1, 'limits display wiring should precede sync upload wiring');
+  assert.notEqual(intervalEnd, -1, 'collection cadence wiring should follow sync upload wiring');
+  const vmContext = {
+    els,
+    ...context,
+    renderHubStatus: () => {},
+    renderSyncClientStatus: () => {},
+    renderHubBuildStatus: () => {}
+  };
+  vm.runInNewContext(
+    `${app.slice(modeStart, modeEnd)}\n${app.slice(draftStart, draftEnd)}\n${app.slice(saveStart, saveEnd)}\n${app.slice(intervalStart, intervalEnd)}`,
+    vmContext
   );
-  assert.match(listenerSlice, /saveSettings\(\{ syncUploadIntervalMs: Number\(els\.syncUploadIntervalInput\.value\) \}\)/);
+  return vmContext;
+}
+
+test('changing sync upload frequency auto-saves without replacing Hub drafts', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      Object.assign(state.settings, patch);
+      vmContext.syncHubDraftFields();
+      els.syncUploadIntervalInput.value = String(state.settings.syncUploadIntervalMs);
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  els.hubUrlInput.value = 'https://draft.example';
+  els.secretInput.value = 'draft-secret';
+  els.deviceIdInput.value = 'draft-device';
+  await els.hubUrlInput.dispatch('input');
+  await els.secretInput.dispatch('input');
+  await els.deviceIdInput.dispatch('input');
+  els.syncUploadIntervalInput.value = '1200000';
+
+  await els.syncUploadIntervalInput.dispatch('change');
+  assert.equal(els.hubUrlInput.value, 'https://draft.example');
+  assert.equal(els.secretInput.value, 'draft-secret');
+  assert.equal(els.deviceIdInput.value, 'draft-device');
+  assert.deepEqual(patches, [{ syncUploadIntervalMs: 1200000 }]);
+
+  await els.saveSettingsButton.dispatch('click');
+  assert.deepEqual(patches, [{
+    syncUploadIntervalMs: 1200000
+  }, {
+    hubUrl: 'https://draft.example',
+    secret: 'draft-secret',
+    deviceId: 'draft-device'
+  }]);
+  assert.equal(els.hubUrlInput.value, 'https://draft.example');
+  assert.equal(els.secretInput.value, 'draft-secret');
+  assert.equal(els.deviceIdInput.value, 'draft-device');
+});
+
+test('Hub Save keeps edits made while persistence is in flight', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let releaseSave;
+  let resolveSaveStarted;
+  const saveGate = new Promise((resolve) => { releaseSave = resolve; });
+  const saveStarted = new Promise((resolve) => { resolveSaveStarted = resolve; });
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      resolveSaveStarted();
+      await saveGate;
+      Object.assign(state.settings, patch);
+      vmContext.syncHubDraftFields();
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  els.hubUrlInput.value = 'https://draft-a.example';
+  els.secretInput.value = 'draft-secret';
+  els.deviceIdInput.value = 'draft-device';
+  await els.hubUrlInput.dispatch('input');
+  await els.secretInput.dispatch('input');
+  await els.deviceIdInput.dispatch('input');
+
+  const savePromise = els.saveSettingsButton.dispatch('click');
+  await saveStarted;
+  els.hubUrlInput.value = 'https://draft-b.example';
+  await els.hubUrlInput.dispatch('input');
+  releaseSave();
+  await savePromise;
+
+  assert.deepEqual(patches, [{
+    hubUrl: 'https://draft-a.example',
+    secret: 'draft-secret',
+    deviceId: 'draft-device'
+  }]);
+  assert.equal(els.hubUrlInput.value, 'https://draft-b.example');
+  assert.equal(els.secretInput.value, 'draft-secret');
+  assert.equal(els.deviceIdInput.value, 'draft-device');
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubUrlInput.value, 'https://draft-b.example');
+});
+
+test('Hub Save keeps an in-flight edit even when it returns to the persisted value', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  let releaseSave;
+  let resolveSaveStarted;
+  const saveGate = new Promise((resolve) => { releaseSave = resolve; });
+  const saveStarted = new Promise((resolve) => { resolveSaveStarted = resolve; });
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      resolveSaveStarted();
+      await saveGate;
+      Object.assign(state.settings, patch);
+      vmContext.syncHubDraftFields();
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  els.hubUrlInput.value = 'https://draft.example';
+  await els.hubUrlInput.dispatch('input');
+
+  const savePromise = els.saveSettingsButton.dispatch('click');
+  await saveStarted;
+  els.hubUrlInput.value = 'https://saved.example';
+  await els.hubUrlInput.dispatch('input');
+  releaseSave();
+  await savePromise;
+
+  assert.equal(els.hubUrlInput.value, 'https://saved.example');
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubUrlInput.value, 'https://saved.example');
+});
+
+test('Host Hub port draft survives settings rehydration and saves with Hub fields', async () => {
+  const classList = { toggle() {} };
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubModeOptions: { querySelectorAll: () => [] },
+    hubClientFields: { classList },
+    hubHostFields: { classList },
+    hubPortInput: fakeHubControl(),
+    hubSecretInput: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'host',
+      hubHostPort: 17321,
+      hubHostSecret: 'host-secret',
+      hubUrl: '',
+      secret: '',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      Object.assign(state.settings, patch);
+      vmContext.syncHubModeUi();
+      vmContext.syncHubDraftFields();
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubModeUi();
+  vmContext.syncHubDraftFields();
+
+  els.hubPortInput.value = '18000';
+  await els.hubPortInput.dispatch('input');
+  // Model the same renderer rehydration that follows any settings push.
+  vmContext.syncHubModeUi();
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubPortInput.value, '18000');
+
+  await els.saveSettingsButton.dispatch('click');
+  assert.deepEqual(patches, [{
+    hubUrl: '',
+    secret: '',
+    deviceId: 'saved-device',
+    hubHostPort: 18000
+  }]);
+  assert.equal(els.hubPortInput.value, '18000');
 });
 
 test('remote Hub build status is wired as a separate localized sync hint', () => {
@@ -1375,7 +1781,7 @@ test('remote Hub build status is wired as a separate localized sync hint', () =>
   assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.legacy':/g)].length, 0);
 });
 
-test('main settings normalize collection cadence and restart only the device runtime when it changes', () => {
+test('main settings normalize collection cadence and replace only usage when it changes', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const collector = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'collector.js'), 'utf8');
   assert.match(main, /function normalizeCollectionMode/);
@@ -1414,8 +1820,7 @@ test('main settings normalize collection cadence and restart only the device run
   assert.match(updateHandler, /normalizedPatch\.collectionIntervalMs = normalizeCollectionIntervalMs/);
   assert.match(updateHandler, /collectionMode: normalizeCollectionMode/);
   assert.match(updateHandler, /collectionIntervalMs: normalizeCollectionIntervalMs/);
-  assert.match(updateHandler, /runtimeChange\.usageStructural \|\| runtimeChange\.sinkStructural/);
-  assert.match(updateHandler, /restartDeviceRuntimeForMode\(\)/);
+  assert.match(updateHandler, /if \(runtimeChange\.usageStructural\) \{\s*reconfigureUsageRuntimeForMode\(\);\s*\}/);
 });
 
 test('main settings normalize sync upload intervals and restart only the device runtime when it changes', () => {
@@ -1446,8 +1851,7 @@ test('main settings normalize sync upload intervals and restart only the device 
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf("ipcMain.handle('appearance:preview'"));
   assert.match(updateHandler, /normalizedPatch\.syncUploadIntervalMs = normalizeSyncUploadIntervalMs/);
   assert.match(updateHandler, /syncUploadIntervalMs: normalizeSyncUploadIntervalMs/);
-  assert.match(updateHandler, /runtimeChange\.usageStructural \|\| runtimeChange\.sinkStructural/);
-  assert.match(updateHandler, /restartDeviceRuntimeForMode\(\)/);
+  assert.match(updateHandler, /else if \(runtimeChange\.sinkStructural\) \{[\s\S]*?restartDeviceRuntimeForMode\(\);[\s\S]*?\} else \{/);
 });
 
 test('main collectors share one live GUI limit credential resolver in every widget mode', () => {
@@ -1481,6 +1885,14 @@ test('main collectors share one live GUI limit credential resolver in every widg
   ]) assert.match(runtimeConfig, new RegExp(`${key}: settings\\.${key}`));
 });
 
+test('WorkBuddy Electron fetch adapter forwards parsed response JSON', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  assert.match(main, /createWorkbuddyLocalAuth\(\{\s*fetch: electronLimitsFetch\(\)/);
+  const limitsDeps = functionBody(main, 'electronLimitsDeps', 'normalizeDeepSeekApiKey');
+  assert.match(limitsDeps, /json: \(\) => result\.json\(\)/);
+  assert.doesNotMatch(limitsDeps, /result\.body/);
+});
+
 test('main settings migrateLimitProviders normalizes without expanding old defaults', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const body = functionBody(main, 'migrateLimitProviders', 'migrateLimitProviderOrder');
@@ -1499,6 +1911,71 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
   assert.match(groupBody, /renderLimitProviderRow\('mimo', limitAccountTitle\('mimo', provider, index, providers\), provider, color/);
   assert.match(renderLimitsBody, /if \(id === 'mimo' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
   assert.match(renderLimitsBody, /nodes\.push\(renderMimoAccountGroup\(label, visibleProviders, color\)\);/);
+});
+
+test('Limits groups multiple Cursor accounts with separate identity and plan rows', () => {
+  const app = readRendererFile('app.js');
+  const groupBody = functionBody(app, 'renderCursorAccountGroup', 'renderOpenCodeAccountGroup');
+  const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+  assert.match(groupBody, /const groupProvider = \{ provider: 'cursor', status: 'ok', windows: \[\], accountGroup: true \};/);
+  assert.match(groupBody, /planText: t\('settings\.cursor\.nAccounts', \{ count: providers\.length \}\)/);
+  assert.match(groupBody, /renderLimitProviderRow\('cursor', limitAccountTitle\('cursor', provider, index, providers\), provider, color/);
+  assert.match(renderLimitsBody, /if \(id === 'cursor' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
+  assert.match(renderLimitsBody, /nodes\.push\(renderCursorAccountGroup\(label, visibleProviders, color\)\);/);
+});
+
+test('Limits groups the Volcengine Coding and Agent plans as rows of one card', () => {
+  const app = readRendererFile('app.js');
+  const groupBody = functionBody(app, 'renderVolcengineAccountGroup', 'renderLimits');
+  const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+  // Both plans are subscriptions on one account, so the rows are titled by the
+  // plan rather than by an account identity the record does not carry.
+  assert.match(groupBody, /renderNamedApiAccountGroup\('volcengine', label, providers, color/);
+  assert.match(groupBody, /groupPlanText: t\('settings\.volcengine\.nPlans', \{ count: providers\.length \}\)/);
+  assert.match(renderLimitsBody, /if \(id === 'volcengine' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
+  assert.match(renderLimitsBody, /nodes\.push\(renderVolcengineAccountGroup\(label, visibleProviders, color\)\);/);
+  // Without an entry here the rows fall back to "Account 1"/"Account 2", since
+  // accountTitleLabel reads accountName/accountEmail and these rows carry
+  // neither — only accountLabel, which holds the plan name.
+  assert.match(app, /volcengine: \(provider, index, providers\) => volcenginePlanAccountTitle\(provider, index, providers\)/);
+});
+
+// Re-saving with the Agent fields empty deliberately preserves the stored
+// override, so without a dedicated control the only way back to the main account
+// is the provider logout, which also clears the Coding Plan credentials.
+test('the Volcengine Agent override can be cleared without clearing the Coding Plan', () => {
+  const app = readRendererFile('app.js');
+  const html = readRendererFile('index.html');
+  const overrideBody = functionBody(app, 'renderVolcengineAgentOverrideState', 'setVolcengineAgentExpanded');
+
+  assert.match(html, /<button id="volcengineAgentClearButton" class="hidden" data-i18n="settings\.volcengine\.agentClear">/);
+  assert.match(overrideBody, /volcengineAgentClearButton/);
+  const clearHandler = app.slice(app.indexOf("getElementById('volcengineAgentClearButton')?.addEventListener"));
+  const saveCall = clearHandler.slice(0, clearHandler.indexOf('});'));
+  assert.match(saveCall, /volcengineAgentAccessKeyId: ''/);
+  assert.match(saveCall, /volcengineAgentSecretAccessKey: ''/);
+  assert.match(saveCall, /volcengineAgentRegion: ''/);
+  // The Coding Plan credentials must not ride along; that is what logout is for.
+  assert.doesNotMatch(saveCall, /volcengineAccessKeyId: ''/);
+});
+
+test('the Volcengine Agent override shows that it is set, from the one flag that means it', () => {
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const statusBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
+  const overrideBody = functionBody(app, 'renderVolcengineAgentOverrideState', 'setVolcengineAgentExpanded');
+
+  // Password inputs are cleared after saving and never repopulated, so without
+  // this the panel looks identical whether or not a second account is stored.
+  assert.match(statusBody, /if \(providerName === 'volcengine'\) renderVolcengineAgentOverrideState\(\);/);
+  assert.match(overrideBody, /state\.settings\?\.volcengineAgentAccessKeyId/);
+  assert.match(overrideBody, /'set'/);
+
+  // volcengineAgentCredentials falls back to the Coding Plan key, so a
+  // "configured" flag derived from it is true for every Coding-only user and
+  // would light this indicator up for all of them.
+  assert.doesNotMatch(main, /volcengineAgentCredentialsConfigured/);
+  assert.doesNotMatch(main, /volcengineAgentCredentialsSource/);
 });
 
 test('a zero-config OpenCode machine is not reported as unconfigured', () => {

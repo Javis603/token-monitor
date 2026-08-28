@@ -23,6 +23,7 @@ const { collectUsageOnce, projectIdentity, watchIgnoreMatcher, watchPathsForClie
 const { syncPayload } = require('../../src/shared/syncPayload');
 const { createDeviceState } = require('../../src/shared/deviceState');
 const { captureSessionUsageArchive } = require('../../src/shared/sessionUsageArchive');
+const { localIso, localMs } = require('../helpers/localTime');
 const { projectRowsForPeriod } = require('../../src/electron/renderer/projectRows');
 const { sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
 const { composeLocalSyncStats } = require('../../src/electron/syncDisplayStats');
@@ -167,22 +168,28 @@ test('Reasonix native adapter derives msg count from the trusted official transc
   const sessionsDir = path.join(stateHome, 'sessions');
   const metaPath = path.join(sessionsDir, 'official.jsonl.meta');
   const eventsPath = path.join(sessionsDir, 'official.events.jsonl');
+  // `getView`'s clock below is local, and the epoch literals this fixture used to
+  // carry (`1786179601000` = `2026-08-08T09:00:01Z`) name a UTC instant, so the
+  // messages left the clock's local day past ±9 and the session dropped out of
+  // `today`. The rest of the file already states its fixtures this way
+  // (`localDateIso`); these two tests were the ones that did not.
+  const dayBase = localMs(2026, 8, 8, 9);
   writeJson(metaPath, {
     BranchMeta: { ID: 'branch-from-official-meta' },
     schema_version: 1,
-    created_at: '2026-08-08T09:00:00.000Z',
-    updated_at: '2026-08-08T09:02:00.000Z',
+    created_at: localIso(2026, 8, 8, 9),
+    updated_at: localIso(2026, 8, 8, 9, 2),
     model: 'deepseek/deepseek-v4-flash'
   });
   fs.writeFileSync(eventsPath, `${JSON.stringify({
     schema_version: 1,
     type: 'replace',
-    created_at: '2026-08-08T09:00:00.000Z',
+    created_at: localIso(2026, 8, 8, 9),
     messages: [
-      { role: 'user', raw_content: 'first', createdAt: 1786179601000 },
-      { role: 'assistant', createdAt: 1786179602000, tool_calls: [{ name: 'search' }] },
-      { role: 'tool', name: 'search', createdAt: 1786179602500 },
-      { role: 'assistant', createdAt: 1786179603000 }
+      { role: 'user', raw_content: 'first', createdAt: dayBase + 1_000 },
+      { role: 'assistant', createdAt: dayBase + 2_000, tool_calls: [{ name: 'search' }] },
+      { role: 'tool', name: 'search', createdAt: dayBase + 2_500 },
+      { role: 'assistant', createdAt: dayBase + 3_000 }
     ]
   })}\n`);
 
@@ -204,11 +211,18 @@ test('Reasonix resumed sessions use the latest trusted event message for live pe
   const stateHome = path.join(root, 'state');
   const sessionsDir = path.join(stateHome, 'projects', '-home-global-workspace', 'sessions');
   const id = 'resumed-with-events';
+  // The point of the test is that one session spans two local days and the live
+  // periods take their date from the *later* message, so all four stamps have to
+  // be local: as `Z` literals the pair collapses onto one local day at some
+  // offsets and splits across two different ones at others.
+  const yesterdayMessage = localIso(2026, 8, 8, 13);
+  const yesterdayReply = localIso(2026, 8, 8, 13, 0, 1);
+  const todayMessage = localIso(2026, 8, 9, 3);
   const paths = sidecars(sessionsDir, id, {
     id,
     schema_version: 1,
-    created_at: '2026-08-08T13:00:00.000Z',
-    updated_at: '2026-08-09T03:00:00.000Z',
+    created_at: yesterdayMessage,
+    updated_at: todayMessage,
     scope: 'global',
     model: 'deepseek-flash/deepseek-v4-flash'
   }, nativeTelemetry({ totalTokens: 320 }));
@@ -217,32 +231,32 @@ test('Reasonix resumed sessions use the latest trusted event message for live pe
     {
       schema_version: 1,
       type: 'replace',
-      created_at: '2026-08-08T13:00:00.000Z',
+      created_at: yesterdayMessage,
       messages: [
-        { role: 'user', raw_content: '昨天的输入', content: '<reasoning-language>内部包装</reasoning-language>昨天的输入', createdAt: Date.parse('2026-08-08T13:00:00.000Z') },
-        { role: 'assistant', createdAt: Date.parse('2026-08-08T13:00:01.000Z') }
+        { role: 'user', raw_content: '昨天的输入', content: '<reasoning-language>内部包装</reasoning-language>昨天的输入', createdAt: Date.parse(yesterdayMessage) },
+        { role: 'assistant', createdAt: Date.parse(yesterdayReply) }
       ]
     },
     {
       schema_version: 1,
       type: 'append',
       message_index: 2,
-      created_at: '2026-08-09T03:00:00.000Z',
+      created_at: todayMessage,
       messages: [
-        { role: 'user', raw_content: '今天继续', createdAt: Date.parse('2026-08-09T03:00:00.000Z') },
+        { role: 'user', raw_content: '今天继续', createdAt: Date.parse(todayMessage) },
         { role: 'assistant' }
       ]
     }
   ].map((record) => JSON.stringify(record)).join('\n') + '\n');
 
   const session = readReasonixNativeSession(paths.metaPath, paths.telemetryPath, { eventPath });
-  assert.equal(session.lastMessageAt, '2026-08-09T03:00:00.000Z');
+  assert.equal(session.lastMessageAt, todayMessage);
   assert.equal(session.model, 'deepseek-v4-flash');
   assert.equal(session.reportedCostUsd, 0.25);
   assert.equal(session.sessionDetailAvailable, false);
 
   const view = cacheFor(stateHome, projectIdentity).getView({
-    now: new Date('2026-08-09T12:00:00.000Z')
+    now: new Date(2026, 7, 9, 12, 0, 0)
   });
   assert.ok(view.sessions.today[`reasonix:${id}`]);
   assert.ok(view.sessions.month[`reasonix:${id}`]);

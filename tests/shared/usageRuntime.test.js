@@ -13,6 +13,9 @@ process.on('exit', () => { try { fs.rmSync(sharedDir, { recursive: true, force: 
 const cursorAuth = require('../../src/shared/cursorAuth');
 const { collectUsageOnce, startCollector } = require('../../src/shared/collector');
 const { createUsageRuntime } = require('../../src/shared/usageRuntime');
+const { installInProcessWatchHost } = require('../helpers/watchHost');
+
+installInProcessWatchHost(test);
 
 function emptyTokscaleResult() {
   return { entries: [] };
@@ -346,7 +349,10 @@ test('coalesced targeted refreshes preserve the union of their clients', async (
     const results = await Promise.all([held, cursor, claude]);
 
     assert.deepEqual(results, [true, true, true]);
-    assert.deepEqual(scans.at(-1), { clients: 'cursor,claude', flags: ['--today'] });
+    assert.deepEqual(scans.slice(-2), [
+      { clients: 'cursor,claude', flags: ['--today'] },
+      { clients: 'claude,cursor', flags: ['--today'] }
+    ]);
     assert.equal(updates.at(-1).reason, 'coalesced');
   } finally {
     runtime.stop();

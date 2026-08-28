@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
+const { throwIfAborted } = require('./abortSignal');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { REASONIX_CLIENT } = require('./reasonixPaths');
 const { buildPromaPeriods, collectPromaRows } = require('./promaUsage');
@@ -38,6 +39,7 @@ const WSL_DATA_MARKERS = [
   '.config/Code/User/globalStorage/kilocode.kilo-code/tasks',
   '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks',
   '.commandcode/projects',
+  '.dsh/sessions',
   '.local/share/mimocode/mimocode.db',
   '.zcode/projects',
   '.zcode/cli/db',
@@ -80,6 +82,7 @@ const MARKER_CLIENTS = {
   '.config/Code/User/globalStorage/kilocode.kilo-code/tasks': 'kilocode',
   '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks': 'kilocode',
   '.commandcode/projects': 'commandcode',
+  '.dsh/sessions': 'dsh',
   '.local/share/mimocode/mimocode.db': 'micode',
   '.zcode/projects': 'zcode',
   '.zcode/cli/db': 'zcode',
@@ -203,6 +206,7 @@ async function collectWslUsage(options = {}, deps = {}) {
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
   const detected = new Set();
+  throwIfAborted(options.signal, 'WSL usage scan aborted');
   if (!trackedClients) return { bundle, detected: [] };
   // Only attribute markers for clients the user is actually tracking — a marker
   // for an untracked client must not surface in the panel.
@@ -215,6 +219,7 @@ async function collectWslUsage(options = {}, deps = {}) {
     .filter((client) => client !== REASONIX_CLIENT)
     .join(',');
   for (const home of wslUsageHomes(deps)) {
+    throwIfAborted(options.signal, 'WSL usage scan aborted');
     // Attribution is marker-based, independent of whether a parser returns data.
     const homeDataClients = homeHasData(home, existsSync, readdirSync);
     for (const id of homeDataClients) {
@@ -252,9 +257,12 @@ async function collectWslUsage(options = {}, deps = {}) {
     if (clientsCsv.length === 0 || typeof runTokscale !== 'function') continue;
     try {
       // Serial on purpose (issue #15): never run these concurrently.
-      const todayJson = await runTokscale({ clients: clientsCsv, flags: ['--today', '--home', home], commandTimeoutMs });
-      const monthJson = await runTokscale({ clients: clientsCsv, flags: ['--month', '--home', home], commandTimeoutMs });
-      const allTimeJson = await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs });
+      const todayJson = await runTokscale({ clients: clientsCsv, flags: ['--today', '--home', home], commandTimeoutMs, signal: options.signal });
+      throwIfAborted(options.signal, 'WSL usage scan aborted');
+      const monthJson = await runTokscale({ clients: clientsCsv, flags: ['--month', '--home', home], commandTimeoutMs, signal: options.signal });
+      throwIfAborted(options.signal, 'WSL usage scan aborted');
+      const allTimeJson = await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs, signal: options.signal });
+      throwIfAborted(options.signal, 'WSL usage scan aborted');
       const periods = {
         today: extractUsageFromTokscale(todayJson),
         month: extractUsageFromTokscale(monthJson),
@@ -265,6 +273,7 @@ async function collectWslUsage(options = {}, deps = {}) {
       bundle.month = mergePeriods(bundle.month, periods.month);
       bundle.allTime = mergePeriods(bundle.allTime, periods.allTime);
     } catch (error) {
+      throwIfAborted(options.signal, 'WSL usage scan aborted');
       if (typeof logger === 'function') logger(`wsl usage scan failed for ${home}: ${error.message}`);
     }
   }

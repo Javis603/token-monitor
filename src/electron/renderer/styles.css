@@ -662,6 +662,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .settings-panel .settings-item.hidden { display: none; }
 #windowsBackdropNote.hidden { display: none; }
 #limitsRefreshAdaptiveNote.hidden { display: none; }
+#volcengineAgentConfigured.hidden { display: none; }
 .settings-item-text {
   flex: 1 1 auto;
   min-width: 0;
@@ -2573,7 +2574,8 @@ html.is-windows .settings-panel select option {
   background: rgb(var(--accent-rgb));
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
-.settings-panel input:focus { border-color: rgba(115, 189, 245, 0.72); }
+.settings-panel input:focus,
+.settings-panel textarea:focus { border-color: rgba(115, 189, 245, 0.72); }
 .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .settings-actions button { min-height: 30px; padding: 0 10px; border-radius: 8px; font-size: 11px; white-space: nowrap; }
 .refresh-button {
@@ -3202,22 +3204,17 @@ html.is-windows .settings-panel select option {
   display: block;
   overflow: visible;
 }
-.home-activity-canvas .heat-base-layer .heat {
-  transform-box: fill-box;
-  transform-origin: center;
-}
 .home-activity-canvas .heat {
   fill: rgba(var(--overlay-rgb), 0.03);
   stroke: none;
   stroke-width: 0;
-  transition: fill 140ms ease, stroke 140ms ease, transform 140ms ease;
+  transition: fill 140ms ease, stroke 140ms ease;
 }
 .home-activity-canvas .heat[data-active="true"],
 .home-activity-canvas .heat:hover {
   filter: url("#homeActivityHeatGlow");
   stroke: rgba(var(--line-rgb), 0.9);
   stroke-width: 1;
-  transform: scale(1.28);
 }
 .home-activity-canvas .heat-bright-layer {
   opacity: 0;
@@ -3276,9 +3273,11 @@ html.is-windows .settings-panel select option {
   padding: 6px 9px;
   border: 1px solid rgba(var(--line-rgb), 0.16);
   border-radius: 8px;
-  background: rgba(var(--panel-rgb), 0.94);
+  background: rgba(var(--panel-rgb), 0.58);
   color: var(--text);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.26), 0 0 18px rgba(var(--blue-rgb), 0.22);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(var(--overlay-rgb), 0.08);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
   font-size: 10px;
   line-height: 1.1;
   opacity: 0;
@@ -3399,6 +3398,8 @@ html.is-windows .settings-panel select option {
 .row-icon-workbuddy  { -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);     mask-image: url(../../../assets/icons/workbuddy.svg); }
 .row-icon-proma      { -webkit-mask-image: url(../../../assets/icons/proma.svg);         mask-image: url(../../../assets/icons/proma.svg); }
 .row-icon-reasonix   { -webkit-mask-image: url(../../../assets/icons/reasonix.svg);      mask-image: url(../../../assets/icons/reasonix.svg); }
+.row-icon-dsh        { -webkit-mask-image: url(../../../assets/icons/dsh.svg);            mask-image: url(../../../assets/icons/dsh.svg); }
+.row-icon-cherrystudio { -webkit-mask-image: url(../../../assets/icons/cherrystudio.svg); mask-image: url(../../../assets/icons/cherrystudio.svg); }
 .row-icon-opencode   { -webkit-mask-image: url(../../../assets/icons/opencode.svg);      mask-image: url(../../../assets/icons/opencode.svg); }
 .row-icon-openrouter { -webkit-mask-image: url(../../../assets/icons/openrouter.svg);    mask-image: url(../../../assets/icons/openrouter.svg); }
 .row-icon-openclaw   { -webkit-mask-image: url(../../../assets/icons/openclaw.svg);      mask-image: url(../../../assets/icons/openclaw.svg); }
@@ -3418,9 +3419,13 @@ html.is-windows .settings-panel select option {
 .row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
 .row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
 .row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
+.row-icon-trae       { -webkit-mask-image: url(../../../assets/icons/trae.svg);          mask-image: url(../../../assets/icons/trae.svg); }
 .row-icon-qodercn    { -webkit-mask-image: url(../../../assets/icons/qodercn.svg);      mask-image: url(../../../assets/icons/qodercn.svg); }
 .row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
-.row-icon-thirdparty { -webkit-mask-image: url(../../../assets/icons/newapi.svg);         mask-image: url(../../../assets/icons/newapi.svg); }
+.row-icon-thirdparty { -webkit-mask-image: url(../../../assets/icons/thirdparty.svg);      mask-image: url(../../../assets/icons/thirdparty.svg); }
+.row-icon-newapi    { -webkit-mask-image: url(../../../assets/icons/newapi.svg);           mask-image: url(../../../assets/icons/newapi.svg); }
+.row-icon-sub2api   { -webkit-mask-image: url(../../../assets/icons/sub2api.svg);          mask-image: url(../../../assets/icons/sub2api.svg); }
+.row-icon-token-monitor { -webkit-mask-image: url(../../../assets/icons/token-monitor.svg); mask-image: url(../../../assets/icons/token-monitor.svg); }
 .row-icon-os-apple   { -webkit-mask-image: url(../../../assets/icons/os-apple.svg);      mask-image: url(../../../assets/icons/os-apple.svg); }
 .row-icon-os-linux   { -webkit-mask-image: url(../../../assets/icons/os-linux.svg);      mask-image: url(../../../assets/icons/os-linux.svg); }
 .row-icon-os-windows { -webkit-mask-image: url(../../../assets/icons/os-windows.svg);    mask-image: url(../../../assets/icons/os-windows.svg); }
@@ -3501,6 +3506,14 @@ html.is-windows .settings-panel select option {
   -webkit-mask-image: url(../../../assets/icons/qoder.svg);
   mask-image: url(../../../assets/icons/qoder.svg);
 }
+.limit-icon-trae {
+  -webkit-mask-image: url(../../../assets/icons/trae.svg);
+  mask-image: url(../../../assets/icons/trae.svg);
+}
+.limit-icon-workbuddy {
+  -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);
+  mask-image: url(../../../assets/icons/workbuddy.svg);
+}
 
 .limit-icon-ollama {
   -webkit-mask-image: url(../../../assets/icons/ollama.svg);
@@ -3515,8 +3528,16 @@ html.is-windows .settings-panel select option {
   mask-image: url(../../../assets/icons/xiaomi.svg);
 }
 .limit-icon-thirdparty {
+  -webkit-mask-image: url(../../../assets/icons/thirdparty.svg);
+  mask-image: url(../../../assets/icons/thirdparty.svg);
+}
+.limit-icon-newapi {
   -webkit-mask-image: url(../../../assets/icons/newapi.svg);
   mask-image: url(../../../assets/icons/newapi.svg);
+}
+.limit-icon-sub2api {
+  -webkit-mask-image: url(../../../assets/icons/sub2api.svg);
+  mask-image: url(../../../assets/icons/sub2api.svg);
 }
 .row-label {
   display: grid;
@@ -5041,6 +5062,7 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel.hidden,
 #volcengineManualPanel.hidden,
 #qoderManualPanel.hidden,
+#traeManualPanel.hidden,
 #commandcodeManualPanel.hidden,
 #ollamaManualPanel.hidden,
 #mimoManualPanel.hidden,
@@ -5051,7 +5073,9 @@ html.is-windows .limit-live-badge {
 #opencodeErrorMessage.hidden,
 #openrouterErrorMessage.hidden,
 #thirdpartyErrorMessage.hidden,
+#thirdpartySub2ApiSteps.hidden,
 #thirdpartyAccessTokenRow.hidden,
+#thirdpartyRefreshTokenRow.hidden,
 #thirdpartyUserIdRow.hidden,
 #thirdpartyApiKeyRow.hidden,
 #thirdpartyModeField.hidden,
@@ -5062,6 +5086,7 @@ html.is-windows .limit-live-badge {
 #zaiteamErrorMessage.hidden,
 #volcengineErrorMessage.hidden,
 #qoderErrorMessage.hidden,
+#traeErrorMessage.hidden,
 #commandcodeErrorMessage.hidden,
 #ollamaErrorMessage.hidden,
 #kimiErrorMessage.hidden,
@@ -5076,6 +5101,7 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel,
 #volcengineManualPanel,
 #qoderManualPanel,
+#traeManualPanel,
 #commandcodeManualPanel,
 #ollamaManualPanel,
 #mimoManualPanel,
@@ -5092,6 +5118,7 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel > .accordion-animation-inner,
 #volcengineManualPanel > .accordion-animation-inner,
 #qoderManualPanel > .accordion-animation-inner,
+#traeManualPanel > .accordion-animation-inner,
 #commandcodeManualPanel > .accordion-animation-inner,
 #ollamaManualPanel > .accordion-animation-inner,
 #mimoManualPanel > .accordion-animation-inner,
@@ -5125,11 +5152,13 @@ html.is-windows .limit-live-badge {
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
 #qoderManualPanel select,
+#traeManualPanel input,
 #commandcodeManualPanel textarea,
 #ollamaManualPanel textarea,
 #mimoManualPanel input,
 #mimoManualPanel textarea,
 #kimiManualPanel input,
+#kimiManualPanel textarea,
 #copilotManualDetails input {
   width: 100%;
   font-size: 12px;
@@ -5154,11 +5183,13 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel input,
 #volcengineManualPanel input,
 #qoderManualPanel textarea,
+#traeManualPanel input,
 #commandcodeManualPanel textarea,
 #ollamaManualPanel textarea,
 #mimoManualPanel input,
 #mimoManualPanel textarea,
 #kimiManualPanel input,
+#kimiManualPanel textarea,
 #copilotManualDetails input {
   font-family: monospace;
 }
@@ -5206,8 +5237,8 @@ html.is-windows .limit-live-badge {
 .detail-role-user { color: #bda5f5; }
 .detail-role-sep { color: var(--muted); }
 .detail-turn-title { color: var(--muted); }
-.row.session-row[data-client="claude"], .row.session-row[data-client="codex"], .row.session-row[data-client="opencode"], .row.session-row[data-client="reasonix"] { cursor: pointer; }
-.row.session-row[data-client="claude"] .row-metrics::after, .row.session-row[data-client="codex"] .row-metrics::after, .row.session-row[data-client="opencode"] .row-metrics::after, .row.session-row[data-client="reasonix"] .row-metrics::after { content: '›'; color: var(--muted); font-size: 14px; line-height: 1; }
+.row.session-row[data-client="claude"], .row.session-row[data-client="codex"], .row.session-row[data-client="opencode"], .row.session-row[data-client="reasonix"], .row.session-row[data-client="dsh"] { cursor: pointer; }
+.row.session-row[data-client="claude"] .row-metrics::after, .row.session-row[data-client="codex"] .row-metrics::after, .row.session-row[data-client="opencode"] .row-metrics::after, .row.session-row[data-client="reasonix"] .row-metrics::after, .row.session-row[data-client="dsh"] .row-metrics::after { content: '›'; color: var(--muted); font-size: 14px; line-height: 1; }
 .row.session-row[data-client="reasonix"][data-detail-unavailable="true"] { cursor: default; }
 .row.session-row[data-client="reasonix"][data-detail-unavailable="true"] .row-metrics::after { content: none; }
 .view-preference-row.has-subgroup {
@@ -5958,6 +5989,12 @@ html.is-windows .limit-live-badge {
 .opencode-add-details {
   margin-top: 8px;
 }
+/* Cursor sits below both the account list and its own provider copy, so the
+   shared add-details margin doubles the visual step before the first action.
+   The form wrapper already supplies the same separation used by MiMo. */
+#cursorManualDetails {
+  margin-top: 0;
+}
 .opencode-add-body {
   display: flex;
   flex-direction: column;
@@ -5986,6 +6023,20 @@ html.is-windows .limit-live-badge {
   height: 30px;
   box-sizing: border-box;
   font-size: 12px;
+}
+/* The Agent Plan override borrows the disclosure chrome above, but that form's
+   rows put a short label beside its input, and these labels are full field
+   names, so the three inputs ended up at three different widths. Fall back to
+   the stacked row the rest of the Volcengine card already uses. */
+#volcengineAgentDetails .settings-row {
+  display: block;
+}
+#volcengineAgentDetails .settings-row label {
+  white-space: normal;
+}
+#volcengineAgentDetails .settings-row :is(input, select) {
+  height: auto;
+  font-size: inherit;
 }
 .opencode-add-body textarea {
   width: 100%;
@@ -6028,7 +6079,7 @@ html.is-windows .limit-live-badge {
   min-width: 0;
   height: 30px;
   box-sizing: border-box;
-  font-size: 11px;
+  font-size: 12px;
 }
 .thirdparty-mode-hint {
   min-height: 30px;

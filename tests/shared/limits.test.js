@@ -283,6 +283,7 @@ test('aggregateLimits preserves distinct OpenRouter accounts and public stats sc
 test('aggregateLimits preserves distinct Third-party API accounts while keeping Base URLs off the wire', () => {
   const providers = ['工作', 'personal'].map((accountName, index) => normalizeLimitProvider({
     provider: 'thirdparty',
+    adapterId: index === 0 ? 'sub2api' : 'custom',
     accountKey: `sha256:thirdparty-${index}`,
     accountName,
     accountLabel: accountName,
@@ -305,7 +306,17 @@ test('aggregateLimits preserves distinct Third-party API accounts while keeping 
       requestCount: index + 10,
       quotaGroup: index === 0 ? 'default' : 'vip',
       expiresAt: '2027-01-15T08:00:00.000Z'
-    }
+    },
+    ...(index === 0 ? {
+      usageSummary: {
+        period: 'month',
+        requests: 10,
+        inputTokens: 200,
+        standardCost: 12,
+        actualCost: 3,
+        averageDurationMs: 400
+      }
+    } : {})
   }));
   const aggregate = aggregateLimits([{
     deviceId: 'macbook',
@@ -318,6 +329,8 @@ test('aggregateLimits preserves distinct Third-party API accounts while keeping 
   assert.equal(work.balance.requestCount, 10);
   assert.equal(work.balance.quotaGroup, 'default');
   assert.equal(work.balance.expiresAt, '2027-01-15T08:00:00.000Z');
+  assert.equal(work.adapterId, 'sub2api');
+  assert.equal(work.usageSummary.actualCost, 3);
   assert.equal(JSON.stringify(thirdparty).includes('http'), false);
 
   const publicPayload = publicLimits({ providers: thirdparty });
@@ -325,6 +338,7 @@ test('aggregateLimits preserves distinct Third-party API accounts while keeping 
   assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountName')));
   assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'accountLabel')));
   assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'planLabel')));
+  assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider, 'usageSummary')));
   assert.ok(publicPayload.providers.every((provider) => !Object.hasOwn(provider.balance, 'quotaGroup')));
   assert.ok(publicPayload.providers.every((provider) => Object.hasOwn(provider.balance, 'requestCount')));
 });
@@ -1074,6 +1088,87 @@ test('collectLimitsOnce flattens multiple providers returned by a provider fetch
   );
 });
 
+test('aggregateLimits preserves distinct Cursor accounts and deduplicates the same account across devices', () => {
+  const cursorProvider = (accountKey, accountEmail, planLabel, usedPercent, updatedAt) => ({
+    provider: 'cursor',
+    accountKey,
+    accountEmail,
+    accountLabel: accountEmail,
+    planLabel,
+    status: 'ok',
+    source: 'web',
+    updatedAt,
+    windows: [{ kind: 'billing', label: 'Total', usedPercent }]
+  });
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'this-mac',
+      limits: {
+        providers: [
+          cursorProvider('sha256:cursor-a', 'a@example.com', 'Free', 10, '2026-08-26T10:00:00.000Z'),
+          cursorProvider('sha256:cursor-b', 'b@example.com', 'Pro', 20, '2026-08-26T10:01:00.000Z')
+        ]
+      }
+    },
+    {
+      deviceId: 'office-pc',
+      limits: {
+        providers: [
+          cursorProvider('sha256:cursor-a', 'a@example.com', 'Free', 30, '2026-08-26T10:02:00.000Z')
+        ]
+      }
+    }
+  ], 0, Date.parse('2026-08-26T10:03:00.000Z'));
+
+  const cursorRows = aggregate.providers.filter((provider) => provider.provider === 'cursor');
+  assert.equal(cursorRows.length, 2);
+  assert.deepEqual(cursorRows.map((provider) => provider.accountEmail), ['a@example.com', 'b@example.com']);
+  assert.deepEqual(cursorRows.map((provider) => provider.planLabel), ['Free', 'Pro']);
+  assert.equal(cursorRows[0].sourceDeviceId, 'office-pc');
+  assert.equal(cursorRows[0].windows[0].usedPercent, 30);
+  assert.equal(cursorRows[1].sourceDeviceId, 'this-mac');
+});
+
+// The collapse-by-name pass exists because one OAuth account hashes differently
+// per platform. Volcengine's accountKey is derived from the AK/SK and the
+// region, so it is identical on every device — the only way one account yields
+// two keys is the Coding/Agent plan split, which must survive to the hub.
+test('aggregateLimits keeps the Volcengine Coding and Agent plans as two rows', () => {
+  const now = '2026-06-24T10:00:00.000Z';
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'this-mac',
+      limits: {
+        updatedAt: now,
+        providers: [
+          {
+            provider: 'volcengine',
+            accountKey: 'sha256:volc-coding',
+            accountLabel: 'Coding Plan',
+            status: 'ok',
+            source: 'api',
+            updatedAt: now,
+            windows: [{ kind: 'session', label: '5-hour', usedPercent: 34 }]
+          },
+          {
+            provider: 'volcengine',
+            accountKey: 'sha256:volc-agent',
+            accountLabel: 'Agent Plan Medium',
+            status: 'ok',
+            source: 'api',
+            updatedAt: now,
+            windows: [{ kind: 'weekly', label: 'Weekly', usedPercent: 20 }]
+          }
+        ]
+      }
+    }
+  ], 0, Date.parse('2026-06-24T10:02:00.000Z'));
+
+  const volcengineRows = aggregate.providers.filter((provider) => provider.provider === 'volcengine');
+  assert.equal(volcengineRows.length, 2);
+  assert.deepEqual(volcengineRows.map((provider) => provider.accountLabel), ['Agent Plan Medium', 'Coding Plan']);
+});
+
 // Regression guard for the renderer's localProviderStatus(): a sync-mode account
 // card (DeepSeek/Minimax/Grok) must read the local device's RAW limits from
 // stats.devices, not stats.limits.providers. This test pins the root cause:
@@ -1158,11 +1253,43 @@ test('normalizeLimitWindow normalizes the window currency', () => {
   assert.equal(normalizeLimitWindow({ kind: 'billing' }).currency, null);
 });
 
+test('normalizeLimitProvider preserves daily windows in canonical order', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'volcengine',
+    status: 'ok',
+    windows: [
+      { kind: 'billing', label: 'Monthly', usedPercent: 40 },
+      { kind: 'daily', label: 'Daily', usedPercent: 20 },
+      { kind: 'weekly', label: 'Weekly', usedPercent: 30 },
+      { kind: 'session', label: '5-hour', usedPercent: 10 }
+    ]
+  });
+
+  assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'daily', 'weekly', 'billing']);
+});
+
 test('normalizeLimitWindow preserves only documented component sources', () => {
   assert.equal(normalizeLimitWindow({ kind: 'session', source: ' local ' }).source, 'local');
   assert.equal(normalizeLimitWindow({ kind: 'weekly', source: 'WEB' }).source, 'web');
   assert.equal('source' in normalizeLimitWindow({ kind: 'session', source: 'oauth' }), false);
   assert.equal('source' in normalizeLimitWindow({ kind: 'session' }), false);
+});
+
+test('normalizeLimitWindow preserves WorkBuddy credits on the shared credits contract', () => {
+  const window = normalizeLimitWindow({
+    kind: 'billing',
+    label: 'Credits',
+    metric: 'credits',
+    currency: 'CREDITS',
+    used: 580.41,
+    limit: 1650,
+    remaining: 1069.59
+  });
+
+  assert.equal(window.metric, 'credits');
+  assert.equal(window.currency, 'CREDITS');
+  assert.equal(window.remaining, 1069.59);
+  assert.equal(window.remainingPercent, 64.824);
 });
 
 test('normalizeLimitProvider restores a balance window for pre-credits-window devices', () => {
@@ -1199,6 +1326,30 @@ test('normalizeLimitProvider never duplicates an existing credits window', () =>
 
   assert.equal(current.windows.length, 1);
   assert.equal(current.windows[0].label, 'Token quota');
+});
+
+test('normalizeLimitProvider never duplicates a WorkBuddy balance window', () => {
+  const current = normalizeLimitProvider({
+    provider: 'workbuddy',
+    accountKey: 'wb1',
+    status: 'ok',
+    updatedAt: '2026-07-26T00:00:00.000Z',
+    windows: [{
+      kind: 'billing',
+      label: 'Credits',
+      metric: 'credits',
+      currency: 'CREDITS',
+      remaining: 1069.59,
+      limit: 1650,
+      used: 580.41
+    }],
+    balance: { amount: 1069.59, currency: 'CREDITS' }
+  });
+
+  assert.equal(current.windows.length, 1);
+  assert.equal(current.windows[0].metric, 'credits');
+  assert.equal(current.windows[0].currency, 'CREDITS');
+  assert.equal(current.balance.currency, 'CREDITS');
 });
 
 test('normalizeLimitProvider leaves percentage-only providers alone', () => {

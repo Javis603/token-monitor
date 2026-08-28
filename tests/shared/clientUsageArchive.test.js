@@ -14,6 +14,8 @@ const {
   pruneArchivedClientUsage
 } = archiveApi;
 
+const { localDate } = require('../helpers/localTime');
+
 function deviceRecord() {
   return {
     deviceId: 'macbook',
@@ -163,11 +165,15 @@ test('archived client usage is added back while the client remains untracked', (
 });
 
 test('archived day and month usage follow calendar boundaries', () => {
-  const archive = captureArchivedClientUsage({}, deviceRecord(), ['hermes'], new Date('2026-05-30T12:00:00.000Z'));
+  // The day and month windows are cut at local midnight, so the three clocks
+  // below are stated in local time: a `Z` noon is already the next calendar day
+  // past UTC+12, which walks the capture and both reads a day forward together
+  // and takes the month rollover with them.
+  const archive = captureArchivedClientUsage({}, deviceRecord(), ['hermes'], localDate(2026, 5, 30, 12));
 
   const nextDay = applyArchivedClientUsage(liveSummaryWithoutHermes(), archive, {
     activeClients: 'codex',
-    now: new Date('2026-05-31T12:00:00.000Z')
+    now: localDate(2026, 5, 31, 12)
   });
   assert.equal(nextDay.today.clients.hermes, undefined);
   assert.equal(nextDay.today.models['claude-3-5-sonnet'], undefined);
@@ -181,7 +187,7 @@ test('archived day and month usage follow calendar boundaries', () => {
 
   const nextMonth = applyArchivedClientUsage(liveSummaryWithoutHermes(), archive, {
     activeClients: 'codex',
-    now: new Date('2026-06-01T12:00:00.000Z')
+    now: localDate(2026, 6, 1, 12)
   });
   assert.equal(nextMonth.today.clients.hermes, undefined);
   assert.equal(nextMonth.month.clients.hermes, undefined);

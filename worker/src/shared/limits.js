@@ -12,7 +12,7 @@ const VALID_STATUSES = new Set(['ok', 'disabled', 'notConfigured', 'unauthorized
 const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
 const VALID_LIMIT_WINDOW_SOURCES = new Set(['web', 'local']);
 const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'ide', 'managed', 'unknown']);
-const WINDOW_ORDER = ['session', 'weekly', 'billing'];
+const WINDOW_ORDER = ['session', 'daily', 'weekly', 'billing'];
 const CODEX_TRANSIENT_WINDOW_RETENTION_MS = 10 * 60 * 1000;
 const CODEX_TRANSIENT_PROVIDER_STATUSES = new Set(['unavailable', 'error', 'rateLimited', 'sourceRateLimited']);
 const MAX_ACCOUNT_LABEL_INPUT_LENGTH = 256;
@@ -97,6 +97,7 @@ function normalizeAccountEmail(value) {
 function normalizeWindowKind(value) {
   const raw = String(value || '').trim().toLowerCase().replace(/[_\s-]+/g, '');
   if (raw === 'session') return 'session';
+  if (raw === 'daily') return 'daily';
   if (raw === 'weekly') return 'weekly';
   if (raw === 'billing' || raw === 'billingcycle' || raw === 'monthly') return 'billing';
   return null;
@@ -356,6 +357,38 @@ function normalizeWorkspaceKind(value) {
   return String(value || '').trim().toLowerCase() === 'personal' ? 'personal' : '';
 }
 
+function normalizeAdapterId(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return /^[a-z0-9-]{1,32}$/u.test(raw) ? raw : '';
+}
+
+function normalizeProviderUsageSummary(input) {
+  if (!input || typeof input !== 'object') return null;
+  const periodValue = String(input.period || '').trim();
+  const period = ['today', 'week', 'month', 'allTime'].includes(periodValue) ? periodValue : '';
+  const count = (value) => {
+    const number = numberOrNull(value);
+    return number === null ? null : Math.max(0, Math.trunc(number));
+  };
+  const nonNegative = (value) => {
+    const number = numberOrNull(value);
+    return number === null ? null : Math.max(0, number);
+  };
+  const summary = {
+    period,
+    requests: count(input.requests),
+    inputTokens: count(input.inputTokens ?? input.input_tokens),
+    outputTokens: count(input.outputTokens ?? input.output_tokens),
+    cacheReadTokens: count(input.cacheReadTokens ?? input.cache_read_tokens),
+    cacheCreationTokens: count(input.cacheCreationTokens ?? input.cache_creation_tokens),
+    totalTokens: count(input.totalTokens ?? input.total_tokens),
+    standardCost: nonNegative(input.standardCost ?? input.standard_cost),
+    actualCost: nonNegative(input.actualCost ?? input.actual_cost),
+    averageDurationMs: nonNegative(input.averageDurationMs ?? input.average_duration_ms)
+  };
+  return Object.values(summary).some((value) => value !== null && value !== '') ? summary : null;
+}
+
 function normalizeOpenCodeAccountKeyAliases(values, accountKey = '') {
   if (!Array.isArray(values)) return [];
   const canonical = String(accountKey || '').trim();
@@ -391,6 +424,8 @@ function normalizeLimitProvider(input) {
     windows.sort((a, b) => WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind));
   }
   const balance = normalizeProviderBalance(input.balance);
+  const adapterId = provider === 'thirdparty' ? normalizeAdapterId(input.adapterId ?? input.adapter_id) : '';
+  const usageSummary = normalizeProviderUsageSummary(input.usageSummary ?? input.usage_summary);
   // Compatibility shim: devices older than the credits-window change post a
   // balance with no window at all, so every renderer would drop the row.
   // Synthesize the window here — the one funnel both the local collector and
@@ -408,6 +443,7 @@ function normalizeLimitProvider(input) {
   }
   return {
     provider,
+    ...(adapterId ? { adapterId } : {}),
     accountKey,
     ...(provider === 'opencode' && input.webAccountKey
       ? { webAccountKey: String(input.webAccountKey) }
@@ -425,6 +461,7 @@ function normalizeLimitProvider(input) {
     windows,
     balanceUsd: numberOrNull(input.balanceUsd),
     balance,
+    ...(usageSummary ? { usageSummary } : {}),
     resetCredits: normalizeProviderResetCredits(input.resetCredits ?? input.rateLimitResetCredits ?? input.rate_limit_reset_credits),
     region: normalizeRegion(input.region)
   };
@@ -485,7 +522,12 @@ function providerCollapseKey(provider) {
       || provider.provider === 'opencode'
       || provider.provider === 'openrouter'
       || provider.provider === 'thirdparty'
-      || provider.provider === 'mimo')
+      || provider.provider === 'mimo'
+      || provider.provider === 'cursor'
+      // Volcengine's accountKey comes from the AK/SK and region, so it is the
+      // same on every platform. Two keys mean the Coding/Agent plan split, not
+      // one account hashed twice.
+      || provider.provider === 'volcengine')
     && isConfiguredProvider(provider)
   ) {
     return providerAggregateKey(provider);
@@ -883,6 +925,7 @@ function publicLimits(limits) {
       accountLabel,
       planLabel,
       workspaceKind,
+      usageSummary,
       ...provider
     }) => {
       if (!provider.balance) return provider;
@@ -915,6 +958,7 @@ module.exports = {
   normalizeLimitProvider,
   normalizeLimitsSummary,
   normalizeLimitWindow,
+  normalizeProviderUsageSummary,
   openCodeWindowKey,
   publicLimits,
   syncLimits

@@ -1,6 +1,6 @@
 'use strict';
 
-const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix' };
+const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', dsh: 'DeepSeek Harness', cherrystudio: 'Cherry Studio' };
 const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
@@ -13,9 +13,10 @@ const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix',
-  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'ollama', 'thirdparty', 'hunyuan'
+  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio',
+  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
+const limitMarksWithIcon = new Set([...clientsWithIcon, 'newapi', 'sub2api']);
 
 function osIconFor(platform) {
   const prefix = String(platform || '').toLowerCase().split('-')[0];
@@ -35,7 +36,7 @@ function iconKindFor(rowData, breakdown) {
     const vendor = modelVendorFor(rowData.key);
     return vendor && clientsWithIcon.has(vendor)
       ? { kind: 'icon', iconClass: `row-icon-${vendor}` }
-      : { kind: 'dot' };
+      : { kind: 'icon', iconClass: 'row-icon-token-monitor' };
   }
   if (breakdown === 'session') {
     return rowData.client && clientsWithIcon.has(rowData.client)
@@ -43,7 +44,8 @@ function iconKindFor(rowData, breakdown) {
       : { kind: 'dot' };
   }
   if (breakdown === 'project') return { kind: 'icon', iconClass: 'row-icon-project' };
-  return clientsWithIcon.has(rowData.key)
+  const iconSet = breakdown === 'limits' ? limitMarksWithIcon : clientsWithIcon;
+  return iconSet.has(rowData.key)
     ? { kind: 'icon', iconClass: `row-icon-${rowData.key}` }
     : { kind: 'dot' };
 }
@@ -72,7 +74,9 @@ const KNOWN_CLIENTS = [
   { id: 'workbuddy', label: 'WorkBuddy' },
   { id: 'proma', label: 'Proma' },
   { id: 'qodercn', label: 'Qoder CN' },
-  { id: 'reasonix', label: 'Reasonix' }
+  { id: 'reasonix', label: 'Reasonix' },
+  { id: 'dsh', label: 'DeepSeek Harness' },
+  { id: 'cherrystudio', label: 'Cherry Studio' }
 ];
 const LIMIT_PROVIDERS = [
   { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
@@ -88,12 +92,14 @@ const LIMIT_PROVIDERS = [
   { id: 'zai', label: 'GLM' },
   { id: 'zaiteam', label: 'GLM Team' },
   { id: 'kiro', label: 'Kiro' },
+  { id: 'workbuddy', label: 'WorkBuddy' },
   { id: 'qoder', label: 'Qoder' },
   { id: 'deepseek', label: 'DeepSeek' },
   { id: 'openrouter', label: 'OpenRouter' },
   { id: 'minimax', label: 'Minimax' },
   { id: 'volcengine', label: 'Volcengine' },
   { id: 'ollama', label: 'Ollama' },
+  { id: 'trae', label: 'Trae CN' },
   { id: 'thirdparty', label: 'Third-party APIs' }
 ];
 const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
@@ -111,6 +117,7 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   minimax: 'minimaxAccountGroup',
   volcengine: 'volcengineAccountGroup',
   qoder: 'qoderAccountGroup',
+  trae: 'traeAccountGroup',
   commandcode: 'commandcodeAccountGroup',
   ollama: 'ollamaAccountGroup',
   thirdparty: 'thirdpartyAccountGroup'
@@ -130,6 +137,7 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   minimax: 'minimaxApiKeyStatus',
   volcengine: 'volcengineAccountStatus',
   qoder: 'qoderAccountStatus',
+  trae: 'traeAccountStatus',
   commandcode: 'commandcodeAccountStatus',
   ollama: 'ollamaAccountStatus',
   thirdparty: 'thirdpartyStatus'
@@ -137,7 +145,8 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
 const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
   grok: 'settings.limits.connection.grok',
-  kiro: 'settings.limits.connection.kiro'
+  kiro: 'settings.limits.connection.kiro',
+  workbuddy: 'settings.limits.connection.workbuddy'
 };
 const TRAY_ICON_VARIANTS = [
   { id: 'claude-brand', label: 'Claude', after: 'claude' },
@@ -205,9 +214,9 @@ const LIMIT_SOURCE_LABELS = { oauth: 'OAuth', cli: 'CLI', web: 'Web', rpc: 'RPC'
 const LIMIT_CAPABILITY_TAG_KEYS = {
   Auto: 'settings.limits.capability.auto',
   'OAuth/CLI': 'settings.limits.capability.oauthCli',
+  'OAuth/App/CLI': 'settings.limits.capability.oauthAppCli',
   'CLI RPC': 'settings.limits.capability.cliRpc',
   'CLI/Web': 'settings.limits.capability.cliWeb',
-  'App/CLI RPC': 'settings.limits.capability.appCliRpc',
   'Manual login': 'settings.limits.capability.manualLogin',
   Web: 'settings.limits.capability.web',
   'Web/API': 'settings.limits.capability.webApi',
@@ -305,7 +314,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
@@ -2098,11 +2107,17 @@ function attributionComponent(period, field, key) {
   );
 }
 
-function toolRowsForPeriod(period) {
-  const clientRows = usageAttributionRowsApi.attributionRows(period?.clients, period?.clientCosts, {
+function periodAttributionRows(period, values, costs) {
+  const rows = usageAttributionRowsApi.attributionRows(values, costs, {
     totalValue: period?.totalTokens,
     totalCost: period?.costUsd
-  }).map(({ key: client, value, cost }) => ({ key: client, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client) }));
+  });
+  return usageAttributionRowsApi.visibleAttributionRows(rows, formatCost);
+}
+
+function toolRowsForPeriod(period) {
+  const clientRows = periodAttributionRows(period, period?.clients, period?.clientCosts)
+    .map(({ key: client, value, cost }) => ({ key: client, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client) }));
   if (clientRows.length > 0) {
     const usageSortedRows = clientRows.sort((a, b) => b.value - a.value);
     return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, state.settings?.clientDisplayOrder, state.settings?.hiddenClients, KNOWN_CLIENTS, state.settings?.pinnedClients);
@@ -2112,10 +2127,7 @@ function toolRowsForPeriod(period) {
 }
 
 function modelRowsForPeriod(period) {
-  const modelRows = usageAttributionRowsApi.attributionRows(period?.models, period?.modelCosts, {
-    totalValue: period?.totalTokens,
-    totalCost: period?.costUsd
-  }).map(({ key: model, value, cost }) => ({
+  const modelRows = periodAttributionRows(period, period?.models, period?.modelCosts).map(({ key: model, value, cost }) => ({
     key: model,
     name: model === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : model,
     value,
@@ -3744,6 +3756,14 @@ function formatLimitAmount(value) {
   return `$${number.toFixed(2)}`;
 }
 
+function formatBalanceAmount(value, source) {
+  return formatMoney(value, source?.currency);
+}
+
+function formatBalanceSpendAmount(value, balance) {
+  return formatBalanceAmount(value, balance);
+}
+
 // Absolute count for windows that expose units (credits). It follows the same
 // display mode as percent bars: remaining/total in quota mode, used/total in
 // used mode.
@@ -3985,14 +4005,13 @@ function limitDetailInfoNode(entries, extraClass = '', ariaLabel = '') {
 function providerSpendNode(balance) {
   const entries = providerSpendEntries(balance);
   if (entries.length === 0) return null;
-  const currency = balance?.currency || 'USD';
   const preferredSummary = entries.filter(([label]) => label === 'Today' || label === 'Month');
   const summaryEntries = preferredSummary.length > 0 ? preferredSummary : entries.slice(0, 2);
-  const formatted = entries.map(([entryLabel, value]) => [entryLabel, formatMoney(value, currency)]);
+  const formatted = entries.map(([entryLabel, value]) => [entryLabel, formatBalanceSpendAmount(value, balance)]);
   return limitNoteRowNode({
     label: 'Spend',
     summary: summaryEntries
-      .map(([label, value]) => `${label} ${formatMoney(value, currency)}`)
+      .map(([label, value]) => `${label} ${formatBalanceSpendAmount(value, balance)}`)
       .join(' · '),
     // Only worth a tooltip when it would say more than the summary already does.
     detailEntries: entries.length > summaryEntries.length ? formatted : null,
@@ -4002,8 +4021,10 @@ function providerSpendNode(balance) {
 
 function thirdPartySpendNode(provider, quotaWindow) {
   const balance = provider?.balance || null;
+  const usage = provider?.usageSummary || null;
   const currency = balance?.currency || 'USD';
   const allTimeSpend = optionalFiniteNumber(balance?.allTimeSpend);
+  const monthSpend = optionalFiniteNumber(balance?.monthSpend);
   const entries = [];
   const total = optionalFiniteNumber(quotaWindow?.limit);
   const requestCount = optionalFiniteNumber(balance?.requestCount);
@@ -4017,12 +4038,39 @@ function thirdPartySpendNode(provider, quotaWindow) {
   if (expiresAt && !Number.isNaN(expiresAt.getTime())) {
     entries.push([t('settings.thirdparty.expires'), expiresAt.toLocaleDateString()]);
   }
-  if (allTimeSpend === null && entries.length === 0) return null;
+  const usageCountEntry = (key, value) => {
+    const number = optionalFiniteNumber(value);
+    if (number !== null) entries.push([t(key), Math.max(0, Math.trunc(number)).toLocaleString()]);
+  };
+  if (usage) {
+    usageCountEntry('settings.thirdparty.monthRequests', usage.requests);
+    usageCountEntry('settings.thirdparty.monthTokens', usage.totalTokens);
+    usageCountEntry('settings.thirdparty.inputTokens', usage.inputTokens);
+    usageCountEntry('settings.thirdparty.outputTokens', usage.outputTokens);
+    const cacheTokens = [usage.cacheReadTokens, usage.cacheCreationTokens]
+      .map(optionalFiniteNumber)
+      .filter((value) => value !== null)
+      .reduce((sum, value) => sum + value, 0);
+    if (cacheTokens > 0) usageCountEntry('settings.thirdparty.cacheTokens', cacheTokens);
+    const averageDurationMs = optionalFiniteNumber(usage.averageDurationMs);
+    if (averageDurationMs !== null) {
+      const duration = averageDurationMs < 1000
+        ? `${Math.round(averageDurationMs)} ms`
+        : `${(averageDurationMs / 1000).toFixed(averageDurationMs < 10000 ? 1 : 0)} s`;
+      entries.push([t('settings.thirdparty.avgResponse'), duration]);
+    }
+    const standardCost = optionalFiniteNumber(usage.standardCost);
+    if (standardCost !== null) entries.push([t('settings.thirdparty.standardCost'), formatMoney(standardCost, currency)]);
+  }
+  if (allTimeSpend === null && monthSpend === null && entries.length === 0) return null;
   // Without a spend figure the row has nothing to summarize, so it retitles
   // itself and leans entirely on the tooltip.
-  const summary = allTimeSpend === null ? '' : `All time ${formatMoney(allTimeSpend, currency)}`;
+  const summary = [
+    ...(monthSpend !== null ? [`Month ${formatMoney(monthSpend, currency)}`] : []),
+    ...(allTimeSpend !== null ? [`All time ${formatMoney(allTimeSpend, currency)}`] : [])
+  ].join(' · ');
   return limitNoteRowNode({
-    label: allTimeSpend === null ? 'Details' : 'Spend',
+    label: summary ? 'Spend' : 'Details',
     summary,
     detailEntries: entries,
     ariaParts: [
@@ -4118,9 +4166,7 @@ function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
 
 function formatHomeLimitWindowValue(window, showUsed) {
   if (window?.planStatus === 'expired') return t('limits.mimo.planExpired');
-  // A credits window's headline value is money. Its percentage denominator is
-  // lifetime spend, which reads as a quota but isn't one.
-  if (window?.metric === 'credits') {
+  if (isCreditsWindow(window)) {
     if (window.remaining == null) {
       return String(window.detail || '').toLowerCase() === 'unlimited'
         ? t('settings.thirdparty.unlimited')
@@ -4130,6 +4176,16 @@ function formatHomeLimitWindowValue(window, showUsed) {
   }
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
   return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
+}
+
+function creditsBalanceValue(provider, credits) {
+  const amount = creditsAmount(provider, credits);
+  if (amount !== null) {
+    return formatCompactMoney(amount, credits?.currency || provider?.balance?.currency);
+  }
+  return String(credits?.detail || '').toLowerCase() === 'unlimited'
+    ? t('settings.thirdparty.unlimited')
+    : '';
 }
 
 function mimoTokenPlanWindowFromBalance(balance) {
@@ -4231,7 +4287,7 @@ function providersByLimitProviderId(providers) {
 
 function renderLimitProviderMark(id, color) {
   const mark = document.createElement('span');
-  if (clientsWithIcon.has(id)) {
+  if (limitMarksWithIcon.has(id)) {
     mark.className = `limit-icon limit-icon-${id}`;
   } else {
     mark.className = 'dot';
@@ -4382,7 +4438,7 @@ function renderLimitProviderHead(id, label, provider, color, options = {}) {
   titleBlock.className = 'limit-title';
   const name = document.createElement('div');
   name.className = 'limit-name';
-  if (options.showIcon !== false) name.append(renderLimitProviderMark(id, color));
+  if (options.showIcon !== false) name.append(renderLimitProviderMark(options.markId || id, color));
   const title = document.createElement('span');
   title.className = 'limit-name-title';
   title.textContent = options.title || label;
@@ -4677,9 +4733,18 @@ function renderProviderWindows(provider, color) {
     const balanceLabel = quotaWindow?.label || 'Balance';
     if (balanceAmount !== null) {
       const balanceValue = formatMoney(balanceAmount, currency);
+      // Balance presets without a fixed quota denominator (Sub2API reports the
+      // remaining USD balance plus an observed monthSpend) get the same
+      // display-layer meter DeepSeek uses: balance / (balance + month spend).
+      // Windows that already carry provider percentages pass through unchanged.
+      const meterPercent = creditsMeterPercent(provider, quotaWindow);
       const balanceNode = limitWindowNode(
         balanceLabel,
-        { ...(quotaWindow || { showMeter: false }), label: balanceLabel },
+        {
+          ...(quotaWindow || { showMeter: false }),
+          label: balanceLabel,
+          ...(meterPercent !== null ? { remainingPercent: meterPercent, showMeter: true } : {})
+        },
         color,
         0.95,
         balanceValue
@@ -4791,19 +4856,17 @@ function renderProviderWindows(provider, color) {
     }
   } else if (provider.provider === 'volcengine') {
     const session = windowForKind(provider, 'session');
+    const daily = windowForKind(provider, 'daily');
     const weekly = windowForKind(provider, 'weekly');
     const monthly = windowForKind(provider, 'billing');
-    if (session) {
-      const sessionNode = limitWindowNode(session.label || '5-hour', session, color, 0.95);
-      if (!weekly && !monthly && session.label) sessionNode.classList.add('limit-window-wide');
-      windows.append(sessionNode);
-    }
-    if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
-    if (monthly) {
-      const monthlyNode = limitWindowNode('Monthly', monthly, color, 0.68);
-      monthlyNode.classList.add('limit-window-wide');
-      windows.append(monthlyNode);
-    }
+    const nodes = [
+      session && limitWindowNode(session.label || '5-hour', session, color, 0.95),
+      daily && limitWindowNode('Daily', daily, color, 0.78),
+      weekly && limitWindowNode('Weekly', weekly, color, 0.68),
+      monthly && limitWindowNode('Monthly', monthly, color, 0.68)
+    ].filter(Boolean);
+    if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
+    windows.append(...nodes);
   } else if (provider.provider === 'kiro') {
     // Kiro exposes monthly credits (plus an optional bonus pool), both billing
     // windows. Render them full-width like Copilot's quota windows.
@@ -4843,6 +4906,30 @@ function renderProviderWindows(provider, color) {
       );
       node.classList.add('limit-window-wide');
       windows.append(node);
+    }
+  } else if (provider.provider === 'workbuddy' || provider.provider === 'trae') {
+    const credits = windowForKind(provider, 'billing');
+    const balance = provider.balance || null;
+    const value = creditsBalanceValue(provider, credits);
+    if (credits && value) {
+      const displayWindow = {
+        ...credits,
+        label: credits.label || 'Credits'
+      };
+      const node = limitWindowNode(
+        displayWindow.label,
+        displayWindow,
+        color,
+        0.95,
+        value
+      );
+      node.classList.add('limit-window-wide');
+      if (!displayWindow.resetsAt && !displayWindow.resetDescription) {
+        node.classList.add('limit-window-no-reset');
+      }
+      windows.append(node);
+      const spendNode = providerSpendNode(balance);
+      if (spendNode) windows.append(spendNode);
     }
   } else if (provider.provider === 'commandcode') {
     // 5-hour and weekly are rate-limit windows (percent); the monthly grant and
@@ -4973,7 +5060,8 @@ const LIMIT_ACCOUNT_TITLES = {
   codex: codexAccountTitle,
   opencode: opencodeAccountTitle,
   openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
-  thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty')
+  thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
+  volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers)
 };
 
 function limitAccountTitle(id, provider, index, providerEntries = [provider]) {
@@ -5079,6 +5167,27 @@ function renderMimoAccountGroup(label, providers, color) {
   return row;
 }
 
+function renderCursorAccountGroup(label, providers, color) {
+  const row = document.createElement('div');
+  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
+  const groupProvider = { provider: 'cursor', status: 'ok', windows: [], accountGroup: true };
+  const head = renderLimitProviderHead('cursor', label, groupProvider, color, {
+    planText: t('settings.cursor.nAccounts', { count: providers.length }),
+    hideMeta: true
+  });
+  const accountList = document.createElement('div');
+  accountList.className = 'limit-account-list';
+  providers.forEach((provider, index) => {
+    accountList.append(renderLimitProviderRow('cursor', limitAccountTitle('cursor', provider, index, providers), provider, color, {
+      accountRow: true,
+      accountTitle: true,
+      showIcon: false
+    }));
+  });
+  row.append(head, accountList);
+  return row;
+}
+
 function opencodeAccountTitle(provider, index) {
   const name = String(provider?.accountName || '').trim();
   // The collector's canonical name is shown as-is. This column holds account
@@ -5126,13 +5235,58 @@ function namedApiAccountTitle(provider, index, providerId) {
   return accountName || `Account ${index + 1}`;
 }
 
+// Both Volcengine plans sit on one account, so the row title carries the plan
+// name from accountLabel. accountTitleLabel reads accountName/accountEmail,
+// neither of which these rows have, so without this they would all render as
+// "Account N".
+function volcenginePlanAccountTitle(provider, index, providers) {
+  return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
+}
+
+// '' while healthy, because the title already shows the plan and there is no
+// second fact to put here; undefined once it is not, so the head falls back to
+// the status label the same way thirdPartyPlanText does.
+function volcenginePlanRowText(provider) {
+  return provider?.status === 'ok' ? '' : undefined;
+}
+
 function thirdPartyPlanText(provider) {
   if (provider?.status !== 'ok') return undefined;
+  const adapterId = String(provider?.adapterId || '').toLowerCase();
+  if (adapterId === 'newapi-account') return 'New API · Account';
+  if (adapterId === 'newapi-token') return 'New API · API key';
+  if (adapterId === 'sub2api') return 'Sub2API · Account';
+  if (adapterId === 'custom') return 'Custom';
   const planLabel = String(provider?.planLabel || '').toLowerCase();
   if (planLabel === 'account') return 'Account';
   if (planLabel === 'api key') return 'API key';
   if (planLabel === 'custom') return 'Custom';
   return undefined;
+}
+
+const THIRD_PARTY_ADAPTER_VISUALS = Object.freeze({
+  'newapi-account': { color: '#C738FB', markId: 'newapi' },
+  'newapi-token': { color: '#C738FB', markId: 'newapi' },
+  sub2api: { color: '#39D9E7', markId: 'sub2api' },
+  custom: { color: '#8A96A8', markId: 'thirdparty' }
+});
+
+function thirdPartyAdapterVisual(provider, fallbackColor) {
+  return THIRD_PARTY_ADAPTER_VISUALS[String(provider?.adapterId || '').toLowerCase()]
+    || { color: fallbackColor, markId: 'thirdparty' };
+}
+
+function thirdPartyAdapterFamily(provider) {
+  const adapterId = String(provider?.adapterId || '').toLowerCase();
+  if (adapterId === 'newapi-account' || adapterId === 'newapi-token') return 'newapi';
+  if (adapterId === 'sub2api') return 'sub2api';
+  if (adapterId === 'custom') return 'thirdparty';
+  return '';
+}
+
+function thirdPartySharedAdapterFamily(providers) {
+  const families = new Set((providers || []).map(thirdPartyAdapterFamily));
+  return families.size === 1 ? [...families][0] : null;
 }
 
 function renderNamedApiAccountGroup(providerId, label, providers, color, options = {}) {
@@ -5141,19 +5295,23 @@ function renderNamedApiAccountGroup(providerId, label, providers, color, options
   const groupProvider = { provider: providerId, status: 'ok', windows: [], accountGroup: true };
   const head = renderLimitProviderHead(providerId, label, groupProvider, color, {
     planText: options.groupPlanText,
-    hideMeta: true
+    hideMeta: true,
+    ...(options.groupMarkId ? { markId: options.groupMarkId } : {})
   });
   const accountList = document.createElement('div');
   accountList.className = 'limit-account-list';
   providers.forEach((provider, index) => {
+    const providerColor = options.colorForProvider?.(provider) || color;
+    const markId = options.markIdForProvider?.(provider);
     accountList.append(renderLimitProviderRow(
       providerId,
       limitAccountTitle(providerId, provider, index, providers),
       provider,
-      color,
+      providerColor,
       {
         accountRow: true,
-        showIcon: false,
+        showIcon: Boolean(markId),
+        ...(markId ? { markId } : {}),
         ...(options.planTextForProvider
           ? { planText: options.planTextForProvider(provider) }
           : {})
@@ -5171,9 +5329,24 @@ function renderOpenRouterAccountGroup(label, providers, color) {
 }
 
 function renderThirdPartyAccountGroup(label, providers, color) {
+  const sharedFamily = thirdPartySharedAdapterFamily(providers);
   return renderNamedApiAccountGroup('thirdparty', label, providers, color, {
     groupPlanText: t('settings.thirdparty.nAccounts', { count: providers.length }),
-    planTextForProvider: thirdPartyPlanText
+    groupMarkId: sharedFamily || 'thirdparty',
+    planTextForProvider: thirdPartyPlanText,
+    colorForProvider: (provider) => thirdPartyAdapterVisual(provider, color).color,
+    ...(sharedFamily === null
+      ? { markIdForProvider: (provider) => thirdPartyAdapterVisual(provider, color).markId }
+      : {})
+  });
+}
+
+// The Coding Plan and the Agent Plan are two subscriptions on one Volcengine
+// account, so they are rows of one card rather than two provider cards.
+function renderVolcengineAccountGroup(label, providers, color) {
+  return renderNamedApiAccountGroup('volcengine', label, providers, color, {
+    groupPlanText: t('settings.volcengine.nPlans', { count: providers.length }),
+    planTextForProvider: volcenginePlanRowText
   });
 }
 
@@ -5264,13 +5437,25 @@ function renderLimits() {
       nodes.push(renderMimoAccountGroup(label, visibleProviders, color));
       continue;
     }
+    if (id === 'cursor' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderCursorAccountGroup(label, visibleProviders, color));
+      continue;
+    }
+    if (id === 'volcengine' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderVolcengineAccountGroup(label, visibleProviders, color));
+      continue;
+    }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
+    const thirdPartyVisual = id === 'thirdparty' ? thirdPartyAdapterVisual(provider, color) : null;
     const rowOptions = id === 'codex'
       ? { accountTitle: true, allowSystemSwitch: true }
       : id === 'thirdparty'
-        ? { planText: thirdPartyPlanText(provider) }
+        ? {
+            planText: thirdPartyPlanText(provider),
+            markId: thirdPartyVisual.markId
+          }
         : undefined;
-    nodes.push(renderLimitProviderRow(id, label, provider, color, rowOptions));
+    nodes.push(renderLimitProviderRow(id, label, provider, thirdPartyVisual?.color || color, rowOptions));
   }
   els.limitsPanel.replaceChildren(...nodes);
 }
@@ -6250,6 +6435,12 @@ function homeLimitRows() {
     colors: clientColors,
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
+    accountColor: (provider, id, fallbackColor) => (
+      id === 'thirdparty' ? thirdPartyAdapterVisual(provider, fallbackColor).color : fallbackColor
+    ),
+    accountIcon: (provider, id) => (
+      id === 'thirdparty' ? thirdPartyAdapterVisual(provider, clientColors.thirdparty).markId : id
+    ),
     accountName: (provider, index, providerEntries) => {
       const id = String(provider?.provider || '').trim().toLowerCase();
       const option = providerOptions.find((entry) => entry.id === id);
@@ -6274,6 +6465,7 @@ function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
   }
   const key = {
     session: 'home.limit.session',
+    daily: 'home.limit.daily',
     weekly: 'home.limit.weekly',
     billing: 'home.limit.billing',
     monthly: 'home.limit.monthly'
@@ -6298,7 +6490,7 @@ function renderHomeLimitModule() {
     const account = document.createElement('div');
     account.className = 'home-limit-account-head';
     const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ key: row.providerId || row.key }, 'limits'), row.color);
+    applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.name;
@@ -6380,10 +6572,7 @@ function renderHomeModelModule(period) {
 }
 
 function homeToolSourceRows(period) {
-  return usageAttributionRowsApi.attributionRows(period?.clients, period?.clientCosts, {
-    totalValue: period?.totalTokens,
-    totalCost: period?.costUsd
-  }).map(({ key: client, value }) => ({
+  return periodAttributionRows(period, period?.clients, period?.clientCosts).map(({ key: client, value }) => ({
     key: client,
     name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client,
     value: Number(value || 0),
@@ -8120,7 +8309,6 @@ function syncHubModeUi() {
   els.hubClientFields.classList.toggle('hidden', mode !== 'client');
   els.hubHostFields.classList.toggle('hidden', mode !== 'host');
   if (mode === 'host') {
-    els.hubPortInput.value = String(state.settings.hubHostPort || 17321);
     els.hubSecretInput.value = state.settings.hubHostSecret || '';
     renderHubStatus();
   }
@@ -8321,6 +8509,55 @@ function renderSessionUsageArchiveStatus() {
     : t('settings.collection.sessionArchiveEmpty');
 }
 
+const HUB_DRAFT_FIELDS = [
+  ['hubUrl', 'hubUrlInput'],
+  ['secret', 'secretInput'],
+  ['deviceId', 'deviceIdInput'],
+  ['hubHostPort', 'hubPortInput']
+];
+const hubDraftDirty = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [field, false]));
+const hubDraftRevisions = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [field, 0]));
+
+function markHubDraftDirty(field) {
+  const inputId = HUB_DRAFT_FIELDS.find(([name]) => name === field)?.[1];
+  const input = inputId ? els[inputId] : null;
+  if (!input) return;
+  hubDraftRevisions[field] += 1;
+  hubDraftDirty[field] = true;
+}
+
+function syncHubDraftFields() {
+  for (const [field, inputId] of HUB_DRAFT_FIELDS) {
+    const input = els[inputId];
+    if (!input || hubDraftDirty[field]) continue;
+    input.value = field === 'hubHostPort'
+      ? String(state.settings?.hubHostPort || 17321)
+      : state.settings?.[field] || '';
+  }
+}
+
+function normalizeHubDraftValue(field, value) {
+  if (field === 'hubHostPort') return String(Number(value) || 17321);
+  if (field === 'secret') return String(value ?? '');
+  return String(value ?? '').trim();
+}
+
+function reconcileHubDraftsAfterSave(submitted, submittedRevisions) {
+  for (const [field, inputId] of HUB_DRAFT_FIELDS) {
+    const input = els[inputId];
+    if (!input) continue;
+    if (!Object.prototype.hasOwnProperty.call(submitted, field)) continue;
+    const current = normalizeHubDraftValue(field, input.value);
+    if (
+      hubDraftRevisions[field] === submittedRevisions[field]
+      && current === submitted[field]
+    ) {
+      hubDraftDirty[field] = false;
+    }
+  }
+  syncHubDraftFields();
+}
+
 function syncSettingsForm() {
   applySettingsTranslations();
   applyInitialBreakdownPreference();
@@ -8332,9 +8569,7 @@ function syncSettingsForm() {
   }
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
   syncCurrencyRateControls();
-  els.hubUrlInput.value = state.settings.hubUrl || '';
-  els.secretInput.value = state.settings.secret || '';
-  els.deviceIdInput.value = state.settings.deviceId || '';
+  syncHubDraftFields();
   els.limitsRefreshInput.value = state.settings.limitsRefreshMode === 'adaptive'
     ? 'adaptive'
     : String(LIMIT_REFRESH_OPTIONS.includes(Number(state.settings.limitsRefreshMs)) ? state.settings.limitsRefreshMs : 300000);
@@ -8441,6 +8676,7 @@ function syncSettingsForm() {
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
+  renderExternalProviderStatus('trae');
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
@@ -9365,10 +9601,10 @@ function localClientHealth() {
   return localDevice()?.clientHealth || null;
 }
 
-// Single entry point for the tracked-tool detail accordion, mirroring the limits
+// Single entry point for the tool detail accordion, mirroring the limits
 // list: the drag gesture collapses and restores it too, so the class and aria
 // bookkeeping cannot live inside the disclosure's own click handler.
-function setClientHealthExpanded(clientId) {
+function setClientHealthExpanded(clientId, options = {}) {
   state.clientHealthExpanded = clientId || '';
   const rows = els.clientDisplayList?.querySelectorAll('.tool-preference-row[data-client]') || [];
   for (const row of rows) {
@@ -9381,7 +9617,9 @@ function setClientHealthExpanded(clientId) {
     // rebuilt every stats tick — to render nothing. A panel already filled is
     // left alone so a collapse still has something to animate.
     if (open) {
-      loadClientSources(row.dataset.client);
+      const force = options.refreshPlaceholder === true
+        && !clientHealthPresentationApi.hasClientHealth(localClientHealth(), row.dataset.client);
+      loadClientSources(row.dataset.client, { force });
       if (container.childElementCount === 0) {
         fillClientHealthPanel(container, row.dataset.client);
       }
@@ -9409,11 +9647,19 @@ function clientPeriodUsage(clientId) {
 // per snapshot without spending IPC on progressive previews that carry the old
 // envelope.
 function clientSourcesIdentity(clientId) {
-  return {
-    deviceId: String(localDevice()?.deviceId || ''),
-    clientId: String(clientId || ''),
-    observedAt: String(localClientHealth()?.observedAt || '')
-  };
+  const id = String(clientId || '');
+  const health = localClientHealth();
+  const tracked = enabledClientSet().has(id);
+  return clientSourceCacheApi.clientSourceIdentity({
+    deviceId: localDevice()?.deviceId,
+    clientId: id,
+    observedAt: health?.observedAt,
+    tracked,
+    // The health envelope timestamp is shared by every client. Only use it
+    // when this client has its own health entry; otherwise unrelated client
+    // updates must not invalidate this client's source probe cache.
+    hasObservation: clientHealthPresentationApi.hasClientHealth(health, id)
+  });
 }
 
 function exactLocalClientSources(clientId) {
@@ -9478,10 +9724,14 @@ function refillOpenClientHealthPanel() {
 // Everything the panel draws beyond the health record itself: the numbers the
 // app already renders elsewhere, and this machine's own paths.
 function clientHealthDetailFor(clientId) {
-  return clientHealthPresentationApi.clientHealthDetail(localClientHealth(), clientId, {
+  const options = {
     usage: clientPeriodUsage(clientId),
-    sources: localClientSources(clientId)
-  });
+    sources: localClientSources(clientId),
+    collectionState: enabledClientSet().has(clientId) ? 'waiting' : 'notTracked'
+  };
+  const detail = clientHealthPresentationApi.clientHealthDetail(localClientHealth(), clientId, options);
+  if (detail) return detail;
+  return clientHealthPresentationApi.clientHealthPlaceholderDetail(options);
 }
 
 function sameRenderedNode(current, next) {
@@ -9673,7 +9923,9 @@ function clientHealthActions(clientId) {
   // The detail is already bound to the exact local device. Renderer mode is a
   // transport state (`local`/`sync`), not topology, so host and client collectors
   // expose the same targeted capability through preload.
-  if (localDevice() && typeof window.tokenMonitor?.rescanClient === 'function') {
+  if (enabledClientSet().has(clientId)
+    && localDevice()
+    && typeof window.tokenMonitor?.rescanClient === 'function') {
     const rescanState = state.clientRescans.snapshot(clientId);
     const feedback = document.createElement('span');
     feedback.className = 'tool-health-action-feedback';
@@ -9970,9 +10222,9 @@ function renderToolPreferencesNow() {
     const actions = document.createElement('div');
     actions.className = 'tool-preference-actions';
     actions.append(visibility, pin);
-    // A device whose agent predates the health field gets no chevron rather than
-    // one that opens onto an empty panel.
-    const detail = clientHealthPresentationApi.clientHealthDetail(health, id);
+    // Tracked tools use the health snapshot; untracked tools get an on-demand
+    // source view so every row keeps the same disclosure affordance.
+    const detail = clientHealthDetailFor(id);
     if (detail) {
       const expanded = state.clientHealthExpanded === id;
       row.classList.toggle('expanded', expanded);
@@ -9995,7 +10247,10 @@ function renderToolPreferencesNow() {
         loadClientSources(id);
         panel.append(clientHealthPanel(clientHealthDetailFor(id) || detail, id));
       }
-      main.addEventListener('click', () => setClientHealthExpanded(state.clientHealthExpanded === id ? '' : id));
+      main.addEventListener('click', () => {
+        const open = state.clientHealthExpanded !== id;
+        setClientHealthExpanded(open ? id : '', { refreshPlaceholder: open });
+      });
       // Last of the row's controls, where the eye and the pin already are —
       // the label stays plain text, exactly as it reads without this feature.
       actions.append(main);
@@ -10386,7 +10641,12 @@ async function onToolTrackingToggle() {
     .filter((cb) => cb.checked)
     .map((cb) => cb.dataset.client);
   await saveSettings({ clients: checked.join(',') });
-  await refreshStats({ force: true });
+  // `clients` is usage-structural, so settings:update schedules a latest-wins
+  // usage reconciliation and the eventual collector runs its own full tick.
+  // Forcing a refresh here would bypass that settling boundary, duplicate the
+  // scan, and drag an all-provider limits refresh along. The extra stats pushes
+  // would then repaint the whole settings panel under the pointer, which is what
+  // made this checkbox stall while the eye and pin next to it did not (#471).
 }
 
 async function onClientVisibilityToggle(clientId) {
@@ -10906,7 +11166,7 @@ els.breakdown.addEventListener('click', (event) => {
   if (!rowEl) return;
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix') return;
+  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh') return;
   if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
@@ -10937,15 +11197,22 @@ els.settingsButton.addEventListener('click', (event) => {
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
 });
 els.saveSettingsButton.addEventListener('click', async () => {
-  const patch = {
+  const submittedHubFields = {
     hubUrl: els.hubUrlInput.value.trim(),
     secret: els.secretInput.value,
     deviceId: els.deviceIdInput.value.trim()
   };
+  const patch = { ...submittedHubFields };
   if (state.settings.hubMode === 'host') {
-    patch.hubHostPort = Number(els.hubPortInput.value) || 17321;
+    const hubHostPort = Number(els.hubPortInput.value) || 17321;
+    submittedHubFields.hubHostPort = String(hubHostPort);
+    patch.hubHostPort = hubHostPort;
   }
+  const submittedHubRevisions = Object.fromEntries(
+    Object.keys(submittedHubFields).map((field) => [field, hubDraftRevisions[field]])
+  );
   await saveSettings(patch);
+  reconcileHubDraftsAfterSave(submittedHubFields, submittedHubRevisions);
   await refreshHubInfo();
   void refreshHubBuildStatus();
   await refreshStats();
@@ -11034,6 +11301,7 @@ els.secretPasteButton?.addEventListener('click', async () => {
     const text = await navigator.clipboard.readText();
     if (text) {
       els.secretInput.value = text.trim();
+      markHubDraftDirty('secret');
     }
   } catch (_) {}
 });
@@ -11109,6 +11377,9 @@ for (const input of els.showLimitUsedInputs || []) {
   input.addEventListener('change', async () => {
     if (input.checked) await saveSettings({ showLimitUsed: input.value === 'used' });
   });
+}
+for (const [field, inputId] of HUB_DRAFT_FIELDS) {
+  els[inputId]?.addEventListener('input', () => markHubDraftDirty(field));
 }
 els.syncUploadIntervalInput?.addEventListener('change', async () => {
   await saveSettings({ syncUploadIntervalMs: Number(els.syncUploadIntervalInput.value) });
@@ -11517,6 +11788,7 @@ function renderStatsUpdate() {
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
+  renderExternalProviderStatus('trae');
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
@@ -11666,13 +11938,13 @@ function providerImageOpticalSample(image) {
   return sample;
 }
 
-function paintProviderImage(ctx, image, x, y, size, templateColor = '') {
+function paintProviderImage(ctx, image, x, y, size, templateColor = '', optical = {}) {
   const {
     trayProviderOpticalLayout,
     trayProviderOpticalRatio
   } = window.TokenMonitorTrayProviderIcons;
   const sample = providerImageOpticalSample(image);
-  const opticalRatio = trayProviderOpticalRatio(trayProviderImageIds.get(image));
+  const opticalRatio = trayProviderOpticalRatio(trayProviderImageIds.get(image), optical);
   const layout = trayProviderOpticalLayout(sample.bounds, size, opticalRatio);
   const maskSize = Math.max(1, Math.round(size));
   const mask = document.createElement('canvas');
@@ -11713,16 +11985,16 @@ function trayGlyphInk(options, image) {
   );
 }
 
-function drawProviderImage(ctx, image, x, y, size, contrastHalo = false, templateColor = '') {
+function drawProviderImage(ctx, image, x, y, size, contrastHalo = false, templateColor = '', optical = {}) {
   if (contrastHalo) {
     const lightSurface = themePresetsApi.isLightHex(resolvedThemeColor('bg'));
     ctx.save();
     ctx.shadowColor = lightSurface ? 'rgba(0, 0, 0, 0.58)' : 'rgba(255, 255, 255, 0.82)';
     ctx.shadowBlur = Math.max(2, Math.round(size * 0.1));
-    paintProviderImage(ctx, image, x, y, size, templateColor);
+    paintProviderImage(ctx, image, x, y, size, templateColor, optical);
     ctx.restore();
   }
-  paintProviderImage(ctx, image, x, y, size, templateColor);
+  paintProviderImage(ctx, image, x, y, size, templateColor, optical);
 }
 
 function renderBarsIcon(stats, height = 44, picker = pickWorstProvider, colors = {}, options = {}) {
@@ -12420,11 +12692,15 @@ function trayComposerWindowChoices(source) {
   const choices = trayLayoutApi.sourceWindowOptions(
     state.stats || {},
     source
-  ).map((entry) => ({
-    value: entry.value,
-    label: trayComposerWindowLabel(entry),
-    preview: trayComposerSourcePreview({ ...source, window: entry.value })
-  }));
+  ).map((entry) => {
+    const selectedWindow = entry.selection?.window || entry.window;
+    return {
+      value: entry.value,
+      label: trayComposerWindowLabel(entry),
+      preview: trayComposerSourcePreview({ ...source, window: entry.value }),
+      credits: selectedWindow?.metric === 'credits'
+    };
+  });
   if (choices.length) return choices;
   return [{
     value: 'primary',
@@ -12440,7 +12716,7 @@ function trayComposerWindowLabel(entry) {
   const kindLabel = translatedKind === kindKey ? t('trayComposer.window.primary') : translatedKind;
   const rawLabel = String(entry.label || '').trim();
   const normalizedLabel = rawLabel.toLowerCase();
-  const redundantLabels = new Set([kind, 'session', 'weekly', 'billing', 'total']);
+  const redundantLabels = new Set([kind, 'session', 'daily', 'weekly', 'billing', 'total']);
   if (!rawLabel || redundantLabels.has(normalizedLabel)) return kindLabel;
   return `${kindLabel} · ${rawLabel}`;
 }
@@ -12668,11 +12944,15 @@ function providerImageToPngDataUrl(img, size, showBadge = false, options = {}) {
   const ctx = canvas.getContext('2d');
   const imageInset = showBadge ? Math.max(1, Math.round(layout.iconSize * 0.07)) : 0;
   const imageSize = layout.iconSize - imageInset * 2;
+  // Only the tray delivery marks itself standalone: there the mark is the whole
+  // icon and Windows expects it to fill its cell. The composer's provider picker
+  // renders previews through here too and keeps the composed optical inset.
+  const optical = { standalone: options.standalone === true, platform: state.appInfo?.platform };
   if (showBadge) {
     ctx.save();
     ctx.shadowColor = 'rgba(255, 255, 255, 0.95)';
     ctx.shadowBlur = Math.max(2, Math.round(layout.iconSize * 0.1));
-    paintProviderImage(ctx, img, imageInset, imageInset, imageSize);
+    paintProviderImage(ctx, img, imageInset, imageInset, imageSize, '', optical);
     ctx.restore();
   }
   drawProviderImage(
@@ -12682,7 +12962,8 @@ function providerImageToPngDataUrl(img, size, showBadge = false, options = {}) {
     imageInset,
     imageSize,
     false,
-    trayGlyphInk({ templateIconColor: options.templateColor, trayInk: options.trayInk }, img)
+    trayGlyphInk({ templateIconColor: options.templateColor, trayInk: options.trayInk }, img),
+    optical
   );
 
   if (!showBadge) return canvas.toDataURL('image/png');
@@ -12726,7 +13007,7 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
       const img = await loadImage(path);
       trayProviderImages[id] = img;
       trayProviderImageIds.set(img, id);
-      icons[id] = providerImageToPngDataUrl(img, 44, showBadge, { trayInk: true });
+      icons[id] = providerImageToPngDataUrl(img, 44, showBadge, { trayInk: true, standalone: true });
     } catch (_) { /* skip missing */ }
   }
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
@@ -12782,6 +13063,7 @@ function selectedThirdPartyAdapter() {
   const platform = String(document.getElementById('thirdpartyPlatformInput')?.value || 'newapi');
   const mode = String(document.getElementById('thirdpartyModeInput')?.value || 'account');
   if (platform === 'custom') return 'custom';
+  if (platform === 'sub2api') return 'sub2api';
   return mode === 'token' ? 'newapi-token' : 'newapi-account';
 }
 
@@ -12802,15 +13084,20 @@ function updateThirdPartyHttpWarning() {
 function setThirdPartyAdapterFields() {
   const adapter = selectedThirdPartyAdapter();
   const customMode = adapter === 'custom';
-  const accountMode = adapter === 'newapi-account';
+  const sub2apiMode = adapter === 'sub2api';
+  const singleChoiceField = customMode || sub2apiMode;
+  const accountMode = adapter === 'newapi-account' || sub2apiMode;
   const newApiAccountMode = adapter === 'newapi-account';
-  document.getElementById('thirdpartyChoiceGrid')?.classList.toggle('single-field', customMode);
-  document.getElementById('thirdpartyModeField')?.classList.toggle('hidden', customMode);
+  const pairedCredentials = newApiAccountMode;
+  document.getElementById('thirdpartyChoiceGrid')?.classList.toggle('single-field', singleChoiceField);
+  document.getElementById('thirdpartyModeField')?.classList.toggle('hidden', singleChoiceField);
   document.getElementById('thirdpartyCredentialGrid')?.classList.toggle(
     'single-field',
-    !newApiAccountMode
+    !pairedCredentials
   );
   document.getElementById('thirdpartyAccessTokenRow')?.classList.toggle('hidden', !accountMode);
+  document.getElementById('thirdpartyRefreshTokenRow')?.classList.toggle('hidden', !sub2apiMode);
+  document.getElementById('thirdpartySub2ApiSteps')?.classList.toggle('hidden', !sub2apiMode);
   document.getElementById('thirdpartyUserIdRow')?.classList.toggle('hidden', !newApiAccountMode);
   document.getElementById('thirdpartyApiKeyRow')?.classList.toggle('hidden', accountMode);
   document.getElementById('thirdpartyCustomConfig')?.classList.toggle('hidden', !customMode);
@@ -12818,10 +13105,40 @@ function setThirdPartyAdapterFields() {
   if (hint) {
     const hintKey = customMode
       ? 'settings.thirdparty.hintCustom'
-      : adapter === 'newapi-token'
-      ? 'settings.thirdparty.hintNewApiToken'
-      : 'settings.thirdparty.hintNewApiAccount';
+      : sub2apiMode
+        ? 'settings.thirdparty.hintSub2Api'
+        : adapter === 'newapi-token'
+          ? 'settings.thirdparty.hintNewApiToken'
+          : 'settings.thirdparty.hintNewApiAccount';
     hint.textContent = t(hintKey);
+  }
+  const accessTokenLabel = document.getElementById('thirdpartyAccessTokenLabel');
+  const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
+  const refreshTokenLabel = document.getElementById('thirdpartyRefreshTokenLabel');
+  const refreshTokenInput = document.getElementById('thirdpartyRefreshTokenInput');
+  const accessTokenKey = 'settings.thirdparty.accessToken';
+  const accessTokenPlaceholderKey = sub2apiMode
+    ? 'settings.thirdparty.sub2ApiAccessTokenPlaceholder'
+    : 'settings.thirdparty.accessTokenPlaceholder';
+  const refreshTokenKey = 'settings.thirdparty.refreshToken';
+  const refreshTokenPlaceholderKey = sub2apiMode
+    ? 'settings.thirdparty.sub2ApiRefreshTokenPlaceholder'
+    : 'settings.thirdparty.refreshTokenPlaceholder';
+  if (accessTokenLabel) {
+    accessTokenLabel.dataset.i18n = accessTokenKey;
+    accessTokenLabel.textContent = t(accessTokenKey);
+  }
+  if (accessTokenInput) {
+    accessTokenInput.dataset.i18nPlaceholder = accessTokenPlaceholderKey;
+    accessTokenInput.placeholder = t(accessTokenPlaceholderKey);
+  }
+  if (refreshTokenLabel) {
+    refreshTokenLabel.dataset.i18n = refreshTokenKey;
+    refreshTokenLabel.textContent = t(refreshTokenKey);
+  }
+  if (refreshTokenInput) {
+    refreshTokenInput.dataset.i18nPlaceholder = refreshTokenPlaceholderKey;
+    refreshTokenInput.placeholder = t(refreshTokenPlaceholderKey);
   }
 }
 
@@ -13256,6 +13573,11 @@ const externalLimitAccountConfig = {
     sourceKey: 'qoderCookieSource',
     pendingKey: 'qoderPendingCheckSince'
   },
+  trae: {
+    configuredKey: 'traeAccessTokenConfigured',
+    sourceKey: 'traeAccessTokenSource',
+    pendingKey: 'traePendingCheckSince'
+  },
   commandcode: {
     configuredKey: 'commandcodeCookieConfigured',
     sourceKey: 'commandcodeCookieSource',
@@ -13484,6 +13806,7 @@ function renderExternalProviderStatus(providerName) {
     const regionInput = document.getElementById('zaiApiRegionInput');
     if (regionInput) regionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
   }
+  if (providerName === 'volcengine') renderVolcengineAgentOverrideState();
   if (providerName === 'qoder') {
     const siteInput = document.getElementById('qoderSiteInput');
     if (siteInput) siteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
@@ -13499,6 +13822,30 @@ function renderExternalProviderStatus(providerName) {
   logoutBtn.classList.toggle('hidden', source !== 'settings' || (!linked && !canClearConfiguredClaude));
   refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();
+}
+
+// The override inputs are password fields, cleared after every save and never
+// repopulated, so this tag is the only thing that tells a stored second account
+// apart from one that was never filled in. It reads the redacted 'set' marker
+// rather than volcengineAgentCredentials, which falls back to the Coding Plan
+// key and is therefore truthy for every Coding-only user.
+function renderVolcengineAgentOverrideState() {
+  const stored = state.settings?.volcengineAgentAccessKeyId === 'set';
+  document.getElementById('volcengineAgentConfigured')?.classList.toggle('hidden', !stored);
+  // Saving with the override fields empty deliberately keeps the stored one, so
+  // without this there is no way back to the main account short of clearing the
+  // Coding Plan credentials too.
+  document.getElementById('volcengineAgentClearButton')?.classList.toggle('hidden', !stored);
+}
+
+// The Agent Plan override is collapsed by default: it only matters when the two
+// plans were bought on different Volcengine accounts.
+function setVolcengineAgentExpanded(expanded) {
+  const next = Boolean(expanded);
+  state.volcengineAgentExpanded = next;
+  document.getElementById('volcengineAgentToggle')?.setAttribute('aria-expanded', next ? 'true' : 'false');
+  document.getElementById('volcengineAgentDetails')?.classList.toggle('hidden', !next);
+  document.getElementById('volcengineAgentPanel')?.classList.toggle('expanded', next);
 }
 
 function setMinimaxAccountExpanded(expanded) {
@@ -14224,12 +14571,18 @@ function openrouterProfileErrorText(result) {
   return result?.error || t('settings.openrouter.saveFailedShort');
 }
 
-function thirdPartyProfileErrorText(result) {
+function thirdPartyProfileErrorText(result, adapter = '') {
   if (result?.errorCode === 'invalidName') return t('settings.thirdparty.invalidName');
   if (result?.errorCode === 'invalidAdapter') return t('settings.thirdparty.invalidAdapter');
   if (result?.errorCode === 'invalidBaseUrl') return t('settings.thirdparty.invalidBaseUrl');
+  if (result?.errorCode === 'missingAccessToken' && adapter === 'sub2api') {
+    return t('settings.thirdparty.missingSub2ApiToken');
+  }
   if (result?.errorCode === 'missingAccessToken') return t('settings.thirdparty.missingAccessToken');
   if (result?.errorCode === 'missingApiKey') return t('settings.thirdparty.missingApiKey');
+  if (result?.errorCode === 'invalidCredential' && adapter === 'sub2api') {
+    return t('settings.thirdparty.sub2ApiCredentialRejected');
+  }
   if (result?.errorCode === 'invalidEndpointPath') return t('settings.thirdparty.invalidEndpointPath');
   if (result?.errorCode === 'invalidAuthMode') return t('settings.thirdparty.invalidAuthMode');
   if (result?.errorCode === 'invalidJsonPath') return t('settings.thirdparty.invalidJsonPath');
@@ -14469,7 +14822,9 @@ function renderThirdPartyProfiles() {
         ? t('settings.thirdparty.detailNewApiKey')
         : profile?.adapter === 'custom'
           ? t('settings.thirdparty.detailCustom')
-          : t('settings.thirdparty.detailNewApiAccount');
+          : profile?.adapter === 'sub2api'
+            ? t('settings.thirdparty.detailSub2Api')
+            : t('settings.thirdparty.detailNewApiAccount');
       let host = '';
       try { host = new URL(String(profile?.baseUrl || '')).host; } catch (_) {}
       return [adapter, host].filter(Boolean).join(' · ');
@@ -14479,12 +14834,9 @@ function renderThirdPartyProfiles() {
 
 function renderCursorStatus() {
   const statusEl = document.getElementById('cursorAccountStatus');
-  const loginBtn = document.getElementById('cursorLoginButton');
-  const logoutBtn = document.getElementById('cursorLogoutButton');
-  const refreshBtn = document.getElementById('cursorRefreshButton');
-  const manualPanel = document.getElementById('cursorManualPanel');
+  const listEl = document.getElementById('cursorAccountList');
   const errorEl = document.getElementById('cursorErrorMessage');
-  if (!statusEl || !loginBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
+  if (!statusEl || !listEl || !errorEl) return;
 
   errorEl.classList.add('hidden');
   errorEl.textContent = '';
@@ -14493,11 +14845,7 @@ function renderCursorStatus() {
     setCursorStatusText(statusEl, t('settings.common.error'));
     errorEl.textContent = t('settings.cursor.statusCheckFailed', { message: state.cursorAccount.error });
     errorEl.classList.remove('hidden');
-    loginBtn.classList.remove('hidden');
-    logoutBtn.classList.add('hidden');
-    refreshBtn.classList.remove('hidden');
-    manualPanel.classList.remove('hidden');
-    setCursorCheckboxesEnabled(false);
+    setCursorCheckboxesEnabled(Boolean(state.cursorAccount.status?.accounts?.length));
     setSettingsSectionExpanded('limits', true);
     setCursorAccountExpanded(true);
     renderSettingsSummaries();
@@ -14511,46 +14859,115 @@ function renderCursorStatus() {
     return;
   }
 
-  if (!status.loggedIn) {
-    setCursorStatusText(statusEl, t('settings.cursor.notLoggedIn'));
-    loginBtn.classList.remove('hidden');
-    logoutBtn.classList.add('hidden');
-    refreshBtn.classList.add('hidden');
-    manualPanel.classList.remove('hidden');
-    setCursorCheckboxesEnabled(false);
-    renderSettingsSummaries();
-    return;
-  }
-  if (status.expired) {
-    setCursorStatusText(statusEl, t('settings.cursor.expired'));
-    loginBtn.classList.remove('hidden');
-    logoutBtn.classList.remove('hidden');
-    refreshBtn.classList.remove('hidden');
-    manualPanel.classList.remove('hidden');
-    setCursorCheckboxesEnabled(false);
-    setSettingsSectionExpanded('limits', true);
-    setCursorAccountExpanded(true);
-    renderSettingsSummaries();
-    return;
-  }
-  const summary = status.email || t('settings.cursor.loggedIn');
+  const accounts = Array.isArray(status.accounts) ? status.accounts : [];
+  const managementBlocked = status.managementBlocked === true;
+  document.getElementById('cursorAgentActiveNote')?.classList.toggle('hidden', !managementBlocked);
+  const addButton = document.getElementById('cursorAddAccountButton');
+  if (addButton) addButton.disabled = managementBlocked;
+  const summary = accounts.length === 0
+    ? t('settings.cursor.notLoggedIn')
+    : t('settings.cursor.connected', { linked: status.linkedCount || 0, total: accounts.length });
   setCursorStatusText(statusEl, summary);
-  loginBtn.classList.add('hidden');
-  logoutBtn.classList.remove('hidden');
-  refreshBtn.classList.remove('hidden');
-  manualPanel.classList.add('hidden');
-  setCursorCheckboxesEnabled(true);
+  setCursorCheckboxesEnabled(accounts.some((account) => !account.expired && !account.error));
+  listEl.replaceChildren();
+  if (accounts.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'settings-note';
+    empty.textContent = t('settings.cursor.empty');
+    listEl.append(empty);
+  } else {
+    for (const account of accounts) {
+      const enabled = account.enabled !== false;
+      const row = document.createElement('div');
+      row.className = 'managed-account-row';
+      row.classList.toggle('disabled', !enabled);
+      const fallbackId = String(account.id || '');
+      const accountName = account.email || account.label || (fallbackId ? `…${fallbackId.slice(-8)}` : t('settings.cursor.unnamedAccount'));
+      const input = document.createElement('input');
+      input.className = 'managed-account-checkbox';
+      input.type = 'checkbox';
+      input.checked = enabled;
+      input.setAttribute('aria-label', t('settings.cursor.toggleAccount', { account: accountName }));
+      const main = document.createElement('div');
+      main.className = 'managed-account-main';
+      const name = document.createElement('div');
+      name.className = 'managed-account-email';
+      name.textContent = accountName;
+      main.append(name);
+      const planLabel = account.membershipType
+        ? limitProviderPresentationApi.limitProviderDisplayLabel(account.membershipType)
+        : t('settings.cursor.webAccount');
+      input.addEventListener('change', async () => {
+        input.disabled = true;
+        const result = await window.tokenMonitor.cursor.setAccountEnabled(account.id, input.checked);
+        if (!result?.ok) {
+          state.cursorAccount = { ...state.cursorAccount, error: result?.error || t('settings.cursor.toggleFailed') };
+        } else {
+          state.cursorAccount = { status: result.status, error: '', busy: false };
+          refreshStats({ force: true }).catch(() => {});
+        }
+        renderCursorStatus();
+      });
+      const right = document.createElement('span');
+      right.className = 'managed-account-right';
+      const info = document.createElement('div');
+      info.className = 'managed-account-info';
+      info.textContent = !enabled
+        ? t('settings.cursor.disabled')
+        : account.expired
+          ? t('settings.cursor.expiredShort')
+          : account.error
+            ? t('settings.common.error')
+            : planLabel;
+      info.title = info.textContent;
+      right.append(info);
+      if (account.removable === true && !managementBlocked) {
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'managed-account-remove';
+        remove.textContent = '✕';
+        remove.title = t('settings.cursor.remove');
+        remove.setAttribute('aria-label', t('settings.cursor.remove'));
+        let confirmingRemove = false;
+        remove.addEventListener('click', async () => {
+          if (!confirmingRemove) {
+            confirmingRemove = true;
+            remove.classList.add('confirming');
+            remove.textContent = '✓';
+            remove.title = t('settings.cursor.removeConfirm', { account: accountName });
+            remove.setAttribute('aria-label', remove.title);
+            return;
+          }
+          remove.disabled = true;
+          const result = await window.tokenMonitor.cursor.logout(account.id);
+          if (!result?.ok) {
+            const message = result?.code === 'EXTERNAL_AGENT_ACTIVE'
+              ? t('settings.cursor.agentActive')
+              : result?.error || t('settings.cursor.removeFailed');
+            state.cursorAccount = { ...state.cursorAccount, error: message };
+          } else {
+            state.cursorAccount = { status: result.status, error: '', busy: false };
+            refreshStats({ force: true }).catch(() => {});
+          }
+          renderCursorStatus();
+        });
+        right.append(remove);
+      }
+      row.append(input, main, right);
+      listEl.append(row);
+    }
+  }
   renderSettingsSummaries();
 }
 
-async function refreshCursorStatus() {
-  state.cursorAccount = { status: null, error: '' };
+async function refreshCursorStatus({ force = false, discover = false } = {}) {
+  state.cursorAccount = { status: null, error: '', busy: true };
   renderCursorStatus();
   try {
-    const status = await window.tokenMonitor.cursor.status();
-    state.cursorAccount = { status, error: '' };
+    const status = await window.tokenMonitor.cursor.status({ force, discover });
+    state.cursorAccount = { status, error: '', busy: false };
   } catch (err) {
-    state.cursorAccount = { status: null, error: err.message };
+    state.cursorAccount = { status: null, error: err.message, busy: false };
   }
   renderCursorStatus();
 }
@@ -14898,22 +15315,27 @@ function setupCursorAccountUI() {
   }
 
   document.getElementById('cursorSettingsToggle').addEventListener('click', () => {
-    setCursorAccountExpanded(!state.cursorAccountExpanded);
+    const expanding = !state.cursorAccountExpanded;
+    setCursorAccountExpanded(expanding);
+    if (expanding && !state.cursorAccount.busy) void refreshCursorStatus({ discover: true });
   });
   setCursorAccountExpanded(false);
 
+  const cursorAddAccountButton = document.getElementById('cursorAddAccountButton');
+  const cursorManualDetails = document.getElementById('cursorManualDetails');
+  function setCursorManualExpanded(expanded) {
+    const next = Boolean(expanded);
+    cursorAddAccountButton?.setAttribute('aria-expanded', next ? 'true' : 'false');
+    cursorManualDetails?.classList.toggle('hidden', !next);
+    document.getElementById('cursorManualPanel')?.classList.toggle('expanded', next);
+  }
+  cursorAddAccountButton?.addEventListener('click', () => {
+    setCursorManualExpanded(cursorManualDetails?.classList.contains('hidden'));
+  });
+  setCursorManualExpanded(false);
+
   document.getElementById('cursorLoginButton').addEventListener('click', () => {
-    window.tokenMonitor.openExternal('https://cursor.com/settings');
-  });
-
-  document.getElementById('cursorLogoutButton').addEventListener('click', async () => {
-    await window.tokenMonitor.cursor.logout();
-    await refreshCursorStatus();
-    await refreshStats({ force: true });
-  });
-
-  document.getElementById('cursorRefreshButton').addEventListener('click', () => {
-    refreshCursorStatus();
+    window.tokenMonitor.openExternal('https://cursor.com/dashboard');
   });
 
   document.getElementById('cursorManualSubmit').addEventListener('click', async () => {
@@ -14922,17 +15344,21 @@ function setupCursorAccountUI() {
     errorEl.classList.add('hidden');
     const result = await window.tokenMonitor.cursor.loginManual(input.value);
     if (!result.ok) {
-      errorEl.textContent = t('settings.cursor.loginFailed', { message: result.error });
+      const message = result.code === 'EXTERNAL_AGENT_ACTIVE'
+        ? t('settings.cursor.agentActive')
+        : result.error;
+      errorEl.textContent = t('settings.cursor.loginFailed', { message });
       errorEl.classList.remove('hidden');
       return;
     }
     input.value = '';
-    await refreshCursorStatus();
-    setCursorAccountExpanded(false);
+    state.cursorAccount = { status: result.status, error: '', busy: false };
+    renderCursorStatus();
+    setCursorManualExpanded(false);
     await refreshStats({ force: true });
   });
 
-  refreshCursorStatus();
+  refreshCursorStatus({ discover: true });
 
   const opencodeToggle = document.getElementById('opencodeSettingsToggle');
   if (opencodeToggle) {
@@ -15140,6 +15566,7 @@ function setupCursorAccountUI() {
     document.getElementById('thirdpartyProfileSubmit')?.addEventListener('click', async () => {
       const nameInput = document.getElementById('thirdpartyProfileName');
       const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
+      const refreshTokenInput = document.getElementById('thirdpartyRefreshTokenInput');
       const userIdInput = document.getElementById('thirdpartyUserIdInput');
       const keyInput = document.getElementById('thirdpartyApiKeyInput');
       const endpointPathInput = document.getElementById('thirdpartyEndpointPathInput');
@@ -15154,6 +15581,7 @@ function setupCursorAccountUI() {
       const adapter = selectedThirdPartyAdapter();
       const baseUrl = String(baseUrlInput?.value || '').trim();
       const accessToken = String(accessTokenInput?.value || '').trim();
+      const refreshToken = String(refreshTokenInput?.value || '').trim();
       const userId = String(userIdInput?.value || '').trim();
       const apiKey = String(keyInput?.value || '').trim();
       errorEl?.classList.add('hidden');
@@ -15162,6 +15590,7 @@ function setupCursorAccountUI() {
         adapter,
         baseUrl,
         accessToken,
+        refreshToken,
         userId,
         apiKey,
         endpointPath: String(endpointPathInput?.value || '').trim(),
@@ -15177,6 +15606,7 @@ function setupCursorAccountUI() {
         baseUrlInput.value = '';
         updateThirdPartyHttpWarning();
         accessTokenInput.value = '';
+        refreshTokenInput.value = '';
         userIdInput.value = '';
         keyInput.value = '';
         endpointPathInput.value = '/user/balance';
@@ -15189,7 +15619,7 @@ function setupCursorAccountUI() {
         renderThirdPartyProfiles();
         await refreshStats({ force: true });
       } else if (errorEl) {
-        errorEl.textContent = thirdPartyProfileErrorText(result);
+        errorEl.textContent = thirdPartyProfileErrorText(result, adapter);
         errorEl.classList.remove('hidden');
       }
     });
@@ -15405,8 +15835,24 @@ function setupCursorAccountUI() {
       window.tokenMonitor.openExternal(volcenginePlatformUrl());
     });
 
+    document.getElementById('volcengineAgentToggle')?.addEventListener('click', () => {
+      setVolcengineAgentExpanded(document.getElementById('volcengineAgentDetails')?.classList.contains('hidden'));
+    });
+    setVolcengineAgentExpanded(false);
+
+    document.getElementById('volcengineAgentClearButton')?.addEventListener('click', async () => {
+      await saveSettings({
+        volcengineAgentAccessKeyId: '', volcengineAgentSecretAccessKey: '', volcengineAgentRegion: ''
+      });
+      renderExternalProviderStatus('volcengine');
+      await refreshStats({ force: true });
+    });
+
     document.getElementById('volcengineLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ volcengineAccessKeyId: '', volcengineSecretAccessKey: '', volcengineRegion: '' });
+      await saveSettings({
+        volcengineAccessKeyId: '', volcengineSecretAccessKey: '', volcengineRegion: '',
+        volcengineAgentAccessKeyId: '', volcengineAgentSecretAccessKey: '', volcengineAgentRegion: ''
+      });
       clearExternalProviderCheckPending('volcengine');
       clearExternalProviderPendingStatus('volcengine');
       renderExternalProviderStatus('volcengine');
@@ -15421,6 +15867,9 @@ function setupCursorAccountUI() {
       const accessKeyInput = document.getElementById('volcengineAccessKeyInput');
       const secretInput = document.getElementById('volcengineSecretAccessKeyInput');
       const regionInput = document.getElementById('volcengineRegionInput');
+      const agentAccessKeyInput = document.getElementById('volcengineAgentAccessKeyInput');
+      const agentSecretInput = document.getElementById('volcengineAgentSecretAccessKeyInput');
+      const agentRegionInput = document.getElementById('volcengineAgentRegionInput');
       const errorEl = document.getElementById('volcengineErrorMessage');
       errorEl.classList.add('hidden');
       const accessKeyValue = String(accessKeyInput.value || '').trim();
@@ -15430,15 +15879,31 @@ function setupCursorAccountUI() {
         errorEl.classList.remove('hidden');
         return;
       }
+      // Only sent when the user actually filled the override in, so saving the
+      // Coding Plan key again cannot silently wipe a separate Agent account.
+      const agentAccessKeyValue = String(agentAccessKeyInput?.value || '').trim();
+      const agentSecretValue = String(agentSecretInput?.value || '').trim();
+      if (agentAccessKeyValue && !agentSecretValue) {
+        errorEl.textContent = t('settings.volcengine.agentSecretRequired');
+        errorEl.classList.remove('hidden');
+        return;
+      }
       try {
         markExternalProviderCheckPending('volcengine');
         await saveSettings({
           volcengineAccessKeyId: accessKeyInput.value,
           volcengineSecretAccessKey: secretInput.value,
-          volcengineRegion: regionInput.value || 'cn-beijing'
+          volcengineRegion: regionInput.value || 'cn-beijing',
+          ...(agentAccessKeyValue ? {
+            volcengineAgentAccessKeyId: agentAccessKeyValue,
+            volcengineAgentSecretAccessKey: agentSecretValue,
+            volcengineAgentRegion: agentRegionInput?.value || 'cn-beijing'
+          } : {})
         });
         accessKeyInput.value = '';
         secretInput.value = '';
+        if (agentAccessKeyInput) agentAccessKeyInput.value = '';
+        if (agentSecretInput) agentSecretInput.value = '';
         renderExternalProviderStatus('volcengine');
         await refreshStats({ force: true });
         setExternalAccountExpanded('volcengine', !externalProviderAccountLinked('volcengine'));
@@ -15579,6 +16044,57 @@ function setupCursorAccountUI() {
       } catch (err) {
         clearExternalProviderCheckPending('qoder');
         errorEl.textContent = t('settings.qoder.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
+  const traeToggle = document.getElementById('traeSettingsToggle');
+  if (traeToggle) {
+    traeToggle.addEventListener('click', () => setExternalAccountExpanded('trae', !state.traeAccountExpanded));
+    setExternalAccountExpanded('trae', false);
+    renderExternalProviderStatus('trae');
+
+    document.getElementById('traeOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal('https://www.trae.cn');
+    });
+    document.getElementById('traeLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ traeAccessToken: '', traeDeviceId: '' });
+      clearExternalProviderCheckPending('trae');
+      clearExternalProviderPendingStatus('trae');
+      renderExternalProviderStatus('trae');
+      await refreshStats({ force: true });
+    });
+    document.getElementById('traeRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+    document.getElementById('traeTokenSubmit').addEventListener('click', async () => {
+      const tokenInput = document.getElementById('traeTokenInput');
+      const deviceIdInput = document.getElementById('traeDeviceIdInput');
+      const errorEl = document.getElementById('traeErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(tokenInput.value || '').trim()) {
+        errorEl.textContent = t('settings.trae.missingAuthorization');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('trae');
+        await saveSettings({
+          traeAccessToken: tokenInput.value,
+          traeDeviceId: deviceIdInput.value,
+          limitProviders: limitProviderSelectionIncluding('trae'),
+          limitsEnabled: true
+        });
+        tokenInput.value = '';
+        deviceIdInput.value = '';
+        renderExternalProviderStatus('trae');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('trae', !externalProviderAccountLinked('trae'));
+        renderExternalProviderStatus('trae');
+      } catch (err) {
+        clearExternalProviderCheckPending('trae');
+        errorEl.textContent = t('settings.trae.saveFailed', { message: err.message });
         errorEl.classList.remove('hidden');
       }
     });
@@ -15996,6 +16512,7 @@ function initSettingsAnimationWrappers() {
     '#zaiteamManualPanel',
     '#volcengineManualPanel',
     '#qoderManualPanel',
+    '#traeManualPanel',
     '#commandcodeManualPanel',
     '#kimiManualPanel',
     '#ollamaManualPanel'

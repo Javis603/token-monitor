@@ -45,6 +45,32 @@ jobs:
       - run: npm run lint
       - run: npm test
 
+  timezones:
+    # Every GitHub-hosted runner sets its clock to UTC on every OS, so the
+    # os × node matrix above varies two axes and still samples a single UTC
+    # offset. Usage periods are cut at *local* midnight, so an assertion written
+    # against a UTC instant is green there by construction and the first person
+    # to see it red is a contributor running `npm run verify` at home.
+    #
+    # This is a list rather than "UTC plus one other" because each offset failed
+    # a different subset of the suite (#481): +02 and +10 were green while +07
+    # was not, and Kathmandu is here because +05:45 is not a whole hour.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Run the suite at several UTC offsets
+        run: |
+          for tz in Asia/Ho_Chi_Minh Asia/Kathmandu Pacific/Chatham America/Los_Angeles Pacific/Honolulu Pacific/Pago_Pago Pacific/Kiritimati; do
+            echo "::group::TZ=$tz"
+            TZ="$tz" npm test
+            echo "::endgroup::"
+          done
+
   mac-widget:
     runs-on: macos-latest
     steps:

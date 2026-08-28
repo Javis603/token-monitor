@@ -202,7 +202,10 @@ function newExchange(promptPreview, timestamp) {
 }
 
 function finalizeExchange(ex) {
-  ex.turnCount = ex.turns.length;
+  // Paid background usage such as a DSH compaction summary stays in `turns`
+  // for period filtering, token totals and cost allocation, but it is not an
+  // assistant reply and must not inflate the user-facing conversation count.
+  ex.turnCount = ex.turns.filter((turn) => turn.type !== 'compaction-summary').length;
   ex.tools = uniqueTools(ex.turns.flatMap((t) => t.tools));
   ex.tokensAvailable = ex.turns.every((turn) => turn.tokensAvailable !== false);
   return ex;
@@ -220,6 +223,7 @@ function groupEvents(events) {
       if (!current) { current = newExchange('', event.timestamp); exchanges.push(current); }
       // event.cost is set for OpenCode (real per-message cost); claude/codex leave it undefined → 0.
       const turnEntry = {
+        ...(event.type ? { type: event.type } : {}),
         timestamp: event.timestamp,
         tokens: event.tokens,
         tokensAvailable: event.tokensAvailable !== false,
@@ -338,10 +342,10 @@ function readReasonixSessionDetail({ sessionId, period = 'total', home, deps = {
   };
 }
 
-function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, deps = {} }) {
+function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, env, useEnvRoots, deps = {} }) {
   if (client === 'opencode') return readOpenCodeSessionDetail({ sessionId, period, deps });
   if (client === 'reasonix') return readReasonixSessionDetail({ sessionId, period, home, deps });
-  const filePath = resolveSessionFile(client, sessionId, home);
+  const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots });
   if (!filePath) return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
   let text;
   try { text = fs.readFileSync(filePath, 'utf8'); } catch (_) {

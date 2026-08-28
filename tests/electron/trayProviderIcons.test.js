@@ -14,7 +14,7 @@ const {
   trayProviderOpticalRatio
 } = require('../../src/electron/renderer/trayProviderIcons');
 
-const CURRENT_TOOLS = ['claude', 'codex', 'hermes', 'opencode', 'openclaw', 'cursor', 'antigravity', 'cline', 'grok', 'commandcode', 'reasonix'];
+const CURRENT_TOOLS = ['claude', 'codex', 'hermes', 'opencode', 'openclaw', 'cursor', 'antigravity', 'cline', 'grok', 'commandcode', 'reasonix', 'dsh'];
 
 function assetPathFromRendererSource(source) {
   return path.resolve(__dirname, '..', '..', 'src', 'electron', 'renderer', source);
@@ -42,7 +42,7 @@ test('tray provider icon sources keep optimized menubar icons where available', 
   assert.equal(trayProviderIconSources(['zcode']).zcode, '../../../assets/icons/zai.svg');
   assert.equal(trayProviderIconSources(['zaiteam']).zaiteam, '../../../assets/icons/zai.svg');
   const thirdPartySource = trayProviderIconSources(['thirdparty']).thirdparty;
-  assert.equal(thirdPartySource, '../../../assets/icons/newapi.svg');
+  assert.equal(thirdPartySource, '../../../assets/icons/thirdparty.svg');
   assert.equal(fs.existsSync(assetPathFromRendererSource(thirdPartySource)), true);
   // CodeBuddy/WorkBuddy have their own brand svg, so they fall through to the id-named default.
   assert.equal(trayProviderIconSources(['codebuddy']).codebuddy, '../../../assets/icons/codebuddy.svg');
@@ -87,6 +87,29 @@ test('Claude Code keeps its intentional wide mark while other providers use the 
   assert.equal(trayProviderOpticalRatio('claude'), 1);
   assert.equal(trayProviderOpticalRatio('claude-brand'), 0.78);
   assert.equal(trayProviderOpticalRatio('codex'), 0.78);
+});
+
+test('a standalone mark fills the Windows notification-area cell, everywhere else keeps the inset', () => {
+  // Windows gives each tray icon one square cell and spaces the cells itself, so
+  // the 0.78 optical inset left a quarter of that cell empty at every scale
+  // (#314): 12px of mark in the 16px cell at 100%, 18px in the 24px cell at 150%.
+  assert.equal(trayProviderOpticalRatio('codex', { standalone: true, platform: 'win32' }), 1);
+  assert.equal(trayProviderOpticalRatio('codex', { standalone: true, platform: 'darwin' }), 0.78);
+  assert.equal(trayProviderOpticalRatio('codex', { standalone: true, platform: 'linux' }), 0.78);
+  // Composed icons (bars / sessions / the custom layout) share their canvas with
+  // bars or text on every platform, so the mark keeps its breathing room there.
+  assert.equal(trayProviderOpticalRatio('codex', { platform: 'win32' }), 0.78);
+  assert.equal(trayProviderOpticalRatio('codex', { standalone: false, platform: 'win32' }), 0.78);
+});
+
+test('a standalone Windows mark is scaled to fill its box edge to edge', () => {
+  const ratio = trayProviderOpticalRatio('codex', { standalone: true, platform: 'win32' });
+  assert.deepEqual(trayProviderOpticalLayout({ width: 128, height: 128 }, 44, ratio), {
+    x: 0,
+    y: 0,
+    width: 44,
+    height: 44
+  });
 });
 
 test('tray provider icon delivery guard invalidates older async work', () => {

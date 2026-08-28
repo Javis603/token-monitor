@@ -137,6 +137,7 @@ test('parseClaudeTranscript counts one reply once across content-block splits an
 });
 
 const { groupEvents, filterExchangesByPeriod, distributeCost } = require('../../src/shared/sessionDetail');
+const { localDate, localIso } = require('../helpers/localTime');
 
 function turn(ts, total, tools = []) {
   return { kind: 'turn', timestamp: ts, tokens: { input: total, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total }, tools };
@@ -168,12 +169,15 @@ test('turns before any prompt go in a leading exchange', () => {
 });
 
 test('filterExchangesByPeriod keeps only in-period turns and drops empties', () => {
-  const now = new Date('2026-05-30T12:00:00.000Z');
+  // `today` is cut at local midnight, so the clock and both exchanges are stated
+  // in local time. Written as `Z` instants the two exchanges share one local day
+  // at some offsets, and then the filter has nothing to exclude.
+  const now = localDate(2026, 5, 30, 12);
   const ex = groupEvents([
-    { kind: 'prompt', timestamp: '2026-05-29T06:00:00.000Z', text: 'yesterday' },
-    turn('2026-05-29T06:00:01.000Z', 999),
-    { kind: 'prompt', timestamp: '2026-05-30T06:00:00.000Z', text: 'today' },
-    turn('2026-05-30T06:00:01.000Z', 100)
+    { kind: 'prompt', timestamp: localIso(2026, 5, 29, 6), text: 'yesterday' },
+    turn(localIso(2026, 5, 29, 6, 0, 1), 999),
+    { kind: 'prompt', timestamp: localIso(2026, 5, 30, 6), text: 'today' },
+    turn(localIso(2026, 5, 30, 6, 0, 1), 100)
   ]);
   const today = filterExchangesByPeriod(ex, 'today', now);
   assert.equal(today.length, 1);
@@ -224,6 +228,32 @@ test('readSessionDetail resolves, parses, groups, and distributes cost', () => {
   assert.equal(detail.totals.totalTokens, 15);
   assert.ok(Math.abs(detail.totals.costUsd - 0.5) < 1e-9);
   assert.ok(Math.abs(detail.exchanges[0].costEstimate - 0.5) < 1e-9);
+});
+
+test('readSessionDetail resolves Claude transcripts from CLAUDE_CONFIG_DIR', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-detail-config-'));
+  const configDir = path.join(home, 'relocated-claude');
+  const id = 'configured-detail';
+  const dir = path.join(configDir, 'transcripts', '-proj');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${id}.jsonl`), [
+    JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: 'configured' } }),
+    JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(), message: { role: 'assistant', usage: { input_tokens: 3, output_tokens: 2 }, content: [] } })
+  ].join('\n'));
+
+  try {
+    const detail = readSessionDetail({
+      client: 'claude',
+      sessionId: id,
+      period: 'total',
+      home,
+      env: { CLAUDE_CONFIG_DIR: configDir }
+    });
+    assert.equal(detail.found, true);
+    assert.equal(detail.totals.totalTokens, 5);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('readSessionDetail reports not found instead of throwing', () => {

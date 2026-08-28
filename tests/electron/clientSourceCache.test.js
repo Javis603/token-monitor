@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  clientSourceIdentity,
   clientSourceRequestKey,
   createClientSourceCache,
   readClientSources,
@@ -73,6 +74,50 @@ test('client source request key includes the full health snapshot identity', () 
   );
   assert.equal(clientSourceRequestKey(identity('', 'observed-at')), '');
   assert.equal(clientSourceRequestKey(identity('codex', '')), '');
+});
+
+test('placeholder source identities stay stable across unrelated health observations', () => {
+  const untrackedBefore = clientSourceIdentity({
+    deviceId: 'device-a',
+    clientId: 'commandcode',
+    observedAt: 'T1',
+    hasObservation: false
+  });
+  const untrackedAfter = clientSourceIdentity({
+    deviceId: 'device-a',
+    clientId: 'commandcode',
+    observedAt: 'T2',
+    hasObservation: false
+  });
+  const waitingBefore = clientSourceIdentity({
+    deviceId: 'device-a',
+    clientId: 'codex',
+    observedAt: 'T1',
+    tracked: true,
+    hasObservation: false
+  });
+  const waitingAfter = clientSourceIdentity({
+    deviceId: 'device-a',
+    clientId: 'codex',
+    observedAt: 'T2',
+    tracked: true,
+    hasObservation: false
+  });
+
+  assert.equal(clientSourceRequestKey(untrackedBefore), 'device-a|commandcode|untracked');
+  assert.equal(clientSourceRequestKey(untrackedAfter), 'device-a|commandcode|untracked');
+  assert.equal(clientSourceRequestKey(waitingBefore), 'device-a|codex|waiting');
+  assert.equal(clientSourceRequestKey(waitingAfter), 'device-a|codex|waiting');
+  assert.equal(
+    clientSourceRequestKey(clientSourceIdentity({
+      deviceId: 'device-a',
+      clientId: 'codex',
+      observedAt: 'T2',
+      tracked: true,
+      hasObservation: true
+    })),
+    'device-a|codex|T2'
+  );
 });
 
 test('client source cache refuses observations without a version stamp', () => {

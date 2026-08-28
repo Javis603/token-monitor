@@ -18,15 +18,18 @@ function functionSource(source, signature) {
 
 // Local / sync / host must every one of them take their usage options from
 // electronUsageConfig, or a mode quietly stops honouring the settings below.
-// Sync and host call it inline. Local hoists it into a const first, because the
-// cold-start anchor seed has to validate against the very config the collector
-// will then run with, so that one is asserted where it lives rather than by
-// counting a bare `usageOptions` shorthand anywhere in the file.
+// Each keeps that exact object in a const: local shares it with the cold-start
+// anchor check, while sync/host also register its structural fingerprint.
 function assertEveryCollectorModeUsesUsageConfig() {
-  assert.equal((main.match(/usageOptions:\s*electronUsageConfig\(/g) || []).length, 2);
-  const localCollector = functionSource(main, 'function startLocalCollector()');
-  assert.match(localCollector, /const usageOptions = electronUsageConfig\('collector'\);/);
-  assert.match(localCollector, /^\s+usageOptions,$/m);
+  for (const [name, label] of [
+    ['startLocalCollector', 'collector'],
+    ['startSyncCollector', 'sync-collector'],
+    ['startHostCollector', 'host-collector']
+  ]) {
+    const collector = functionSource(main, `function ${name}()`);
+    assert.match(collector, new RegExp(`const usageOptions = electronUsageConfig\\('${label}'\\);`));
+    assert.match(collector, /^\s+usageOptions,$/m);
+  }
 }
 
 test('every Electron collector mode follows the retained-session setting for daily history', () => {

@@ -10,6 +10,9 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { EventEmitter } = require('node:events');
+const { installInProcessWatchHost } = require('../helpers/watchHost');
+
+installInProcessWatchHost(test);
 
 const collectorPath = require.resolve('../../src/shared/collector');
 
@@ -64,6 +67,37 @@ const baseOptions = {
   agentVersion: 'test',
   limitsEnabled: false
 };
+
+function clientPeriod(client, totalTokens) {
+  const { emptyPeriod } = require('../../src/shared/usage');
+  return {
+    ...emptyPeriod(),
+    totalTokens,
+    clients: { [client]: totalTokens }
+  };
+}
+
+function combinedPeriod(clientTokens) {
+  const { emptyPeriod } = require('../../src/shared/usage');
+  return {
+    ...emptyPeriod(),
+    totalTokens: Object.values(clientTokens).reduce((sum, value) => sum + value, 0),
+    clients: { ...clientTokens }
+  };
+}
+
+function tokscaleRows(clientTokens) {
+  return {
+    entries: Object.entries(clientTokens).map(([client, input]) => ({
+      client,
+      sessionId: `${client}-session`,
+      model: `${client}-model`,
+      input,
+      output: 0,
+      cost: 0
+    }))
+  };
+}
 
 test('collectUsageOnce with a valid anchor runs a single --today scan and derives the broader periods', async () => {
   const childProcess = require('node:child_process');
@@ -159,6 +193,225 @@ test('an anchored watch tick does not re-read session files that only appear in 
     fs.rmSync(home, { recursive: true, force: true });
     delete require.cache[collectorPath];
   }
+});
+
+test('an all-client fallback preserves parse-local partitions that were not refreshed', async () => {
+  const { collectUsageOnce, localTodayKey } = freshCollector();
+  const calls = [];
+  const anchorClients = { claude: 10, codex: 20, proma: 5 };
+  const anchor = {
+    dateKey: localTodayKey(),
+    today: combinedPeriod(anchorClients),
+    month: combinedPeriod(anchorClients),
+    allTime: combinedPeriod(anchorClients),
+    todayPartitions: {
+      claude: clientPeriod('claude', 10),
+      codex: clientPeriod('codex', 20),
+      proma: clientPeriod('proma', 5)
+    }
+  };
+  const runTokscale = async ({ clients }) => {
+    calls.push(clients);
+    if (clients === 'codex') return tokscaleRows({ claude: 99 });
+    return tokscaleRows({ claude: 10, codex: 20 });
+  };
+
+  const summary = await collectUsageOnce({
+    ...baseOptions,
+    clients: 'claude,codex,proma',
+    targetClients: ['codex'],
+    todayOnlyAnchor: anchor,
+    runTokscale,
+    historyEnabled: false,
+    projectsEnabled: false
+  });
+
+  assert.deepEqual(calls, ['codex', 'claude,codex']);
+  assert.equal(summary.today.totalTokens, 35);
+  assert.equal(summary.today.clients.proma, 5);
+  assert.equal(summary.month.clients.proma, 5);
+  assert.equal(summary.allTime.clients.proma, 5);
+});
+
+test('a partial multi-target union falls back instead of trusting a polluted partition', async () => {
+  const { collectUsageOnce, localTodayKey } = freshCollector();
+  const calls = [];
+  const anchorClients = { claude: 10, codex: 20 };
+  const anchor = {
+    dateKey: localTodayKey(),
+    today: combinedPeriod(anchorClients),
+    month: combinedPeriod(anchorClients),
+    allTime: combinedPeriod(anchorClients),
+    todayPartitions: {
+      claude: clientPeriod('claude', 10),
+      codex: clientPeriod('codex', 20)
+    }
+  };
+  const runTokscale = async ({ clients }) => {
+    calls.push(clients);
+    if (calls.length === 1) return tokscaleRows({ codex: 30 });
+    return tokscaleRows({ claude: 10, codex: 20 });
+  };
+
+  const summary = await collectUsageOnce({
+    ...baseOptions,
+    clients: 'claude,codex',
+    targetClients: ['claude', 'codex'],
+    todayOnlyAnchor: anchor,
+    runTokscale,
+    historyEnabled: false,
+    projectsEnabled: false
+  });
+
+  assert.deepEqual(calls, ['claude,codex', 'claude,codex']);
+  assert.equal(summary.today.totalTokens, 30);
+  assert.deepEqual(summary.today.clients, anchorClients);
+  assert.deepEqual(summary.month.clients, anchorClients);
+  assert.deepEqual(summary.allTime.clients, anchorClients);
+});
+
+test('an empty multi-target union falls back before clearing live partitions', async () => {
+  const { collectUsageOnce, localTodayKey } = freshCollector();
+  const calls = [];
+  const anchorClients = { claude: 10, codex: 20 };
+  const anchor = {
+    dateKey: localTodayKey(),
+    today: combinedPeriod(anchorClients),
+    month: combinedPeriod(anchorClients),
+    allTime: combinedPeriod(anchorClients),
+    todayPartitions: {
+      claude: clientPeriod('claude', 10),
+      codex: clientPeriod('codex', 20)
+    }
+  };
+  const runTokscale = async ({ clients }) => {
+    calls.push(clients);
+    return calls.length === 1 ? tokscaleRows({}) : tokscaleRows(anchorClients);
+  };
+
+  const summary = await collectUsageOnce({
+    ...baseOptions,
+    clients: 'claude,codex',
+    targetClients: ['claude', 'codex'],
+    todayOnlyAnchor: anchor,
+    runTokscale,
+    historyEnabled: false,
+    projectsEnabled: false
+  });
+
+  assert.deepEqual(calls, ['claude,codex', 'claude,codex']);
+  assert.equal(summary.today.totalTokens, 30);
+  assert.deepEqual(summary.today.clients, anchorClients);
+  assert.deepEqual(summary.month.clients, anchorClients);
+  assert.deepEqual(summary.allTime.clients, anchorClients);
+});
+
+test('an empty multi-target union and full snapshot clear genuinely deleted usage', async () => {
+  const { collectUsageOnce, localTodayKey } = freshCollector();
+  const calls = [];
+  const anchorClients = { claude: 10, codex: 20 };
+  const anchor = {
+    dateKey: localTodayKey(),
+    today: combinedPeriod(anchorClients),
+    month: combinedPeriod(anchorClients),
+    allTime: combinedPeriod(anchorClients),
+    todayPartitions: {
+      claude: clientPeriod('claude', 10),
+      codex: clientPeriod('codex', 20)
+    }
+  };
+  const runTokscale = async ({ clients }) => {
+    calls.push(clients);
+    return tokscaleRows({});
+  };
+
+  const summary = await collectUsageOnce({
+    ...baseOptions,
+    clients: 'claude,codex',
+    targetClients: ['claude', 'codex'],
+    todayOnlyAnchor: anchor,
+    runTokscale,
+    historyEnabled: false,
+    projectsEnabled: false
+  });
+
+  assert.deepEqual(calls, ['claude,codex', 'claude,codex']);
+  assert.equal(summary.today.totalTokens, 0);
+  assert.equal(summary.month.totalTokens, 0);
+  assert.equal(summary.allTime.totalTokens, 0);
+});
+
+test('an unsafe unattributed union falls back without intermediate scans', async () => {
+  const { collectUsageOnce, localTodayKey } = freshCollector();
+  const calls = [];
+  const anchorClients = { claude: 10, codex: 20 };
+  const anchor = {
+    dateKey: localTodayKey(),
+    today: combinedPeriod(anchorClients),
+    month: combinedPeriod(anchorClients),
+    allTime: combinedPeriod(anchorClients),
+    todayPartitions: {
+      claude: clientPeriod('claude', 10),
+      codex: clientPeriod('codex', 20)
+    }
+  };
+  const runTokscale = async ({ clients }) => {
+    calls.push(clients);
+    if (calls.length > 1) return tokscaleRows({ claude: 10, codex: 20 });
+    const partial = tokscaleRows({ codex: 20 });
+    partial.entries.push({ model: 'unknown-model', input: 99, output: 0, cost: 0 });
+    return partial;
+  };
+
+  const summary = await collectUsageOnce({
+    ...baseOptions,
+    clients: 'claude,codex',
+    targetClients: ['claude', 'codex'],
+    todayOnlyAnchor: anchor,
+    runTokscale,
+    historyEnabled: false,
+    projectsEnabled: false
+  });
+
+  assert.deepEqual(calls, ['claude,codex', 'claude,codex']);
+  assert.equal(summary.today.totalTokens, 30);
+  assert.deepEqual(summary.today.clients, anchorClients);
+});
+
+test('a multi-target full fallback still clears genuinely deleted usage', async () => {
+  const { collectUsageOnce, localTodayKey } = freshCollector();
+  const calls = [];
+  const anchorClients = { claude: 10, codex: 20 };
+  const anchor = {
+    dateKey: localTodayKey(),
+    today: combinedPeriod(anchorClients),
+    month: combinedPeriod(anchorClients),
+    allTime: combinedPeriod(anchorClients),
+    todayPartitions: {
+      claude: clientPeriod('claude', 10),
+      codex: clientPeriod('codex', 20)
+    }
+  };
+  const runTokscale = async ({ clients }) => {
+    calls.push(clients);
+    return tokscaleRows({ codex: 20 });
+  };
+
+  const summary = await collectUsageOnce({
+    ...baseOptions,
+    clients: 'claude,codex',
+    targetClients: ['claude', 'codex'],
+    todayOnlyAnchor: anchor,
+    runTokscale,
+    historyEnabled: false,
+    projectsEnabled: false
+  });
+
+  assert.deepEqual(calls, ['claude,codex', 'claude,codex']);
+  assert.equal(summary.today.totalTokens, 20);
+  assert.equal(summary.today.clients.claude || 0, 0);
+  assert.equal(summary.month.clients.claude || 0, 0);
+  assert.equal(summary.allTime.clients.claude || 0, 0);
 });
 
 test('collectUsageOnce ignores a stale anchor from a previous day and runs the full scan', async () => {

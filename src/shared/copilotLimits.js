@@ -253,7 +253,7 @@ async function fetchJson(url, headers, deps = {}) {
           : 'unavailable';
       throw errorWithStatus(status, `${url} returned ${response.status}`);
     }
-    return response.json();
+    return await response.json();
   } catch (error) {
     if (error?.name === 'AbortError') throw errorWithStatus('unavailable', `${url} timed out`);
     throw error;

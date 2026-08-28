@@ -51,7 +51,7 @@
   const COST_FORMATS = new Set(['compact', 'full']);
   const USAGE_SCOPES = new Set(['all', 'recent']);
   const PERIODS = new Set(['today', 'month', 'allTime']);
-  const WINDOW_PRESETS = new Set(['primary', 'secondary', 'session', 'weekly', 'billing']);
+  const WINDOW_PRESETS = new Set(['primary', 'secondary', 'session', 'daily', 'weekly', 'billing']);
 
   function clean(value, max = 160) {
     return String(value || '').trim().slice(0, max);
@@ -139,13 +139,17 @@
     const provider = clean(source.provider, 48).toLowerCase();
     const accountMode = clean(source.accountMode, 24);
     const valueMode = clean(source.valueMode, 24);
-    return {
+    const normalized = {
       provider: provider || 'auto',
       accountMode: ACCOUNT_MODES.has(accountMode) ? accountMode : 'lowest',
       accountKey: clean(source.accountKey),
       window: normalizeWindowSelector(source.window, fallbackWindow),
       valueMode: VALUE_MODES.has(valueMode) ? valueMode : 'remaining'
     };
+    // Balance stays the default headline for compatibility. Persist only the
+    // explicit percentage opt-in so older layouts keep their compact shape.
+    if (source.creditsDisplay === 'percent') normalized.creditsDisplay = 'percent';
+    return normalized;
   }
 
   function infoRowDefaults(metric = 'percent', window = 'primary') {
@@ -700,10 +704,11 @@
     if (normalized.startsWith('exact|')) {
       return meteredWindows(provider).find((window) => windowKey(window) === normalized) || null;
     }
-    if (normalized === 'session' || normalized === 'weekly' || normalized === 'billing') {
+    if (normalized === 'session' || normalized === 'daily' || normalized === 'weekly' || normalized === 'billing') {
       return preferredWindow(provider, normalized);
     }
     const primary = preferredWindow(provider, 'session')
+      || preferredWindow(provider, 'daily')
       || preferredWindow(provider, 'weekly')
       || preferredWindow(provider, 'billing')
       || meteredWindows(provider)[0]
@@ -768,6 +773,18 @@
   function formatPercent(value) {
     const percent = clampPercent(value);
     return percent === null ? '--' : `${Math.round(percent)}%`;
+  }
+
+  function formatSelectionHeadline(selection) {
+    if (!selection) return '--';
+    const useCreditsPercent = Boolean(
+      selection.moneyText
+      && selection.source?.creditsDisplay === 'percent'
+      && selection.percent !== null
+    );
+    return useCreditsPercent || !selection.moneyText
+      ? formatPercent(selection.percent)
+      : selection.moneyText;
   }
 
   function formatResetCountdown(value, nowMs = Date.now()) {
@@ -861,7 +878,7 @@
     const selection = selectSource(stats, item.source, options);
     if (!selection) return { ...item, available: false, text: '--', selection: null };
     const reset = formatResetCountdown(selection.window.resetsAt, options.nowMs);
-    const headline = selection.moneyText || formatPercent(selection.percent);
+    const headline = formatSelectionHeadline(selection);
     let text;
     if (item.metric === 'percent') text = headline;
     else if (item.metric === 'percentReset') text = [headline, reset].filter(Boolean).join(' · ');
@@ -978,7 +995,7 @@
               ? '--'
               : item.metric === 'reset'
                 ? formatResetCountdown(selection.window.resetsAt, options.nowMs) || '--'
-                : formatPercent(selection.percent);
+                : formatSelectionHeadline(selection);
             return {
               source,
               available: Boolean(selection && text !== '--'),

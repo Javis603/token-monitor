@@ -48,10 +48,10 @@ const supportedToolOrder = [
   'OpenCode',
   'Hermes Agent',
   'OpenClaw',
-  'Cursor',
+  'Cursor IDE / Cursor CLI',
   'Antigravity',
   'Cline',
-  'Kimi CLI / Kimi Code',
+  'Kimi CLI / Kimi Code / Kimi Work',
   'Qwen CLI',
   'Grok Build',
   'GitHub Copilot',
@@ -67,11 +67,13 @@ const supportedToolOrder = [
   'Proma',
   'Qoder',
   'Reasonix',
-  'DeepSeek',
+  'DeepSeek / DeepSeek Harness',
+  'Cherry Studio',
   'OpenRouter',
   'Minimax',
   'Volcengine',
   'Ollama',
+  'Trae CN',
   'Third-party APIs'
 ];
 
@@ -101,11 +103,13 @@ const supportedToolIdOrder = [
   'qoder',
   'reasonix',
   'deepseek',
+  'cherrystudio',
   'openrouter',
   'minimax',
   'volcengine',
   'ollama',
-  'newapi'
+  'trae',
+  'thirdparty'
 ];
 
 // Exact counts, not "at least": a floor check would still pass after new tools land, which is
@@ -174,8 +178,7 @@ test('localized READMEs list the same supported tools', () => {
 const README_ICON_TO_LIMIT_PROVIDERS = {
   xai: ['grok'],
   'mimo-code': ['mimo'],
-  zcode: ['zai', 'zaiteam'],
-  newapi: ['thirdparty']
+  zcode: ['zai', 'zaiteam']
 };
 
 test('limit provider order follows the supported-tools table', () => {
@@ -249,7 +252,7 @@ test('WSL SQLite guides keep English and Chinese entry points connected', () => 
 test('WSL SQLite guides state and verify the Node.js prerequisite', () => {
   for (const file of ['docs/wsl-sqlite-setup.md', 'docs/wsl-sqlite-setup.zh-CN.md']) {
     const guide = read(file);
-    assert.match(guide, /Node\.js 22\.13\.0/, file);
+    assert.match(guide, /Node\.js 22\.15\.0/, file);
     assert.match(guide, /node --version\nnpm --version\n/, file);
   }
 });

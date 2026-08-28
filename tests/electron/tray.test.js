@@ -222,7 +222,9 @@ test('macOS tray icon downsamples the high-resolution template like provider ico
   ]);
 });
 
-test('non-macOS tray icon keeps the resized full-color app asset', () => {
+test('Linux tray icon keeps the resized full-color app asset at the unchanged square size', () => {
+  // Windows now gets its own small-icon metric branch (see
+  // trayIconSizing.test.js); Linux remains the square 20x20 catch-all.
   const calls = [];
   const resized = {};
   const image = {
@@ -231,7 +233,7 @@ test('non-macOS tray icon keeps the resized full-color app asset', () => {
   };
 
   assert.equal(buildTrayIcon({
-    platform: 'win32',
+    platform: 'linux',
     nativeImage: {
       createFromPath(iconPath) {
         calls.push(['path', iconPath]);
@@ -903,6 +905,24 @@ test('compact provider windows preserve Claude session plus general weekly', () 
   assert.equal(selection.primaryWindow.kind, 'session');
   assert.equal(selection.secondaryWindow.remainingPercent, 80);
   assert.equal(selection.secondaryWindow.label, undefined);
+});
+
+test('compact provider windows show Volcengine 5-hour plus Daily before broader windows', () => {
+  const selection = compactLimitSelection({
+    provider: 'volcengine',
+    status: 'ok',
+    windows: [
+      { kind: 'session', remainingPercent: 70 },
+      { kind: 'daily', remainingPercent: 60 },
+      { kind: 'weekly', remainingPercent: 50 },
+      { kind: 'billing', remainingPercent: 40 }
+    ]
+  });
+
+  assert.equal(selection.primaryWindow.kind, 'session');
+  assert.equal(selection.secondaryWindow.kind, 'daily');
+  assert.equal(selection.primaryPercent, 70);
+  assert.equal(selection.secondaryPercent, 60);
 });
 
 test('compact provider windows use billing as a final fallback and ignore non-meter rows', () => {

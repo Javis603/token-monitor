@@ -160,6 +160,19 @@ test('tray layout editing keeps item ids stable and supports add, move, update a
   assert.deepEqual(layout.items.map((item) => item.id), ['bars', 'quota']);
 });
 
+test('tray layout normalization preserves the Daily window selector', () => {
+  const normalized = normalizeTrayLayout({
+    items: [{
+      id: 'daily',
+      type: 'text',
+      metric: 'percent',
+      source: { provider: 'volcengine', accountMode: 'lowest', window: 'daily' }
+    }]
+  });
+
+  assert.equal(normalized.items[0].source.window, 'daily');
+});
+
 test('tray layouts support optional shared icons, stacked values and configurable spacers', () => {
   const normalized = normalizeTrayLayout({
     version: 1,

@@ -21,6 +21,8 @@ const {
   writeSessionUsageArchive
 } = archiveApi;
 
+const { localDate } = require('../helpers/localTime');
+
 function liveSummary() {
   return {
     deviceId: 'macbook',
@@ -213,9 +215,13 @@ test('captures and reapplies missing sessions for any client without double-coun
 });
 
 test('archive day and month windows expire while all-time stays available', () => {
-  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  // The month window expires on the local calendar month, and this is the one
+  // pair in the file that straddles a month edge: `2026-08-01T00:20Z` is still
+  // July locally at every negative offset, so as a `Z` literal the read lands in
+  // the same month it was captured in and the window under test never expires.
+  const archive = captureSessionUsageArchive({}, liveSummary(), localDate(2026, 7, 9, 8, 15));
   const nextMonth = applySessionUsageArchive(summaryAfterOpenCodeDelete(), archive, {
-    now: new Date('2026-08-01T00:20:00.000Z')
+    now: localDate(2026, 8, 1, 0, 20)
   });
 
   assert.equal(nextMonth.today.sessions['opencode:o1'], undefined);

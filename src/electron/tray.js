@@ -13,6 +13,15 @@ const { codexAccountDisplayLabel } = require('./renderer/accountIdentity');
 const { translate: translateMessage } = require('./renderer/i18n');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
+// icon.png is authored to the macOS icon grid, where the squircle is inset from
+// its canvas — the artwork covers ~75% of the 1024px square and the Dock reads
+// the margin as spacing. The Windows notification area spaces the cells itself
+// and expects full-bleed artwork, so downscaling that padded canvas into the
+// small-icon metric spends a quarter of the cell on nothing at every scale,
+// which is why #314 reads as undersized at 100% (12px of mark in a 16px cell)
+// as much as at 150% (18px in 24px). icon-win.png is the full-bleed variant
+// electron-builder already ships to the Windows installer.
+const WINDOWS_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-win.png');
 const TRAY_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icons', 'tray-token-monitor.png');
 
 // Windows keeps the taskbar's theme in SystemUsesLightTheme, separate from the
@@ -86,15 +95,121 @@ async function watchSystemDarkUi({ read, wait, publish, isCurrent = () => true, 
   return current;
 }
 
+// Each platform renders the notification-area / menubar icon at a different
+// logical size, so the resize target is platform-specific instead of the old
+// one-size-fits-all height: 20.
+//   - macOS menubar icons sit at ~22 pt and use template tinting.
+//   - Windows draws the notification-area icon at the small-icon system metric
+//     (SM_CXSMICON): 16 px at 100%, scaling with the display's DPI factor
+//     (24 @150%, 32 @200%, 40 @250%, 48 @300%) — track the metric, no cap.
+// https://learn.microsoft.com/en-us/windows/win32/shell/notification-area
+const DARWIN_TRAY_ICON_HEIGHT = 20;
+const WINDOWS_SMALL_ICON_BASE_PX = 16;
+
+function windowsTrayIconHeight(scaleFactor) {
+  const factor = Math.max(1, Number(scaleFactor) || 1);
+  return Math.max(WINDOWS_SMALL_ICON_BASE_PX, Math.round(WINDOWS_SMALL_ICON_BASE_PX * factor));
+}
+
+function primaryDisplayScaleFactor() {
+  // Best-effort: the tray lives on the primary display's taskbar. In contexts
+  // without a live Electron screen (tests), fall back to 1 (= 100% metric).
+  try {
+    return require('electron').screen.getPrimaryDisplay().scaleFactor || 1;
+  } catch (_) {
+    return 1;
+  }
+}
+
+// Resize a tray source image to the platform's metric. `height`-only resizing
+// preserves aspect ratio, so wide bar-style icons keep their width while square
+// provider icons stay square. Windows keeps a larger, metric-matched source so
+// the OS never has to blur-upscale an undersized icon on HiDPI.
+function resizeTrayIconForPlatform(img, { platform = process.platform, scaleFactor, square = false } = {}) {
+  if (platform === 'darwin') {
+    return img.resize({ height: DARWIN_TRAY_ICON_HEIGHT, quality: 'best' });
+  }
+  if (platform === 'win32') {
+    const factor = scaleFactor == null ? primaryDisplayScaleFactor() : scaleFactor;
+    return img.resize({ height: windowsTrayIconHeight(factor), quality: 'best' });
+  }
+  // Linux and anything else. Generated tray icons (bars / sessions / limits) are
+  // wider than tall, so default to the aspect-preserving height-only resize the
+  // tray:setIcons handler always used. The bundled default app icon is square
+  // and opts into force-square sizing via `square` to guarantee a 20x20 tile
+  // regardless of the source aspect (the historical buildTrayIcon sizing).
+  return square
+    ? img.resize({ width: 20, height: 20 })
+    : img.resize({ height: 20, quality: 'best' });
+}
+
+// The tightest rectangle covering every drawn pixel, or null when nothing is
+// drawn. `bitmap` is Electron's raw 4-bytes-per-pixel buffer; only the alpha
+// byte matters, and its offset is the same whether the transport is RGBA or
+// BGRA. The threshold ignores the near-invisible tail of an antialiased edge,
+// which would otherwise pin the bounds to a pixel nobody can see.
+function trayIconOpaqueBounds(bitmap, width, height, alphaThreshold = 12) {
+  if (!bitmap || !(width > 0) || !(height > 0)) return null;
+  if (bitmap.length < width * height * 4) return null;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (bitmap[(y * width + x) * 4 + 3] <= alphaThreshold) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < minX || maxY < minY) return null;
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
+// Windows fits the whole bitmap into one square cell of the small-icon metric,
+// so every transparent row and column the renderer left around the artwork is
+// cell space the icon does not get. The renderer composes at 44px with the macOS
+// menubar's breathing room built in — a provider mark sits at 78% of its box, a
+// text segment's ink at about half its canvas height — which on a 24px cell is a
+// quarter of the icon spent on nothing, while every neighbouring app draws edge
+// to edge. Trimming to the drawn pixels is a no-op for a bitmap that already
+// reaches its edges, and is deliberately not applied on macOS: the menubar has
+// no cell to fill and that breathing room is what keeps the icon off the text
+// beside it.
+function trimTrayIconPadding(img) {
+  const { width, height } = img.getSize();
+  const bounds = trayIconOpaqueBounds(img.toBitmap(), width, height);
+  if (!bounds) return img;
+  if (bounds.width === width && bounds.height === height) return img;
+  return img.crop(bounds);
+}
+
+// The whole path from a renderer-composed bitmap to the one the shell draws, so
+// the Windows-only trim travels with the resize it belongs to instead of living
+// at the IPC boundary.
+function prepareTrayIconForPlatform(img, { platform = process.platform, scaleFactor, square = false } = {}) {
+  const source = platform === 'win32' ? trimTrayIconPadding(img) : img;
+  return resizeTrayIconForPlatform(source, { platform, scaleFactor, square });
+}
+
 function buildTrayIcon(options = {}) {
   const platform = options.platform || process.platform;
   const nativeImage = options.nativeImage || require('electron').nativeImage;
   if (platform === 'darwin') {
-    const image = nativeImage.createFromPath(TRAY_ICON_PATH).resize({ height: 20, quality: 'best' });
-    image.setTemplateImage(true);
-    return image;
+    const image = nativeImage.createFromPath(TRAY_ICON_PATH);
+    const sized = resizeTrayIconForPlatform(image, { platform, scaleFactor: options.scaleFactor });
+    sized.setTemplateImage(true);
+    return sized;
   }
-  return nativeImage.createFromPath(ICON_PATH).resize({ width: 20, height: 20 });
+  // Windows / Linux: the bundled app icon is already high-resolution, so a
+  // single best-quality downscale to the platform metric keeps the small
+  // notification-area icon crisp on HiDPI instead of the old fixed 20x20.
+  // Windows takes the full-bleed variant so the mark fills its cell; both
+  // canvases are square, so the force-square 20x20 tile still applies.
+  const image = nativeImage.createFromPath(platform === 'win32' ? WINDOWS_ICON_PATH : ICON_PATH);
+  return resizeTrayIconForPlatform(image, { platform, scaleFactor: options.scaleFactor, square: true });
 }
 
 function trayUsagePeriod(contentMode) {
@@ -359,9 +474,15 @@ module.exports = {
   pickUsageTrayIconId,
   pickWorstLimit,
   popoverBounds,
+  prepareTrayIconForPlatform,
+  primaryDisplayScaleFactor,
   reconcileCodexAccountSelection,
+  resizeTrayIconForPlatform,
   runTrayMenuAction,
   shouldUseTemplateTrayIcon,
   sortCodexAccountsForDisplay,
-  trayShowsTitle
+  trayIconOpaqueBounds,
+  trayShowsTitle,
+  trimTrayIconPadding,
+  windowsTrayIconHeight
 };

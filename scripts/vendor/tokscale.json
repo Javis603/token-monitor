@@ -1,0 +1,60 @@
+{
+  "mode": "upstream",
+  "modeNote": "\"override\": ensure-vendored-tokscale.js swaps in the pinned fork build described below, and the two verify-vendored-tokscale*.js gates run against it. \"upstream\": ensure-vendored-tokscale.js no-ops (no download or replacement) and the plain npm-installed tokscale is authoritative — but both verify-vendored-tokscale*.js gates keep running, now against that npm-installed binary, so CI still fails if it doesn't actually cover DEFAULT_CLIENTS or regressed DSH parsing. Flip to this once package.json's tokscale dependency is bumped to an official release that already contains the commit below. The pin fields (commit/releaseTag/platforms) stay in place either way, so flipping back to \"override\" for a future upstream lag is editing this file again rather than re-adding infrastructure; baseVersion is not one of them — it tracks the installed dependency in both modes (see baseVersionNote).",
+  "upstream": "junhoyeo/tokscale",
+  "fork": "Javis603/tokscale",
+  "commit": "b4abf21f481ea0a58803418f8cdae6733ec68e75",
+  "commitTitle": "feat(sessions): add Oh My Pi (omp) as a local session source (#1161)",
+  "baseVersion": "4.14.0",
+  "baseVersionNote": "The npm-installed @tokscale/cli-<platform> package version this manifest is aligned with. It tracks the dependency in BOTH modes, and two gates enforce that: ensure-vendored-tokscale.js refuses to swap under \"override\" when the installed package reports something else, and verify-vendored-tokscale-release.js (plus its real-manifest test, so npm run verify catches it too) rejects any manifest whose baseVersion disagrees with @tokscale/cli optionalDependencies. So a tokscale bump always has to touch this file — either pin a new build or flip the mode — instead of silently leaving a stale override in place.",
+  "releaseRepo": "Javis603/tokscale",
+  "releaseTag": "token-monitor-b4abf21f",
+  "reason": "Retired: tokscale 4.14.0 is the first official release containing commit b4abf21f, so the pinned fork build is no longer ahead of npm and the npm-installed binary is authoritative. The commit/commitTitle/releaseTag/platforms block below is the record of that retired pin, kept so the wiring stays in place for a future upstream lag — it is NOT reusable as-is: those SHA-256s are the b4abf21f fork assets, so flipping back to \"override\" means regenerating the whole block (new commit, releaseTag, per-target hashes) against a newly built release, not just changing the mode string.",
+  "platforms": {
+    "android-arm64": {
+      "package": "@tokscale/cli-android-arm64",
+      "asset": "tokscale-android-arm64",
+      "sha256": "e7286a7e5114ec01936e9384cad2f1dc87afbd3e4daa186573250b4fdaf8cb47"
+    },
+    "darwin-arm64": {
+      "package": "@tokscale/cli-darwin-arm64",
+      "asset": "tokscale-darwin-arm64",
+      "sha256": "52c5fb2e6c6156496a114d50d6bf0b1c4bf0db1f99c7d57a872557e63e23e2cd"
+    },
+    "darwin-x64": {
+      "package": "@tokscale/cli-darwin-x64",
+      "asset": "tokscale-darwin-x64",
+      "sha256": "c4fad90b7bb859415657bab77bad1997d44eb0692373b5e043c52ded9763d638"
+    },
+    "linux-arm64": {
+      "package": "@tokscale/cli-linux-arm64-gnu",
+      "asset": "tokscale-linux-arm64",
+      "sha256": "65237cdba9eff0eda4fe8d54ba1aa6edb7313776c8fd2821b188efb9413dc1f3"
+    },
+    "linux-arm64-musl": {
+      "package": "@tokscale/cli-linux-arm64-musl",
+      "asset": "tokscale-linux-arm64-musl",
+      "sha256": "8e2d2c6af4c48577275b4af7e67995c63204f4ec209b875d8811b0e0c0354111"
+    },
+    "linux-x64": {
+      "package": "@tokscale/cli-linux-x64-gnu",
+      "asset": "tokscale-linux-x64",
+      "sha256": "2f153ff53e41a244423e9cba57fcf9c1fabd6fc96f27af68b26f77236b44c0b3"
+    },
+    "linux-x64-musl": {
+      "package": "@tokscale/cli-linux-x64-musl",
+      "asset": "tokscale-linux-x64-musl",
+      "sha256": "a1980e920d5152ef7b40e46365ca0a78e9508d36aea6cbe7790838cf34d02ae7"
+    },
+    "win32-arm64": {
+      "package": "@tokscale/cli-win32-arm64-msvc",
+      "asset": "tokscale-win32-arm64.exe",
+      "sha256": "5f31304fe46e369f3eed0cbaa7988a52b45086d7f94195c0cfdc20216dae00da"
+    },
+    "win32-x64": {
+      "package": "@tokscale/cli-win32-x64-msvc",
+      "asset": "tokscale-win32-x64.exe",
+      "sha256": "75e82e00c029b67115de3fac5332b17fec81f73217d5fc481c41011449e87cb0"
+    }
+  }
+}

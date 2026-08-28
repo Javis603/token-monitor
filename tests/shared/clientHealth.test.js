@@ -332,6 +332,42 @@ test('every source-root id the collector emits is in the allowlist', () => {
   }
 });
 
+test('Claude source roots follow CLAUDE_CONFIG_DIR like tokscale', () => {
+  const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  const originalHomedir = os.homedir;
+  os.homedir = () => path.join(path.sep, 'home', 'alice');
+  process.env.CLAUDE_CONFIG_DIR = path.join(path.sep, 'srv', 'claude-config');
+  try {
+    assert.deepEqual(clientSourceRoots('claude').claude, [
+      { id: 'claude-projects', dir: path.join(path.sep, 'srv', 'claude-config', 'projects') },
+      { id: 'claude-transcripts', dir: path.join(path.sep, 'srv', 'claude-config', 'transcripts') }
+    ]);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+  }
+});
+
+test('self-synced cache roots follow the Tokscale config dir on Windows', () => {
+  const homeDir = 'C:\\Users\\alice';
+  const appData = 'C:\\Users\\alice\\AppData\\Roaming';
+  const roots = clientSourceRoots('cursor,antigravity', {
+    homeDir,
+    platform: 'win32',
+    env: { APPDATA: appData }
+  });
+
+  assert.deepEqual(roots.cursor, [{
+    id: 'tokscale-cursor-cache',
+    dir: path.join(appData, 'tokscale', 'cursor-cache')
+  }]);
+  assert.deepEqual(roots.antigravity, [{
+    id: 'tokscale-antigravity-cache',
+    dir: path.join(appData, 'tokscale', 'antigravity-cache')
+  }]);
+});
+
 test('labelling roots keeps diagnostics separate from watcher roots', () => {
   const roots = clientSourceRoots(KNOWN_CLIENTS);
   const candidates = clientWatchCandidates(KNOWN_CLIENTS);

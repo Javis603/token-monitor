@@ -53,6 +53,16 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertNil(snapshot.quota[1].windows.first?.metric)
     }
 
+    func testWorkBuddyCreditsAndUnlimitedKeepNativeDisplaySemantics() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"workbuddy","status":"ok","balance":{"amount":63,"currency":"CREDITS"},"windows":[{"kind":"billing","metric":"credits","remaining":63,"currency":"CREDITS","showMeter":false}]},{"provider":"workbuddy","status":"ok","instanceId":"workbuddy-unlimited","windows":[{"kind":"billing","metric":"credits","detail":"unlimited","showMeter":false}]}],"status":{"noData":false}}
+        """)
+
+        XCTAssertEqual(WidgetFormat.quotaValue(snapshot.quota[0]), "63.00 left")
+        XCTAssertEqual(snapshot.quota[1].windows.first?.detail, "unlimited")
+        XCTAssertEqual(WidgetFormat.quotaValue(snapshot.quota[1]), "Unlimited")
+    }
+
     func testSchemaV6KeepsMultiAccountProviderRowsStableAndPrivate() throws {
         let snapshot = try decode("""
         {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"codex","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","instanceId":"codex-a1b2c3d4","displayName":"Codex 1","windows":[{"kind":"weekly","remainingPercent":80}]},{"provider":"codex","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","instanceId":"codex-e5f6a7b8","displayName":"Codex 2","windows":[{"kind":"weekly","remainingPercent":60}]},{"provider":"codex","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","instanceId":"codex-c9d0e1f2","displayName":"Codex 3","windows":[{"kind":"weekly","remainingPercent":40}]}],"status":{"noData":true}}
