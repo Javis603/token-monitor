@@ -8,6 +8,7 @@ const compactMoneyApi = window.TokenMonitorCompactMoney;
 const compactTokenApi = window.TokenMonitorCompactTokens;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const fontSettingsApi = window.TokenMonitorFontSettings;
+const statsRenderSchedulerApi = window.TokenMonitorStatsRenderScheduler;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
 // Canonical brand colours, captured before any override (clientColors is shared
@@ -48,6 +49,8 @@ const KLINE_MOTION_MS = 560;
 const HEATMAP_MOTION_MS = 720;
 const HEAT_CELL_MOTION_MS = 280;
 let heatmapMotionGeneration = 0;
+let dashboardReady = false;
+let dashboardRefreshFrame = 0;
 
 function prefersReducedMotion() {
   return motionPreferenceApi.shouldReduceMotion(state.reduceMotion, reducedMotionMedia?.matches);
@@ -513,7 +516,7 @@ function renderActivity() {
   renderBreakdown();
 }
 
-function render() {
+function renderNow() {
   hideTooltip();
   const hasData = (state.history?.daily || []).length > 0 || (state.history?.monthly || []).length > 0;
   els.empty.classList.toggle('hidden', hasData);
@@ -532,6 +535,37 @@ function render() {
   }
   state.motion = 'none';
 }
+
+const dashboardRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler({
+  isHidden: () => dashboardReady && document.hidden,
+  render: renderNow
+});
+
+function render() {
+  dashboardRenderScheduler.request();
+}
+
+function scheduleDashboardRefresh() {
+  if (dashboardRefreshFrame) cancelAnimationFrame(dashboardRefreshFrame);
+  dashboardRefreshFrame = requestAnimationFrame(() => {
+    dashboardRefreshFrame = 0;
+    if (document.hidden || refreshRunning) return;
+    refreshQueued = false;
+    void refresh();
+  });
+}
+
+function handleDashboardVisibilityChange() {
+  if (!dashboardRenderScheduler.visibilityChanged()) return;
+  if (!document.hidden) {
+    scheduleDashboardRefresh();
+    return;
+  }
+  if (dashboardRefreshFrame) cancelAnimationFrame(dashboardRefreshFrame);
+  dashboardRefreshFrame = 0;
+}
+
+document.addEventListener('visibilitychange', handleDashboardVisibilityChange);
 
 function hideTooltip() { els.tooltip.classList.add('hidden'); }
 
@@ -596,7 +630,7 @@ async function refresh() {
     console.log(`[dashboard] history failed: ${error.message}`);
   } finally {
     refreshRunning = false;
-    if (refreshQueued) {
+    if (refreshQueued && !document.hidden) {
       refreshQueued = false;
       void refresh();
     }
@@ -619,6 +653,7 @@ async function boot() {
   populateRangeSelect();
   render();
   await refresh();
+  dashboardReady = true;
   window.tokenMonitor.dashboard.ready();
 }
 
@@ -670,7 +705,15 @@ reducedMotionMedia?.addEventListener?.('change', () => {
   render();
 });
 
-window.tokenMonitor.onDashboardHistoryChanged?.(() => { void refresh(); });
+function handleDashboardHistoryChanged() {
+  if (document.hidden) {
+    refreshQueued = true;
+    return;
+  }
+  void refresh();
+}
+
+window.tokenMonitor.onDashboardHistoryChanged?.(handleDashboardHistoryChanged);
 
 els.tabs.forEach((tab) => tab.addEventListener('click', () => {
   if (state.tab === tab.dataset.tab) return;
@@ -730,6 +773,10 @@ window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => { state.motion = 'none'; render(); }, 120); // both the chart and the heatmap are sized to the window
 });
-window.addEventListener('focus', refresh);
+function handleDashboardFocus() {
+  if (!document.hidden) scheduleDashboardRefresh();
+}
+
+window.addEventListener('focus', handleDashboardFocus);
 
 boot();

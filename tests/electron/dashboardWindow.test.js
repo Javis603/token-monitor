@@ -4,10 +4,19 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const rootDir = path.join(__dirname, '..', '..');
 const read = (...p) => fs.readFileSync(path.join(rootDir, ...p), 'utf8');
 const { usageConfigFromSettings } = require('../../src/electron/runtimeConfig');
+
+function dashboardFunction(name, endMarker, context) {
+  const source = read('src', 'electron', 'renderer', 'dashboard.js');
+  const asyncStart = source.indexOf(`async function ${name}(`);
+  const start = asyncStart >= 0 ? asyncStart : source.indexOf(`function ${name}(`);
+  const body = source.slice(start, source.indexOf(endMarker));
+  return new vm.Script(`${body}\n${name};`).runInNewContext(context);
+}
 
 test('preload exposes the dashboard IPC surface', () => {
   const preload = read('src', 'electron', 'preload.js');
@@ -146,7 +155,137 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(js, /updateSettings\(\{ dashboardFlat: state\.flat \}\)/);
   assert.match(js, /dashboard\.minimize\(\)/);
   assert.match(js, /dashboard\.ready\(\)/);
-  assert.match(js, /onDashboardHistoryChanged\?\.\(\(\) => \{ void refresh\(\); \}\)/);
+  assert.match(js, /onDashboardHistoryChanged\?\.\(handleDashboardHistoryChanged\)/);
+});
+
+test('dashboard reuses the shared scheduler to defer hidden render work', () => {
+  const html = read('src', 'electron', 'renderer', 'dashboard.html');
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const schedulerScript = html.indexOf('<script src="statsRenderScheduler.js"></script>');
+  const dashboardScript = html.indexOf('<script src="dashboard.js"></script>');
+
+  assert.ok(schedulerScript >= 0 && schedulerScript < dashboardScript);
+  assert.match(js, /createStatsRenderScheduler\(\{[\s\S]*isHidden: \(\) => dashboardReady && document\.hidden,[\s\S]*render: renderNow/);
+  assert.match(js, /function render\(\) \{\s*dashboardRenderScheduler\.request\(\);\s*\}/);
+  assert.match(js, /function handleDashboardVisibilityChange\(\)[\s\S]*visibilityChanged\(\)[\s\S]*scheduleDashboardRefresh\(\)/);
+  assert.match(js, /document\.addEventListener\('visibilitychange', handleDashboardVisibilityChange\)/);
+});
+
+test('dashboard restore coalesces either native event order into one refresh', () => {
+  let hidden = true;
+  let focused = true;
+  let refreshRunning = false;
+  let refreshQueued = false;
+  let refreshes = 0;
+  let frame = null;
+  const context = {
+    document: {
+      get hidden() { return hidden; },
+      hasFocus: () => focused
+    },
+    requestAnimationFrame(callback) { frame = callback; return 1; },
+    cancelAnimationFrame() { frame = null; },
+    dashboardRenderScheduler: {
+      visibilityChanged: () => true
+    },
+    refresh: () => { refreshes += 1; },
+    get refreshRunning() { return refreshRunning; },
+    get refreshQueued() { return refreshQueued; },
+    set refreshQueued(value) { refreshQueued = value; },
+    get dashboardRefreshFrame() { return frame ? 1 : 0; },
+    set dashboardRefreshFrame(value) { if (!value) frame = null; }
+  };
+  const scheduleRefresh = dashboardFunction(
+    'scheduleDashboardRefresh',
+    '\nfunction handleDashboardVisibilityChange',
+    context
+  );
+  context.scheduleDashboardRefresh = scheduleRefresh;
+  const visibilityChanged = dashboardFunction(
+    'handleDashboardVisibilityChange',
+    "\ndocument.addEventListener('visibilitychange'",
+    context
+  );
+  const focus = dashboardFunction(
+    'handleDashboardFocus',
+    "\nwindow.addEventListener('focus'",
+    context
+  );
+  const runFrame = () => { const callback = frame; frame = null; callback(); };
+
+  focus();
+  assert.equal(frame, null, 'macOS focuses the window while its document is still hidden');
+
+  hidden = false;
+  visibilityChanged();
+  focus();
+  runFrame();
+  assert.equal(refreshes, 1, 'focus then visibility shares one animation-frame refresh');
+
+  hidden = true;
+  visibilityChanged();
+  focused = false;
+  hidden = false;
+  visibilityChanged();
+  focused = true;
+  focus();
+  runFrame();
+  assert.equal(refreshes, 2, 'visibility then focus also shares one animation-frame refresh');
+
+  refreshRunning = true;
+  visibilityChanged();
+  runFrame();
+  assert.equal(refreshes, 2, 'an in-flight history refresh will render the latest state itself');
+});
+
+test('dashboard history invalidation defers IPC while hidden', () => {
+  let hidden = true;
+  let refreshQueued = false;
+  let refreshes = 0;
+  const context = {
+    document: { get hidden() { return hidden; } },
+    refresh: () => { refreshes += 1; },
+    get refreshQueued() { return refreshQueued; },
+    set refreshQueued(value) { refreshQueued = value; }
+  };
+  const historyChanged = dashboardFunction(
+    'handleDashboardHistoryChanged',
+    '\nwindow.tokenMonitor.onDashboardHistoryChanged',
+    context
+  );
+
+  historyChanged();
+  historyChanged();
+  assert.equal(refreshes, 0);
+  assert.equal(refreshQueued, true);
+
+  hidden = false;
+  historyChanged();
+  assert.equal(refreshes, 1);
+});
+
+test('an in-flight Dashboard refresh preserves a hidden invalidation for restore', async () => {
+  let refreshRunning = false;
+  let refreshQueued = true;
+  let requests = 0;
+  const context = {
+    document: { hidden: true },
+    state: { history: null, motion: 'none' },
+    window: { tokenMonitor: { getDashboardHistory: async () => { requests += 1; return {}; } } },
+    render() {},
+    console: { log() {} },
+    get refreshRunning() { return refreshRunning; },
+    set refreshRunning(value) { refreshRunning = value; },
+    get refreshQueued() { return refreshQueued; },
+    set refreshQueued(value) { refreshQueued = value; }
+  };
+  const refresh = dashboardFunction('refresh', '\nasync function boot(', context);
+
+  await refresh();
+  await Promise.resolve();
+
+  assert.equal(requests, 1);
+  assert.equal(refreshQueued, true);
 });
 
 test('heatmap metric preserves the legacy cost default and normalizes settings', () => {
