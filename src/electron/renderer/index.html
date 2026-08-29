@@ -1556,7 +1556,13 @@
                 </select>
               </label>
               <div id="syncClientStatus" class="hub-status" hidden></div>
+              <div id="hubSelfUrlHint" class="hub-status hub-self-url-hint" hidden></div>
               <div id="hubBuildStatus" class="hub-status hub-build-status" role="status" hidden></div>
+              <div class="hub-gateway-scan">
+                <button id="gatewayScanButton" type="button" data-i18n="settings.sync.scanGateways">Scan for gateways</button>
+                <div id="gatewayScanStatus" class="hub-status" hidden></div>
+                <div id="gatewayScanList" class="hub-gateway-list"></div>
+              </div>
             </div>
             <div id="hubHostFields" class="hub-mode-fields hidden">
               <label><span data-i18n="settings.sync.port">Port</span><input id="hubPortInput" type="number" min="1" max="65535" spellcheck="false" /></label>
@@ -1569,6 +1575,12 @@
               </label>
               <div id="hubStatusRow" class="hub-status"></div>
               <div id="hubAddressList" class="hub-address-list"></div>
+              <div id="hubMdnsStatus" class="hub-status hub-mdns-status" hidden></div>
+              <label class="checkbox-label settings-item hub-view-toggle"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.viewEnabled">Read-only view</span><span class="settings-item-desc" data-i18n="settings.sync.viewEnabledDesc">Expose an unauthenticated, read-only port that any device on this network can open. Off by default because it is plain HTTP.</span></span><input id="hubViewEnabledInput" type="checkbox" /></label>
+              <div id="hubViewInfo" class="hub-view-info hidden" role="status">
+                <div id="hubViewStatusRow" class="hub-status"></div>
+                <div id="hubViewAddressList" class="hub-address-list"></div>
+              </div>
               <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. macOS / Windows may prompt to allow incoming connections the first time. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
               <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
             </div>

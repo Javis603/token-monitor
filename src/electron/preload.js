@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     close: () => ipcRenderer.send('dashboard:close')
   },
   getHubInfo: () => ipcRenderer.invoke('hub:getInfo'),
+  discoverGateways: () => ipcRenderer.invoke('hub:discoverGateways'),
   getHubBuildStatus: () => ipcRenderer.invoke('hub:getBuildStatus'),
   regenerateHubSecret: () => ipcRenderer.invoke('hub:regenerateSecret'),
   onHubPush: (callback) => {

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Token 监控</string>
+
+    <string name="nav_gateways">网关</string>
+    <string name="nav_overview">概览</string>
+
+    <string name="conn_retry">重试</string>
+
+    <string name="gateways_title">网关</string>
+    <string name="gateways_subtitle">选择要读取用量的来源。</string>
+    <string name="gateways_discovering">正在搜索本网络中的网关…</string>
+    <string name="gateways_discovered">网络发现</string>
+    <string name="gateways_saved">已保存</string>
+    <string name="gateways_manual">手动连接</string>
+    <string name="gateways_host_hint">主机或 IP</string>
+    <string name="gateways_port_hint">端口</string>
+    <string name="gateways_connect">连接</string>
+    <string name="gateways_none">尚未发现网关。请确认网关在本机同一 Wi‑Fi 下运行，或按地址手动添加。</string>
+    <string name="gateways_cleartext_notice">通过明文 HTTP 读取网关的无鉴权只读端口。请仅在可信网络中使用。</string>
+    <string name="gateways_empty">尚未连接任何网关。</string>
+    <string name="error_host_blank">请输入网关地址。</string>
+    <string name="error_port_invalid">端口必须在 1–65535 之间。</string>
+
+    <string name="period_today">今日</string>
+    <string name="period_month">本月</string>
+    <string name="period_all">累计</string>
+
+    <string name="overview_tokens">Token 用量</string>
+    <string name="overview_cost">费用</string>
+    <string name="overview_devices">设备</string>
+    <string name="overview_top">主要</string>
+    <string name="overview_updated">%1$s更新</string>
+    <string name="overview_unknown_cost">—</string>
+
+    <string name="overview_empty_title">未连接网关</string>
+    <string name="overview_empty_body">请先在「网关」页选择一个网关查看用量。</string>
+    <string name="overview_empty_action">前往网关列表</string>
+
+    <string name="section_tools">按工具</string>
+    <string name="section_models">按型号</string>
+    <string name="section_limits">AI 工具额度</string>
+    <string name="section_devices">设备</string>
+
+    <string name="device_online">在线</string>
+    <string name="device_offline">离线</string>
+
+    <string name="limits_empty">暂无设备上报额度。</string>
+    <string name="limits_resets">%1$s 重置</string>
+
+    <string name="status_connecting">连接中…</string>
+    <string name="status_reconnecting">重连中…</string>
+    <string name="status_connected">已连接</string>
+    <string name="empty_state_hint">请确认网关仍在该地址运行，且本手机在同一 Wi‑Fi 网络下。</string>
+    <string name="action_switch">切换网关</string>
+    <string name="action_refresh">刷新</string>
+    <string name="action_forget">删除</string>
+</resources>

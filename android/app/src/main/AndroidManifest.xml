@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.TokenMonitor"
+        android:networkSecurityConfig="@xml/network_security_config"
+        tools:targetApi="31">
+
+        <!--
+          The gateway's view plane serves plain HTTP with no authentication, so
+          connecting to it means Android's cleartext ban (in force since API 28)
+          has to be lifted. That is safe only because the payload is a LAN
+          address the user picked, and it is why the UI says "trusted LAN only":
+          on a hostile network, an unauthenticated HTTP read of this port is
+          readable by anyone on it, and nothing here verifies who answered.
+
+          `usesCleartextTraffic` is set as a belt-and-suspenders for pre-Android
+          17 builds. On Android 17+ the flag is deprecated and ignored — the
+          decision is taken from `network_security_config.xml` instead, which
+          is the only way a per-domain rule can override the platform default
+          on OEM builds that ignore the flag for private (RFC1918) ranges.
+          Surface signature on this phone: `CLEARTEXT ... not permitted by
+          network security policy` against an RFC1918 address, even with the
+          flag present.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:usesCleartextTraffic="true"
+            android:theme="@style/Theme.TokenMonitor"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

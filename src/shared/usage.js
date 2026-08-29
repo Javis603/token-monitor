@@ -1,7 +1,7 @@
 'use strict';
 
 const PERIODS = ['today', 'month', 'allTime'];
-const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
+const { aggregateLimits, normalizeLimitsSummary, publicLimits } = require('./limits');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
   coerceHistory, dayKeyAddDays, hasDisjointReasoning, localDayKey, mergeHistories,
@@ -1438,6 +1438,45 @@ function deltaValue(base, fresh, anchor, key) {
   return base ?? fresh;
 }
 
+// Redaction for the unauthenticated view surface (see publicStats.js). Session
+// rows carry no project fields and periods carry no project rollup: the canonical
+// project key is a workspace-folder label, which is a path the collecting device
+// keeps to itself.
+function publicPeriods(periods) {
+  return Object.fromEntries(Object.entries(periods || {}).map(([name, period]) => {
+    const safePeriod = { ...(period || {}) };
+    delete safePeriod.projects;
+    return [name, {
+      ...safePeriod,
+      sessions: Object.fromEntries(Object.entries(period?.sessions || {}).map(([key, session]) => {
+        const { projectId, projectLabel, projectPath, ...safe } = session || {};
+        return [key, safe];
+      }))
+    }];
+  }));
+}
+
+// Per-device rows for the same surface. The authenticated `devices[]` is dropped
+// wholesale today because it carries clientHealth diagnostics and account hashes;
+// filtering field by field keeps what a LAN viewer actually needs — which machine
+// burned how much — and leaves the diagnostics behind.
+const PUBLIC_DEVICE_FIELDS = Object.freeze([
+  'deviceId', 'hostname', 'platform', 'osName', 'osVersion',
+  'updatedAt', 'receivedAt', 'ageMs', 'stale'
+]);
+
+function publicDevices(devices) {
+  return (devices || []).map((device) => {
+    const row = {};
+    for (const field of PUBLIC_DEVICE_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(device || {}, field)) row[field] = device[field];
+    }
+    row.periods = publicPeriods(device?.periods);
+    row.limits = publicLimits(device?.limits);
+    return row;
+  });
+}
+
 module.exports = {
   PERIODS,
   UNATTRIBUTED_USAGE_CLIENT,
@@ -1458,5 +1497,7 @@ module.exports = {
   normalizeModelNameForClient,
   normalizeDeviceRecord,
   normalizePeriod,
-  projectRollupFromSessions
+  projectRollupFromSessions,
+  publicDevices,
+  publicPeriods
 };

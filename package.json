@@ -7,6 +7,8 @@
   "scripts": {
     "start": "npm run ensure:tokscale && electron .",
     "hub": "node src/hub/server.js",
+    "gateway": "node src/gateway/server.js",
+    "gateway:doctor": "node scripts/lan-doctor.js",
     "agent": "npm run ensure:tokscale && node src/agent/agent.js",
     "agent:once": "npm run ensure:tokscale && node src/agent/agent.js --once",
     "widget": "npm run ensure:tokscale && electron .",

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP is the gateway view plane's whole transport, and the OS-level
+  defaults do not cover it. `usesCleartextTraffic="true"` is enough on stock
+  Android 9-16; on Android 17 the flag is deprecated and ignored entirely, so
+  the per-domain network security config wins. OEM builds (the failure on
+  the user's device, `CLEARTEXT ... not permitted by network security policy`
+  against an RFC1918 address with the flag present) also follow this path
+  regardless of OS version.
+
+  The base config below opts every host in this app into cleartext. That is
+  the only sane shape for a viewer that talks to whatever the user typed into
+  the address field: domain-listing every LAN range a user might pick would
+  miss Tailscale, ZeroTier, mDNS-resolved names, and any other private network
+  the user might trust.
+
+  The trade is what it always was: the app trusts the network to deliver the
+  gateway's address unaltered. That is acceptable only because the UI says
+  "trusted LAN only" in plain text; the protection here is the notice, not
+  the wire.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
