@@ -769,13 +769,16 @@ test('hidden Settings keeps the custom tray clock running without refreshing com
   const syncClock = functionBody(app, 'syncCustomTrayClockTimer', 'refreshTrayComposers');
   const maybeUpdateBarsIcon = `async ${functionBody(app, 'maybeUpdateBarsIcon', 'loadImage')}`;
   const intervals = [];
+  let bubbleRenders = 0;
+  let scheduledRenders = 0;
   const context = {
     customTrayClockTimer: null,
+    isRendererWindowHidden: () => true,
     isSettingsSurfaceVisible: () => false,
     refreshTrayComposers: () => { throw new Error('hidden Settings refreshed composer DOM'); },
-    renderFloatingBubbleContent() {},
-    setInterval: (_callback, delay) => {
-      intervals.push(delay);
+    renderFloatingBubbleContent() { bubbleRenders += 1; },
+    setInterval: (callback, delay) => {
+      intervals.push({ callback, delay });
       return 1;
     },
     clearInterval() {},
@@ -785,6 +788,7 @@ test('hidden Settings keeps the custom tray clock running without refreshing com
         trayCustomLayout: { items: [{ type: 'clock' }] }
       }
     },
+    statsRenderScheduler: { request() { scheduledRenders += 1; } },
     trayLayoutApi: { trayLayoutNeedsClock: () => true },
     window: {
       TokenMonitorTrayText: { isGeneratedTrayIconMode: () => false },
@@ -797,7 +801,11 @@ test('hidden Settings keeps the custom tray clock running without refreshing com
     context
   );
 
-  assert.deepEqual(intervals, [30_000]);
+  assert.equal(intervals.length, 1);
+  assert.equal(intervals[0].delay, 30_000);
+  await intervals[0].callback();
+  assert.equal(bubbleRenders, 0);
+  assert.equal(scheduledRenders, 1);
 });
 
 test('provider tray badges are opt-in and keep monochrome assets visible', () => {

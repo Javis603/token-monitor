@@ -8068,10 +8068,14 @@ function handleWindowShortcutRecordKey(event) {
   syncWindowShortcutStatus();
 }
 
-function applyFloatingBubbleState(payload = {}) {
+function applyFloatingBubbleState(payload = {}, options = {}) {
   const wasCollapsed = state.floatingBubble.collapsed;
   const side = payload?.collapsed && ['left', 'right'].includes(payload.side) ? payload.side : null;
   state.floatingBubble = { collapsed: Boolean(side), side };
+  if (isRendererWindowHidden()) {
+    statsRenderScheduler.request();
+    return;
+  }
   document.documentElement.classList.toggle('floating-bubble-collapsed-left', side === 'left');
   document.documentElement.classList.toggle('floating-bubble-collapsed-right', side === 'right');
   document.body.classList.toggle('floating-bubble-collapsed-left', side === 'left');
@@ -8081,6 +8085,7 @@ function applyFloatingBubbleState(payload = {}) {
     els.floatingBubbleTab.title = title;
     els.floatingBubbleTab.setAttribute('aria-label', title);
   }
+  if (options.renderContent === false) return;
   if (wasCollapsed && !state.floatingBubble.collapsed) {
     if (isSettingsPanelOpen()) {
       syncSettingsForm();
@@ -11940,6 +11945,7 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
 function handleWindowVisibilityChange() {
   if (!statsRenderScheduler.visibilityChanged()) return;
   if (isRendererWindowHidden()) cancelTokenRateBoost();
+  else applyFloatingBubbleState(state.floatingBubble, { renderContent: false });
   if (!isRendererWindowHidden() && state.settings?.hubMode === 'client' && hubBuildStatusRefreshDue()) {
     void refreshHubBuildStatus();
   }
@@ -13066,7 +13072,8 @@ function syncCustomTrayClockTimer() {
   if (clockNeeded && !customTrayClockTimer) {
     customTrayClockTimer = setInterval(() => {
       void maybeUpdateBarsIcon({ refreshComposers: false });
-      renderFloatingBubbleContent();
+      if (isRendererWindowHidden()) statsRenderScheduler.request();
+      else renderFloatingBubbleContent();
     }, 30 * 1000);
   } else if (!clockNeeded && customTrayClockTimer) {
     clearInterval(customTrayClockTimer);

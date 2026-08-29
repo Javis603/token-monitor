@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   createStatsRenderScheduler,
@@ -12,6 +13,12 @@ const {
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 const electronDir = path.join(rendererDir, '..');
+
+function rendererFunction(name, endMarker, context) {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const source = app.slice(app.indexOf(`function ${name}(`), app.indexOf(endMarker));
+  return new vm.Script(`${source}\n${name};`).runInNewContext(context);
+}
 
 test('hidden stats updates coalesce into one render when visibility returns', () => {
   let hidden = true;
@@ -91,6 +98,31 @@ test('visible stats update only the exposed surface', () => {
   assert.equal(visibleStatsSurface(false, true, false), 'bubble');
   assert.equal(visibleStatsSurface(true, false, false), null);
   assert.equal(visibleStatsSurface(true, true, false), null);
+});
+
+test('a hidden floating-bubble state update changes state without touching DOM', () => {
+  let scheduledRenders = 0;
+  const state = { floatingBubble: { collapsed: false, side: null } };
+  const applyFloatingBubbleState = rendererFunction(
+    'applyFloatingBubbleState',
+    'const BUBBLE_CONTENT_VALUES',
+    {
+      document: {
+        get documentElement() {
+          return assert.fail('hidden floating-bubble state touched DOM');
+        }
+      },
+      isRendererWindowHidden: () => true,
+      state,
+      statsRenderScheduler: { request() { scheduledRenders += 1; } }
+    }
+  );
+
+  applyFloatingBubbleState({ collapsed: true, side: 'left' });
+
+  assert.equal(state.floatingBubble.collapsed, true);
+  assert.equal(state.floatingBubble.side, 'left');
+  assert.equal(scheduledRenders, 1);
 });
 
 test('hidden payloads keep the latest state and tray updates before visible rendering resumes', () => {
@@ -242,6 +274,7 @@ test('hidden event sources defer DOM work and visible surfaces catch up', () => 
     assert.ok(hiddenReturn < settingsSync.indexOf(domCall));
   }
   assert.match(settingsSync, /if \(isRendererWindowHidden\(\)\) \{[\s\S]*settingsDomSyncPending = true;[\s\S]*return;/);
+  assert.match(visibilityHandler, /else applyFloatingBubbleState\(state\.floatingBubble, \{ renderContent: false \}\);/);
   assert.match(visibilityHandler, /else \{[\s\S]*if \(settingsDomSyncPending\) syncSettingsForm\(\);[\s\S]*statsRenderScheduler\.flush\(\);/);
 });
 
