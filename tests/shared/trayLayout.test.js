@@ -351,6 +351,40 @@ test('specific account and exact window selectors do not silently fall back', ()
   }), null);
 });
 
+test('custom tray selections keep Codex additional quota windows out of compact layouts', () => {
+  const canonicalWeekly = { kind: 'weekly', remainingPercent: 80 };
+  const additionalSession = { kind: 'session', label: 'gpt-reserve', remainingPercent: 10 };
+  const compactStats = {
+    limits: {
+      providers: [{
+        provider: 'codex',
+        status: 'ok',
+        accountKey: 'active',
+        windows: [canonicalWeekly, additionalSession]
+      }]
+    }
+  };
+
+  assert.equal(selectSource(compactStats, {
+    provider: 'codex',
+    accountMode: 'specific',
+    accountKey: 'active',
+    window: 'primary'
+  }).window, canonicalWeekly);
+  assert.equal(selectSource(compactStats, {
+    provider: 'codex',
+    accountMode: 'specific',
+    accountKey: 'active',
+    window: 'secondary'
+  }), null);
+  assert.equal(selectSource(compactStats, {
+    provider: 'codex',
+    accountMode: 'specific',
+    accountKey: 'active',
+    window: windowKey(additionalSession)
+  }), null);
+});
+
 test('reset countdown formatting follows the compact issue 133 contract', () => {
   assert.equal(formatResetCountdown('2026-07-23T08:42:00.000Z', now), '42m');
   assert.equal(formatResetCountdown('2026-07-23T11:07:00.000Z', now), '3h 07m');

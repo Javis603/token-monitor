@@ -3747,22 +3747,35 @@ function codexCanonicalWindow(provider, kind) {
 
 function codexAdditionalWindowLabel(window, siblingWindows = []) {
   const name = String(window?.label || '').trim();
-  const minutes = Number(window?.windowMinutes);
-  const period = window?.kind === 'session'
-    ? (minutes === 5 * 60 ? '5-hour' : 'Session')
-    : window?.kind === 'daily'
-      ? 'Daily'
-      : window?.kind === 'weekly'
-        ? 'Weekly'
-        : window?.kind === 'billing'
-          ? 'Monthly'
-          : '';
+  const period = codexAdditionalWindowPeriodLabel(window);
   if (!name) return period || 'Additional limit';
   const normalizedName = name.toLowerCase();
   const matchingWindowCount = siblingWindows.filter((candidate) => (
     String(candidate?.label || '').trim().toLowerCase() === normalizedName
   )).length;
   return matchingWindowCount > 1 && period ? `${name} · ${period}` : name;
+}
+
+function codexAdditionalWindowPeriodLabel(window) {
+  const minutes = Number(window?.windowMinutes);
+  if (Number.isFinite(minutes) && minutes > 0 && Number.isInteger(minutes)) {
+    if (minutes === 30 * 24 * 60) return 'Monthly';
+    if (minutes % (7 * 24 * 60) === 0) {
+      const weeks = minutes / (7 * 24 * 60);
+      return weeks === 1 ? 'Weekly' : `${weeks}-week`;
+    }
+    if (minutes % (24 * 60) === 0) {
+      const days = minutes / (24 * 60);
+      return days === 1 ? 'Daily' : `${days}-day`;
+    }
+    if (minutes % 60 === 0) return `${minutes / 60}-hour`;
+    return `${minutes}-minute`;
+  }
+  if (window?.kind === 'daily') return 'Daily';
+  if (window?.kind === 'weekly') return 'Weekly';
+  if (window?.kind === 'billing') return 'Monthly';
+  if (window?.kind === 'session') return 'Session';
+  return '';
 }
 
 function antigravityQuotaGroups(provider) {

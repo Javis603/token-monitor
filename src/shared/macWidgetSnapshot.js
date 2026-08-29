@@ -169,6 +169,18 @@ function buildProviderBalance(provider) {
   return { amount, currency };
 }
 
+function isCanonicalCodexWindow(providerId, window) {
+  if (providerId !== 'codex') return true;
+  const kind = String(window?.kind || '').trim().toLowerCase();
+  const label = String(window?.label || '').trim().toLowerCase();
+  const canonicalLabels = kind === 'session' ? new Set(['', 'session', '5-hour'])
+    : kind === 'daily' ? new Set(['', 'daily'])
+      : kind === 'weekly' ? new Set(['', 'weekly'])
+        : kind === 'billing' ? new Set(['', 'monthly', 'billing'])
+          : new Set(['']);
+  return canonicalLabels.has(label);
+}
+
 function buildQuota(limits) {
   const providers = Array.isArray(limits?.providers) ? limits.providers : [];
   const candidates = [];
@@ -177,7 +189,11 @@ function buildQuota(limits) {
     const providerId = String(provider.provider || '').trim().toLowerCase();
     if (!KNOWN_LIMIT_PROVIDERS.has(providerId)) continue;
     const windows = Array.isArray(provider.windows)
-      ? provider.windows.map(buildLimitWindow).filter(Boolean).slice(0, 2)
+      ? provider.windows
+        .filter((window) => isCanonicalCodexWindow(providerId, window))
+        .map(buildLimitWindow)
+        .filter(Boolean)
+        .slice(0, 2)
       : [];
     const balance = buildProviderBalance(provider);
     const accountKey = String(provider.accountKey || '').trim();

@@ -173,6 +173,32 @@ test('Codex provider reads quota windows from alternate rate limit ids', () => {
   assert.equal(provider.windows[1].remainingPercent, 75);
 });
 
+test('Codex provider classifies additional quota windows by their actual duration', () => {
+  const provider = mapCodexRateLimitsToProvider({
+    account: { email: 'user@example.com', planType: 'plus' },
+    rateLimits: {
+      primary: { usedPercent: 10, windowDurationMins: 300 }
+    },
+    rateLimitsByLimitId: {
+      'some-quota': {
+        limitName: 'Some quota',
+        primary: { usedPercent: 20, windowDurationMins: 60 },
+        secondary: { usedPercent: 30, windowDurationMins: 1_440 }
+      }
+    }
+  }, {
+    source: 'rpc',
+    sourceDetail: 'app',
+    updatedAt: '2026-06-01T00:00:00Z'
+  });
+
+  assert.deepEqual(provider.windows.map((window) => [window.kind, window.label, window.windowMinutes]), [
+    ['session', '', 300],
+    ['session', 'Some quota', 60],
+    ['daily', 'Some quota', 1_440]
+  ]);
+});
+
 test('Codex provider does not guess between conflicting alternate rate limit ids', () => {
   const snapshots = {
     'gpt-5.4': {

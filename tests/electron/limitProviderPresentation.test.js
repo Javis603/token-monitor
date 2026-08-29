@@ -994,7 +994,8 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(renderProviderWindows, /additionalNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(codexAdditionalWindowLabel, /if \(!name\) return period \|\| 'Additional limit';/);
   assert.match(codexAdditionalWindowLabel, /matchingWindowCount > 1 && period \? `\$\{name\} · \$\{period\}` : name/);
-  assert.match(codexAdditionalWindowLabel, /minutes === 5 \* 60 \? '5-hour' : 'Session'/);
+  assert.match(codexAdditionalWindowLabel, /codexAdditionalWindowPeriodLabel\(window\)/);
+  assert.match(codexAdditionalWindowLabel, /minutes % 60 === 0/);
   assert.match(styles, /\.limit-window-text span:first-child \{[\s\S]*text-overflow: ellipsis;/);
   assert.match(renderProviderWindows, /const resetNode = codexResetCreditsNode\(provider\.resetCredits\);/);
   assert.doesNotMatch(renderProviderWindows, /limitWindowNode\('Reset credits'/);
@@ -1050,10 +1051,14 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
 test('Codex additional quota labels omit a redundant period unless one name has multiple windows', () => {
   const weekly = { kind: 'weekly', label: 'gpt-reserve', windowMinutes: 10_080 };
   const session = { kind: 'session', label: 'gpt-reserve', windowMinutes: 300 };
+  const hourly = { kind: 'session', label: 'Some quota', windowMinutes: 60 };
+  const daily = { kind: 'daily', label: 'Some quota', windowMinutes: 1_440 };
 
   assert.equal(runCodexAdditionalWindowLabel(weekly, [weekly]), 'gpt-reserve');
   assert.equal(runCodexAdditionalWindowLabel(session, [session, weekly]), 'gpt-reserve · 5-hour');
   assert.equal(runCodexAdditionalWindowLabel(weekly, [session, weekly]), 'gpt-reserve · Weekly');
+  assert.equal(runCodexAdditionalWindowLabel(hourly, [hourly, daily]), 'Some quota · 1-hour');
+  assert.equal(runCodexAdditionalWindowLabel(daily, [hourly, daily]), 'Some quota · Daily');
 });
 
 function runClaudePrepaidGrantRows(app, tranches, currency, now) {

@@ -163,6 +163,39 @@ test('native widget keeps Volcengine 5-hour and Daily as its two compact windows
   assert.deepEqual(snapshot.quota[0].windows.map((window) => window.kind), ['session', 'daily']);
 });
 
+test('native widget exports only canonical Codex quota windows', () => {
+  const cases = [
+    {
+      windows: [
+        { kind: 'weekly', remainingPercent: 80 },
+        { kind: 'session', label: 'gpt-reserve', remainingPercent: 10 }
+      ],
+      expectedKinds: ['weekly']
+    },
+    {
+      windows: [
+        { kind: 'session', remainingPercent: 70 },
+        { kind: 'weekly', label: 'gpt-reserve', remainingPercent: 20 }
+      ],
+      expectedKinds: ['session']
+    },
+    {
+      windows: [
+        { kind: 'session', label: 'gpt-reserve', remainingPercent: 10 },
+        { kind: 'weekly', label: 'gpt-reserve', remainingPercent: 20 }
+      ],
+      expectedKinds: []
+    }
+  ];
+
+  for (const { windows, expectedKinds } of cases) {
+    const snapshot = buildSnapshot({
+      limits: { providers: [{ provider: 'codex', status: 'ok', windows }] }
+    }, { now: NOW });
+    assert.deepEqual(snapshot.quota[0].windows.map((window) => window.kind), expectedKinds);
+  }
+});
+
 test('shares the complete provider allowlist and preserves credit window display semantics', () => {
   const snapshot = buildSnapshot({
     limits: { providers: [
