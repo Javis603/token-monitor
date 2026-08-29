@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const {
   describeWindowBehavior,
+  floatingAlwaysOnTopLevel,
   normalizeWindowBehavior,
   normalizeWindowBehaviorSettings,
   windowBehaviorSelection
@@ -106,4 +107,23 @@ test('settings:update hands the mode selection over, not the whole patch', () =>
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src/electron/main.js'), 'utf8');
   assert.match(main, /\}, windowBehaviorSelection\(normalizedPatch\)\);/);
   assert.doesNotMatch(main, /\}, normalizedPatch\);/);
+});
+
+// Electron places the `floating` z-order level behind the Windows taskbar on
+// purpose, so a widget dragged onto the taskbar vanishes behind it (#533).
+test('always-on-top windows opt out of the Windows behind-taskbar levels', () => {
+  assert.equal(floatingAlwaysOnTopLevel('win32'), 'screen-saver');
+  assert.equal(floatingAlwaysOnTopLevel('darwin'), 'floating');
+  assert.equal(floatingAlwaysOnTopLevel('linux'), 'floating');
+});
+
+// Both always-on-top call sites (the expanded widget and the collapsed bubble)
+// have to go through the helper; a bare 'floating' literal reintroduces #533.
+test('main.js never passes a bare floating level to setAlwaysOnTop', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src/electron/main.js'), 'utf8');
+  const calls = main.match(/setAlwaysOnTop\([^)]*\)/g) || [];
+  assert.ok(calls.length >= 2);
+  for (const call of calls) {
+    assert.match(call, /floatingAlwaysOnTopLevel\(\)/);
+  }
 });

@@ -289,7 +289,12 @@ const {
   runManualDeviceRefresh,
   settingsLimitInvalidationPlan
 } = require('./deviceRuntimeCoordinator');
-const { describeWindowBehavior, normalizeWindowBehaviorSettings, windowBehaviorSelection } = require('./windowBehavior');
+const {
+  describeWindowBehavior,
+  floatingAlwaysOnTopLevel,
+  normalizeWindowBehaviorSettings,
+  windowBehaviorSelection
+} = require('./windowBehavior');
 const {
   normalizeWindowToggleShortcut,
   windowToggleShortcutAction,
@@ -1823,7 +1828,7 @@ function applyCollapsedFloatingBubbleLimits(bounds) {
     mainWindow.setMaximumSize(bounds?.width || FLOATING_BUBBLE_HANDLE_WIDTH, bounds?.height || FLOATING_BUBBLE_HANDLE_HEIGHT);
   }
   if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(false);
-  mainWindow.setAlwaysOnTop(true, process.platform === 'win32' ? 'screen-saver' : 'floating');
+  mainWindow.setAlwaysOnTop(true, floatingAlwaysOnTopLevel());
   if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(true);
 }
 
@@ -2453,7 +2458,7 @@ function applyWindowSettings() {
     return;
   }
   const behavior = describeWindowBehavior(settings);
-  mainWindow.setAlwaysOnTop(behavior.alwaysOnTop, 'floating');
+  mainWindow.setAlwaysOnTop(behavior.alwaysOnTop, floatingAlwaysOnTopLevel());
   if (typeof mainWindow.setMovable === 'function') mainWindow.setMovable(behavior.draggable);
   if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(behavior.resizable);
   if (typeof mainWindow.setIgnoreMouseEvents === 'function') {
