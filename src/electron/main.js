@@ -6,7 +6,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
-const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
+const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir, writeJsonAtomic } = require('../shared/config');
+const {
+  attachCodexWeeklyCapacityEstimates,
+  normalizeCodexWeeklyCapacityArchive,
+  observeCodexWeeklyCapacity
+} = require('../shared/codexWeeklyCapacity');
 const {
   CredentialStore,
   credentialSettingsForRenderer,
@@ -2541,12 +2546,38 @@ let cachedMacWidgetConfiguration;
 let trayRefreshInFlight = false;
 let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
+let codexWeeklyCapacityArchive = null;
+
+function codexWeeklyCapacityArchivePath() {
+  return path.join(app.getPath('userData'), 'codex-weekly-capacity.json');
+}
+
+function ensureCodexWeeklyCapacityArchive() {
+  if (codexWeeklyCapacityArchive) return codexWeeklyCapacityArchive;
+  codexWeeklyCapacityArchive = normalizeCodexWeeklyCapacityArchive(
+    readJson(codexWeeklyCapacityArchivePath(), null)
+  );
+  return codexWeeklyCapacityArchive;
+}
+
+function captureCodexWeeklyCapacity(deviceRecord) {
+  try {
+    const result = observeCodexWeeklyCapacity(ensureCodexWeeklyCapacityArchive(), deviceRecord);
+    codexWeeklyCapacityArchive = result.archive;
+    if (result.changed) writeJsonAtomic(codexWeeklyCapacityArchivePath(), codexWeeklyCapacityArchive);
+  } catch (error) {
+    console.warn(`[codex-capacity] local archive update failed: ${error?.code || 'unknown'}`);
+  }
+}
 
 function electronPresentationStats(stats) {
-  return projectLimitStatsForDisplay(stats, {
+  const projected = projectLimitStatsForDisplay(stats, {
     localDeviceId: settings?.deviceId,
     syncActive: mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim()),
     opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
+  });
+  return attachCodexWeeklyCapacityEstimates(projected, ensureCodexWeeklyCapacityArchive(), {
+    localDeviceId: settings?.deviceId
   });
 }
 let trayCodexPendingSince = 0;
@@ -3448,6 +3479,7 @@ function startSyncCollector() {
         syncUploadIntervalMs: syncUploadIntervalMs()
       };
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
+      captureCodexWeeklyCapacity(lastCollectedDevice);
       const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
       if (displayStats) {
         updateDiscordRpcDisplay(displayStats);
@@ -3485,6 +3517,7 @@ function startHostCollector() {
       if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
       const visibleSummary = summary;
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
+      captureCodexWeeklyCapacity(lastCollectedDevice);
       if (!embeddedHub) return;
       try {
         const stale = settings.lastPostedDeviceId;
@@ -4048,6 +4081,7 @@ function startLocalCollector() {
       const visibleSummary = summary;
       localDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       lastCollectedDevice = localDevice;
+      captureCodexWeeklyCapacity(lastCollectedDevice);
       localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
       attachLocalNativeViews(localStats, localDevice);
       updateDiscordRpcDisplay(localStats);

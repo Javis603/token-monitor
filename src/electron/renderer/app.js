@@ -4598,6 +4598,34 @@ function renderLimitProviderHead(id, label, provider, color, options = {}) {
   return head;
 }
 
+function codexWeeklyCapacityNode(estimate) {
+  if (!estimate || typeof estimate !== 'object') return null;
+  const row = document.createElement('div');
+  row.className = 'codex-weekly-capacity';
+  row.title = t('limits.codex.weeklyCapacityLocalOnly');
+  const label = document.createElement('span');
+  label.textContent = t('limits.codex.weeklyCapacity');
+  const value = document.createElement('span');
+  const capacity = Number(estimate.capacityTokens);
+  value.textContent = Number.isFinite(capacity) && capacity > 0
+    ? `≈ ${formatNumber(capacity)} ${t('limits.codex.weeklyCapacityTokens')}`
+    : t(`limits.codex.weeklyCapacity.${estimate.status === 'unavailable' ? 'unavailable' : 'collecting'}`);
+  const status = document.createElement('span');
+  const statusName = ['stable', 'preliminary', 'unstable'].includes(estimate.status)
+    ? estimate.status
+    : estimate.status === 'unavailable' ? 'unavailable' : 'collecting';
+  status.className = `codex-weekly-capacity-status ${statusName}`;
+  const change = Number(estimate.capacityChangePercent);
+  const changeText = Number.isFinite(change)
+    ? ` · ${t('limits.codex.weeklyCapacity.change', {
+        value: `${change > 0 ? '+' : ''}${change.toFixed(1)}%`
+      })}`
+    : '';
+  status.textContent = `${t(`limits.codex.weeklyCapacity.${statusName}`)}${changeText}`;
+  row.append(label, value, status);
+  return row;
+}
+
 function renderProviderWindows(provider, color) {
   const windows = document.createElement('div');
   windows.className = 'limit-windows';
@@ -4612,6 +4640,8 @@ function renderProviderWindows(provider, color) {
     }
     if (weekly) {
       const weeklyNode = limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68);
+      const capacity = codexWeeklyCapacityNode(provider.weeklyCapacityEstimate);
+      if (capacity) weeklyNode.append(capacity);
       if (!session && !monthly) weeklyNode.classList.add('limit-window-wide');
       windows.append(weeklyNode);
     }

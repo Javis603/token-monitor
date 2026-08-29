@@ -4044,6 +4044,38 @@ html.is-windows .limit-live-badge {
   gap: 8px;
 }
 .limit-window { display: grid; gap: 5px; min-width: 0; }
+.codex-weekly-capacity {
+  display: grid;
+  min-width: 0;
+  padding-top: 3px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.12);
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.2;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+}
+.codex-weekly-capacity > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codex-weekly-capacity > span:nth-child(2) {
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: end;
+}
+.codex-weekly-capacity-status {
+  grid-column: 1 / -1;
+  justify-self: end;
+  opacity: 0.72;
+  overflow-wrap: anywhere;
+  text-align: end;
+}
+.codex-weekly-capacity-status.stable { color: var(--green, var(--text)); opacity: 0.9; }
+.codex-weekly-capacity-status.unstable,
+.codex-weekly-capacity-status.unavailable { color: var(--red); opacity: 0.85; }
 .limit-window-wide {
   grid-column: 1 / -1;
 }
