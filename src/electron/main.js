@@ -296,6 +296,8 @@ const {
   normalizeWindowBehaviorSettings,
   windowBehaviorSelection
 } = require('./windowBehavior');
+const { createTaskbarZOrderKeeper, taskbarZOrderEnabled } = require('./windowsTaskbarZOrder');
+const { subscribeForegroundChange } = require('./windowsForegroundHook');
 const {
   normalizeWindowToggleShortcut,
   windowToggleShortcutAction,
@@ -454,6 +456,7 @@ function defaultSettings() {
     secret: process.env.TOKEN_MONITOR_SECRET || '',
     windowBehavior,
     alwaysOnTop: windowBehavior === 'floating',
+    keepAboveTaskbar: false,
     refreshMs: Number(process.env.TOKEN_MONITOR_WIDGET_REFRESH_MS || 15000),
     glassOpacity: 68,
     glassBlur: 32,
@@ -1848,6 +1851,7 @@ function applyCollapsedFloatingBubbleLimits(bounds) {
   if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(false);
   mainWindow.setAlwaysOnTop(true, floatingAlwaysOnTopLevel());
   if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(true);
+  syncTaskbarZOrder();
 }
 
 function displayForBounds(bounds) {
@@ -2241,6 +2245,9 @@ function readSettings() {
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
     merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
+    if (saved.keepAboveTaskbar !== undefined) {
+      merged.keepAboveTaskbar = parseBoolean(saved.keepAboveTaskbar, false);
+    }
     if (saved.windowBehavior === undefined && saved.alwaysOnTop !== undefined) {
       merged.windowBehavior = saved.alwaysOnTop ? 'floating' : 'normal';
     }
@@ -2470,6 +2477,44 @@ function applyMacSpaceBehavior(trayMode = Boolean(settings?.trayMode)) {
   }
 }
 
+// Windows re-raises its taskbar over an always-on-top widget that overlaps it
+// and gives us no event for the common case, so keeping the widget above it
+// costs a timer and can briefly flicker during some app switches. That price
+// only makes sense for someone who deliberately parked the widget on the
+// taskbar, which is why it is opt-in. windowsTaskbarZOrder.js explains the
+// mechanics. Everything that can change whether the widget still overlaps the
+// taskbar — or is still on top, or still visible — calls this, and the keeper
+// decides for itself.
+let taskbarZOrderKeeper = null;
+
+function stopTaskbarZOrderKeeper() {
+  if (taskbarZOrderKeeper) taskbarZOrderKeeper.stop();
+}
+
+function syncTaskbarZOrder() {
+  if (!taskbarZOrderEnabled(settings)) {
+    stopTaskbarZOrderKeeper();
+    return;
+  }
+  if (!taskbarZOrderKeeper) {
+    taskbarZOrderKeeper = createTaskbarZOrderKeeper({
+      screen,
+      subscribeForeground: subscribeForegroundChange,
+      log: process.env.TOKEN_MONITOR_TASKBAR_ZORDER_DEBUG === '1'
+        ? (message) => console.log(`[taskbar-zorder ${Date.now() % 100000}] ${message}`)
+        : null
+    });
+  }
+  taskbarZOrderKeeper.sync(mainWindow);
+}
+
+// Losing activation to the taskbar is the one transition Windows raises it on
+// that reaches us as an event, so it gets the fast path.
+function nudgeTaskbarZOrder() {
+  if (!taskbarZOrderEnabled(settings) || !taskbarZOrderKeeper) return;
+  taskbarZOrderKeeper.nudge(mainWindow);
+}
+
 function applyWindowSettings() {
   if (!mainWindow) return;
   if (floatingBubbleState.collapsed) {
@@ -2486,6 +2531,7 @@ function applyWindowSettings() {
   if (typeof mainWindow.setFocusable === 'function') mainWindow.setFocusable(behavior.focusable);
   if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(Boolean(settings?.trayMode));
   if (!behavior.focusable && typeof mainWindow.blur === 'function') mainWindow.blur();
+  syncTaskbarZOrder();
 }
 
 function nativeBlurEnabled(source = settings) {
@@ -5896,11 +5942,16 @@ function createWindow(boundsOverride, options = {}) {
     stopFloatingBubbleAutoCollapseTimer();
   });
   win.on('blur', () => {
+    nudgeTaskbarZOrder();
     if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) hidePopover();
     else if (!quitRequested) scheduleFloatingBubbleAutoCollapse();
   });
-  win.on('resized', persistBoundsSoon);
-  win.on('moved', persistBoundsSoon);
+  win.on('resized', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
+  win.on('moved', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
+  win.on('show', syncTaskbarZOrder);
+  win.on('restore', syncTaskbarZOrder);
+  win.on('hide', stopTaskbarZOrderKeeper);
+  win.on('minimize', stopTaskbarZOrderKeeper);
   win.on('close', (event) => {
     if (quitRequested) return;
     const action = mainWindowCloseAction(settings, { platform: process.platform });
@@ -6392,6 +6443,7 @@ app.whenReady().then(() => {
       opencodeAmbientEnabled: parseBoolean(patch.opencodeAmbientEnabled ?? settings.opencodeAmbientEnabled, true),
       opencodeLocalLimitsEnabled: parseBoolean(patch.opencodeLocalLimitsEnabled ?? settings.opencodeLocalLimitsEnabled, false),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
+      keepAboveTaskbar: parseBoolean(patch.keepAboveTaskbar ?? settings.keepAboveTaskbar, false),
       windowMaximized: parseBoolean(settings.windowMaximized, false),
       zoomFactor: clampZoom(patch.zoomFactor ?? settings.zoomFactor),
       ...normalizeTrayModeSettings({
@@ -7796,6 +7848,7 @@ app.on('before-quit', () => {
   resetMacWidgetReloadThrottle();
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
+  stopTaskbarZOrderKeeper();
   unregisterWindowToggleShortcut();
   electronWorkbuddyLocalAuth.dispose();
   if (skipForcedQuit) return;
