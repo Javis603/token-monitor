@@ -154,3 +154,15 @@ test('Reasonix native session keeps presentation identity for the brand icon pat
   assert.equal(row.client, 'reasonix');
   assert.equal(row.name, 'Reasonix · deepseek/deepseek-v4-flash');
 });
+
+test('LM Studio has a label and uses the standard mask-safe icon path', () => {
+  const source = rendererSource();
+  const styles = rendererStyles();
+
+  assert.ok(clientLabelIds(source).has('lmstudio'));
+  assert.match(source, /clientsWithIcon = new Set\([\s\S]*'lmstudio'/);
+  assert.match(styles, /\.row-icon-lmstudio\s*\{[^}]*mask-image:\s*url\([^)]*assets\/icons\/lmstudio\.svg\)/s);
+  assert.doesNotMatch(styles, /\.row-icon-lmstudio\s*\{[^}]*background-image:/s);
+  assert.equal(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'lmstudio.svg')), true);
+  assert.equal(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'lmstudio.png')), true);
+});

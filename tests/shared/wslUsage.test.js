@@ -39,6 +39,12 @@ test('homeHasData maps Proma agent sessions to proma', () => {
   assert.deepEqual(ids, ['proma']);
 });
 
+test('homeHasData maps LM Studio server logs to lmstudio', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const present = new Set([`${home}\\.lmstudio\\server-logs`]);
+  assert.deepEqual(homeHasData(home, (p) => present.has(p)), ['lmstudio']);
+});
+
 test('homeHasData maps VS Code Copilot workspace storage to copilot', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const workspaceRoot = `${home}\\.config\\Code\\User\\workspaceStorage`;
@@ -141,11 +147,11 @@ test('wslUsageHomes returns [] when no distro is running', () => {
 });
 
 // A WSL home that only holds a new A-class client's data (pi, Oh My Pi, zed,
-// kilocode, Command Code, DSH, micode, zcode, kiro) must still be discovered — mirroring the sync
+// kilocode, Command Code, DSH, micode, zcode, kiro, LM Studio) must still be discovered — mirroring the sync
 // point each new tracked client adds (see AGENTS.md "Tracked-client list must
 // stay in sync"). Zed's marker is the threads.db file, not the directory
 // (tokscale checks is_file()).
-test('wslUsageHomes keeps a home whose only tracked-client data is pi, zed, kilocode, Command Code, DSH, micode, zcode, or kiro', () => {
+test('wslUsageHomes keeps a home whose only tracked-client data is pi, zed, kilocode, Command Code, DSH, micode, zcode, kiro, or LM Studio', () => {
   function homesFor(markerRel) {
     return wslUsageHomes({
       platform: 'win32',
@@ -171,6 +177,7 @@ test('wslUsageHomes keeps a home whose only tracked-client data is pi, zed, kilo
   assert.deepEqual(homesFor('.config/kiro/User/globalStorage/kiro.kiroagent'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
   assert.deepEqual(homesFor('.codebuddy/projects'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
   assert.deepEqual(homesFor('.workbuddy'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.lmstudio/server-logs'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
 });
 
 test('wslUsageHomes keeps a home whose only data is VS Code Copilot Chat', () => {

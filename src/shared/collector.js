@@ -2422,6 +2422,11 @@ function clientSourceRoots(clientsCsv, options = {}) {
     'cherrystudio',
     ...cherryRoots
   );
+  // LM Studio's OpenAI-compatible local server writes nested monthly `.log`
+  // files under this root. Tokscale's PathRoot::EnvVar treats a blank override
+  // as unset, so keep the watcher and source-health path on the same fallback.
+  const lmStudioHome = nonBlankEnvPath('LM_STUDIO_HOME', path.join(home, '.lmstudio'), env);
+  add('lmstudio', ['lmstudio-server-logs', path.join(lmStudioHome, 'server-logs')]);
   return byClient;
 }
 
