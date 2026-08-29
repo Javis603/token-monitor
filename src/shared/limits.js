@@ -396,6 +396,14 @@ function normalizeOpenCodeAccountKeyAliases(values, accountKey = '') {
     .slice(0, MAX_OPENCODE_ACCOUNT_KEY_ALIASES);
 }
 
+function cursorWindowRank(window) {
+  if (window.metric === 'spend') return 4;
+  if (window.label === 'Requests' || window.label === 'Cursor Models') return 0;
+  if (window.label === 'Other Models') return 1;
+  if (window.label === 'Grok Bot') return 2;
+  return 3;
+}
+
 function normalizeLimitProvider(input) {
   if (!input || typeof input !== 'object') return null;
   const provider = normalizeProviderId(input.provider);
@@ -417,6 +425,11 @@ function normalizeLimitProvider(input) {
     };
     windows.sort((a, b) => groupRank(a) - groupRank(b)
       || WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind));
+  } else if (provider === 'cursor') {
+    // Cursor's official dashboard presents its two monthly model pools first,
+    // followed by the optional Grok Bot allowance and on-demand spend. Generic
+    // kind ordering would incorrectly put the weekly Grok row before both pools.
+    windows.sort((a, b) => cursorWindowRank(a) - cursorWindowRank(b));
   } else {
     windows.sort((a, b) => WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind));
   }

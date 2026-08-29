@@ -199,6 +199,19 @@ function runProviderSpendNode(source, balance) {
   return JSON.parse(JSON.stringify(context.result));
 }
 
+test('Cursor limits render every normalized quota and format on-demand spend explicitly', () => {
+  const app = readRendererFile('app.js');
+  const spendValue = functionBody(app, 'formatCursorSpendValue', 'formatBalanceAmount');
+  const windows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+
+  assert.match(spendValue, /formatMoney\(used, window\?\.currency \|\| 'USD'\)/);
+  assert.match(spendValue, /limit !== null && limit > 0/);
+  assert.match(windows, /for \(const quotaWindow of provider\.windows \|\| \[\]\)/);
+  assert.match(windows, /quotaWindow\.metric === 'spend'/);
+  assert.match(windows, /formatCursorSpendValue\(quotaWindow\)/);
+  assert.doesNotMatch(windows, /visibleWindows = billingWindows\.length > 0 \? billingWindows : \[null\]/);
+});
+
 function runHomeLimitModule(rows, resetLabels = {}) {
   const app = readRendererFile('app.js');
   const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');

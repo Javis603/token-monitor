@@ -1268,6 +1268,24 @@ test('normalizeLimitProvider preserves daily windows in canonical order', () => 
   assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'daily', 'weekly', 'billing']);
 });
 
+test('normalizeLimitProvider keeps Cursor dashboard quota order across window kinds', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'cursor',
+    status: 'ok',
+    windows: [
+      { kind: 'billing', metric: 'spend', label: 'On-demand spend', used: 2, limit: 20, showMeter: false },
+      { kind: 'weekly', label: 'Grok Bot', usedPercent: 30 },
+      { kind: 'billing', label: 'Other Models', usedPercent: 20 },
+      { kind: 'billing', label: 'Cursor Models', usedPercent: 10 }
+    ]
+  });
+
+  assert.deepEqual(
+    provider.windows.map((window) => window.label),
+    ['Cursor Models', 'Other Models', 'Grok Bot', 'On-demand spend']
+  );
+});
+
 test('normalizeLimitWindow preserves only documented component sources', () => {
   assert.equal(normalizeLimitWindow({ kind: 'session', source: ' local ' }).source, 'local');
   assert.equal(normalizeLimitWindow({ kind: 'weekly', source: 'WEB' }).source, 'web');

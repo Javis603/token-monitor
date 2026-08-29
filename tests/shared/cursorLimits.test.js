@@ -22,7 +22,7 @@ test('fetchCursorLimits returns unauthorized when probe says so', async () => {
   assert.equal(result.status, 'unauthorized');
 });
 
-test('fetchCursorLimits returns ok with Cursor billing dimensions when probe succeeds', async () => {
+test('fetchCursorLimits exposes the official model pools, Grok Bot, and on-demand spend', async () => {
   const result = await fetchCursorLimits({}, {
     readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
     probe: async () => ({
@@ -30,7 +30,13 @@ test('fetchCursorLimits returns ok with Cursor billing dimensions when probe suc
       usage: {
         planPercent: 42, autoPercent: 20, apiPercent: 64,
         planUsedUsd: 8.4, planLimitUsd: 20, onDemandUsedUsd: 0, onDemandLimitUsd: 50,
-        requestsUsed: 7, requestsLimit: 10,
+        grokBot: {
+          usedPercent: 100,
+          resetsAt: '2026-05-28T00:00:00Z',
+          windowMinutes: 10080,
+          hasAvailableUsage: false,
+          hasNonZeroIncludedLimit: true
+        },
         billingCycleEnd: '2026-06-01T00:00:00Z', membershipType: 'pro'
       },
       user: { email: 'a@b.com', name: 'Alice', sub: 'u1' }
@@ -39,18 +45,97 @@ test('fetchCursorLimits returns ok with Cursor billing dimensions when probe suc
   assert.equal(result.status, 'ok');
   assert.equal(result.provider, 'cursor');
   assert.equal(result.source, 'web');
-  assert.deepEqual(result.windows.map((window) => window.label), ['Total', 'Auto', 'API', 'Credits']);
+  assert.deepEqual(result.windows.map((window) => window.label), ['Cursor Models', 'Other Models', 'Grok Bot', 'On-demand spend']);
   assert.equal(result.windows[0].kind, 'billing');
-  assert.equal(result.windows[0].usedPercent, 70);
-  assert.equal(result.windows[0].used, 7);
-  assert.equal(result.windows[0].limit, 10);
+  assert.equal(result.windows[0].usedPercent, 20);
   assert.equal(result.windows[0].resetsAt, '2026-06-01T00:00:00.000Z');
-  assert.equal(result.windows[1].usedPercent, 20);
-  assert.equal(result.windows[2].usedPercent, 64);
-  assert.equal(result.windows[3].usedPercent, 0);
+  assert.equal(result.windows[1].usedPercent, 64);
+  assert.equal(result.windows[2].kind, 'weekly');
+  assert.equal(result.windows[2].usedPercent, 100);
+  assert.equal(result.windows[2].resetsAt, '2026-05-28T00:00:00Z');
+  assert.equal(result.windows[2].windowMinutes, 10080);
+  assert.equal(result.windows[3].metric, 'spend');
+  assert.equal(result.windows[3].currency, 'USD');
+  assert.equal(result.windows[3].used, 0);
+  assert.equal(result.windows[3].limit, 50);
   assert.equal(result.windows[3].showMeter, false);
   assert.equal(result.windows[3].remaining, 50);
   assert.equal(result.windows[3].resetDescription, '');
+});
+
+test('fetchCursorLimits uses Requests for a legacy request-based plan', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: async () => ({
+      ok: true,
+      usage: {
+        planPercent: 42,
+        autoPercent: 20,
+        apiPercent: 64,
+        requestsUsed: 7,
+        requestsLimit: 10,
+        billingCycleEnd: '2026-06-01T00:00:00Z',
+        membershipType: 'pro'
+      },
+      user: { email: 'a@b.com', sub: 'u1' }
+    })
+  });
+
+  assert.deepEqual(result.windows.map((window) => window.label), ['Requests']);
+  assert.equal(result.windows[0].usedPercent, 70);
+  assert.equal(result.windows[0].used, 7);
+  assert.equal(result.windows[0].limit, 10);
+  assert.equal(result.windows[0].remaining, 3);
+});
+
+test('fetchCursorLimits hides Grok Bot only when no included allowance exists', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: async () => ({
+      ok: true,
+      usage: {
+        autoPercent: 0,
+        apiPercent: 0,
+        grokBot: {
+          usedPercent: 100,
+          hasAvailableUsage: false,
+          hasNonZeroIncludedLimit: false
+        },
+        onDemandUsedUsd: 0,
+        onDemandLimitUsd: 0,
+        membershipType: 'free'
+      },
+      user: { email: 'free@example.com', sub: 'u1' }
+    })
+  });
+
+  assert.deepEqual(result.windows.map((window) => window.label), ['Cursor Models', 'Other Models']);
+});
+
+test('fetchCursorLimits shows uncapped positive spend but hides a zero-dollar non-cap', async () => {
+  const baseAccount = () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' });
+  const positive = await fetchCursorLimits({}, {
+    readActiveAccount: baseAccount,
+    probe: async () => ({
+      ok: true,
+      usage: { autoPercent: 10, apiPercent: 20, onDemandUsedUsd: 3.5, onDemandLimitUsd: 0 },
+      user: { sub: 'u1' }
+    })
+  });
+  const zero = await fetchCursorLimits({}, {
+    readActiveAccount: baseAccount,
+    probe: async () => ({
+      ok: true,
+      usage: { autoPercent: 10, apiPercent: 20, onDemandUsedUsd: 0, onDemandLimitUsd: 0 },
+      user: { sub: 'u1' }
+    })
+  });
+
+  const spend = positive.windows.find((window) => window.metric === 'spend');
+  assert.ok(spend);
+  assert.equal(spend.used, 3.5);
+  assert.equal(spend.limit, null);
+  assert.equal(zero.windows.some((window) => window.metric === 'spend'), false);
 });
 
 test('fetchCursorLimits prefers account identity over the plan for the account label', async () => {

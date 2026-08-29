@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
-const { parseUsageSummary, parseUserInfo, probe } = require('../../src/shared/cursorProbe');
+const { parseGrokBotUsage, parseUsageSummary, parseUserInfo, probe } = require('../../src/shared/cursorProbe');
 
 test('parseUsageSummary maps cents to USD and reads billing cycle end', () => {
   const input = {
@@ -37,13 +37,31 @@ test('parseUsageSummary falls back to (used / limit) when totalPercentUsed missi
   assert.equal(result.planPercent, 25);
 });
 
-test('parseUsageSummary falls back to Auto/API average before dollars', () => {
+test('parseUsageSummary never synthesizes a total from the separate model pools', () => {
   const input = {
     billingCycleEnd: '2026-06-01T00:00:00Z',
     individualUsage: { plan: { used: 500, limit: 2000, autoPercentUsed: 10, apiPercentUsed: 50 } }
   };
   const result = parseUsageSummary(input);
-  assert.equal(result.planPercent, 30);
+  assert.equal(result.planPercent, 25);
+});
+
+test('parseGrokBotUsage keeps an exhausted included allowance visible', () => {
+  const result = parseGrokBotUsage({
+    usagePercent: 100,
+    currentPeriodStart: '2026-05-25T00:00:00Z',
+    nextResetTimestampUtc: '2026-06-01T00:00:00Z',
+    hasAvailableUsage: false,
+    hasNonZeroIncludedLimit: true
+  });
+  assert.deepEqual(result, {
+    usedPercent: 100,
+    periodStart: '2026-05-25T00:00:00.000Z',
+    resetsAt: '2026-06-01T00:00:00.000Z',
+    windowMinutes: 7 * 24 * 60,
+    hasAvailableUsage: false,
+    hasNonZeroIncludedLimit: true
+  });
 });
 
 test('parseUsageSummary reads legacy request-based usage', () => {
@@ -120,7 +138,8 @@ test('probe includes legacy request usage when auth returns a user id', async ()
   const calls = [];
   const fakeHttps = {
     request(opts, cb) {
-      calls.push({ path: opts.path, referer: opts.headers.Referer });
+      const call = { path: opts.path, method: opts.method, headers: opts.headers, body: '', timeoutMs: null };
+      calls.push(call);
       let payload;
       if (opts.path === '/api/usage-summary') {
         payload = {
@@ -131,6 +150,14 @@ test('probe includes legacy request usage when auth returns a user id', async ()
         payload = { email: 'a@b.com', name: 'Alice', sub: 'user_1' };
       } else if (opts.path === '/api/usage?user=user_1') {
         payload = { 'gpt-4': { numRequestsTotal: 4, maxRequestUsage: 8 } };
+      } else if (opts.path === '/api/dashboard/get-sand-usage-status') {
+        payload = {
+          usagePercent: 100,
+          currentPeriodStart: '2026-05-25T00:00:00Z',
+          nextResetTimestampUtc: '2026-06-01T00:00:00Z',
+          hasAvailableUsage: false,
+          hasNonZeroIncludedLimit: true
+        };
       } else {
         payload = {};
       }
@@ -143,7 +170,12 @@ test('probe includes legacy request usage when auth returns a user id', async ()
           res.emit('end');
         });
       });
-      return { on() {}, end() {}, write() {}, setTimeout() {} };
+      return {
+        on() {},
+        end() {},
+        write(chunk) { call.body += String(chunk); },
+        setTimeout(timeoutMs) { call.timeoutMs = timeoutMs; }
+      };
     }
   };
 
@@ -151,11 +183,45 @@ test('probe includes legacy request usage when auth returns a user id', async ()
   assert.equal(result.ok, true);
   assert.equal(result.usage.requestsUsed, 4);
   assert.equal(result.usage.requestsLimit, 8);
+  assert.equal(result.usage.grokBot.usedPercent, 100);
+  assert.equal(result.usage.grokBot.hasAvailableUsage, false);
   assert.deepEqual(
     calls.map((call) => call.path).sort(),
-    ['/api/auth/me', '/api/usage-summary', '/api/usage?user=user_1'].sort()
+    ['/api/auth/me', '/api/dashboard/get-sand-usage-status', '/api/usage-summary', '/api/usage?user=user_1'].sort()
   );
-  assert.deepEqual(new Set(calls.map((call) => call.referer)), new Set(['https://cursor.com/dashboard']));
+  assert.deepEqual(new Set(calls.map((call) => call.headers.Referer)), new Set(['https://cursor.com/dashboard']));
+  const sand = calls.find((call) => call.path === '/api/dashboard/get-sand-usage-status');
+  assert.equal(sand.method, 'POST');
+  assert.equal(sand.headers.Origin, 'https://cursor.com');
+  assert.equal(sand.headers['Content-Type'], 'application/json');
+  assert.equal(sand.body, '{}');
+  assert.equal(sand.timeoutMs, 5000);
+});
+
+test('probe treats Grok Bot as a best-effort optional request', async () => {
+  const fakeHttps = {
+    request(opts, cb) {
+      const res = new EventEmitter();
+      res.statusCode = opts.path === '/api/dashboard/get-sand-usage-status' ? 500 : 200;
+      const payload = opts.path === '/api/usage-summary'
+        ? { individualUsage: { plan: { autoPercentUsed: 20, apiPercentUsed: 40 } } }
+        : {};
+      setImmediate(() => {
+        cb(res);
+        if (res.statusCode === 200) setImmediate(() => {
+          res.emit('data', Buffer.from(JSON.stringify(payload)));
+          res.emit('end');
+        });
+      });
+      return { on() {}, end() {}, write() {}, setTimeout() {} };
+    }
+  };
+
+  const result = await probe('tok', { httpsLib: fakeHttps });
+  assert.equal(result.ok, true);
+  assert.equal(result.usage.autoPercent, 20);
+  assert.equal(result.usage.apiPercent, 40);
+  assert.equal(result.usage.grokBot, null);
 });
 
 test('probe destroys in-flight HTTPS requests when the parent signal aborts', async () => {
@@ -165,6 +231,7 @@ test('probe destroys in-flight HTTPS requests when the parent signal aborts', as
     request() {
       const req = new EventEmitter();
       req.end = () => {};
+      req.write = () => {};
       req.setTimeout = () => {};
       req.destroy = () => { req.destroyed = true; };
       requests.push(req);
@@ -178,6 +245,6 @@ test('probe destroys in-flight HTTPS requests when the parent signal aborts', as
   const result = await pending;
   assert.equal(result.ok, false);
   assert.equal(result.error.kind, 'network');
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 3);
   assert.ok(requests.every((request) => request.destroyed));
 });

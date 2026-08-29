@@ -4104,6 +4104,46 @@ function cursorBillingWindow(label, fields = {}) {
   };
 }
 
+function cursorOnDemandWindow(usage, resetsAt) {
+  const personalUsed = finiteNumber(usage.onDemandUsedUsd) ?? 0;
+  const personalLimit = finiteNumber(usage.onDemandLimitUsd);
+  const teamUsed = finiteNumber(usage.teamOnDemandUsedUsd) ?? 0;
+  const teamLimit = finiteNumber(usage.teamOnDemandLimitUsd);
+  let used;
+  let limit = null;
+  let remaining = null;
+
+  if (personalLimit !== null && personalLimit > 0) {
+    used = personalUsed;
+    limit = personalLimit;
+    remaining = finiteNumber(usage.onDemandRemainingUsd);
+  } else if (teamLimit !== null && teamLimit > 0) {
+    used = teamUsed;
+    limit = teamLimit;
+    remaining = finiteNumber(usage.teamOnDemandRemainingUsd);
+  } else if (personalUsed > 0) {
+    used = personalUsed;
+  } else if (teamUsed > 0) {
+    used = teamUsed;
+  } else {
+    return null;
+  }
+
+  if (limit !== null && remaining === null) remaining = Math.max(0, limit - used);
+  return cursorBillingWindow('On-demand spend', {
+    metric: 'spend',
+    currency: 'USD',
+    usedPercent: percentFromUsedLimit(used, limit),
+    used,
+    limit,
+    remaining,
+    resetsAt,
+    windowMinutes: null,
+    resetDescription: '',
+    showMeter: false
+  });
+}
+
 async function fetchCursorAccountLimits(account, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const updatedAt = new Date(nowMs).toISOString();
@@ -4139,71 +4179,50 @@ async function fetchCursorAccountLimits(account, deps = {}) {
   const hasRequestUsage = finiteNumber(usage.requestsUsed) !== null
     && finiteNumber(usage.requestsLimit) !== null
     && usage.requestsLimit > 0;
-  const totalPercent = hasRequestUsage
-    ? percentFromUsedLimit(usage.requestsUsed, usage.requestsLimit)
-    : usage.planPercent;
-  const windows = [
-    cursorBillingWindow('Total', {
-      usedPercent: totalPercent,
-      used: hasRequestUsage ? usage.requestsUsed : usage.planUsedUsd,
-      limit: hasRequestUsage ? usage.requestsLimit : usage.planLimitUsd,
-      remaining: hasRequestUsage
-        ? Math.max(0, usage.requestsLimit - usage.requestsUsed)
-        : usage.planRemainingUsd,
+  const windows = [];
+
+  if (hasRequestUsage) {
+    windows.push(cursorBillingWindow('Requests', {
+      usedPercent: percentFromUsedLimit(usage.requestsUsed, usage.requestsLimit),
+      used: usage.requestsUsed,
+      limit: usage.requestsLimit,
+      remaining: Math.max(0, usage.requestsLimit - usage.requestsUsed),
       resetsAt,
       windowMinutes: null,
       resetDescription: usage.membershipType ? `Cursor ${usage.membershipType}` : ''
-    })
-  ];
-
-  if (finiteNumber(usage.autoPercent) !== null) {
-    windows.push(cursorBillingWindow('Auto', {
+    }));
+  } else if (finiteNumber(usage.autoPercent) !== null || finiteNumber(usage.apiPercent) !== null) {
+    if (finiteNumber(usage.autoPercent) !== null) windows.push(cursorBillingWindow('Cursor Models', {
       usedPercent: usage.autoPercent,
       resetsAt,
       windowMinutes: null
     }));
-  }
-
-  if (finiteNumber(usage.apiPercent) !== null) {
-    windows.push(cursorBillingWindow('API', {
+    if (finiteNumber(usage.apiPercent) !== null) windows.push(cursorBillingWindow('Other Models', {
       usedPercent: usage.apiPercent,
+      resetsAt,
+      windowMinutes: null
+    }));
+  } else if (usage.hasOverallUsage && finiteNumber(usage.planPercent) !== null) {
+    windows.push(cursorBillingWindow('Overall', {
+      usedPercent: usage.planPercent,
+      used: usage.planUsedUsd,
+      limit: usage.planLimitUsd,
+      remaining: usage.planRemainingUsd,
       resetsAt,
       windowMinutes: null
     }));
   }
 
-  if (usage.hasOnDemandUsage || finiteNumber(usage.onDemandLimitUsd) !== null || (finiteNumber(usage.onDemandUsedUsd) !== null && usage.onDemandUsedUsd > 0)) {
-    const remaining = finiteNumber(usage.onDemandRemainingUsd)
-      ?? (finiteNumber(usage.onDemandLimitUsd) !== null
-        ? Math.max(0, usage.onDemandLimitUsd - (finiteNumber(usage.onDemandUsedUsd) || 0))
-        : null);
-    windows.push(cursorBillingWindow('Credits', {
-      usedPercent: finiteNumber(usage.onDemandPercent) ?? percentFromUsedLimit(usage.onDemandUsedUsd, usage.onDemandLimitUsd),
-      used: usage.onDemandUsedUsd,
-      limit: usage.onDemandLimitUsd,
-      remaining,
-      resetsAt: null,
-      windowMinutes: null,
+  if (usage.grokBot?.hasNonZeroIncludedLimit === true && finiteNumber(usage.grokBot.usedPercent) !== null) {
+    windows.push({
+      kind: 'weekly',
+      label: 'Grok Bot',
+      usedPercent: usage.grokBot.usedPercent,
+      resetsAt: usage.grokBot.resetsAt || null,
+      windowMinutes: finiteNumber(usage.grokBot.windowMinutes),
       resetDescription: '',
-      showMeter: false
-    }));
-  }
-
-  if (usage.hasTeamOnDemandUsage || finiteNumber(usage.teamOnDemandLimitUsd) !== null || (finiteNumber(usage.teamOnDemandUsedUsd) !== null && usage.teamOnDemandUsedUsd > 0)) {
-    const remaining = finiteNumber(usage.teamOnDemandRemainingUsd)
-      ?? (finiteNumber(usage.teamOnDemandLimitUsd) !== null
-        ? Math.max(0, usage.teamOnDemandLimitUsd - (finiteNumber(usage.teamOnDemandUsedUsd) || 0))
-        : null);
-    windows.push(cursorBillingWindow('Team credits', {
-      usedPercent: finiteNumber(usage.teamOnDemandPercent) ?? percentFromUsedLimit(usage.teamOnDemandUsedUsd, usage.teamOnDemandLimitUsd),
-      used: usage.teamOnDemandUsedUsd,
-      limit: usage.teamOnDemandLimitUsd,
-      remaining,
-      resetsAt: null,
-      windowMinutes: null,
-      resetDescription: '',
-      showMeter: false
-    }));
+      showMeter: true
+    });
   }
 
   if (usage.hasTeamPooledUsage || finiteNumber(usage.teamPooledLimitUsd) !== null || (finiteNumber(usage.teamPooledUsedUsd) !== null && usage.teamPooledUsedUsd > 0)) {
@@ -4221,6 +4240,9 @@ async function fetchCursorAccountLimits(account, deps = {}) {
       resetDescription: 'Shared team usage pool.'
     }));
   }
+
+  const onDemandWindow = cursorOnDemandWindow(usage, resetsAt);
+  if (onDemandWindow) windows.push(onDemandWindow);
 
   return {
     provider: 'cursor',

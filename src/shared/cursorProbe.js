@@ -7,6 +7,8 @@ const { BROWSER_USER_AGENT } = require('./browserUserAgent');
 const USAGE_SUMMARY_URL = 'https://cursor.com/api/usage-summary';
 const AUTH_ME_URL = 'https://cursor.com/api/auth/me';
 const REQUEST_USAGE_URL = 'https://cursor.com/api/usage';
+const SAND_USAGE_URL = 'https://cursor.com/api/dashboard/get-sand-usage-status';
+const SAND_TIMEOUT_MS = 5000;
 
 const DEFAULT_HEADERS = {
   'Accept': '*/*',
@@ -52,6 +54,32 @@ function parseRequestUsage(input) {
   };
 }
 
+function isoTimestampOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function parseGrokBotUsage(input) {
+  const usage = input && typeof input === 'object' ? input : {};
+  const usedPercent = clampPercent(numberOrNull(usage.usagePercent));
+  const periodStart = isoTimestampOrNull(usage.currentPeriodStart);
+  const resetsAt = isoTimestampOrNull(usage.nextResetTimestampUtc);
+  const startMs = periodStart ? Date.parse(periodStart) : Number.NaN;
+  const resetMs = resetsAt ? Date.parse(resetsAt) : Number.NaN;
+  const windowMinutes = Number.isFinite(startMs) && Number.isFinite(resetMs) && resetMs > startMs
+    ? Math.round((resetMs - startMs) / 60000)
+    : null;
+  return {
+    usedPercent,
+    periodStart,
+    resetsAt,
+    windowMinutes,
+    hasAvailableUsage: typeof usage.hasAvailableUsage === 'boolean' ? usage.hasAvailableUsage : null,
+    hasNonZeroIncludedLimit: usage.hasNonZeroIncludedLimit === true
+  };
+}
+
 function parseUsageSummary(input, { requestUsage = null } = {}) {
   const summary = input && typeof input === 'object' ? input : {};
   const individual = summary.individualUsage && typeof summary.individualUsage === 'object' ? summary.individualUsage : {};
@@ -80,10 +108,7 @@ function parseUsageSummary(input, { requestUsage = null } = {}) {
 
   let planPercent = clampPercent(numberOrNull(plan.totalPercentUsed));
   if (planPercent === null) {
-    if (autoPercent !== null && apiPercent !== null) planPercent = clampPercent((autoPercent + apiPercent) / 2);
-    else if (apiPercent !== null) planPercent = apiPercent;
-    else if (autoPercent !== null) planPercent = autoPercent;
-    else if (planLimit > 0) planPercent = percentFromUsedLimit(planUsed, planLimit);
+    if (planLimit > 0) planPercent = percentFromUsedLimit(planUsed, planLimit);
     else if (overallLimit !== null && overallLimit > 0) planPercent = percentFromUsedLimit(overallUsed, overallLimit);
     else if (teamPooledLimit !== null && teamPooledLimit > 0) planPercent = percentFromUsedLimit(teamPooledUsed, teamPooledLimit);
     else planPercent = 0;
@@ -146,7 +171,14 @@ function parseUserInfo(input) {
   };
 }
 
-function requestJson(url, sessionToken, { timeoutMs = 15000, httpsLib = https, signal } = {}) {
+function requestJson(url, sessionToken, {
+  timeoutMs = 15000,
+  httpsLib = https,
+  signal,
+  method = 'GET',
+  headers = {},
+  body = null
+} = {}) {
   if (signal?.aborted) return Promise.reject(abortError(signal));
   return new Promise((resolve) => {
     const parsed = new URL(url);
@@ -164,11 +196,12 @@ function requestJson(url, sessionToken, { timeoutMs = 15000, httpsLib = https, s
       finish({ ok: false, error: { kind: 'network', message: error.message } });
     };
     req = httpsLib.request({
-      method: 'GET',
+      method,
       hostname: parsed.hostname,
       path: `${parsed.pathname}${parsed.search}`,
       headers: {
         ...DEFAULT_HEADERS,
+        ...headers,
         'Cookie': `WorkosCursorSessionToken=${sessionToken}`
       }
     }, (res) => {
@@ -201,12 +234,25 @@ function requestJson(url, sessionToken, { timeoutMs = 15000, httpsLib = https, s
       onAbort();
       return;
     }
+    if (body !== null && body !== undefined) req.write(String(body));
     req.end();
   });
 }
 
 async function probe(sessionToken, opts = {}) {
   if (!sessionToken) return { ok: false, error: { kind: 'unauthorized', message: 'no session token' } };
+  const configuredTimeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 15000;
+  const grokBotResultPromise = requestJson(SAND_USAGE_URL, sessionToken, {
+    ...opts,
+    timeoutMs: Math.min(configuredTimeoutMs, SAND_TIMEOUT_MS),
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Origin': 'https://cursor.com'
+    },
+    body: '{}'
+  });
   const [usageResult, userResult] = await Promise.all([
     requestJson(USAGE_SUMMARY_URL, sessionToken, opts),
     requestJson(AUTH_ME_URL, sessionToken, opts)
@@ -219,17 +265,22 @@ async function probe(sessionToken, opts = {}) {
     const requestUsageResult = await requestJson(url, sessionToken, opts);
     if (requestUsageResult.ok) requestUsage = requestUsageResult.json;
   }
-  const usage = parseUsageSummary(usageResult.json, { requestUsage });
+  const grokBotResult = await grokBotResultPromise;
+  const grokBot = grokBotResult.ok ? parseGrokBotUsage(grokBotResult.json) : null;
+  const usage = { ...parseUsageSummary(usageResult.json, { requestUsage }), grokBot };
   return { ok: true, usage, user };
 }
 
 module.exports = {
   parseUsageSummary,
   parseRequestUsage,
+  parseGrokBotUsage,
   parseUserInfo,
   probe,
   requestJson,
   USAGE_SUMMARY_URL,
   AUTH_ME_URL,
-  REQUEST_USAGE_URL
+  REQUEST_USAGE_URL,
+  SAND_USAGE_URL,
+  SAND_TIMEOUT_MS
 };

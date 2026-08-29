@@ -3756,6 +3756,16 @@ function formatLimitAmount(value) {
   return `$${number.toFixed(2)}`;
 }
 
+function formatCursorSpendValue(window) {
+  const used = optionalFiniteNumber(window?.used);
+  const limit = optionalFiniteNumber(window?.limit);
+  if (used === null) return '';
+  const usedText = formatMoney(used, window?.currency || 'USD');
+  return limit !== null && limit > 0
+    ? `${usedText} / ${formatMoney(limit, window?.currency || 'USD')}`
+    : usedText;
+}
+
 function formatBalanceAmount(value, source) {
   return formatMoney(value, source?.currency);
 }
@@ -4613,10 +4623,11 @@ function renderProviderWindows(provider, color) {
     if (resetNode) windows.append(resetNode);
   } else if (provider.provider === 'cursor') {
     windows.classList.add('limit-windows-cursor');
-    const billingWindows = windowsForKind(provider, 'billing');
-    const visibleWindows = billingWindows.length > 0 ? billingWindows : [null];
-    for (const billing of visibleWindows) {
-      const node = limitWindowNode('Billing cycle', billing, color, 0.68);
+    for (const quotaWindow of provider.windows || []) {
+      const valueOverride = quotaWindow.metric === 'spend'
+        ? formatCursorSpendValue(quotaWindow)
+        : null;
+      const node = limitWindowNode(quotaWindow.label || 'Quota', quotaWindow, color, 0.68, valueOverride);
       node.classList.add('limit-window-wide');
       windows.append(node);
     }
