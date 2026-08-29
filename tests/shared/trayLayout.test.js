@@ -353,7 +353,7 @@ test('specific account and exact window selectors do not silently fall back', ()
 
 test('custom tray selections keep Codex additional quota windows out of compact layouts', () => {
   const canonicalWeekly = { kind: 'weekly', remainingPercent: 80 };
-  const additionalSession = { kind: 'session', label: 'gpt-reserve', remainingPercent: 10 };
+  const additionalSession = { kind: 'session', label: 'Session', limitId: 'gpt-reserve', additional: true, remainingPercent: 10 };
   const compactStats = {
     limits: {
       providers: [{

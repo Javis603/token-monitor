@@ -3734,16 +3734,7 @@ function windowsForKind(provider, kind) {
 }
 
 function codexCanonicalWindow(provider, kind) {
-  const canonicalLabels = kind === 'session'
-    ? new Set(['', 'session', '5-hour'])
-    : kind === 'weekly'
-      ? new Set(['', 'weekly'])
-      : kind === 'billing'
-        ? new Set(['', 'monthly', 'billing'])
-        : new Set(['']);
-  return windowsForKind(provider, kind).find((window) => (
-    canonicalLabels.has(String(window?.label || '').trim().toLowerCase())
-  )) || null;
+  return windowsForKind(provider, kind).find((window) => window?.additional !== true) || null;
 }
 
 function codexAdditionalWindowLabel(window, siblingWindows = []) {
@@ -4651,7 +4642,7 @@ function renderProviderWindows(provider, color) {
     const session = codexCanonicalWindow(provider, 'session');
     const weekly = codexCanonicalWindow(provider, 'weekly');
     const monthly = codexCanonicalWindow(provider, 'billing');
-    const canonicalWindows = new Set([session, weekly, monthly].filter(Boolean));
+    const additionalWindows = (provider.windows || []).filter((window) => window?.additional === true);
     if (session) {
       const sessionNode = limitWindowNode(session.label || 'Session', session, color, 0.95);
       if (!weekly && !monthly) sessionNode.classList.add('limit-window-wide');
@@ -4667,9 +4658,9 @@ function renderProviderWindows(provider, color) {
       monthlyNode.classList.add('limit-window-wide');
       windows.append(monthlyNode);
     }
-    for (const additional of (provider.windows || []).filter((window) => !canonicalWindows.has(window))) {
+    for (const additional of additionalWindows) {
       const additionalNode = limitWindowNode(
-        codexAdditionalWindowLabel(additional, provider.windows),
+        codexAdditionalWindowLabel(additional, additionalWindows),
         { ...additional, label: '' },
         color,
         0.78

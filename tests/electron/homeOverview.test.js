@@ -190,8 +190,8 @@ test('Home keeps canonical Codex quotas ahead of named additional windows', () =
   const windows = [
     { kind: 'session', label: '5-hour', remainingPercent: 40 },
     { kind: 'weekly', label: 'Weekly', remainingPercent: 70 },
-    { kind: 'session', label: 'gpt-reserve', remainingPercent: 100 },
-    { kind: 'weekly', label: 'gpt-reserve', remainingPercent: 100 }
+    { kind: 'session', label: 'Session', limitId: 'gpt-reserve', additional: true, remainingPercent: 100 },
+    { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 100 }
   ];
   const [row] = homeLimitAccounts([{
     key: 'codex:0',

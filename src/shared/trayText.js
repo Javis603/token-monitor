@@ -179,14 +179,7 @@
 
   function isCanonicalCodexWindow(provider, window) {
     if (normalizedProviderId(provider?.provider) !== 'codex') return true;
-    const kind = normalizedProviderId(window?.kind);
-    const label = normalizedProviderId(window?.label);
-    const canonicalLabels = kind === 'session' ? new Set(['', 'session', '5-hour'])
-      : kind === 'daily' ? new Set(['', 'daily'])
-        : kind === 'weekly' ? new Set(['', 'weekly'])
-          : kind === 'billing' ? new Set(['', 'monthly', 'billing'])
-            : new Set(['']);
-    return canonicalLabels.has(label);
+    return window?.additional !== true;
   }
 
   function meteredWindows(provider, kind = '') {

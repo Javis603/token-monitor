@@ -168,21 +168,21 @@ test('native widget exports only canonical Codex quota windows', () => {
     {
       windows: [
         { kind: 'weekly', remainingPercent: 80 },
-        { kind: 'session', label: 'gpt-reserve', remainingPercent: 10 }
+        { kind: 'session', label: 'Session', limitId: 'gpt-reserve', additional: true, remainingPercent: 10 }
       ],
       expectedKinds: ['weekly']
     },
     {
       windows: [
         { kind: 'session', remainingPercent: 70 },
-        { kind: 'weekly', label: 'gpt-reserve', remainingPercent: 20 }
+        { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 20 }
       ],
       expectedKinds: ['session']
     },
     {
       windows: [
-        { kind: 'session', label: 'gpt-reserve', remainingPercent: 10 },
-        { kind: 'weekly', label: 'gpt-reserve', remainingPercent: 20 }
+        { kind: 'session', label: '', limitId: 'gpt-reserve', additional: true, remainingPercent: 10 },
+        { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 20 }
       ],
       expectedKinds: []
     }

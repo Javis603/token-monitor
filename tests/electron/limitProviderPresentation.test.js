@@ -125,8 +125,9 @@ test('compact Antigravity windows prefer 5-hour on ties and preserve legacy pool
 test('compact Codex windows never backfill canonical lanes with additional quotas', () => {
   const canonicalSession = { kind: 'session', label: '5-hour', remainingPercent: 40 };
   const canonicalWeekly = { kind: 'weekly', label: 'Weekly', remainingPercent: 70 };
-  const additionalSession = { kind: 'session', label: 'gpt-reserve', remainingPercent: 100 };
-  const additionalWeekly = { kind: 'weekly', label: 'gpt-reserve', remainingPercent: 100 };
+  const additionalSession = { kind: 'session', label: 'Session', limitId: 'gpt-reserve', additional: true, remainingPercent: 100 };
+  const additionalWeekly = { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 100 };
+  const additionalWithoutLabel = { kind: 'session', label: '', limitId: 'codex-long-name', additional: true, remainingPercent: 100 };
 
   assert.deepEqual(
     limitProviderCompactWindows('codex', [canonicalSession, canonicalWeekly, additionalSession, additionalWeekly]),
@@ -141,7 +142,7 @@ test('compact Codex windows never backfill canonical lanes with additional quota
     [canonicalSession]
   );
   assert.deepEqual(
-    limitProviderCompactWindows('codex', [additionalSession, additionalWeekly]),
+    limitProviderCompactWindows('codex', [additionalSession, additionalWeekly, additionalWithoutLabel]),
     []
   );
 });
@@ -1013,8 +1014,8 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(renderProviderWindows, /if \(!session && !monthly\) weeklyNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(renderProviderWindows, /limitWindowNode\(monthly\.label \|\| 'Monthly', monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /monthlyNode\.classList\.add\('limit-window-wide'\);/);
-  assert.match(renderProviderWindows, /\(provider\.windows \|\| \[\]\)\.filter\(\(window\) => !canonicalWindows\.has\(window\)\)/);
-  assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, provider\.windows\)/);
+  assert.match(renderProviderWindows, /const additionalWindows = \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
+  assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);
   assert.match(renderProviderWindows, /additionalNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(codexAdditionalWindowLabel, /if \(!name\) return period \|\| 'Additional limit';/);
   assert.match(codexAdditionalWindowLabel, /matchingWindowCount > 1 && period \? `\$\{name\} · \$\{period\}` : name/);

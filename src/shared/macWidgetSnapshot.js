@@ -171,14 +171,7 @@ function buildProviderBalance(provider) {
 
 function isCanonicalCodexWindow(providerId, window) {
   if (providerId !== 'codex') return true;
-  const kind = String(window?.kind || '').trim().toLowerCase();
-  const label = String(window?.label || '').trim().toLowerCase();
-  const canonicalLabels = kind === 'session' ? new Set(['', 'session', '5-hour'])
-    : kind === 'daily' ? new Set(['', 'daily'])
-      : kind === 'weekly' ? new Set(['', 'weekly'])
-        : kind === 'billing' ? new Set(['', 'monthly', 'billing'])
-          : new Set(['']);
-  return canonicalLabels.has(label);
+  return window?.additional !== true;
 }
 
 function buildQuota(limits) {

@@ -2027,7 +2027,7 @@ function codexAdditionalRateLimitWindows(payload = {}) {
   const windows = [];
   for (const [limitId, snapshot] of Object.entries(rateLimitsById)) {
     if (limitId === 'codex' || !snapshot || typeof snapshot !== 'object') continue;
-    const limitName = String(snapshot.limitName ?? snapshot.limit_name ?? limitId).trim();
+    const limitName = String(snapshot.limitName ?? snapshot.limit_name ?? '').trim() || String(limitId).trim();
     if (!limitName) continue;
     for (const key of ['primary', 'secondary']) {
       const window = snapshot[key];
@@ -2035,6 +2035,8 @@ function codexAdditionalRateLimitWindows(payload = {}) {
       windows.push({
         kind: codexWindowKind(key, window),
         label: limitName,
+        limitId,
+        additional: true,
         usedPercent: window.usedPercent ?? window.used_percent,
         resetsAt: window.resetsAt ?? window.resets_at,
         windowMinutes: window.windowDurationMins ?? window.window_duration_mins
@@ -2441,6 +2443,7 @@ async function waitForCodexEmptyQuotaRetry(deps = {}) {
 
 function mapCodexRateLimitsToProvider(payload, meta = {}) {
   const rateLimits = codexRateLimitSnapshot(payload);
+  const canonicalLimitId = String(rateLimits.limitId ?? rateLimits.limit_id ?? 'codex').trim() || 'codex';
   const windows = [];
   for (const key of ['primary', 'secondary']) {
     const window = rateLimits[key];
@@ -2449,6 +2452,7 @@ function mapCodexRateLimitsToProvider(payload, meta = {}) {
     windows.push({
       kind,
       ...(kind === 'billing' ? { label: 'Monthly' } : {}),
+      limitId: canonicalLimitId,
       usedPercent: window.usedPercent ?? window.used_percent,
       resetsAt: window.resetsAt ?? window.resets_at,
       windowMinutes: window.windowDurationMins ?? window.window_duration_mins

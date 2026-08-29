@@ -1273,19 +1273,34 @@ test('normalizeLimitProvider keeps canonical Codex lanes ahead of named addition
     provider: 'codex',
     status: 'ok',
     windows: [
-      { kind: 'weekly', label: 'gpt-reserve', usedPercent: 5 },
-      { kind: 'weekly', usedPercent: 40 },
-      { kind: 'session', label: 'gpt-reserve', usedPercent: 10 },
-      { kind: 'session', usedPercent: 20 }
+      { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, usedPercent: 5 },
+      { kind: 'weekly', limitId: 'codex', usedPercent: 40 },
+      { kind: 'session', label: 'Session', limitId: 'gpt-reserve', additional: true, usedPercent: 10 },
+      { kind: 'session', limitId: 'codex', usedPercent: 20 }
     ]
   });
 
-  assert.deepEqual(provider.windows.map((window) => [window.kind, window.label]), [
-    ['session', ''],
-    ['weekly', ''],
-    ['session', 'gpt-reserve'],
-    ['weekly', 'gpt-reserve']
+  assert.deepEqual(provider.windows.map((window) => [window.kind, window.label, window.limitId, window.additional]), [
+    ['session', '', 'codex', undefined],
+    ['weekly', '', 'codex', undefined],
+    ['session', 'Session', 'gpt-reserve', true],
+    ['weekly', 'Weekly', 'gpt-reserve', true]
   ]);
+});
+
+test('normalizeLimitWindow preserves bounded quota identity independently of its display label', () => {
+  const window = normalizeLimitWindow({
+    kind: 'weekly',
+    label: 'A backend quota name that is longer than thirty-two characters',
+    limitId: ' codex_special ',
+    additional: true
+  });
+
+  assert.equal(window.label, '');
+  assert.equal(window.limitId, 'codex_special');
+  assert.equal(window.additional, true);
+  assert.equal('additional' in normalizeLimitWindow({ kind: 'weekly', limitId: 'codex' }), false);
+  assert.equal('limitId' in normalizeLimitWindow({ kind: 'weekly', limitId: 'x'.repeat(129) }), false);
 });
 
 test('normalizeLimitProvider keeps Cursor dashboard quota order across window kinds', () => {

@@ -148,14 +148,7 @@
   }
 
   function isCanonicalCodexWindow(window) {
-    const kind = normalizeId(window?.kind);
-    const label = normalizeId(window?.label);
-    const canonicalLabels = kind === 'session' ? new Set(['', 'session', '5-hour'])
-      : kind === 'daily' ? new Set(['', 'daily'])
-        : kind === 'weekly' ? new Set(['', 'weekly'])
-          : kind === 'billing' ? new Set(['', 'monthly', 'billing'])
-            : new Set(['']);
-    return canonicalLabels.has(label);
+    return window?.additional !== true;
   }
 
   function compactWindowRemaining(window) {

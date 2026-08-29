@@ -192,10 +192,10 @@ test('Codex provider classifies additional quota windows by their actual duratio
     updatedAt: '2026-06-01T00:00:00Z'
   });
 
-  assert.deepEqual(provider.windows.map((window) => [window.kind, window.label, window.windowMinutes]), [
-    ['session', '', 300],
-    ['session', 'Some quota', 60],
-    ['daily', 'Some quota', 1_440]
+  assert.deepEqual(provider.windows.map((window) => [window.kind, window.label, window.limitId, window.additional, window.windowMinutes]), [
+    ['session', '', 'codex', undefined, 300],
+    ['session', 'Some quota', 'some-quota', true, 60],
+    ['daily', 'Some quota', 'some-quota', true, 1_440]
   ]);
 });
 
@@ -643,6 +643,8 @@ test('fetchCodexLimits surfaces a named additional OAuth bucket without promotin
   assert.equal(provider.windows.length, 1);
   assert.equal(provider.windows[0].kind, 'weekly');
   assert.equal(provider.windows[0].label, 'Codex Other');
+  assert.equal(provider.windows[0].limitId, 'codex_other');
+  assert.equal(provider.windows[0].additional, true);
   assert.equal(provider.windows[0].usedPercent, 70);
 });
 
@@ -662,7 +664,7 @@ test('fetchCodexLimits keeps the main OAuth windows and surfaces gpt-reserve sep
         },
         additional_rate_limits: [{
           limit_name: 'gpt-reserve',
-          metered_feature: 'gpt-reserve',
+          metered_feature: 'base_model_inference',
           rate_limit: {
             primary_window: { used_percent: 70, reset_at: 1_770_500_000, limit_window_seconds: 604_800 }
           }
@@ -675,6 +677,8 @@ test('fetchCodexLimits keeps the main OAuth windows and surfaces gpt-reserve sep
   assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly', 'weekly']);
   assert.deepEqual(provider.windows.map((window) => window.usedPercent), [12, 34, 70]);
   assert.deepEqual(provider.windows.map((window) => window.label), ['', '', 'gpt-reserve']);
+  assert.deepEqual(provider.windows.map((window) => window.limitId), ['codex', 'codex', 'base_model_inference']);
+  assert.deepEqual(provider.windows.map((window) => window.additional), [undefined, undefined, true]);
 });
 
 test('fetchCodexLimits keeps different additional OAuth buckets as independent named windows', async () => {
@@ -709,9 +713,40 @@ test('fetchCodexLimits keeps different additional OAuth buckets as independent n
   });
 
   assert.equal(provider.status, 'ok');
-  assert.deepEqual(provider.windows.map((window) => [window.kind, window.label, window.usedPercent]), [
-    ['session', 'codex_spark', 20],
-    ['weekly', 'Codex Other', 70]
+  assert.deepEqual(provider.windows.map((window) => [window.kind, window.label, window.limitId, window.additional, window.usedPercent]), [
+    ['session', 'codex_spark', 'codex_spark', true, 20],
+    ['weekly', 'Codex Other', 'codex_other', true, 70]
+  ]);
+});
+
+test('fetchCodexLimits falls back to metered_feature for an empty additional quota name', async () => {
+  const provider = await fetchCodexLimits({}, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        plan_type: 'plus',
+        rate_limit: {
+          primary_window: { used_percent: 12, reset_at: 1_770_000_000, limit_window_seconds: 18_000 }
+        },
+        additional_rate_limits: [{
+          limit_name: '',
+          metered_feature: 'codex_spark',
+          rate_limit: {
+            primary_window: { used_percent: 20, reset_at: 1_770_000_000, limit_window_seconds: 18_000 }
+          }
+        }]
+      })
+    }),
+    readCodexResetCredits: async () => null
+  });
+
+  assert.deepEqual(provider.windows.map((window) => [window.label, window.limitId, window.additional]), [
+    ['', 'codex', undefined],
+    ['codex_spark', 'codex_spark', true]
   ]);
 });
 

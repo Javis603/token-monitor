@@ -692,14 +692,7 @@
 
   function isCanonicalCodexWindow(provider, window) {
     if (providerId(provider) !== 'codex') return true;
-    const kind = clean(window?.kind, 24).toLowerCase();
-    const label = clean(window?.label, 120).toLowerCase();
-    const canonicalLabels = kind === 'session' ? new Set(['', 'session', '5-hour'])
-      : kind === 'daily' ? new Set(['', 'daily'])
-        : kind === 'weekly' ? new Set(['', 'weekly'])
-          : kind === 'billing' ? new Set(['', 'monthly', 'billing'])
-            : new Set(['']);
-    return canonicalLabels.has(label);
+    return window?.additional !== true;
   }
 
   function preferredWindow(provider, kind) {

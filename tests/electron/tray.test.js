@@ -914,8 +914,8 @@ test('compact provider windows keep Codex main quotas ahead of named reserve quo
     windows: [
       { kind: 'session', remainingPercent: 70 },
       { kind: 'weekly', remainingPercent: 80 },
-      { kind: 'session', label: 'gpt-reserve', remainingPercent: 10 },
-      { kind: 'weekly', label: 'gpt-reserve', remainingPercent: 20 }
+      { kind: 'session', label: 'Session', limitId: 'gpt-reserve', additional: true, remainingPercent: 10 },
+      { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 20 }
     ]
   });
 
@@ -931,7 +931,7 @@ test('compact Codex windows do not promote an additional session over a canonica
     status: 'ok',
     windows: [
       { kind: 'weekly', remainingPercent: 80 },
-      { kind: 'session', label: 'gpt-reserve', remainingPercent: 10 }
+      { kind: 'session', label: '', limitId: 'gpt-reserve', additional: true, remainingPercent: 10 }
     ]
   });
 
@@ -946,7 +946,7 @@ test('compact Codex windows do not use an additional weekly quota as a secondary
     status: 'ok',
     windows: [
       { kind: 'session', remainingPercent: 70 },
-      { kind: 'weekly', label: 'gpt-reserve', remainingPercent: 20 }
+      { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 20 }
     ]
   });
 
@@ -960,8 +960,8 @@ test('compact Codex selection ignores providers with additional quota windows on
     provider: 'codex',
     status: 'ok',
     windows: [
-      { kind: 'session', label: 'gpt-reserve', remainingPercent: 10 },
-      { kind: 'weekly', label: 'gpt-reserve', remainingPercent: 20 }
+      { kind: 'session', label: 'Session', limitId: 'gpt-reserve', additional: true, remainingPercent: 10 },
+      { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 20 }
     ]
   }), null);
 });

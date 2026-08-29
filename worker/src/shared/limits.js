@@ -110,6 +110,11 @@ function normalizeWindowLabel(value) {
   return clean.length <= 32 ? clean : '';
 }
 
+function normalizeWindowLimitId(value) {
+  const raw = String(value || '').replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  return raw && raw.length <= 128 ? raw : '';
+}
+
 function normalizeWindowDetail(value) {
   const raw = String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
   return raw.slice(0, 96);
@@ -163,10 +168,13 @@ function normalizeLimitWindow(input) {
   const limit = numberOrNull(input.limit);
   const remaining = numberOrNull(input.remaining);
   const usedPercent = percentFromWindow(input, used, limit);
+  const limitId = normalizeWindowLimitId(input.limitId ?? input.limit_id);
   return {
     kind,
     ...(metric ? { metric } : {}),
     ...(source ? { source } : {}),
+    ...(limitId ? { limitId } : {}),
+    ...(input.additional === true ? { additional: true } : {}),
     label: normalizeWindowLabel(input.label || input.displayLabel || input.title),
     used,
     limit,
@@ -409,15 +417,7 @@ function cursorWindowRank(window) {
 
 function codexWindowRank(window) {
   const kind = String(window?.kind || '');
-  const label = String(window?.label || '').trim().toLowerCase();
-  const canonicalLabels = kind === 'session'
-    ? new Set(['', 'session', '5-hour'])
-    : kind === 'weekly'
-      ? new Set(['', 'weekly'])
-      : kind === 'billing'
-        ? new Set(['', 'monthly', 'billing'])
-        : new Set(['']);
-  const group = canonicalLabels.has(label) ? 0 : 1;
+  const group = window?.additional === true ? 1 : 0;
   return group * WINDOW_ORDER.length + WINDOW_ORDER.indexOf(kind);
 }
 
@@ -448,9 +448,8 @@ function normalizeLimitProvider(input) {
     // kind ordering would incorrectly put the weekly Grok row before both pools.
     windows.sort((a, b) => cursorWindowRank(a) - cursorWindowRank(b));
   } else if (provider === 'codex') {
-    // Keep the ordinary 5-hour/weekly/billing lanes ahead of separately named
-    // additional buckets. Compact consumers take the first two windows, while
-    // the full Limits card can still render every named allowance below them.
+    // Keep canonical lanes ahead of explicitly marked additional buckets. The
+    // display name is intentionally not an identity signal.
     windows.sort((a, b) => codexWindowRank(a) - codexWindowRank(b));
   } else {
     windows.sort((a, b) => WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind));
