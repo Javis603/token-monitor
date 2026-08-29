@@ -47,10 +47,12 @@
 // never steals focus or activates the widget.
 
 const INTERVAL_MS = 250;
-// The shell raises the taskbar a moment after our blur, so the immediate call
-// is reliably overtaken. These only have to bridge the gap to the next interval
-// tick, which is why they stop where the interval takes over.
-const NUDGE_DELAYS_MS = [60, 200];
+// The shell raises the taskbar somewhere after the event that announced the
+// switch, so the immediate call is reliably overtaken. How far after depends on
+// the flow: taskbar-to-app lands inside the first two, widget -> other app ->
+// taskbar lands later, which is why these run past the point where the interval
+// would otherwise be the one to pick it up.
+const NUDGE_DELAYS_MS = [60, 200, 400, 800];
 
 function rectsIntersect(a, b) {
   return a.x < b.x + b.width

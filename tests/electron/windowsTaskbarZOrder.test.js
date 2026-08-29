@@ -195,10 +195,10 @@ test('nudge re-asserts immediately and again while the shell settles', () => {
 
   assert.equal(keeper.nudge(win), true);
   assert.equal(win.moveTopCalls, 1);
-  assert.deepEqual([...timers.state.timeouts.values()].map((entry) => entry.delay), [60, 200]);
+  assert.deepEqual([...timers.state.timeouts.values()].map((entry) => entry.delay), [60, 200, 400, 800]);
 
   timers.runTimeouts();
-  assert.equal(win.moveTopCalls, 3);
+  assert.equal(win.moveTopCalls, 5);
 });
 
 test('nudge keeps the safety interval running alongside the follow-ups', () => {
@@ -324,7 +324,7 @@ test('a foreground change re-asserts the same way losing focus does', () => {
   hook.state.handler();
   assert.equal(win.moveTopCalls, 2);
   timers.runTimeouts();
-  assert.equal(win.moveTopCalls, 4);
+  assert.equal(win.moveTopCalls, 6);
 });
 
 // stop() is also how the setting being turned off arrives, so a disabled
