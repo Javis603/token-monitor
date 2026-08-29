@@ -98,6 +98,7 @@ function createTaskbarZOrderKeeper(options = {}) {
   const screen = options.screen;
   const intervalOverride = Number(options.intervalMs) > 0 ? Number(options.intervalMs) : 0;
   const subscribeForeground = options.subscribeForeground;
+  const log = typeof options.log === 'function' ? options.log : null;
   const setIntervalFn = options.setInterval || setInterval;
   const clearIntervalFn = options.clearInterval || clearInterval;
   const setTimeoutFn = options.setTimeout || setTimeout;
@@ -137,12 +138,14 @@ function createTaskbarZOrderKeeper(options = {}) {
       }
     }
     const interval = intervalOverride || (unsubscribeForeground ? HOOKED_INTERVAL_MS : POLLING_INTERVAL_MS);
+    if (log) log(`start hook=${unsubscribeForeground ? 'installed' : 'none'} interval=${interval}ms`);
     timer = setIntervalFn(tick, interval);
   }
 
   // Some window somewhere took the foreground; if it was the taskbar we are now
   // under it, and if it was not, re-asserting costs one SetWindowPos.
   function onForegroundChange() {
+    if (log) log('foreground-event');
     if (target) nudge(target);
   }
 
@@ -179,6 +182,7 @@ function createTaskbarZOrderKeeper(options = {}) {
       return;
     }
     try {
+      if (log) log('moveTop');
       target.moveTop();
     } catch (_) {
       // A window torn down between the check and the call is not worth logging.

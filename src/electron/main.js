@@ -2477,7 +2477,13 @@ function syncTaskbarZOrder() {
     return;
   }
   if (!taskbarZOrderKeeper) {
-    taskbarZOrderKeeper = createTaskbarZOrderKeeper({ screen, subscribeForeground: subscribeForegroundChange });
+    taskbarZOrderKeeper = createTaskbarZOrderKeeper({
+      screen,
+      subscribeForeground: subscribeForegroundChange,
+      log: process.env.TOKEN_MONITOR_TASKBAR_ZORDER_DEBUG === '1'
+        ? (message) => console.log(`[taskbar-zorder ${Date.now() % 100000}] ${message}`)
+        : null
+    });
   }
   taskbarZOrderKeeper.sync(mainWindow);
 }
