@@ -279,7 +279,11 @@ test('the settings row is gated on Windows and the floating mode', () => {
 
 // Polling can only cover-then-restore; the hook is what makes a taskbar raise
 // reach us before it is visible, so the interval means different things.
-test('the foreground hook demotes the interval to a slow watchdog', () => {
+// Measured on Windows: the hook fires on every switch, but the shell does not
+// always raise the taskbar inside the window the follow-ups cover, and slowing
+// the interval turns that case back into a visible flicker. So the hook shortens
+// the flicker, it does not license a slower interval.
+test('installing the hook does not slow the interval down', () => {
   const win = fakeWindow();
   const hook = fakeForegroundHook();
   const { keeper, timers } = keeperFor(win, { subscribeForeground: hook.subscribe });
@@ -287,7 +291,7 @@ test('the foreground hook demotes the interval to a slow watchdog', () => {
   keeper.sync(win);
   assert.equal(keeper.isHooked(), true);
   assert.equal(hook.state.subscribed, 1);
-  assert.equal(timers.state.intervalMs, 2000);
+  assert.equal(timers.state.intervalMs, 250);
 });
 
 test('without a hook the interval is the whole mechanism', () => {

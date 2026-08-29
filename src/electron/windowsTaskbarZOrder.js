@@ -29,10 +29,13 @@
 // cannot replace it: polling always covers-then-restores, and shortening the
 // interval only shortens the visible flicker.
 //
-// So the interval means different things depending on whether that hook came
-// up. With it, the interval is a slow watchdog for events that never arrive;
-// without it — no koffi, a hook that refuses to install — it degrades to the
-// polling that at least keeps the widget reachable. Everything here is opt-in
+// The interval stays on at the same rate either way. Measured on Windows, the
+// hook fires on every switch with sub-millisecond latency, but the shell does
+// not always raise the taskbar inside the window the follow-ups cover — going
+// widget -> other app -> taskbar lands the raise later than that — and a
+// slower interval turns exactly that case back into a visible flicker. One
+// SetWindowPos per interval is cheap enough that trading it for an unproven
+// optimisation is not worth doing twice. Everything here is opt-in
 // behind `keepAboveTaskbar`: a permanent timer, a system-wide hook and the
 // flicker of the fallback are not things to hand to everyone who pins a
 // widget.
@@ -43,10 +46,7 @@
 // taskbar. moveTop() is SetWindowPos(HWND_TOP, SWP_NOACTIVATE), so re-asserting
 // never steals focus or activates the widget.
 
-// With the foreground hook installed the interval only catches what the hook
-// misses, so it stays slow. Without it, it is the whole mechanism.
-const HOOKED_INTERVAL_MS = 2000;
-const POLLING_INTERVAL_MS = 250;
+const INTERVAL_MS = 250;
 // The shell raises the taskbar a moment after our blur, so the immediate call
 // is reliably overtaken. These only have to bridge the gap to the next interval
 // tick, which is why they stop where the interval takes over.
@@ -137,16 +137,16 @@ function createTaskbarZOrderKeeper(options = {}) {
         unsubscribeForeground = null;
       }
     }
-    const interval = intervalOverride || (unsubscribeForeground ? HOOKED_INTERVAL_MS : POLLING_INTERVAL_MS);
+    const interval = intervalOverride || INTERVAL_MS;
     if (log) log(`start hook=${unsubscribeForeground ? 'installed' : 'none'} interval=${interval}ms`);
-    timer = setIntervalFn(tick, interval);
+    timer = setIntervalFn(() => tick('tick'), interval);
   }
 
   // Some window somewhere took the foreground; if it was the taskbar we are now
   // under it, and if it was not, re-asserting costs one SetWindowPos.
   function onForegroundChange() {
     if (log) log('foreground-event');
-    if (target) nudge(target);
+    if (target) nudge(target, 'foreground');
   }
 
   function displayFor(bounds) {
@@ -176,20 +176,20 @@ function createTaskbarZOrderKeeper(options = {}) {
     }
   }
 
-  function tick() {
+  function tick(reason) {
     if (!shouldKeep(target)) {
       stop();
       return;
     }
     try {
-      if (log) log('moveTop');
+      if (log) log(`moveTop ${reason}`);
       target.moveTop();
     } catch (_) {
       // A window torn down between the check and the call is not worth logging.
     }
   }
 
-  function sync(window) {
+  function sync(window, reason = 'sync') {
     if (!shouldKeep(window)) {
       stop();
       return false;
@@ -197,19 +197,19 @@ function createTaskbarZOrderKeeper(options = {}) {
     target = window;
     start();
     // Re-assert immediately so a drag onto the taskbar does not wait a tick.
-    tick();
+    tick(reason);
     return true;
   }
 
   // Something took the foreground — the widget losing activation, or any window
   // reported by the hook. sync() re-asserts once; the follow-ups cover the shell
   // raising the taskbar a moment later.
-  function nudge(window) {
-    if (!sync(window)) return false;
+  function nudge(window, reason = 'nudge') {
+    if (!sync(window, `${reason}+0`)) return false;
     for (const delay of nudgeDelays) {
       const handle = setTimeoutFn(() => {
         nudges.delete(handle);
-        tick();
+        tick(`${reason}+${delay}`);
       }, delay);
       nudges.add(handle);
     }
