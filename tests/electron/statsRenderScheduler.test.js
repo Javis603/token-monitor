@@ -246,6 +246,105 @@ test('the closed-Settings guard does not strand main-surface controls', () => {
   }
 });
 
+test('heavy render roots reject work for an inactive surface', () => {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const body = (name, next) => app.slice(app.indexOf(`function ${name}(`), app.indexOf(next));
+
+  assert.match(body('renderServiceStatus', '\nasync function refreshServiceStatus('), /function renderServiceStatus\(\) \{\n {2}if \(!serviceStatusSurfaceVisible\(\)\) return;/);
+  assert.match(body('renderFloatingBubbleContent', '\nfunction setupFloatingBubbleInteraction('), /function renderFloatingBubbleContent\(\) \{\n {2}if \(visibleStatsSurface\(\) !== 'bubble'\) return;/);
+
+  for (const [name, next] of [
+    ['renderSettingsSummaries', '\nfunction formatNumber('],
+    ['renderSubscriptionSettings', '\n// The list may live on a hub'],
+    ['renderCodexAccounts', '\nasync function refreshCodexAccounts('],
+    ['renderMimoStatus', '\nfunction externalLimitProviderConfig('],
+    ['renderOpenCodeProfiles', '\nfunction normalizeProfileName('],
+    ['renderNamedApiProfiles', '\nfunction renderOpenRouterProfiles('],
+    ['renderCursorStatus', '\nasync function refreshCursorStatus('],
+    ['renderCustomPricing', '\nfunction setupCustomPricingUI(']
+  ]) {
+    assert.match(body(name, next), new RegExp(`function ${name}\\([^)]*\\) \\{\\n {2}if \\(!isSettingsSurfaceVisible\\(\\)\\) return;`));
+  }
+
+  assert.match(body('renderOpenCodeProfiles', '\nfunction normalizeProfileName('), /\.then\(\([^)]*\) => \{\n {4}if \(!isSettingsSurfaceVisible\(\)\) return;/);
+  assert.match(body('renderNamedApiProfiles', '\nfunction renderOpenRouterProfiles('), /\.then\(\([^)]*\) => \{\n {4}if \(!isSettingsSurfaceVisible\(\)\) return;/);
+});
+
+test('entering Status does not depend on the panel class from the previous render', () => {
+  const serviceStatusSurfaceVisible = rendererFunction(
+    'serviceStatusSurfaceVisible',
+    '\nfunction openHomeSettings(',
+    {
+      visibleStatsSurface: () => 'main',
+      state: { breakdown: 'status' },
+      els: { serviceStatusPanel: { classList: { contains: () => true } } }
+    }
+  );
+
+  assert.equal(serviceStatusSurfaceVisible(), true);
+});
+
+test('a hidden Session detail result waits for the main surface to return', () => {
+  let surface = null;
+  let scheduled = 0;
+  const rendered = [];
+  const request = {};
+  const state = { openSession: request };
+  const applySessionDetailResult = rendererFunction(
+    'applySessionDetailResult',
+    '\nasync function openSessionDetail(',
+    {
+      visibleStatsSurface: () => surface,
+      isRendererWindowHidden: () => surface === null,
+      statsRenderScheduler: { request() { scheduled += 1; } },
+      renderSessionDetail: (options) => rendered.push(options),
+      state
+    }
+  );
+
+  const options = { detail: { turns: [1, 2, 3] } };
+  applySessionDetailResult(request, options);
+  assert.equal(scheduled, 1);
+  assert.deepEqual(rendered, []);
+  assert.equal(request.renderOptions, options);
+
+  surface = 'settings';
+  applySessionDetailResult(request, options);
+  assert.equal(scheduled, 1);
+  assert.deepEqual(rendered, []);
+
+  surface = 'main';
+  applySessionDetailResult(request, options);
+  assert.deepEqual(rendered, [options]);
+  assert.equal(request.renderOptions, null);
+
+  const renderBody = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const sessionBranch = renderBody.slice(
+    renderBody.indexOf('} else if (state.openSession) {'),
+    renderBody.indexOf('} else {', renderBody.indexOf('} else if (state.openSession) {'))
+  );
+  assert.match(sessionBranch, /state\.openSession\.renderOptions[\s\S]*renderSessionDetail/);
+});
+
+test('a direct main render defers only while the window is hidden', () => {
+  let surface = 'settings';
+  let scheduled = 0;
+  const render = rendererFunction('render', '\nfunction setStatus(', {
+    visibleStatsSurface: () => surface,
+    statsRenderScheduler: { request() { scheduled += 1; } },
+    state: { stats: null }
+  });
+
+  render();
+  surface = 'bubble';
+  render();
+  assert.equal(scheduled, 0);
+
+  surface = null;
+  render();
+  assert.equal(scheduled, 1);
+});
+
 test('hidden event sources defer DOM work and visible surfaces catch up', () => {
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   const settingsPush = app.match(/window\.tokenMonitor\.onSettingsPush\?\.\(\(next\) => \{[\s\S]*?\n\}\);/)?.[0] || '';

@@ -21,13 +21,16 @@ function deferred() {
 }
 
 function sessionDetailHarness(getSessionDetail) {
-  const start = rendererSource.indexOf('async function openSessionDetail(');
+  const start = rendererSource.indexOf('function applySessionDetailResult(');
   const end = rendererSource.indexOf('\nfunction toggleDetailSort', start);
   assert.ok(start >= 0 && end > start, 'openSessionDetail should be present');
   const renders = [];
   const state = { period: 'today', openSession: null };
   const context = {
     state,
+    visibleStatsSurface: () => 'main',
+    isRendererWindowHidden: () => false,
+    statsRenderScheduler: { request() {} },
     renderSessionDetail: (args) => renders.push(args),
     window: { tokenMonitor: { getSessionDetail } }
   };

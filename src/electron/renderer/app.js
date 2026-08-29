@@ -769,6 +769,7 @@ function settingsSectionSummary(section) {
 }
 
 function renderSettingsSummaries() {
+  if (!isSettingsSurfaceVisible()) return;
   for (const section of SETTINGS_SECTION_IDS) {
     const el = els[`${section}SettingsSummary`];
     if (el) el.textContent = settingsSectionSummary(section);
@@ -3090,6 +3091,7 @@ function renderSubscriptionTotal() {
 }
 
 function renderSubscriptionSettings() {
+  if (!isSettingsSurfaceVisible()) return;
   renderSubscriptionNote();
   renderSubscriptionOrphanNotice();
   renderSubscriptionSyncError();
@@ -5584,6 +5586,7 @@ function serviceStatusIconId(id) {
 }
 
 function renderServiceStatus() {
+  if (!serviceStatusSurfaceVisible()) return;
   if (!els.serviceStatusPanel) return;
   const rows = serviceStatusRows().map((provider) => {
     const row = document.createElement('button');
@@ -5719,6 +5722,17 @@ function stopServiceStatusTicker() {
   state.serviceStatusTicker = null;
 }
 
+function applySessionDetailResult(request, options) {
+  if (state.openSession !== request) return;
+  request.renderOptions = options;
+  if (visibleStatsSurface() !== 'main') {
+    if (isRendererWindowHidden()) statsRenderScheduler.request();
+    return;
+  }
+  request.renderOptions = null;
+  renderSessionDetail(options);
+}
+
 async function openSessionDetail({ client, sessionId, sessionCost, title }) {
   const request = { client, sessionId, sessionCost, title, period: state.period, detail: null };
   state.openSession = request;
@@ -5727,10 +5741,10 @@ async function openSessionDetail({ client, sessionId, sessionCost, title }) {
     const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: request.period, sessionCost });
     if (state.openSession === request) {
       request.detail = detail;
-      renderSessionDetail({ detail });
+      applySessionDetailResult(request, { detail });
     }
   } catch (_) {
-    if (state.openSession === request) renderSessionDetail({ error: true });
+    applySessionDetailResult(request, { error: true });
   }
 }
 
@@ -5944,8 +5958,7 @@ function isSettingsSurfaceVisible() {
 
 function serviceStatusSurfaceVisible() {
   return visibleStatsSurface() === 'main'
-    && state.breakdown === 'status'
-    && !els.serviceStatusPanel?.classList.contains('hidden');
+    && state.breakdown === 'status';
 }
 
 function openHomeSettings() {
@@ -7225,6 +7238,11 @@ function renderHome() {
 }
 
 function render() {
+  const surface = visibleStatsSurface();
+  if (surface !== 'main') {
+    if (!surface) statsRenderScheduler.request();
+    return;
+  }
   if (!state.stats) return;
   renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
@@ -7338,6 +7356,11 @@ function render() {
     els.trendsPanel.classList.add('hidden');
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
+    if (state.openSession.renderOptions) {
+      const options = state.openSession.renderOptions;
+      state.openSession.renderOptions = null;
+      renderSessionDetail(options);
+    }
   } else {
     els.homePanel.classList.add('hidden');
     els.limitsPanel.classList.add('hidden');
@@ -8123,6 +8146,7 @@ function floatingBubbleGeneratedColors() {
 }
 
 function renderFloatingBubbleContent() {
+  if (visibleStatsSurface() !== 'bubble') return;
   const el = els.floatingBubbleContent;
   if (!el || !state.floatingBubble.collapsed) return;
   const mode = state.settings?.floatingBubbleContent || 'icon';
@@ -13373,6 +13397,7 @@ function renderCodexLoginStatus() {
 }
 
 function renderCodexAccounts() {
+  if (!isSettingsSurfaceVisible()) return;
   const statusEl = document.getElementById('codexAccountStatus');
   const listEl = document.getElementById('codexAccountList');
   const errorEl = document.getElementById('codexAccountErrorMessage');
@@ -13555,6 +13580,7 @@ function clearDeepseekProviderStatus() {
 }
 
 function renderMimoStatus() {
+  if (!isSettingsSurfaceVisible()) return;
   const statusEl = document.getElementById('mimoAccountStatus');
   const listEl = document.getElementById('mimoAccountList');
   const emptyEl = document.getElementById('mimoAccountEmpty');
@@ -14110,12 +14136,14 @@ function renderDeepseekStatus() {
 }
 
 function renderOpenCodeProfiles() {
+  if (!isSettingsSurfaceVisible()) return;
   const listEl = document.getElementById('opencodeProfileList');
   if (!listEl) return;
 
   const api = window.tokenMonitor.opencode;
 
   api.getProfiles().then(({ profiles, hasEnvVar, hasAmbientKey, ambientEnabled = true }) => {
+    if (!isSettingsSurfaceVisible()) return;
     listEl.innerHTML = '';
     const entries = Object.entries(profiles);
 
@@ -14904,6 +14932,7 @@ function appendNamedApiProfileRow(listEl, config) {
 }
 
 function renderNamedApiProfiles(config) {
+  if (!isSettingsSurfaceVisible()) return;
   const {
     providerId,
     profileSettingsKey,
@@ -14918,6 +14947,7 @@ function renderNamedApiProfiles(config) {
   const listEl = document.getElementById(`${providerId}ProfileList`);
   if (!listEl || !api) return;
   api.getProfiles().then(({ profiles, hasEnvVar }) => {
+    if (!isSettingsSurfaceVisible()) return;
     listEl.replaceChildren();
     state.settings[profileSettingsKey] = profiles;
     state.settings[envConfiguredKey] = Boolean(hasEnvVar);
@@ -15002,6 +15032,7 @@ function renderThirdPartyProfiles() {
 }
 
 function renderCursorStatus() {
+  if (!isSettingsSurfaceVisible()) return;
   const statusEl = document.getElementById('cursorAccountStatus');
   const listEl = document.getElementById('cursorAccountList');
   const errorEl = document.getElementById('cursorErrorMessage');
@@ -15162,6 +15193,7 @@ function customPricingMeta(ov) {
 }
 
 function renderCustomPricing() {
+  if (!isSettingsSurfaceVisible()) return;
   const listEl = document.getElementById('customPricingList');
   const statusEl = document.getElementById('customPricingStatus');
   if (!listEl) return;
