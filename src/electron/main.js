@@ -296,6 +296,7 @@ const {
   windowBehaviorSelection
 } = require('./windowBehavior');
 const { createTaskbarZOrderKeeper, taskbarZOrderEnabled } = require('./windowsTaskbarZOrder');
+const { subscribeForegroundChange } = require('./windowsForegroundHook');
 const {
   normalizeWindowToggleShortcut,
   windowToggleShortcutAction,
@@ -2475,7 +2476,9 @@ function syncTaskbarZOrder() {
     stopTaskbarZOrderKeeper();
     return;
   }
-  if (!taskbarZOrderKeeper) taskbarZOrderKeeper = createTaskbarZOrderKeeper({ screen });
+  if (!taskbarZOrderKeeper) {
+    taskbarZOrderKeeper = createTaskbarZOrderKeeper({ screen, subscribeForeground: subscribeForegroundChange });
+  }
   taskbarZOrderKeeper.sync(mainWindow);
 }
 

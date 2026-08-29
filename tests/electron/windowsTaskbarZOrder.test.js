@@ -40,10 +40,10 @@ function fakeWindow(overrides = {}) {
 }
 
 function fakeTimers() {
-  const state = { tick: null, cleared: 0, id: 0, timeouts: new Map() };
+  const state = { tick: null, cleared: 0, id: 0, timeouts: new Map(), intervalMs: null };
   return {
     state,
-    setInterval(fn) { state.tick = fn; state.id += 1; return state.id; },
+    setInterval(fn, delay) { state.tick = fn; state.intervalMs = delay; state.id += 1; return state.id; },
     clearInterval() { state.cleared += 1; state.tick = null; },
     setTimeout(fn, delay) { state.id += 1; state.timeouts.set(state.id, { fn, delay }); return state.id; },
     clearTimeout(handle) { state.timeouts.delete(handle); },
@@ -52,6 +52,18 @@ function fakeTimers() {
         state.timeouts.delete(handle);
         entry.fn();
       }
+    }
+  };
+}
+
+function fakeForegroundHook() {
+  const state = { handler: null, subscribed: 0, released: 0 };
+  return {
+    state,
+    subscribe(handler) {
+      state.handler = handler;
+      state.subscribed += 1;
+      return () => { state.released += 1; state.handler = null; };
     }
   };
 }
@@ -263,4 +275,81 @@ test('the settings row is gated on Windows and the floating mode', () => {
   assert.match(app, /state\.appInfo\?\.platform === 'win32' && mode === 'floating'/);
   assert.match(app, /els\.keepAboveTaskbarRow\?\.classList\.toggle\('hidden', !taskbarOptionApplies\)/);
   assert.match(readSource('src/electron/renderer/index.html'), /id="keepAboveTaskbarRow"[^>]*class="[^"]*hidden"/);
+});
+
+// Polling can only cover-then-restore; the hook is what makes a taskbar raise
+// reach us before it is visible, so the interval means different things.
+test('the foreground hook demotes the interval to a slow watchdog', () => {
+  const win = fakeWindow();
+  const hook = fakeForegroundHook();
+  const { keeper, timers } = keeperFor(win, { subscribeForeground: hook.subscribe });
+
+  keeper.sync(win);
+  assert.equal(keeper.isHooked(), true);
+  assert.equal(hook.state.subscribed, 1);
+  assert.equal(timers.state.intervalMs, 2000);
+});
+
+test('without a hook the interval is the whole mechanism', () => {
+  const win = fakeWindow();
+  const { keeper, timers } = keeperFor(win, { subscribeForeground: () => null });
+
+  keeper.sync(win);
+  assert.equal(keeper.isHooked(), false);
+  assert.equal(timers.state.intervalMs, 250);
+});
+
+test('a hook that throws on install leaves the polling fallback intact', () => {
+  const win = fakeWindow();
+  const { keeper, timers } = keeperFor(win, {
+    subscribeForeground: () => { throw new Error('user32 unavailable'); }
+  });
+
+  assert.equal(keeper.sync(win), true);
+  assert.equal(keeper.isHooked(), false);
+  assert.equal(timers.state.intervalMs, 250);
+});
+
+test('a foreground change re-asserts the same way losing focus does', () => {
+  const win = fakeWindow();
+  const hook = fakeForegroundHook();
+  const { keeper, timers } = keeperFor(win, { subscribeForeground: hook.subscribe });
+  keeper.sync(win);
+  assert.equal(win.moveTopCalls, 1);
+
+  hook.state.handler();
+  assert.equal(win.moveTopCalls, 2);
+  timers.runTimeouts();
+  assert.equal(win.moveTopCalls, 4);
+});
+
+// stop() is also how the setting being turned off arrives, so a disabled
+// feature must not leave a system-wide hook installed.
+test('stopping releases the hook and syncing again installs a fresh one', () => {
+  const win = fakeWindow();
+  const hook = fakeForegroundHook();
+  const { keeper } = keeperFor(win, { subscribeForeground: hook.subscribe });
+
+  keeper.sync(win);
+  keeper.stop();
+  assert.equal(hook.state.released, 1);
+  assert.equal(keeper.isHooked(), false);
+
+  keeper.sync(win);
+  assert.equal(hook.state.subscribed, 2);
+  assert.equal(keeper.isHooked(), true);
+});
+
+test('a foreground change after the widget moved off the taskbar stops the keeper', () => {
+  const win = fakeWindow();
+  const hook = fakeForegroundHook();
+  const { keeper } = keeperFor(win, { subscribeForeground: hook.subscribe });
+  keeper.sync(win);
+  const handler = hook.state.handler;
+
+  win.bounds = { x: 100, y: 100, width: 320, height: 200 };
+  handler();
+  assert.equal(keeper.isRunning(), false);
+  assert.equal(hook.state.released, 1);
+  assert.equal(win.moveTopCalls, 1);
 });
