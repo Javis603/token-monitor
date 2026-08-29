@@ -4047,6 +4047,12 @@ html.is-windows .limit-live-badge {
   grid-column: 1 / -1;
 }
 .limit-window-text { color: var(--muted); font-size: 10px; }
+.limit-window-text span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .limit-window-text span:last-child { color: var(--text); white-space: nowrap; }
 .limit-meter {
   width: 100%;

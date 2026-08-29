@@ -404,6 +404,20 @@ function cursorWindowRank(window) {
   return 3;
 }
 
+function codexWindowRank(window) {
+  const kind = String(window?.kind || '');
+  const label = String(window?.label || '').trim().toLowerCase();
+  const canonicalLabels = kind === 'session'
+    ? new Set(['', 'session', '5-hour'])
+    : kind === 'weekly'
+      ? new Set(['', 'weekly'])
+      : kind === 'billing'
+        ? new Set(['', 'monthly', 'billing'])
+        : new Set(['']);
+  const group = canonicalLabels.has(label) ? 0 : 1;
+  return group * WINDOW_ORDER.length + WINDOW_ORDER.indexOf(kind);
+}
+
 function normalizeLimitProvider(input) {
   if (!input || typeof input !== 'object') return null;
   const provider = normalizeProviderId(input.provider);
@@ -430,6 +444,11 @@ function normalizeLimitProvider(input) {
     // followed by the optional Grok Bot allowance and on-demand spend. Generic
     // kind ordering would incorrectly put the weekly Grok row before both pools.
     windows.sort((a, b) => cursorWindowRank(a) - cursorWindowRank(b));
+  } else if (provider === 'codex') {
+    // Keep the ordinary 5-hour/weekly/billing lanes ahead of separately named
+    // additional buckets. Compact consumers take the first two windows, while
+    // the full Limits card can still render every named allowance below them.
+    windows.sort((a, b) => codexWindowRank(a) - codexWindowRank(b));
   } else {
     windows.sort((a, b) => WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind));
   }

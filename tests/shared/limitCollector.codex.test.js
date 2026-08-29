@@ -588,7 +588,7 @@ test('fetchCodexLimits supports a single weekly OAuth window', async () => {
   assert.equal(provider.windows[0].windowMinutes, 10_080);
 });
 
-test('fetchCodexLimits does not promote an additional OAuth bucket when the main bucket is absent', async () => {
+test('fetchCodexLimits surfaces a named additional OAuth bucket without promoting it into the main lanes', async () => {
   const provider = await fetchCodexLimits({}, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin' },
@@ -614,10 +614,13 @@ test('fetchCodexLimits does not promote an additional OAuth bucket when the main
   assert.equal(provider.status, 'ok');
   assert.equal(provider.source, 'oauth');
   assert.equal(provider.accountLabel, 'Pro 20x');
-  assert.deepEqual(provider.windows, []);
+  assert.equal(provider.windows.length, 1);
+  assert.equal(provider.windows[0].kind, 'weekly');
+  assert.equal(provider.windows[0].label, 'Codex Other');
+  assert.equal(provider.windows[0].usedPercent, 70);
 });
 
-test('fetchCodexLimits keeps the main OAuth windows without surfacing an additional bucket', async () => {
+test('fetchCodexLimits keeps the main OAuth windows and surfaces gpt-reserve separately', async () => {
   const provider = await fetchCodexLimits({}, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin' },
@@ -632,8 +635,8 @@ test('fetchCodexLimits keeps the main OAuth windows without surfacing an additio
           secondary_window: { used_percent: 34, reset_at: 1_770_500_000, limit_window_seconds: 604_800 }
         },
         additional_rate_limits: [{
-          limit_name: 'Codex Other',
-          metered_feature: 'codex_other',
+          limit_name: 'gpt-reserve',
+          metered_feature: 'gpt-reserve',
           rate_limit: {
             primary_window: { used_percent: 70, reset_at: 1_770_500_000, limit_window_seconds: 604_800 }
           }
@@ -643,11 +646,12 @@ test('fetchCodexLimits keeps the main OAuth windows without surfacing an additio
     readCodexResetCredits: async () => null
   });
 
-  assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly']);
-  assert.deepEqual(provider.windows.map((window) => window.usedPercent), [12, 34]);
+  assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly', 'weekly']);
+  assert.deepEqual(provider.windows.map((window) => window.usedPercent), [12, 34, 70]);
+  assert.deepEqual(provider.windows.map((window) => window.label), ['', '', 'gpt-reserve']);
 });
 
-test('fetchCodexLimits does not choose between different additional OAuth buckets', async () => {
+test('fetchCodexLimits keeps different additional OAuth buckets as independent named windows', async () => {
   const provider = await fetchCodexLimits({}, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin' },
@@ -667,7 +671,6 @@ test('fetchCodexLimits does not choose between different additional OAuth bucket
             }
           },
           {
-            limit_name: 'Codex Spark',
             metered_feature: 'codex_spark',
             rate_limit: {
               primary_window: { used_percent: 20, reset_at: 1_770_000_000, limit_window_seconds: 18_000 }
@@ -680,7 +683,10 @@ test('fetchCodexLimits does not choose between different additional OAuth bucket
   });
 
   assert.equal(provider.status, 'ok');
-  assert.deepEqual(provider.windows, []);
+  assert.deepEqual(provider.windows.map((window) => [window.kind, window.label, window.usedPercent]), [
+    ['session', 'codex_spark', 20],
+    ['weekly', 'Codex Other', 70]
+  ]);
 });
 
 test('fetchCodexLimits uses Codex API paths for a non-ChatGPT base URL', async () => {

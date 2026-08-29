@@ -1268,6 +1268,26 @@ test('normalizeLimitProvider preserves daily windows in canonical order', () => 
   assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'daily', 'weekly', 'billing']);
 });
 
+test('normalizeLimitProvider keeps canonical Codex lanes ahead of named additional windows', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'codex',
+    status: 'ok',
+    windows: [
+      { kind: 'weekly', label: 'gpt-reserve', usedPercent: 5 },
+      { kind: 'weekly', usedPercent: 40 },
+      { kind: 'session', label: 'gpt-reserve', usedPercent: 10 },
+      { kind: 'session', usedPercent: 20 }
+    ]
+  });
+
+  assert.deepEqual(provider.windows.map((window) => [window.kind, window.label]), [
+    ['session', ''],
+    ['weekly', ''],
+    ['session', 'gpt-reserve'],
+    ['weekly', 'gpt-reserve']
+  ]);
+});
+
 test('normalizeLimitProvider keeps Cursor dashboard quota order across window kinds', () => {
   const provider = normalizeLimitProvider({
     provider: 'cursor',

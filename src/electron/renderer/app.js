@@ -3732,6 +3732,39 @@ function windowsForKind(provider, kind) {
   return (provider?.windows || []).filter((window) => window.kind === kind);
 }
 
+function codexCanonicalWindow(provider, kind) {
+  const canonicalLabels = kind === 'session'
+    ? new Set(['', 'session', '5-hour'])
+    : kind === 'weekly'
+      ? new Set(['', 'weekly'])
+      : kind === 'billing'
+        ? new Set(['', 'monthly', 'billing'])
+        : new Set(['']);
+  return windowsForKind(provider, kind).find((window) => (
+    canonicalLabels.has(String(window?.label || '').trim().toLowerCase())
+  )) || null;
+}
+
+function codexAdditionalWindowLabel(window, siblingWindows = []) {
+  const name = String(window?.label || '').trim();
+  const minutes = Number(window?.windowMinutes);
+  const period = window?.kind === 'session'
+    ? (minutes === 5 * 60 ? '5-hour' : 'Session')
+    : window?.kind === 'daily'
+      ? 'Daily'
+      : window?.kind === 'weekly'
+        ? 'Weekly'
+        : window?.kind === 'billing'
+          ? 'Monthly'
+          : '';
+  if (!name) return period || 'Additional limit';
+  const normalizedName = name.toLowerCase();
+  const matchingWindowCount = siblingWindows.filter((candidate) => (
+    String(candidate?.label || '').trim().toLowerCase() === normalizedName
+  )).length;
+  return matchingWindowCount > 1 && period ? `${name} · ${period}` : name;
+}
+
 function antigravityQuotaGroups(provider) {
   const entries = (provider?.windows || [])
     .filter((window) => window.kind === 'session' || window.kind === 'weekly')
@@ -4601,9 +4634,10 @@ function renderProviderWindows(provider, color) {
   const windows = document.createElement('div');
   windows.className = 'limit-windows';
   if (provider.provider === 'codex') {
-    const session = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    const monthly = windowForKind(provider, 'billing');
+    const session = codexCanonicalWindow(provider, 'session');
+    const weekly = codexCanonicalWindow(provider, 'weekly');
+    const monthly = codexCanonicalWindow(provider, 'billing');
+    const canonicalWindows = new Set([session, weekly, monthly].filter(Boolean));
     if (session) {
       const sessionNode = limitWindowNode(session.label || 'Session', session, color, 0.95);
       if (!weekly && !monthly) sessionNode.classList.add('limit-window-wide');
@@ -4618,6 +4652,16 @@ function renderProviderWindows(provider, color) {
       const monthlyNode = limitWindowNode(monthly.label || 'Monthly', monthly, color, 0.68);
       monthlyNode.classList.add('limit-window-wide');
       windows.append(monthlyNode);
+    }
+    for (const additional of (provider.windows || []).filter((window) => !canonicalWindows.has(window))) {
+      const additionalNode = limitWindowNode(
+        codexAdditionalWindowLabel(additional, provider.windows),
+        { ...additional, label: '' },
+        color,
+        0.78
+      );
+      additionalNode.classList.add('limit-window-wide');
+      windows.append(additionalNode);
     }
     const resetNode = codexResetCreditsNode(provider.resetCredits);
     if (resetNode) windows.append(resetNode);

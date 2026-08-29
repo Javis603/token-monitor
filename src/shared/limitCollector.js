@@ -2014,6 +2014,35 @@ function codexWindowKind(name, window) {
   return 'session';
 }
 
+function codexAdditionalRateLimitWindows(payload = {}) {
+  const rateLimitsById = codexRateLimitsById(payload);
+  const direct = codexDirectRateLimits(payload);
+  // A named bucket is additive only when a canonical quota source exists. If
+  // an old RPC response has nothing but alternate buckets, codexRateLimitSnapshot
+  // may use their consensus as the main quota; publishing them again here would
+  // duplicate the same numbers as both ordinary and additional windows.
+  if (!Object.hasOwn(rateLimitsById, 'codex') && !hasCodexRateLimitWindows(direct)) return [];
+
+  const windows = [];
+  for (const [limitId, snapshot] of Object.entries(rateLimitsById)) {
+    if (limitId === 'codex' || !snapshot || typeof snapshot !== 'object') continue;
+    const limitName = String(snapshot.limitName ?? snapshot.limit_name ?? limitId).trim();
+    if (!limitName) continue;
+    for (const key of ['primary', 'secondary']) {
+      const window = snapshot[key];
+      if (!window) continue;
+      windows.push({
+        kind: codexWindowKind(key, window),
+        label: limitName,
+        usedPercent: window.usedPercent ?? window.used_percent,
+        resetsAt: window.resetsAt ?? window.resets_at,
+        windowMinutes: window.windowDurationMins ?? window.window_duration_mins
+      });
+    }
+  }
+  return windows;
+}
+
 function hasCodexRateLimitWindows(snapshot) {
   return Boolean(snapshot && typeof snapshot === 'object' && (snapshot.primary || snapshot.secondary));
 }
@@ -2424,6 +2453,7 @@ function mapCodexRateLimitsToProvider(payload, meta = {}) {
       windowMinutes: window.windowDurationMins ?? window.window_duration_mins
     });
   }
+  windows.push(...codexAdditionalRateLimitWindows(payload));
   return normalizeLimitProvider({
     provider: 'codex',
     accountKey: meta.accountKey || '',

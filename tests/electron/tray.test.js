@@ -907,6 +907,24 @@ test('compact provider windows preserve Claude session plus general weekly', () 
   assert.equal(selection.secondaryWindow.label, undefined);
 });
 
+test('compact provider windows keep Codex main quotas ahead of named reserve quotas', () => {
+  const selection = compactLimitSelection({
+    provider: 'codex',
+    status: 'ok',
+    windows: [
+      { kind: 'session', remainingPercent: 70 },
+      { kind: 'weekly', remainingPercent: 80 },
+      { kind: 'session', label: 'gpt-reserve', remainingPercent: 10 },
+      { kind: 'weekly', label: 'gpt-reserve', remainingPercent: 20 }
+    ]
+  });
+
+  assert.equal(selection.primaryWindow.kind, 'session');
+  assert.equal(selection.primaryWindow.label, undefined);
+  assert.equal(selection.secondaryWindow.kind, 'weekly');
+  assert.equal(selection.secondaryWindow.label, undefined);
+});
+
 test('compact provider windows show Volcengine 5-hour plus Daily before broader windows', () => {
   const selection = compactLimitSelection({
     provider: 'volcengine',
