@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Pure vector, deliberately: the project carries no binary icon assets, and an
+  adaptive icon declared this way builds without a generated PNG set. The two
+  subpaths are diamonds, and `evenOdd` cuts the inner one out so the mark reads
+  as a token outline rather than a solid blob in the launcher's clipped shapes.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M54,22 L86,54 L54,86 L22,54 Z M54,42 L66,54 L54,66 L42,54 Z" />
+</vector>

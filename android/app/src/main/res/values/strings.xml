@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Token Monitor</string>
+
+    <string name="nav_gateways">Gateways</string>
+    <string name="nav_overview">Overview</string>
+
+    <string name="conn_retry">Retry</string>
+
+    <string name="gateways_title">Gateways</string>
+    <string name="gateways_subtitle">Choose where to read usage from.</string>
+    <string name="gateways_discovering">Looking for gateways on this network…</string>
+    <string name="gateways_discovered">Found on this network</string>
+    <string name="gateways_saved">Saved</string>
+    <string name="gateways_manual">Connect manually</string>
+    <string name="gateways_host_hint">Host or IP</string>
+    <string name="gateways_port_hint">Port</string>
+    <string name="gateways_connect">Connect</string>
+    <string name="gateways_none">No gateways found yet. Make sure the gateway is running on the same Wi‑Fi network, or add one by address.</string>
+    <string name="gateways_cleartext_notice">Reads the gateway\'s unauthenticated view port over plain HTTP. Use only on a network you trust.</string>
+    <string name="gateways_empty">No gateway connected.</string>
+    <string name="error_host_blank">Enter the gateway\'s address.</string>
+    <string name="error_port_invalid">Port must be between 1 and 65535.</string>
+
+    <string name="period_today">Today</string>
+    <string name="period_month">Month</string>
+    <string name="period_all">All time</string>
+
+    <string name="overview_tokens">Tokens</string>
+    <string name="overview_cost">Cost</string>
+    <string name="overview_devices">Devices</string>
+    <string name="overview_top">Top</string>
+    <string name="overview_updated">Updated %1$s</string>
+    <string name="overview_unknown_cost">—</string>
+
+    <string name="overview_empty_title">No gateway connected</string>
+    <string name="overview_empty_body">Choose a gateway from the Gateways tab to see its usage.</string>
+    <string name="overview_empty_action">Go to gateways</string>
+
+    <string name="section_tools">By tool</string>
+    <string name="section_models">By model</string>
+    <string name="section_limits">AI tool limits</string>
+    <string name="section_devices">Devices</string>
+
+    <string name="device_offline">Offline</string>
+    <string name="device_online">Live</string>
+
+    <string name="limits_empty">No limits reported by any device.</string>
+    <string name="limits_resets">Resets %1$s</string>
+
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_reconnecting">Reconnecting…</string>
+    <string name="status_connected">Live</string>
+    <string name="empty_state_hint">Check that the gateway is still running on this address and that this phone is on the same Wi‑Fi network.</string>
+    <string name="action_switch">Switch gateway</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="action_forget">Forget</string>
+</resources>

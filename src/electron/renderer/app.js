@@ -383,7 +383,16 @@ Object.assign(els, {
   secretPasteButton: document.getElementById('secretPasteButton'),
   hubStatusRow: document.getElementById('hubStatusRow'),
   syncClientStatus: document.getElementById('syncClientStatus'),
+  hubSelfUrlHint: document.getElementById('hubSelfUrlHint'),
   hubAddressList: document.getElementById('hubAddressList'),
+  hubMdnsStatus: document.getElementById('hubMdnsStatus'),
+  hubViewEnabledInput: document.getElementById('hubViewEnabledInput'),
+  hubViewInfo: document.getElementById('hubViewInfo'),
+  hubViewStatusRow: document.getElementById('hubViewStatusRow'),
+  hubViewAddressList: document.getElementById('hubViewAddressList'),
+  gatewayScanButton: document.getElementById('gatewayScanButton'),
+  gatewayScanStatus: document.getElementById('gatewayScanStatus'),
+  gatewayScanList: document.getElementById('gatewayScanList'),
   syncUploadIntervalInput: document.getElementById('syncUploadIntervalInput'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
   collectionCadenceNote: document.getElementById('collectionCadenceNote'),
@@ -8310,8 +8319,11 @@ function syncHubModeUi() {
   els.hubHostFields.classList.toggle('hidden', mode !== 'host');
   if (mode === 'host') {
     els.hubSecretInput.value = state.settings.hubHostSecret || '';
+    if (els.hubViewEnabledInput) els.hubViewEnabledInput.checked = Boolean(state.settings?.hubViewEnabled);
+    if (els.hubViewInfo) els.hubViewInfo.classList.toggle('hidden', !state.settings?.hubViewEnabled);
     renderHubStatus();
   }
+  if (els.hubViewInfo && mode !== 'host') els.hubViewInfo.classList.add('hidden');
   renderSyncClientStatus();
   renderHubBuildStatus();
 }
@@ -8324,6 +8336,9 @@ function renderHubStatus() {
     els.hubStatusRow.textContent = t('settings.sync.starting');
     els.hubStatusRow.className = 'hub-status';
     els.hubAddressList.replaceChildren();
+    if (els.hubViewStatusRow) { els.hubViewStatusRow.textContent = ''; els.hubViewStatusRow.className = 'hub-status'; }
+    if (els.hubViewAddressList) els.hubViewAddressList.replaceChildren();
+    if (els.hubMdnsStatus) { els.hubMdnsStatus.hidden = true; els.hubMdnsStatus.textContent = ''; }
     return;
   }
   if (info.error) {
@@ -8331,17 +8346,34 @@ function renderHubStatus() {
     els.hubStatusRow.textContent = `${code} — ${info.error.message}`;
     els.hubStatusRow.className = 'hub-status error';
     els.hubAddressList.replaceChildren();
+    if (els.hubMdnsStatus) { els.hubMdnsStatus.hidden = true; els.hubMdnsStatus.textContent = ''; }
     return;
   }
   if (!info.listening) {
     els.hubStatusRow.textContent = t('settings.sync.hubStopped');
     els.hubStatusRow.className = 'hub-status';
     els.hubAddressList.replaceChildren();
+    if (els.hubMdnsStatus) { els.hubMdnsStatus.hidden = true; els.hubMdnsStatus.textContent = ''; }
     return;
   }
   els.hubStatusRow.textContent = t('settings.sync.listening', { port: info.listeningPort });
   els.hubStatusRow.className = 'hub-status ok';
   renderHubAddresses(info.lanAddresses || [], info.listeningPort);
+  renderHubViewStatus(info);
+  if (els.hubMdnsStatus) {
+    if (info.mdnsListening === false) {
+      els.hubMdnsStatus.textContent = t('settings.sync.mdnsUnavailable');
+      els.hubMdnsStatus.className = 'hub-status hub-mdns-status error';
+      els.hubMdnsStatus.hidden = false;
+    } else if (!info.mdnsVerified) {
+      els.hubMdnsStatus.textContent = t('settings.sync.mdnsNotVerified');
+      els.hubMdnsStatus.className = 'hub-status hub-mdns-status';
+      els.hubMdnsStatus.hidden = false;
+    } else {
+      els.hubMdnsStatus.hidden = true;
+      els.hubMdnsStatus.textContent = '';
+    }
+  }
 }
 
 function renderSyncClientStatus() {
@@ -8356,6 +8388,11 @@ function renderSyncClientStatus() {
   // Empty .hub-status still renders a bordered box, so hide it entirely when
   // there is nothing to show (connected, or not in client mode).
   els.syncClientStatus.hidden = !text;
+  if (els.hubSelfUrlHint) {
+    const self = state.settings?.hubMode === 'client' && Boolean(state.hubInfo?.hubUrlIsSelf);
+    els.hubSelfUrlHint.textContent = self ? t('settings.sync.selfHubUrl') : '';
+    els.hubSelfUrlHint.hidden = !self;
+  }
 }
 
 function renderHubBuildStatus() {
@@ -8406,6 +8443,51 @@ function renderHubAddresses(addresses, port) {
   }
 }
 
+function renderHubViewStatus(info) {
+  if (!els.hubViewStatusRow || !els.hubViewAddressList) return;
+  const viewPort = Number(info?.viewPort) || Number(state.settings?.hubViewPort) || 0;
+  const enabled = Boolean(info?.viewEnabled);
+  if (!enabled) {
+    els.hubViewStatusRow.textContent = t('settings.sync.viewDisabled');
+    els.hubViewStatusRow.className = 'hub-status';
+    els.hubViewAddressList.replaceChildren();
+    return;
+  }
+  if (!info?.listening) {
+    els.hubViewStatusRow.textContent = t('settings.sync.viewNotRunning');
+    els.hubViewStatusRow.className = 'hub-status error';
+    els.hubViewAddressList.replaceChildren();
+    return;
+  }
+  const addresses = info.lanAddresses || [];
+  if (addresses.length === 0) {
+    els.hubViewStatusRow.textContent = t('settings.sync.viewNoLan', { port: viewPort });
+    els.hubViewStatusRow.className = 'hub-status';
+    els.hubViewAddressList.replaceChildren();
+    return;
+  }
+  els.hubViewStatusRow.textContent = t('settings.sync.viewListening', { port: viewPort });
+  els.hubViewStatusRow.className = 'hub-status ok';
+  for (const addr of addresses) {
+    const url = `http://${addr.address}:${viewPort}`;
+    const row = document.createElement('div');
+    row.className = 'hub-address-row';
+    const code = document.createElement('code');
+    code.textContent = url;
+    const label = document.createElement('span');
+    label.className = 'hub-address-iface';
+    label.textContent = addr.interface || t('settings.sync.viewReadOnly');
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'icon-button';
+    copy.title = t('settings.sync.copyUrl', { url });
+    copy.textContent = '⧉';
+    copy.addEventListener('click', () => copyToClipboard(url, copy));
+    row.append(code, label, copy);
+    els.hubViewAddressList.appendChild(row);
+  }
+}
+
 async function copyToClipboard(text, button) {
   try {
     if (window.tokenMonitor.copyText) await window.tokenMonitor.copyText(text);
@@ -8426,6 +8508,7 @@ async function refreshHubInfo() {
   try {
     state.hubInfo = await window.tokenMonitor.getHubInfo();
     renderHubStatus();
+    renderSyncClientStatus();
   } catch (_) { /* ignore */ }
 }
 
@@ -11207,6 +11290,9 @@ els.saveSettingsButton.addEventListener('click', async () => {
     const hubHostPort = Number(els.hubPortInput.value) || 17321;
     submittedHubFields.hubHostPort = String(hubHostPort);
     patch.hubHostPort = hubHostPort;
+    const hubViewEnabled = Boolean(els.hubViewEnabledInput?.checked);
+    submittedHubFields.hubViewEnabled = String(hubViewEnabled);
+    patch.hubViewEnabled = hubViewEnabled;
   }
   const submittedHubRevisions = Object.fromEntries(
     Object.keys(submittedHubFields).map((field) => [field, hubDraftRevisions[field]])
@@ -11226,6 +11312,85 @@ els.hubModeOptions.addEventListener('change', async (event) => {
   void refreshHubBuildStatus();
   await refreshStats();
 });
+
+els.hubViewEnabledInput?.addEventListener('change', async () => {
+  const enabled = Boolean(els.hubViewEnabledInput.checked);
+  if (enabled && !window.confirm(t('settings.sync.viewConfirm'))) {
+    els.hubViewEnabledInput.checked = state.settings?.hubViewEnabled === true;
+    return;
+  }
+  state.settings = { ...state.settings, hubViewEnabled: enabled };
+  if (els.hubViewInfo) els.hubViewInfo.classList.toggle('hidden', !enabled);
+  await saveSettings({ hubViewEnabled: enabled });
+  await refreshHubInfo();
+});
+
+async function scanLanGateways() {
+  const button = els.gatewayScanButton;
+  if (!button || !window.tokenMonitor.discoverGateways || button.disabled) return;
+  button.disabled = true;
+  els.gatewayScanStatus.hidden = false;
+  els.gatewayScanStatus.textContent = t('settings.sync.scanning');
+  els.gatewayScanStatus.className = 'hub-status';
+  els.gatewayScanList.replaceChildren();
+  try {
+    const result = await window.tokenMonitor.discoverGateways();
+    renderGatewayScan(result);
+  } catch (_) {
+    els.gatewayScanStatus.textContent = t('settings.sync.scanFailed');
+    els.gatewayScanStatus.className = 'hub-status error';
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderGatewayScan(result) {
+  els.gatewayScanStatus.hidden = false;
+  els.gatewayScanList.replaceChildren();
+  if (!result || result.error) {
+    els.gatewayScanStatus.textContent = result?.error ? t('settings.sync.scanFailed') : t('settings.sync.noGateways');
+    els.gatewayScanStatus.className = 'hub-status error';
+    return;
+  }
+  if (!Array.isArray(result) || result.length === 0) {
+    els.gatewayScanStatus.textContent = t('settings.sync.noGateways');
+    els.gatewayScanStatus.className = 'hub-status';
+    return;
+  }
+  els.gatewayScanStatus.textContent = t('settings.sync.gatewayCount', { count: result.length });
+  els.gatewayScanStatus.className = 'hub-status ok';
+  for (const service of result) {
+    const row = document.createElement('div');
+    row.className = 'hub-gateway-row';
+    const info = document.createElement('div');
+    const name = document.createElement('strong');
+    name.textContent = service.name || service.host || 'gateway';
+    const meta = document.createElement('span');
+    const address = (service.addresses && service.addresses[0]) || service.host;
+    meta.textContent = `${address}${address ? ':' : ''}${service.port || 17321}`
+      + (service.hasView ? ` · ${t('settings.sync.gatewayView')}` : '');
+    info.append(name, meta);
+    const connect = document.createElement('button');
+    connect.type = 'button';
+    connect.textContent = t('settings.sync.connectGateway');
+    connect.addEventListener('click', () => selectGateway(service));
+    row.append(info, connect);
+    els.gatewayScanList.appendChild(row);
+  }
+}
+
+async function selectGateway(service) {
+  const address = (service.addresses && service.addresses[0]) || service.host;
+  const port = service.port || 17321;
+  const url = `http://${address}:${port}`;
+  if (els.hubUrlInput) els.hubUrlInput.value = url;
+  await saveSettings({ hubMode: 'client', hubUrl: url });
+  await refreshHubInfo();
+  void refreshHubBuildStatus();
+  await refreshStats();
+}
+
+els.gatewayScanButton?.addEventListener('click', scanLanGateways);
 
 // Both, not just the mark: either one reveals the reading on hover, so a click or hold that
 // only worked on one of them would leave the other looking broken. The suppression listener

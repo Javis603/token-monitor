@@ -133,7 +133,10 @@ function lanIpv4Addresses() {
       if (isVirtualMac(addr.mac)) continue;
       if (seen.has(addr.address)) continue;
       seen.add(addr.address);
-      out.push({ address: addr.address, interface: name });
+      // `mac` rides along because a caller advertising these addresses to other
+      // devices (mDNS) has a higher bar than one merely listing them in a UI:
+      // an all-zero MAC marks a tunnel/virtual adapter no peer can route to.
+      out.push({ address: addr.address, interface: name, mac: addr.mac || '' });
     }
   }
   return out;

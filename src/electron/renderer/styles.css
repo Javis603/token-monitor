@@ -1609,6 +1609,30 @@ span.settings-note.settings-item-desc {
 .hub-address-iface { color: var(--muted); font-size: 9.5px; flex: 0 0 auto; }
 .hub-address-row .icon-button { width: 26px; height: 26px; flex: 0 0 auto; font-size: 12px; }
 .settings-note.hub-warning { color: var(--orange); }
+.hub-view-toggle { margin-top: 4px; }
+.hub-view-info.hidden { display: none; }
+.hub-view-info { display: grid; gap: 6px; min-width: 0; margin-top: 2px; }
+.hub-mdns-status { line-height: 1.35; }
+.hub-self-url-hint { color: var(--orange); border-color: rgba(244, 160, 115, 0.4); line-height: 1.35; }
+.hub-gateway-scan { display: grid; gap: 8px; min-width: 0; margin-top: 6px; }
+.hub-gateway-scan button { justify-self: start; }
+.hub-gateway-list { display: grid; gap: 5px; min-width: 0; }
+.hub-gateway-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
+}
+.hub-gateway-row > div { display: grid; gap: 1px; min-width: 0; }
+.hub-gateway-row strong { font-size: 10.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-gateway-row span { color: var(--muted); font-size: 9.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-gateway-row button { flex: 0 0 auto; }
 .currency-rate-row { display: grid; gap: 4px; min-width: 0; }
 .currency-rate-row.hidden, .currency-rate-manual-field.hidden { display: none; }
 /* The rate row is a sub-setting of the Currency row: keep them as one unseparated pair. */

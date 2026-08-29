@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Not a MaterialComponents theme on purpose: the entire UI is Compose, so
+      the window only needs to stay out of the way (no action bar, no default
+      window background fighting the Compose one).
+    -->
+    <style name="Theme.TokenMonitor" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

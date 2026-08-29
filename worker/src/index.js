@@ -1,7 +1,7 @@
 import { publicLimits } from './shared/limits.js';
 import subscriptionDisplay from './shared/subscriptionDisplay.js';
 import currency from './shared/currency.js';
-import { aggregateDevices, mergeDeviceRecord, aggregateHistory } from './shared/usage.js';
+import { aggregateDevices, mergeDeviceRecord, aggregateHistory, publicPeriods } from './shared/usage.js';
 import { DEFAULT_STALE_AFTER_MS } from './shared/syncUploadInterval.js';
 import { deviceHistoryRevision, historyPreview, historyRevision } from './shared/history.js';
 import hubBuildIdentity from './shared/hubBuildIdentity.js';
@@ -296,18 +296,9 @@ export class HubDO {
   }
 }
 
-function publicPeriods(periods) {
-  return Object.fromEntries(Object.entries(periods || {}).map(([name, period]) => {
-    const safePeriod = { ...(period || {}) };
-    delete safePeriod.projects;
-    return [name, {
-      ...safePeriod,
-      sessions: Object.fromEntries(Object.entries(period?.sessions || {}).map(([key, session]) => {
-      const { projectId, projectLabel, projectPath, ...safe } = session;
-      return [key, safe];
-      }))
-    }];
-  }));
-}
-
+// Re-exported for callers that want the redaction helper on its own. The Worker
+// deliberately does NOT use the shared publicStats() assembly: it is an
+// internet-facing URL rather than a trusted LAN, so its public route keeps
+// dropping `devices` wholesale instead of shipping the redacted per-device rows
+// the gateway serves.
 export { publicPeriods };

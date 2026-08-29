@@ -77,7 +77,8 @@ const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
-const { createHub } = require('../hub/server');
+const { createGateway, DEFAULT_VIEW_PORT: DEFAULT_HUB_VIEW_PORT } = require('../gateway/server');
+const { DEFAULT_SERVICE_TYPE, discoverServices } = require('../shared/mdns');
 const { probeHubBuild } = require('./hubBuildStatus');
 const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
@@ -436,6 +437,11 @@ function defaultSettings() {
     // embedded hub without a fresh round of credential sharing. Falls back
     // to a random secret generated in startEmbeddedHub() if env is empty.
     hubHostSecret: process.env.TOKEN_MONITOR_SECRET || '',
+    // The read-only view plane is off by default: it serves plain HTTP to the
+    // whole subnet with no auth, so it is opt-in and gated by a one-time risk
+    // confirmation in the UI rather than silently open on every host.
+    hubViewEnabled: false,
+    hubViewPort: DEFAULT_HUB_VIEW_PORT,
     secret: process.env.TOKEN_MONITOR_SECRET || '',
     windowBehavior,
     alwaysOnTop: windowBehavior === 'floating',
@@ -2231,6 +2237,8 @@ function readSettings() {
     merged.cursorManualAccountIds = normalizeCursorAccountIds(merged.cursorManualAccountIds);
     merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
+    merged.hubViewEnabled = parseBoolean(merged.hubViewEnabled, false);
+    merged.hubViewPort = normalizeHubPort(merged.hubViewPort, DEFAULT_HUB_VIEW_PORT);
     delete merged.workbuddyEndpoint;
     merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
     merged.archivedClientUsage = normalizeArchivedClientUsage(merged.archivedClientUsage);
@@ -2807,14 +2815,43 @@ function sendHubPush(payload) {
 
 function getHubInfo() {
   const port = normalizeHubPort(settings?.hubHostPort);
+  const viewPort = normalizeHubPort(settings?.hubViewPort, DEFAULT_HUB_VIEW_PORT);
+  // Prefer the addresses the mDNS responder actually advertises (it filters
+  // virtual/tunnel adapters a peer cannot route to); fall back to every LAN
+  // address when no gateway is running. The renderer expects objects shaped
+  // {address, interface}, so preserve that shape while preferring the reachable
+  // set (the responder advertises plain strings).
+  const allLan = lanIpv4Addresses();
+  // Detect "the user is connecting to this machine's own address" so the
+  // renderer can steer them to host mode instead of showing a cryptic refused
+  // connection. This is the single most common gateway-fails-first-time trap.
+  const clientUrl = String(settings?.hubUrl || '').trim();
+  let clientUrlHost = '';
+  try { clientUrlHost = new URL(clientUrl).hostname; } catch (_) {}
+  const hubUrlIsSelf = Boolean(clientUrlHost)
+    && allLan.some((entry) => entry.address === clientUrlHost);
+  const advertised = embeddedHub?.gateway?.lanAddresses?.length
+    ? embeddedHub.gateway.lanAddresses
+    : null;
+  const lanAddresses = advertised
+    ? advertised.map((address) => {
+        const known = allLan.find((entry) => entry.address === address);
+        return known || { address, interface: '' };
+      })
+    : allLan;
   return {
     mode: settings?.hubMode || 'local',
     port,
+    viewPort,
+    viewEnabled: Boolean(embeddedHub?.viewEnabled ?? settings?.hubViewEnabled),
+    hubUrlIsSelf,
     secret: settings?.hubHostSecret || '',
     listening: Boolean(embeddedHub),
     listeningPort: embeddedHub ? embeddedHub.port : null,
+    mdnsVerified: Boolean(embeddedHub?.gateway?.mdnsVerified),
+    mdnsListening: Boolean(embeddedHub?.gateway?.mdnsListening),
     error: embeddedHubError,
-    lanAddresses: lanIpv4Addresses()
+    lanAddresses
   };
 }
 
@@ -2822,6 +2859,26 @@ async function getHubBuildStatus() {
   if (settings?.hubMode !== 'client') return { status: 'notConfigured', runtime: '', hubUrl: '' };
   const hubUrl = String(settings.hubUrl || '').trim();
   return probeHubBuild(hubUrl);
+}
+
+async function discoverLanGateways() {
+  try {
+    const services = await discoverServices({ serviceType: DEFAULT_SERVICE_TYPE, timeoutMs: 3000 });
+    // Keep only what a client needs to attempt a connection. The mDNS TXT
+    // carries no secret (it goes to the whole subnet), so these values are safe
+    // to send to the renderer where the user picks one.
+    return services.map((service) => ({
+      name: service.name,
+      host: service.host,
+      port: service.port,
+      addresses: Array.isArray(service.addresses) ? service.addresses : [],
+      txt: service.txt || {},
+      hasView: Boolean(service.txt && service.txt.view)
+    }));
+  } catch (error) {
+    console.log(`[gateway] discovery failed: ${error?.message || error}`);
+    return { error: error?.message || String(error) };
+  }
 }
 
 async function startEmbeddedHub() {
@@ -2833,21 +2890,24 @@ async function startEmbeddedHub() {
   }
   const port = normalizeHubPort(settings.hubHostPort);
   try {
-    const hub = createHub({
-      port,
+    const gateway = createGateway({
+      dataPort: port,
+      viewPort: normalizeHubPort(settings.hubViewPort, DEFAULT_HUB_VIEW_PORT),
       host: '0.0.0.0',
       secret: settings.hubHostSecret,
       dataFile: hubDataFile(),
+      mdnsEnabled: true,
+      viewEnabled: Boolean(settings.hubViewEnabled),
       logger: { error: (err) => console.log(`[hub] ${err?.message || err}`) }
     });
-    await hub.start();
-    embeddedHub = { hub, port };
-    console.log(`[hub] listening on 0.0.0.0:${port}`);
+    await gateway.start();
+    embeddedHub = { hub: gateway.hub, port, gateway, viewEnabled: gateway.viewEnabled };
+    console.log(`[hub] gateway listening on 0.0.0.0:${port}${gateway.viewEnabled ? `, read-only view on :${gateway.viewPort}` : ''}`);
     sendHubPush({ type: 'listening', info: getHubInfo() });
     return embeddedHub;
   } catch (error) {
     embeddedHubError = { code: error.code || 'error', message: error.message, port };
-    console.log(`[hub] failed to start on port ${port}: ${error.message}`);
+    console.log(`[hub] failed to start gateway on port ${port}: ${error.message}`);
     sendHubPush({ type: 'error', info: getHubInfo() });
     return null;
   }
@@ -2857,7 +2917,8 @@ async function stopEmbeddedHub() {
   if (!embeddedHub) return;
   const handle = embeddedHub;
   embeddedHub = null;
-  try { await handle.hub.stop(); } catch (_) {}
+  const stopFn = handle.gateway ? () => handle.gateway.stop() : () => handle.hub.stop();
+  try { await stopFn(); } catch (_) {}
   sendHubPush({ type: 'stopped', info: getHubInfo() });
 }
 
@@ -6269,6 +6330,8 @@ app.whenReady().then(() => {
       hubMode: patch.hubMode !== undefined ? normalizeHubMode(patch.hubMode, settings.hubMode) : settings.hubMode,
       hubHostPort: patch.hubHostPort !== undefined ? normalizeHubPort(patch.hubHostPort, settings.hubHostPort) : settings.hubHostPort,
       hubHostSecret: patch.hubHostSecret !== undefined ? String(patch.hubHostSecret) : settings.hubHostSecret,
+      hubViewEnabled: patch.hubViewEnabled !== undefined ? parseBoolean(patch.hubViewEnabled, false) : Boolean(settings.hubViewEnabled),
+      hubViewPort: patch.hubViewPort !== undefined ? normalizeHubPort(patch.hubViewPort, settings.hubViewPort) : (settings.hubViewPort ?? DEFAULT_HUB_VIEW_PORT),
       deviceId: (patch.deviceId !== undefined ? String(patch.deviceId).trim() : settings.deviceId) || defaultDeviceId(),
       clients: patch.clients !== undefined ? clientsCsvForSetting(patch.clients, '') : clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS),
       refreshMs: Math.max(5000, Number(patch.refreshMs ?? settings.refreshMs ?? 15000)),
@@ -6642,6 +6705,7 @@ app.whenReady().then(() => {
   }));
   ipcMain.handle('hub:getInfo', () => getHubInfo());
   ipcMain.handle('hub:getBuildStatus', () => getHubBuildStatus());
+  ipcMain.handle('hub:discoverGateways', () => discoverLanGateways());
   ipcMain.handle('hub:regenerateSecret', () => {
     settings.hubHostSecret = generateHubSecret();
     saveSettings({ throwOnError: true });
