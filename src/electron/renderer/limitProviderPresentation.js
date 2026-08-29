@@ -147,6 +147,17 @@
     return { groupLabel, windowLabel: kind === 'session' ? '5-hour' : 'Weekly' };
   }
 
+  function isCanonicalCodexWindow(window) {
+    const kind = normalizeId(window?.kind);
+    const label = normalizeId(window?.label);
+    const canonicalLabels = kind === 'session' ? new Set(['', 'session', '5-hour'])
+      : kind === 'daily' ? new Set(['', 'daily'])
+        : kind === 'weekly' ? new Set(['', 'weekly'])
+          : kind === 'billing' ? new Set(['', 'monthly', 'billing'])
+            : new Set(['']);
+    return canonicalLabels.has(label);
+  }
+
   function compactWindowRemaining(window) {
     const rawRemaining = window?.remainingPercent;
     const remaining = rawRemaining == null || String(rawRemaining).trim() === '' ? null : Number(rawRemaining);
@@ -159,7 +170,9 @@
   }
 
   function limitProviderCompactWindows(providerOrId, windows = []) {
-    if (providerId(providerOrId) !== 'antigravity') return windows;
+    const provider = providerId(providerOrId);
+    if (provider === 'codex') return (windows || []).filter(isCanonicalCodexWindow);
+    if (provider !== 'antigravity') return windows;
     const entries = (windows || []).map((window, index) => ({
       window,
       index,

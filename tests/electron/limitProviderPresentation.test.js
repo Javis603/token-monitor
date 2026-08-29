@@ -122,6 +122,30 @@ test('compact Antigravity windows prefer 5-hour on ties and preserve legacy pool
   assert.equal(limitProviderCompactWindows('antigravity', legacy), legacy);
 });
 
+test('compact Codex windows never backfill canonical lanes with additional quotas', () => {
+  const canonicalSession = { kind: 'session', label: '5-hour', remainingPercent: 40 };
+  const canonicalWeekly = { kind: 'weekly', label: 'Weekly', remainingPercent: 70 };
+  const additionalSession = { kind: 'session', label: 'gpt-reserve', remainingPercent: 100 };
+  const additionalWeekly = { kind: 'weekly', label: 'gpt-reserve', remainingPercent: 100 };
+
+  assert.deepEqual(
+    limitProviderCompactWindows('codex', [canonicalSession, canonicalWeekly, additionalSession, additionalWeekly]),
+    [canonicalSession, canonicalWeekly]
+  );
+  assert.deepEqual(
+    limitProviderCompactWindows('codex', [canonicalWeekly, additionalSession]),
+    [canonicalWeekly]
+  );
+  assert.deepEqual(
+    limitProviderCompactWindows('codex', [canonicalSession, additionalWeekly]),
+    [canonicalSession]
+  );
+  assert.deepEqual(
+    limitProviderCompactWindows('codex', [additionalSession, additionalWeekly]),
+    []
+  );
+});
+
 test('compact Antigravity labels preserve period fallback when groups are not distinct', () => {
   const differentPeriods = [
     { kind: 'session', label: 'Gemini 5-hour' },
