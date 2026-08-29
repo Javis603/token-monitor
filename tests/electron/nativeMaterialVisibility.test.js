@@ -58,15 +58,19 @@ test('window lifecycle suspends and restores the latest material preference', ()
   assert.deepEqual(win.materials, ['hud', null, null]);
 });
 
-test('an unchanged material preference does not re-apply to the Dashboard', () => {
+test('an unchanged material preference does not re-apply to either window', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const applyMaterial = main.slice(
     main.indexOf('function applyNativeMaterial(source = settings)'),
-    main.indexOf('function createWindow(')
+    main.indexOf('function withHistoryPreview(')
   );
 
-  // applyNativeMaterial() runs on every floating-bubble collapse/expand, which
-  // carries no information about the Dashboard.
+  // applyNativeMaterial() also runs for every appearance slider preview and
+  // floating-bubble transition; neither should rebuild an unchanged effect.
+  assert.match(
+    applyMaterial,
+    /mainWindowNativeBlurEnabled !== enabled\) \{\s*mainWindowNativeBlurEnabled = enabled;\s*syncNativeMaterialVisibility\(mainWindow, enabled\);/
+  );
   assert.match(
     applyMaterial,
     /dashboardWindowNativeBlurEnabled !== enabled\) \{\s*dashboardWindowNativeBlurEnabled = enabled;\s*syncNativeMaterialVisibility\(dashboardWindow, enabled\);/
@@ -75,11 +79,25 @@ test('an unchanged material preference does not re-apply to the Dashboard', () =
 
 test('main and Dashboard windows use the visibility-aware material lifecycle', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const mainWindowConstructor = main.slice(
+    main.indexOf('function createWindow('),
+    main.indexOf('function handleZoomShortcut(')
+  );
+  const dashboardWindowConstructor = main.slice(
+    main.indexOf('function createDashboardWindow('),
+    main.indexOf('async function getDashboardHistory(')
+  );
   assert.equal([...main.matchAll(/attachNativeMaterialVisibility\(win,/g)].length, 2);
   // Electron has no setVisualEffectState, so 'active' can only be set at
-  // construction. Losing it makes macOS fall back to followWindow, which greys
-  // the glass out whenever the window is not key.
-  assert.equal([...main.matchAll(/visualEffectState: 'active'/g)].length, 2);
+  // construction. Both windows must retain that construction-time capability
+  // even when system glass starts disabled and is enabled later at runtime.
+  for (const constructor of [mainWindowConstructor, dashboardWindowConstructor]) {
+    assert.match(
+      constructor,
+      /process\.platform === 'darwin' \? \{ vibrancy: 'hud', visualEffectState: 'active' \} : \{\}/
+    );
+  }
+  assert.match(mainWindowConstructor, /mainWindow = win;\s*mainWindowNativeBlurEnabled = null;/);
   assert.doesNotMatch(main, /\.setVisualEffectState\(/);
   assert.equal([...main.matchAll(/syncNativeMaterialVisibility\((?:mainWindow|dashboardWindow),/g)].length, 2);
 });

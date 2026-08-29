@@ -2486,13 +2486,13 @@ function nativeBlurEnabled(source = settings) {
 
 function applyNativeMaterial(source = settings) {
   const enabled = nativeBlurEnabled(source);
-  if (mainWindow && !mainWindow.isDestroyed()) {
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindowNativeBlurEnabled !== enabled) {
     mainWindowNativeBlurEnabled = enabled;
     syncNativeMaterialVisibility(mainWindow, enabled);
   }
-  // The Dashboard has its own lifecycle. This also runs on every floating-bubble
-  // collapse/expand, which says nothing about the Dashboard, so re-applying an
-  // unchanged material there would rebuild its native effect view for nothing.
+  // This also runs for every appearance slider preview and floating-bubble
+  // transition, so re-applying an unchanged material would rebuild its native
+  // effect view for nothing.
   if (dashboardWindow && !dashboardWindow.isDestroyed() && dashboardWindowNativeBlurEnabled !== enabled) {
     dashboardWindowNativeBlurEnabled = enabled;
     syncNativeMaterialVisibility(dashboardWindow, enabled);
@@ -5834,7 +5834,7 @@ function createWindow(boundsOverride, options = {}) {
     // it macOS falls back to followWindow and the glass greys out on blur. The
     // vibrancy here is immediately re-evaluated by applyNativeMaterial() below, so
     // a window that is not on screen still ends up with no material attached.
-    ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
+    ...(process.platform === 'darwin' ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass && !windowsAccent ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -5843,6 +5843,7 @@ function createWindow(boundsOverride, options = {}) {
     }
   });
   mainWindow = win;
+  mainWindowNativeBlurEnabled = null;
   mainWindowChrome = { collapsedFloatingBubble };
   applyMacSpaceBehavior();
   applyWindowsChrome(win, { round: true });
@@ -5998,7 +5999,7 @@ function createDashboardWindow() {
     backgroundColor: '#00000000',
     ...appWindowIcon(),
     skipTaskbar: false,
-    ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
+    ...(process.platform === 'darwin' ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
