@@ -1,10 +1,13 @@
 'use strict';
 
 (function exposeToolDetails(root, factory) {
-  const api = factory();
+  const usageAttributionRowsApi = typeof module === 'object' && module.exports
+    ? require('./usageAttributionRows')
+    : root?.TokenMonitorUsageAttributionRows;
+  const api = factory(usageAttributionRowsApi);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorToolDetails = api;
-})(typeof window !== 'undefined' ? window : null, function createToolDetailsApi() {
+})(typeof window !== 'undefined' ? window : null, function createToolDetailsApi(usageAttributionRowsApi) {
   function amount(value) {
     const number = Number(value);
     return Number.isFinite(number) ? Math.max(0, number) : 0;
@@ -18,19 +21,23 @@
     if ((!models || typeof models !== 'object') && (!costs || typeof costs !== 'object')) return [];
 
     const total = amount(period?.clients?.[clientKey]);
-    return [...new Set([...Object.keys(models || {}), ...Object.keys(costs || {})])]
-      .map((model) => {
-        const value = amount(models?.[model]);
-        const cost = amount(costs?.[model]);
+    const totalCost = amount(period?.clientCosts?.[clientKey]);
+    return usageAttributionRowsApi.attributionRows(models, costs, {
+      totalValue: total,
+      totalCost
+    })
+      .map((row) => {
+        const value = amount(row.value);
+        const cost = amount(row.cost);
         return {
-          key: model,
-          name: model,
+          key: row.key,
+          name: row.key,
           value,
           cost,
-          percent: total > 0 ? Math.min(100, value / total * 100) : 0
+          percent: total > 0 ? Math.min(100, value / total * 100) : 0,
+          unattributed: row.unattributed === true
         };
       })
-      .filter((row) => row.value > 0 || row.cost > 0)
       .sort((a, b) => b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
   }
 

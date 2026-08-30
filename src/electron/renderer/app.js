@@ -1866,7 +1866,8 @@ function renderToolDetailAccordion(accordionInner, detail) {
   if (mode === 'models' && hasModels) {
     for (const model of modelRows) {
       const metric = model.value > 0 ? formatNumber(model.value) : formatCost(model.cost);
-      appendAccordionMetricRow(content, model.name, metric, model.value > 0 ? model.percent : null, 'tool-model-row');
+      const label = model.unattributed === true ? labels.unclassified : model.name;
+      appendAccordionMetricRow(content, label, metric, model.value > 0 ? model.percent : null, 'tool-model-row');
     }
   }
 
