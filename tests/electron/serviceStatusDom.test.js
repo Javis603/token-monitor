@@ -399,12 +399,12 @@ test('row accordions expose keyboard and aria interactions', () => {
   assert.match(app, /function toggleAccordionRow/);
   assert.match(app, /function setAttributeIfChanged/);
   assert.match(app, /event\.key !== 'Enter' && event\.key !== ' '/);
-  assert.match(app, /row\.tabIndex = 0/);
-  assert.match(app, /setAttributeIfChanged\(row, 'role', 'button'\)/);
-  assert.match(app, /setAttributeIfChanged\(row, 'aria-expanded'/);
-  assert.match(app, /setAttributeIfChanged\(row, 'aria-label', `\$\{name\}, \$\{t\('dashboard\.stat\.totalTokens'\)\}/);
+  assert.match(app, /rowHead\.tabIndex = 0/);
+  assert.match(app, /setAttributeIfChanged\(rowHead, 'role', 'button'\)/);
+  assert.match(app, /setAttributeIfChanged\(rowHead, 'aria-expanded'/);
+  assert.match(app, /setAttributeIfChanged\(rowHead, 'aria-label', `\$\{name\}, \$\{t\('dashboard\.stat\.totalTokens'\)\}/);
   assert.match(app, /\$\{t\('dashboard\.stat\.totalCost'\)\}: \$\{formatCost\(cost \|\| 0\)\}/);
-  assert.match(app, /row\.removeAttribute\('aria-label'\)/);
+  assert.match(app, /rowHead\.removeAttribute\('aria-label'\)/);
 });
 
 test('project accordions retain unchanged DOM between live refreshes', () => {

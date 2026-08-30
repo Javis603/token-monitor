@@ -4662,6 +4662,46 @@ html.is-windows .limit-live-badge {
   color: var(--muted);
   font-size: 11px;
 }
+.tool-detail-footer {
+  display: grid;
+  height: 30px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  flex: 0 0 104px;
+  overflow: hidden;
+  border: 1px solid rgba(var(--line-rgb), 0.18);
+  border-radius: 7px;
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
+}
+.tool-detail-footer.hidden { display: none; }
+.tool-detail-footer-option {
+  min-width: 0;
+  padding: 0 7px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  transition: color 120ms ease, background 120ms ease;
+}
+.tool-detail-footer-option + .tool-detail-footer-option {
+  border-left: 1px solid rgba(var(--line-rgb), 0.14);
+}
+.tool-detail-footer-option:hover {
+  color: var(--text);
+  background: rgba(var(--overlay-rgb), 0.04);
+}
+.tool-detail-footer-option[aria-pressed="true"] {
+  color: var(--text);
+  background: rgba(var(--accent-rgb), 0.11);
+}
+.tool-detail-footer-option:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: -2px;
+}
 .view-switcher {
   position: relative;
   display: flex;
@@ -5457,6 +5497,7 @@ html.is-windows .limit-live-badge {
   align-items: baseline;
   gap: 12px;
   font-size: 11px;
+  line-height: 1.35;
 }
 .accordion-label {
   color: var(--muted);
@@ -5465,6 +5506,12 @@ html.is-windows .limit-live-badge {
   display: flex;
   align-items: baseline;
   gap: 6px;
+  white-space: nowrap;
+}
+.accordion-item-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .device-breakdown { gap: 6px; }
