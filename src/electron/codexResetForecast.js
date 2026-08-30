@@ -4,7 +4,7 @@ const { appVersion } = require('../shared/appVersion');
 
 const CODEX_RESET_FORECAST_PAGE_URL = 'https://codex-resets.com/';
 const CODEX_RESET_FORECAST_URL = 'https://codex-resets.com/api/v1/status';
-const DEFAULT_CACHE_MS = 5 * 60 * 1000;
+const DEFAULT_CACHE_MS = 15 * 60 * 1000;
 const DEFAULT_ERROR_CACHE_MS = 30 * 1000;
 const DEFAULT_TIMEOUT_MS = 6 * 1000;
 const USER_AGENT = `TokenMonitor/${appVersion()} (+https://github.com/Javis603/token-monitor)`;
@@ -17,13 +17,21 @@ function objectValue(...values) {
   return values.find((value) => value && typeof value === 'object' && !Array.isArray(value)) || {};
 }
 
-function finitePercent(value) {
+function finiteNumber(value) {
   if (typeof value !== 'number' && typeof value !== 'string') return null;
   if (typeof value === 'string' && !/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(value.trim())) return null;
   const number = typeof value === 'number' ? value : Number(value.trim());
-  if (!Number.isFinite(number)) return null;
-  const percent = number >= 0 && number <= 1 ? number * 100 : number;
-  return Math.max(0, Math.min(100, Math.round(percent)));
+  return Number.isFinite(number) ? number : null;
+}
+
+function finitePercent(value) {
+  const number = finiteNumber(value);
+  return number !== null && number >= 0 && number <= 100 ? number : null;
+}
+
+function finiteRatioPercent(value) {
+  const number = finiteNumber(value);
+  return number !== null && number >= 0 && number <= 1 ? number * 100 : null;
 }
 
 function optionalBoolean(value) {
@@ -89,11 +97,12 @@ function normalizeCodexResetForecast(payload, options = {}) {
     forecast.chance_percent,
     forecast.probabilityPercent,
     forecast.probability_percent,
+    forecast.percentage
+  )) ?? finiteRatioPercent(firstDefined(
     forecast.probability,
     forecast.probability48h,
     forecast.probability_48h,
     forecast.chance,
-    forecast.percentage,
     forecast.confidence,
     forecast.score,
     data.forecastProbability,
@@ -236,13 +245,27 @@ function createCodexResetForecastClient(options = {}) {
     const checkedAt = new Date(currentTime).toISOString();
     try {
       const payload = await fetchJsonWithTimeout(fetchImpl, endpoint, timeoutMs);
-      cache = normalizeCodexResetForecast(payload, { checkedAt });
-      lastGood = cache.status === 'unavailable' ? lastGood : cache;
+      const normalized = normalizeCodexResetForecast(payload, { checkedAt });
+      if (normalized.status === 'unavailable') {
+        const error = new Error('Unrecognized forecast response');
+        error.code = 'INVALID_RESPONSE';
+        throw error;
+      }
+      cache = { ...normalized, retryAfterMs: cacheMs };
+      lastGood = cache;
       cacheUntil = currentTime + cacheMs;
     } catch (error) {
+      const errorKind = error?.code === 'INVALID_RESPONSE' ? 'invalid-response' : 'request';
       cache = lastGood
-        ? { ...lastGood, stale: true, checkedAt, error: error.message }
-        : { status: 'unavailable', checkedAt, pageUrl: CODEX_RESET_FORECAST_PAGE_URL, error: error.message };
+        ? { ...lastGood, stale: true, checkedAt, error: error.message, errorKind, retryAfterMs: errorCacheMs }
+        : {
+            status: 'unavailable',
+            checkedAt,
+            pageUrl: CODEX_RESET_FORECAST_PAGE_URL,
+            error: error.message,
+            errorKind,
+            retryAfterMs: errorCacheMs
+          };
       cacheUntil = currentTime + errorCacheMs;
     }
     return cache;

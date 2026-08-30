@@ -43,7 +43,7 @@ test('normalizes snake-case latest reset timestamps without retaining post conte
       latest_reset: { announced_at: '2026-08-29T20:43:00Z' },
       active_watch: {
         active: true,
-        probability: 89,
+        probability_percent: 89,
         source: { handle: '@thsottiaux', content: 'Long third-party post.' }
       }
     }
@@ -81,7 +81,12 @@ test('normalizes the public codex-resets v1 status schema', () => {
   assert.equal(result.latestResetAt, '2026-08-29T20:43:34.000Z');
 });
 
-test('accepts snake-case forecast fields and clamps percentages', () => {
+test('keeps explicit percent fields distinct from ratio fields', () => {
+  assert.equal(normalizeCodexResetForecast({ forecast: { reset_chance_percent: 1 } }).chancePercent, 1);
+  assert.equal(normalizeCodexResetForecast({ forecast: { reset_chance_percent: 0.5 } }).chancePercent, 0.5);
+  assert.equal(normalizeCodexResetForecast({ forecast: { probability: 0.75 } }).chancePercent, 75);
+  assert.equal(normalizeCodexResetForecast({ forecast: { probability: 1 } }).chancePercent, 100);
+
   const result = normalizeCodexResetForecast({
     data: {
       active_watch: {
@@ -95,9 +100,11 @@ test('accepts snake-case forecast fields and clamps percentages', () => {
   });
 
   assert.equal(result.status, 'active');
-  assert.equal(result.chancePercent, 100);
+  assert.equal(result.chancePercent, null);
   assert.equal(result.predictedAt, '2026-08-31T07:00:00.000Z');
   assert.equal(result.expiresAt, '');
+  assert.equal(normalizeCodexResetForecast({ forecast: { reset_chance_percent: 120 } }).status, 'unavailable');
+  assert.equal(normalizeCodexResetForecast({ forecast: { probability: 1.2 } }).status, 'unavailable');
 });
 
 test('keeps a forecast expiry separate from an expected reset time', () => {
@@ -144,6 +151,32 @@ test('keeps an explicit active signal even when it has no percentage or date', (
   assert.equal(result.chancePercent, null);
 });
 
+test('client keeps successful forecasts for 15 minutes by default', async () => {
+  let currentTime = Date.parse('2026-08-30T04:00:00Z');
+  let calls = 0;
+  const client = createCodexResetForecastClient({
+    now: () => currentTime,
+    fetchImpl: async () => {
+      calls += 1;
+      return {
+        ok: true,
+        json: async () => ({ forecast: { reset_chance_percent: 75 } })
+      };
+    }
+  });
+
+  await client.getForecast();
+  currentTime += 5 * 60 * 1000;
+  await client.getForecast();
+  currentTime += 10 * 60 * 1000 - 1;
+  await client.getForecast();
+  assert.equal(calls, 1);
+
+  currentTime += 1;
+  await client.getForecast();
+  assert.equal(calls, 2);
+});
+
 test('client caches success and preserves it as stale after a later failure', async () => {
   let currentTime = Date.parse('2026-08-30T04:00:00Z');
   let calls = 0;
@@ -156,7 +189,7 @@ test('client caches success and preserves it as stale after a later failure', as
       if (calls > 1) throw new Error('offline');
       return {
         ok: true,
-        json: async () => ({ forecast: { probability: 75, by: '2026-08-31T07:00:00Z' } })
+        json: async () => ({ forecast: { probability: 0.75, by: '2026-08-31T07:00:00Z' } })
       };
     }
   });
@@ -171,4 +204,39 @@ test('client caches success and preserves it as stale after a later failure', as
   assert.equal(stale.status, 'active');
   assert.equal(stale.stale, true);
   assert.equal(stale.error, 'offline');
+  assert.equal(stale.errorKind, 'request');
+  assert.equal(stale.retryAfterMs, 100);
+});
+
+test('client treats an unrecognized successful response as a short-lived failure', async () => {
+  let currentTime = Date.parse('2026-08-30T04:00:00Z');
+  let calls = 0;
+  const client = createCodexResetForecastClient({
+    now: () => currentTime,
+    cacheMs: 1000,
+    errorCacheMs: 100,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => (++calls === 1
+        ? { forecast: { reset_chance_percent: 75 } }
+        : { ok: true })
+    })
+  });
+
+  const first = await client.getForecast();
+  assert.equal(first.status, 'active');
+  assert.equal(first.retryAfterMs, 1000);
+
+  currentTime += 1001;
+  const stale = await client.getForecast();
+  assert.equal(stale.status, 'active');
+  assert.equal(stale.chancePercent, 75);
+  assert.equal(stale.stale, true);
+  assert.equal(stale.errorKind, 'invalid-response');
+  assert.equal(stale.retryAfterMs, 100);
+
+  assert.equal((await client.getForecast()).checkedAt, stale.checkedAt);
+  currentTime += 101;
+  await client.getForecast();
+  assert.equal(calls, 3);
 });

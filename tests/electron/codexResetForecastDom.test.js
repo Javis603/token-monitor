@@ -135,7 +135,7 @@ test('forecast tooltip safely stays absent before the first response arrives', (
 
 test('forecast source author is displayed as an X handle without duplicating @', () => {
   const start = app.indexOf('function codexResetForecastSourceAuthor');
-  const end = app.indexOf('\nfunction positionCodexResetForecastTooltip', start);
+  const end = app.indexOf('\nfunction codexResetForecastPercent', start);
   const sourceAuthor = vm.runInNewContext(`(${app.slice(start, end)})`, { String });
   assert.equal(sourceAuthor('thsottiaux'), '@thsottiaux');
   assert.equal(sourceAuthor('@thsottiaux'), '@thsottiaux');
@@ -143,7 +143,25 @@ test('forecast source author is displayed as an X handle without duplicating @',
   assert.equal(sourceAuthor(''), '');
 });
 
+test('forecast percentage display preserves fractional percent semantics', () => {
+  const start = app.indexOf('function codexResetForecastPercent');
+  const end = app.indexOf('\nfunction positionCodexResetForecastTooltip', start);
+  const formatPercent = vm.runInNewContext(`(${app.slice(start, end)})`, { Intl });
+  assert.equal(formatPercent(0.5, 'en-US'), '0.5');
+  assert.equal(formatPercent(75, 'en-US'), '75');
+  assert.equal(formatPercent(75.125, 'en-US'), '75.13');
+});
+
 test('forecast requests use the widget outbound transport', () => {
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   assert.match(main, /createCodexResetForecastClient\(\{\s*fetchImpl: electronLimitsFetch\(\)\s*\}\)/);
+});
+
+test('forecast refresh cadence follows the cache policy returned by the main process', () => {
+  const renderer = app.slice(app.indexOf('function maybeFetchCodexResetForecast'), app.indexOf('\nfunction renderLimitProviderRow'));
+  assert.match(renderer, /const retryAfterMs = Number\(state\.codexResetForecast\?\.retryAfterMs\);/);
+  assert.match(renderer, /state\.codexResetForecast\?\.error \? 30 \* 1000 : 15 \* 60 \* 1000/);
+  assert.match(renderer, /age >= refreshMs/);
+  assert.doesNotMatch(renderer, /age >= 15 \* 60 \* 1000/);
+  assert.match(renderer, /setTimeout\(\(\) => \{[\s\S]*?state\.breakdown === 'limits' && visibleStatsSurface\(\) === 'main'/);
 });

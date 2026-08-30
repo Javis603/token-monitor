@@ -321,6 +321,7 @@ state.toolDetailMode = 'tokens';
 state.codexResetForecast = null;
 state.codexResetForecastBusy = false;
 state.codexResetForecastRequestedAt = 0;
+state.codexResetForecastRetryTimer = null;
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
@@ -5287,6 +5288,10 @@ function codexResetForecastSourceAuthor(value) {
   return author ? `@${author}` : '';
 }
 
+function codexResetForecastPercent(value, locale = currentLocale()) {
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value);
+}
+
 function positionCodexResetForecastTooltip(wrap) {
   const tooltip = wrap?.querySelector('.limit-detail-tooltip');
   const clip = wrap?.closest('.limits-panel');
@@ -5316,11 +5321,13 @@ function codexResetForecastTooltip(forecast) {
       [expiresAt, expiresIn].filter(Boolean).join(' · ')
     ]);
   }
-  if (forecast?.error) {
+  if (forecast?.error && forecast.errorKind !== 'invalid-response') {
     entries.push([
       t('limits.codexResetForecast.connectionFailed'),
       t('limits.codexResetForecast.connectionHelp')
     ]);
+  }
+  if (forecast?.error) {
     const lastAttempt = codexResetForecastAge(forecast.checkedAt);
     if (lastAttempt) entries.push([t('limits.codexResetForecast.lastAttempt'), lastAttempt]);
   }
@@ -5374,7 +5381,7 @@ function renderCodexResetForecast() {
   } else if (forecast?.status === 'active') {
     const chance = forecast.chancePercent;
     value.textContent = Number.isFinite(chance)
-      ? t('limits.codexResetForecast.chance', { percent: Math.round(chance) })
+      ? t('limits.codexResetForecast.chance', { percent: codexResetForecastPercent(chance) })
       : t('limits.codexResetForecast.signal');
     const predictedAt = codexResetForecastDate(forecast.predictedAt);
     const expiresAt = codexResetForecastDate(forecast.expiresAt);
@@ -5389,7 +5396,7 @@ function renderCodexResetForecast() {
     detail.textContent = forecast.stale ? t('limits.codexResetForecast.stale') : '';
   } else {
     item.classList.add('is-unavailable');
-    value.textContent = forecast?.error
+    value.textContent = forecast?.error && forecast.errorKind !== 'invalid-response'
       ? t('limits.codexResetForecast.connectionFailed')
       : t('limits.codexResetForecast.unavailable');
   }
@@ -5406,9 +5413,15 @@ function appendCodexResetForecast(parent) {
   if (node) parent.append(node);
 }
 
+function clearCodexResetForecastRetryTimer() {
+  if (state.codexResetForecastRetryTimer) clearTimeout(state.codexResetForecastRetryTimer);
+  state.codexResetForecastRetryTimer = null;
+}
+
 async function refreshCodexResetForecast(options = {}) {
   if (state.settings?.codexResetForecastEnabled !== true || !window.tokenMonitor.getCodexResetForecast) return;
   if (state.codexResetForecastBusy) return;
+  clearCodexResetForecastRetryTimer();
   state.codexResetForecastBusy = true;
   state.codexResetForecastRequestedAt = Date.now();
   if (state.breakdown === 'limits') renderLimits();
@@ -5427,10 +5440,24 @@ async function refreshCodexResetForecast(options = {}) {
 }
 
 function maybeFetchCodexResetForecast() {
-  if (state.settings?.codexResetForecastEnabled !== true) return;
+  if (state.settings?.codexResetForecastEnabled !== true) {
+    clearCodexResetForecastRetryTimer();
+    return;
+  }
   const age = Date.now() - Number(state.codexResetForecastRequestedAt || 0);
-  if (!state.codexResetForecastBusy && (!state.codexResetForecast || age >= 5 * 60 * 1000)) {
+  const retryAfterMs = Number(state.codexResetForecast?.retryAfterMs);
+  const refreshMs = Number.isFinite(retryAfterMs) && retryAfterMs > 0
+    ? retryAfterMs
+    : (state.codexResetForecast?.error ? 30 * 1000 : 15 * 60 * 1000);
+  if (state.codexResetForecastBusy) return;
+  if (!state.codexResetForecast || age >= refreshMs) {
+    clearCodexResetForecastRetryTimer();
     void refreshCodexResetForecast();
+  } else if (!state.codexResetForecastRetryTimer) {
+    state.codexResetForecastRetryTimer = setTimeout(() => {
+      state.codexResetForecastRetryTimer = null;
+      if (state.breakdown === 'limits' && visibleStatsSurface() === 'main') maybeFetchCodexResetForecast();
+    }, Math.max(0, refreshMs - age));
   }
 }
 
@@ -11120,6 +11147,7 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
       input.addEventListener('change', async () => {
         await saveSettings({ [setting.key]: input.checked });
         if (setting.key === 'codexResetForecastEnabled') {
+          clearCodexResetForecastRetryTimer();
           state.codexResetForecast = null;
           state.codexResetForecastRequestedAt = 0;
           if (input.checked) await refreshCodexResetForecast({ force: true });
