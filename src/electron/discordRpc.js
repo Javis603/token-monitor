@@ -8,7 +8,7 @@ const CLIENT_ID = '1507034330436862062';
 const GITHUB_URL = 'https://github.com/Javis603/token-monitor';
 const KNOWN_CLIENT_ASSETS = new Set([
   'claude', 'codex', 'hermes', 'gemini', 'cursor', 'opencode', 'openclaw', 'antigravity', 'cline',
-  'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio'
+  'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio'
 ]);
 const CLIENT_LABELS = {
   claude: 'Claude', codex: 'Codex', hermes: 'Hermes Agent',

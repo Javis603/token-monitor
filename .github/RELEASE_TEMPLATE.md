@@ -4,23 +4,26 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Cursor auto-detection and multi-account support:** Automatically detect the locally signed-in Cursor desktop account, combine token usage from multiple saved accounts, and manage limits per account. (#523)
-- **Volcengine Agent Plan:** Show 5-hour, daily, weekly, and monthly quotas alongside the Coding Plan, with optional credentials when the Agent Plan is on another account. (#490, #532)
-- **Grok limits in WSL:** Show Grok limits on Windows when the active login is inside a running WSL distribution. (#530)
+- **LM Studio usage:** Add token usage tracking for OpenAI-compatible `/v1/chat/completions` and `/v1/responses` requests recorded in LM Studio server logs. (#546)
+- **Cursor Grok Bot quota:** Show the included weekly Grok Bot quota when it is available for the signed-in Cursor account. (#543)
+- **Codex gpt-reserve quota:** Show named `gpt-reserve` quota windows in the Limits view when returned by Codex. (#545)
+
+### Improved
+- **Cursor limits:** Use the official `Cursor Models` and `Other Models` pools, keep exhausted allowances visible, and show on-demand spend only when a cap or spend exists. (#543)
 
 ### Fixed
-- **Windows startup:** Fix an issue that could prevent recent versions from starting normally on some Windows systems. (#522)
-- **Trae CN Credits:** Show balances for untouched credit packs and ignore feature-only entitlements without a credit limit. (#515)
-- **Device ID reset:** Clearing a custom Device ID returns to the automatic hostname-based ID after restart, keeping the local device matched in sync views. (#441)
+- **Tokscale 4.15.0:** Fix DSH usage attribution to the model that actually served the response and xAI cost estimates that were too low when long-context prompts reached 200K tokens. (#544)
+- **Windows floating widget:** Prevent the always-on-top widget from being hidden behind the taskbar when they overlap. (#541)
+- **Trae CN setup:** Correct the account setup steps to copy `Cloud-IDE-Token` from browser Local Storage; Device ID remains optional. (#553)
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.49.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.49.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.49.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-Setup-0.49.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.49.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.49.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.50.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.50.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-Setup-0.50.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.50.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -58,23 +61,26 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **Cursor 自动检测与多账号：** 自动检测本机 Cursor 桌面版已登录的账号，合并追踪多个已保存账号的 Token 用量，并分别管理各账号的额度。（#523）
-- **Volcengine Agent Plan：** 在 Coding Plan 之外显示 5 小时、每日、每周和每月额度；若 Agent Plan 位于其他账号，也可单独设置凭证。（#490, #532）
-- **WSL 中的 Grok 额度：** Windows 上的 Grok 登录位于正在运行的 WSL 发行版中时，也能显示额度。（#530）
+- **LM Studio 用量：** 新增 LM Studio Token 用量追踪，涵盖服务器日志中的 OpenAI 兼容 `/v1/chat/completions` 和 `/v1/responses` 请求。（#546）
+- **Cursor Grok Bot 额度：** 已登录的 Cursor 账号包含 Grok Bot 额度时，显示其每周额度。（#543）
+- **Codex gpt-reserve 额度：** Codex 返回 `gpt-reserve` 时，在“额度”视图中显示对应额度周期。（#545）
+
+### 改进
+- **Cursor 额度：** 改用官方 `Cursor Models` 与 `Other Models` 额度池，保留已用尽的额度，并仅在存在上限或实际消费时显示按需消费。（#543）
 
 ### 修复
-- **Windows 启动：** 修复近期版本在部分 Windows 系统上可能无法正常启动的问题。（#522）
-- **Trae CN Credits：** 未使用的积分包可正常显示余额，并忽略没有积分额度的功能权益。（#515）
-- **设备 ID 重置：** 清空自定义设备 ID 后，重启时会恢复为按主机名自动生成的 ID，确保同步视图继续匹配本机设备。（#441）
+- **Tokscale 4.15.0：** 修正 DSH 用量的实际响应模型归属，以及 xAI 长上下文请求达到 200K Tokens 时成本估算偏低的问题。（#544）
+- **Windows 浮动小组件：** 修复小组件与任务栏重叠时，即使启用置顶仍可能被任务栏遮挡的问题。（#541）
+- **Trae CN 设置：** 修正账号设置步骤，改为从浏览器 Local Storage 复制 `Cloud-IDE-Token`；Device ID 仍为可选。（#553）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.49.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.49.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.49.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-Setup-0.49.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.49.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.49.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.50.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.50.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-Setup-0.50.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.50.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -107,7 +113,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.48.0...v0.49.0">v0.48.0...v0.49.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.49.0...v0.50.0">v0.49.0...v0.50.0</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -125,23 +131,26 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **Cursor 自動偵測與多帳號：** 自動偵測本機 Cursor 桌面版已登入的帳號、合併追蹤多個已儲存帳號的 Token 用量，並分別管理各帳號的額度。（#523）
-- **Volcengine Agent Plan：** 在 Coding Plan 之外顯示 5 小時、每日、每週與每月額度；若 Agent Plan 位於其他帳號，也可另行設定憑證。（#490, #532）
-- **WSL 中的 Grok 額度：** Windows 上的 Grok 登入位於正在執行的 WSL 發行版時，也能顯示額度。（#530）
+- **LM Studio 用量：** 新增 LM Studio Token 用量追蹤，涵蓋伺服器日誌中的 OpenAI 相容 `/v1/chat/completions` 與 `/v1/responses` 請求。（#546）
+- **Cursor Grok Bot 額度：** 已登入的 Cursor 帳號包含 Grok Bot 額度時，顯示其每週額度。（#543）
+- **Codex gpt-reserve 額度：** Codex 傳回 `gpt-reserve` 時，在「額度」檢視中顯示對應額度週期。（#545）
+
+### 改進
+- **Cursor 額度：** 改用官方 `Cursor Models` 與 `Other Models` 額度池、保留已用盡的額度，並只在存在上限或實際消費時顯示隨用隨付消費。（#543）
 
 ### 修復
-- **Windows 啟動：** 修復近期版本在部分 Windows 系統上可能無法正常啟動的問題。（#522）
-- **Trae CN Credits：** 未使用的點數包可正常顯示餘額，並忽略沒有點數額度的功能權益。（#515）
-- **裝置 ID 重設：** 清除自訂裝置 ID 後，重新啟動時會恢復為依主機名稱自動產生的 ID，讓同步檢視繼續正確對應本機裝置。（#441）
+- **Tokscale 4.15.0：** 修正 DSH 用量的實際回應模型歸屬，以及 xAI 長上下文請求達到 200K Tokens 時成本估算偏低的問題。（#544）
+- **Windows 浮動小工具：** 修復小工具與工作列重疊時，即使啟用置頂仍可能被工作列遮擋的問題。（#541）
+- **Trae CN 設定：** 修正帳號設定步驟，改為從瀏覽器 Local Storage 複製 `Cloud-IDE-Token`；Device ID 仍為選填。（#553）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.49.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.49.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.49.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-Setup-0.49.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.49.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.49.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.50.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.50.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-Setup-0.50.0.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.50.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.AppImage)
 
 </details>
 
@@ -154,23 +163,26 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ko:start -->
 ### 추가
-- **Cursor 자동 감지 및 다중 계정:** 로컬 Cursor 데스크톱 앱에 로그인된 계정을 자동으로 감지하고 여러 저장 계정의 토큰 사용량을 합산해 추적하며, 계정별 한도를 관리할 수 있습니다. (#523)
-- **Volcengine Agent Plan:** Coding Plan과 함께 5시간·일일·주간·월간 할당량을 표시하며, Agent Plan이 다른 계정에 있으면 별도 자격 증명을 설정할 수 있습니다. (#490, #532)
-- **WSL의 Grok 한도:** Windows에서 실행 중인 WSL 배포판에 Grok 로그인이 있으면 해당 한도를 표시합니다. (#530)
+- **LM Studio 사용량:** LM Studio 서버 로그에 기록된 OpenAI 호환 `/v1/chat/completions` 및 `/v1/responses` 요청의 토큰 사용량을 추적합니다. (#546)
+- **Cursor Grok Bot 한도:** 로그인한 Cursor 계정에 Grok Bot 할당량이 포함되어 있으면 주간 한도를 표시합니다. (#543)
+- **Codex gpt-reserve 한도:** Codex가 `gpt-reserve`를 반환하면 한도 화면에 해당 한도 기간을 표시합니다. (#545)
+
+### 개선
+- **Cursor 한도:** 공식 `Cursor Models` 및 `Other Models` 풀을 사용하고 소진된 할당량을 계속 표시하며, 상한 또는 실제 지출이 있을 때만 온디맨드 지출을 표시합니다. (#543)
 
 ### 수정
-- **Windows 시작:** 일부 Windows 시스템에서 최근 버전이 정상적으로 시작되지 않을 수 있는 문제를 수정했습니다. (#522)
-- **Trae CN Credits:** 사용하지 않은 크레딧 팩의 잔액을 표시하고 크레딧 한도가 없는 기능 전용 권한은 제외합니다. (#515)
-- **기기 ID 재설정:** 사용자 지정 기기 ID를 지우면 재시작 후 호스트명 기반 자동 ID로 돌아가 동기화 화면에서 로컬 기기를 계속 올바르게 찾습니다. (#441)
+- **Tokscale 4.15.0:** DSH 사용량을 실제 응답 모델에 귀속하고, xAI 긴 컨텍스트 요청이 200K Tokens에 도달할 때 비용이 낮게 추정되던 문제를 수정했습니다. (#544)
+- **Windows 플로팅 위젯:** 항상 위로 설정한 위젯이 작업 표시줄 영역과 겹칠 때 뒤로 숨는 문제를 수정했습니다. (#541)
+- **Trae CN 설정:** 계정 설정 절차를 수정해 브라우저 Local Storage에서 `Cloud-IDE-Token`을 복사하도록 안내하며, Device ID는 선택 사항으로 유지됩니다. (#553)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.49.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.49.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.49.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-Setup-0.49.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.49.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.49.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.50.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.50.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-Setup-0.50.0.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.50.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.AppImage)
 
 </details>
 
@@ -183,23 +195,26 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **Cursorの自動検出と複数アカウント：** ローカルのCursorデスクトップアプリでサインイン中のアカウントを自動検出し、保存済みの複数アカウントのトークン使用量を合算して追跡しながら、アカウントごとの上限を管理できます。（#523）
-- **Volcengine Agent Plan：** Coding Planと並べて5時間・日次・週次・月次の割り当てを表示し、Agent Planが別アカウントにある場合は専用の認証情報も設定できます。（#490, #532）
-- **WSLのGrok上限：** Windowsで実行中のWSLディストリビューションにGrokのログイン情報がある場合も上限を表示します。（#530）
+- **LM Studioの使用量：** LM Studioのサーバーログに記録されたOpenAI互換の`/v1/chat/completions`および`/v1/responses`リクエストのトークン使用量を追跡します。（#546）
+- **Cursor Grok Botの上限：** サインイン中のCursorアカウントにGrok Botの割り当てが含まれる場合、週次上限を表示します。（#543）
+- **Codex gpt-reserveの上限：** Codexから`gpt-reserve`が返された場合、「上限」画面に対象の上限期間を表示します。（#545）
+
+### 改善
+- **Cursorの上限：** 公式の`Cursor Models`と`Other Models`のプールを使用し、使い切った割り当ても表示したまま、上限または実際の支出がある場合のみオンデマンド支出を表示します。（#543）
 
 ### 修正
-- **Windowsの起動：** 一部のWindows環境で最近のバージョンが正常に起動しないことがある問題を修正しました。（#522）
-- **Trae CN Credits：** 未使用のクレジットパックの残高を表示し、クレジット上限のない機能専用権限は除外します。（#515）
-- **デバイスIDのリセット：** カスタムのデバイスIDを消去すると、再起動後にホスト名ベースの自動IDへ戻り、同期画面でローカルデバイスを正しく照合できます。（#441）
+- **Tokscale 4.15.0：** DSHの使用量を実際の応答モデルに帰属させ、xAIの長いコンテキストリクエストが200K Tokensに達した際にコストが低く見積もられる問題を修正しました。（#544）
+- **Windowsのフローティングウィジェット：** タスクバー領域と重なったとき、常に手前に表示するウィジェットがタスクバーの背後に隠れる問題を修正しました。（#541）
+- **Trae CNの設定：** アカウント設定手順を修正し、ブラウザのLocal Storageから`Cloud-IDE-Token`をコピーする案内に変更しました。Device IDは引き続き任意です。（#553）
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.49.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.49.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.49.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-Setup-0.49.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.49.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.49.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.49.0/Token-Monitor-0.49.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.50.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.50.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-Setup-0.50.0.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.50.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.AppImage)
 
 </details>
 
