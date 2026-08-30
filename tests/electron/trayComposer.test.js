@@ -16,7 +16,8 @@ const {
   moveTrayLayoutItemByKey,
   periodItemPatch,
   syncTrayComposerSurfaces,
-  usageScopePatch
+  usageScopePatch,
+  watchDeviceScaleChanges
 } = require('../../src/electron/renderer/trayComposer');
 
 test('floating bubble bitmap height tracks CSS pixels at the current device scale', () => {
@@ -28,6 +29,57 @@ test('floating bubble bitmap height tracks CSS pixels at the current device scal
   assert.equal(floatingBubbleBitmapHeight(0), 24);
   assert.equal(floatingBubbleBitmapHeight('invalid'), 24);
   assert.equal(floatingBubbleBitmapHeight(1.5, 20), 30);
+});
+
+test('device scale watcher rearms its resolution query and notifies on DPR changes', () => {
+  const queries = [];
+  let ratio = 1.5;
+  let notifications = 0;
+  const matchMedia = (media) => {
+    const listeners = new Set();
+    const query = {
+      media,
+      addEventListener(type, listener) {
+        assert.equal(type, 'change');
+        listeners.add(listener);
+      },
+      removeEventListener(type, listener) {
+        assert.equal(type, 'change');
+        listeners.delete(listener);
+      },
+      dispatchChange() {
+        for (const listener of [...listeners]) listener({ matches: false, media });
+      },
+      listenerCount() {
+        return listeners.size;
+      }
+    };
+    queries.push(query);
+    return query;
+  };
+
+  const stop = watchDeviceScaleChanges({
+    matchMedia,
+    getDevicePixelRatio: () => ratio,
+    onChange: () => { notifications += 1; }
+  });
+
+  assert.equal(queries[0].media, '(resolution: 1.5dppx)');
+  assert.equal(queries[0].listenerCount(), 1);
+  assert.equal(notifications, 0);
+
+  ratio = 1;
+  queries[0].dispatchChange();
+  assert.equal(queries[0].listenerCount(), 0);
+  assert.equal(queries[1].media, '(resolution: 1dppx)');
+  assert.equal(queries[1].listenerCount(), 1);
+  assert.equal(notifications, 1);
+
+  stop();
+  assert.equal(queries[1].listenerCount(), 0);
+  queries[1].dispatchChange();
+  assert.equal(queries.length, 2);
+  assert.equal(notifications, 1);
 });
 
 function layoutWithIds(...ids) {

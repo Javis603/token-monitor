@@ -8604,6 +8604,13 @@ function refreshFloatingBubbleBitmapForDeviceScale() {
   if (bitmapHeight !== floatingBubbleRenderedBitmapHeight) renderFloatingBubbleContent();
 }
 
+const stopFloatingBubbleDeviceScaleWatcher = window.TokenMonitorTrayComposer.watchDeviceScaleChanges({
+  matchMedia: typeof window.matchMedia === 'function' ? (query) => window.matchMedia(query) : null,
+  getDevicePixelRatio: () => window.devicePixelRatio,
+  onChange: refreshFloatingBubbleBitmapForDeviceScale
+});
+window.addEventListener('unload', stopFloatingBubbleDeviceScaleWatcher, { once: true });
+
 const HOVER_REVEAL_DELAY_MS = 250;
 const HOVER_COLLAPSE_GRACE_MS = 200;
 let floatingBubbleHoverRevealTimer = null;

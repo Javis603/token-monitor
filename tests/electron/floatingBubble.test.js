@@ -429,6 +429,7 @@ test('generated floating bubble images use a device-scale-aware bitmap', () => {
   assert.match(renderBody, /trayDataUrlForMode\(mode, bitmapHeight,/);
   assert.doesNotMatch(renderBody, /trayDataUrlForMode\(mode, 44,/);
   assert.match(previewBody, /trayDataUrlForMode\(mode, currentFloatingBubbleBitmapHeight\(\),/);
+  assert.match(app, /watchDeviceScaleChanges\(\{[\s\S]*onChange:\s*refreshFloatingBubbleBitmapForDeviceScale/);
   assert.match(app, /window\.addEventListener\('resize',[\s\S]*refreshFloatingBubbleBitmapForDeviceScale\(\);/);
 });
 
