@@ -5436,6 +5436,9 @@ async function refreshCodexResetForecast(options = {}) {
   } finally {
     state.codexResetForecastBusy = false;
     if (state.breakdown === 'limits') renderLimits();
+    if (state.breakdown === 'limits' && visibleStatsSurface() === 'main') {
+      maybeFetchCodexResetForecast();
+    }
   }
 }
 

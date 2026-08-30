@@ -166,3 +166,55 @@ test('forecast refresh cadence follows the cache policy returned by the main pro
   assert.doesNotMatch(renderer, /age >= 15 \* 60 \* 1000/);
   assert.match(renderer, /setTimeout\(\(\) => \{[\s\S]*?state\.breakdown === 'limits' && visibleStatsSurface\(\) === 'main'/);
 });
+
+test('first forecast response immediately schedules its success or error cadence', async () => {
+  const start = app.indexOf('function clearCodexResetForecastRetryTimer');
+  const end = app.indexOf('\nfunction renderLimitProviderRow', start);
+  const source = app.slice(start, end);
+
+  async function scheduledDelayFor(result) {
+    const scheduled = [];
+    const state = {
+      settings: { codexResetForecastEnabled: true },
+      breakdown: 'limits',
+      codexResetForecast: null,
+      codexResetForecastBusy: false,
+      codexResetForecastRequestedAt: 0,
+      codexResetForecastRetryTimer: null
+    };
+    const api = vm.runInNewContext(`(() => { ${source}; return { maybeFetchCodexResetForecast }; })()`, {
+      Date: class FixedDate extends Date {
+        static now() { return 1_000_000; }
+      },
+      Number,
+      clearTimeout: () => {},
+      renderLimits: () => {},
+      setTimeout: (_callback, delay) => {
+        scheduled.push(delay);
+        return scheduled.length;
+      },
+      state,
+      visibleStatsSurface: () => 'main',
+      window: {
+        tokenMonitor: {
+          getCodexResetForecast: async () => result
+        }
+      }
+    });
+
+    api.maybeFetchCodexResetForecast();
+    await new Promise(setImmediate);
+    return scheduled;
+  }
+
+  assert.deepEqual(await scheduledDelayFor({
+    status: 'unavailable',
+    error: 'offline',
+    retryAfterMs: 30_000
+  }), [30_000]);
+  assert.deepEqual(await scheduledDelayFor({
+    status: 'active',
+    chancePercent: 75,
+    retryAfterMs: 15 * 60 * 1000
+  }), [15 * 60 * 1000]);
+});
