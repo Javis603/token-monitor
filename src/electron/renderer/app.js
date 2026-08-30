@@ -5418,13 +5418,20 @@ function clearCodexResetForecastRetryTimer() {
   state.codexResetForecastRetryTimer = null;
 }
 
+function renderCodexResetForecastUpdate() {
+  if (state.breakdown !== 'limits') return null;
+  const surface = visibleStatsSurface();
+  if (surface === 'main') renderLimits();
+  else if (!surface) statsRenderScheduler.request();
+  return surface;
+}
+
 async function refreshCodexResetForecast(options = {}) {
   if (state.settings?.codexResetForecastEnabled !== true || !window.tokenMonitor.getCodexResetForecast) return;
   if (state.codexResetForecastBusy) return;
   clearCodexResetForecastRetryTimer();
   state.codexResetForecastBusy = true;
   state.codexResetForecastRequestedAt = Date.now();
-  if (state.breakdown === 'limits') renderLimits();
   try {
     state.codexResetForecast = await window.tokenMonitor.getCodexResetForecast({ force: options.force === true });
   } catch (error) {
@@ -5435,10 +5442,7 @@ async function refreshCodexResetForecast(options = {}) {
     };
   } finally {
     state.codexResetForecastBusy = false;
-    if (state.breakdown === 'limits') renderLimits();
-    if (state.breakdown === 'limits' && visibleStatsSurface() === 'main') {
-      maybeFetchCodexResetForecast();
-    }
+    if (renderCodexResetForecastUpdate() === 'main') maybeFetchCodexResetForecast();
   }
 }
 

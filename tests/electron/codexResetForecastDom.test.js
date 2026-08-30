@@ -167,13 +167,15 @@ test('forecast refresh cadence follows the cache policy returned by the main pro
   assert.match(renderer, /setTimeout\(\(\) => \{[\s\S]*?state\.breakdown === 'limits' && visibleStatsSurface\(\) === 'main'/);
 });
 
-test('first forecast response immediately schedules its success or error cadence', async () => {
+test('first forecast response follows the active surface and schedules only on main', async () => {
   const start = app.indexOf('function clearCodexResetForecastRetryTimer');
   const end = app.indexOf('\nfunction renderLimitProviderRow', start);
   const source = app.slice(start, end);
 
-  async function scheduledDelayFor(result) {
+  async function settleForecast(result, surface = 'main') {
     const scheduled = [];
+    let renderCount = 0;
+    let schedulerRequests = 0;
     const state = {
       settings: { codexResetForecastEnabled: true },
       breakdown: 'limits',
@@ -188,13 +190,16 @@ test('first forecast response immediately schedules its success or error cadence
       },
       Number,
       clearTimeout: () => {},
-      renderLimits: () => {},
+      renderLimits: () => { renderCount += 1; },
       setTimeout: (_callback, delay) => {
         scheduled.push(delay);
         return scheduled.length;
       },
       state,
-      visibleStatsSurface: () => 'main',
+      statsRenderScheduler: {
+        request: () => { schedulerRequests += 1; }
+      },
+      visibleStatsSurface: () => surface,
       window: {
         tokenMonitor: {
           getCodexResetForecast: async () => result
@@ -204,17 +209,24 @@ test('first forecast response immediately schedules its success or error cadence
 
     api.maybeFetchCodexResetForecast();
     await new Promise(setImmediate);
-    return scheduled;
+    return { renderCount, scheduled, schedulerRequests };
   }
 
-  assert.deepEqual(await scheduledDelayFor({
+  assert.deepEqual(await settleForecast({
     status: 'unavailable',
     error: 'offline',
     retryAfterMs: 30_000
-  }), [30_000]);
-  assert.deepEqual(await scheduledDelayFor({
+  }), { renderCount: 1, scheduled: [30_000], schedulerRequests: 0 });
+  assert.deepEqual(await settleForecast({
     status: 'active',
     chancePercent: 75,
     retryAfterMs: 15 * 60 * 1000
-  }), [15 * 60 * 1000]);
+  }), { renderCount: 1, scheduled: [15 * 60 * 1000], schedulerRequests: 0 });
+
+  const hidden = await settleForecast({ status: 'unavailable', error: 'offline', retryAfterMs: 30_000 }, null);
+  assert.deepEqual(hidden, { renderCount: 0, scheduled: [], schedulerRequests: 1 });
+  for (const surface of ['settings', 'bubble']) {
+    const inactive = await settleForecast({ status: 'active', retryAfterMs: 15 * 60 * 1000 }, surface);
+    assert.deepEqual(inactive, { renderCount: 0, scheduled: [], schedulerRequests: 0 });
+  }
 });
