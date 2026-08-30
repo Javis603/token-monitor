@@ -5353,6 +5353,7 @@ function codexResetForecastTooltip(forecast) {
 function renderCodexResetForecast() {
   if (state.settings?.codexResetForecastEnabled !== true) return null;
   const forecast = state.codexResetForecast;
+  const expired = codexResetForecastExpired(forecast);
   const item = document.createElement('div');
   item.className = 'codex-reset-forecast';
   const openButton = document.createElement('button');
@@ -5378,7 +5379,7 @@ function renderCodexResetForecast() {
   if (state.codexResetForecastBusy && !forecast) {
     item.classList.add('is-loading');
     value.textContent = t('limits.codexResetForecast.loading');
-  } else if (forecast?.status === 'active') {
+  } else if (forecast?.status === 'active' && !expired) {
     const chance = forecast.chancePercent;
     value.textContent = Number.isFinite(chance)
       ? t('limits.codexResetForecast.chance', { percent: codexResetForecastPercent(chance) })
@@ -5391,7 +5392,7 @@ function renderCodexResetForecast() {
         : (expiresAt || ''),
       forecast.stale ? t('limits.codexResetForecast.stale') : ''
     ].filter(Boolean).join(' · ');
-  } else if (forecast?.status === 'inactive') {
+  } else if (forecast?.status === 'inactive' || expired) {
     value.textContent = t('limits.codexResetForecast.noSignal');
     detail.textContent = forecast.stale ? t('limits.codexResetForecast.stale') : '';
   } else {
@@ -5411,6 +5412,12 @@ function renderCodexResetForecast() {
 function appendCodexResetForecast(parent) {
   const node = renderCodexResetForecast();
   if (node) parent.append(node);
+}
+
+function codexResetForecastExpired(forecast, nowMs = Date.now()) {
+  if (forecast?.status !== 'active') return false;
+  const expiresAtMs = Date.parse(forecast.expiresAt || '');
+  return Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs;
 }
 
 function clearCodexResetForecastRetryTimer() {
@@ -5451,20 +5458,27 @@ function maybeFetchCodexResetForecast() {
     clearCodexResetForecastRetryTimer();
     return;
   }
-  const age = Date.now() - Number(state.codexResetForecastRequestedAt || 0);
+  const nowMs = Date.now();
   const retryAfterMs = Number(state.codexResetForecast?.retryAfterMs);
   const refreshMs = Number.isFinite(retryAfterMs) && retryAfterMs > 0
     ? retryAfterMs
     : (state.codexResetForecast?.error ? 30 * 1000 : 15 * 60 * 1000);
+  const checkedAtMs = Date.parse(state.codexResetForecast?.checkedAt || '');
+  const fallbackBaseMs = Number(state.codexResetForecastRequestedAt || nowMs);
+  const baseMs = Number.isFinite(checkedAtMs) ? checkedAtMs : fallbackBaseMs;
+  const remainingMs = Math.max(0, baseMs + refreshMs - nowMs);
   if (state.codexResetForecastBusy) return;
-  if (!state.codexResetForecast || age >= refreshMs) {
+  if (!state.codexResetForecast || remainingMs <= 0) {
     clearCodexResetForecastRetryTimer();
     void refreshCodexResetForecast();
   } else if (!state.codexResetForecastRetryTimer) {
     state.codexResetForecastRetryTimer = setTimeout(() => {
       state.codexResetForecastRetryTimer = null;
-      if (state.breakdown === 'limits' && visibleStatsSurface() === 'main') maybeFetchCodexResetForecast();
-    }, Math.max(0, refreshMs - age));
+      if (state.breakdown === 'limits' && visibleStatsSurface() === 'main') {
+        if (codexResetForecastExpired(state.codexResetForecast)) renderCodexResetForecastUpdate();
+        maybeFetchCodexResetForecast();
+      }
+    }, remainingMs);
   }
 }
 

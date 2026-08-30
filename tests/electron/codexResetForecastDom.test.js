@@ -134,6 +134,21 @@ test('forecast tooltip safely stays absent before the first response arrives', (
   assert.match(renderer, /const forecastInfo = codexResetForecastTooltip\(forecast\);\s*if \(forecastInfo\) title\.append\(forecastInfo\);/);
 });
 
+test('renderer hides an active forecast at its expiry boundary', () => {
+  const start = app.indexOf('function codexResetForecastExpired');
+  const end = app.indexOf('\nfunction clearCodexResetForecastRetryTimer', start);
+  const expired = vm.runInNewContext(`(${app.slice(start, end)})`, { Date, Number });
+  const forecast = { status: 'active', expiresAt: '2026-08-30T04:01:00.000Z' };
+
+  assert.equal(expired(forecast, Date.parse('2026-08-30T04:00:59.999Z')), false);
+  assert.equal(expired(forecast, Date.parse('2026-08-30T04:01:00.000Z')), true);
+  assert.equal(expired({ status: 'inactive', expiresAt: forecast.expiresAt }, Date.parse('2026-08-30T04:01:00.000Z')), false);
+
+  const renderer = app.slice(app.indexOf('function renderCodexResetForecast'), app.indexOf('function appendCodexResetForecast'));
+  assert.match(renderer, /forecast\?\.status === 'active' && !expired/);
+  assert.match(renderer, /forecast\?\.status === 'inactive' \|\| expired/);
+});
+
 test('forecast source author is displayed as an X handle without duplicating @', () => {
   const start = app.indexOf('function codexResetForecastSourceAuthor');
   const end = app.indexOf('\nfunction codexResetForecastPercent', start);
@@ -162,13 +177,14 @@ test('forecast refresh cadence follows the cache policy returned by the main pro
   const renderer = app.slice(app.indexOf('function maybeFetchCodexResetForecast'), app.indexOf('\nfunction renderLimitProviderRow'));
   assert.match(renderer, /const retryAfterMs = Number\(state\.codexResetForecast\?\.retryAfterMs\);/);
   assert.match(renderer, /state\.codexResetForecast\?\.error \? 30 \* 1000 : 15 \* 60 \* 1000/);
-  assert.match(renderer, /age >= refreshMs/);
-  assert.doesNotMatch(renderer, /age >= 15 \* 60 \* 1000/);
+  assert.match(renderer, /const checkedAtMs = Date\.parse\(state\.codexResetForecast\?\.checkedAt \|\| ''\);/);
+  assert.match(renderer, /const remainingMs = Math\.max\(0, baseMs \+ refreshMs - nowMs\);/);
+  assert.doesNotMatch(renderer, /const age =/);
   assert.match(renderer, /setTimeout\(\(\) => \{[\s\S]*?state\.breakdown === 'limits' && visibleStatsSurface\(\) === 'main'/);
 });
 
 test('first forecast response follows the active surface and schedules only on main', async () => {
-  const start = app.indexOf('function clearCodexResetForecastRetryTimer');
+  const start = app.indexOf('function codexResetForecastExpired');
   const end = app.indexOf('\nfunction renderLimitProviderRow', start);
   const source = app.slice(start, end);
 
@@ -229,4 +245,85 @@ test('first forecast response follows the active surface and schedules only on m
     const inactive = await settleForecast({ status: 'active', retryAfterMs: 15 * 60 * 1000 }, surface);
     assert.deepEqual(inactive, { renderCount: 0, scheduled: [], schedulerRequests: 0 });
   }
+});
+
+test('forecast deadline stays anchored to response settlement across latency and an early cache hit', async () => {
+  const start = app.indexOf('function codexResetForecastExpired');
+  const end = app.indexOf('\nfunction renderLimitProviderRow', start);
+  const source = app.slice(start, end);
+  const scheduled = [];
+  let nowMs = 1_000_000;
+  let calls = 0;
+  let renderCount = 0;
+  const cached = {
+    status: 'active',
+    chancePercent: 75,
+    checkedAt: new Date(1_001_000).toISOString(),
+    expiresAt: new Date(1_060_000).toISOString(),
+    retryAfterMs: 59_000
+  };
+  const state = {
+    settings: { codexResetForecastEnabled: true },
+    breakdown: 'limits',
+    codexResetForecast: null,
+    codexResetForecastBusy: false,
+    codexResetForecastRequestedAt: 0,
+    codexResetForecastRetryTimer: null
+  };
+  class MutableDate extends Date {
+    constructor(value) {
+      super(value === undefined ? nowMs : value);
+    }
+
+    static now() {
+      return nowMs;
+    }
+  }
+  const api = vm.runInNewContext(`(() => { ${source}; return { maybeFetchCodexResetForecast, refreshCodexResetForecast }; })()`, {
+    Date: MutableDate,
+    Math,
+    Number,
+    clearTimeout: () => {},
+    renderLimits: () => { renderCount += 1; },
+    setTimeout: (callback, delay) => {
+      scheduled.push({ callback, delay });
+      return scheduled.length;
+    },
+    state,
+    statsRenderScheduler: { request: () => {} },
+    visibleStatsSurface: () => 'main',
+    window: {
+      tokenMonitor: {
+        getCodexResetForecast: async () => {
+          calls += 1;
+          if (calls === 1) {
+            nowMs += 1000;
+            return cached;
+          }
+          if (calls === 2) return cached;
+          return {
+            status: 'inactive',
+            checkedAt: new Date(nowMs).toISOString(),
+            retryAfterMs: 15 * 60 * 1000
+          };
+        }
+      }
+    }
+  });
+
+  api.maybeFetchCodexResetForecast();
+  await new Promise(setImmediate);
+  assert.equal(scheduled.at(-1).delay, 59_000);
+
+  nowMs = 1_059_000;
+  await api.refreshCodexResetForecast();
+  assert.equal(calls, 2);
+  assert.equal(scheduled.at(-1).delay, 1000);
+
+  nowMs = 1_060_000;
+  scheduled.at(-1).callback();
+  await new Promise(setImmediate);
+  assert.equal(calls, 3);
+  assert.equal(state.codexResetForecast.status, 'inactive');
+  assert.ok(renderCount >= 4, 'expiry renders no-signal before and after the refresh settles');
 });
