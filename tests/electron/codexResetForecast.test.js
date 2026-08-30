@@ -81,6 +81,28 @@ test('normalizes the public codex-resets v1 status schema', () => {
   assert.equal(result.latestResetAt, '2026-08-29T20:43:34.000Z');
 });
 
+test('treats the public active_watch null shape as no active signal', async () => {
+  const payload = {
+    data: {
+      latest_reset: { announced_at: '2026-08-29T20:43:34.000Z' },
+      active_watch: null
+    }
+  };
+  const result = normalizeCodexResetForecast(payload, { checkedAt: '2026-08-30T04:00:00Z' });
+
+  assert.equal(result.status, 'inactive');
+  assert.equal(result.latestResetAt, '2026-08-29T20:43:34.000Z');
+
+  const client = createCodexResetForecastClient({
+    now: () => Date.parse('2026-08-30T04:00:00Z'),
+    fetchImpl: async () => ({ ok: true, json: async () => payload })
+  });
+  const cached = await client.getForecast();
+  assert.equal(cached.status, 'inactive');
+  assert.equal(cached.error, undefined);
+  assert.equal(cached.retryAfterMs, 15 * 60 * 1000);
+});
+
 test('keeps explicit percent fields distinct from ratio fields', () => {
   assert.equal(normalizeCodexResetForecast({ forecast: { reset_chance_percent: 1 } }).chancePercent, 1);
   assert.equal(normalizeCodexResetForecast({ forecast: { reset_chance_percent: 0.5 } }).chancePercent, 0.5);
@@ -113,10 +135,40 @@ test('keeps a forecast expiry separate from an expected reset time', () => {
       active: true,
       expires_at: '2026-08-31T07:00:00Z'
     }
-  });
+  }, { checkedAt: '2026-08-30T04:00:00Z' });
 
   assert.equal(result.predictedAt, '');
   assert.equal(result.expiresAt, '2026-08-31T07:00:00.000Z');
+});
+
+test('treats an expired forecast as inactive at the expiry boundary', () => {
+  const payload = {
+    active_watch: {
+      active: true,
+      reset_chance_percent: 75,
+      observed_at: '2026-08-30T03:00:00Z',
+      expires_at: '2026-08-30T04:00:00Z'
+    }
+  };
+
+  assert.equal(normalizeCodexResetForecast(payload, { checkedAt: '2026-08-30T03:59:59.999Z' }).status, 'active');
+  assert.equal(normalizeCodexResetForecast(payload, { checkedAt: '2026-08-30T04:00:00.000Z' }).status, 'inactive');
+});
+
+test('treats a watch observed before the latest reset as inactive', () => {
+  const result = normalizeCodexResetForecast({
+    data: {
+      latest_reset: { announced_at: '2026-08-30T04:00:00Z' },
+      active_watch: {
+        active: true,
+        reset_chance_percent: 75,
+        observed_at: '2026-08-30T04:00:00Z',
+        expires_at: '2026-08-30T05:00:00Z'
+      }
+    }
+  }, { checkedAt: '2026-08-30T04:01:00Z' });
+
+  assert.equal(result.status, 'inactive');
 });
 
 test('returns inactive for an explicit closed watch', () => {
@@ -177,6 +229,80 @@ test('client keeps successful forecasts for 15 minutes by default', async () => 
   assert.equal(calls, 2);
 });
 
+test('client refreshes when an active forecast expires before the default cache boundary', async () => {
+  let currentTime = Date.parse('2026-08-30T04:00:00Z');
+  let calls = 0;
+  const client = createCodexResetForecastClient({
+    now: () => currentTime,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => (++calls === 1
+        ? {
+            data: {
+              active_watch: {
+                active: true,
+                reset_chance_percent: 75,
+                observed_at: '2026-08-30T03:00:00Z',
+                expires_at: '2026-08-30T04:01:00Z'
+              }
+            }
+          }
+        : { data: { active_watch: null } })
+    })
+  });
+
+  const first = await client.getForecast();
+  assert.equal(first.status, 'active');
+  assert.equal(first.retryAfterMs, 60 * 1000);
+
+  currentTime += 60 * 1000 - 1;
+  assert.equal((await client.getForecast()).status, 'active');
+  assert.equal(calls, 1);
+
+  currentTime += 1;
+  assert.equal((await client.getForecast()).status, 'inactive');
+  assert.equal(calls, 2);
+});
+
+test('client evaluates validity when the response settles, not when the request starts', async () => {
+  let currentTime = Date.parse('2026-08-30T04:00:00Z');
+  const client = createCodexResetForecastClient({
+    now: () => currentTime,
+    fetchImpl: async () => {
+      currentTime += 1000;
+      return {
+        ok: true,
+        json: async () => ({
+          data: {
+            active_watch: {
+              active: true,
+              reset_chance_percent: 75,
+              observed_at: '2026-08-30T03:00:00Z',
+              expires_at: '2026-08-30T04:00:00.500Z'
+            }
+          }
+        })
+      };
+    }
+  });
+
+  assert.equal((await client.getForecast()).status, 'inactive');
+});
+
+test('client rejects redirects at the fixed third-party network boundary', async () => {
+  let requestInit = null;
+  const client = createCodexResetForecastClient({
+    fetchImpl: async (_url, init) => {
+      requestInit = init;
+      return { ok: true, json: async () => ({ data: { active_watch: null } }) };
+    }
+  });
+
+  await client.getForecast();
+  assert.equal(requestInit.redirect, 'error');
+  assert.equal(requestInit.credentials, 'omit');
+});
+
 test('client caches success and preserves it as stale after a later failure', async () => {
   let currentTime = Date.parse('2026-08-30T04:00:00Z');
   let calls = 0;
@@ -206,6 +332,47 @@ test('client caches success and preserves it as stale after a later failure', as
   assert.equal(stale.error, 'offline');
   assert.equal(stale.errorKind, 'request');
   assert.equal(stale.retryAfterMs, 100);
+});
+
+test('client never keeps an expired last-good forecast active', async () => {
+  let currentTime = Date.parse('2026-08-30T04:00:00Z');
+  let calls = 0;
+  const client = createCodexResetForecastClient({
+    now: () => currentTime,
+    errorCacheMs: 30 * 1000,
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls > 1) throw new Error('offline');
+      return {
+        ok: true,
+        json: async () => ({
+          data: {
+            active_watch: {
+              active: true,
+              reset_chance_percent: 75,
+              observed_at: '2026-08-30T03:00:00Z',
+              expires_at: '2026-08-30T04:00:01Z'
+            }
+          }
+        })
+      };
+    }
+  });
+
+  const first = await client.getForecast();
+  assert.equal(first.retryAfterMs, 1000);
+
+  currentTime += 500;
+  const staleBeforeExpiry = await client.getForecast({ force: true });
+  assert.equal(staleBeforeExpiry.status, 'active');
+  assert.equal(staleBeforeExpiry.stale, true);
+  assert.equal(staleBeforeExpiry.retryAfterMs, 500);
+
+  currentTime += 500;
+  const staleAtExpiry = await client.getForecast();
+  assert.equal(staleAtExpiry.status, 'inactive');
+  assert.equal(staleAtExpiry.stale, true);
+  assert.equal(staleAtExpiry.retryAfterMs, 30 * 1000);
 });
 
 test('client treats an unrecognized successful response as a short-lived failure', async () => {

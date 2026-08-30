@@ -52,13 +52,47 @@ function isoDate(value) {
   return Number.isNaN(date.getTime()) ? '' : date.toISOString();
 }
 
+function dateMs(value) {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function forecastAtTime(forecast, nowMs) {
+  if (forecast?.status !== 'active') return forecast;
+  const expiresAtMs = dateMs(forecast.expiresAt);
+  const observedAtMs = dateMs(forecast.observedAt);
+  const latestResetAtMs = dateMs(forecast.latestResetAt);
+  const expired = expiresAtMs !== null && expiresAtMs <= nowMs;
+  const superseded = observedAtMs !== null
+    && latestResetAtMs !== null
+    && latestResetAtMs >= observedAtMs;
+  return expired || superseded ? { ...forecast, status: 'inactive' } : forecast;
+}
+
+function cacheDurationForForecast(forecast, nowMs, maximumMs) {
+  if (forecast?.status !== 'active') return maximumMs;
+  const expiresAtMs = dateMs(forecast.expiresAt);
+  if (expiresAtMs === null) return maximumMs;
+  return Math.min(maximumMs, Math.max(0, expiresAtMs - nowMs));
+}
+
 function normalizeCodexResetForecast(payload, options = {}) {
   const checkedAt = options.checkedAt || new Date().toISOString();
+  const checkedAtMs = Date.parse(checkedAt);
+  const nowMs = Number.isFinite(options.nowMs)
+    ? Number(options.nowMs)
+    : (Number.isFinite(checkedAtMs) ? checkedAtMs : Date.now());
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return { status: 'unavailable', checkedAt, pageUrl: CODEX_RESET_FORECAST_PAGE_URL };
   }
 
   const data = objectValue(payload.data, payload);
+  const explicitlyNoActiveWatch = [data, payload].some((container) => (
+    Object.hasOwn(container, 'activeWatch') && container.activeWatch === null
+  ) || (
+    Object.hasOwn(container, 'active_watch') && container.active_watch === null
+  ));
   const watch = objectValue(
     data.activeWatch,
     data.active_watch,
@@ -185,7 +219,7 @@ function normalizeCodexResetForecast(payload, options = {}) {
     source.username
   ) || '').trim().slice(0, 80);
   const hasPrediction = chancePercent !== null || Boolean(predictedAt);
-  const recognized = explicitlyActive !== null || hasPrediction;
+  const recognized = explicitlyNoActiveWatch || explicitlyActive !== null || hasPrediction;
   if (!recognized) {
     return {
       status: 'unavailable',
@@ -196,9 +230,11 @@ function normalizeCodexResetForecast(payload, options = {}) {
       pageUrl: CODEX_RESET_FORECAST_PAGE_URL
     };
   }
-  const active = explicitlyActive === null ? hasPrediction : explicitlyActive;
+  const active = explicitlyNoActiveWatch
+    ? false
+    : (explicitlyActive === null ? hasPrediction : explicitlyActive);
 
-  return {
+  return forecastAtTime({
     status: active ? 'active' : 'inactive',
     chancePercent,
     predictedAt,
@@ -208,7 +244,7 @@ function normalizeCodexResetForecast(payload, options = {}) {
     latestResetAt,
     checkedAt,
     pageUrl: CODEX_RESET_FORECAST_PAGE_URL
-  };
+  }, nowMs);
 }
 
 async function fetchJsonWithTimeout(fetchImpl, url, timeoutMs) {
@@ -216,7 +252,8 @@ async function fetchJsonWithTimeout(fetchImpl, url, timeoutMs) {
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   const init = {
     headers: { Accept: 'application/json', 'User-Agent': USER_AGENT },
-    credentials: 'omit'
+    credentials: 'omit',
+    redirect: 'error'
   };
   if (controller) init.signal = controller.signal;
   try {
@@ -242,31 +279,37 @@ function createCodexResetForecastClient(options = {}) {
   async function getForecast({ force = false } = {}) {
     const currentTime = Number(now());
     if (!force && cache && currentTime < cacheUntil) return cache;
-    const checkedAt = new Date(currentTime).toISOString();
     try {
       const payload = await fetchJsonWithTimeout(fetchImpl, endpoint, timeoutMs);
-      const normalized = normalizeCodexResetForecast(payload, { checkedAt });
+      const responseTime = Number(now());
+      const checkedAt = new Date(responseTime).toISOString();
+      const normalized = normalizeCodexResetForecast(payload, { checkedAt, nowMs: responseTime });
       if (normalized.status === 'unavailable') {
         const error = new Error('Unrecognized forecast response');
         error.code = 'INVALID_RESPONSE';
         throw error;
       }
-      cache = { ...normalized, retryAfterMs: cacheMs };
+      const successCacheMs = cacheDurationForForecast(normalized, responseTime, cacheMs);
+      cache = { ...normalized, retryAfterMs: successCacheMs };
       lastGood = cache;
-      cacheUntil = currentTime + cacheMs;
+      cacheUntil = responseTime + successCacheMs;
     } catch (error) {
+      const failureTime = Number(now());
+      const checkedAt = new Date(failureTime).toISOString();
       const errorKind = error?.code === 'INVALID_RESPONSE' ? 'invalid-response' : 'request';
-      cache = lastGood
-        ? { ...lastGood, stale: true, checkedAt, error: error.message, errorKind, retryAfterMs: errorCacheMs }
+      const fallback = forecastAtTime(lastGood, failureTime);
+      const retryAfterMs = cacheDurationForForecast(fallback, failureTime, errorCacheMs);
+      cache = fallback
+        ? { ...fallback, stale: true, checkedAt, error: error.message, errorKind, retryAfterMs }
         : {
             status: 'unavailable',
             checkedAt,
             pageUrl: CODEX_RESET_FORECAST_PAGE_URL,
             error: error.message,
             errorKind,
-            retryAfterMs: errorCacheMs
+            retryAfterMs
           };
-      cacheUntil = currentTime + errorCacheMs;
+      cacheUntil = failureTime + retryAfterMs;
     }
     return cache;
   }
