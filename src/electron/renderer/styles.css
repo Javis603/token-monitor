@@ -3846,6 +3846,114 @@ html.is-windows .settings-panel select option {
 .limit-row-group {
   gap: 8px;
 }
+.codex-reset-forecast {
+  position: relative;
+  display: grid;
+  width: 100%;
+  gap: 3px;
+  padding: 8px 0 0;
+  color: var(--muted);
+}
+.limit-row:has(> .codex-reset-forecast) {
+  padding-bottom: 7px;
+}
+.codex-reset-forecast-open {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.codex-reset-forecast-head {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  pointer-events: none;
+}
+.codex-reset-forecast-title {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+}
+.codex-reset-forecast-label {
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+}
+.codex-reset-forecast-value {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codex-reset-forecast-detail {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  font-size: 9px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.codex-reset-forecast:hover :is(.codex-reset-forecast-label, .codex-reset-forecast-value),
+.codex-reset-forecast:has(.codex-reset-forecast-open:focus-visible) :is(.codex-reset-forecast-label, .codex-reset-forecast-value) {
+  color: var(--accent);
+}
+.codex-reset-forecast:has(.codex-reset-forecast-open:focus-visible) {
+  outline: 2px solid rgba(var(--accent-rgb), 0.5);
+  outline-offset: 3px;
+}
+.codex-reset-forecast-info-wrap {
+  z-index: 2;
+  pointer-events: auto;
+}
+.codex-reset-forecast-info-wrap .limit-detail-tooltip {
+  right: auto;
+  left: -1px;
+  width: max-content;
+  max-width: min(230px, calc(100vw - 48px));
+  grid-template-columns: max-content minmax(0, 1fr);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.2;
+  text-align: left;
+}
+.codex-reset-forecast-info-wrap .limit-detail-tooltip::after {
+  right: auto;
+  left: 6px;
+}
+.codex-reset-forecast-info-wrap .limit-detail-tooltip-row span:last-child {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.codex-reset-forecast-info-wrap .limit-detail-tooltip.is-below {
+  top: calc(100% + 5px);
+  bottom: auto;
+}
+.codex-reset-forecast-info-wrap .limit-detail-tooltip.is-below::after {
+  top: -4px;
+  bottom: auto;
+  border-top: 1px solid rgba(var(--line-rgb), 0.22);
+  border-right: none;
+  border-bottom: none;
+  border-left: 1px solid rgba(var(--line-rgb), 0.22);
+}
+.codex-reset-forecast.is-loading .codex-reset-forecast-value,
+.codex-reset-forecast.is-unavailable .codex-reset-forecast-value {
+  color: var(--muted);
+}
 /* Spacing lives on the rows, not here, so each account can carry its own
    separator rule in the gap it opens above itself. */
 .limit-account-list {
@@ -4012,7 +4120,8 @@ html.is-windows .limit-live-badge {
   margin-top: 10px;
   padding-top: 10px;
 }
-.limit-account-row + .limit-account-row::before {
+.limit-account-row + .limit-account-row::before,
+.limit-row-group > .codex-reset-forecast::before {
   position: absolute;
   top: 0;
   right: 0;
@@ -4269,6 +4378,21 @@ html.is-windows .limit-live-badge {
   opacity: 0.54;
   text-align: right;
   white-space: nowrap;
+}
+.codex-reset-forecast-disclaimer {
+  grid-column: 1 / -1;
+  max-width: 210px;
+  margin-top: 2px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.16);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 400;
+  line-height: 1.35;
+  opacity: 0.66;
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: normal;
 }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .limit-detail-tooltip {

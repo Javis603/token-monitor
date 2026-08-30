@@ -318,6 +318,9 @@ function normalizeInitialViewValue(value, allowed, fallback) {
 
 const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.toolDetailMode = 'tokens';
+state.codexResetForecast = null;
+state.codexResetForecastBusy = false;
+state.codexResetForecastRequestedAt = 0;
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
@@ -5224,6 +5227,213 @@ function renderProviderWindows(provider, color) {
   return windows;
 }
 
+function codexResetForecastDate(value, options = {}) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+  const locale = options.locale || currentLocale();
+  const timeZone = options.timeZone;
+  const dayNumber = (input) => {
+    const parts = new Intl.DateTimeFormat('en-US-u-ca-gregory-nu-latn', {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      ...(timeZone ? { timeZone } : {})
+    }).formatToParts(input);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day));
+  };
+  const dayDelta = Math.round((dayNumber(date) - dayNumber(new Date(nowMs))) / 86_400_000);
+  if (dayDelta >= -1 && dayDelta <= 1) {
+    const time = new Intl.DateTimeFormat(locale, {
+      hour: 'numeric',
+      minute: '2-digit',
+      ...(locale.startsWith('zh') ? { hourCycle: 'h23' } : {}),
+      ...(timeZone ? { timeZone } : {})
+    }).format(date);
+    const relativeDay = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(dayDelta, 'day');
+    return `${relativeDay} ${time}`;
+  }
+  return expiryDateLabel(date);
+}
+
+function codexResetForecastTimeUntil(value, options = {}) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+  const remainingMs = date.getTime() - nowMs;
+  if (remainingMs <= 0) return '';
+  const locale = options.locale || currentLocale();
+  const hours = remainingMs / 3_600_000;
+  const unit = hours >= 48 ? 'day' : (hours >= 1 ? 'hour' : 'minute');
+  const divisor = unit === 'day' ? 86_400_000 : (unit === 'hour' ? 3_600_000 : 60_000);
+  const amount = Math.max(1, Math.round(remainingMs / divisor));
+  const duration = new Intl.NumberFormat(locale, {
+    style: 'unit',
+    unit,
+    unitDisplay: 'long'
+  }).format(amount);
+  return t('limits.codexResetForecast.approximately', { duration });
+}
+
+function codexResetForecastAge(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return formatAgo(Math.max(0, Date.now() - date.getTime()));
+}
+
+function codexResetForecastSourceAuthor(value) {
+  const author = String(value || '').trim().replace(/^@+/, '');
+  return author ? `@${author}` : '';
+}
+
+function positionCodexResetForecastTooltip(wrap) {
+  const tooltip = wrap?.querySelector('.limit-detail-tooltip');
+  const clip = wrap?.closest('.limits-panel');
+  if (!tooltip || !clip) return;
+  const roomAbove = wrap.getBoundingClientRect().top - clip.getBoundingClientRect().top;
+  tooltip.classList.toggle('is-below', roomAbove < tooltip.offsetHeight + 5);
+}
+
+function codexResetForecastTooltip(forecast) {
+  const entries = [];
+  const disclaimer = t('limits.codexResetForecast.disclaimer');
+  const latestReset = codexResetForecastDate(forecast?.latestResetAt);
+  if (latestReset) {
+    const age = codexResetForecastAge(forecast.latestResetAt);
+    entries.push([t('limits.codexResetForecast.lastReset'), [latestReset, age].filter(Boolean).join(' · ')]);
+  }
+  const source = [
+    codexResetForecastSourceAuthor(forecast?.sourceAuthor),
+    codexResetForecastAge(forecast?.observedAt)
+  ].filter(Boolean).join(' · ');
+  if (source) entries.push([t('limits.codexResetForecast.sourceSignal'), source]);
+  const expiresAt = codexResetForecastDate(forecast?.expiresAt);
+  const expiresIn = codexResetForecastTimeUntil(forecast?.expiresAt);
+  if (expiresAt) {
+    entries.push([
+      t('limits.codexResetForecast.expiresLabel'),
+      [expiresAt, expiresIn].filter(Boolean).join(' · ')
+    ]);
+  }
+  if (forecast?.error) {
+    entries.push([
+      t('limits.codexResetForecast.connectionFailed'),
+      t('limits.codexResetForecast.connectionHelp')
+    ]);
+    const lastAttempt = codexResetForecastAge(forecast.checkedAt);
+    if (lastAttempt) entries.push([t('limits.codexResetForecast.lastAttempt'), lastAttempt]);
+  }
+  if (entries.length === 0) return null;
+  const info = limitDetailInfoNode(
+    entries,
+    'codex-reset-forecast-info-wrap',
+    [...entries.map(([label, value]) => `${label}: ${value}`), disclaimer].join(', ')
+  );
+  const tooltip = info.querySelector('.limit-detail-tooltip');
+  if (tooltip) {
+    const footer = document.createElement('span');
+    footer.className = 'codex-reset-forecast-disclaimer';
+    footer.textContent = disclaimer;
+    tooltip.append(footer);
+  }
+  const position = () => positionCodexResetForecastTooltip(info);
+  info.addEventListener('pointerenter', position);
+  info.addEventListener('focusin', position);
+  return info;
+}
+
+function renderCodexResetForecast() {
+  if (state.settings?.codexResetForecastEnabled !== true) return null;
+  const forecast = state.codexResetForecast;
+  const item = document.createElement('div');
+  item.className = 'codex-reset-forecast';
+  const openButton = document.createElement('button');
+  openButton.type = 'button';
+  openButton.className = 'codex-reset-forecast-open';
+  openButton.addEventListener('click', () => window.tokenMonitor.openExternal?.('https://codex-resets.com/'));
+
+  const head = document.createElement('span');
+  head.className = 'codex-reset-forecast-head';
+  const title = document.createElement('span');
+  title.className = 'codex-reset-forecast-title';
+  const label = document.createElement('span');
+  label.className = 'codex-reset-forecast-label';
+  label.textContent = t('limits.codexResetForecast.title');
+  title.append(label);
+  const forecastInfo = codexResetForecastTooltip(forecast);
+  if (forecastInfo) title.append(forecastInfo);
+  const value = document.createElement('span');
+  value.className = 'codex-reset-forecast-value';
+
+  const detail = document.createElement('span');
+  detail.className = 'codex-reset-forecast-detail';
+  if (state.codexResetForecastBusy && !forecast) {
+    item.classList.add('is-loading');
+    value.textContent = t('limits.codexResetForecast.loading');
+  } else if (forecast?.status === 'active') {
+    const chance = forecast.chancePercent;
+    value.textContent = Number.isFinite(chance)
+      ? t('limits.codexResetForecast.chance', { percent: Math.round(chance) })
+      : t('limits.codexResetForecast.signal');
+    const predictedAt = codexResetForecastDate(forecast.predictedAt);
+    const expiresAt = codexResetForecastDate(forecast.expiresAt);
+    detail.textContent = [
+      predictedAt
+        ? t('limits.codexResetForecast.expectedReset', { date: predictedAt })
+        : (expiresAt ? t('limits.codexResetForecast.expires', { date: expiresAt }) : ''),
+      forecast.stale ? t('limits.codexResetForecast.stale') : ''
+    ].filter(Boolean).join(' · ');
+  } else if (forecast?.status === 'inactive') {
+    value.textContent = t('limits.codexResetForecast.noSignal');
+    detail.textContent = forecast.stale ? t('limits.codexResetForecast.stale') : '';
+  } else {
+    item.classList.add('is-unavailable');
+    value.textContent = forecast?.error
+      ? t('limits.codexResetForecast.connectionFailed')
+      : t('limits.codexResetForecast.unavailable');
+  }
+
+  head.append(title, value);
+  item.append(openButton, head, detail);
+  openButton.title = t('limits.codexResetForecast.openSource');
+  openButton.setAttribute('aria-label', [label.textContent, value.textContent, detail.textContent, t('limits.codexResetForecast.openSource')].filter(Boolean).join(', '));
+  return item;
+}
+
+function appendCodexResetForecast(parent) {
+  const node = renderCodexResetForecast();
+  if (node) parent.append(node);
+}
+
+async function refreshCodexResetForecast(options = {}) {
+  if (state.settings?.codexResetForecastEnabled !== true || !window.tokenMonitor.getCodexResetForecast) return;
+  if (state.codexResetForecastBusy) return;
+  state.codexResetForecastBusy = true;
+  state.codexResetForecastRequestedAt = Date.now();
+  if (state.breakdown === 'limits') renderLimits();
+  try {
+    state.codexResetForecast = await window.tokenMonitor.getCodexResetForecast({ force: options.force === true });
+  } catch (error) {
+    state.codexResetForecast = {
+      status: 'unavailable',
+      checkedAt: new Date().toISOString(),
+      error: error.message
+    };
+  } finally {
+    state.codexResetForecastBusy = false;
+    if (state.breakdown === 'limits') renderLimits();
+  }
+}
+
+function maybeFetchCodexResetForecast() {
+  if (state.settings?.codexResetForecastEnabled !== true) return;
+  const age = Date.now() - Number(state.codexResetForecastRequestedAt || 0);
+  if (!state.codexResetForecastBusy && (!state.codexResetForecast || age >= 5 * 60 * 1000)) {
+    void refreshCodexResetForecast();
+  }
+}
+
 function renderLimitProviderRow(id, label, provider, color, options = {}) {
   const row = document.createElement('div');
   const classes = ['limit-row'];
@@ -5234,6 +5444,7 @@ function renderLimitProviderRow(id, label, provider, color, options = {}) {
     renderLimitProviderHead(id, label, provider, color, options),
     renderProviderWindows(provider, color)
   );
+  if (id === 'codex' && !options.accountRow) appendCodexResetForecast(row);
   return row;
 }
 
@@ -5304,6 +5515,7 @@ function renderCodexAccountGroup(label, providers, color) {
     }));
   });
   row.append(head, accountList);
+  appendCodexResetForecast(row);
   return row;
 }
 
@@ -5571,6 +5783,7 @@ function renderLimits() {
       state.settings?.showLimitUsed === true,
       state.settings?.showToolIcons !== false,
       state.settings?.claudePrepaidBalanceEnabled !== false,
+      state.settings?.codexResetForecastEnabled === true,
       state.settings?.currency || '',
       state.settings?.currencyRatesEffective || null,
       state.settings?.subscriptions || [],
@@ -5578,7 +5791,9 @@ function renderLimits() {
       state.codexActiveAccount || null,
       state.codexSystemSwitchingAccountId || '',
       state.codexSystemSwitchErrorAccountId || '',
-      state.codexSystemSwitchError || ''
+      state.codexSystemSwitchError || '',
+      state.codexResetForecastBusy,
+      state.codexResetForecast || null
     ],
     providerOrder: orderedProviders.map(({ id }) => id),
     providers: [...visibleProviderEntries.entries()]
@@ -7451,6 +7666,7 @@ function render() {
     els.serviceStatusPanel?.classList.add('hidden');
     els.trendsPanel.classList.add('hidden');
     els.limitsPanel.classList.remove('hidden');
+    maybeFetchCodexResetForecast();
     renderLimits();
   } else if (state.breakdown === 'trends') {
     els.homePanel.classList.add('hidden');
@@ -10816,6 +11032,12 @@ const LIMIT_PROVIDER_SETTINGS = {
     requiresConfiguredKey: 'claudeWebCookieConfigured',
     defaultValue: true
   }],
+  codex: [{
+    key: 'codexResetForecastEnabled',
+    titleKey: 'settings.limits.codexResetForecast',
+    descKey: 'settings.limits.codexResetForecastDesc',
+    defaultValue: false
+  }],
   opencode: [{
     key: 'opencodeLocalLimitsEnabled',
     titleKey: 'settings.limits.opencodeLocalLimits',
@@ -10897,6 +11119,11 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
     if (!existingInput) {
       input.addEventListener('change', async () => {
         await saveSettings({ [setting.key]: input.checked });
+        if (setting.key === 'codexResetForecastEnabled') {
+          state.codexResetForecast = null;
+          state.codexResetForecastRequestedAt = 0;
+          if (input.checked) await refreshCodexResetForecast({ force: true });
+        }
       });
     }
     const desc = document.createElement('span');

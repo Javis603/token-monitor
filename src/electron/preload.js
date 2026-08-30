@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getSessionDetail: (args) => ipcRenderer.invoke('session:getDetail', args),
   getStreamStatus: () => ipcRenderer.invoke('stream:status'),
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
+  getCodexResetForecast: (options) => ipcRenderer.invoke('codexResetForecast:get', options),
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),
   getDashboardHistory: (options) => ipcRenderer.invoke('dashboard:getHistory', options),
   onDashboardHistoryChanged: (callback) => {

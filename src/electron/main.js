@@ -263,6 +263,7 @@ const {
   trayToggleAction
 } = require('./trayModeSettings');
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
+const { createCodexResetForecastClient } = require('./codexResetForecast');
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
 const {
@@ -401,6 +402,9 @@ let lastSessionUsageArchiveUpdate = {
 };
 let rendererViewState = normalizeInitialRendererViewState();
 const serviceStatusClient = createServiceStatusClient();
+const codexResetForecastClient = createCodexResetForecastClient({
+  fetchImpl: electronLimitsFetch()
+});
 const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname));
 const diagnosticJournal = createDiagnosticJournal();
 const recoverMacWidgetLaunchServicesRegistration = createMacWidgetLaunchServicesRecovery();
@@ -523,6 +527,9 @@ function defaultSettings() {
     // the user does not want reported.
     opencodeAmbientEnabled: parseBoolean(process.env.TOKEN_MONITOR_OPENCODE_AMBIENT, true),
     opencodeLocalLimitsEnabled: false,
+    // Third-party global reset predictions are opt-in and remain separate from
+    // the account-specific limits wire shape.
+    codexResetForecastEnabled: false,
     showLimitUsed: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_USED, false),
     // Manual subscription metadata. Plain preferences, not credentials, so they
     // live in settings.json and cross to the renderer unredacted.
@@ -2188,6 +2195,7 @@ function readSettings() {
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
+    merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
     merged.opencodeLocalLimitsEnabled = parseBoolean(merged.opencodeLocalLimitsEnabled, false);
     delete merged.workbuddyLocalAppEnabled;
     merged.windowMaximized = parseBoolean(merged.windowMaximized, false);
@@ -5717,6 +5725,7 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/junhoyeo/tokscale')) return true;
   if (parsed.hostname === 'www.npmjs.com' && parsed.pathname.startsWith('/package/@tokscale/')) return true;
   if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/Javis603/token-monitor')) return true;
+  if (parsed.hostname === 'codex-resets.com' && (parsed.pathname === '' || parsed.pathname === '/')) return true;
   if (
     (parsed.hostname === 'javis-ai.com' || parsed.hostname === 'www.javis-ai.com')
     && (parsed.pathname === '/token-monitor' || parsed.pathname.startsWith('/token-monitor/'))
@@ -6377,6 +6386,7 @@ app.whenReady().then(() => {
       showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
+      codexResetForecastEnabled: parseBoolean(patch.codexResetForecastEnabled ?? settings.codexResetForecastEnabled, false),
       opencodeAmbientEnabled: parseBoolean(patch.opencodeAmbientEnabled ?? settings.opencodeAmbientEnabled, true),
       opencodeLocalLimitsEnabled: parseBoolean(patch.opencodeLocalLimitsEnabled ?? settings.opencodeLocalLimitsEnabled, false),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
@@ -6678,6 +6688,12 @@ app.whenReady().then(() => {
     force: Boolean(options?.force),
     providerIds: Array.isArray(options?.providerIds) ? options.providerIds : null
   }));
+  ipcMain.handle('codexResetForecast:get', (_event, options) => {
+    if (settings?.codexResetForecastEnabled !== true) {
+      return { status: 'disabled', checkedAt: new Date().toISOString() };
+    }
+    return codexResetForecastClient.getForecast({ force: Boolean(options?.force) });
+  });
   ipcMain.handle('hub:getInfo', () => getHubInfo());
   ipcMain.handle('hub:getBuildStatus', () => getHubBuildStatus());
   ipcMain.handle('hub:regenerateSecret', () => {
