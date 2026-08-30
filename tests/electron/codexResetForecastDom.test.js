@@ -59,7 +59,8 @@ test('forecast details use the shared accessible tooltip without repeating third
   assert.match(renderer, /const chance = forecast\.chancePercent;/);
   assert.doesNotMatch(renderer, /Number\(forecast\.chancePercent\)/);
   assert.match(renderer, /limits\.codexResetForecast\.expectedReset/);
-  assert.match(renderer, /limits\.codexResetForecast\.expires/);
+  assert.match(renderer, /: \(expiresAt \|\| ''\)/);
+  assert.doesNotMatch(renderer, /limits\.codexResetForecast\.expires['"]/);
   assert.doesNotMatch(renderer, /forecast\.predictedAt \|\| forecast\.expiresAt/);
   assert.match(styles, /\.codex-reset-forecast-info-wrap \.limit-detail-tooltip\s*\{[^}]*right: auto;[^}]*left: -1px;/s);
   assert.match(renderer, /positionCodexResetForecastTooltip\(info\)/);

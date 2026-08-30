@@ -5388,7 +5388,7 @@ function renderCodexResetForecast() {
     detail.textContent = [
       predictedAt
         ? t('limits.codexResetForecast.expectedReset', { date: predictedAt })
-        : (expiresAt ? t('limits.codexResetForecast.expires', { date: expiresAt }) : ''),
+        : (expiresAt || ''),
       forecast.stale ? t('limits.codexResetForecast.stale') : ''
     ].filter(Boolean).join(' · ');
   } else if (forecast?.status === 'inactive') {
