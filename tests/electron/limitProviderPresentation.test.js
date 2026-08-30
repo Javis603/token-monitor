@@ -10,6 +10,7 @@ const accountIdentityApi = require('../../src/electron/renderer/accountIdentity'
 const {
   antigravityQuotaWindow,
   apiKeyAccountStatus,
+  codexAdditionalQuotaDisplayName,
   isCodexLiveAccount,
   limitProviderDisplayLabel,
   limitProviderCapabilityTags,
@@ -53,6 +54,14 @@ test('limitProviderDisplayLabel normalizes short account labels without rewritin
   assert.equal(limitProviderDisplayLabel('Team'), 'Team');
   assert.equal(limitProviderDisplayLabel('primary.user@example.com'), 'primary.user@example.com');
   assert.equal(limitProviderDisplayLabel(''), '');
+});
+
+test('Codex additional quota display names map gpt-reserve and preserve unknown names', () => {
+  assert.equal(codexAdditionalQuotaDisplayName('gpt-reserve'), 'Luna Reserve');
+  assert.equal(codexAdditionalQuotaDisplayName(' GPT-RESERVE '), 'Luna Reserve');
+  assert.equal(codexAdditionalQuotaDisplayName('codex_spark'), 'codex_spark');
+  assert.equal(codexAdditionalQuotaDisplayName('Codex Other'), 'Codex Other');
+  assert.equal(codexAdditionalQuotaDisplayName(''), '');
 });
 
 test('compact Antigravity labels distinguish duplicate periods by model group', () => {
@@ -228,7 +237,8 @@ function runCodexAdditionalWindowLabel(window, siblingWindows) {
   const app = readRendererFile('app.js');
   const formatter = functionBody(app, 'codexAdditionalWindowLabel', 'antigravityQuotaGroups');
   return vm.runInNewContext(
-    `${formatter}\ncodexAdditionalWindowLabel(${JSON.stringify(window)}, ${JSON.stringify(siblingWindows)});`
+    `${formatter}\ncodexAdditionalWindowLabel(${JSON.stringify(window)}, ${JSON.stringify(siblingWindows)});`,
+    { limitProviderPresentationApi: { codexAdditionalQuotaDisplayName } }
   );
 }
 
@@ -1018,7 +1028,8 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);
   assert.match(renderProviderWindows, /additionalNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(codexAdditionalWindowLabel, /if \(!name\) return period \|\| 'Additional limit';/);
-  assert.match(codexAdditionalWindowLabel, /matchingWindowCount > 1 && period \? `\$\{name\} · \$\{period\}` : name/);
+  assert.match(codexAdditionalWindowLabel, /codexAdditionalQuotaDisplayName\(name\)/);
+  assert.match(codexAdditionalWindowLabel, /matchingWindowCount > 1 && period \? `\$\{displayName\} · \$\{period\}` : displayName/);
   assert.match(codexAdditionalWindowLabel, /codexAdditionalWindowPeriodLabel\(window\)/);
   assert.match(codexAdditionalWindowLabel, /minutes % 60 === 0/);
   assert.match(styles, /\.limit-window-text span:first-child \{[\s\S]*text-overflow: ellipsis;/);
@@ -1079,9 +1090,9 @@ test('Codex additional quota labels omit a redundant period unless one name has 
   const hourly = { kind: 'session', label: 'Some quota', windowMinutes: 60 };
   const daily = { kind: 'daily', label: 'Some quota', windowMinutes: 1_440 };
 
-  assert.equal(runCodexAdditionalWindowLabel(weekly, [weekly]), 'gpt-reserve');
-  assert.equal(runCodexAdditionalWindowLabel(session, [session, weekly]), 'gpt-reserve · 5-hour');
-  assert.equal(runCodexAdditionalWindowLabel(weekly, [session, weekly]), 'gpt-reserve · Weekly');
+  assert.equal(runCodexAdditionalWindowLabel(weekly, [weekly]), 'Luna Reserve');
+  assert.equal(runCodexAdditionalWindowLabel(session, [session, weekly]), 'Luna Reserve · 5-hour');
+  assert.equal(runCodexAdditionalWindowLabel(weekly, [session, weekly]), 'Luna Reserve · Weekly');
   assert.equal(runCodexAdditionalWindowLabel(hourly, [hourly, daily]), 'Some quota · 1-hour');
   assert.equal(runCodexAdditionalWindowLabel(daily, [hourly, daily]), 'Some quota · Daily');
 });

@@ -133,6 +133,11 @@
     return label.replace(/^[a-z]/, (letter) => letter.toUpperCase());
   }
 
+  function codexAdditionalQuotaDisplayName(value) {
+    const name = String(value || '').trim();
+    return normalizeId(name) === 'gpt-reserve' ? 'Luna Reserve' : name;
+  }
+
   function antigravityQuotaWindow(window) {
     const kind = normalizeId(window?.kind);
     const suffix = kind === 'session'
@@ -427,6 +432,7 @@
   return {
     antigravityQuotaWindow,
     apiKeyAccountStatus,
+    codexAdditionalQuotaDisplayName,
     isCodexLiveAccount,
     limitProviderCapabilityTags,
     limitProviderCompactWindowLabel,

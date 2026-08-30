@@ -3745,7 +3745,8 @@ function codexAdditionalWindowLabel(window, siblingWindows = []) {
   const matchingWindowCount = siblingWindows.filter((candidate) => (
     String(candidate?.label || '').trim().toLowerCase() === normalizedName
   )).length;
-  return matchingWindowCount > 1 && period ? `${name} · ${period}` : name;
+  const displayName = limitProviderPresentationApi.codexAdditionalQuotaDisplayName(name);
+  return matchingWindowCount > 1 && period ? `${displayName} · ${period}` : displayName;
 }
 
 function codexAdditionalWindowPeriodLabel(window) {
