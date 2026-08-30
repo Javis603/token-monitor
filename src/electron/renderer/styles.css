@@ -4673,6 +4673,7 @@ html.is-windows .limit-live-badge {
   background: rgba(var(--overlay-rgb), var(--control-alpha));
 }
 .tool-detail-footer.hidden { display: none; }
+.shell.settings-open .tool-detail-footer { display: none; }
 .tool-detail-footer-option {
   min-width: 0;
   padding: 0 7px;

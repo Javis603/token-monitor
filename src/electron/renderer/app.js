@@ -503,6 +503,7 @@ function toggleAccordionRow(row) {
   if (!isExpanded) {
     row.classList.add('expanded');
     row.querySelector('.row-head')?.setAttribute('aria-expanded', 'true');
+    renderActiveToolDetail();
   }
   renderToolDetailFooter();
 }
@@ -1878,13 +1879,19 @@ function renderToolDetailAccordion(accordionInner, detail) {
 }
 
 function activeToolDetail() {
-  if (state.breakdown !== 'tool') return null;
+  if (visibleStatsSurface() !== 'main' || state.breakdown !== 'tool') return null;
   const accordionInner = els.breakdown.querySelector('.row.expanded .row-accordion-inner');
   const detail = accordionInner ? toolDetailData.get(accordionInner) : null;
   if (!accordionInner || !detail) return null;
   const hasTokenDetails = detail.tokenDetailsAvailable === true;
   const hasModels = Array.isArray(detail.modelRows) && detail.modelRows.length > 0;
   return hasTokenDetails && hasModels ? { accordionInner, detail } : null;
+}
+
+function renderActiveToolDetail() {
+  const active = activeToolDetail();
+  if (!active) return;
+  renderToolDetailAccordion(active.accordionInner, active.detail);
 }
 
 function renderToolDetailFooter() {
@@ -1903,7 +1910,8 @@ function setActiveToolDetailMode(mode) {
   const active = activeToolDetail();
   if (!active || (mode !== 'tokens' && mode !== 'models') || state.toolDetailMode === mode) return;
   state.toolDetailMode = mode;
-  render();
+  renderToolDetailAccordion(active.accordionInner, active.detail);
+  renderToolDetailFooter();
 }
 
 function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable }) {
@@ -2071,7 +2079,6 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
   const structureChanged = signature !== state.rowSignature;
   const renderContext = {
     breakdown: state.breakdown,
-    toolDetailMode: state.toolDetailMode,
     currency: currentCurrency(),
     currencyRatesEffective: state.settings?.currencyRatesEffective || null,
     locale: currentLocale(),
