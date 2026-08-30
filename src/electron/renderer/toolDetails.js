@@ -47,5 +47,15 @@
     return `${Math.round(Math.min(100, percent))}%`;
   }
 
-  return { detailPercentLabel, modelRowsForTool };
+  function tokenInputPercentages(parts = {}) {
+    const cacheRead = amount(parts.cacheRead);
+    const cacheMiss = amount(parts.cacheMiss);
+    const input = cacheRead + cacheMiss;
+    return {
+      hit: input > 0 ? cacheRead / input * 100 : 0,
+      miss: input > 0 ? cacheMiss / input * 100 : 0
+    };
+  }
+
+  return { detailPercentLabel, modelRowsForTool, tokenInputPercentages };
 });

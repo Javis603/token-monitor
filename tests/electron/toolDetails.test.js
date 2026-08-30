@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { detailPercentLabel, modelRowsForTool } = require('../../src/electron/renderer/toolDetails');
+const { tokenComponentBreakdown } = require('../../src/electron/renderer/fixedPeriodRanges');
+const { detailPercentLabel, modelRowsForTool, tokenInputPercentages } = require('../../src/electron/renderer/toolDetails');
 
 test('modelRowsForTool keeps the same model separated by tool and sorts usage', () => {
   const period = {
@@ -57,6 +58,26 @@ test('detailPercentLabel does not present small positive shares as zero', () => 
   assert.equal(detailPercentLabel(150), '100%');
 });
 
+test('token detail input shares preserve small positive values through the breakdown pipeline', () => {
+  const tinyHit = tokenInputPercentages(tokenComponentBreakdown({
+    totalTokens: 1000,
+    cacheReadTokens: 1,
+    outputTokens: 0,
+    unclassifiedTokens: 0
+  }));
+  assert.equal(detailPercentLabel(tinyHit.hit), '<1%');
+  assert.equal(detailPercentLabel(tinyHit.miss), '100%');
+
+  const tinyMiss = tokenInputPercentages(tokenComponentBreakdown({
+    totalTokens: 1000,
+    cacheReadTokens: 999,
+    outputTokens: 0,
+    unclassifiedTokens: 0
+  }));
+  assert.equal(detailPercentLabel(tinyMiss.hit), '100%');
+  assert.equal(detailPercentLabel(tinyMiss.miss), '<1%');
+});
+
 test('tool details helper loads before app.js and exposes a contextual app footer switch', () => {
   const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
   const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
@@ -68,11 +89,13 @@ test('tool details helper loads before app.js and exposes a contextual app foote
   assert.match(app, /function activeToolDetail\(\)/);
   assert.match(app, /function setActiveToolDetailMode\(mode\)/);
   assert.match(app, /state\.toolDetailMode = mode/);
+  assert.match(app, /const inputPercentages = toolDetailsApi\.tokenInputPercentages\(tokenParts\)/);
   assert.match(app, /toolDetailMode: state\.toolDetailMode/);
   assert.match(app, /state\.toolDetailMode = mode;\s*render\(\);/);
   assert.match(app, /const mode = state\.toolDetailMode === 'models' && hasModels/);
   assert.match(app, /model\.unattributed === true \? labels\.unclassified : model\.name/);
   assert.match(app, /els\.toolDetailFooter\.classList\.toggle\('hidden', !active\)/);
+  assert.ok(app.indexOf("if (surface !== 'main')") < app.indexOf("els.toolDetailFooter.classList.add('hidden')"));
   assert.match(css, /\.tool-detail-footer-option:focus-visible/);
   assert.match(css, /\.accordion-row \{[^}]*line-height: 1\.35;/);
   assert.doesNotMatch(css, /\.tool-detail-switch/);
