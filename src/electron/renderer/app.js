@@ -8516,6 +8516,15 @@ function normalizeWindowToggleShortcutValue(value) {
 const BUBBLE_CONTENT_MIN_W = 34;
 const BUBBLE_CONTENT_HEIGHT = 34;
 const BUBBLE_CONTENT_PAD_X = 10;
+const BUBBLE_GENERATED_IMAGE_CSS_HEIGHT = 24;
+let floatingBubbleRenderedBitmapHeight = null;
+
+function currentFloatingBubbleBitmapHeight() {
+  return window.TokenMonitorTrayComposer.floatingBubbleBitmapHeight(
+    window.devicePixelRatio,
+    BUBBLE_GENERATED_IMAGE_CSS_HEIGHT
+  );
+}
 
 function floatingBubbleGeneratedColors() {
   const text = resolvedThemeColor('text');
@@ -8533,8 +8542,12 @@ function renderFloatingBubbleContent() {
   if (!el || !state.floatingBubble.collapsed) return;
   const mode = state.settings?.floatingBubbleContent || 'icon';
   if (window.TokenMonitorTrayText.isGeneratedTrayIconMode(mode)) {
+    // The generated content is a raster image displayed at 24 CSS px. Match its
+    // backing height to the current display scale so Chromium never has to
+    // interpolate already-rasterized text on fractional or high-DPI displays.
+    const bitmapHeight = currentFloatingBubbleBitmapHeight();
     const dataUrl = state.stats
-      ? trayDataUrlForMode(mode, 44, floatingBubbleGeneratedColors(), {
+      ? trayDataUrlForMode(mode, bitmapHeight, floatingBubbleGeneratedColors(), {
           contentOnly: mode === 'barsAllSessions' || mode === 'limitsAllSessions',
           providerContrastHalo: true,
           showProviderBadge: false,
@@ -8549,14 +8562,18 @@ function renderFloatingBubbleContent() {
       img.addEventListener('load', reportFloatingBubbleSize, { once: true });
       img.src = dataUrl;
       el.replaceChildren(img);
+      floatingBubbleRenderedBitmapHeight = bitmapHeight;
       return;
     }
+    floatingBubbleRenderedBitmapHeight = null;
     el.classList.remove('bars');
     el.textContent = (state.stats && window.TokenMonitorTrayText.formatTrayText(state.stats, mode, currentCurrency(), compactTokenDisplayOptions())) || 'Σ';
   } else if (mode === 'icon') {
+    floatingBubbleRenderedBitmapHeight = null;
     el.classList.remove('bars');
     el.textContent = 'Σ';
   } else {
+    floatingBubbleRenderedBitmapHeight = null;
     el.classList.remove('bars');
     el.textContent = state.stats ? (window.TokenMonitorTrayText.formatTrayText(state.stats, mode, currentCurrency(), compactTokenDisplayOptions()) || '0') : '0';
   }
@@ -8574,6 +8591,17 @@ function reportFloatingBubbleSize() {
     width = Math.max(BUBBLE_CONTENT_MIN_W, Math.ceil(el.scrollWidth) + pad);
   }
   window.tokenMonitor.setFloatingBubbleCollapsedSize?.({ width, height: BUBBLE_CONTENT_HEIGHT });
+}
+
+function refreshFloatingBubbleBitmapForDeviceScale() {
+  if (!state.floatingBubble.collapsed || !state.stats) return;
+  const mode = state.settings?.floatingBubbleContent || 'icon';
+  if (!window.TokenMonitorTrayText.isGeneratedTrayIconMode(mode)) return;
+  // Moving the collapsed window between displays can change devicePixelRatio
+  // without changing its CSS dimensions. Repaint only when the backing height
+  // actually changes, which also avoids a size-report/resize loop.
+  const bitmapHeight = currentFloatingBubbleBitmapHeight();
+  if (bitmapHeight !== floatingBubbleRenderedBitmapHeight) renderFloatingBubbleContent();
 }
 
 const HOVER_REVEAL_DELAY_MS = 250;
@@ -12077,7 +12105,10 @@ els.showCompactTotalTokensInput.addEventListener('change', async () => {
 els.compactTokenUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
-window.addEventListener('resize', () => { if (!numberAnimHandle) fitTotalNumber(); });
+window.addEventListener('resize', () => {
+  if (!numberAnimHandle) fitTotalNumber();
+  refreshFloatingBubbleBitmapForDeviceScale();
+});
 els.swapSettingsRefreshInput.addEventListener('change', () => {
   applyControlLayout(els.swapSettingsRefreshInput.checked);
   void saveAppearanceFromControls();
@@ -13405,7 +13436,7 @@ function trayComposerPreview(surface) {
     // icons in colour, so no templateIconColor here — that is a menu-bar-only
     // requirement and would preview the bubble as monochrome.
     return {
-      src: trayDataUrlForMode(mode, 44, floatingBubbleGeneratedColors(), {
+      src: trayDataUrlForMode(mode, currentFloatingBubbleBitmapHeight(), floatingBubbleGeneratedColors(), {
         stats,
         layout: state.settings?.[layoutKey],
         contentOnly: mode === 'barsAllSessions' || mode === 'limitsAllSessions',

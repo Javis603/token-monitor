@@ -16,6 +16,14 @@
     return Math.min(max, Math.max(min, value));
   }
 
+  function floatingBubbleBitmapHeight(devicePixelRatio, cssHeight = 24) {
+    const ratio = Number(devicePixelRatio);
+    const resolvedRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+    const height = Number(cssHeight);
+    const resolvedHeight = Number.isFinite(height) && height > 0 ? height : 24;
+    return Math.max(1, Math.round(resolvedHeight * resolvedRatio));
+  }
+
   function button(className, text, onClick) {
     const el = document.createElement('button');
     el.type = 'button';
@@ -1338,6 +1346,7 @@
     costDisplayPatch,
     createTrayComposer,
     duplicateTrayLayoutItem,
+    floatingBubbleBitmapHeight,
     handlePickerDocumentScroll,
     moveTrayLayoutItemByKey,
     periodItemPatch,

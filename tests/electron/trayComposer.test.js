@@ -11,12 +11,24 @@ const {
   costDisplayPatch,
   createTrayComposer,
   duplicateTrayLayoutItem,
+  floatingBubbleBitmapHeight,
   handlePickerDocumentScroll,
   moveTrayLayoutItemByKey,
   periodItemPatch,
   syncTrayComposerSurfaces,
   usageScopePatch
 } = require('../../src/electron/renderer/trayComposer');
+
+test('floating bubble bitmap height tracks CSS pixels at the current device scale', () => {
+  assert.equal(floatingBubbleBitmapHeight(1), 24);
+  assert.equal(floatingBubbleBitmapHeight(1.25), 30);
+  assert.equal(floatingBubbleBitmapHeight(1.5), 36);
+  assert.equal(floatingBubbleBitmapHeight(2), 48);
+  assert.equal(floatingBubbleBitmapHeight(2.5), 60);
+  assert.equal(floatingBubbleBitmapHeight(0), 24);
+  assert.equal(floatingBubbleBitmapHeight('invalid'), 24);
+  assert.equal(floatingBubbleBitmapHeight(1.5, 20), 30);
+});
 
 function layoutWithIds(...ids) {
   return {
