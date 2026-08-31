@@ -21,7 +21,7 @@
     claude: { oauth: 'OAuth', cli: 'CLI', web: 'Web' },
     codex: { rpc: 'RPC' },
     cursor: { web: 'Web' },
-    antigravity: { rpc: 'RPC' },
+    antigravity: { oauth: 'OAuth', rpc: 'RPC' },
     opencode: { local: 'Local', web: 'Web', api: 'API' },
     openrouter: { api: 'API' },
     deepseek: { api: 'API' },
@@ -53,7 +53,7 @@
     claude: ['Auto', 'OAuth/CLI', 'Web'],
     codex: ['Auto', 'OAuth/App/CLI'],
     cursor: ['Auto', 'Web'],
-    antigravity: ['App/CLI must be open', 'RPC'],
+    antigravity: ['Auto', 'OAuth/App/CLI'],
     opencode: ['Auto', 'API/Web'],
     openrouter: ['Pay-as-you-go', 'API key'],
     deepseek: ['Pay-as-you-go', 'API key'],
@@ -74,12 +74,6 @@
     thirdparty: ['Relay', 'API']
   };
 
-  // Capability hint -> the status label it would duplicate. When that status is
-  // active, the hint is suppressed so the row doesn't show two tags saying the
-  // same thing (see limitProviderSettingsTags).
-  const CAPABILITY_STATUS_DUPLICATES = {
-    'App/CLI must be open': 'Open app or CLI'
-  };
   const COMPACT_LIMIT_CRITICAL_PERCENT = 20;
 
   function normalizeId(value) {
@@ -265,6 +259,13 @@
     const status = statusId(provider);
 
     if (provider?.stale) return { label: 'Stale', tone: 'stale' };
+    if (providerName === 'antigravity' && provider?.actionRequired === 'accountVerification') {
+      return {
+        label: 'Open Antigravity to verify',
+        key: 'settings.antigravity.verificationRequired',
+        tone: 'setup'
+      };
+    }
     if (status === 'ok') return { label: isLinkedStatus(provider) ? 'Linked' : 'Live', tone: 'ok' };
     if (status === 'disabled') return { label: 'Disabled', tone: 'muted' };
     if (status === 'noSyncedData') return { label: 'No synced data', tone: 'sync' };
@@ -285,7 +286,7 @@
     if (providerName === 'mimo' && status === 'error') return { label: 'Unavailable', tone: 'warn' };
     if (status === 'notConfigured') {
       if (providerName === 'kimi') return { label: 'Add credential', tone: 'setup' };
-      if (providerName === 'antigravity') return { label: 'Open app or CLI', tone: 'setup' };
+      if (providerName === 'antigravity') return { label: 'Not set up', tone: 'setup' };
       if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi') return { label: 'Add API key', tone: 'setup' };
@@ -418,12 +419,7 @@
       tags.push(...limitProviderProvenanceTags(provenance));
       return tags;
     }
-    // Some capability hints restate the active setup status (e.g. antigravity's
-    // "App/CLI must be open" vs the notConfigured "Open app or CLI"). Drop the
-    // hint when it would duplicate the status tag already shown.
-    const statusLabel = status?.label;
     for (const label of limitProviderCapabilityTags(provider)) {
-      if (CAPABILITY_STATUS_DUPLICATES[label] === statusLabel) continue;
       tags.push({ label, kind: 'capability' });
     }
     return tags;

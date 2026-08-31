@@ -271,9 +271,11 @@ test('limits config resolves managed credentials at dispatch time through contex
   const limits = limitsConfigFromSettings({ codexManagedAccounts: [{ id: 'stale' }] }, {
     env: {},
     codexManagedAccounts: [{ id: 'live', homePath: '/tmp/live' }],
+    antigravityManagedAccounts: [{ id: 'antigravity', credentials: { accessToken: 'oauth' } }],
     mimoManagedAccounts: [{ id: 'mimo', cookieHeader: 'allowlisted' }]
   });
   assert.deepEqual(limits.codexManagedAccounts, [{ id: 'live', homePath: '/tmp/live' }]);
+  assert.deepEqual(limits.antigravityManagedAccounts, [{ id: 'antigravity', credentials: { accessToken: 'oauth' } }]);
   assert.deepEqual(limits.mimoManagedAccounts, [{ id: 'mimo', cookieHeader: 'allowlisted' }]);
 });
 

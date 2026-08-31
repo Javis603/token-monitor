@@ -388,8 +388,8 @@ test('_quotaSummaryWindows recognizes cadence aliases and marks disabled buckets
     groups: [{
       displayName: 'Gemini Models',
       buckets: [
-        { bucketId: 'gemini_session', displayName: 'Session', remaining: { remainingFraction: 0.75 } },
-        { bucketId: 'gemini-weekly', displayName: 'Weekly Limit', remainingFraction: 0.5, disabled: true },
+        { window: '5h', displayName: 'Five Hour Limit Remaining', remaining: { remainingFraction: 0.75 } },
+        { window: 'weekly', displayName: 'Weekly Limit Remaining', remainingFraction: 0.5, disabled: true },
         { bucketId: 'gemini-session-history', displayName: 'Session History', remainingFraction: 0.25 }
       ]
     }]

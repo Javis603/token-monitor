@@ -1422,7 +1422,6 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
     });
     child.on('close', (code) => {
       termination.confirmClosed();
-      if (settled) return;
       if (terminalOutcome) {
         removeOwnedAntigravitySyncLock({
           lockPath: syncLockPath,
@@ -1430,6 +1429,7 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
           childStartedAt
         });
       }
+      if (settled) return;
       if (terminalOutcome?.cancelled) return settle(false, '', {}, false, true);
       if (terminalOutcome) {
         return settle(

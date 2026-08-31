@@ -108,6 +108,7 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   codex: 'codexAccountGroup',
   opencode: 'opencodeCookieGroup',
   cursor: 'cursorAccountGroup',
+  antigravity: 'antigravityAccountGroup',
   kimi: 'kimiAccountGroup',
   copilot: 'copilotAccountGroup',
   mimo: 'mimoAccountGroup',
@@ -128,6 +129,7 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   codex: 'codexAccountStatus',
   opencode: 'opencodeCookieStatus',
   cursor: 'cursorAccountStatus',
+  antigravity: 'antigravityAccountStatus',
   kimi: 'kimiAccountStatus',
   copilot: 'copilotApiTokenStatus',
   mimo: 'mimoAccountStatus',
@@ -316,7 +318,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.toolDetailMode = 'tokens';
 state.codexResetForecast = null;
 state.codexResetForecastBusy = false;
@@ -5634,6 +5636,12 @@ function renderCursorAccountGroup(label, providers, color) {
   return row;
 }
 
+function renderAntigravityAccountGroup(label, providers, color) {
+  return renderNamedApiAccountGroup('antigravity', label, providers, color, {
+    groupPlanText: t('settings.antigravity.nAccounts', { count: providers.length })
+  });
+}
+
 function opencodeAccountTitle(provider, index) {
   const name = String(provider?.accountName || '').trim();
   // The collector's canonical name is shown as-is. This column holds account
@@ -5888,6 +5896,10 @@ function renderLimits() {
     }
     if (id === 'cursor' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderCursorAccountGroup(label, visibleProviders, color));
+      continue;
+    }
+    if (id === 'antigravity' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderAntigravityAccountGroup(label, visibleProviders, color));
       continue;
     }
     if (id === 'volcengine' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
@@ -9221,6 +9233,7 @@ function syncSettingsForm() {
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
+  renderAntigravityStatus();
   renderMimoStatus();
   renderCopilotStatus();
   renderViewPreferences();
@@ -10934,8 +10947,11 @@ function renderLimitProviderCheckboxesNow() {
     }
     for (const tagInfo of tagInfos) {
       if ((detected || !isEnabled) && tagInfo.kind === 'status') continue;
+      // Account groups own their configuration summary on the right. Avoid
+      // repeating "Not set up" beside the same account state, as with Codex.
+      if (accountGroup && provider.status === 'notConfigured' && tagInfo.kind === 'status') continue;
       const duplicatesInlineSetup = tagInfo.kind === 'capability'
-        && ((connectionDetailKey && tagInfo.label === 'Auto')
+        && ((connectionDetailKey && !accountGroup && tagInfo.label === 'Auto')
           || (accountGroup && tagInfo.label === 'Manual login'));
       if (duplicatesInlineSetup) continue;
       const tag = document.createElement('span');
@@ -10949,7 +10965,9 @@ function renderLimitProviderCheckboxesNow() {
     const actions = document.createElement('span');
     actions.className = 'limit-provider-actions';
     const accountStatus = limitProviderAccountStatus(id);
-    if (connectionDetailKey) {
+    // Multi-account providers use this space for their account summary. Their
+    // automatic collection support stays with the capability tags on the left.
+    if (connectionDetailKey && !accountGroup) {
       const mode = document.createElement('span');
       mode.className = 'cursor-status-pill limit-provider-mode-pill';
       mode.textContent = t('settings.limits.connection.autoDetect');
@@ -13670,6 +13688,10 @@ function setCursorAccountExpanded(expanded) {
   setAccountGroupExpanded('cursor', expanded, 'cursorAccountExpanded');
 }
 
+function setAntigravityAccountExpanded(expanded) {
+  setAccountGroupExpanded('antigravity', expanded, 'antigravityAccountExpanded');
+}
+
 function setOpencodeCookieExpanded(expanded) {
   setAccountGroupExpanded('opencode', expanded, 'opencodeCookieExpanded');
 }
@@ -14007,6 +14029,128 @@ function clearDeepseekPendingCheck() {
 function clearDeepseekProviderStatus() {
   if (!Array.isArray(state.stats?.limits?.providers)) return;
   state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'deepseek');
+}
+
+function renderAntigravityStatus() {
+  if (!isSettingsSurfaceVisible()) return;
+  const statusEl = document.getElementById('antigravityAccountStatus');
+  const listEl = document.getElementById('antigravityAccountList');
+  const errorEl = document.getElementById('antigravityAccountErrorMessage');
+  const statusMessage = document.getElementById('antigravityLoginStatus');
+  const addButton = document.getElementById('antigravityAddAccountButton');
+  const cancelButton = document.getElementById('antigravityCancelLoginButton');
+  if (!statusEl || !listEl || !errorEl || !addButton || !cancelButton) return;
+  const accounts = state.settings?.antigravityManagedAccounts || [];
+  const enabledCount = accounts.filter((account) => account.enabled !== false).length;
+  setCursorStatusText(statusEl, accounts.length === 0
+    ? t('settings.antigravity.notConfigured')
+    : t('settings.antigravity.connected', { linked: enabledCount, total: accounts.length }));
+  errorEl.textContent = state.antigravityAccountError || '';
+  errorEl.classList.toggle('hidden', !state.antigravityAccountError);
+  addButton.disabled = state.antigravitySignInBusy;
+  addButton.textContent = t(state.antigravitySignInBusy
+    ? 'settings.antigravity.waitingForGoogle'
+    : 'settings.antigravity.addAccount');
+  cancelButton.classList.toggle('hidden', !state.antigravitySignInBusy);
+  if (statusMessage) {
+    statusMessage.textContent = state.antigravitySignInBusy ? t('settings.antigravity.loginStatus') : '';
+    statusMessage.classList.toggle('hidden', !state.antigravitySignInBusy);
+  }
+
+  listEl.replaceChildren();
+  if (accounts.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'settings-note';
+    empty.textContent = t('settings.antigravity.empty');
+    listEl.append(empty);
+  }
+  const antigravityProviders = localProviderStatuses('antigravity');
+  accounts.forEach((account, index) => {
+    const enabled = account.enabled !== false;
+    const accountName = String(account.accountEmail || account.accountLabel || '').trim()
+      || t('settings.antigravity.accountFallback', { number: index + 1 });
+    const row = document.createElement('div');
+    row.className = 'managed-account-row';
+    row.classList.toggle('disabled', !enabled);
+
+    const input = document.createElement('input');
+    input.className = 'managed-account-checkbox';
+    input.type = 'checkbox';
+    input.checked = enabled;
+    input.disabled = state.antigravitySignInBusy;
+    input.setAttribute('aria-label', t('settings.antigravity.toggleAccount', { account: accountName }));
+    input.addEventListener('change', async () => {
+      input.disabled = true;
+      const result = await window.tokenMonitor.antigravity.setAccountEnabled(account.id, input.checked);
+      if (!result?.ok) state.antigravityAccountError = result?.error || t('settings.antigravity.toggleFailed');
+      else {
+        state.antigravityAccountError = '';
+        state.settings.antigravityManagedAccounts = result.accounts || [];
+      }
+      renderAntigravityStatus();
+      renderSettingsSummaries();
+    });
+
+    const main = document.createElement('div');
+    main.className = 'managed-account-main';
+    const email = document.createElement('div');
+    email.className = 'managed-account-email';
+    email.textContent = accountName;
+    main.append(email);
+
+    const right = document.createElement('span');
+    right.className = 'managed-account-right';
+    const info = document.createElement('span');
+    info.className = 'managed-account-info';
+    const accountKey = String(account.accountKey || '').trim();
+    const accountEmail = String(account.accountEmail || '').trim().toLowerCase();
+    const provider = antigravityProviders.find((candidate) => {
+      const providerKey = String(candidate?.accountKey || '').trim();
+      const providerEmail = String(candidate?.accountEmail || '').trim().toLowerCase();
+      if (accountKey && providerKey) return accountKey === providerKey;
+      return Boolean(accountEmail && providerEmail && accountEmail === providerEmail);
+    });
+    const planLabel = limitProviderPresentationApi.limitProviderDisplayLabel(provider?.accountLabel);
+    const statusLabel = provider && provider.status !== 'ok'
+      ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
+      : '';
+    info.textContent = enabled ? (planLabel || statusLabel) : t('settings.antigravity.disabled');
+    info.title = provider?.actionRequired === 'accountVerification'
+      ? t('settings.antigravity.verificationRequiredDetail')
+      : info.textContent;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'managed-account-remove';
+    remove.textContent = '✕';
+    remove.title = t('settings.antigravity.remove');
+    remove.setAttribute('aria-label', t('settings.antigravity.remove'));
+    remove.disabled = state.antigravitySignInBusy;
+    let confirmingRemove = false;
+    remove.addEventListener('click', async () => {
+      if (!confirmingRemove) {
+        confirmingRemove = true;
+        remove.classList.add('confirming');
+        remove.textContent = '✓';
+        remove.title = t('settings.antigravity.removeConfirm', { account: accountName });
+        remove.setAttribute('aria-label', remove.title);
+        return;
+      }
+      remove.disabled = true;
+      const result = await window.tokenMonitor.antigravity.removeAccount(account.id);
+      if (!result?.ok) state.antigravityAccountError = result?.error || t('settings.antigravity.removeFailed');
+      else {
+        state.antigravityAccountError = '';
+        state.settings.antigravityManagedAccounts = result.accounts || [];
+        refreshStats({ force: true }).catch(() => {});
+      }
+      renderAntigravityStatus();
+      renderSettingsSummaries();
+    });
+    right.append(info, remove);
+    row.append(input, main, right);
+    listEl.append(row);
+  });
+  renderSettingsSummaries();
 }
 
 function renderMimoStatus() {
@@ -16912,6 +17056,65 @@ function setupCursorAccountUI() {
         errorEl.textContent = t('settings.kimi.saveFailed', { message: err.message });
         errorEl.classList.remove('hidden');
       }
+    });
+  }
+
+  const antigravityToggle = document.getElementById('antigravitySettingsToggle');
+  if (antigravityToggle && window.tokenMonitor.antigravity) {
+    antigravityToggle.addEventListener('click', () => {
+      setAntigravityAccountExpanded(!state.antigravityAccountExpanded);
+    });
+    setAntigravityAccountExpanded(false);
+    renderAntigravityStatus();
+
+    window.tokenMonitor.antigravity.onAccounts((accounts) => {
+      state.settings.antigravityManagedAccounts = accounts || [];
+      renderAntigravityStatus();
+    });
+    window.tokenMonitor.antigravity.accounts().then((accounts) => {
+      state.settings.antigravityManagedAccounts = accounts || [];
+      renderAntigravityStatus();
+    }).catch(() => {});
+
+    document.getElementById('antigravityAddAccountButton').addEventListener('click', async () => {
+      if (state.antigravitySignInBusy) return;
+      state.antigravitySignInBusy = true;
+      state.antigravityAccountError = '';
+      renderAntigravityStatus();
+      let result;
+      try {
+        result = await window.tokenMonitor.antigravity.addAccount();
+      } catch (error) {
+        result = { ok: false, error: error.message };
+      } finally {
+        state.antigravitySignInBusy = false;
+      }
+      if (!result?.ok && result?.errorCode !== 'cancelled') {
+        const errorKeys = {
+          OAUTH_CLIENT_NOT_FOUND: 'settings.antigravity.oauthClientMissing',
+          TIMEOUT: 'settings.antigravity.loginTimeout',
+          STATE_MISMATCH: 'settings.antigravity.loginStateMismatch',
+          credentialStorageUnavailable: 'settings.antigravity.credentialStorageUnavailable',
+          loginInProgress: 'settings.antigravity.loginInProgress'
+        };
+        state.antigravityAccountError = errorKeys[result?.errorCode]
+          ? t(errorKeys[result.errorCode])
+          : result?.error || t('settings.antigravity.loginFailed');
+      } else if (result?.ok) {
+        state.antigravityAccountError = '';
+        state.settings.antigravityManagedAccounts = result.accounts || [];
+        // Match the Codex account flow: the account is connected as soon as its
+        // credential is stored. Quota onboarding and refresh continue in the
+        // background instead of leaving the login button visually busy.
+        refreshStats({ force: true }).catch(() => {});
+      }
+      renderAntigravityStatus();
+    });
+
+    document.getElementById('antigravityCancelLoginButton').addEventListener('click', async () => {
+      await window.tokenMonitor.antigravity.cancelLogin();
+      state.antigravitySignInBusy = false;
+      renderAntigravityStatus();
     });
   }
 

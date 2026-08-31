@@ -759,6 +759,7 @@ test('native Antigravity reports and settles an unconfirmed forced termination',
     assert.equal(fs.existsSync(syncLockPath), true, 'without a confirmed close the lock owner may still be alive');
 
     syncChild.emit('close', null, 'SIGKILL');
+    assert.equal(fs.existsSync(syncLockPath), false, 'a late confirmed close must remove the owned lock');
   } finally {
     childProcess.spawn = originalSpawn;
     delete require.cache[collectorPath];

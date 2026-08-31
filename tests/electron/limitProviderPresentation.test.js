@@ -330,7 +330,7 @@ test('capability tags explain how each provider is collected in settings', () =>
   assert.deepEqual(limitProviderCapabilityTags('claude'), ['Auto', 'OAuth/CLI', 'Web']);
   assert.deepEqual(limitProviderCapabilityTags('codex'), ['Auto', 'OAuth/App/CLI']);
   assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Auto', 'Web']);
-  assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['App/CLI must be open', 'RPC']);
+  assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['Auto', 'OAuth/App/CLI']);
   assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Auto', 'API/Web']);
   assert.deepEqual(limitProviderCapabilityTags('minimax'), ['Token Plan', 'API key']);
   assert.deepEqual(limitProviderCapabilityTags('grok'), ['Auto', 'CLI/Web']);
@@ -427,18 +427,15 @@ test('undetected settings tags include status and supported collection hints', (
       .map((tag) => tag.label),
     ['Not set up', 'Auto', 'OAuth/App/CLI']
   );
-  // Antigravity's "App/CLI must be open" capability restates the notConfigured
-  // status ("Open app or CLI"), so it is dropped to avoid a duplicate tag.
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'antigravity', status: 'notConfigured', source: 'rpc' })
       .map((tag) => tag.label),
-    ['Open app or CLI', 'RPC']
+    ['Not set up', 'Auto', 'OAuth/App/CLI']
   );
-  // Other failure states don't say "Open app or CLI", so the hint stays useful.
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'antigravity', status: 'unavailable', source: 'rpc' })
       .map((tag) => tag.label),
-    ['Unavailable', 'App/CLI must be open', 'RPC']
+    ['Unavailable', 'Auto', 'OAuth/App/CLI']
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'cursor', status: 'notConfigured', source: 'web' })
@@ -2003,7 +2000,9 @@ test('account and automatic provider panels reuse the original account summary g
   assert.match(renderSettings, /moveLimitProviderLiveNode\(actions, accountStatus, disclosureIcon\)/);
   assert.match(renderSettings, /mode\.className = 'cursor-status-pill limit-provider-mode-pill'/);
   assert.match(renderSettings, /mode\.textContent = t\('settings\.limits\.connection\.autoDetect'\)/);
-  assert.match(renderSettings, /connectionDetailKey && tagInfo\.label === 'Auto'/);
+  assert.match(renderSettings, /connectionDetailKey && !accountGroup/);
+  assert.match(renderSettings, /accountGroup && provider\.status === 'notConfigured'/);
+  assert.match(renderSettings, /connectionDetailKey && !accountGroup && tagInfo\.label === 'Auto'/);
   assert.match(renderSettings, /accountGroup && tagInfo\.label === 'Manual login'/);
   assert.match(renderSettings, /if \(duplicatesInlineSetup\) continue/);
   assert.match(renderSettings, /main\.append\(copy, actions\)/);
@@ -2142,6 +2141,25 @@ test('account validation keeps aggregate fallback for legacy stats without devic
 });
 
 const presentation = require('../../src/electron/renderer/limitProviderPresentation');
+
+test('Antigravity uses the shared OAuth source label', () => {
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'antigravity', source: 'oauth' }), 'OAuth');
+});
+
+test('Antigravity account verification is shown as an actionable status', () => {
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({
+      provider: 'antigravity',
+      status: 'unauthorized',
+      actionRequired: 'accountVerification'
+    }),
+    {
+      label: 'Open Antigravity to verify',
+      key: 'settings.antigravity.verificationRequired',
+      tone: 'setup'
+    }
+  );
+});
 
 test('deepseek source label and capability tags', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'deepseek', source: 'api' }), 'API');

@@ -114,6 +114,10 @@ A device is "stale" if `Date.now() - receivedAt > staleAfterMs` (default 10 min)
 
 ## Conventions
 
+### Provider notes
+
+Focused notes for providers with non-obvious data sources, identity rules, fallbacks, or security boundaries live under `docs/providers/`. Read the matching note before changing that provider, and update it in the same change when its documented contract moves. These notes supplement the code; they do not replace it.
+
 - **Consider best practices first.** When picking an approach — library vs hand-roll, pattern vs custom, framework default vs override — start by checking the ecosystem convention, not by optimizing for "fewer deps" or "less code". If a hand-rolled solution is genuinely better, argue that *after* weighing the convention.
 - **This project has external users.** Settings keys, env vars, CLI flags, hub endpoints, and the wire shape (`docs/API.md`) are compatibility surfaces — treat changes to them as breaking and think about migration. Internal code can still be refactored and renamed freely.
 - **Don't add dependencies or new tooling without discussing it first** (in the issue or PR description).

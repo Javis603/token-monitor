@@ -85,6 +85,18 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   repairClientSyncLock: (clientId) => ipcRenderer.invoke('usage:repairClientSyncLock', clientId),
   openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
   openUserData: () => ipcRenderer.invoke('app:openUserData'),
+  antigravity: {
+    accounts: () => ipcRenderer.invoke('antigravity:accounts'),
+    addAccount: () => ipcRenderer.invoke('antigravity:addAccount'),
+    cancelLogin: () => ipcRenderer.invoke('antigravity:cancelLogin'),
+    removeAccount: (id) => ipcRenderer.invoke('antigravity:removeAccount', id),
+    setAccountEnabled: (id, enabled) => ipcRenderer.invoke('antigravity:setAccountEnabled', id, enabled),
+    onAccounts: (callback) => {
+      const handler = (_event, accounts) => callback(accounts);
+      ipcRenderer.on('antigravity:accounts', handler);
+      return () => ipcRenderer.removeListener('antigravity:accounts', handler);
+    }
+  },
   mimo: {
     accounts: () => ipcRenderer.invoke('mimo:accounts'),
     addAccount: (cookieHeader) => ipcRenderer.invoke('mimo:addAccount', cookieHeader),
