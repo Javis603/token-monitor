@@ -97,11 +97,11 @@ function normalizeManagedAccounts(value, options = {}) {
 
 function parseClientFromText(content) {
   const text = String(content || '');
-  const embeddedIds = unique(text.match(OAUTH_CLIENT_ID_PATTERN) || []);
-  const embeddedSecrets = unique(text.match(OAUTH_CLIENT_SECRET_PATTERN) || []);
+  const embeddedIds = new Set(text.match(OAUTH_CLIENT_ID_PATTERN) || []);
+  const embeddedSecrets = new Set(text.match(OAUTH_CLIENT_SECRET_PATTERN) || []);
   if (
-    embeddedIds.includes(ANTIGRAVITY_OAUTH_CLIENT_ID)
-    && embeddedSecrets.includes(ANTIGRAVITY_OAUTH_CLIENT_SECRET)
+    embeddedIds.has(ANTIGRAVITY_OAUTH_CLIENT_ID)
+    && embeddedSecrets.has(ANTIGRAVITY_OAUTH_CLIENT_SECRET)
   ) {
     return officialOAuthClient();
   }
