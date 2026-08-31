@@ -1,6 +1,6 @@
 'use strict';
 
-const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', dsh: 'DeepSeek Harness', cherrystudio: 'Cherry Studio', lmstudio: 'LM Studio' };
+const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', dsh: 'DeepSeek Harness', cherrystudio: 'Cherry Studio', lmstudio: 'LM Studio', trae: 'Trae CN' };
 const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
@@ -77,7 +77,8 @@ const KNOWN_CLIENTS = [
   { id: 'reasonix', label: 'Reasonix' },
   { id: 'dsh', label: 'DeepSeek Harness' },
   { id: 'cherrystudio', label: 'Cherry Studio' },
-  { id: 'lmstudio', label: 'LM Studio' }
+  { id: 'lmstudio', label: 'LM Studio' },
+  { id: 'trae', label: 'Trae CN' }
 ];
 const LIMIT_PROVIDERS = [
   { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
@@ -325,6 +326,10 @@ state.codexResetForecastBusy = false;
 state.codexResetForecastRequestedAt = 0;
 state.codexResetForecastRetryTimer = null;
 state.clientRescans = clientRescanStateApi.createClientRescanState({
+  // Trae's targeted collect finishes in a few hundred milliseconds, which
+  // would make its rescan button's disabled state flash invisibly; hold it
+  // for a visible beat. Every other client scans slowly enough on its own.
+  minimumPendingMs: (clientId) => (clientId === 'trae' ? 1000 : 0),
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
   }
@@ -734,7 +739,9 @@ function settingsSectionSummary(section) {
   if (section === 'tools') {
     const counts = clientHealthPresentationApi.clientHealthCountsForTracked(
       localClientHealth(),
-      enabledClientSet()
+      // Trae CN has no collector health envelope; letting it into the health
+      // counting set would flip the whole summary to the generic fallback.
+      new Set([...enabledClientSet()].filter((id) => id !== 'trae'))
     );
     if (counts) return t('settings.summary.toolsHealth', counts);
     return t('settings.summary.tools', {
@@ -9292,7 +9299,12 @@ function syncSettingsForm() {
 }
 
 function enabledClientSet() {
-  return new Set(String(state.settings.clients || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+  const enabled = new Set(String(state.settings.clients || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+  // Trae CN collects through its own Electron lane (no shared-collector
+  // adapter, so it never joins the clients CSV), but the display list treats
+  // it like any other tracked client.
+  if (state.settings?.traeCollectionEnabled !== false) enabled.add('trae');
+  return enabled;
 }
 
 function hiddenClientSet() {
@@ -10186,6 +10198,25 @@ function localClientStatus() {
   return localDevice()?.clientStatus || {};
 }
 
+// The Trae row's badges, off the lane's pushed status instead of the collector
+// health envelope it does not have. The shared status vocabulary describes the
+// lane state (追踪中 once a collect has succeeded, 需要处理 on key problems);
+// the reverse-engineered marker always follows, marking where the data comes
+// from.
+function traeRowTagInfos() {
+  const status = state.traeStatus;
+  let statusTag;
+  if (!status) statusTag = clientStatusPresentationApi.clientStatusTag('trae', 'waiting');
+  else if (status.state === 'unsupported') statusTag = clientStatusPresentationApi.clientStatusTag('trae', 'missing');
+  else if (status.state === 'needsKey' || status.state === 'keyInvalid' || status.state === 'error') {
+    statusTag = { key: 'settings.tools.status.attention', tone: 'warn' };
+  } else {
+    statusTag = clientStatusPresentationApi.clientStatusTag('trae', 'active');
+  }
+  const marker = { key: 'settings.tools.status.separate', tone: 'ok' };
+  return statusTag ? [statusTag, marker] : [marker];
+}
+
 function localClientHealth() {
   return localDevice()?.clientHealth || null;
 }
@@ -10208,7 +10239,9 @@ function setClientHealthExpanded(clientId, options = {}) {
     if (open) {
       const force = options.refreshPlaceholder === true
         && !clientHealthPresentationApi.hasClientHealth(localClientHealth(), row.dataset.client);
-      loadClientSources(row.dataset.client, { force });
+      // Trae CN has no collector sources; its panel renders from the lane's
+      // pushed status alone.
+      if (row.dataset.client !== 'trae') loadClientSources(row.dataset.client, { force });
       if (container.childElementCount === 0) {
         fillClientHealthPanel(container, row.dataset.client);
       }
@@ -10363,6 +10396,10 @@ function patchRenderedNode(current, next) {
 }
 
 function fillClientHealthPanel(container, clientId) {
+  if (clientId === 'trae') {
+    renderTraePanelInto(container);
+    return;
+  }
   const detail = clientHealthDetailFor(clientId);
   if (!detail) return;
   const next = clientHealthPanel(detail, clientId);
@@ -10465,6 +10502,10 @@ function clientHealthGroup(group, notes) {
         relative: relativeDayLabel(group.lastActivityDay),
         day: group.lastActivityDay
       });
+      // Trae reports last activity by date only; the lane's stamp carries a
+      // full timestamp, so the panel shows the time too — freshness at a
+      // glance instead of "is today's number actually moving?".
+      if (group.lastActivityTime) activity.textContent += ` · ${group.lastActivityTime}`;
       body.append(activity);
     }
   }
@@ -10671,6 +10712,133 @@ function renderWslPanel() {
   }
 }
 
+// Trae CN local-collection panel: rendered inside the Trae row's disclosure in
+// the collection list, using the exact same group sections — and the exact
+// same accordion wrappers — as the collector health panels (来源 / 采集 / 用量)
+// so every expanded row reads and collapses identically. The collapse
+// animation is a grid row squeezed to 0fr: it only folds when the container's
+// single child carries min-height:0 (accordion-animation-inner), so the
+// content must never be appended to the container directly.
+function renderTraePanelInto(container) {
+  if (!container) return;
+  const isWin = state.appInfo?.platform === 'win32';
+  container.replaceChildren();
+  const status = state.traeStatus;
+  if (!isWin || !status) return;
+
+  const inner = document.createElement('div');
+  inner.className = 'accordion-animation-inner';
+  const box = document.createElement('div');
+  box.className = 'tool-health-inner';
+  inner.append(box);
+  const groups = document.createElement('div');
+  groups.className = 'tool-health-groups';
+
+  const dbFound = status.dbFound === true;
+  groups.append(clientHealthGroup({
+    id: 'source',
+    key: 'settings.tools.health.source',
+    state: dbFound ? 'detected' : 'missing',
+    detectedCount: dbFound ? 1 : 0,
+    checkedCount: 1,
+    checks: status.dbPath
+      ? [{ id: 'trae-database', exists: dbFound, paths: [{ dir: status.dbPath, exists: dbFound }] }]
+      : []
+  }, []));
+  // No lastAttemptAt/lastSuccessAt here: the shared group would render them as
+  // "上次尝试/成功于 X 前" stamps, which the Trae lane should not show.
+  groups.append(clientHealthGroup({
+    id: 'collection',
+    key: 'settings.tools.health.sync',
+    state: 'direct'
+  }, []));
+
+  const usage = status.usage || { today: 0, month: 0, allTime: 0 };
+  // "Last activity" is the newest real turn in the collected data — never the
+  // snapshot capture time, which moves on every collect.
+  const lastActivityAt = Number(status.lastActivityAt) || 0;
+  groups.append(clientHealthGroup({
+    id: 'usage',
+    key: 'settings.tools.health.usage',
+    periods: [
+      { period: 'today', tokens: usage.today || 0, cost: 0 },
+      { period: 'month', tokens: usage.month || 0, cost: 0 },
+      { period: 'allTime', tokens: usage.allTime || 0, cost: 0 }
+    ],
+    lastActivityDay: lastActivityAt ? localDayKey(new Date(lastActivityAt)) : null,
+    lastActivityTime: lastActivityAt
+      ? new Date(lastActivityAt).toLocaleTimeString(currentLocale(), { hour: '2-digit', minute: '2-digit' })
+      : null
+  }, []));
+
+  if (status.lastError || status.lastExtractError) {
+    const note = document.createElement('div');
+    note.className = 'tool-health-note-line tone-warn';
+    note.textContent = status.lastError || status.lastExtractError;
+    groups.append(note);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'tool-health-actions';
+  const extractButton = document.createElement('button');
+  extractButton.type = 'button';
+  extractButton.className = 'tool-health-action';
+  extractButton.textContent = t('settings.collection.traePanel.extractKey');
+  extractButton.disabled = status.state === 'extracting' || status.state === 'collecting' || !isWin;
+  extractButton.addEventListener('click', async () => {
+    extractButton.disabled = true;
+    try {
+      const result = await window.tokenMonitor.traeExtractKey?.();
+      if (result && result.ok === false && result.error) {
+        state.traeStatus = { ...(state.traeStatus || {}), lastExtractError: result.error };
+      }
+    } finally {
+      renderToolPreferences();
+    }
+  });
+  actions.append(extractButton);
+  // Same slot, label and handler shape as the health panels' rescan button:
+  // begin → rescanClient → finish, with loadClientSources on success. For
+  // Trae the main process routes rescanClient('trae') to the collection lane.
+  const rescanState = state.clientRescans.snapshot('trae');
+  const rescanButton = document.createElement('button');
+  rescanButton.type = 'button';
+  rescanButton.className = 'tool-health-action';
+  rescanButton.textContent = t('settings.tools.health.rescan');
+  rescanButton.id = 'toolHealthRescan-trae';
+  rescanButton.dataset.healthAction = 'rescan';
+  rescanButton.disabled = rescanState.pending;
+  rescanButton.addEventListener('click', async () => {
+    const requestId = state.clientRescans.begin('trae');
+    let succeeded = false;
+    try {
+      succeeded = await window.tokenMonitor.rescanClient('trae') === true;
+      if (succeeded) loadClientSources('trae', { force: true });
+    } catch (_) {
+      succeeded = false;
+    } finally {
+      state.clientRescans.finish('trae', requestId, succeeded);
+    }
+  });
+  actions.append(rescanButton);
+  // Reveal the database file in Explorer, mirroring the health panels' reveal
+  // button; the path is resolved main-side (trae:revealSource), never sent
+  // from here.
+  if (status.dbFound && status.dbPath) {
+    const revealButton = document.createElement('button');
+    revealButton.type = 'button';
+    revealButton.className = 'tool-health-action';
+    revealButton.textContent = t('settings.tools.health.reveal');
+    revealButton.id = 'toolHealthReveal-trae';
+    revealButton.dataset.healthAction = 'reveal';
+    revealButton.addEventListener('click', () => { void window.tokenMonitor?.traeRevealSource?.(); });
+    actions.append(revealButton);
+  }
+
+  box.append(groups, actions);
+  container.append(inner);
+}
+
 // The tracked-tools list drags from the whole row too, on the same controller
 // as the limits list. What differs is the commit: its order is not one setting.
 // While the list is on its default order the pinned block is the only thing
@@ -10712,6 +10880,7 @@ function toolPreferenceRenderSignature() {
   const clientStatus = localClientStatus();
   const health = localClientHealth();
   const device = localDevice();
+  const trae = state.traeStatus;
   return JSON.stringify({
     settings: [
       [...enabledClientSet()].sort(),
@@ -10724,6 +10893,9 @@ function toolPreferenceRenderSignature() {
     ],
     deviceId: device?.deviceId || '',
     clientStatus,
+    // The Trae lane pushes its own status outside the collector health
+    // envelope; its state drives the row badge and the expanded panel.
+    traeStatus: trae ? [trae.state, trae.capturedAt || '', trae.keyPresent === true] : null,
     healthRows: KNOWN_CLIENTS.map(({ id }) => [
       id,
       health?.clients?.[id]?.overall || '',
@@ -10798,10 +10970,12 @@ function renderToolPreferencesNow() {
       // would keep reporting "Tracking" — leaving the one state this whole
       // feature exists to surface invisible until the row is expanded.
       const needsAttention = health?.clients?.[id]?.overall === 'attention';
-      const tagInfo = needsAttention
-        ? { key: 'settings.tools.status.attention', tone: 'warn' }
-        : clientStatusPresentationApi.clientStatusTag(id, clientStatus[id] || 'waiting');
-      if (tagInfo) {
+      const tagInfos = id === 'trae'
+        ? traeRowTagInfos()
+        : (needsAttention
+          ? [{ key: 'settings.tools.status.attention', tone: 'warn' }]
+          : [clientStatusPresentationApi.clientStatusTag(id, clientStatus[id] || 'waiting')].filter(Boolean));
+      for (const tagInfo of tagInfos) {
         const tag = document.createElement('span');
         tag.className = `tool-status-tag tool-status-tag-${tagInfo.tone}`;
         tag.textContent = t(tagInfo.key);
@@ -10848,9 +11022,38 @@ function renderToolPreferencesNow() {
     actions.className = 'tool-preference-actions';
     actions.append(visibility, pin);
     // Tracked tools use the health snapshot; untracked tools get an on-demand
-    // source view so every row keeps the same disclosure affordance.
-    const detail = clientHealthDetailFor(id);
-    if (detail) {
+    // source view so every row keeps the same disclosure affordance. Trae CN
+    // mounts its own lane panel (usage, key state, extract/collect actions)
+    // instead of the collector health detail it does not have.
+    if (id === 'trae') {
+      const expanded = state.clientHealthExpanded === id;
+      row.classList.toggle('expanded', expanded);
+      const main = document.createElement('button');
+      main.type = 'button';
+      main.id = `toolHealthDisclosure-${id}`;
+      main.className = 'tool-preference-main';
+      main.title = t('settings.tools.health.open', { name: label });
+      main.setAttribute('aria-label', main.title);
+      main.setAttribute('aria-expanded', String(expanded));
+      const disclosureIcon = document.createElement('span');
+      disclosureIcon.className = 'cursor-disclosure-icon';
+      disclosureIcon.setAttribute('aria-hidden', 'true');
+      main.append(disclosureIcon);
+      const panel = document.createElement('div');
+      panel.id = `toolHealthPanel-${id}`;
+      panel.className = `accordion-animated-container${expanded ? '' : ' hidden'}`;
+      main.setAttribute('aria-controls', panel.id);
+      if (expanded) renderTraePanelInto(panel);
+      main.addEventListener('click', () => {
+        const open = state.clientHealthExpanded !== id;
+        setClientHealthExpanded(open ? id : '');
+      });
+      actions.append(main);
+      row.classList.add('has-health');
+      row.append(track, labelGroup, actions, panel);
+    } else {
+      const detail = clientHealthDetailFor(id);
+      if (detail) {
       const expanded = state.clientHealthExpanded === id;
       row.classList.toggle('expanded', expanded);
       const main = document.createElement('button');
@@ -10881,8 +11084,9 @@ function renderToolPreferencesNow() {
       actions.append(main);
       row.classList.add('has-health');
       row.append(track, labelGroup, actions, panel);
-    } else {
-      row.append(track, labelGroup, actions);
+      } else {
+        row.append(track, labelGroup, actions);
+      }
     }
     row.addEventListener('pointerdown', (event) => clientPreferenceRowDrag.startRowDrag(event, id));
     els.clientDisplayList.appendChild(row);
@@ -11279,10 +11483,18 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
 }
 
 async function onToolTrackingToggle() {
-  const checked = Array.from(els.clientDisplayList.querySelectorAll('input[data-preference="track"]'))
-    .filter((cb) => cb.checked)
+  const trackCheckboxes = Array.from(els.clientDisplayList.querySelectorAll('input[data-preference="track"]'))
+    .filter((cb) => cb.checked);
+  // Trae CN's checkbox gates its Electron collection lane, not the shared
+  // clients CSV — no collector adapter exists for it, and the CSV would hand
+  // an unknown id to the collector and tokscale.
+  const traeToggle = trackCheckboxes.find((cb) => cb.dataset.client === 'trae');
+  const checked = trackCheckboxes
+    .filter((cb) => cb.dataset.client !== 'trae')
     .map((cb) => cb.dataset.client);
-  await saveSettings({ clients: checked.join(',') });
+  const patch = { clients: checked.join(',') };
+  if (traeToggle) patch.traeCollectionEnabled = traeToggle.checked;
+  await saveSettings(patch);
   // `clients` is usage-structural, so settings:update schedules a latest-wins
   // usage reconciliation and the eventual collector runs its own full tick.
   // Forcing a refresh here would bypass that settling boundary, duplicate the
@@ -12418,6 +12630,17 @@ function renderConnectionStatus(surface = visibleStatsSurface()) {
   setStatus(statusTextFor(state.mode, state.streamConnected));
   if (surface === 'settings') renderSyncClientStatus();
 }
+window.tokenMonitor.onTraeStatusPush?.((payload) => {
+  state.traeStatus = payload;
+  // The collection-list row's badge and expanded panel read this status; the
+  // render signature includes it, so unchanged pushes repaint nothing.
+  renderToolPreferences();
+});
+window.tokenMonitor.traeStatus?.().then((status) => {
+  if (!status) return;
+  state.traeStatus = status;
+  renderToolPreferences();
+}).catch(() => {});
 
 function renderStatsUpdate() {
   const surface = visibleStatsSurface();

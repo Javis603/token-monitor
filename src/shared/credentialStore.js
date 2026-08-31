@@ -29,6 +29,7 @@ const CREDENTIAL_SETTING_PATHS = Object.freeze({
   qoderCookie: ['providers', 'qoder', 'cookie'],
   traeAccessToken: ['providers', 'trae', 'accessToken'],
   traeDeviceId: ['providers', 'trae', 'deviceId'],
+  traeDbKey: ['providers', 'trae', 'dbKey'],
   commandcodeCookie: ['providers', 'commandcode', 'cookie'],
   kimiApiKey: ['providers', 'kimi', 'apiKey'],
   kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],

@@ -25,7 +25,13 @@ test('targeted rescans stay strict while Cursor credential refresh is best effor
   const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
   const clientSourceIpc = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'clientSourceIpc.js'), 'utf8');
   assert.match(clientSourceIpc, /if \(!canRescanClient\(client\) \|\| !canRunRescan\(\)\) return false/);
-  assert.match(main, /rescanClient: \(client\) => refreshUsageClient\(client, \{ forceSync: true \}\)/);
+  // Targeted rescans stay strict (throw on untracked clients) for every
+  // collector client; trae is the one exception — it collects through its own
+  // Electron lane, so its rescan routes there instead.
+  assert.match(
+    main,
+    /rescanClient: \(client\) => client === 'trae'\s*\?\s*Promise\.resolve\(traeCollectionLane\?\.collectNow\('manual'\)\)\.then\(\(status\) => Boolean\(status\)\)\s*:\s*refreshUsageClient\(client, \{ forceSync: true \}\)/
+  );
   assert.match(main, /repairClientSyncLock: \(\) => repairAntigravitySyncLock/);
   assert.match(main, /lockPath: antigravitySyncLockPath\(os\.homedir\(\)\)/);
   assert.match(preload, /repairClientSyncLock: \(clientId\) => ipcRenderer\.invoke\('usage:repairClientSyncLock', clientId\)/);

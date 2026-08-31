@@ -80,6 +80,7 @@ test('tool diagnostics bind source values to the full health snapshot key', () =
   assert.match(actions, /window\.tokenMonitor\.revealClientSyncLock\(clientId\)/);
   assert.match(actions, /revealLock\.id = `toolHealthRevealLock-\$\{clientId\}`/);
   assert.match(actions, /if \(succeeded\) loadClientSources/);
+  assert.match(actions, /state\.clientRescans\.finish\(clientId, requestId, succeeded\)/);
   assert.match(actions, /rescan\.id = `toolHealthRescan-\$\{clientId\}`/);
   assert.match(actions, /reveal\.id = `toolHealthReveal-\$\{clientId\}`/);
   assert.match(actions, /exactLocalClientSources\(clientId\)/);

@@ -280,8 +280,10 @@ function pruneArchivedClientUsage(archive, activeClients) {
 }
 
 module.exports = {
+  addClientUsage,
   applyArchivedClientUsage,
   captureArchivedClientUsage,
+  clientUsageFromPeriod,
   normalizeArchivedClientUsage,
   pruneArchivedClientUsage
 };

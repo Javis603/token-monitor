@@ -88,6 +88,7 @@ const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
+const { createTraeCollection } = require('./traeCollection');
 const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
@@ -592,6 +593,8 @@ function defaultSettings() {
     qoderSite: 'global',
     traeAccessToken: '',
     traeDeviceId: '',
+    traeCollectionEnabled: true,
+    traeDbKey: '',
     commandcodeCookie: '',
     kimiApiKey: '',
     kimiWebAccessToken: '',
@@ -855,6 +858,13 @@ function normalizeTraeAccessToken(value) {
 
 function normalizeTraeDeviceId(value) {
   return traeDeviceId({}, { traeDeviceId: String(value || '') });
+}
+
+// The SQLCipher key extracted from the running Trae CN process is a 32-byte
+// hex string; anything else is discarded rather than stored.
+function normalizeTraeDbKey(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return /^[0-9a-f]{64}$/.test(raw) ? raw : '';
 }
 
 function currentTraeAccessToken() {
@@ -2611,6 +2621,27 @@ function summaryWithArchivedClientUsage(summary) {
   return summaryWithArchivesApplied(summary, updateSessionUsageArchive(summary, now), now);
 }
 
+// Render transform for every collector summary: the Trae CN local snapshot goes
+// in first (its sessions feed the project rollups below), then the archives.
+function traeTransformUsage(summary, reason, meta) {
+  const withTrae = traeCollectionLane
+    ? traeCollectionLane.applyToSummary(summary, meta)
+    : summary;
+  return summaryWithArchivedClientUsage(withTrae);
+}
+
+async function persistTraeSettingsPatch(patch) {
+  if (patch?.traeDbKey !== undefined) settings.traeDbKey = normalizeTraeDbKey(patch.traeDbKey);
+  saveSettings({ throwOnError: true });
+  pushSettingsToRenderer();
+}
+
+function pushTraeStatusToRenderer(status) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.webContents.send('trae:status', status); } catch (_) {}
+  }
+}
+
 function applyMacActivationPolicy(state = {}) {
   if (process.platform !== 'darwin') return;
   const mainWindowVisible = state.mainWindowVisible !== undefined
@@ -2763,6 +2794,7 @@ let sseRetryTimer = null;
 let streamConnected = false;
 let streamFailure = null;
 let lastCollectedDevice = null;
+let traeCollectionLane = null;
 let latestHubStats = null;
 let latestHubStatsReceivedAt = null;
 let latestHubStatsSource = 'none';
@@ -3700,7 +3732,7 @@ function startSyncCollector() {
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
-    transformUsage: summaryWithArchivedClientUsage,
+    transformUsage: traeTransformUsage,
     usageOptions,
     sink,
     onDiagnosticEvent: recordDiagnosticEvent,
@@ -3747,7 +3779,7 @@ function startHostCollector() {
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
-    transformUsage: summaryWithArchivedClientUsage,
+    transformUsage: traeTransformUsage,
     usageOptions,
     sink,
     onDiagnosticEvent: recordDiagnosticEvent,
@@ -4277,7 +4309,7 @@ function startLocalCollector() {
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
-    transformUsage: summaryWithArchivedClientUsage,
+    transformUsage: traeTransformUsage,
     usageOptions,
     progressive: true,
     onRecord: (summary, meta) => {
@@ -4714,6 +4746,7 @@ function settingsForRenderer() {
     qoderCookie: settings?.qoderCookie ? 'set' : '',
     traeAccessToken: settings?.traeAccessToken ? 'set' : '',
     traeDeviceId: settings?.traeDeviceId ? 'set' : '',
+    traeDbKey: settings?.traeDbKey ? 'set' : '',
     commandcodeCookie: settings?.commandcodeCookie ? 'set' : '',
     ollamaCookie: settings?.ollamaCookie ? 'set' : '',
     // Never ship OpenCode session cookies to the renderer; the UI only needs to
@@ -6365,6 +6398,20 @@ function rebuildWindow() {
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
+  traeCollectionLane = createTraeCollection({
+    getSettings: () => settings,
+    updateSettings: persistTraeSettingsPatch,
+    pushStatus: pushTraeStatusToRenderer,
+    // Timestamped: the collect log is the only record of when the watch fired
+    // versus when the data landed, which is exactly what "usage updated late"
+    // reports have to be judged against.
+    log: (message) => console.log(new Date().toISOString(), message),
+    userDataPath: app.getPath('userData'),
+    // The collector's watch never covers the Trae directory, so a landed Trae
+    // snapshot would otherwise wait out the shared collection interval before
+    // any tick merged it into the totals the dashboard shows.
+    nudgeCollector: () => deviceRuntimeHandle?.tick('trae', { todayOnly: true })
+  });
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
   // it — nothing else in the app would notice the change.
@@ -6414,6 +6461,7 @@ app.whenReady().then(() => {
       macWidgetSnapshotController?.resume();
     }
   });
+  traeCollectionLane.start();
   void hydrateCodexManagedWorkspaceLabels();
   if (settings.discordRpcEnabled) startDiscordRpc();
   rateCache = readRateCache();
@@ -6422,6 +6470,30 @@ app.whenReady().then(() => {
   rateRefreshTimer = setInterval(() => { refreshExchangeRates(); }, 6 * 60 * 60 * 1000);
   setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
+
+  ipcMain.handle('trae:getStatus', () => traeCollectionLane?.status() || null);
+  ipcMain.handle('trae:extractKey', async () => {
+    try {
+      return await traeCollectionLane?.extractAndSaveKey() || { ok: false, error: 'trae collection unavailable' };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+  ipcMain.handle('trae:collectNow', async () => {
+    try {
+      return await traeCollectionLane?.collectNow('manual') || null;
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+  // Reveal the Trae CN database in Explorer. The path is resolved here, never
+  // accepted from the renderer — the same rule as usage:revealClientSource.
+  ipcMain.handle('trae:revealSource', () => {
+    const dbPath = traeCollectionLane?.status()?.dbPath || '';
+    if (!dbPath || !fs.existsSync(dbPath)) return false;
+    shell.showItemInFolder(dbPath);
+    return true;
+  });
 
   ipcMain.handle('subscriptions:adoptOrphans', async () => {
     try {
@@ -6537,6 +6609,7 @@ app.whenReady().then(() => {
     if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
     if (patch.traeAccessToken !== undefined) normalizedPatch.traeAccessToken = normalizeTraeAccessToken(patch.traeAccessToken);
     if (patch.traeDeviceId !== undefined) normalizedPatch.traeDeviceId = normalizeTraeDeviceId(patch.traeDeviceId);
+    if (patch.traeDbKey !== undefined) normalizedPatch.traeDbKey = normalizeTraeDbKey(patch.traeDbKey);
     if (patch.commandcodeCookie !== undefined) normalizedPatch.commandcodeCookie = normalizeCommandcodeCookie(patch.commandcodeCookie);
     if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
     if (patch.kimiWebAccessToken !== undefined) normalizedPatch.kimiWebAccessToken = normalizeKimiWebAccessToken(patch.kimiWebAccessToken);
@@ -6611,6 +6684,7 @@ app.whenReady().then(() => {
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
       sessionUsageArchiveEnabled: parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true),
       wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, true),
+      traeCollectionEnabled: parseBoolean(patch.traeCollectionEnabled ?? settings.traeCollectionEnabled, true),
       collectionMode: normalizeCollectionMode(patch.collectionMode ?? settings.collectionMode),
       collectionIntervalMs: normalizeCollectionIntervalMs(patch.collectionIntervalMs ?? settings.collectionIntervalMs),
       syncUploadIntervalMs: normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs ?? settings.syncUploadIntervalMs),
@@ -6666,6 +6740,7 @@ app.whenReady().then(() => {
       qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
       traeAccessToken: patch.traeAccessToken !== undefined ? normalizeTraeAccessToken(patch.traeAccessToken) : (settings.traeAccessToken || ''),
       traeDeviceId: patch.traeDeviceId !== undefined ? normalizeTraeDeviceId(patch.traeDeviceId) : (settings.traeDeviceId || ''),
+      traeDbKey: patch.traeDbKey !== undefined ? normalizeTraeDbKey(patch.traeDbKey) : (settings.traeDbKey || ''),
       commandcodeCookie: patch.commandcodeCookie !== undefined ? normalizeCommandcodeCookie(patch.commandcodeCookie) : (settings.commandcodeCookie || ''),
       ollamaCookie: patch.ollamaCookie !== undefined ? normalizeOllamaCookie(patch.ollamaCookie) : (settings.ollamaCookie || ''),
       customModelPricing: patch.customModelPricing !== undefined
@@ -6684,6 +6759,12 @@ app.whenReady().then(() => {
     if (JSON.stringify(settings.customModelPricing || []) !== previousCustomModelPricing) {
       regenerateTokscalePricing();
       refreshAfterPricingChange();
+    }
+    if (previousRuntimeSettings.traeCollectionEnabled !== settings.traeCollectionEnabled
+      || previousRuntimeSettings.traeDbKey !== settings.traeDbKey
+      || previousRuntimeSettings.collectionMode !== settings.collectionMode
+      || previousRuntimeSettings.collectionIntervalMs !== settings.collectionIntervalMs) {
+      traeCollectionLane?.onSettingsChanged();
     }
     configureWindowToggleShortcut();
     if (settings.startAtLogin !== previousStartAtLogin) {
@@ -6980,7 +7061,14 @@ app.whenReady().then(() => {
   // pair when the tool is not tracked, avoiding eager filesystem work.
   const clientSourceIpcHandlers = createClientSourceIpcHandlers({
     knownClients: KNOWN_CLIENTS,
-    trackedClients: () => trackedClientSet(clientsCsvForSetting(settings?.clients)),
+    trackedClients: () => {
+      const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
+      // Trae CN collects through its own lane rather than this collector, so
+      // it never joins the clients CSV — its settings row still needs the
+      // standard rescan guards to see it as tracked while the lane is on.
+      if (settings?.traeCollectionEnabled !== false) tracked.add('trae');
+      return tracked;
+    },
     visibleDiagnosticRoots,
     clientDiagnosticRoots,
     showItemInFolder: (target) => shell.showItemInFolder(target),
@@ -6992,7 +7080,9 @@ app.whenReady().then(() => {
       return true;
     },
     canRunRescan: () => ownsUsageRuntime(),
-    rescanClient: (client) => refreshUsageClient(client, { forceSync: true }),
+    rescanClient: (client) => client === 'trae'
+      ? Promise.resolve(traeCollectionLane?.collectNow('manual')).then((status) => Boolean(status))
+      : refreshUsageClient(client, { forceSync: true }),
     repairClientSyncLock: () => repairAntigravitySyncLock({
       lockPath: antigravitySyncLockPath(os.homedir())
     }),

@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -13,6 +13,15 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   adoptOrphanedSubscriptions: () => ipcRenderer.invoke('subscriptions:adoptOrphans'),
   discardOrphanedSubscriptions: () => ipcRenderer.invoke('subscriptions:discardOrphans'),
   clearSessionUsageArchive: () => ipcRenderer.invoke('sessionUsageArchive:clear'),
+  traeStatus: () => ipcRenderer.invoke('trae:getStatus'),
+  traeExtractKey: () => ipcRenderer.invoke('trae:extractKey'),
+  traeCollectNow: () => ipcRenderer.invoke('trae:collectNow'),
+  traeRevealSource: () => ipcRenderer.invoke('trae:revealSource'),
+  onTraeStatusPush: (callback) => {
+    const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
+    ipcRenderer.on('trae:status', listener);
+    return () => ipcRenderer.removeListener('trae:status', listener);
+  },
   lookupModelPricing: (modelId) => ipcRenderer.invoke('pricing:lookup', modelId),
   previewAppearance: (patch) => ipcRenderer.invoke('appearance:preview', patch),
   getStats: (options) => ipcRenderer.invoke('stats:get', options),
