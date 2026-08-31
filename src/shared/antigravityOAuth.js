@@ -26,8 +26,8 @@ const SCOPES = Object.freeze([
   'https://www.googleapis.com/auth/experimentsandconfigs'
 ]);
 const REFRESH_SAFETY_MS = 60_000;
-const OAUTH_CLIENT_ID_PATTERN = /[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com/g;
-const OAUTH_CLIENT_SECRET_PATTERN = /GOCSPX-[A-Za-z0-9_-]{28}/g;
+const OAUTH_CLIENT_ID_PATTERN = /(?<![A-Za-z0-9_-])[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com(?![A-Za-z0-9._-])/g;
+const OAUTH_CLIENT_SECRET_PATTERN = /(?<![A-Za-z0-9_-])GOCSPX-[A-Za-z0-9_-]{28}(?![A-Za-z0-9_-])/g;
 // Antigravity ships more than one Google desktop OAuth client in the same Go
 // binary. This is the client used by Antigravity Hub for the quota APIs. Pair it
 // explicitly before falling back to the generic artifact parser; pairing the
@@ -97,7 +97,12 @@ function normalizeManagedAccounts(value, options = {}) {
 
 function parseClientFromText(content) {
   const text = String(content || '');
-  if (text.includes(ANTIGRAVITY_OAUTH_CLIENT_ID) && text.includes(ANTIGRAVITY_OAUTH_CLIENT_SECRET)) {
+  const embeddedIds = unique(text.match(OAUTH_CLIENT_ID_PATTERN) || []);
+  const embeddedSecrets = unique(text.match(OAUTH_CLIENT_SECRET_PATTERN) || []);
+  if (
+    embeddedIds.includes(ANTIGRAVITY_OAUTH_CLIENT_ID)
+    && embeddedSecrets.includes(ANTIGRAVITY_OAUTH_CLIENT_SECRET)
+  ) {
     return officialOAuthClient();
   }
   const marker = 'vs/platform/cloudCode/common/oauthClient.js';

@@ -62,6 +62,15 @@ test('parseClientFromText prefers the Antigravity Hub client when multiple clien
   assert.deepEqual(client, officialClient);
 });
 
+test('parseClientFromText requires complete OAuth credential tokens', () => {
+  const officialClient = antigravityOAuth._officialOAuthClient();
+  const client = antigravityOAuth.parseClientFromText(`
+    ${officialClient.clientId}.example.test
+    ${officialClient.clientSecret}suffix
+  `);
+  assert.equal(client, null);
+});
+
 test('discoverOAuthClient uses the bundled Antigravity Hub client without an installed app', () => {
   const officialClient = antigravityOAuth._officialOAuthClient();
   const client = antigravityOAuth.discoverOAuthClient({
