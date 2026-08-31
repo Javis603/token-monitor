@@ -225,7 +225,7 @@ const {
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
-const { priceCacheContinuity } = require('../shared/sessionDetail');
+const { priceCacheContinuity, resolveCacheContinuityPricing } = require('../shared/sessionDetail');
 const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const {
@@ -6922,9 +6922,7 @@ app.whenReady().then(() => {
     const { client, sessionId, period, sessionCost } = args || {};
     const detail = await readSessionDetailForPlatform({ client, sessionId, period, sessionCost });
     if (!detail?.cacheContinuity) return detail;
-    const pricingByModel = await resolvePromaPricing(
-      detail.cacheContinuity.events.map((event) => ({ model: event.toModel }))
-    );
+    const pricingByModel = await resolveCacheContinuityPricing(detail.cacheContinuity, resolvePromaPricing);
     return { ...detail, cacheContinuity: priceCacheContinuity(detail.cacheContinuity, pricingByModel) };
   });
   ipcMain.handle('stream:status', () => ({ connected: streamConnected, mode, ...(streamFailure || {}) }));

@@ -142,7 +142,7 @@ test('session detail resolves custom model pricing through the bounded shared re
   const start = mainSource.indexOf("ipcMain.handle('session:getDetail'");
   const end = mainSource.indexOf("ipcMain.handle('stream:status'", start);
   const handler = mainSource.slice(start, end);
-  assert.match(handler, /await resolvePromaPricing\(/);
+  assert.match(handler, /await resolveCacheContinuityPricing\(detail\.cacheContinuity, resolvePromaPricing\)/);
   assert.doesNotMatch(handler, /readTokscalePricingCatalog/);
 });
 

@@ -141,6 +141,7 @@ const {
   filterExchangesByPeriod,
   distributeCost,
   summarizeCacheContinuity,
+  resolveCacheContinuityPricing,
   priceCacheContinuity
 } = require('../../src/shared/sessionDetail');
 const { localDate, localIso } = require('../helpers/localTime');
@@ -188,6 +189,20 @@ test('Codex cache continuity measures a switch drop, recovery, loss, and API equ
     }
   });
   const unavailable = priceCacheContinuity(summary);
+  const inputTierOnly = priceCacheContinuity(summary, {
+    'gpt-new': {
+      inputCostPerToken: 4e-6,
+      cacheReadInputTokenCost: 0.4e-6,
+      inputCostPerTokenAbove272kTokens: 8e-6
+    }
+  });
+  const cacheTierOnly = priceCacheContinuity(summary, {
+    'gpt-new': {
+      inputCostPerToken: 4e-6,
+      cacheReadInputTokenCost: 0.4e-6,
+      cacheReadInputTokenCostAbove272kTokens: 0.8e-6
+    }
+  });
   assert.equal(priced.switchCount, 1);
   assert.equal(priced.materialDropCount, 1);
   assert.equal(priced.lostTokens, 620_000);
@@ -195,7 +210,27 @@ test('Codex cache continuity measures a switch drop, recovery, loss, and API equ
   assert.equal(priced.latest.recoveryCalls, 2);
   assert.ok(Math.abs(basePriced.apiEquivalentUsd - 2.232) < 1e-9);
   assert.ok(Math.abs(priced.apiEquivalentUsd - 4.464) < 1e-9);
+  assert.ok(Math.abs(inputTierOnly.apiEquivalentUsd - 4.712) < 1e-9);
+  assert.ok(Math.abs(cacheTierOnly.apiEquivalentUsd - 1.984) < 1e-9);
   assert.equal(unavailable.pricedTokens, 0);
+});
+
+test('cache continuity pricing skips non-material sessions and shares one deadline across models', async () => {
+  let calls = 0;
+  assert.deepEqual(await resolveCacheContinuityPricing({ materialModels: [] }, () => { calls += 1; }), {});
+  assert.equal(calls, 0);
+
+  const result = await resolveCacheContinuityPricing(
+    { materialModels: ['model-a', 'model-b', 'model-c'] },
+    async (rows, options) => {
+      calls += 1;
+      assert.deepEqual(rows, [{ model: 'model-a' }, { model: 'model-b' }, { model: 'model-c' }]);
+      assert.equal(options.commandTimeoutMs * rows.length, 3000);
+      return { 'model-a': { inputCostPerToken: 1 } };
+    }
+  );
+  assert.equal(calls, 1);
+  assert.equal(result['model-a'].inputCostPerToken, 1);
 });
 
 test('groupEvents groups turns under the preceding prompt', () => {

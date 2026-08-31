@@ -8,6 +8,7 @@ const { readReasonixSessionEvents } = require('./reasonixSessionDetail');
 const CACHE_MATERIAL_DROP_PP = 20;
 const CACHE_RECOVERY_TOLERANCE_PP = 5;
 const CACHE_LONG_CONTEXT_THRESHOLD = 272_000;
+const CACHE_CONTINUITY_PRICING_BUDGET_MS = 3000;
 
 function num(value) {
   const n = Number(value);
@@ -360,11 +361,23 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
     effortSwitchCount: scopedEvents.filter((event) => event.effortChanged).length,
     materialDropCount: materialEvents.length,
     lostTokens: materialEvents.reduce((sum, event) => sum + event.lostTokens, 0),
+    materialModels: Array.from(new Set(materialEvents.map((event) => event.toModel))),
     averageRecoveryCalls: recoveredEvents.length
       ? recoveredEvents.reduce((sum, event) => sum + event.recoveryCalls, 0) / recoveredEvents.length
       : null,
     events: scopedEvents
   };
+}
+
+async function resolveCacheContinuityPricing(summary, resolvePricing) {
+  const models = Array.isArray(summary?.materialModels) ? summary.materialModels : [];
+  if (models.length === 0 || typeof resolvePricing !== 'function') return {};
+  const commandTimeoutMs = Math.max(1, Math.floor(CACHE_CONTINUITY_PRICING_BUDGET_MS / models.length));
+  try {
+    return await resolvePricing(models.map((model) => ({ model })), { commandTimeoutMs });
+  } catch (_) {
+    return {};
+  }
 }
 
 function priceCacheContinuity(summary, pricingByModel = {}) {
@@ -374,11 +387,13 @@ function priceCacheContinuity(summary, pricingByModel = {}) {
     let apiEquivalentUsd = 0;
     let pricedTokens = 0;
     for (const call of event.lossCalls) {
-      const useLongContextRate = call.inputTokens > CACHE_LONG_CONTEXT_THRESHOLD
-        && Number.isFinite(pricing?.inputCostPerTokenAbove272kTokens)
-        && Number.isFinite(pricing?.cacheReadInputTokenCostAbove272kTokens);
-      const inputRate = useLongContextRate ? pricing.inputCostPerTokenAbove272kTokens : pricing?.inputCostPerToken;
-      const cacheRate = useLongContextRate ? pricing.cacheReadInputTokenCostAbove272kTokens : pricing?.cacheReadInputTokenCost;
+      const longContext = call.inputTokens > CACHE_LONG_CONTEXT_THRESHOLD;
+      const inputRate = longContext && Number.isFinite(pricing?.inputCostPerTokenAbove272kTokens)
+        ? pricing.inputCostPerTokenAbove272kTokens
+        : pricing?.inputCostPerToken;
+      const cacheRate = longContext && Number.isFinite(pricing?.cacheReadInputTokenCostAbove272kTokens)
+        ? pricing.cacheReadInputTokenCostAbove272kTokens
+        : pricing?.cacheReadInputTokenCost;
       if (!Number.isFinite(inputRate) || !Number.isFinite(cacheRate) || inputRate < cacheRate) continue;
       pricedTokens += call.lostTokens;
       apiEquivalentUsd += call.lostTokens * (inputRate - cacheRate);
@@ -502,6 +517,7 @@ module.exports = {
   groupEvents,
   filterExchangesByPeriod,
   summarizeCacheContinuity,
+  resolveCacheContinuityPricing,
   priceCacheContinuity,
   distributeCost,
   readReasonixSessionDetail,
