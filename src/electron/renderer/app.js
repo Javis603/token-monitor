@@ -12790,10 +12790,6 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     }
     if (payload.data?.mode) state.mode = payload.data.mode;
     state.stats = overlayAllTimeSessions(payload.data.stats);
-    // TEMP DIAGNOSTIC: lane-refresh render investigation, remove after.
-    if (payload.data?.reason === 'local') {
-      console.log(`[diag-renderer] lane push allTime=${payload.data?.stats?.periods?.allTime?.totalTokens} today=${payload.data?.stats?.periods?.today?.totalTokens} tw=${payload.data?.stats?.periods?.today?.clients?.traework} hidden=${isRendererWindowHidden()}`);
-    }
     applyCodexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see
     // AGENTS.md collector notes), so only the final push can retire the

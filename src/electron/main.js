@@ -6159,10 +6159,6 @@ function createWindow(boundsOverride, options = {}) {
     }
   });
   mainWindow = win;
-  // TEMP DIAGNOSTIC: forward renderer diagnostics to the main log, remove after.
-  win.webContents.on('console-message', (_event, _level, message) => {
-    if (String(message).includes('[diag-renderer]')) console.log(new Date().toISOString(), '[renderer]', message);
-  });
   mainWindowNativeBlurEnabled = null;
   mainWindowChrome = { collapsedFloatingBubble };
   applyMacSpaceBehavior();
