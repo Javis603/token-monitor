@@ -1152,6 +1152,7 @@ async function addAntigravityManagedAccount() {
     })) {
       return { ok: false, errorCode: 'credentialStorageUnavailable' };
     }
+    const previousAccounts = settings.antigravityManagedAccounts;
     settings.antigravityManagedAccounts = normalizeAntigravityManagedAccounts([
       ...accounts.filter((entry) => entry.id !== account.id && entry.accountEmail !== account.accountEmail),
       account
@@ -1159,6 +1160,7 @@ async function addAntigravityManagedAccount() {
     try {
       saveSettings({ throwOnError: true });
     } catch (_) {
+      settings.antigravityManagedAccounts = previousAccounts;
       if (previousCredential) writeAntigravityCredential(account.id, previousCredential);
       else removeAntigravityCredential(account.id);
       return { ok: false, errorCode: 'credentialStorageUnavailable' };
@@ -1198,10 +1200,12 @@ async function removeAntigravityManagedAccount(id) {
   if (!account) return { ok: false, error: 'Account not found' };
   const previousCredential = readAntigravityCredential(accountId);
   if (!removeAntigravityCredential(accountId)) return { ok: false, error: 'Could not remove stored credential' };
+  const previousAccounts = settings.antigravityManagedAccounts;
   settings.antigravityManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
   try {
     saveSettings({ throwOnError: true });
   } catch (_) {
+    settings.antigravityManagedAccounts = previousAccounts;
     if (previousCredential) writeAntigravityCredential(accountId, previousCredential);
     return { ok: false, error: 'Could not persist account removal' };
   }
@@ -1221,10 +1225,12 @@ function setAntigravityManagedAccountEnabled(id, enabled) {
   if (!account) return { ok: false, error: 'Account not found' };
   account.enabled = Boolean(enabled);
   account.updatedAt = new Date().toISOString();
+  const previousAccounts = settings.antigravityManagedAccounts;
   settings.antigravityManagedAccounts = accounts;
   try {
     saveSettings({ throwOnError: true });
   } catch (_) {
+    settings.antigravityManagedAccounts = previousAccounts;
     return { ok: false, error: 'Could not persist account state' };
   }
   pushSettingsToRenderer();

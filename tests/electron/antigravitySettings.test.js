@@ -63,6 +63,20 @@ test('Antigravity OAuth credentials remain in the main-process credential store'
   assert.doesNotMatch(antigravityRenderer, /accessToken|refreshToken|clientSecret|credentials/);
 });
 
+test('Antigravity account mutations restore in-memory settings when persistence fails', () => {
+  const main = read('src/electron/main.js');
+  const functions = [
+    main.slice(main.indexOf('async function addAntigravityManagedAccount()'), main.indexOf('function cancelAntigravityManagedAccountLogin()')),
+    main.slice(main.indexOf('async function removeAntigravityManagedAccount(id)'), main.indexOf('function setAntigravityManagedAccountEnabled(id, enabled)')),
+    main.slice(main.indexOf('function setAntigravityManagedAccountEnabled(id, enabled)'), main.indexOf('function normalizeMimoManagedAccounts(value)'))
+  ];
+
+  for (const source of functions) {
+    assert.match(source, /const previousAccounts = settings\.antigravityManagedAccounts;/);
+    assert.match(source, /catch \(_\) \{\s+settings\.antigravityManagedAccounts = previousAccounts;/);
+  }
+});
+
 test('Antigravity account copy is complete in every locale', () => {
   const i18n = read('src/electron/renderer/i18n.js');
   for (const key of [
