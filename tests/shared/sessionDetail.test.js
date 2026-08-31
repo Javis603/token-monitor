@@ -232,10 +232,30 @@ test('cache continuity detects model-only and effort-only switches', () => {
     cacheTurn('2026-05-30T06:00:01.000Z', 'unknown', 'high', 900_000),
     cacheTurn('2026-05-30T06:00:02.000Z', 'unknown', 'low', 200_000)
   ] }]);
+  const sameModel = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'GPT-5', 'high', 900_000),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'gpt-5', 'high', 100_000)
+  ] }]);
 
   assert.deepEqual([modelOnly.switchCount, modelOnly.modelSwitchCount, modelOnly.effortSwitchCount], [1, 1, 0]);
   assert.deepEqual([effortOnly.switchCount, effortOnly.modelSwitchCount, effortOnly.effortSwitchCount], [1, 0, 1]);
   assert.deepEqual(effortOnly.materialModels, []);
+  assert.equal(sameModel, null);
+});
+
+test('cache continuity stays linear across many switches', () => {
+  const turns = Array.from({ length: 100_000 }, (_, index) => ({
+    timestamp: new Date(1_700_000_000_000 + index).toISOString(),
+    model: index % 2 ? 'model-a' : 'model-b',
+    effort: 'high',
+    tokens: { input: 900, cacheRead: 100 }
+  }));
+  const startedAt = performance.now();
+  const summary = summarizeCacheContinuity([{ turns }]);
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.equal(summary.switchCount, turns.length - 1);
+  assert.ok(elapsedMs < 1200, `cache continuity took ${Math.round(elapsedMs)}ms`);
 });
 
 test('cache continuity pricing skips non-material sessions and enforces one deadline', async () => {

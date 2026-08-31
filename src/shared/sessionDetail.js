@@ -302,7 +302,7 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
     .map((turn) => {
       const cachedInputTokens = Math.max(0, num(turn.tokens?.cacheRead));
       const inputTokens = Math.max(0, num(turn.tokens?.input)) + cachedInputTokens;
-      const model = String(turn.model || '').trim();
+      const model = String(turn.model || '').trim().toLowerCase();
       const effort = String(turn.effort || '').trim();
       const modelKnown = knownCoordinate(model);
       const effortKnown = knownCoordinate(effort);
@@ -332,7 +332,8 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
     const lossCalls = [];
     let recovered = false;
     let recoveryCalls = 0;
-    for (const call of calls.slice(index)) {
+    for (let callIndex = index; callIndex < calls.length; callIndex += 1) {
+      const call = calls[callIndex];
       if (!matchesKnownConfiguration(call, after)) break;
       recoveryCalls += 1;
       lossCalls.push({
