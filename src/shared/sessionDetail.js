@@ -371,16 +371,20 @@ function priceCacheContinuity(summary, pricingByModel = {}) {
   if (!summary) return null;
   const events = summary.events.map((event) => {
     const pricing = pricingByModel[event.toModel];
-    const inputRate = pricing?.inputCostPerToken;
-    const cacheRate = pricing?.cacheReadInputTokenCost;
-    const priced = Number.isFinite(inputRate) && Number.isFinite(cacheRate) && inputRate >= cacheRate;
-    const apiEquivalentUsd = priced
-      ? event.lossCalls.reduce((sum, call) => (
-        sum + call.lostTokens * (inputRate - cacheRate) * (call.inputTokens > CACHE_LONG_CONTEXT_THRESHOLD ? 2 : 1)
-      ), 0)
-      : 0;
+    let apiEquivalentUsd = 0;
+    let pricedTokens = 0;
+    for (const call of event.lossCalls) {
+      const useLongContextRate = call.inputTokens > CACHE_LONG_CONTEXT_THRESHOLD
+        && Number.isFinite(pricing?.inputCostPerTokenAbove272kTokens)
+        && Number.isFinite(pricing?.cacheReadInputTokenCostAbove272kTokens);
+      const inputRate = useLongContextRate ? pricing.inputCostPerTokenAbove272kTokens : pricing?.inputCostPerToken;
+      const cacheRate = useLongContextRate ? pricing.cacheReadInputTokenCostAbove272kTokens : pricing?.cacheReadInputTokenCost;
+      if (!Number.isFinite(inputRate) || !Number.isFinite(cacheRate) || inputRate < cacheRate) continue;
+      pricedTokens += call.lostTokens;
+      apiEquivalentUsd += call.lostTokens * (inputRate - cacheRate);
+    }
     const { lossCalls, ...publicEvent } = event;
-    return { ...publicEvent, pricedTokens: priced ? event.lostTokens : 0, apiEquivalentUsd };
+    return { ...publicEvent, pricedTokens, apiEquivalentUsd };
   });
   const materialEvents = events.filter((event) => event.dropPp >= CACHE_MATERIAL_DROP_PP);
   return {

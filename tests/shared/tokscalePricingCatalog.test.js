@@ -54,8 +54,10 @@ test('catalog parsing preserves full keys and keeps null rates unavailable', (t)
     data: {
       'opencode-go/deepseek-v4-pro': {
         input_cost_per_token: 4.35e-7,
+        input_cost_per_token_above_272k_tokens: 8.7e-7,
         output_cost_per_token: 8.7e-7,
         cache_read_input_token_cost: 3.625e-9,
+        cache_read_input_token_cost_above_272k_tokens: 7.25e-9,
         cache_creation_input_token_cost: null
       }
     }
@@ -66,7 +68,9 @@ test('catalog parsing preserves full keys and keeps null rates unavailable', (t)
     inputCostPerToken: 4.35e-7,
     outputCostPerToken: 8.7e-7,
     cacheReadInputTokenCost: 3.625e-9,
-    cacheCreationInputTokenCost: undefined
+    cacheCreationInputTokenCost: undefined,
+    inputCostPerTokenAbove272kTokens: 8.7e-7,
+    cacheReadInputTokenCostAbove272kTokens: 7.25e-9
   });
 });
 
@@ -360,14 +364,22 @@ test('missing cache-write rate keeps a partially priced Proma row unavailable', 
   assert.equal(periods.today.entries[0].cost, 0);
 });
 
-test('normalizePromaPricing keeps null command rates unavailable', () => {
+test('normalizePromaPricing keeps null rates unavailable and preserves explicit long-context rates', () => {
   assert.deepEqual(
-    normalizePromaPricing({ pricing: { inputCostPerToken: 1e-7, outputCostPerToken: 2e-7, cacheReadInputTokenCost: null } }),
+    normalizePromaPricing({ pricing: {
+      inputCostPerToken: 1e-7,
+      outputCostPerToken: 2e-7,
+      cacheReadInputTokenCost: null,
+      inputCostPerTokenAbove272kTokens: 2e-7,
+      cacheReadInputTokenCostAbove272kTokens: 2e-8
+    } }),
     {
       inputCostPerToken: 1e-7,
       outputCostPerToken: 2e-7,
       cacheReadInputTokenCost: undefined,
-      cacheCreationInputTokenCost: undefined
+      cacheCreationInputTokenCost: undefined,
+      inputCostPerTokenAbove272kTokens: 2e-7,
+      cacheReadInputTokenCostAbove272kTokens: 2e-8
     }
   );
 });

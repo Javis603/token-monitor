@@ -75,8 +75,8 @@ const {
   clientDiagnosticRoots,
   lookupModelPricing,
   normalizeHistoryIntervalMs,
-  readTokscalePricingCatalog,
   repairAntigravitySyncLock,
+  resolvePromaPricing,
   visibleDiagnosticRoots
 } = require('../shared/collector');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
@@ -6922,10 +6922,9 @@ app.whenReady().then(() => {
     const { client, sessionId, period, sessionCost } = args || {};
     const detail = await readSessionDetailForPlatform({ client, sessionId, period, sessionCost });
     if (!detail?.cacheContinuity) return detail;
-    const pricingByModel = {};
-    for (const model of new Set(detail.cacheContinuity.events.map((event) => event.toModel))) {
-      try { pricingByModel[model] = readTokscalePricingCatalog(model); } catch (_) {}
-    }
+    const pricingByModel = await resolvePromaPricing(
+      detail.cacheContinuity.events.map((event) => ({ model: event.toModel }))
+    );
     return { ...detail, cacheContinuity: priceCacheContinuity(detail.cacheContinuity, pricingByModel) };
   });
   ipcMain.handle('stream:status', () => ({ connected: streamConnected, mode, ...(streamFailure || {}) }));

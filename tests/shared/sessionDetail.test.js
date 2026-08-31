@@ -176,15 +176,26 @@ test('Codex cache continuity measures a switch drop, recovery, loss, and API equ
   assert.deepEqual([turns[0].model, turns[0].effort, turns[3].model], ['gpt-old', 'high', 'gpt-new']);
 
   const summary = summarizeCacheContinuity(groupEvents(events), 'today', localDate(2026, 5, 30, 12));
-  const priced = priceCacheContinuity(summary, {
+  const basePriced = priceCacheContinuity(summary, {
     'gpt-new': { inputCostPerToken: 4e-6, cacheReadInputTokenCost: 0.4e-6 }
   });
+  const priced = priceCacheContinuity(summary, {
+    'gpt-new': {
+      inputCostPerToken: 4e-6,
+      cacheReadInputTokenCost: 0.4e-6,
+      inputCostPerTokenAbove272kTokens: 8e-6,
+      cacheReadInputTokenCostAbove272kTokens: 0.8e-6
+    }
+  });
+  const unavailable = priceCacheContinuity(summary);
   assert.equal(priced.switchCount, 1);
   assert.equal(priced.materialDropCount, 1);
   assert.equal(priced.lostTokens, 620_000);
   assert.equal(priced.latest.recovered, true);
   assert.equal(priced.latest.recoveryCalls, 2);
+  assert.ok(Math.abs(basePriced.apiEquivalentUsd - 2.232) < 1e-9);
   assert.ok(Math.abs(priced.apiEquivalentUsd - 4.464) < 1e-9);
+  assert.equal(unavailable.pricedTokens, 0);
 });
 
 test('groupEvents groups turns under the preceding prompt', () => {

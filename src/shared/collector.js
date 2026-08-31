@@ -501,7 +501,9 @@ const CATALOG_PRICING_FIELDS = [
   'inputCostPerToken',
   'outputCostPerToken',
   'cacheReadInputTokenCost',
-  'cacheCreationInputTokenCost'
+  'cacheCreationInputTokenCost',
+  'inputCostPerTokenAbove272kTokens',
+  'cacheReadInputTokenCostAbove272kTokens'
 ];
 
 // Parsed catalog, invalidated by every selected candidate's file metadata.
@@ -529,6 +531,10 @@ function normalizeCatalogPricing(value) {
     cacheReadInputTokenCost: normalizePricingRate(value, 'cache_read_input_token_cost'),
     cacheCreationInputTokenCost: normalizePricingRate(value, 'cache_creation_input_token_cost')
   };
+  const longInput = normalizePricingRate(value, 'input_cost_per_token_above_272k_tokens');
+  const longCacheRead = normalizePricingRate(value, 'cache_read_input_token_cost_above_272k_tokens');
+  if (longInput !== undefined) pricing.inputCostPerTokenAbove272kTokens = longInput;
+  if (longCacheRead !== undefined) pricing.cacheReadInputTokenCostAbove272kTokens = longCacheRead;
   return pricing.inputCostPerToken !== undefined || pricing.outputCostPerToken !== undefined ? pricing : null;
 }
 
@@ -703,6 +709,10 @@ function normalizePromaPricing(result) {
     cacheReadInputTokenCost: normalizePricingRate(source, 'cacheReadInputTokenCost'),
     cacheCreationInputTokenCost: normalizePricingRate(source, 'cacheCreationInputTokenCost')
   };
+  const longInput = normalizePricingRate(source, 'inputCostPerTokenAbove272kTokens');
+  const longCacheRead = normalizePricingRate(source, 'cacheReadInputTokenCostAbove272kTokens');
+  if (longInput !== undefined) pricing.inputCostPerTokenAbove272kTokens = longInput;
+  if (longCacheRead !== undefined) pricing.cacheReadInputTokenCostAbove272kTokens = longCacheRead;
   return pricing.inputCostPerToken !== undefined || pricing.outputCostPerToken !== undefined ? pricing : null;
 }
 

@@ -6200,26 +6200,36 @@ function cacheContinuityNode(summary) {
   const card = document.createElement('div');
   card.className = 'detail-cache-continuity';
   card.innerHTML = '<div class="detail-cache-title"></div><div class="detail-cache-metrics"></div><div class="detail-cache-latest"></div>';
-  card.querySelector('.detail-cache-title').textContent = t('cacheContinuity') || 'Cache continuity';
-  const switches = `${summary.switchCount} switch${summary.switchCount === 1 ? '' : 'es'}`
-    + ` · ${summary.modelSwitchCount} model change${summary.modelSwitchCount === 1 ? '' : 's'}`
-    + ` · ${summary.effortSwitchCount} effort change${summary.effortSwitchCount === 1 ? '' : 's'}`;
+  card.querySelector('.detail-cache-title').textContent = t('cacheContinuity');
+  const switches = t('cacheContinuitySwitchSummary', {
+    switches: summary.switchCount,
+    models: summary.modelSwitchCount,
+    efforts: summary.effortSwitchCount
+  });
   if (summary.materialDropCount === 0) {
-    card.querySelector('.detail-cache-metrics').textContent = `${switches} · no material cache drops`;
+    card.querySelector('.detail-cache-metrics').textContent = `${switches} · ${t('cacheContinuityNoDrops')}`;
     card.querySelector('.detail-cache-latest').remove();
     return card;
   }
   const estimatedCost = summary.pricedTokens
-    ? `${summary.pricedTokens < summary.lostTokens ? '~' : ''}${formatCost(summary.apiEquivalentUsd)} API equivalent`
-    : 'API equivalent unavailable';
-  card.querySelector('.detail-cache-metrics').textContent = `${switches} · ${summary.materialDropCount} material drop${summary.materialDropCount === 1 ? '' : 's'}`
-    + ` · ${formatNumber(summary.lostTokens)} estimated cache loss · ${estimatedCost}`;
+    ? t('cacheContinuityApiEquivalent', { cost: `${summary.pricedTokens < summary.lostTokens ? '~' : ''}${formatCost(summary.apiEquivalentUsd)}` })
+    : t('cacheContinuityApiUnavailable');
+  card.querySelector('.detail-cache-metrics').textContent = `${switches} · ${t('cacheContinuityDropSummary', {
+    drops: summary.materialDropCount,
+    lost: formatNumber(summary.lostTokens),
+    cost: estimatedCost
+  })}`;
   const latest = summary.latest;
   const recovery = latest.recovered
-    ? `recovered in ${latest.recoveryCalls} call${latest.recoveryCalls === 1 ? '' : 's'}`
-    : `${latest.endReason === 'next_switch' ? 'not recovered before next switch' : 'not yet recovered'} (${latest.recoveryCalls} calls observed)`;
-  card.querySelector('.detail-cache-latest').textContent = `Latest: ${latest.fromModel}/${latest.fromEffort} → ${latest.toModel}/${latest.toEffort}`
-    + ` · hit ${latest.baselineHitRate.toFixed(1)}% → ${latest.firstHitRate.toFixed(1)}% · ${recovery}`;
+    ? t('cacheContinuityRecovered', { calls: latest.recoveryCalls })
+    : t(latest.endReason === 'next_switch' ? 'cacheContinuityNotRecoveredBeforeSwitch' : 'cacheContinuityNotRecoveredYet', { calls: latest.recoveryCalls });
+  card.querySelector('.detail-cache-latest').textContent = t('cacheContinuityLatest', {
+    from: `${latest.fromModel}/${latest.fromEffort}`,
+    to: `${latest.toModel}/${latest.toEffort}`,
+    baseline: latest.baselineHitRate.toFixed(1),
+    first: latest.firstHitRate.toFixed(1),
+    recovery
+  });
   return card;
 }
 
