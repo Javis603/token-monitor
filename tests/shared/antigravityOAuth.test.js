@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const test = require('node:test');
 
 const antigravityOAuth = require('../../src/shared/antigravityOAuth');
@@ -21,16 +22,28 @@ function fixtureOAuthClient(id, marker) {
   };
 }
 
-test('authorizationUrl requests offline Google access with state and Antigravity scopes', () => {
+test('generatePkce creates an RFC 7636 S256 verifier and challenge', () => {
+  const { codeVerifier, codeChallenge } = antigravityOAuth.generatePkce();
+  assert.match(codeVerifier, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(
+    codeChallenge,
+    crypto.createHash('sha256').update(codeVerifier).digest('base64url')
+  );
+});
+
+test('authorizationUrl requests offline Google access with state, PKCE, and Antigravity scopes', () => {
   const url = new URL(antigravityOAuth.authorizationUrl({
     clientId: 'client.apps.googleusercontent.com',
     redirectUri: 'http://127.0.0.1:1234/oauth-callback',
-    state: 'random-state'
+    state: 'random-state',
+    codeChallenge: 'pkce-challenge'
   }));
   assert.equal(url.origin + url.pathname, antigravityOAuth.AUTH_URL);
   assert.equal(url.searchParams.get('access_type'), 'offline');
   assert.equal(url.searchParams.get('prompt'), 'select_account consent');
   assert.equal(url.searchParams.get('state'), 'random-state');
+  assert.equal(url.searchParams.get('code_challenge'), 'pkce-challenge');
+  assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
   assert.deepEqual(url.searchParams.get('scope').split(' '), [
     'https://www.googleapis.com/auth/cloud-platform',
     'https://www.googleapis.com/auth/userinfo.email',
@@ -99,7 +112,8 @@ test('exchangeAuthorizationCode and refreshCredential preserve the refresh token
   const exchanged = await antigravityOAuth.exchangeAuthorizationCode({
     code: 'code',
     client: { clientId: 'client', clientSecret: 'secret' },
-    redirectUri: 'http://127.0.0.1/callback'
+    redirectUri: 'http://127.0.0.1/callback',
+    codeVerifier: 'pkce-verifier'
   }, {
     now: () => 1000,
     fetch: async (url, init) => {
@@ -120,6 +134,7 @@ test('exchangeAuthorizationCode and refreshCredential preserve the refresh token
   assert.equal(refreshed.refreshToken, 'refresh-1');
   assert.deepEqual(renewed, refreshed);
   assert.match(requests[0][1].body, /grant_type=authorization_code/);
+  assert.equal(new URLSearchParams(requests[0][1].body).get('code_verifier'), 'pkce-verifier');
   assert.match(requests[1][1].body, /grant_type=refresh_token/);
 });
 

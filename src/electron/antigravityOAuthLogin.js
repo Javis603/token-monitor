@@ -31,6 +31,7 @@ async function runAntigravityOAuthLogin(options = {}) {
   }
   if (typeof options.openExternal !== 'function') throw new TypeError('openExternal is required');
   const state = crypto.randomBytes(32).toString('base64url');
+  const { codeVerifier, codeChallenge } = antigravityOAuth.generatePkce();
   const controller = new AbortController();
   const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
   const timeoutMs = Math.max(1000, Number(options.timeoutMs) || DEFAULT_TIMEOUT_MS);
@@ -101,10 +102,16 @@ async function runAntigravityOAuthLogin(options = {}) {
     await options.openExternal(antigravityOAuth.authorizationUrl({
       clientId: client.clientId,
       redirectUri,
-      state
+      state,
+      codeChallenge
     }));
     const code = await callback;
-    const credential = await antigravityOAuth.exchangeAuthorizationCode({ code, client, redirectUri }, {
+    const credential = await antigravityOAuth.exchangeAuthorizationCode({
+      code,
+      client,
+      redirectUri,
+      codeVerifier
+    }, {
       fetch: options.fetch,
       signal,
       now: options.now

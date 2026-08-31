@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const { once } = require('node:events');
 const net = require('node:net');
 const test = require('node:test');
@@ -13,12 +14,16 @@ function response(status, body) {
 
 test('Antigravity OAuth login binds a loopback callback and ignores the wrong state', async () => {
   const opened = [];
+  let codeChallenge = '';
   const result = await runAntigravityOAuthLogin({
     client: { clientId: 'client', clientSecret: 'secret' },
     timeoutMs: 5000,
     openExternal: async (authUrl) => {
       opened.push(authUrl);
       const auth = new URL(authUrl);
+      codeChallenge = auth.searchParams.get('code_challenge');
+      assert.match(codeChallenge, /^[A-Za-z0-9_-]{43}$/);
+      assert.equal(auth.searchParams.get('code_challenge_method'), 'S256');
       const redirect = new URL(auth.searchParams.get('redirect_uri'));
       assert.equal(redirect.hostname, '127.0.0.1');
       assert.equal(redirect.pathname, '/oauth-callback');
@@ -32,7 +37,14 @@ test('Antigravity OAuth login binds a loopback callback and ignores the wrong st
     },
     fetch: async (url, init = {}) => {
       if (String(url).includes('/token')) {
-        assert.match(init.body, /code=real-code/);
+        const body = new URLSearchParams(init.body);
+        assert.equal(body.get('code'), 'real-code');
+        const codeVerifier = body.get('code_verifier');
+        assert.match(codeVerifier, /^[A-Za-z0-9_-]{43}$/);
+        assert.equal(
+          crypto.createHash('sha256').update(codeVerifier).digest('base64url'),
+          codeChallenge
+        );
         return response(200, {
           access_token: 'access',
           refresh_token: 'refresh',

@@ -164,7 +164,15 @@ function discoverOAuthClient(options = {}) {
   return officialOAuthClient();
 }
 
-function authorizationUrl({ clientId, redirectUri, state }) {
+function generatePkce() {
+  const codeVerifier = crypto.randomBytes(32).toString('base64url');
+  const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+  return { codeVerifier, codeChallenge };
+}
+
+function authorizationUrl({ clientId, redirectUri, state, codeChallenge }) {
+  const challenge = trimmed(codeChallenge);
+  if (!challenge) throw new TypeError('codeChallenge is required');
   const url = new URL(AUTH_URL);
   url.searchParams.set('client_id', trimmed(clientId));
   url.searchParams.set('redirect_uri', trimmed(redirectUri));
@@ -173,6 +181,8 @@ function authorizationUrl({ clientId, redirectUri, state }) {
   url.searchParams.set('access_type', 'offline');
   url.searchParams.set('prompt', 'select_account consent');
   url.searchParams.set('state', trimmed(state));
+  url.searchParams.set('code_challenge', challenge);
+  url.searchParams.set('code_challenge_method', 'S256');
   return url.toString();
 }
 
@@ -199,7 +209,9 @@ async function responseJson(response, action) {
   throw errorWithStatus('unavailable', `${action}: ${detail}`, status);
 }
 
-async function exchangeAuthorizationCode({ code, client, redirectUri }, deps = {}) {
+async function exchangeAuthorizationCode({ code, client, redirectUri, codeVerifier }, deps = {}) {
+  const verifier = trimmed(codeVerifier);
+  if (!verifier) throw new TypeError('codeVerifier is required');
   const fetchFn = deps.fetch || fetch;
   const response = await fetchFn(TOKEN_URL, {
     method: 'POST',
@@ -208,6 +220,7 @@ async function exchangeAuthorizationCode({ code, client, redirectUri }, deps = {
       client_id: client?.clientId,
       client_secret: client?.clientSecret,
       code,
+      code_verifier: verifier,
       grant_type: 'authorization_code',
       redirect_uri: redirectUri
     }),
@@ -516,6 +529,7 @@ module.exports = {
   exchangeAuthorizationCode,
   fetchGoogleIdentity,
   fetchRemoteSnapshot,
+  generatePkce,
   modelsFromAvailable,
   modelsFromBuckets,
   normalizeManagedAccounts,
