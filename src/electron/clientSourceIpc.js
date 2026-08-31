@@ -22,8 +22,10 @@ function createClientSourceIpcHandlers(options = {}) {
   const clientDiagnosticRoots = options.clientDiagnosticRoots || (() => ({}));
   const canRunRescan = options.canRunRescan || (() => true);
   const revealFile = options.showItemInFolder || (() => {});
+  const revealSyncLock = options.revealClientSyncLock || (() => false);
   const revealDirectory = options.openPath || (async () => 'unavailable');
   const rescan = options.rescanClient || (async () => false);
+  const repairSyncLock = options.repairClientSyncLock || (async () => ({ ok: false, code: 'unavailable' }));
 
   function canInspectClient(clientId) {
     return knownClients().has(normalizeClientId(clientId));
@@ -72,6 +74,16 @@ function createClientSourceIpcHandlers(options = {}) {
     }
   }
 
+  function revealClientSyncLock(clientId) {
+    const client = normalizeClientId(clientId);
+    if (client !== 'antigravity' || !canInspectClient(client)) return false;
+    try {
+      return revealSyncLock(client) === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function rescanClient(clientId) {
     const client = normalizeClientId(clientId);
     if (!canRescanClient(client) || !canRunRescan()) return false;
@@ -83,10 +95,43 @@ function createClientSourceIpcHandlers(options = {}) {
     }
   }
 
+  async function repairClientSyncLock(clientId) {
+    const client = normalizeClientId(clientId);
+    if (client !== 'antigravity' || !canRescanClient(client) || !canRunRescan()) {
+      return { ok: false, code: 'unavailable' };
+    }
+    try {
+      const repairResult = await repairSyncLock(client);
+      if (repairResult?.ok !== true) {
+        const allowed = new Set(['owner-active', 'unsafe-lock', 'repair-failed']);
+        return {
+          ok: false,
+          code: allowed.has(repairResult?.code) ? repairResult.code : 'repair-failed'
+        };
+      }
+      const rescanned = await rescan(client) === true;
+      if (rescanned) {
+        return {
+          ok: true,
+          code: repairResult.code === 'not-found' ? 'rescanned' : 'repaired'
+        };
+      }
+      return {
+        ok: false,
+        code: repairResult.code === 'repaired' ? 'repaired-rescan-failed' : 'rescan-failed'
+      };
+    } catch (error) {
+      options.onRescanError?.(error);
+      return { ok: false, code: 'repair-failed' };
+    }
+  }
+
   return {
     canInspectClient,
     canRescanClient,
     clientSources,
+    repairClientSyncLock,
+    revealClientSyncLock,
     revealClientSource,
     rescanClient
   };

@@ -606,6 +606,7 @@ test('sync detail classification is conservative and emits only closed codes', (
     'network-timeout',
     'permission-denied',
     'rpc-failed',
+    'sync-lock-present',
     'unknown'
   ].sort());
   assert.equal(
@@ -632,6 +633,18 @@ test('sync detail classification is conservative and emits only closed codes', (
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'HTTPS request timed out' }), 'network-timeout');
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'tokscale cursor sync timed out after 30000ms' }), null);
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'ETIMEDOUT while connecting to Cursor API' }), 'network-timeout');
+  assert.equal(
+    classifyClientSyncDetailCode({
+      client: 'antigravity',
+      text: "Error: Antigravity sync lock at '/Users/alice/.config/tokscale/antigravity-cache/sync.lock' already exists."
+    }),
+    'sync-lock-present'
+  );
+  assert.equal(
+    classifyClientSyncDetailCode({ client: 'cursor', text: 'Cursor sync lock at /tmp/sync.lock already exists.' }),
+    null,
+    'the lock code is scoped to the upstream Antigravity wording'
+  );
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'new upstream wording with no known meaning' }), null);
   assert.equal(
     classifyClientSyncDetailCode({
@@ -640,6 +653,29 @@ test('sync detail classification is conservative and emits only closed codes', (
     }),
     null
   );
+});
+
+test('Antigravity sync-lock detail replaces the generic process-exit diagnostic', () => {
+  const health = deriveClientHealth('antigravity', { clients: {} }, {
+    sourceChecks: { antigravity: [{ id: 'antigravity-ide-source', exists: true }] },
+    selfSyncThrottle: {
+      syncStatus() {
+        return {
+          state: 'failed',
+          failureCode: 'sync-exit-error',
+          failureStage: 'process-exit',
+          detailCode: 'sync-lock-present',
+          exitCode: 1
+        };
+      }
+    }
+  });
+  const entry = health.clients.antigravity;
+  assert.equal(entry.collection.syncDetailCode, 'sync-lock-present');
+  assert.deepEqual(entry.diagnostics, [
+    { code: 'sync-lock-present' },
+    { code: 'no-usage-observed' }
+  ]);
 });
 
 // lastSyncAt is the rate-limit anchor that claim() moves; a completion never

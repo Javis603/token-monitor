@@ -9,7 +9,12 @@ const test = require('node:test');
 
 const cursorAuth = require('../../src/shared/cursorAuth');
 const { createDeviceRuntime } = require('../../src/shared/deviceRuntime');
-const { startCollector, selfSyncThrottle } = require('../../src/shared/collector');
+const {
+  repairAntigravitySyncLock,
+  removeOwnedAntigravitySyncLock,
+  startCollector,
+  selfSyncThrottle
+} = require('../../src/shared/collector');
 const { SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = require('../../src/shared/selfSyncThrottle');
 const { referencedTerminationOptions } = require('../helpers/referencedTerminationTimers');
 
@@ -487,11 +492,13 @@ test('native Antigravity cancellation releases the claim without publishing fail
   const originalSpawn = childProcess.spawn;
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cancelled-antigravity-'));
   fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+  const syncLockPath = path.join(home, 'sync.lock');
   let syncSpawns = 0;
   let killed = 0;
   let firstSyncChild = null;
   childProcess.spawn = (_bin, args) => {
     const child = new EventEmitter();
+    child.pid = 42420 + syncSpawns;
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
     child.stdin = { end() {} };
@@ -516,10 +523,12 @@ test('native Antigravity cancellation releases the claim without publishing fail
       agentVersion: 'test',
       historyEnabled: false,
       homeDir: home,
+      antigravitySyncLockPath: syncLockPath,
       runTokscale: async () => ({ entries: [] })
     };
     const cancelled = fresh.collectUsageOnce({ ...options, signal: controller.signal });
     await waitFor(() => syncSpawns === 1);
+    fs.writeFileSync(syncLockPath, `${firstSyncChild.pid} ${Math.floor(Date.now() / 1000)}\n`);
     controller.abort(new Error('usage runtime superseded'));
     let cancellationSettled = false;
     cancelled.catch(() => { cancellationSettled = true; });
@@ -529,6 +538,7 @@ test('native Antigravity cancellation releases the claim without publishing fail
     await assert.rejects(cancelled, /usage runtime superseded/);
 
     assert.equal(killed, 1);
+    assert.equal(fs.existsSync(syncLockPath), false, 'the confirmed child close removes only its own sync lock');
     assert.equal(fresh.selfSyncThrottle.syncStatus('antigravity').state, 'idle');
     assert.equal(fresh.selfSyncThrottle.sourceFloorMs('antigravity'), SYNC_SOURCE_EVENT_MIN_INTERVAL_MS);
 
@@ -543,20 +553,120 @@ test('native Antigravity cancellation releases the claim without publishing fail
   }
 });
 
+test('owned Antigravity lock cleanup preserves every record not proven to belong to the closed child', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-owned-antigravity-lock-'));
+  const lockPath = path.join(dir, 'sync.lock');
+  const startedAt = 2_000_000;
+  const options = {
+    lockPath,
+    childPid: 42720,
+    childStartedAt: startedAt,
+    now: () => startedAt + 1000
+  };
+  try {
+    fs.writeFileSync(lockPath, `42721 ${Math.floor(startedAt / 1000)}\n`);
+    assert.equal(removeOwnedAntigravitySyncLock(options), false);
+    assert.equal(fs.existsSync(lockPath), true, 'a different child owns this lock');
+
+    fs.writeFileSync(lockPath, '42720 1\n');
+    assert.equal(removeOwnedAntigravitySyncLock(options), false);
+    assert.equal(fs.existsSync(lockPath), true, 'an old same-PID record may predate PID reuse');
+
+    fs.writeFileSync(lockPath, `42720 ${Math.floor(startedAt / 1000)}\n`);
+    assert.equal(removeOwnedAntigravitySyncLock(options), true);
+    assert.equal(fs.existsSync(lockPath), false, 'the exact child record is removed after close');
+
+    if (process.platform !== 'win32') {
+      const targetPath = path.join(dir, 'target.lock');
+      fs.writeFileSync(targetPath, `42720 ${Math.floor(startedAt / 1000)}\n`);
+      fs.symlinkSync(targetPath, lockPath);
+      assert.equal(removeOwnedAntigravitySyncLock(options), false);
+      assert.equal(fs.lstatSync(lockPath).isSymbolicLink(), true, 'a symlink is never reclaimed');
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('user-mediated Antigravity lock repair removes only a regular dead-owner record', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-repair-antigravity-lock-'));
+  const lockPath = path.join(dir, 'sync.lock');
+  try {
+    assert.deepEqual(repairAntigravitySyncLock({ lockPath }), { ok: true, code: 'not-found' });
+
+    fs.writeFileSync(lockPath, '42720 2000\n');
+    assert.deepEqual(
+      repairAntigravitySyncLock({ lockPath, pidIsAlive: () => true }),
+      { ok: false, code: 'owner-active' }
+    );
+    assert.equal(fs.existsSync(lockPath), true, 'a live owner is never repaired');
+
+    fs.writeFileSync(lockPath, 'not a lock\n');
+    assert.deepEqual(
+      repairAntigravitySyncLock({ lockPath, pidIsAlive: () => false }),
+      { ok: false, code: 'unsafe-lock' }
+    );
+    assert.equal(fs.existsSync(lockPath), true, 'an unrecognized record is preserved');
+
+    fs.writeFileSync(lockPath, '42720 2000\n');
+    assert.deepEqual(
+      repairAntigravitySyncLock({ lockPath, pidIsAlive: () => false }),
+      { ok: true, code: 'repaired' }
+    );
+    assert.equal(fs.existsSync(lockPath), false, 'a confirmed dead-owner record is removed');
+
+    fs.writeFileSync(lockPath, '42720 2000\n');
+    let reads = 0;
+    assert.deepEqual(
+      repairAntigravitySyncLock({
+        lockPath,
+        pidIsAlive: () => false,
+        fsApi: {
+          lstatSync: (...args) => fs.lstatSync(...args),
+          readFileSync: (...args) => {
+            reads += 1;
+            return reads === 1 ? fs.readFileSync(...args) : '42721 2000\n';
+          },
+          unlinkSync: (...args) => fs.unlinkSync(...args)
+        }
+      }),
+      { ok: false, code: 'unsafe-lock' }
+    );
+    assert.equal(fs.existsSync(lockPath), true, 'a record that changes before unlink is preserved');
+    fs.unlinkSync(lockPath);
+
+    if (process.platform !== 'win32') {
+      const targetPath = path.join(dir, 'target.lock');
+      fs.writeFileSync(targetPath, '42720 2000\n');
+      fs.symlinkSync(targetPath, lockPath);
+      assert.deepEqual(
+        repairAntigravitySyncLock({ lockPath, pidIsAlive: () => false }),
+        { ok: false, code: 'unsafe-lock' }
+      );
+      assert.equal(fs.lstatSync(lockPath).isSymbolicLink(), true, 'a symlink is preserved');
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('native Antigravity timeout remains pending until the child closes', async () => {
   const childProcess = require('node:child_process');
   const collectorPath = require.resolve('../../src/shared/collector');
   const originalSpawn = childProcess.spawn;
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-timeout-antigravity-'));
   fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+  const syncLockPath = path.join(home, 'sync.lock');
   let syncChild = null;
   childProcess.spawn = () => {
     const child = new EventEmitter();
+    child.pid = 42520;
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
     child.stdin = { end() {} };
     child.signals = [];
     child.kill = (signal) => { child.signals.push(signal); return true; };
+    fs.writeFileSync(syncLockPath, `${child.pid} ${Math.floor(Date.now() / 1000)}\n`);
     syncChild = child;
     return child;
   };
@@ -574,6 +684,7 @@ test('native Antigravity timeout remains pending until the child closes', async 
       agentVersion: 'test',
       historyEnabled: false,
       homeDir: home,
+      antigravitySyncLockPath: syncLockPath,
       runTokscale: async () => ({ entries: [] }),
       onSelfSyncFailed: () => { failed += 1; }
     });
@@ -586,6 +697,7 @@ test('native Antigravity timeout remains pending until the child closes', async 
 
     syncChild.emit('close', null, 'SIGTERM');
     const summary = await pending;
+    assert.equal(fs.existsSync(syncLockPath), false, 'a timed-out child cannot strand its owned lock');
     assert.equal(failed, 1);
     assert.equal(fresh.selfSyncThrottle.syncStatus('antigravity').failureCode, 'sync-timeout');
     assert.equal(summary.clientHealth.clients.antigravity.collection.state, 'failed');
@@ -602,14 +714,17 @@ test('native Antigravity reports and settles an unconfirmed forced termination',
   const originalSpawn = childProcess.spawn;
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-unconfirmed-antigravity-'));
   fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+  const syncLockPath = path.join(home, 'sync.lock');
   let syncChild = null;
   childProcess.spawn = () => {
     const child = new EventEmitter();
+    child.pid = 42620;
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
     child.stdin = { end() {} };
     child.signals = [];
     child.kill = (signal) => { child.signals.push(signal); return true; };
+    fs.writeFileSync(syncLockPath, `${child.pid} ${Math.floor(Date.now() / 1000)}\n`);
     syncChild = child;
     return child;
   };
@@ -628,6 +743,7 @@ test('native Antigravity reports and settles an unconfirmed forced termination',
       agentVersion: 'test',
       historyEnabled: false,
       homeDir: home,
+      antigravitySyncLockPath: syncLockPath,
       runTokscale: async () => ({ entries: [] }),
       onDiagnosticEvent: (event) => diagnostics.push(event)
     });
@@ -640,6 +756,7 @@ test('native Antigravity reports and settles an unconfirmed forced termination',
     }]);
     assert.equal(fresh.selfSyncThrottle.syncStatus('antigravity').failureCode, 'sync-timeout');
     assert.equal(summary.clientHealth.clients.antigravity.collection.state, 'failed');
+    assert.equal(fs.existsSync(syncLockPath), true, 'without a confirmed close the lock owner may still be alive');
 
     syncChild.emit('close', null, 'SIGKILL');
   } finally {

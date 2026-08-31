@@ -1988,6 +1988,14 @@ span.settings-note.settings-item-desc {
   border-color: rgba(var(--accent-rgb), 0.42);
   color: var(--fg);
 }
+.tool-health-action.is-repair {
+  border-color: rgba(244, 160, 115, 0.48);
+  color: var(--orange);
+}
+.tool-health-action.is-repair:hover:not(:disabled) {
+  border-color: rgba(244, 160, 115, 0.72);
+  color: var(--fg);
+}
 .tool-health-action:disabled { cursor: default; opacity: 0.55; }
 .tool-health-action-feedback {
   align-self: center;

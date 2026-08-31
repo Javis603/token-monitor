@@ -68,7 +68,14 @@ function electronProviderDeps(deps = {}) {
   return { ...deps, fetch: electronLimitsFetch() };
 }
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
-const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs, visibleDiagnosticRoots } = require('../shared/collector');
+const {
+  antigravitySyncLockPath,
+  clientDiagnosticRoots,
+  lookupModelPricing,
+  normalizeHistoryIntervalMs,
+  repairAntigravitySyncLock,
+  visibleDiagnosticRoots
+} = require('../shared/collector');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
@@ -6750,15 +6757,26 @@ app.whenReady().then(() => {
     clientDiagnosticRoots,
     showItemInFolder: (target) => shell.showItemInFolder(target),
     openPath: (target) => shell.openPath(target),
+    revealClientSyncLock: () => {
+      const lockPath = antigravitySyncLockPath(os.homedir());
+      if (!fs.existsSync(lockPath)) return false;
+      shell.showItemInFolder(lockPath);
+      return true;
+    },
     canRunRescan: () => ownsUsageRuntime(),
     rescanClient: (client) => refreshUsageClient(client, { forceSync: true }),
+    repairClientSyncLock: () => repairAntigravitySyncLock({
+      lockPath: antigravitySyncLockPath(os.homedir())
+    }),
     onRescanError: (error) => console.log(`[usage-runtime] rescan failed: ${error.message}`)
   });
   ipcMain.handle('usage:clientSources', (_event, clientId) => clientSourceIpcHandlers.clientSources(clientId));
   // The renderer sends a client id, never a path: anything it could send would
   // otherwise become an arbitrary filesystem open.
   ipcMain.handle('usage:revealClientSource', (_event, clientId) => clientSourceIpcHandlers.revealClientSource(clientId));
+  ipcMain.handle('usage:revealClientSyncLock', (_event, clientId) => clientSourceIpcHandlers.revealClientSyncLock(clientId));
   ipcMain.handle('usage:rescanClient', (_event, clientId) => clientSourceIpcHandlers.rescanClient(clientId));
+  ipcMain.handle('usage:repairClientSyncLock', (_event, clientId) => clientSourceIpcHandlers.repairClientSyncLock(clientId));
   ipcMain.handle('clipboard:write', (_event, text) => {
     clipboard.writeText(String(text || ''));
     return true;

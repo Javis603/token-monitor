@@ -10444,7 +10444,7 @@ function relativeDayLabel(day) {
   return day;
 }
 
-function clientHealthActions(clientId) {
+function clientHealthActions(clientId, detail) {
   const actions = document.createElement('div');
   actions.className = 'tool-health-actions';
   const button = (labelKey, onClick) => {
@@ -10456,6 +10456,8 @@ function clientHealthActions(clientId) {
     actions.append(control);
     return control;
   };
+  const syncLockBlocked = clientId === 'antigravity'
+    && detail?.notes?.some((note) => note.code === 'sync-lock-present');
   // The detail is already bound to the exact local device. Renderer mode is a
   // transport state (`local`/`sync`), not topology, so host and client collectors
   // expose the same targeted capability through preload.
@@ -10468,27 +10470,61 @@ function clientHealthActions(clientId) {
     feedback.dataset.healthAction = 'rescan-feedback';
     feedback.setAttribute('role', 'status');
     feedback.setAttribute('aria-live', 'polite');
-    feedback.textContent = rescanState.failed ? t('settings.tools.health.rescanFailed') : '';
-    const rescan = button('settings.tools.health.rescan', async () => {
-      const requestId = state.clientRescans.begin(clientId);
-      let succeeded = false;
-      try {
-        succeeded = await window.tokenMonitor.rescanClient(clientId) === true;
-        if (succeeded) loadClientSources(clientId, { force: true });
-      } catch (_) {
-        succeeded = false;
-      } finally {
-        state.clientRescans.finish(clientId, requestId, succeeded);
-      }
-    });
-    rescan.dataset.healthAction = 'rescan';
-    rescan.id = `toolHealthRescan-${clientId}`;
-    rescan.disabled = rescanState.pending;
+    const feedbackCode = rescanState.feedbackCode;
+    feedback.textContent = feedbackCode
+      ? t(feedbackCode === 'rescan-failed'
+        ? 'settings.tools.health.rescanFailed'
+        : `settings.tools.health.repairFeedback.${feedbackCode}`)
+      : '';
+    if (syncLockBlocked && typeof window.tokenMonitor?.repairClientSyncLock === 'function') {
+      const repair = button(
+        rescanState.pending ? 'settings.tools.health.repairing' : 'settings.tools.health.repairAndRescan',
+        async () => {
+          if (!window.confirm(t('settings.tools.health.repairConfirm'))) return;
+          const requestId = state.clientRescans.begin(clientId);
+          let result = { ok: false, code: 'repair-failed' };
+          try {
+            result = await window.tokenMonitor.repairClientSyncLock(clientId);
+            if (result?.ok === true) loadClientSources(clientId, { force: true });
+          } catch (_) {
+            result = { ok: false, code: 'repair-failed' };
+          } finally {
+            state.clientRescans.finish(clientId, requestId, result?.ok === true, result?.code || 'repair-failed');
+          }
+        }
+      );
+      repair.classList.add('is-repair');
+      repair.dataset.healthAction = 'repair-sync-lock';
+      repair.id = `toolHealthRepair-${clientId}`;
+      repair.disabled = rescanState.pending;
+    } else {
+      const rescan = button('settings.tools.health.rescan', async () => {
+        const requestId = state.clientRescans.begin(clientId);
+        let succeeded = false;
+        try {
+          succeeded = await window.tokenMonitor.rescanClient(clientId) === true;
+          if (succeeded) loadClientSources(clientId, { force: true });
+        } catch (_) {
+          succeeded = false;
+        } finally {
+          state.clientRescans.finish(clientId, requestId, succeeded, succeeded ? '' : 'rescan-failed');
+        }
+      });
+      rescan.dataset.healthAction = 'rescan';
+      rescan.id = `toolHealthRescan-${clientId}`;
+      rescan.disabled = rescanState.pending;
+    }
     actions.append(feedback);
   }
   // Only where something was actually found: the button opens the first existing
   // root, and offering it for a tool with none would open nothing.
-  if ((exactLocalClientSources(clientId) || []).some((source) => source.dir && source.exists)) {
+  if (syncLockBlocked && typeof window.tokenMonitor?.revealClientSyncLock === 'function') {
+    const revealLock = button('settings.tools.health.revealSyncLock', () => {
+      void window.tokenMonitor.revealClientSyncLock(clientId);
+    });
+    revealLock.dataset.healthAction = 'reveal-sync-lock';
+    revealLock.id = `toolHealthRevealLock-${clientId}`;
+  } else if ((exactLocalClientSources(clientId) || []).some((source) => source.dir && source.exists)) {
     const reveal = button('settings.tools.health.reveal', () => { void window.tokenMonitor?.revealClientSource?.(clientId); });
     reveal.dataset.healthAction = 'reveal';
     reveal.id = `toolHealthReveal-${clientId}`;
@@ -10514,7 +10550,7 @@ function clientHealthPanel(detail, clientId) {
       detail.notes.filter((note) => note.group === group.id)
     ));
   }
-  box.append(groups, clientHealthActions(clientId));
+  box.append(groups, clientHealthActions(clientId, detail));
   return inner;
 }
 

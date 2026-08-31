@@ -80,7 +80,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
   clientSources: (clientId) => ipcRenderer.invoke('usage:clientSources', clientId),
   revealClientSource: (clientId) => ipcRenderer.invoke('usage:revealClientSource', clientId),
+  revealClientSyncLock: (clientId) => ipcRenderer.invoke('usage:revealClientSyncLock', clientId),
   rescanClient: (clientId) => ipcRenderer.invoke('usage:rescanClient', clientId),
+  repairClientSyncLock: (clientId) => ipcRenderer.invoke('usage:repairClientSyncLock', clientId),
   openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
   openUserData: () => ipcRenderer.invoke('app:openUserData'),
   mimo: {

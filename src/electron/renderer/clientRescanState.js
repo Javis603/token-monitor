@@ -16,8 +16,8 @@
     function snapshot(clientId) {
       const entry = entries.get(String(clientId || ''));
       return entry
-        ? { pending: entry.pending, failed: entry.failed }
-        : { pending: false, failed: false };
+        ? { pending: entry.pending, failed: entry.failed, feedbackCode: entry.feedbackCode }
+        : { pending: false, failed: false, feedbackCode: '' };
     }
 
     function begin(clientId) {
@@ -25,24 +25,31 @@
       const previous = entries.get(id);
       if (previous?.timer !== null && previous?.timer !== undefined) clearTimer(previous.timer);
       const requestId = ++nextRequestId;
-      entries.set(id, { requestId, pending: true, failed: false, timer: null });
+      entries.set(id, { requestId, pending: true, failed: false, feedbackCode: '', timer: null });
       onChange(id);
       return requestId;
     }
 
-    function finish(clientId, requestId, succeeded) {
+    function finish(
+      clientId,
+      requestId,
+      succeeded,
+      feedbackCode = succeeded === true ? '' : 'rescan-failed'
+    ) {
       const id = String(clientId || '');
       const entry = entries.get(id);
       if (!entry || entry.requestId !== requestId) return false;
       entry.pending = false;
       entry.failed = succeeded !== true;
+      entry.feedbackCode = String(feedbackCode || '');
       if (entry.timer !== null && entry.timer !== undefined) clearTimer(entry.timer);
       entry.timer = null;
-      if (entry.failed) {
+      if (entry.feedbackCode) {
         entry.timer = setTimer(() => {
           const current = entries.get(id);
           if (!current || current.requestId !== requestId) return;
           current.failed = false;
+          current.feedbackCode = '';
           current.timer = null;
           onChange(id);
         }, failureMs);
