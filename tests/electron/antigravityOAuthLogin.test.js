@@ -96,7 +96,7 @@ test('Antigravity OAuth login does not wait for a retained callback socket', asy
         });
         socket.once('error', reject);
         socket.on('data', (chunk) => {
-          if (chunk.toString().includes('Antigravity account connected')) resolve();
+          if (chunk.toString().includes('Sign-in received')) resolve();
         });
       });
     },
@@ -115,4 +115,12 @@ test('Antigravity OAuth login does not wait for a retained callback socket', asy
   assert.ok(Date.now() - startedAt < 1000, 'login should not wait for callback keep-alive');
   if (!socket.destroyed) await once(socket, 'close', { signal: AbortSignal.timeout(500) });
   assert.equal(socket.destroyed, true);
+});
+
+test('Antigravity OAuth callback says sign-in was received before account persistence finishes', () => {
+  const { _callbackPage } = require('../../src/electron/antigravityOAuthLogin');
+  const page = _callbackPage(true);
+  assert.match(page, /Sign-in received/);
+  assert.match(page, /Return to Token Monitor to finish connecting this account/);
+  assert.doesNotMatch(page, /account connected/);
 });

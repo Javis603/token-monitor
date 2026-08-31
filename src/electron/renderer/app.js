@@ -14079,7 +14079,9 @@ function renderAntigravityStatus() {
       ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
       : '';
     info.textContent = enabled ? (planLabel || statusLabel) : t('settings.antigravity.disabled');
-    info.title = info.textContent;
+    info.title = provider?.actionRequired === 'accountVerification'
+      ? t('settings.antigravity.verificationRequiredDetail')
+      : info.textContent;
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'managed-account-remove';

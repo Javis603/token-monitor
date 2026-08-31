@@ -52,7 +52,7 @@ test('Antigravity OAuth credentials remain in the main-process credential store'
   assert.match(credentials, /readAntigravityCredential\(id/);
   assert.match(credentials, /\['providers', 'antigravity', 'accounts', accountId, 'credentials'\]/);
   assert.match(main, /antigravityManagedAccountsForCollector\(\)/);
-  assert.match(main, /credentials: readAntigravityCredential\(account\.id\)/);
+  assert.match(main, /antigravityOAuth\.managedAccountsForCollector/);
   assert.match(main, /antigravityManagedAccounts: antigravityAccountsForRenderer\(\)/);
   assert.match(main, /delete normalizedPatch\.antigravityManagedAccounts/);
   const app = read('src/electron/renderer/app.js');
@@ -63,18 +63,17 @@ test('Antigravity OAuth credentials remain in the main-process credential store'
   assert.doesNotMatch(antigravityRenderer, /accessToken|refreshToken|clientSecret|credentials/);
 });
 
-test('Antigravity account mutations restore in-memory settings when persistence fails', () => {
+test('Antigravity account mutations rely on centralized settings rollback', () => {
   const main = read('src/electron/main.js');
-  const functions = [
-    main.slice(main.indexOf('async function addAntigravityManagedAccount()'), main.indexOf('function cancelAntigravityManagedAccountLogin()')),
-    main.slice(main.indexOf('async function removeAntigravityManagedAccount(id)'), main.indexOf('function setAntigravityManagedAccountEnabled(id, enabled)')),
-    main.slice(main.indexOf('function setAntigravityManagedAccountEnabled(id, enabled)'), main.indexOf('function normalizeMimoManagedAccounts(value)'))
-  ];
+  const antigravityHandlers = main.slice(
+    main.indexOf('async function addAntigravityManagedAccount()'),
+    main.indexOf('function normalizeMimoManagedAccounts(value)')
+  );
 
-  for (const source of functions) {
-    assert.match(source, /const previousAccounts = settings\.antigravityManagedAccounts;/);
-    assert.match(source, /catch \(_\) \{\s+settings\.antigravityManagedAccounts = previousAccounts;/);
-  }
+  assert.doesNotMatch(antigravityHandlers, /previousAccounts/);
+  assert.match(main, /catch \(error\) \{\s+settings = previousSettings;/);
+  assert.match(antigravityHandlers, /if \(previousCredential\) writeAntigravityCredential/);
+  assert.match(antigravityHandlers, /else removeAntigravityCredential/);
 });
 
 test('Antigravity account copy is complete in every locale', () => {
@@ -83,7 +82,9 @@ test('Antigravity account copy is complete in every locale', () => {
     'settings.antigravity.title',
     'settings.antigravity.notConfigured',
     'settings.antigravity.addAccount',
-    'settings.antigravity.loginFailed'
+    'settings.antigravity.loginFailed',
+    'settings.antigravity.verificationRequired',
+    'settings.antigravity.verificationRequiredDetail'
   ]) {
     assert.equal(i18n.split(`'${key}'`).length - 1, 5, `${key} should exist in all five locales`);
   }

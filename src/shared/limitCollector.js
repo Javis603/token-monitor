@@ -3392,6 +3392,7 @@ function mapAntigravitySnapshot(snapshot, { nowMs, source = 'rpc', account = nul
 }
 
 function antigravityAccountError(account, error, nowMs) {
+  const verificationRequired = error?.status === 'verificationRequired';
   return normalizeLimitProvider({
     provider: 'antigravity',
     accountKey: account?.accountKey || antigravityOAuth.accountKey(account?.accountEmail),
@@ -3399,7 +3400,10 @@ function antigravityAccountError(account, error, nowMs) {
     accountEmail: account?.accountEmail || '',
     source: 'oauth',
     sourceDetail: 'oauth',
-    status: error?.status === 'permissionDenied' ? 'unavailable' : providerStatusFromError(error),
+    status: verificationRequired
+      ? 'unauthorized'
+      : error?.status === 'permissionDenied' ? 'unavailable' : providerStatusFromError(error),
+    ...(verificationRequired ? { actionRequired: 'accountVerification' } : {}),
     updatedAt: nowIso(nowMs),
     windows: []
   });

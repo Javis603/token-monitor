@@ -95,6 +95,14 @@ function normalizeManagedAccounts(value, options = {}) {
   });
 }
 
+function managedAccountsForCollector(value, readCredential) {
+  if (typeof readCredential !== 'function') throw new TypeError('readCredential is required');
+  return normalizeManagedAccounts(value).map((account) => ({
+    ...account,
+    credentials: readCredential(account.id)
+  }));
+}
+
 function parseClientFromText(content) {
   const text = String(content || '');
   const embeddedIds = new Set(text.match(OAUTH_CLIENT_ID_PATTERN) || []);
@@ -197,6 +205,16 @@ function errorWithStatus(status, message, httpStatus = null) {
   return error;
 }
 
+function googleVerificationRequired(status, body) {
+  if (status !== 403) return false;
+  const detail = trimmed(body?.error?.message || body?.message || body?.error_description || body?.error);
+  if (!/\bverify (?:your )?account\b/i.test(detail)) return false;
+  const urls = detail.match(/https?:\/\/[^\s"'<>]+/gi) || [];
+  return urls.some((value) => {
+    try { return new URL(value).hostname === 'accounts.google.com'; } catch (_) { return false; }
+  });
+}
+
 async function responseJson(response, action) {
   let body = null;
   try { body = await response.json(); } catch (_) {}
@@ -204,6 +222,13 @@ async function responseJson(response, action) {
   const status = Number(response?.status);
   const detail = trimmed(body?.error_description || body?.error?.message || body?.error) || `HTTP ${status || 0}`;
   if (status === 400 || status === 401) throw errorWithStatus('unauthorized', `${action}: ${detail}`, status);
+  if (googleVerificationRequired(status, body)) {
+    throw errorWithStatus(
+      'verificationRequired',
+      'Google requires account verification. Open Antigravity and complete verification, then refresh.',
+      status
+    );
+  }
   if (status === 403) throw errorWithStatus('permissionDenied', `${action}: ${detail}`, status);
   if (status === 429) throw errorWithStatus('rateLimited', `${action}: ${detail}`, status);
   throw errorWithStatus('unavailable', `${action}: ${detail}`, status);
@@ -389,7 +414,7 @@ async function fetchAvailableModels(accessToken, projectBody, deps = {}) {
       return await cloudCodeRequest('/v1internal:fetchAvailableModels', accessToken, projectBody, deps, { baseUrl });
     } catch (error) {
       lastError = error;
-      if (error?.status === 'unauthorized' || error?.status === 'rateLimited') throw error;
+      if (error?.status === 'unauthorized' || error?.status === 'verificationRequired' || error?.status === 'rateLimited') throw error;
     }
   }
   throw lastError || errorWithStatus('unavailable', 'Antigravity model endpoints returned no response');
@@ -481,7 +506,7 @@ async function fetchRemoteSnapshot(account, deps = {}) {
         };
       }
     } catch (error) {
-      if (error?.status === 'unauthorized' || error?.status === 'rateLimited') throw error;
+      if (error?.status === 'unauthorized' || error?.status === 'verificationRequired' || error?.status === 'rateLimited') throw error;
       deps.logger?.(`Antigravity quota summary unavailable: ${error.message}`);
     }
   }
@@ -532,6 +557,7 @@ module.exports = {
   generatePkce,
   modelsFromAvailable,
   modelsFromBuckets,
+  managedAccountsForCollector,
   normalizeManagedAccounts,
   parseClientFromText,
   refreshCredential,

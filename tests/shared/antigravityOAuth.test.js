@@ -388,3 +388,48 @@ test('normalizeManagedAccounts does not expose credentials unless explicitly req
     'secret'
   );
 });
+
+test('managedAccountsForCollector preserves account metadata when its credential is missing', () => {
+  const accounts = antigravityOAuth.managedAccountsForCollector([{
+    id: 'one',
+    accountEmail: 'USER@example.com',
+    enabled: true
+  }], () => null);
+
+  assert.equal(accounts.length, 1);
+  assert.equal(accounts[0].accountEmail, 'user@example.com');
+  assert.equal(accounts[0].credentials, null);
+});
+
+test('fetchRemoteSnapshot surfaces Google account verification without swallowing it as a quota fallback', async () => {
+  await assert.rejects(antigravityOAuth.fetchRemoteSnapshot({
+    id: 'account-1',
+    accountEmail: 'user@example.com',
+    credentials: {
+      accessToken: 'access',
+      expiresAt: Date.now() + 3600_000,
+      clientId: 'client',
+      clientSecret: 'secret',
+      projectId: 'project-1'
+    }
+  }, {
+    collapsePools: antigravityProbe._collapsePools,
+    quotaSummaryWindows: antigravityProbe._quotaSummaryWindows,
+    fetch: async (url) => {
+      if (url.endsWith(':loadCodeAssist')) return response(200, { currentTier: { id: 'standard-tier' } });
+      if (url.endsWith(':retrieveUserQuotaSummary')) {
+        return response(403, {
+          code: 403,
+          status: 'PERMISSION_DENIED',
+          message: 'To continue, verify your account at https://accounts.google.com/signin/continue?token=private'
+        });
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }
+  }), (error) => {
+    assert.equal(error.status, 'verificationRequired');
+    assert.equal(error.httpStatus, 403);
+    assert.doesNotMatch(error.message, /token=private/);
+    return true;
+  });
+});

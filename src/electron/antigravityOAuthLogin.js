@@ -13,8 +13,10 @@ function loginError(code, message) {
 }
 
 function callbackPage(ok) {
-  const title = ok ? 'Antigravity account connected' : 'Antigravity sign-in failed';
-  const detail = ok ? 'You can close this window and return to Token Monitor.' : 'Return to Token Monitor for details.';
+  const title = ok ? 'Sign-in received' : 'Antigravity sign-in failed';
+  const detail = ok
+    ? 'Return to Token Monitor to finish connecting this account.'
+    : 'Return to Token Monitor for details.';
   return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${title}</title><body style="font:16px system-ui;padding:40px;max-width:560px;margin:auto"><h1>${title}</h1><p>${detail}</p></body></html>`;
 }
 

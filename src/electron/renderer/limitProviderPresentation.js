@@ -259,6 +259,13 @@
     const status = statusId(provider);
 
     if (provider?.stale) return { label: 'Stale', tone: 'stale' };
+    if (providerName === 'antigravity' && provider?.actionRequired === 'accountVerification') {
+      return {
+        label: 'Open Antigravity to verify',
+        key: 'settings.antigravity.verificationRequired',
+        tone: 'setup'
+      };
+    }
     if (status === 'ok') return { label: isLinkedStatus(provider) ? 'Linked' : 'Live', tone: 'ok' };
     if (status === 'disabled') return { label: 'Disabled', tone: 'muted' };
     if (status === 'noSyncedData') return { label: 'No synced data', tone: 'sync' };

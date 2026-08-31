@@ -197,6 +197,73 @@ test('fetchAntigravityLimits refreshes all enabled OAuth accounts and keeps per-
   assert.equal(result[0].windows[0].remainingPercent, 60);
 });
 
+test('fetchAntigravityLimits keeps managed accounts with missing credentials actionable', async () => {
+  const result = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'missing-credential',
+      accountEmail: 'missing@example.com',
+      enabled: true,
+      credentials: null
+    }]
+  }, {
+    antigravityProbe: async () => {
+      const error = new Error('not running');
+      error.status = 'notConfigured';
+      throw error;
+    }
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].accountEmail, 'missing@example.com');
+  assert.equal(result[0].status, 'unauthorized');
+});
+
+test('fetchAntigravityLimits marks Google verification as an actionable account state', async () => {
+  const result = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'verify-account',
+      accountEmail: 'verify@example.com',
+      enabled: true,
+      credentials: {
+        accessToken: 'access',
+        expiresAt: Date.now() + 3600_000,
+        clientId: 'client',
+        clientSecret: 'secret',
+        projectId: 'project-1'
+      }
+    }]
+  }, {
+    antigravityProbe: async () => {
+      const error = new Error('not running');
+      error.status = 'notConfigured';
+      throw error;
+    },
+    fetch: async (url) => {
+      if (url.endsWith(':loadCodeAssist')) {
+        return { ok: true, status: 200, json: async () => ({ currentTier: { id: 'standard-tier' } }) };
+      }
+      if (url.endsWith(':retrieveUserQuotaSummary')) {
+        return {
+          ok: false,
+          status: 403,
+          json: async () => ({
+            error: {
+              code: 403,
+              status: 'PERMISSION_DENIED',
+              message: 'To continue, verify your account at https://accounts.google.com/signin/continue?token=private'
+            }
+          })
+        };
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].status, 'unauthorized');
+  assert.equal(result[0].actionRequired, 'accountVerification');
+});
+
 test('fetchAntigravityLimits replaces the matching OAuth account with the live RPC snapshot', async () => {
   const result = await fetchAntigravityLimits({
     antigravityManagedAccounts: [{

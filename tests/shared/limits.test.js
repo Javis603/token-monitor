@@ -1395,6 +1395,24 @@ test('normalizeLimitProvider preserves daily windows in canonical order', () => 
   assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'daily', 'weekly', 'billing']);
 });
 
+test('normalizeLimitProvider preserves only the bounded account action hint', () => {
+  const actionable = normalizeLimitProvider({
+    provider: 'antigravity',
+    status: 'unauthorized',
+    actionRequired: 'accountVerification',
+    windows: []
+  });
+  const unknown = normalizeLimitProvider({
+    provider: 'antigravity',
+    status: 'unauthorized',
+    actionRequired: 'open-provider-url',
+    windows: []
+  });
+
+  assert.equal(actionable.actionRequired, 'accountVerification');
+  assert.equal(Object.hasOwn(unknown, 'actionRequired'), false);
+});
+
 test('normalizeLimitProvider keeps canonical Codex lanes ahead of named additional windows', () => {
   const provider = normalizeLimitProvider({
     provider: 'codex',

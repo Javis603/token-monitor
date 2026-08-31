@@ -9,6 +9,7 @@ const VALID_STATUSES = new Set(['ok', 'disabled', 'notConfigured', 'unauthorized
 const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
 const VALID_LIMIT_WINDOW_SOURCES = new Set(['web', 'local']);
 const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'ide', 'managed', 'unknown']);
+const VALID_ACTION_REQUIREMENTS = new Set(['accountVerification']);
 const WINDOW_ORDER = ['session', 'daily', 'weekly', 'billing'];
 const CODEX_TRANSIENT_WINDOW_RETENTION_MS = 10 * 60 * 1000;
 const CODEX_TRANSIENT_PROVIDER_STATUSES = new Set(['unavailable', 'error', 'rateLimited', 'sourceRateLimited']);
@@ -48,6 +49,11 @@ function normalizeSource(value) {
 function normalizeSourceDetail(value) {
   const raw = String(value || '').trim().toLowerCase();
   return VALID_SOURCE_DETAILS.has(raw) ? raw : '';
+}
+
+function normalizeActionRequired(value) {
+  const raw = String(value || '').trim();
+  return VALID_ACTION_REQUIREMENTS.has(raw) ? raw : '';
 }
 
 function containsSensitiveAccountText(value) {
@@ -469,6 +475,7 @@ function normalizeLimitProvider(input) {
       currency: balance.currency
     }));
   }
+  const actionRequired = normalizeActionRequired(input.actionRequired);
   return {
     provider,
     ...(adapterId ? { adapterId } : {}),
@@ -483,6 +490,7 @@ function normalizeLimitProvider(input) {
     accountEmail: normalizeAccountEmail(input.accountEmail ?? input.email),
     workspaceKind: normalizeWorkspaceKind(input.workspaceKind),
     status: normalizeStatus(input.status),
+    ...(actionRequired ? { actionRequired } : {}),
     source: normalizeSource(input.source),
     sourceDetail: normalizeSourceDetail(input.sourceDetail ?? input.source_detail),
     updatedAt: normalizeIsoTimestamp(input.updatedAt) || normalizeIsoTimestamp(input.checkedAt),

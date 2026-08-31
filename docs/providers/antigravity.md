@@ -90,6 +90,8 @@ The OAuth scopes intentionally cover Cloud Code quota access plus Google profile
 
 Remote quota collection uses the Cloud Code bootstrap, onboarding, grouped quota-summary, available-models, and legacy quota endpoints. Available-model discovery retains production, daily, and sandbox endpoint fallbacks. The legacy quota request is also used to verify suspicious all-100-percent grouped responses.
 
+A generic `403 PERMISSION_DENIED` may mean that one quota endpoint is unavailable and must continue through the existing fallbacks. Only a 403 that explicitly asks the user to verify the account at `accounts.google.com` becomes `actionRequired: accountVerification`; the UI then directs the user to open Antigravity, complete verification, and refresh. Never forward the provider-supplied verification URL because it may contain account-specific parameters.
+
 ### Quota mapping
 
 Grouped quota responses map into the normalized limits windows used by every provider. Preserve the distinction between:
@@ -117,7 +119,9 @@ When changing normalized limits behavior:
 
 GUI-managed account metadata lives in `settings.antigravityManagedAccounts`. Raw tokens live under the Antigravity account namespace in the shared credential store, never in renderer-visible settings.
 
-Add, remove, and enable/disable operations must roll back their in-memory metadata mutation if settings persistence fails. Credential writes and metadata writes form one user-visible operation even though they use separate files.
+Settings persistence failures must leave account metadata unchanged. `saveSettings()` owns the in-memory settings rollback, while Antigravity account handlers compensate any dynamic credential write performed before that transaction. Credential writes and metadata writes form one user-visible operation even though they use separate files.
+
+Managed account metadata must still reach the collector when its credential is missing or unreadable. The collector turns that account into an actionable unauthorized row so the UI can ask the user to sign in again; silently filtering it out would leave Settings claiming that the account is linked while quota collection behaves as though it does not exist.
 
 The headless agent and standalone hub do not read the widget credential store. They can receive already-normalized limits through the normal device record, but they do not inherit the widget's managed OAuth accounts.
 
