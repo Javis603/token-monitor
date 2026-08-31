@@ -11560,6 +11560,24 @@ window.addEventListener('blur', () => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
 });
 
+// A transient IPC failure in init() used to abort the rest of startup and leave
+// the UI on factory defaults — settings never applied, no retry, no error. Retry
+// the critical startup reads with backoff so a single dropped IPC round trip at
+// boot cannot leave the renderer half-initialized.
+async function ipcReadWithRetry(task, { attempts = 3, baseDelayMs = 300, label = 'ipc' } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, baseDelayMs * attempt));
+    }
+  }
+  console.error(`[init] ${label} failed after ${attempts} attempts`, lastError);
+  throw lastError;
+}
+
 async function init() {
   // Subscribed before the app-info round trip, not after: a theme flipped while
   // that call is in flight would otherwise be missed until the next flip. The
@@ -11582,11 +11600,11 @@ async function init() {
   // and settings have not loaded yet, so repainting from here would only churn.
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
-  state.settings = await window.tokenMonitor.getSettings();
+  state.settings = await ipcReadWithRetry(() => window.tokenMonitor.getSettings(), { label: 'getSettings' });
   applyEffectiveCurrencyRates();
   deliverTrayProviderIcons();
 
-  state.appUpdate = await window.tokenMonitor.getAppUpdateState();
+  state.appUpdate = await ipcReadWithRetry(() => window.tokenMonitor.getAppUpdateState(), { label: 'getAppUpdateState' });
   renderAppUpdatePill();
   renderSettingsAppUpdateRow();
   window.tokenMonitor.onAppUpdatePush?.((payload) => {
