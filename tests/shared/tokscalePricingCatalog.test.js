@@ -19,6 +19,7 @@ const {
   resolvePromaPricing,
   tokscalePricingCatalog
 } = require('../../src/shared/collector');
+const { resolveCacheContinuityPricing } = require('../../src/shared/sessionDetail');
 const { buildPromaPeriods } = require('../../src/shared/promaUsage');
 
 function catalogDir(t) {
@@ -132,6 +133,33 @@ test('terminal matches with identical rates remain safe without a bare key', (t)
   });
 
   assert.equal(readTokscalePricingCatalog('model-x', { configDir: dir }).inputCostPerToken, 1e-7);
+});
+
+test('terminal matches keep shared base rates without guessing conflicting long-context rates', (t) => {
+  resetPricingCaches(t);
+  const dir = catalogDir(t);
+  writeCatalog(dir, 'pricing-litellm.json', {
+    timestamp: 0,
+    data: {
+      'provider-a/model-x': {
+        input_cost_per_token: 1e-7,
+        output_cost_per_token: 2e-7,
+        input_cost_per_token_above_272k_tokens: 3e-7,
+        cache_read_input_token_cost_above_272k_tokens: 4e-8
+      },
+      'provider-b/model-x': {
+        input_cost_per_token: 1e-7,
+        output_cost_per_token: 2e-7,
+        input_cost_per_token_above_272k_tokens: 5e-7
+      }
+    }
+  });
+
+  const pricing = readTokscalePricingCatalog('model-x', { configDir: dir });
+  assert.equal(pricing.inputCostPerToken, 1e-7);
+  assert.equal(pricing.outputCostPerToken, 2e-7);
+  assert.equal(pricing.inputCostPerTokenAbove272kTokens, undefined);
+  assert.equal(pricing.cacheReadInputTokenCostAbove272kTokens, undefined);
 });
 
 test('provider-scoped ids require their own full exact key', (t) => {
@@ -300,6 +328,43 @@ test('resolvePromaPricing falls back to the local catalog when the lookup fails 
     cacheCreationInputTokenCost: 0
   });
   assert.equal(lookupCalls, 1);
+});
+
+test('cache continuity returns local catalog pricing when live lookup hits its deadline', async (t) => {
+  resetPricingCaches(t);
+  const dir = catalogDir(t);
+  writeCatalog(dir, 'pricing-litellm.json', {
+    timestamp: 0,
+    data: {
+      'provider/deadline-model': {
+        input_cost_per_token: 1.4e-7,
+        output_cost_per_token: 2.8e-7,
+        cache_read_input_token_cost: 2.8e-9
+      }
+    }
+  });
+
+  let liveLookup;
+  const pricing = await resolveCacheContinuityPricing(
+    { materialModels: ['deadline-model'] },
+    (rows, options) => {
+      liveLookup = resolvePromaPricing(rows, {
+        ...options,
+        configDir: dir,
+        pricingRevision: 1,
+        nowMs: 1000,
+        lookupModelPricing: (_model, _timeout, signal) => new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+        })
+      });
+      return liveLookup;
+    },
+    { budgetMs: 20 }
+  );
+  await liveLookup;
+
+  assert.equal(pricing['deadline-model'].inputCostPerToken, 1.4e-7);
+  assert.equal(pricing['deadline-model'].cacheReadInputTokenCost, 2.8e-9);
 });
 
 test('catalog changes invalidate the outer Proma pricing cache', async (t) => {

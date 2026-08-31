@@ -329,6 +329,7 @@ test('cache continuity pricing skips non-material sessions and enforces one dead
   const seen = [];
   const signals = [];
   const retryTimedOut = [];
+  const fallbackHooks = [];
   const work = resolveCacheContinuityPricing(
     { materialModels: ['model-a', 'model-b', 'model-c'] },
     async (rows, options) => {
@@ -336,7 +337,9 @@ test('cache continuity pricing skips non-material sessions and enforces one dead
       seen.push(rows[0].model);
       signals.push(options.signal);
       retryTimedOut.push(options.retryTimedOut);
+      fallbackHooks.push(typeof options.onFallback);
       if (rows[0].model === 'model-a') return { 'model-a': { inputCostPerToken: 1 } };
+      options.onFallback({ 'model-b': { inputCostPerToken: 2 } });
       return new Promise(() => {});
     },
     { budgetMs: 20 }
@@ -351,7 +354,9 @@ test('cache continuity pricing skips non-material sessions and enforces one dead
   assert.equal(signals[0], signals[1]);
   assert.equal(signals[0].aborted, true);
   assert.deepEqual(retryTimedOut, [true, true]);
+  assert.deepEqual(fallbackHooks, ['function', 'function']);
   assert.equal(result['model-a'].inputCostPerToken, 1);
+  assert.equal(result['model-b'].inputCostPerToken, 2);
 });
 
 test('groupEvents groups turns under the preceding prompt', () => {

@@ -498,11 +498,13 @@ const TOKSCALE_ROUTING_LABELS = new Set(['auto', 'agent_review']);
 const TOKSCALE_TERMINAL_FALLBACK_BLOCKLIST = new Set([
   'auto', 'mini', 'chat', 'base', 'claude', 'anthropic', 'gemini', 'model', 'router', 'default'
 ]);
-const CATALOG_PRICING_FIELDS = [
+const CATALOG_BASE_PRICING_FIELDS = [
   'inputCostPerToken',
   'outputCostPerToken',
   'cacheReadInputTokenCost',
-  'cacheCreationInputTokenCost',
+  'cacheCreationInputTokenCost'
+];
+const CATALOG_LONG_CONTEXT_PRICING_FIELDS = [
   'inputCostPerTokenAbove272kTokens',
   'cacheReadInputTokenCostAbove272kTokens'
 ];
@@ -540,7 +542,7 @@ function normalizeCatalogPricing(value) {
 }
 
 function catalogPricingFingerprint(pricing) {
-  return JSON.stringify(CATALOG_PRICING_FIELDS.map((field) => (
+  return JSON.stringify(CATALOG_BASE_PRICING_FIELDS.map((field) => (
     pricing[field] === undefined ? 'missing' : pricing[field]
   )));
 }
@@ -678,7 +680,12 @@ function readTokscalePricingCatalog(modelId, options = {}) {
   const candidates = catalog.byTerminal.get(key) || [];
   if (candidates.length === 0) return null;
   const fingerprints = new Set(candidates.map(({ pricing }) => catalogPricingFingerprint(pricing)));
-  return fingerprints.size === 1 ? candidates[0].pricing : null;
+  if (fingerprints.size !== 1) return null;
+  const pricing = { ...candidates[0].pricing };
+  for (const field of CATALOG_LONG_CONTEXT_PRICING_FIELDS) {
+    if (!candidates.every((candidate) => candidate.pricing[field] === pricing[field])) delete pricing[field];
+  }
+  return pricing;
 }
 
 function resetTokscaleCatalogCache() {
@@ -736,12 +743,22 @@ async function resolveModelPricing(rows, options = {}) {
   }
   for (const [modelId] of modelIds) {
     const cached = promaPricingCache.get(modelId);
-    if (cached && cached.revision === revision && nowMs - cached.at < PROMA_PRICING_CACHE_TTL_MS) {
+    if (cached
+      && cached.revision === revision
+      && nowMs - cached.at < PROMA_PRICING_CACHE_TTL_MS
+      && !(options.retryTimedOut === true && cached.timedOut === true)) {
       if (cached.pricing) pricingByModel[modelId] = cached.pricing;
       continue;
     }
     let pricing;
     let timedOut = false;
+    let fallbackPricing;
+    if (typeof options.onFallback === 'function') {
+      fallbackPricing = readTokscalePricingCatalog(modelId, options);
+      if (fallbackPricing) {
+        try { options.onFallback({ [modelId]: fallbackPricing }); } catch (_) {}
+      }
+    }
     try {
       pricing = normalizePromaPricing(await lookup(modelId, commandTimeoutMs, options.signal));
     } catch (error) {
@@ -751,14 +768,14 @@ async function resolveModelPricing(rows, options = {}) {
       // but when the lookup itself failed (timeout/offline), the price the
       // command would have fallen back to is tokscale's local catalog cache,
       // which is on disk without any network round trip.
-      pricing = readTokscalePricingCatalog(modelId, options);
+      pricing = fallbackPricing || readTokscalePricingCatalog(modelId, options);
       // Parsing a future-dated source adds its time boundary to the catalog
       // revision, so an unavailable result expires when that source becomes
       // eligible even if the file itself does not change.
       revision = currentRevision();
     }
     if (pricing || (!options.signal?.aborted && (!timedOut || options.retryTimedOut !== true))) {
-      promaPricingCache.set(modelId, { at: nowMs, revision, pricing });
+      promaPricingCache.set(modelId, { at: nowMs, revision, pricing, timedOut });
     }
     if (pricing) pricingByModel[modelId] = pricing;
   }

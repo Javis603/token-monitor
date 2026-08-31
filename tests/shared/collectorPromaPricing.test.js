@@ -81,7 +81,8 @@ test('Proma pricing caches a timed out lookup by default', async () => {
   let calls = 0;
   const lookupModelPricing = async () => {
     calls += 1;
-    throw Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' });
+    if (calls === 1) throw Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' });
+    return { pricing: { inputCostPerToken: 0.000003, outputCostPerToken: 0.000015 } };
   };
   const rows = [{ model: 'private-background-timeout-alias' }];
 
@@ -96,6 +97,14 @@ test('Proma pricing caches a timed out lookup by default', async () => {
     nowMs: 1001
   }), {});
   assert.equal(calls, 1);
+  const retried = await resolvePromaPricing(rows, {
+    lookupModelPricing,
+    pricingRevision: 1,
+    nowMs: 1002,
+    retryTimedOut: true
+  });
+  assert.equal(retried['private-background-timeout-alias'].inputCostPerToken, 0.000003);
+  assert.equal(calls, 2);
   resetPromaPricingCache();
 });
 

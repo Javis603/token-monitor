@@ -429,15 +429,23 @@ async function resolveCacheContinuityPricing(summary, resolvePricing, options = 
     for (const model of models) {
       const commandTimeoutMs = deadline - Date.now();
       if (commandTimeoutMs <= 0) break;
+      const fallback = {};
       const lookup = Promise.resolve()
         .then(() => resolvePricing([{ model }], {
           commandTimeoutMs,
           signal: controller.signal,
-          retryTimedOut: true
+          retryTimedOut: true,
+          onFallback(pricing) {
+            if (pricing && typeof pricing === 'object') Object.assign(fallback, pricing);
+          }
         }))
         .catch(() => ({}));
       const result = await Promise.race([lookup, timeout]);
-      if (result === timedOut) break;
+      if (result === timedOut) {
+        Object.assign(pricingByModel, fallback);
+        break;
+      }
+      Object.assign(pricingByModel, fallback);
       if (result && typeof result === 'object') Object.assign(pricingByModel, result);
     }
     return pricingByModel;
