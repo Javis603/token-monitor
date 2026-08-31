@@ -150,6 +150,15 @@ function turn(ts, total, tools = []) {
   return { kind: 'turn', timestamp: ts, tokens: { input: total, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total }, tools };
 }
 
+function cacheTurn(timestamp, model, effort, cacheRead, inputTokens = 1_000_000) {
+  return {
+    timestamp,
+    model,
+    effort,
+    tokens: { input: inputTokens - cacheRead, cacheRead }
+  };
+}
+
 test('Codex cache continuity measures a switch drop, recovery, loss, and API equivalent', () => {
   const context = (timestamp, model, effort) => JSON.stringify({
     type: 'turn_context',
@@ -216,12 +225,6 @@ test('Codex cache continuity measures a switch drop, recovery, loss, and API equ
 });
 
 test('cache continuity detects model-only and effort-only switches', () => {
-  const cacheTurn = (timestamp, model, effort, cacheRead) => ({
-    timestamp,
-    model,
-    effort,
-    tokens: { input: 1_000_000 - cacheRead, cacheRead }
-  });
   const modelOnly = summarizeCacheContinuity([{ turns: [
     cacheTurn('2026-05-30T06:00:00.000Z', 'model-a', 'unknown', 900_000),
     cacheTurn('2026-05-30T06:00:01.000Z', 'model-a', 'unknown', 900_000),
@@ -241,6 +244,66 @@ test('cache continuity detects model-only and effort-only switches', () => {
   assert.deepEqual([effortOnly.switchCount, effortOnly.modelSwitchCount, effortOnly.effortSwitchCount], [1, 0, 1]);
   assert.deepEqual(effortOnly.materialModels, []);
   assert.equal(sameModel, null);
+});
+
+test('cache continuity stops a partial episode at the next detected switch', () => {
+  const summary = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'model-a', 'unknown', 90, 100),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'model-b', 'unknown', 0, 100),
+    cacheTurn('2026-05-30T06:00:02.000Z', 'model-b', 'low', 80, 100),
+    cacheTurn('2026-05-30T06:00:03.000Z', 'model-b', 'high', 50, 100)
+  ] }]);
+
+  assert.equal(summary.events[0].recoveryCalls, 2);
+  assert.equal(summary.events[0].recovered, false);
+  assert.equal(summary.events[0].endReason, 'next_switch');
+  assert.equal(summary.events[0].lostTokens, 100);
+  assert.equal(summary.lostTokens, 130);
+});
+
+test('cache continuity prices known models discovered inside a partial episode', () => {
+  const summary = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'unknown', 'high', 80, 100),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'unknown', 'low', 0, 100),
+    cacheTurn('2026-05-30T06:00:02.000Z', 'gpt-5', 'low', 10, 100)
+  ] }]);
+  const priced = priceCacheContinuity(summary, {
+    'gpt-5': { inputCostPerToken: 2e-6, cacheReadInputTokenCost: 0.2e-6 }
+  });
+
+  assert.deepEqual(summary.materialModels, ['gpt-5']);
+  assert.equal(priced.lostTokens, 150);
+  assert.equal(priced.pricedTokens, 70);
+  assert.ok(Math.abs(priced.apiEquivalentUsd - 0.000126) < 1e-12);
+});
+
+test('cache continuity includes exact material and recovery thresholds', () => {
+  const material = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'model-a', 'high', 1, 3),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'model-b', 'high', 2, 15)
+  ] }]);
+  const recovered = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'model-a', 'high', 5, 6),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'model-b', 'high', 0, 60),
+    cacheTurn('2026-05-30T06:00:02.000Z', 'model-b', 'high', 47, 60)
+  ] }]);
+
+  assert.equal(material.materialDropCount, 1);
+  assert.equal(recovered.events[0].recovered, true);
+  assert.equal(recovered.events[0].recoveryCalls, 2);
+});
+
+test('cache continuity baseline uses matching calls only within the prior three positions', () => {
+  const summary = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'model-a', 'high', 90, 100),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'model-a', 'high', 80, 100),
+    cacheTurn('2026-05-30T06:00:02.000Z', 'model-b', 'high', 10, 100),
+    cacheTurn('2026-05-30T06:00:03.000Z', 'model-a', 'high', 70, 100),
+    cacheTurn('2026-05-30T06:00:04.000Z', 'model-c', 'high', 59, 100)
+  ] }]);
+
+  assert.equal(summary.events.at(-1).baselineHitRate, 75);
+  assert.equal(summary.events.at(-1).dropPp, 16);
 });
 
 test('cache continuity stays linear across many switches', () => {

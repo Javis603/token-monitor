@@ -7,6 +7,7 @@ const { readReasonixSessionEvents } = require('./reasonixSessionDetail');
 
 const CACHE_MATERIAL_DROP_PP = 20;
 const CACHE_RECOVERY_TOLERANCE_PP = 5;
+const CACHE_PERCENT_EPSILON = 1e-9;
 const CACHE_LONG_CONTEXT_THRESHOLD = 272_000;
 const CACHE_CONTINUITY_PRICING_BUDGET_MS = 3000;
 
@@ -296,6 +297,17 @@ function matchesKnownConfiguration(call, configuration) {
     && (!knownCoordinate(configuration.effort) || call.effort === configuration.effort);
 }
 
+function switchCoordinates(before, after) {
+  return {
+    modelChanged: knownCoordinate(before.model) && knownCoordinate(after.model) && before.model !== after.model,
+    effortChanged: knownCoordinate(before.effort) && knownCoordinate(after.effort) && before.effort !== after.effort
+  };
+}
+
+function isMaterialDrop(event) {
+  return event.dropPp + CACHE_PERCENT_EPSILON >= CACHE_MATERIAL_DROP_PP;
+}
+
 function summarizeCacheContinuity(exchanges, period = 'total', now = new Date()) {
   const calls = exchanges
     .flatMap((exchange) => exchange.turns || [])
@@ -321,9 +333,10 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
   for (let index = 1; index < calls.length; index += 1) {
     const before = calls[index - 1];
     const after = calls[index];
-    const modelChanged = knownCoordinate(before.model) && knownCoordinate(after.model) && before.model !== after.model;
-    const effortChanged = knownCoordinate(before.effort) && knownCoordinate(after.effort) && before.effort !== after.effort;
+    const { modelChanged, effortChanged } = switchCoordinates(before, after);
     if (!modelChanged && !effortChanged) continue;
+    // Mirror Cache Meter: inspect the previous three chronological calls, then keep the old config.
+    // This avoids reviving a stale baseline from an earlier run of the same configuration.
     const previous = calls.slice(Math.max(0, index - 3), index)
       .filter((call) => matchesKnownConfiguration(call, before))
       .map((call) => call.hitRate);
@@ -332,8 +345,16 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
     const lossCalls = [];
     let recovered = false;
     let recoveryCalls = 0;
+    let endedBySwitch = false;
     for (let callIndex = index; callIndex < calls.length; callIndex += 1) {
       const call = calls[callIndex];
+      if (callIndex > index) {
+        const boundary = switchCoordinates(calls[callIndex - 1], call);
+        if (boundary.modelChanged || boundary.effortChanged) {
+          endedBySwitch = true;
+          break;
+        }
+      }
       if (!matchesKnownConfiguration(call, after)) break;
       recoveryCalls += 1;
       lossCalls.push({
@@ -341,7 +362,7 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
         inputTokens: call.inputTokens,
         lostTokens: Math.max(0, Math.round(call.inputTokens * baselineHitRate / 100) - call.cachedInputTokens)
       });
-      if (call.hitRate >= baselineHitRate - CACHE_RECOVERY_TOLERANCE_PP) {
+      if (call.hitRate + CACHE_PERCENT_EPSILON >= baselineHitRate - CACHE_RECOVERY_TOLERANCE_PP) {
         recovered = true;
         break;
       }
@@ -359,7 +380,7 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
       lostTokens,
       recoveryCalls,
       recovered,
-      endReason: recovered ? 'recovered' : (index + recoveryCalls < calls.length ? 'next_switch' : 'log_end'),
+      endReason: recovered ? 'recovered' : (endedBySwitch ? 'next_switch' : 'log_end'),
       modelChanged,
       effortChanged,
       lossCalls
@@ -368,7 +389,7 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
   // An episode belongs to its first post-switch call; period views never split one loss episode.
   const scopedEvents = events.filter((event) => withinPeriod(event.timestamp, period, now));
   if (scopedEvents.length === 0) return null;
-  const materialEvents = scopedEvents.filter((event) => event.dropPp >= CACHE_MATERIAL_DROP_PP);
+  const materialEvents = scopedEvents.filter(isMaterialDrop);
   const recoveredEvents = materialEvents.filter((event) => event.recovered);
   return {
     switchCount: scopedEvents.length,
@@ -376,7 +397,9 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
     effortSwitchCount: scopedEvents.filter((event) => event.effortChanged).length,
     materialDropCount: materialEvents.length,
     lostTokens: materialEvents.reduce((sum, event) => sum + event.lostTokens, 0),
-    materialModels: Array.from(new Set(materialEvents.map((event) => event.toModel).filter(knownCoordinate))),
+    materialModels: Array.from(new Set(materialEvents
+      .flatMap((event) => event.lossCalls.map((call) => call.model))
+      .filter(knownCoordinate))),
     averageRecoveryCalls: recoveredEvents.length
       ? recoveredEvents.reduce((sum, event) => sum + event.recoveryCalls, 0) / recoveredEvents.length
       : null,
@@ -422,10 +445,10 @@ async function resolveCacheContinuityPricing(summary, resolvePricing, options = 
 function priceCacheContinuity(summary, pricingByModel = {}) {
   if (!summary) return null;
   const events = summary.events.map((event) => {
-    const pricing = pricingByModel[String(event.toModel || '').trim().toLowerCase()];
     let apiEquivalentUsd = 0;
     let pricedTokens = 0;
     for (const call of event.lossCalls) {
+      const pricing = pricingByModel[String(call.model || '').trim().toLowerCase()];
       const longContext = call.inputTokens > CACHE_LONG_CONTEXT_THRESHOLD;
       const inputRate = longContext && Number.isFinite(pricing?.inputCostPerTokenAbove272kTokens)
         ? pricing.inputCostPerTokenAbove272kTokens
@@ -440,7 +463,7 @@ function priceCacheContinuity(summary, pricingByModel = {}) {
     const { lossCalls, ...publicEvent } = event;
     return { ...publicEvent, pricedTokens, apiEquivalentUsd };
   });
-  const materialEvents = events.filter((event) => event.dropPp >= CACHE_MATERIAL_DROP_PP);
+  const materialEvents = events.filter(isMaterialDrop);
   return {
     ...summary,
     pricedTokens: materialEvents.reduce((sum, event) => sum + event.pricedTokens, 0),
