@@ -8348,8 +8348,9 @@ function syncHubDraftDirty(field) {
   }
   const inputId = HUB_DRAFT_FIELDS.find(([name]) => name === field)?.[1];
   const input = inputId ? els[inputId] : null;
+  const savedValue = state.settings?.[field];
   hubDraftDirty[field] = Boolean(input) && (
-    normalizeHubDraftValue(field, input.value) !== normalizeHubDraftValue(field, state.settings?.[field])
+    normalizeHubDraftValue(field, input.value, savedValue) !== normalizeHubDraftValue(field, savedValue)
   );
 }
 
@@ -8380,8 +8381,19 @@ function syncHubDraftFields() {
   syncHubSaveButton();
 }
 
-function normalizeHubDraftValue(field, value) {
-  if (field === 'hubHostPort') return String(Number(value) || 17321);
+// Keep this aligned with main's normalizeHubPort: dirty state must describe
+// the value settings:update will actually persist, including its fallback.
+function normalizeHubDraftPort(value, fallback = 17321) {
+  const fallbackNumber = Math.floor(Number(fallback));
+  const normalizedFallback = Number.isFinite(fallbackNumber) && fallbackNumber >= 1 && fallbackNumber <= 65535
+    ? fallbackNumber
+    : 17321;
+  const number = Math.floor(Number(value));
+  return String(Number.isFinite(number) && number >= 1 && number <= 65535 ? number : normalizedFallback);
+}
+
+function normalizeHubDraftValue(field, value, fallback) {
+  if (field === 'hubHostPort') return normalizeHubDraftPort(value, fallback);
   if (field === 'secret') return String(value ?? '');
   return String(value ?? '').trim();
 }
@@ -8392,7 +8404,7 @@ function hubDraftValuesFromInputs() {
     if (field === 'hubHostPort' && state.settings?.hubMode !== 'host') continue;
     const input = els[inputId];
     if (!input) continue;
-    values[field] = normalizeHubDraftValue(field, input.value);
+    values[field] = normalizeHubDraftValue(field, input.value, state.settings?.[field]);
   }
   return values;
 }
@@ -8425,7 +8437,7 @@ function reconcileHubDraftsAfterSave(submitted, submittedRevisions) {
     const input = els[inputId];
     if (!input) continue;
     if (!Object.prototype.hasOwnProperty.call(submitted, field)) continue;
-    const current = normalizeHubDraftValue(field, input.value);
+    const current = normalizeHubDraftValue(field, input.value, submitted[field]);
     if (
       hubDraftRevisions[field] === submittedRevisions[field]
       && current === submitted[field]
