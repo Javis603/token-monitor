@@ -25,6 +25,8 @@ const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./claudeWebFetch');
+const { runAntigravityOAuthLogin } = require('./antigravityOAuthLogin');
+const antigravityOAuth = require('../shared/antigravityOAuth');
 const {
   createWorkbuddyLocalAuth,
   isSupportedWorkbuddyLocalAppPlatform
@@ -394,6 +396,7 @@ let claudeWebCookieMutationRevision = 0;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
+let antigravityOAuthLoginController = null;
 let sessionUsageArchive = null;
 let lastSessionUsageArchiveUpdate = {
   at: null,
@@ -584,6 +587,7 @@ function defaultSettings() {
     kimiWebAccessToken: '',
     ollamaCookie: '',
     codexManagedAccounts: [],
+    antigravityManagedAccounts: [],
     mimoManagedAccounts: [],
     appUpdate: {
       lastCheckedAt: null,
@@ -690,6 +694,7 @@ function electronLimitsConfig() {
     workbuddyLocalSession: workbuddyDesktopSessionEnabled ? electronWorkbuddyLocalAuth.getSessionInfo() : {},
     defaultLimitProviders: defaultLimitProviders(),
     codexManagedAccounts: codexManagedAccountsForCollector(),
+    antigravityManagedAccounts: antigravityManagedAccountsForCollector(),
     mimoManagedAccounts: mimoManagedAccountsForCollector()
   });
 }
@@ -749,6 +754,7 @@ function electronLimitsDeps() {
     },
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
+    onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
     onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
     onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey
   };
@@ -1066,6 +1072,168 @@ function codexAccountsForRenderer() {
 
 function codexManagedAccountsForCollector() {
   return normalizeCodexManagedAccounts(settings?.codexManagedAccounts);
+}
+
+function normalizeAntigravityManagedAccounts(value) {
+  return antigravityOAuth.normalizeManagedAccounts(value);
+}
+
+function antigravityAccountsForRenderer() {
+  return normalizeAntigravityManagedAccounts(settings?.antigravityManagedAccounts);
+}
+
+function readAntigravityCredential(id) {
+  try {
+    return ensureCredentialStore().readAntigravityCredential(id);
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeAntigravityCredential(id, credentials) {
+  try {
+    return ensureCredentialStore().writeAntigravityCredential(id, credentials);
+  } catch (_) {
+    return false;
+  }
+}
+
+function removeAntigravityCredential(id) {
+  try {
+    return ensureCredentialStore().removeAntigravityCredential(id);
+  } catch (_) {
+    return false;
+  }
+}
+
+function antigravityManagedAccountsForCollector() {
+  return normalizeAntigravityManagedAccounts(settings?.antigravityManagedAccounts).map((account) => ({
+    ...account,
+    credentials: readAntigravityCredential(account.id)
+  })).filter((account) => account.credentials);
+}
+
+function persistAntigravityCredentialsRenewal({ account, credentials, previous } = {}) {
+  const accountId = String(account?.id || '').trim();
+  if (!accountId || !credentials || typeof credentials !== 'object') return false;
+  const current = readAntigravityCredential(accountId);
+  if (!current || JSON.stringify(current) !== JSON.stringify(previous || {})) return false;
+  return writeAntigravityCredential(accountId, credentials);
+}
+
+async function addAntigravityManagedAccount() {
+  if (antigravityOAuthLoginController) return { ok: false, errorCode: 'loginInProgress' };
+  const controller = new AbortController();
+  antigravityOAuthLoginController = controller;
+  try {
+    const { credential, identity } = await runAntigravityOAuthLogin({
+      env: process.env,
+      fetch: electronLimitsFetch(),
+      openExternal: (url) => shell.openExternal(url),
+      signal: controller.signal,
+      logger: (message) => console.log(`[antigravity-oauth] ${message}`)
+    });
+    const accounts = normalizeAntigravityManagedAccounts(settings?.antigravityManagedAccounts);
+    const now = new Date().toISOString();
+    const existing = accounts.find((account) => account.accountEmail === identity.email);
+    const account = {
+      id: existing?.id || `antigravity-${crypto.randomUUID()}`,
+      accountKey: antigravityOAuth.accountKey(identity.email),
+      accountEmail: identity.email,
+      accountLabel: existing?.accountLabel || identity.name || '',
+      enabled: true,
+      addedAt: existing?.addedAt || now,
+      updatedAt: now
+    };
+    const previousCredential = existing ? readAntigravityCredential(existing.id) : null;
+    if (!writeAntigravityCredential(account.id, {
+      ...credential,
+      refreshToken: credential.refreshToken || previousCredential?.refreshToken || ''
+    })) {
+      return { ok: false, errorCode: 'credentialStorageUnavailable' };
+    }
+    settings.antigravityManagedAccounts = normalizeAntigravityManagedAccounts([
+      ...accounts.filter((entry) => entry.id !== account.id && entry.accountEmail !== account.accountEmail),
+      account
+    ]);
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (_) {
+      if (previousCredential) writeAntigravityCredential(account.id, previousCredential);
+      else removeAntigravityCredential(account.id);
+      return { ok: false, errorCode: 'credentialStorageUnavailable' };
+    }
+    pushSettingsToRenderer();
+    sendAntigravityAccountsPush();
+    void queueLimitInvalidation({
+      provider: 'antigravity',
+      accountId: account.id,
+      accountKey: account.accountKey,
+      accountEmail: account.accountEmail,
+      sourceDetail: 'oauth'
+    }, 'account-added');
+    return { ok: true, accounts: antigravityAccountsForRenderer() };
+  } catch (error) {
+    const cancelled = controller.signal.aborted || error?.code === 'CANCELLED' || error?.name === 'AbortError';
+    return {
+      ok: false,
+      errorCode: cancelled ? 'cancelled' : error?.code || 'loginFailed',
+      error: cancelled ? '' : String(error?.message || error)
+    };
+  } finally {
+    if (antigravityOAuthLoginController === controller) antigravityOAuthLoginController = null;
+  }
+}
+
+function cancelAntigravityManagedAccountLogin() {
+  if (!antigravityOAuthLoginController) return false;
+  antigravityOAuthLoginController.abort();
+  return true;
+}
+
+async function removeAntigravityManagedAccount(id) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeAntigravityManagedAccounts(settings?.antigravityManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  const previousCredential = readAntigravityCredential(accountId);
+  if (!removeAntigravityCredential(accountId)) return { ok: false, error: 'Could not remove stored credential' };
+  settings.antigravityManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    if (previousCredential) writeAntigravityCredential(accountId, previousCredential);
+    return { ok: false, error: 'Could not persist account removal' };
+  }
+  pushSettingsToRenderer();
+  sendAntigravityAccountsPush();
+  void queueLimitInvalidation({ provider: 'antigravity', accountId, accountKey: account.accountKey }, 'account-removed', {
+    clear: true,
+    refresh: false
+  });
+  return { ok: true, accounts: antigravityAccountsForRenderer() };
+}
+
+function setAntigravityManagedAccountEnabled(id, enabled) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeAntigravityManagedAccounts(settings?.antigravityManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  account.enabled = Boolean(enabled);
+  account.updatedAt = new Date().toISOString();
+  settings.antigravityManagedAccounts = accounts;
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    return { ok: false, error: 'Could not persist account state' };
+  }
+  pushSettingsToRenderer();
+  sendAntigravityAccountsPush();
+  void queueLimitInvalidation({ provider: 'antigravity', accountId, accountKey: account.accountKey }, 'account-state', {
+    clear: !account.enabled,
+    refresh: account.enabled
+  });
+  return { ok: true, accounts: antigravityAccountsForRenderer() };
 }
 
 function normalizeMimoManagedAccounts(value) {
@@ -2240,6 +2408,7 @@ function readSettings() {
       merged.serviceStatusRefreshMs = normalizeServiceStatusRefreshMs(saved.serviceStatusRefreshMs);
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
+    merged.antigravityManagedAccounts = normalizeAntigravityManagedAccounts(merged.antigravityManagedAccounts);
     merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
     if (saved.windowBehavior === undefined && saved.alwaysOnTop !== undefined) {
       merged.windowBehavior = saved.alwaysOnTop ? 'floating' : 'normal';
@@ -4509,6 +4678,7 @@ function settingsForRenderer() {
     openrouterEnvConfigured: Boolean(openrouterLimits.openrouterToken(process.env)),
     thirdPartyEnvConfigured: thirdPartyLimits.configuredAccounts({}, { env: process.env }).length > 0,
     codexManagedAccounts: codexAccountsForRenderer(),
+    antigravityManagedAccounts: antigravityAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
     claudeWebCookieConfigured: Boolean(currentClaudeWebCookie()),
     claudeWebCookieSource,
@@ -4645,6 +4815,11 @@ function refreshLimitStatsPresentation() {
 function sendMimoAccountsPush() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try { mainWindow.webContents.send('mimo:accounts', mimoAccountsForRenderer()); } catch (_) {}
+}
+
+function sendAntigravityAccountsPush() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('antigravity:accounts', antigravityAccountsForRenderer()); } catch (_) {}
 }
 
 function unregisterWindowToggleShortcut() {
@@ -6256,6 +6431,7 @@ app.whenReady().then(() => {
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
     delete normalizedPatch.windowMaximized;
     delete normalizedPatch.codexManagedAccounts;
+    delete normalizedPatch.antigravityManagedAccounts;
     delete normalizedPatch.mimoManagedAccounts;
     delete normalizedPatch.workbuddyAccessToken;
     delete normalizedPatch.workbuddyUserId;
@@ -6770,6 +6946,11 @@ app.whenReady().then(() => {
       .catch((error) => ({ ok: false, error: error.message }));
   });
   ipcMain.handle('app:openUserData', () => shell.openPath(app.getPath('userData')));
+  ipcMain.handle('antigravity:accounts', () => antigravityAccountsForRenderer());
+  ipcMain.handle('antigravity:addAccount', () => addAntigravityManagedAccount());
+  ipcMain.handle('antigravity:cancelLogin', () => cancelAntigravityManagedAccountLogin());
+  ipcMain.handle('antigravity:setAccountEnabled', (_event, id, enabled) => setAntigravityManagedAccountEnabled(id, enabled));
+  ipcMain.handle('antigravity:removeAccount', (_event, id) => removeAntigravityManagedAccount(id));
   ipcMain.handle('mimo:accounts', () => mimoAccountsForRenderer());
   ipcMain.handle('mimo:addAccount', (_event, cookieHeader) => addMimoManagedAccount(cookieHeader));
   ipcMain.handle('mimo:openConsole', () => shell.openExternal(MIMO_PLATFORM_CONSOLE_URL)
@@ -7793,6 +7974,7 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 // OS-initiated logout or restart on macOS.
 app.on('before-quit', () => {
   quitRequested = true;
+  antigravityOAuthLoginController?.abort();
   resetMacWidgetReloadThrottle();
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);

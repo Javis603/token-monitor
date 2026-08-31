@@ -552,6 +552,9 @@ function providerCollapseKey(provider) {
       || provider.provider === 'thirdparty'
       || provider.provider === 'mimo'
       || provider.provider === 'cursor'
+      // Antigravity OAuth and RPC both derive the account key from the
+      // normalized Google email, so one key is one account on every device.
+      || provider.provider === 'antigravity'
       // Volcengine's accountKey comes from the AK/SK and region, so it is the
       // same on every platform. Two keys mean the Coding/Agent plan split, not
       // one account hashed twice.

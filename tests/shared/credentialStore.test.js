@@ -309,3 +309,20 @@ test('stores, migrates, and removes MiMo account cookies in the unified store', 
   assert.equal(store.readMimoCredential('account-1'), '');
   assert.equal(store.writeMimoCredential('__proto__', 'serviceToken=unsafe'), false);
 });
+
+test('stores and removes Antigravity OAuth credentials without exposing them as settings', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  const credentials = {
+    accessToken: 'access-secret',
+    refreshToken: 'refresh-secret',
+    expiresAt: 12345,
+    clientId: 'client-id',
+    clientSecret: 'client-secret'
+  };
+  assert.equal(store.writeAntigravityCredential('account-1', credentials), true);
+  assert.deepEqual(store.readAntigravityCredential('account-1'), credentials);
+  assert.equal(store.settingsCredentials().antigravityManagedAccounts, undefined);
+  assert.equal(store.removeAntigravityCredential('account-1'), true);
+  assert.equal(store.readAntigravityCredential('account-1'), null);
+  assert.equal(store.writeAntigravityCredential('__proto__', credentials), false);
+});

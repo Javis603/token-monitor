@@ -1129,6 +1129,53 @@ test('aggregateLimits preserves distinct Cursor accounts and deduplicates the sa
   assert.equal(cursorRows[1].sourceDeviceId, 'this-mac');
 });
 
+test('aggregateLimits preserves distinct Antigravity accounts and deduplicates the same account across devices', () => {
+  const antigravityProvider = (accountKey, accountEmail, source, remainingPercent, updatedAt) => ({
+    provider: 'antigravity',
+    accountKey,
+    accountEmail,
+    accountLabel: 'Pro',
+    status: 'ok',
+    source,
+    sourceDetail: source === 'rpc' ? 'app' : 'oauth',
+    updatedAt,
+    windows: [{
+      kind: 'weekly',
+      label: 'Gemini weekly',
+      usedPercent: 100 - remainingPercent,
+      remainingPercent,
+      windowMinutes: 10_080
+    }]
+  });
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'macbook',
+      limits: {
+        providers: [
+          antigravityProvider('sha256:antigravity-a', 'a@example.com', 'oauth', 40, '2026-08-31T10:00:00.000Z')
+        ]
+      }
+    },
+    {
+      deviceId: 'desktop',
+      limits: {
+        providers: [
+          antigravityProvider('sha256:antigravity-a', 'a@example.com', 'rpc', 70, '2026-08-31T10:02:00.000Z'),
+          antigravityProvider('sha256:antigravity-b', 'b@example.com', 'oauth', 80, '2026-08-31T10:01:00.000Z')
+        ]
+      }
+    }
+  ], 0, Date.parse('2026-08-31T10:03:00.000Z'));
+
+  const antigravityRows = aggregate.providers.filter((provider) => provider.provider === 'antigravity');
+  assert.equal(antigravityRows.length, 2);
+  assert.deepEqual(antigravityRows.map((provider) => provider.accountEmail), ['a@example.com', 'b@example.com']);
+  assert.equal(antigravityRows[0].sourceDeviceId, 'desktop');
+  assert.equal(antigravityRows[0].source, 'rpc');
+  assert.equal(antigravityRows[0].windows[0].remainingPercent, 70);
+  assert.equal(antigravityRows[1].sourceDeviceId, 'desktop');
+});
+
 // The collapse-by-name pass exists because one OAuth account hashes differently
 // per platform. Volcengine's accountKey is derived from the AK/SK and the
 // region, so it is identical on every device — the only way one account yields

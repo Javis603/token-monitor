@@ -119,3 +119,175 @@ test('fetchAntigravityLimits maps unauthorized errors', async () => {
   });
   assert.equal(result.status, 'unauthorized');
 });
+
+test('fetchAntigravityLimits refreshes all enabled OAuth accounts and keeps per-account errors', async () => {
+  const accounts = [
+    {
+      id: 'one',
+      accountEmail: 'one@example.com',
+      enabled: true,
+      credentials: {
+        accessToken: 'token-one',
+        refreshToken: 'refresh-one',
+        expiresAt: Date.now() + 3600_000,
+        clientId: 'client',
+        clientSecret: 'secret',
+        projectId: 'project-one'
+      }
+    },
+    {
+      id: 'two',
+      accountEmail: 'two@example.com',
+      enabled: true,
+      credentials: {
+        accessToken: 'token-two',
+        refreshToken: 'refresh-two',
+        expiresAt: Date.now() + 3600_000,
+        clientId: 'client',
+        clientSecret: 'secret',
+        projectId: 'project-two'
+      }
+    },
+    {
+      id: 'disabled',
+      accountEmail: 'disabled@example.com',
+      enabled: false,
+      credentials: { accessToken: 'never-used' }
+    }
+  ];
+  const requestedTokens = [];
+  const result = await fetchAntigravityLimits({ antigravityManagedAccounts: accounts }, {
+    antigravityProbe: async () => {
+      const error = new Error('not running');
+      error.status = 'notConfigured';
+      throw error;
+    },
+    fetch: async (url, init) => {
+      const token = init.headers.authorization.replace('Bearer ', '');
+      requestedTokens.push(token);
+      if (token === 'token-two') return { ok: false, status: 401, json: async () => ({ error: 'expired' }) };
+      if (url.endsWith(':loadCodeAssist')) {
+        return { ok: true, status: 200, json: async () => ({ currentTier: { id: 'standard-tier' } }) };
+      }
+      if (url.endsWith(':fetchAvailableModels')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            models: {
+              'gemini-2.5-pro': {
+                displayName: 'Gemini Pro',
+                quotaInfo: { remainingFraction: 0.6, resetTime: '2026-09-01T00:00:00Z' }
+              }
+            }
+          })
+        };
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }
+  });
+
+  assert.equal(result.length, 2);
+  assert.deepEqual(result.map((provider) => [provider.accountEmail, provider.status, provider.source]), [
+    ['one@example.com', 'ok', 'oauth'],
+    ['two@example.com', 'unauthorized', 'oauth']
+  ]);
+  assert.equal(requestedTokens.includes('never-used'), false);
+  assert.equal(result[0].windows[0].label, 'Gemini Pro');
+  assert.equal(result[0].windows[0].remainingPercent, 60);
+});
+
+test('fetchAntigravityLimits replaces the matching OAuth account with the live RPC snapshot', async () => {
+  const result = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'same-account',
+      accountEmail: 'Same@Example.com',
+      enabled: true,
+      credentials: {
+        accessToken: 'token-same',
+        refreshToken: 'refresh-same',
+        expiresAt: Date.now() + 3600_000,
+        clientId: 'client',
+        clientSecret: 'secret',
+        projectId: 'project-same'
+      }
+    }]
+  }, {
+    antigravityProbe: async () => ({
+      accountPlan: 'Google AI Pro',
+      accountEmail: 'same@example.com',
+      sourceDetail: 'app',
+      windows: [
+        { name: 'Gemini weekly', kind: 'weekly', remainingFraction: 0.73 }
+      ]
+    }),
+    fetch: async (url) => {
+      if (url.endsWith(':loadCodeAssist')) {
+        return { ok: true, status: 200, json: async () => ({ currentTier: { id: 'standard-tier' } }) };
+      }
+      if (url.endsWith(':retrieveUserQuotaSummary')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            groups: [{
+              displayName: 'Gemini Models',
+              buckets: [{ displayName: 'Weekly Limit', window: 'weekly', remainingFraction: 0.41 }]
+            }]
+          })
+        };
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].accountEmail, 'same@example.com');
+  assert.equal(result[0].source, 'rpc');
+  assert.equal(result[0].sourceDetail, 'app');
+  assert.equal(result[0].windows[0].remainingPercent, 73);
+});
+
+test('fetchAntigravityLimits keeps the OAuth plan when quota data is unavailable', async () => {
+  const result = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'one',
+      accountEmail: 'one@example.com',
+      accountKey: 'account-key',
+      enabled: true,
+      credentials: {
+        accessToken: 'token-one',
+        refreshToken: 'refresh-one',
+        expiresAt: Date.now() + 3600_000,
+        clientId: 'client',
+        clientSecret: 'secret',
+        projectId: 'project-one'
+      }
+    }]
+  }, {
+    antigravityProbe: async () => {
+      const error = new Error('not running');
+      error.status = 'notConfigured';
+      throw error;
+    },
+    fetch: async (url) => {
+      if (url.endsWith(':loadCodeAssist')) {
+        return { ok: true, status: 200, json: async () => ({ currentTier: { id: 'standard-tier' } }) };
+      }
+      if (url.endsWith(':fetchAvailableModels') || url.endsWith(':retrieveUserQuota')) {
+        return {
+          ok: false,
+          status: 403,
+          json: async () => ({ error: { message: 'The caller does not have permission' } })
+        };
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].accountEmail, 'one@example.com');
+  assert.equal(result[0].accountLabel, 'Paid');
+  assert.equal(result[0].status, 'unavailable');
+  assert.deepEqual(result[0].windows, []);
+});

@@ -714,6 +714,24 @@
                 <div id="cursorErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="antigravityAccountGroup" class="settings-group cursor-account-group">
+              <button id="antigravitySettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="antigravitySettingsDetails">
+                <span data-i18n="settings.antigravity.title">Antigravity Accounts</span>
+                <span class="cursor-settings-summary">
+                  <span id="antigravityAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="antigravitySettingsDetails" class="cursor-settings-details hidden">
+                <div id="antigravityAccountList" class="managed-account-list"></div>
+                <div class="settings-actions">
+                  <button id="antigravityAddAccountButton" type="button" data-i18n="settings.antigravity.addAccount">Add Google account</button>
+                  <button id="antigravityCancelLoginButton" type="button" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
+                </div>
+                <div id="antigravityLoginStatus" class="settings-note hidden" role="status" aria-live="polite"></div>
+                <div id="antigravityAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
+              </div>
+            </div>
             <div id="opencodeCookieGroup" class="settings-group cursor-account-group">
               <button id="opencodeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="opencodeSettingsDetails">
                 <span data-i18n="settings.opencode.title">OpenCode Accounts</span>
