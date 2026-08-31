@@ -75,3 +75,28 @@ test('Proma pricing retries immediately after an aborted lookup', async () => {
   assert.equal(calls, 2);
   resetPromaPricingCache();
 });
+
+test('Proma pricing retries immediately after a timed out lookup', async () => {
+  resetPromaPricingCache();
+  let calls = 0;
+  const lookupModelPricing = async () => {
+    calls += 1;
+    if (calls === 1) throw Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' });
+    return { pricing: { inputCostPerToken: 0.000003, outputCostPerToken: 0.000015 } };
+  };
+  const rows = [{ model: 'private-timeout-channel-alias' }];
+
+  assert.deepEqual(await resolvePromaPricing(rows, {
+    lookupModelPricing,
+    pricingRevision: 1,
+    nowMs: 1000
+  }), {});
+  const retried = await resolvePromaPricing(rows, {
+    lookupModelPricing,
+    pricingRevision: 1,
+    nowMs: 1001
+  });
+  assert.equal(retried['private-timeout-channel-alias'].inputCostPerToken, 0.000003);
+  assert.equal(calls, 2);
+  resetPromaPricingCache();
+});

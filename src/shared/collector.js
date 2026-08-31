@@ -210,6 +210,7 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
     timeout = setTimeout(() => {
       if (terminalError) return;
       terminalError = new Error(`tokscale timed out after ${commandTimeoutMs}ms`);
+      terminalError.code = 'ETIMEDOUT';
       timeout = null;
       termination.request();
     }, commandTimeoutMs);
@@ -740,9 +741,11 @@ async function resolveModelPricing(rows, options = {}) {
       continue;
     }
     let pricing;
+    let timedOut = false;
     try {
       pricing = normalizePromaPricing(await lookup(modelId, commandTimeoutMs, options.signal));
-    } catch (_) {
+    } catch (error) {
+      timedOut = error?.code === 'ETIMEDOUT';
       // An unknown model, offline lookup, or custom channel must remain
       // cost-unavailable instead of inheriting an unrelated catalog price —
       // but when the lookup itself failed (timeout/offline), the price the
@@ -754,7 +757,7 @@ async function resolveModelPricing(rows, options = {}) {
       // eligible even if the file itself does not change.
       revision = currentRevision();
     }
-    if (pricing || !options.signal?.aborted) {
+    if (pricing || (!options.signal?.aborted && !timedOut)) {
       promaPricingCache.set(modelId, { at: nowMs, revision, pricing });
     }
     if (pricing) pricingByModel[modelId] = pricing;
