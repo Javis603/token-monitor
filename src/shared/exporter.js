@@ -7,9 +7,25 @@ const BOM = '﻿';
 const PERIODS = ['today', 'month', 'allTime'];
 const SNAPSHOT_COLUMNS = ['period', 'dimension', 'name', 'tokens', 'cost_usd'];
 const DAILY_COLUMNS = ['date', 'tool', 'tokens', 'cost_usd'];
+const DAILY_MODEL_COLUMNS = [
+  'date',
+  'model',
+  'input_tokens',
+  'output_tokens',
+  'cache_read_tokens',
+  'cache_write_tokens',
+  'unclassified_tokens',
+  'total_tokens',
+  'cost_usd'
+];
 // The complete set of generated filenames — the single source of truth the
 // writer uses to clean up orphans (e.g. a stale daily.csv once history empties).
-const EXPORT_FILENAMES = ['token-monitor-export.json', 'token-monitor-snapshot.csv', 'token-monitor-daily.csv'];
+const EXPORT_FILENAMES = [
+  'token-monitor-export.json',
+  'token-monitor-snapshot.csv',
+  'token-monitor-daily.csv',
+  'token-monitor-daily-models.csv'
+];
 
 function num(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -65,6 +81,64 @@ function buildDailyRows(history) {
   return rows;
 }
 
+function dailyModelComponents(day, value) {
+  const totalTokens = Math.max(0, num(value?.tokens));
+  let outputTokens = Math.max(0, num(value?.outputTokens));
+  let cacheReadTokens = Math.max(0, num(value?.cacheReadTokens));
+  let cacheWriteTokens = Math.max(0, num(value?.cacheWriteTokens));
+  let knownTokens = outputTokens + cacheReadTokens + cacheWriteTokens;
+  const invalidComponents = knownTokens > totalTokens;
+
+  // Malformed or mixed-version history must keep its trusted total without
+  // inventing a component split. Treat the whole row as unclassified instead.
+  if (invalidComponents) {
+    outputTokens = 0;
+    cacheReadTokens = 0;
+    cacheWriteTokens = 0;
+    knownTokens = 0;
+  }
+
+  const remainingTokens = totalTokens - knownTokens;
+  const hasExplicitUnclassified = Object.prototype.hasOwnProperty.call(value || {}, 'unclassifiedTokens');
+  const componentsComplete = !invalidComponents
+    && day?.tokenComponentsAvailable === true
+    && (!hasExplicitUnclassified || num(value.unclassifiedTokens) === 0);
+  const unclassifiedTokens = componentsComplete
+    ? 0
+    : Math.min(remainingTokens, Math.max(0, hasExplicitUnclassified
+      ? num(value.unclassifiedTokens)
+      : remainingTokens));
+
+  return {
+    input_tokens: Math.max(0, remainingTokens - unclassifiedTokens),
+    output_tokens: outputTokens,
+    cache_read_tokens: cacheReadTokens,
+    cache_write_tokens: cacheWriteTokens,
+    unclassified_tokens: unclassifiedTokens,
+    total_tokens: totalTokens
+  };
+}
+
+function buildDailyModelRows(history) {
+  const daily = history && Array.isArray(history.daily) ? history.daily : [];
+  const rows = [];
+  for (const day of daily) {
+    const date = String(day.date || '').slice(0, 10);
+    if (!date) continue;
+    const perModel = day.perModel && typeof day.perModel === 'object' ? day.perModel : {};
+    for (const model of Object.keys(perModel)) {
+      const value = perModel[model] || {};
+      rows.push({
+        date,
+        model,
+        ...dailyModelComponents(day, value),
+        cost_usd: num(value.cost)
+      });
+    }
+  }
+  return rows;
+}
+
 function periodSnapshot(periods, key) {
   const p = periods && typeof periods === 'object' ? periods[key] : null;
   // Lossless: a whole period is usage data (cache/output/session breakdowns
@@ -80,6 +154,10 @@ function renderSnapshotCsv(periods) {
 
 function renderTimeseriesCsv(history) {
   return toCsv(buildDailyRows(history), DAILY_COLUMNS);
+}
+
+function renderDailyModelsCsv(history) {
+  return toCsv(buildDailyModelRows(history), DAILY_MODEL_COLUMNS);
 }
 
 function renderExportJson({ periods, history, meta } = {}) {
@@ -125,7 +203,7 @@ function exportSignature(periods, history) {
 }
 
 function exportFileSet({ periods, history, meta } = {}) {
-  const [jsonName, snapshotName, dailyName] = EXPORT_FILENAMES;
+  const [jsonName, snapshotName, dailyName, dailyModelsName] = EXPORT_FILENAMES;
   const files = [
     { name: jsonName, contents: renderExportJson({ periods, history, meta }) },
     { name: snapshotName, contents: renderSnapshotCsv(periods) }
@@ -134,11 +212,15 @@ function exportFileSet({ periods, history, meta } = {}) {
   if (dailyRows.length > 0) {
     files.push({ name: dailyName, contents: toCsv(dailyRows, DAILY_COLUMNS) });
   }
+  const dailyModelRows = buildDailyModelRows(history);
+  if (dailyModelRows.length > 0) {
+    files.push({ name: dailyModelsName, contents: toCsv(dailyModelRows, DAILY_MODEL_COLUMNS) });
+  }
   return files;
 }
 
 module.exports = {
-  csvEscape, toCsv, buildSnapshotRows, buildDailyRows,
-  renderSnapshotCsv, renderTimeseriesCsv, renderExportJson, exportFileSet, exportSignature,
+  csvEscape, toCsv, buildSnapshotRows, buildDailyRows, buildDailyModelRows,
+  renderSnapshotCsv, renderTimeseriesCsv, renderDailyModelsCsv, renderExportJson, exportFileSet, exportSignature,
   EXPORT_FILENAMES
 };

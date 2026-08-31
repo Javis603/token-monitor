@@ -27,6 +27,7 @@ Both actions write the **same** files.
 | `token-monitor-export.json` | Complete, lossless snapshot + history in one JSON object |
 | `token-monitor-snapshot.csv` | Current totals (today / month / all-time), one row per tool and per model |
 | `token-monitor-daily.csv` | Daily time-series **history**, one row per day × tool — spans your whole tracked history, not just today (only written when trend history has data) |
+| `token-monitor-daily-models.csv` | Daily model detail, one row per day × model, including input/output/cache components (only written when model history has data) |
 
 CSV files are UTF-8 **with BOM** (so Excel opens non-ASCII correctly), RFC 4180
 quoted, with a header row and ISO 8601 dates. Cost columns are named `cost_usd`
@@ -62,6 +63,20 @@ date,tool,tokens,cost_usd
 2026-07-02,codex,5,1
 2026-07-03,codex,7,1
 2026-07-03,claude-code,5,1
+```
+
+### `token-monitor-daily-models.csv`
+
+Each row is one day × one model. `input_tokens` is uncached input;
+`cache_read_tokens` and `cache_write_tokens` remain separate so every row keeps
+the same token-component semantics as Token Monitor. When older or partial
+history does not contain a complete component split, the unknown remainder is
+reported as `unclassified_tokens` instead of being guessed as input.
+
+```
+date,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,unclassified_tokens,total_tokens,cost_usd
+2026-07-02,gpt-5,2,2,1,0,0,5,1
+2026-07-03,opus,0,2,0,0,10,12,2
 ```
 
 ### `token-monitor-export.json`
