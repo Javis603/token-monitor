@@ -80,7 +80,10 @@ test('tool diagnostics bind source values to the full health snapshot key', () =
   assert.match(actions, /window\.tokenMonitor\.revealClientSyncLock\(clientId\)/);
   assert.match(actions, /revealLock\.id = `toolHealthRevealLock-\$\{clientId\}`/);
   assert.match(actions, /if \(succeeded\) loadClientSources/);
-  assert.match(actions, /state\.clientRescans\.finish\(clientId, requestId, succeeded\)/);
+  // The lane panel's own rescan handler keeps the 3-arg finish; the shared
+  // tool-health actions use the feedback-aware 4-arg form above.
+  const lanePanel = functionBody(app, 'renderLanePanelInto', 'renderToolPreferences');
+  assert.match(lanePanel, /state\.clientRescans\.finish\(clientId, requestId, succeeded\)/);
   assert.match(actions, /rescan\.id = `toolHealthRescan-\$\{clientId\}`/);
   assert.match(actions, /reveal\.id = `toolHealthReveal-\$\{clientId\}`/);
   assert.match(actions, /exactLocalClientSources\(clientId\)/);

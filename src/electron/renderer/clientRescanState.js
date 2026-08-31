@@ -58,8 +58,9 @@
         current.pending = false;
         current.failed = succeeded !== true;
         current.feedbackCode = String(feedbackCode || '');
+        if (current.timer !== null && current.timer !== undefined) clearTimer(current.timer);
         current.timer = null;
-        if (current.failed) {
+        if (current.feedbackCode) {
           current.timer = setTimer(() => {
             const cleared = entries.get(id);
             if (!cleared || cleared.requestId !== requestId) return;
