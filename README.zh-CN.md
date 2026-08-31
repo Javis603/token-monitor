@@ -156,7 +156,13 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/Javis603/token-monitor/releases) 下载。
+macOS 可通过官方 [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor) 安装：
+
+```bash
+brew install --cask token-monitor
+```
+
+也可从 [GitHub Releases](https://github.com/Javis603/token-monitor/releases) 下载。
 
 - **macOS（Apple Silicon）** — `.dmg`，已签名并 notarize
 - **macOS（Intel）** — x64 `.dmg`，已签名并 notarize

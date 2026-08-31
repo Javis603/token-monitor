@@ -153,10 +153,10 @@ test('pathless and probe-only checks survive the source merge', () => {
 test('diagnostics are assigned to semantic groups and unavailable noise stays quiet', () => {
   assert.deepEqual(clientHealthNotes(entry({
     collection: { state: 'failed' },
-    diagnostics: [{ code: 'sync-timeout' }, { code: 'no-usage-observed' }, { code: 'invented' }],
+    diagnostics: [{ code: 'sync-lock-present' }, { code: 'no-usage-observed' }, { code: 'invented' }],
     overall: 'attention'
   })), [
-    { code: 'sync-timeout', group: 'collection', tone: 'warn' },
+    { code: 'sync-lock-present', group: 'collection', tone: 'warn' },
     { code: 'no-usage-observed', group: 'data', tone: 'muted' }
   ]);
   assert.deepEqual(clientHealthNotes(entry({

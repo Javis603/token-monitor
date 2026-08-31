@@ -156,7 +156,13 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 
 ## 설치
 
-[GitHub Releases](https://github.com/Javis603/token-monitor/releases)에서 다운로드하세요.
+macOS에서는 공식 [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor)로 설치할 수 있습니다:
+
+```bash
+brew install --cask token-monitor
+```
+
+또는 [GitHub Releases](https://github.com/Javis603/token-monitor/releases)에서 다운로드하세요.
 
 - **macOS (Apple Silicon)** — `.dmg`, 서명 및 notarize 완료
 - **macOS (Intel)** — x64 `.dmg`, 서명 및 notarize 완료

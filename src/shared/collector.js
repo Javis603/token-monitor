@@ -1199,6 +1199,7 @@ async function maybeSyncCursor(clientsCsv, logger, options = {}) {
 // tokscale's antigravity sync reads the IDE's native session roots under
 // ~/.gemini/; when none exist there is nothing to sync, so don't spawn at all.
 const ANTIGRAVITY_DATA_ROOTS = ['antigravity', 'antigravity-ide', 'antigravity-backup'];
+const ANTIGRAVITY_SYNC_LOCK_MAX_BYTES = 128;
 
 function antigravityDataRoots(home = os.homedir()) {
   return ANTIGRAVITY_DATA_ROOTS.map((name) => path.join(home, '.gemini', name));
@@ -1206,6 +1207,111 @@ function antigravityDataRoots(home = os.homedir()) {
 
 function antigravityDataPresent(home) {
   return antigravityDataRoots(home).some(dirExists);
+}
+
+function antigravitySyncLockPath(home, env = process.env, platform = process.platform) {
+  return path.join(
+    tokscaleConfigDir({ env, platform, homeDir: home }),
+    'antigravity-cache',
+    'sync.lock'
+  );
+}
+
+// Tokscale deliberately preserves an unknown sync.lock after a crash: an older
+// binary may still own it during a rolling upgrade, so reclaiming arbitrary
+// dead-PID records here would undo that safety boundary. We can make one much
+// narrower claim after a child we terminated has emitted close: a regular file
+// naming that exact child, created during this spawn, is our orphan. Recheck the
+// inode and contents immediately before unlinking so a successor or user edit
+// is preserved instead of mistaken for the record we observed.
+function removeOwnedAntigravitySyncLock({
+  lockPath,
+  childPid,
+  childStartedAt,
+  fsApi = fs,
+  now = Date.now
+} = {}) {
+  if (!lockPath || !Number.isSafeInteger(childPid) || childPid <= 0) return false;
+  if (!Number.isFinite(childStartedAt)) return false;
+  try {
+    const firstStat = fsApi.lstatSync(lockPath);
+    if (!firstStat.isFile() || firstStat.isSymbolicLink() || firstStat.size > ANTIGRAVITY_SYNC_LOCK_MAX_BYTES) {
+      return false;
+    }
+    const record = fsApi.readFileSync(lockPath, 'utf8');
+    const match = record.match(/^(\d+)\s+(\d+)\s*$/);
+    if (!match || Number(match[1]) !== childPid) return false;
+    const recordedAt = Number(match[2]);
+    const earliest = Math.floor(childStartedAt / 1000) - 1;
+    const latest = Math.floor(now() / 1000) + 1;
+    if (!Number.isSafeInteger(recordedAt) || recordedAt < earliest || recordedAt > latest) return false;
+
+    const finalStat = fsApi.lstatSync(lockPath);
+    if (firstStat.dev !== finalStat.dev || firstStat.ino !== finalStat.ino) return false;
+    if (fsApi.readFileSync(lockPath, 'utf8') !== record) return false;
+    fsApi.unlinkSync(lockPath);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function processIdIsAlive(pid, kill = process.kill.bind(process)) {
+  try {
+    kill(pid, 0);
+    return true;
+  } catch (error) {
+    // A permission error still proves that the process exists. Every other
+    // normal failure means there is no process for this user to signal.
+    return error?.code === 'EPERM' || error?.code === 'EACCES';
+  }
+}
+
+// This is deliberately user-mediated rather than startup cleanup. Tokscale's
+// visible lock remains compatible with older binaries that do not participate
+// in sync.os.lock, so absence of a new-format OS owner is not enough evidence
+// to reclaim it in the background. Once the user confirms that no sync is
+// running, accept only the exact legacy record shape, refuse a live pid, and
+// repeat the inode/content checks immediately before removing the one path.
+function repairAntigravitySyncLock({
+  lockPath,
+  fsApi = fs,
+  pidIsAlive = processIdIsAlive
+} = {}) {
+  if (!lockPath) return { ok: false, code: 'unsafe-lock' };
+  try {
+    const firstStat = fsApi.lstatSync(lockPath);
+    if (!firstStat.isFile() || firstStat.isSymbolicLink() || firstStat.size > ANTIGRAVITY_SYNC_LOCK_MAX_BYTES) {
+      return { ok: false, code: 'unsafe-lock' };
+    }
+    const record = fsApi.readFileSync(lockPath, 'utf8');
+    const match = record.match(/^(\d+)\s+(\d+)\s*$/);
+    const pid = Number(match?.[1]);
+    const recordedAt = Number(match?.[2]);
+    if (
+      !match
+      || !Number.isSafeInteger(pid)
+      || pid <= 0
+      || !Number.isSafeInteger(recordedAt)
+      || recordedAt <= 0
+    ) {
+      return { ok: false, code: 'unsafe-lock' };
+    }
+    if (pidIsAlive(pid)) return { ok: false, code: 'owner-active' };
+
+    const finalStat = fsApi.lstatSync(lockPath);
+    if (firstStat.dev !== finalStat.dev || firstStat.ino !== finalStat.ino) {
+      return { ok: false, code: 'unsafe-lock' };
+    }
+    if (fsApi.readFileSync(lockPath, 'utf8') !== record) {
+      return { ok: false, code: 'unsafe-lock' };
+    }
+    fsApi.unlinkSync(lockPath);
+    return { ok: true, code: 'repaired' };
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { ok: true, code: 'not-found' };
+    return { ok: false, code: 'repair-failed' };
+  }
 }
 
 async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), options = {}) {
@@ -1240,12 +1346,14 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
     return;
   }
   const { bin, prefixArgs, env } = tokscaleCommand();
+  const syncLockPath = options.syncLockPath || antigravitySyncLockPath(home, env);
   // Every outcome resolves — a stuck sync must not hold the tick open — so a
   // failure is only visible through onFailure. The caller needs it: the tick has
   // already consumed the source event that asked for this sync, and silently
   // scanning the unchanged cache would put the refresh back on the fallback
   // interval, which is the latency this whole path exists to remove.
   await new Promise((resolve) => {
+    const childStartedAt = Date.now();
     const child = spawn(bin, [...prefixArgs, 'antigravity', 'sync'], { env, windowsHide: true });
     const termination = createSubprocessTermination(child, {
       ...(options.terminationOptions || {}),
@@ -1314,6 +1422,13 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
     });
     child.on('close', (code) => {
       termination.confirmClosed();
+      if (terminalOutcome) {
+        removeOwnedAntigravitySyncLock({
+          lockPath: syncLockPath,
+          childPid: child.pid,
+          childStartedAt
+        });
+      }
       if (settled) return;
       if (terminalOutcome?.cancelled) return settle(false, '', {}, false, true);
       if (terminalOutcome) {
@@ -1543,6 +1658,7 @@ async function collectUsageOnce(options) {
     await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
       minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'antigravity'),
       run: options.runAntigravitySync,
+      syncLockPath: options.antigravitySyncLockPath,
       signal: options.signal,
       timeoutMs: options.selfSyncTimeoutMs,
       terminationOptions: options.subprocessTerminationOptions,
@@ -3060,7 +3176,8 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
       // set is the normal shape of a normal install. `checks` still ships as
       // neutral evidence of which ones were found.
       if (checks.length > 0 && detected.length === 0) codes.push('source-missing');
-      if (sync?.failureCode) codes.push(sync.failureCode);
+      if (sync?.detailCode === 'sync-lock-present') codes.push('sync-lock-present');
+      else if (sync?.failureCode) codes.push(sync.failureCode);
       if (detected.length > 0 && liveTokens <= 0) codes.push('no-usage-observed');
       // States a fact, not a cause: a marker without usage can equally mean the
       // tool is installed in that distro and simply unused.
@@ -4199,6 +4316,9 @@ module.exports = {
   localTodayKey,
   nextLimitsResetBoundary,
   normalizeHistoryIntervalMs,
+  antigravitySyncLockPath,
+  repairAntigravitySyncLock,
+  removeOwnedAntigravitySyncLock,
   sessionTimestampMap,
   locateBundledBinary,
   lookupModelPricing,

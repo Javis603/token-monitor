@@ -441,7 +441,7 @@ function quotaGroupName(displayName) {
 function quotaBucketKind(bucket) {
   const aliases = new Set(['session', '5h', '5-hour', 'five hour', 'five-hour']);
   const candidates = [];
-  for (const value of [bucket?.bucketId, bucket?.displayName]) {
+  for (const value of [bucket?.window, bucket?.bucketId, bucket?.displayName]) {
     const normalized = String(value || '').trim().toLowerCase().replaceAll('_', '-');
     if (!normalized) continue;
     candidates.push(normalized);

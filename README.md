@@ -156,7 +156,13 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ## Installation
 
-Download from [GitHub Releases](https://github.com/Javis603/token-monitor/releases).
+On macOS, install through the official [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor):
+
+```bash
+brew install --cask token-monitor
+```
+
+Or download from [GitHub Releases](https://github.com/Javis603/token-monitor/releases).
 
 - **macOS (Apple Silicon)** — `.dmg`, signed and notarized
 - **macOS (Intel)** — x64 `.dmg`, signed and notarized

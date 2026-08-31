@@ -42,13 +42,14 @@ test('tool diagnostics summarize complete health and render three semantic group
   assert.match(actions, /aria-live', 'polite'/);
   assert.match(actions, /state\.clientRescans\.snapshot\(clientId\)/);
   assert.match(actions, /state\.clientRescans\.begin\(clientId\)/);
-  assert.match(actions, /state\.clientRescans\.finish\(clientId, requestId, succeeded\)/);
+  assert.match(actions, /state\.clientRescans\.finish\(clientId, requestId, succeeded,/);
   assert.match(actions, /rescan\.disabled = rescanState\.pending/);
   assert.match(panel, /for \(const group of detail\.groups\)/);
   assert.match(panel, /note\.group === group\.id/);
   assert.match(stats, /renderSettingsSummaries\(\)/);
   assert.match(cssRule(css, '.tool-health-group'), /grid-template-columns:\s*58px minmax\(0,\s*1fr\)/);
   assert.match(cssRule(css, '.tool-health-group + .tool-health-group'), /border-top/);
+  assert.match(cssRule(css, '.tool-health-action.is-repair'), /color:\s*var\(--orange\)/);
 });
 
 test('tool diagnostics bind source values to the full health snapshot key', () => {
@@ -59,6 +60,7 @@ test('tool diagnostics bind source values to the full health snapshot key', () =
   const loader = functionBody(app, 'loadClientSources', 'refillOpenClientHealthPanel');
   const expand = functionBody(app, 'setClientHealthExpanded', 'clientPeriodUsage');
   const actions = functionBody(app, 'clientHealthActions', 'clientHealthPanel');
+  const panel = functionBody(app, 'clientHealthPanel', 'localWslStatus');
 
   assert.match(identity, /deviceId[\s\S]*clientId[\s\S]*observedAt/);
   assert.match(identity, /clientHealthPresentationApi\.hasClientHealth\(health, id\)/);
@@ -71,10 +73,17 @@ test('tool diagnostics bind source values to the full health snapshot key', () =
   assert.match(loader, /return true;/);
   assert.match(expand, /if \(open\)[\s\S]*loadClientSources\(row\.dataset\.client, \{ force \}\)/);
   assert.match(actions, /succeeded = await window\.tokenMonitor\.rescanClient\(clientId\) === true/);
+  assert.match(actions, /detail\?\.notes\?\.some\(\(note\) => note\.code === 'sync-lock-present'\)/);
+  assert.match(actions, /window\.confirm\(t\('settings\.tools\.health\.repairConfirm'\)\)/);
+  assert.match(actions, /window\.tokenMonitor\.repairClientSyncLock\(clientId\)/);
+  assert.match(actions, /repair\.id = `toolHealthRepair-\$\{clientId\}`/);
+  assert.match(actions, /window\.tokenMonitor\.revealClientSyncLock\(clientId\)/);
+  assert.match(actions, /revealLock\.id = `toolHealthRevealLock-\$\{clientId\}`/);
   assert.match(actions, /if \(succeeded\) loadClientSources/);
   assert.match(actions, /rescan\.id = `toolHealthRescan-\$\{clientId\}`/);
   assert.match(actions, /reveal\.id = `toolHealthReveal-\$\{clientId\}`/);
   assert.match(actions, /exactLocalClientSources\(clientId\)/);
+  assert.match(panel, /clientHealthActions\(clientId, detail\)/);
   assert.doesNotMatch(app, /clientSourceIds/);
 });
 

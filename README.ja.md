@@ -156,7 +156,13 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 
 ## インストール
 
-[GitHub Releases](https://github.com/Javis603/token-monitor/releases) からダウンロードできます。
+macOS では公式の [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor) からインストールできます：
+
+```bash
+brew install --cask token-monitor
+```
+
+または [GitHub Releases](https://github.com/Javis603/token-monitor/releases) からダウンロードできます。
 
 - **macOS (Apple Silicon)** — `.dmg`、署名および notarize 済み
 - **macOS (Intel)** — x64 `.dmg`、署名および notarize 済み

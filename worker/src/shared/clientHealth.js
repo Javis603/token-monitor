@@ -73,6 +73,7 @@ const CLIENT_SYNC_DETAIL_CODES = Object.freeze([
   'network-timeout',
   'network-failed',
   'authentication-failed',
+  'sync-lock-present',
   'unknown'
 ]);
 const CLIENT_SYNC_DETAIL_CODE_SET = new Set(CLIENT_SYNC_DETAIL_CODES);
@@ -151,6 +152,12 @@ function classifyClientSyncDetailCode({ client = '', text = '' } = {}) {
   ) {
     return 'rpc-failed';
   }
+  if (
+    client === 'antigravity'
+    && /antigravity sync lock at .* already exists/.test(message)
+  ) {
+    return 'sync-lock-present';
+  }
   if (/failed to connect|connection refused|connection reset|could not resolve|\bdns\b|\bnetwork\b/.test(message)) {
     return 'network-failed';
   }
@@ -227,6 +234,7 @@ const CLIENT_HEALTH_DIAGNOSTIC_CODES = Object.freeze([
   'sync-timeout',          // self-sync was killed after its deadline
   'sync-spawn-failed',     // the self-sync subprocess could not be started
   'sync-exit-error',       // the self-sync subprocess exited non-zero
+  'sync-lock-present',     // an existing Antigravity sync lock blocked the subprocess
   'no-usage-observed',     // sources are present, all-time usage is zero
   'wsl-detected-no-data'   // a WSL marker was found but the scan returned nothing
 ]);

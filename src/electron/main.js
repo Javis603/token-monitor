@@ -25,6 +25,8 @@ const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./claudeWebFetch');
+const { runAntigravityOAuthLogin } = require('./antigravityOAuthLogin');
+const antigravityOAuth = require('../shared/antigravityOAuth');
 const {
   createWorkbuddyLocalAuth,
   isSupportedWorkbuddyLocalAppPlatform
@@ -69,7 +71,14 @@ function electronProviderDeps(deps = {}) {
 }
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const { limitProvidersForDetectedClients } = require('../shared/limitProviders');
-const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs, visibleDiagnosticRoots } = require('../shared/collector');
+const {
+  antigravitySyncLockPath,
+  clientDiagnosticRoots,
+  lookupModelPricing,
+  normalizeHistoryIntervalMs,
+  repairAntigravitySyncLock,
+  visibleDiagnosticRoots
+} = require('../shared/collector');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
@@ -297,6 +306,8 @@ const {
   normalizeWindowBehaviorSettings,
   windowBehaviorSelection
 } = require('./windowBehavior');
+const { createTaskbarZOrderKeeper, taskbarZOrderEnabled } = require('./windowsTaskbarZOrder');
+const { subscribeForegroundChange } = require('./windowsForegroundHook');
 const {
   normalizeWindowToggleShortcut,
   windowToggleShortcutAction,
@@ -396,6 +407,7 @@ let claudeWebCookieMutationRevision = 0;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
+let antigravityOAuthLoginController = null;
 let sessionUsageArchive = null;
 let lastSessionUsageArchiveUpdate = {
   at: null,
@@ -456,6 +468,7 @@ function defaultSettings() {
     secret: process.env.TOKEN_MONITOR_SECRET || '',
     windowBehavior,
     alwaysOnTop: windowBehavior === 'floating',
+    keepAboveTaskbar: false,
     refreshMs: Number(process.env.TOKEN_MONITOR_WIDGET_REFRESH_MS || 15000),
     glassOpacity: 68,
     glassBlur: 32,
@@ -586,6 +599,7 @@ function defaultSettings() {
     kimiWebAccessToken: '',
     ollamaCookie: '',
     codexManagedAccounts: [],
+    antigravityManagedAccounts: [],
     mimoManagedAccounts: [],
     appUpdate: {
       lastCheckedAt: null,
@@ -692,6 +706,7 @@ function electronLimitsConfig() {
     workbuddyLocalSession: workbuddyDesktopSessionEnabled ? electronWorkbuddyLocalAuth.getSessionInfo() : {},
     defaultLimitProviders: defaultLimitProviders(),
     codexManagedAccounts: codexManagedAccountsForCollector(),
+    antigravityManagedAccounts: antigravityManagedAccountsForCollector(),
     mimoManagedAccounts: mimoManagedAccountsForCollector()
   });
 }
@@ -751,6 +766,7 @@ function electronLimitsDeps() {
     },
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
+    onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
     onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
     onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey
   };
@@ -1068,6 +1084,168 @@ function codexAccountsForRenderer() {
 
 function codexManagedAccountsForCollector() {
   return normalizeCodexManagedAccounts(settings?.codexManagedAccounts);
+}
+
+function normalizeAntigravityManagedAccounts(value) {
+  return antigravityOAuth.normalizeManagedAccounts(value);
+}
+
+function antigravityAccountsForRenderer() {
+  return normalizeAntigravityManagedAccounts(settings?.antigravityManagedAccounts);
+}
+
+function readAntigravityCredential(id) {
+  try {
+    return ensureCredentialStore().readAntigravityCredential(id);
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeAntigravityCredential(id, credentials) {
+  try {
+    return ensureCredentialStore().writeAntigravityCredential(id, credentials);
+  } catch (_) {
+    return false;
+  }
+}
+
+function removeAntigravityCredential(id) {
+  try {
+    return ensureCredentialStore().removeAntigravityCredential(id);
+  } catch (_) {
+    return false;
+  }
+}
+
+function antigravityManagedAccountsForCollector() {
+  return antigravityOAuth.managedAccountsForCollector(
+    settings?.antigravityManagedAccounts,
+    readAntigravityCredential
+  );
+}
+
+function persistAntigravityCredentialsRenewal({ account, credentials, previous } = {}) {
+  const accountId = String(account?.id || '').trim();
+  if (!accountId || !credentials || typeof credentials !== 'object') return false;
+  const current = readAntigravityCredential(accountId);
+  if (!current || JSON.stringify(current) !== JSON.stringify(previous || {})) return false;
+  return writeAntigravityCredential(accountId, credentials);
+}
+
+async function addAntigravityManagedAccount() {
+  if (antigravityOAuthLoginController) return { ok: false, errorCode: 'loginInProgress' };
+  const controller = new AbortController();
+  antigravityOAuthLoginController = controller;
+  try {
+    const { credential, identity } = await runAntigravityOAuthLogin({
+      env: process.env,
+      fetch: electronLimitsFetch(),
+      openExternal: (url) => shell.openExternal(url),
+      signal: controller.signal,
+      logger: (message) => console.log(`[antigravity-oauth] ${message}`)
+    });
+    const accounts = normalizeAntigravityManagedAccounts(settings?.antigravityManagedAccounts);
+    const now = new Date().toISOString();
+    const existing = accounts.find((account) => account.accountEmail === identity.email);
+    const account = {
+      id: existing?.id || `antigravity-${crypto.randomUUID()}`,
+      accountKey: antigravityOAuth.accountKey(identity.email),
+      accountEmail: identity.email,
+      accountLabel: existing?.accountLabel || identity.name || '',
+      enabled: true,
+      addedAt: existing?.addedAt || now,
+      updatedAt: now
+    };
+    const previousCredential = existing ? readAntigravityCredential(existing.id) : null;
+    if (!writeAntigravityCredential(account.id, {
+      ...credential,
+      refreshToken: credential.refreshToken || previousCredential?.refreshToken || ''
+    })) {
+      return { ok: false, errorCode: 'credentialStorageUnavailable' };
+    }
+    settings.antigravityManagedAccounts = normalizeAntigravityManagedAccounts([
+      ...accounts.filter((entry) => entry.id !== account.id && entry.accountEmail !== account.accountEmail),
+      account
+    ]);
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (_) {
+      if (previousCredential) writeAntigravityCredential(account.id, previousCredential);
+      else removeAntigravityCredential(account.id);
+      return { ok: false, errorCode: 'credentialStorageUnavailable' };
+    }
+    pushSettingsToRenderer();
+    sendAntigravityAccountsPush();
+    void queueLimitInvalidation({
+      provider: 'antigravity',
+      accountId: account.id,
+      accountKey: account.accountKey,
+      accountEmail: account.accountEmail,
+      sourceDetail: 'oauth'
+    }, 'account-added');
+    return { ok: true, accounts: antigravityAccountsForRenderer() };
+  } catch (error) {
+    const cancelled = controller.signal.aborted || error?.code === 'CANCELLED' || error?.name === 'AbortError';
+    return {
+      ok: false,
+      errorCode: cancelled ? 'cancelled' : error?.code || 'loginFailed',
+      error: cancelled ? '' : String(error?.message || error)
+    };
+  } finally {
+    if (antigravityOAuthLoginController === controller) antigravityOAuthLoginController = null;
+  }
+}
+
+function cancelAntigravityManagedAccountLogin() {
+  if (!antigravityOAuthLoginController) return false;
+  antigravityOAuthLoginController.abort();
+  return true;
+}
+
+async function removeAntigravityManagedAccount(id) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeAntigravityManagedAccounts(settings?.antigravityManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  const previousCredential = readAntigravityCredential(accountId);
+  if (!removeAntigravityCredential(accountId)) return { ok: false, error: 'Could not remove stored credential' };
+  settings.antigravityManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    if (previousCredential) writeAntigravityCredential(accountId, previousCredential);
+    return { ok: false, error: 'Could not persist account removal' };
+  }
+  pushSettingsToRenderer();
+  sendAntigravityAccountsPush();
+  void queueLimitInvalidation({ provider: 'antigravity', accountId, accountKey: account.accountKey }, 'account-removed', {
+    clear: true,
+    refresh: false
+  });
+  return { ok: true, accounts: antigravityAccountsForRenderer() };
+}
+
+function setAntigravityManagedAccountEnabled(id, enabled) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeAntigravityManagedAccounts(settings?.antigravityManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  account.enabled = Boolean(enabled);
+  account.updatedAt = new Date().toISOString();
+  settings.antigravityManagedAccounts = accounts;
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    return { ok: false, error: 'Could not persist account state' };
+  }
+  pushSettingsToRenderer();
+  sendAntigravityAccountsPush();
+  void queueLimitInvalidation({ provider: 'antigravity', accountId, accountKey: account.accountKey }, 'account-state', {
+    clear: !account.enabled,
+    refresh: account.enabled
+  });
+  return { ok: true, accounts: antigravityAccountsForRenderer() };
 }
 
 function normalizeMimoManagedAccounts(value) {
@@ -1850,6 +2028,7 @@ function applyCollapsedFloatingBubbleLimits(bounds) {
   if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(false);
   mainWindow.setAlwaysOnTop(true, floatingAlwaysOnTopLevel());
   if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(true);
+  syncTaskbarZOrder();
 }
 
 function displayForBounds(bounds) {
@@ -2248,7 +2427,11 @@ function readSettings() {
       merged.serviceStatusRefreshMs = normalizeServiceStatusRefreshMs(saved.serviceStatusRefreshMs);
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
+    merged.antigravityManagedAccounts = normalizeAntigravityManagedAccounts(merged.antigravityManagedAccounts);
     merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
+    if (saved.keepAboveTaskbar !== undefined) {
+      merged.keepAboveTaskbar = parseBoolean(saved.keepAboveTaskbar, false);
+    }
     if (saved.windowBehavior === undefined && saved.alwaysOnTop !== undefined) {
       merged.windowBehavior = saved.alwaysOnTop ? 'floating' : 'normal';
     }
@@ -2487,6 +2670,44 @@ function applyMacSpaceBehavior(trayMode = Boolean(settings?.trayMode)) {
   }
 }
 
+// Windows re-raises its taskbar over an always-on-top widget that overlaps it
+// and gives us no event for the common case, so keeping the widget above it
+// costs a timer and can briefly flicker during some app switches. That price
+// only makes sense for someone who deliberately parked the widget on the
+// taskbar, which is why it is opt-in. windowsTaskbarZOrder.js explains the
+// mechanics. Everything that can change whether the widget still overlaps the
+// taskbar — or is still on top, or still visible — calls this, and the keeper
+// decides for itself.
+let taskbarZOrderKeeper = null;
+
+function stopTaskbarZOrderKeeper() {
+  if (taskbarZOrderKeeper) taskbarZOrderKeeper.stop();
+}
+
+function syncTaskbarZOrder() {
+  if (!taskbarZOrderEnabled(settings)) {
+    stopTaskbarZOrderKeeper();
+    return;
+  }
+  if (!taskbarZOrderKeeper) {
+    taskbarZOrderKeeper = createTaskbarZOrderKeeper({
+      screen,
+      subscribeForeground: subscribeForegroundChange,
+      log: process.env.TOKEN_MONITOR_TASKBAR_ZORDER_DEBUG === '1'
+        ? (message) => console.log(`[taskbar-zorder ${Date.now() % 100000}] ${message}`)
+        : null
+    });
+  }
+  taskbarZOrderKeeper.sync(mainWindow);
+}
+
+// Losing activation to the taskbar is the one transition Windows raises it on
+// that reaches us as an event, so it gets the fast path.
+function nudgeTaskbarZOrder() {
+  if (!taskbarZOrderEnabled(settings) || !taskbarZOrderKeeper) return;
+  taskbarZOrderKeeper.nudge(mainWindow);
+}
+
 function applyWindowSettings() {
   if (!mainWindow) return;
   if (floatingBubbleState.collapsed) {
@@ -2503,6 +2724,7 @@ function applyWindowSettings() {
   if (typeof mainWindow.setFocusable === 'function') mainWindow.setFocusable(behavior.focusable);
   if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(Boolean(settings?.trayMode));
   if (!behavior.focusable && typeof mainWindow.blur === 'function') mainWindow.blur();
+  syncTaskbarZOrder();
 }
 
 function nativeBlurEnabled(source = settings) {
@@ -4529,6 +4751,7 @@ function settingsForRenderer() {
     openrouterEnvConfigured: Boolean(openrouterLimits.openrouterToken(process.env)),
     thirdPartyEnvConfigured: thirdPartyLimits.configuredAccounts({}, { env: process.env }).length > 0,
     codexManagedAccounts: codexAccountsForRenderer(),
+    antigravityManagedAccounts: antigravityAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
     claudeWebCookieConfigured: Boolean(currentClaudeWebCookie()),
     claudeWebCookieSource,
@@ -4665,6 +4888,11 @@ function refreshLimitStatsPresentation() {
 function sendMimoAccountsPush() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try { mainWindow.webContents.send('mimo:accounts', mimoAccountsForRenderer()); } catch (_) {}
+}
+
+function sendAntigravityAccountsPush() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('antigravity:accounts', antigravityAccountsForRenderer()); } catch (_) {}
 }
 
 function unregisterWindowToggleShortcut() {
@@ -5916,11 +6144,16 @@ function createWindow(boundsOverride, options = {}) {
     stopFloatingBubbleAutoCollapseTimer();
   });
   win.on('blur', () => {
+    nudgeTaskbarZOrder();
     if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) hidePopover();
     else if (!quitRequested) scheduleFloatingBubbleAutoCollapse();
   });
-  win.on('resized', persistBoundsSoon);
-  win.on('moved', persistBoundsSoon);
+  win.on('resized', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
+  win.on('moved', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
+  win.on('show', syncTaskbarZOrder);
+  win.on('restore', syncTaskbarZOrder);
+  win.on('hide', stopTaskbarZOrderKeeper);
+  win.on('minimize', stopTaskbarZOrderKeeper);
   win.on('close', (event) => {
     if (quitRequested) return;
     const action = mainWindowCloseAction(settings, { platform: process.platform });
@@ -6277,6 +6510,7 @@ app.whenReady().then(() => {
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
     delete normalizedPatch.windowMaximized;
     delete normalizedPatch.codexManagedAccounts;
+    delete normalizedPatch.antigravityManagedAccounts;
     delete normalizedPatch.mimoManagedAccounts;
     delete normalizedPatch.workbuddyAccessToken;
     delete normalizedPatch.workbuddyUserId;
@@ -6413,6 +6647,7 @@ app.whenReady().then(() => {
       opencodeAmbientEnabled: parseBoolean(patch.opencodeAmbientEnabled ?? settings.opencodeAmbientEnabled, true),
       opencodeLocalLimitsEnabled: parseBoolean(patch.opencodeLocalLimitsEnabled ?? settings.opencodeLocalLimitsEnabled, false),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
+      keepAboveTaskbar: parseBoolean(patch.keepAboveTaskbar ?? settings.keepAboveTaskbar, false),
       windowMaximized: parseBoolean(settings.windowMaximized, false),
       zoomFactor: clampZoom(patch.zoomFactor ?? settings.zoomFactor),
       ...normalizeTrayModeSettings({
@@ -6771,15 +7006,26 @@ app.whenReady().then(() => {
     clientDiagnosticRoots,
     showItemInFolder: (target) => shell.showItemInFolder(target),
     openPath: (target) => shell.openPath(target),
+    revealClientSyncLock: () => {
+      const lockPath = antigravitySyncLockPath(os.homedir());
+      if (!fs.existsSync(lockPath)) return false;
+      shell.showItemInFolder(lockPath);
+      return true;
+    },
     canRunRescan: () => ownsUsageRuntime(),
     rescanClient: (client) => refreshUsageClient(client, { forceSync: true }),
+    repairClientSyncLock: () => repairAntigravitySyncLock({
+      lockPath: antigravitySyncLockPath(os.homedir())
+    }),
     onRescanError: (error) => console.log(`[usage-runtime] rescan failed: ${error.message}`)
   });
   ipcMain.handle('usage:clientSources', (_event, clientId) => clientSourceIpcHandlers.clientSources(clientId));
   // The renderer sends a client id, never a path: anything it could send would
   // otherwise become an arbitrary filesystem open.
   ipcMain.handle('usage:revealClientSource', (_event, clientId) => clientSourceIpcHandlers.revealClientSource(clientId));
+  ipcMain.handle('usage:revealClientSyncLock', (_event, clientId) => clientSourceIpcHandlers.revealClientSyncLock(clientId));
   ipcMain.handle('usage:rescanClient', (_event, clientId) => clientSourceIpcHandlers.rescanClient(clientId));
+  ipcMain.handle('usage:repairClientSyncLock', (_event, clientId) => clientSourceIpcHandlers.repairClientSyncLock(clientId));
   ipcMain.handle('clipboard:write', (_event, text) => {
     clipboard.writeText(String(text || ''));
     return true;
@@ -6791,6 +7037,11 @@ app.whenReady().then(() => {
       .catch((error) => ({ ok: false, error: error.message }));
   });
   ipcMain.handle('app:openUserData', () => shell.openPath(app.getPath('userData')));
+  ipcMain.handle('antigravity:accounts', () => antigravityAccountsForRenderer());
+  ipcMain.handle('antigravity:addAccount', () => addAntigravityManagedAccount());
+  ipcMain.handle('antigravity:cancelLogin', () => cancelAntigravityManagedAccountLogin());
+  ipcMain.handle('antigravity:setAccountEnabled', (_event, id, enabled) => setAntigravityManagedAccountEnabled(id, enabled));
+  ipcMain.handle('antigravity:removeAccount', (_event, id) => removeAntigravityManagedAccount(id));
   ipcMain.handle('mimo:accounts', () => mimoAccountsForRenderer());
   ipcMain.handle('mimo:addAccount', (_event, cookieHeader) => addMimoManagedAccount(cookieHeader));
   ipcMain.handle('mimo:openConsole', () => shell.openExternal(MIMO_PLATFORM_CONSOLE_URL)
@@ -7814,9 +8065,11 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 // OS-initiated logout or restart on macOS.
 app.on('before-quit', () => {
   quitRequested = true;
+  antigravityOAuthLoginController?.abort();
   resetMacWidgetReloadThrottle();
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
+  stopTaskbarZOrderKeeper();
   unregisterWindowToggleShortcut();
   electronWorkbuddyLocalAuth.dispose();
   if (skipForcedQuit) return;

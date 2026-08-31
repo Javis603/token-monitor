@@ -18,7 +18,8 @@
     'sync-failed': 'warn',
     'sync-timeout': 'warn',
     'sync-spawn-failed': 'warn',
-    'sync-exit-error': 'warn'
+    'sync-exit-error': 'warn',
+    'sync-lock-present': 'warn'
   };
   const DIAGNOSTIC_GROUPS = {
     'source-missing': 'source',
@@ -26,6 +27,7 @@
     'sync-timeout': 'collection',
     'sync-spawn-failed': 'collection',
     'sync-exit-error': 'collection',
+    'sync-lock-present': 'collection',
     'no-usage-observed': 'data',
     'wsl-detected-no-data': 'data'
   };

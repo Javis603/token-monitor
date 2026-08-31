@@ -244,6 +244,13 @@
                 </select>
                 <span class="settings-note settings-item-desc" data-i18n="settings.display.windowBehaviorNote">Desktop pinned keeps the widget below other apps and locks drag/resize while staying clickable.</span>
               </label>
+              <label id="keepAboveTaskbarRow" class="checkbox-label settings-item hidden">
+                <span class="settings-item-text">
+                  <span class="settings-item-title" data-i18n="settings.display.keepAboveTaskbar">Keep above taskbar (Experimental)</span>
+                </span>
+                <input id="keepAboveTaskbarInput" type="checkbox" />
+                <span class="settings-note settings-item-desc" data-i18n="settings.display.keepAboveTaskbarNote">Re-asserts the widget above the Windows taskbar while they overlap. It may briefly flicker during some app switches.</span>
+              </label>
               <div class="settings-item settings-shortcut-item">
                 <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.windowShortcut">Shortcut</span></span>
                 <div class="shortcut-recorder">
@@ -712,6 +719,24 @@
                   </div>
                 </div>
                 <div id="cursorErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
+            <div id="antigravityAccountGroup" class="settings-group cursor-account-group">
+              <button id="antigravitySettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="antigravitySettingsDetails">
+                <span data-i18n="settings.antigravity.title">Antigravity Accounts</span>
+                <span class="cursor-settings-summary">
+                  <span id="antigravityAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="antigravitySettingsDetails" class="cursor-settings-details hidden">
+                <div id="antigravityAccountList" class="managed-account-list"></div>
+                <div class="settings-actions">
+                  <button id="antigravityAddAccountButton" type="button" data-i18n="settings.antigravity.addAccount">Add Google account</button>
+                  <button id="antigravityCancelLoginButton" type="button" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
+                </div>
+                <div id="antigravityLoginStatus" class="settings-note hidden" role="status" aria-live="polite"></div>
+                <div id="antigravityAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="opencodeCookieGroup" class="settings-group cursor-account-group">

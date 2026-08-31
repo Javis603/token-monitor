@@ -16,6 +16,55 @@
     return Math.min(max, Math.max(min, value));
   }
 
+  function floatingBubbleBitmapHeight(devicePixelRatio, cssHeight = 24) {
+    const ratio = Number(devicePixelRatio);
+    const resolvedRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+    const height = Number(cssHeight);
+    const resolvedHeight = Number.isFinite(height) && height > 0 ? height : 24;
+    return Math.max(1, Math.round(resolvedHeight * resolvedRatio));
+  }
+
+  function watchDeviceScaleChanges({ matchMedia, getDevicePixelRatio, onChange } = {}) {
+    if (typeof matchMedia !== 'function') return () => {};
+    const readRatio = typeof getDevicePixelRatio === 'function' ? getDevicePixelRatio : () => 1;
+    const notify = typeof onChange === 'function' ? onChange : () => {};
+    let active = true;
+    let mediaQuery = null;
+
+    function removeListener() {
+      if (typeof mediaQuery?.removeEventListener === 'function') {
+        mediaQuery.removeEventListener('change', handleChange);
+      } else {
+        mediaQuery?.removeListener?.(handleChange);
+      }
+    }
+
+    function arm() {
+      if (!active) return;
+      removeListener();
+      const ratio = Number(readRatio());
+      const resolvedRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+      mediaQuery = matchMedia(`(resolution: ${resolvedRatio}dppx)`);
+      if (typeof mediaQuery?.addEventListener === 'function') {
+        mediaQuery.addEventListener('change', handleChange);
+      } else {
+        mediaQuery?.addListener?.(handleChange);
+      }
+    }
+
+    function handleChange() {
+      arm();
+      notify();
+    }
+
+    arm();
+    return () => {
+      active = false;
+      removeListener();
+      mediaQuery = null;
+    };
+  }
+
   function button(className, text, onClick) {
     const el = document.createElement('button');
     el.type = 'button';
@@ -1338,10 +1387,12 @@
     costDisplayPatch,
     createTrayComposer,
     duplicateTrayLayoutItem,
+    floatingBubbleBitmapHeight,
     handlePickerDocumentScroll,
     moveTrayLayoutItemByKey,
     periodItemPatch,
     syncTrayComposerSurfaces,
-    usageScopePatch
+    usageScopePatch,
+    watchDeviceScaleChanges
   };
 });
