@@ -169,12 +169,12 @@ test('Codex cache continuity measures a switch drop, recovery, loss, and API equ
     usage(localIso(2026, 5, 29, 23, 59, 57), 900_000),
     usage(localIso(2026, 5, 29, 23, 59, 58), 900_000),
     usage(localIso(2026, 5, 29, 23, 59, 59), 900_000),
-    context(localIso(2026, 5, 30, 0, 0, 0), 'gpt-new', 'high'),
+    context(localIso(2026, 5, 30, 0, 0, 0), 'GPT-New', 'high'),
     usage(localIso(2026, 5, 30, 0, 0, 1), 300_000),
     usage(localIso(2026, 5, 30, 0, 0, 2), 880_000)
   ].join('\n'));
   const turns = events.filter((event) => event.kind === 'turn');
-  assert.deepEqual([turns[0].model, turns[0].effort, turns[3].model], ['gpt-old', 'high', 'gpt-new']);
+  assert.deepEqual([turns[0].model, turns[0].effort, turns[3].model], ['gpt-old', 'high', 'GPT-New']);
 
   const summary = summarizeCacheContinuity(groupEvents(events), 'today', localDate(2026, 5, 30, 12));
   const basePriced = priceCacheContinuity(summary, {

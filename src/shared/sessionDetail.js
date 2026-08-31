@@ -421,7 +421,7 @@ async function resolveCacheContinuityPricing(summary, resolvePricing, options = 
 function priceCacheContinuity(summary, pricingByModel = {}) {
   if (!summary) return null;
   const events = summary.events.map((event) => {
-    const pricing = pricingByModel[event.toModel];
+    const pricing = pricingByModel[String(event.toModel || '').trim().toLowerCase()];
     let apiEquivalentUsd = 0;
     let pricedTokens = 0;
     for (const call of event.lossCalls) {

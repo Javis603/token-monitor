@@ -44,3 +44,34 @@ test('Proma pricing caches unknown models without substituting another model pri
   assert.equal(calls, 1);
   resetPromaPricingCache();
 });
+
+test('Proma pricing retries immediately after an aborted lookup', async () => {
+  resetPromaPricingCache();
+  const firstController = new AbortController();
+  let calls = 0;
+  const lookupModelPricing = async () => {
+    calls += 1;
+    if (calls === 1) {
+      firstController.abort();
+      throw new Error('cancelled');
+    }
+    return { pricing: { inputCostPerToken: 0.000003, outputCostPerToken: 0.000015 } };
+  };
+  const rows = [{ model: 'private-aborted-channel-alias' }];
+
+  assert.deepEqual(await resolvePromaPricing(rows, {
+    lookupModelPricing,
+    pricingRevision: 1,
+    nowMs: 1000,
+    signal: firstController.signal
+  }), {});
+  const retried = await resolvePromaPricing(rows, {
+    lookupModelPricing,
+    pricingRevision: 1,
+    nowMs: 1001,
+    signal: new AbortController().signal
+  });
+  assert.equal(retried['private-aborted-channel-alias'].inputCostPerToken, 0.000003);
+  assert.equal(calls, 2);
+  resetPromaPricingCache();
+});

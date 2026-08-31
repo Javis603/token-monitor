@@ -754,7 +754,9 @@ async function resolveModelPricing(rows, options = {}) {
       // eligible even if the file itself does not change.
       revision = currentRevision();
     }
-    promaPricingCache.set(modelId, { at: nowMs, revision, pricing });
+    if (pricing || !options.signal?.aborted) {
+      promaPricingCache.set(modelId, { at: nowMs, revision, pricing });
+    }
     if (pricing) pricingByModel[modelId] = pricing;
   }
   return pricingByModel;
