@@ -88,10 +88,6 @@
       },
       {
         "revision": 22,
-        "buildId": "sha256:e3e9885586267251ac5eeef61554816ebf17baae597d0ea0cf3d7d3c472fe724"
-      },
-      {
-        "revision": 23,
         "buildId": "sha256:4fd35d2563eddefa178aeaf7f855b1b2f4d0f48c85ab83de3861c366acded22d"
       }
     ],
