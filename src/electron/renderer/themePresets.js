@@ -114,7 +114,7 @@
     volcengine: 'Volcengine',
     qoder: 'Qoder',
     trae: 'Trae CN',
-    traework: 'TraeWork',
+    traework: 'Trae Work CN',
     ollama: 'Ollama',
     thirdparty: 'Third-party APIs',
     default: 'Default'
