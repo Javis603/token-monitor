@@ -1129,7 +1129,7 @@ test('aggregateLimits preserves distinct Cursor accounts and deduplicates the sa
   assert.equal(cursorRows[1].sourceDeviceId, 'this-mac');
 });
 
-test('aggregateLimits preserves distinct Antigravity accounts and deduplicates the same account across devices', () => {
+test('aggregateLimits preserves distinct Antigravity accounts and deduplicates trusted email identities across devices', () => {
   const antigravityProvider = (accountKey, accountEmail, source, remainingPercent, updatedAt) => ({
     provider: 'antigravity',
     accountKey,
@@ -1152,7 +1152,7 @@ test('aggregateLimits preserves distinct Antigravity accounts and deduplicates t
       deviceId: 'macbook',
       limits: {
         providers: [
-          antigravityProvider('sha256:antigravity-a', 'a@example.com', 'oauth', 40, '2026-08-31T10:00:00.000Z')
+          antigravityProvider('sha256:antigravity-a', ' A@Example.com ', 'oauth', 40, '2026-08-31T10:00:00.000Z')
         ]
       }
     },
@@ -1174,6 +1174,86 @@ test('aggregateLimits preserves distinct Antigravity accounts and deduplicates t
   assert.equal(antigravityRows[0].source, 'rpc');
   assert.equal(antigravityRows[0].windows[0].remainingPercent, 70);
   assert.equal(antigravityRows[1].sourceDeviceId, 'desktop');
+});
+
+test('aggregateLimits keeps anonymous Antigravity RPC fallback identities device-scoped', () => {
+  const anonymousRpcProvider = (remainingPercent, updatedAt) => ({
+    provider: 'antigravity',
+    accountKey: 'sha256:antigravity-rpc-fallback',
+    status: 'ok',
+    source: 'rpc',
+    sourceDetail: 'app',
+    updatedAt,
+    windows: [{
+      kind: 'weekly',
+      label: 'Gemini weekly',
+      usedPercent: 100 - remainingPercent,
+      remainingPercent
+    }]
+  });
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'device-a',
+      limits: { providers: [anonymousRpcProvider(40, '2026-08-31T10:00:00.000Z')] }
+    },
+    {
+      deviceId: 'device-b',
+      limits: { providers: [anonymousRpcProvider(70, '2026-08-31T10:02:00.000Z')] }
+    }
+  ], 0, Date.parse('2026-08-31T10:03:00.000Z'));
+
+  const antigravityRows = aggregate.providers.filter((provider) => provider.provider === 'antigravity');
+  assert.equal(antigravityRows.length, 2);
+  assert.deepEqual(
+    new Set(antigravityRows.map((provider) => provider.sourceDeviceId)),
+    new Set(['device-a', 'device-b'])
+  );
+  assert.deepEqual(
+    new Set(antigravityRows.map((provider) => provider.windows[0].remainingPercent)),
+    new Set([40, 70])
+  );
+});
+
+test('aggregateLimits does not merge anonymous Antigravity RPC with managed OAuth', () => {
+  const sharedFallbackKey = 'sha256:antigravity-shared-fallback';
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'rpc-device',
+      limits: {
+        providers: [{
+          provider: 'antigravity',
+          accountKey: sharedFallbackKey,
+          status: 'ok',
+          source: 'rpc',
+          sourceDetail: 'app',
+          updatedAt: '2026-08-31T10:02:00.000Z',
+          windows: [{ kind: 'weekly', label: 'Gemini weekly', remainingPercent: 70 }]
+        }]
+      }
+    },
+    {
+      deviceId: 'oauth-device',
+      limits: {
+        providers: [{
+          provider: 'antigravity',
+          accountKey: sharedFallbackKey,
+          accountEmail: 'managed@example.com',
+          status: 'ok',
+          source: 'oauth',
+          sourceDetail: 'oauth',
+          updatedAt: '2026-08-31T10:01:00.000Z',
+          windows: [{ kind: 'weekly', label: 'Gemini weekly', remainingPercent: 80 }]
+        }]
+      }
+    }
+  ], 0, Date.parse('2026-08-31T10:03:00.000Z'));
+
+  const antigravityRows = aggregate.providers.filter((provider) => provider.provider === 'antigravity');
+  assert.equal(antigravityRows.length, 2);
+  assert.deepEqual(
+    new Set(antigravityRows.map((provider) => provider.sourceDeviceId)),
+    new Set(['rpc-device', 'oauth-device'])
+  );
 });
 
 // The collapse-by-name pass exists because one OAuth account hashes differently

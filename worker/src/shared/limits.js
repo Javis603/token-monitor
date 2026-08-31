@@ -539,7 +539,14 @@ function isProviderStale(provider, summary, device, staleAfterMs, nowMs) {
 }
 
 function providerAggregateKey(provider) {
-  return `${provider.provider}:${provider.accountKey || provider.status}`;
+  const identity = provider.accountKey || provider.status;
+  if (
+    provider.provider === 'antigravity'
+    && !(provider.accountEmail && isConfiguredProvider(provider))
+  ) {
+    return `${provider.provider}:${identity}:device:${provider.sourceDeviceId || ''}`;
+  }
+  return `${provider.provider}:${identity}`;
 }
 
 function isConfiguredProvider(provider) {
@@ -547,6 +554,10 @@ function isConfiguredProvider(provider) {
 }
 
 function providerCollapseKey(provider) {
+  // Antigravity account keys are portable only when a normalized Google email
+  // proves the identity. Anonymous RPC fallback keys are local observations,
+  // so keep the device scope established by providerAggregateKey().
+  if (provider.provider === 'antigravity') return providerAggregateKey(provider);
   if (
     (provider.provider === 'claude'
       || provider.provider === 'codex'
@@ -555,9 +566,6 @@ function providerCollapseKey(provider) {
       || provider.provider === 'thirdparty'
       || provider.provider === 'mimo'
       || provider.provider === 'cursor'
-      // Antigravity OAuth and RPC both derive the account key from the
-      // normalized Google email, so one key is one account on every device.
-      || provider.provider === 'antigravity'
       // Volcengine's accountKey comes from the AK/SK and region, so it is the
       // same on every platform. Two keys mean the Coding/Agent plan split, not
       // one account hashed twice.
@@ -900,7 +908,7 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
         providersWithFreshObservations.add(provider.provider);
         if (isConfiguredProvider(provider)) providersWithFreshConfiguredAccounts.add(provider.provider);
       }
-      const key = providerAggregateKey(provider);
+      const key = providerAggregateKey(candidate);
       if (candidate.provider === 'opencode' && isConfiguredProvider(candidate)) {
         openCodeCandidates.push(candidate);
         continue;
