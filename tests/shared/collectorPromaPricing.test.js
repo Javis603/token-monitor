@@ -76,7 +76,30 @@ test('Proma pricing retries immediately after an aborted lookup', async () => {
   resetPromaPricingCache();
 });
 
-test('Proma pricing retries immediately after a timed out lookup', async () => {
+test('Proma pricing caches a timed out lookup by default', async () => {
+  resetPromaPricingCache();
+  let calls = 0;
+  const lookupModelPricing = async () => {
+    calls += 1;
+    throw Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' });
+  };
+  const rows = [{ model: 'private-background-timeout-alias' }];
+
+  assert.deepEqual(await resolvePromaPricing(rows, {
+    lookupModelPricing,
+    pricingRevision: 1,
+    nowMs: 1000
+  }), {});
+  assert.deepEqual(await resolvePromaPricing(rows, {
+    lookupModelPricing,
+    pricingRevision: 1,
+    nowMs: 1001
+  }), {});
+  assert.equal(calls, 1);
+  resetPromaPricingCache();
+});
+
+test('Proma pricing retries a timed out on-demand lookup', async () => {
   resetPromaPricingCache();
   let calls = 0;
   const lookupModelPricing = async () => {
@@ -89,12 +112,14 @@ test('Proma pricing retries immediately after a timed out lookup', async () => {
   assert.deepEqual(await resolvePromaPricing(rows, {
     lookupModelPricing,
     pricingRevision: 1,
-    nowMs: 1000
+    nowMs: 1000,
+    retryTimedOut: true
   }), {});
   const retried = await resolvePromaPricing(rows, {
     lookupModelPricing,
     pricingRevision: 1,
-    nowMs: 1001
+    nowMs: 1001,
+    retryTimedOut: true
   });
   assert.equal(retried['private-timeout-channel-alias'].inputCostPerToken, 0.000003);
   assert.equal(calls, 2);

@@ -328,12 +328,14 @@ test('cache continuity pricing skips non-material sessions and enforces one dead
 
   const seen = [];
   const signals = [];
+  const retryTimedOut = [];
   const work = resolveCacheContinuityPricing(
     { materialModels: ['model-a', 'model-b', 'model-c'] },
     async (rows, options) => {
       calls += 1;
       seen.push(rows[0].model);
       signals.push(options.signal);
+      retryTimedOut.push(options.retryTimedOut);
       if (rows[0].model === 'model-a') return { 'model-a': { inputCostPerToken: 1 } };
       return new Promise(() => {});
     },
@@ -348,6 +350,7 @@ test('cache continuity pricing skips non-material sessions and enforces one dead
   assert.deepEqual(seen, ['model-a', 'model-b']);
   assert.equal(signals[0], signals[1]);
   assert.equal(signals[0].aborted, true);
+  assert.deepEqual(retryTimedOut, [true, true]);
   assert.equal(result['model-a'].inputCostPerToken, 1);
 });
 

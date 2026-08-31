@@ -430,7 +430,11 @@ async function resolveCacheContinuityPricing(summary, resolvePricing, options = 
       const commandTimeoutMs = deadline - Date.now();
       if (commandTimeoutMs <= 0) break;
       const lookup = Promise.resolve()
-        .then(() => resolvePricing([{ model }], { commandTimeoutMs, signal: controller.signal }))
+        .then(() => resolvePricing([{ model }], {
+          commandTimeoutMs,
+          signal: controller.signal,
+          retryTimedOut: true
+        }))
         .catch(() => ({}));
       const result = await Promise.race([lookup, timeout]);
       if (result === timedOut) break;
