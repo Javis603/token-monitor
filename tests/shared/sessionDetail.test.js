@@ -215,21 +215,56 @@ test('Codex cache continuity measures a switch drop, recovery, loss, and API equ
   assert.equal(unavailable.pricedTokens, 0);
 });
 
-test('cache continuity pricing skips non-material sessions and shares one deadline across models', async () => {
+test('cache continuity detects model-only and effort-only switches', () => {
+  const cacheTurn = (timestamp, model, effort, cacheRead) => ({
+    timestamp,
+    model,
+    effort,
+    tokens: { input: 1_000_000 - cacheRead, cacheRead }
+  });
+  const modelOnly = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'model-a', 'unknown', 900_000),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'model-a', 'unknown', 900_000),
+    cacheTurn('2026-05-30T06:00:02.000Z', 'model-b', 'unknown', 200_000)
+  ] }]);
+  const effortOnly = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'unknown', 'high', 900_000),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'unknown', 'high', 900_000),
+    cacheTurn('2026-05-30T06:00:02.000Z', 'unknown', 'low', 200_000)
+  ] }]);
+
+  assert.deepEqual([modelOnly.switchCount, modelOnly.modelSwitchCount, modelOnly.effortSwitchCount], [1, 1, 0]);
+  assert.deepEqual([effortOnly.switchCount, effortOnly.modelSwitchCount, effortOnly.effortSwitchCount], [1, 0, 1]);
+  assert.deepEqual(effortOnly.materialModels, []);
+});
+
+test('cache continuity pricing skips non-material sessions and enforces one deadline', async () => {
   let calls = 0;
   assert.deepEqual(await resolveCacheContinuityPricing({ materialModels: [] }, () => { calls += 1; }), {});
   assert.equal(calls, 0);
 
-  const result = await resolveCacheContinuityPricing(
+  const seen = [];
+  const signals = [];
+  const work = resolveCacheContinuityPricing(
     { materialModels: ['model-a', 'model-b', 'model-c'] },
     async (rows, options) => {
       calls += 1;
-      assert.deepEqual(rows, [{ model: 'model-a' }, { model: 'model-b' }, { model: 'model-c' }]);
-      assert.equal(options.commandTimeoutMs * rows.length, 3000);
-      return { 'model-a': { inputCostPerToken: 1 } };
-    }
+      seen.push(rows[0].model);
+      signals.push(options.signal);
+      if (rows[0].model === 'model-a') return { 'model-a': { inputCostPerToken: 1 } };
+      return new Promise(() => {});
+    },
+    { budgetMs: 20 }
   );
-  assert.equal(calls, 1);
+  let testTimer;
+  const result = await Promise.race([
+    work,
+    new Promise((_, reject) => { testTimer = setTimeout(() => reject(new Error('shared deadline was not enforced')), 250); })
+  ]).finally(() => clearTimeout(testTimer));
+  assert.equal(calls, 2);
+  assert.deepEqual(seen, ['model-a', 'model-b']);
+  assert.equal(signals[0], signals[1]);
+  assert.equal(signals[0].aborted, true);
   assert.equal(result['model-a'].inputCostPerToken, 1);
 });
 

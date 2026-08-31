@@ -6220,9 +6220,12 @@ function cacheContinuityNode(summary) {
     cost: estimatedCost
   })}`;
   const latest = summary.latest;
+  const notRecoveredKey = latest.endReason === 'next_switch'
+    ? 'cacheContinuityNotRecoveredBeforeSwitch'
+    : 'cacheContinuityNotRecoveredYet';
   const recovery = latest.recovered
     ? t('cacheContinuityRecovered', { calls: latest.recoveryCalls })
-    : t(latest.endReason === 'next_switch' ? 'cacheContinuityNotRecoveredBeforeSwitch' : 'cacheContinuityNotRecoveredYet', { calls: latest.recoveryCalls });
+    : t(latest.recoveryCalls === 1 ? `${notRecoveredKey}One` : notRecoveredKey, { calls: latest.recoveryCalls });
   card.querySelector('.detail-cache-latest').textContent = t('cacheContinuityLatest', {
     from: `${latest.fromModel}/${latest.fromEffort}`,
     to: `${latest.toModel}/${latest.toEffort}`,

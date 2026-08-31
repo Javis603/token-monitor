@@ -129,13 +129,17 @@ test('cache continuity copy is complete in every locale', () => {
     'cacheContinuityLatest',
     'cacheContinuityRecovered',
     'cacheContinuityNotRecoveredBeforeSwitch',
-    'cacheContinuityNotRecoveredYet'
+    'cacheContinuityNotRecoveredBeforeSwitchOne',
+    'cacheContinuityNotRecoveredYet',
+    'cacheContinuityNotRecoveredYetOne'
   ];
   for (const [locale, messages] of Object.entries(MESSAGES)) {
     for (const key of keys) assert.equal(typeof messages[key], 'string', `${locale} is missing ${key}`);
   }
   assert.equal(translate('zh-CN', 'cacheContinuity'), '缓存连续性');
   assert.match(translate('en', 'cacheContinuityRecovered', { calls: 2 }), /2 calls/);
+  assert.match(translate('en', 'cacheContinuityNotRecoveredYetOne'), /1 call observed/);
+  assert.match(rendererSource, /latest\.recoveryCalls === 1 \? `\$\{notRecoveredKey\}One` : notRecoveredKey/);
 });
 
 test('session detail resolves custom model pricing through the bounded shared resolver', () => {

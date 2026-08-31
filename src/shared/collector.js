@@ -457,10 +457,10 @@ function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOption
   ), signal);
 }
 
-function lookupModelPricing(modelId, commandTimeoutMs = 15000) {
+function lookupModelPricing(modelId, commandTimeoutMs = 15000, signal) {
   const id = String(modelId || '').trim();
   if (!id) return Promise.reject(new Error('lookupModelPricing: modelId is required'));
-  return spawnTokscaleJson(['pricing', id, '--json', '--no-spinner'], commandTimeoutMs);
+  return spawnTokscaleJson(['pricing', id, '--json', '--no-spinner'], commandTimeoutMs, tokscaleCommand(), signal);
 }
 
 const PROMA_PRICING_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -741,7 +741,7 @@ async function resolveModelPricing(rows, options = {}) {
     }
     let pricing;
     try {
-      pricing = normalizePromaPricing(await lookup(modelId, commandTimeoutMs));
+      pricing = normalizePromaPricing(await lookup(modelId, commandTimeoutMs, options.signal));
     } catch (_) {
       // An unknown model, offline lookup, or custom channel must remain
       // cost-unavailable instead of inheriting an unrelated catalog price —

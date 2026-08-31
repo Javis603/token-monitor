@@ -287,6 +287,15 @@ function median(values) {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
+function knownCoordinate(value) {
+  return Boolean(value && value !== 'unknown');
+}
+
+function matchesKnownConfiguration(call, configuration) {
+  return (!knownCoordinate(configuration.model) || call.model === configuration.model)
+    && (!knownCoordinate(configuration.effort) || call.effort === configuration.effort);
+}
+
 function summarizeCacheContinuity(exchanges, period = 'total', now = new Date()) {
   const calls = exchanges
     .flatMap((exchange) => exchange.turns || [])
@@ -295,11 +304,13 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
       const inputTokens = Math.max(0, num(turn.tokens?.input)) + cachedInputTokens;
       const model = String(turn.model || '').trim();
       const effort = String(turn.effort || '').trim();
-      if (!inputTokens || !model || model === 'unknown' || model === 'codex-auto-review' || !effort || effort === 'unknown') return null;
+      const modelKnown = knownCoordinate(model);
+      const effortKnown = knownCoordinate(effort);
+      if (!inputTokens || model === 'codex-auto-review' || (!modelKnown && !effortKnown)) return null;
       return {
         timestamp: turn.timestamp || '',
-        model,
-        effort,
+        model: modelKnown ? model : 'unknown',
+        effort: effortKnown ? effort : 'unknown',
         inputTokens,
         cachedInputTokens,
         hitRate: cachedInputTokens / inputTokens * 100
@@ -310,9 +321,11 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
   for (let index = 1; index < calls.length; index += 1) {
     const before = calls[index - 1];
     const after = calls[index];
-    if (before.model === after.model && before.effort === after.effort) continue;
+    const modelChanged = knownCoordinate(before.model) && knownCoordinate(after.model) && before.model !== after.model;
+    const effortChanged = knownCoordinate(before.effort) && knownCoordinate(after.effort) && before.effort !== after.effort;
+    if (!modelChanged && !effortChanged) continue;
     const previous = calls.slice(Math.max(0, index - 3), index)
-      .filter((call) => call.model === before.model && call.effort === before.effort)
+      .filter((call) => matchesKnownConfiguration(call, before))
       .map((call) => call.hitRate);
     if (previous.length === 0) continue;
     const baselineHitRate = median(previous);
@@ -320,7 +333,7 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
     let recovered = false;
     let recoveryCalls = 0;
     for (const call of calls.slice(index)) {
-      if (call.model !== after.model || call.effort !== after.effort) break;
+      if (!matchesKnownConfiguration(call, after)) break;
       recoveryCalls += 1;
       lossCalls.push({
         model: call.model,
@@ -346,11 +359,12 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
       recoveryCalls,
       recovered,
       endReason: recovered ? 'recovered' : (index + recoveryCalls < calls.length ? 'next_switch' : 'log_end'),
-      modelChanged: before.model !== after.model,
-      effortChanged: before.effort !== after.effort,
+      modelChanged,
+      effortChanged,
       lossCalls
     });
   }
+  // An episode belongs to its first post-switch call; period views never split one loss episode.
   const scopedEvents = events.filter((event) => withinPeriod(event.timestamp, period, now));
   if (scopedEvents.length === 0) return null;
   const materialEvents = scopedEvents.filter((event) => event.dropPp >= CACHE_MATERIAL_DROP_PP);
@@ -361,7 +375,7 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
     effortSwitchCount: scopedEvents.filter((event) => event.effortChanged).length,
     materialDropCount: materialEvents.length,
     lostTokens: materialEvents.reduce((sum, event) => sum + event.lostTokens, 0),
-    materialModels: Array.from(new Set(materialEvents.map((event) => event.toModel))),
+    materialModels: Array.from(new Set(materialEvents.map((event) => event.toModel).filter(knownCoordinate))),
     averageRecoveryCalls: recoveredEvents.length
       ? recoveredEvents.reduce((sum, event) => sum + event.recoveryCalls, 0) / recoveredEvents.length
       : null,
@@ -369,14 +383,38 @@ function summarizeCacheContinuity(exchanges, period = 'total', now = new Date())
   };
 }
 
-async function resolveCacheContinuityPricing(summary, resolvePricing) {
+async function resolveCacheContinuityPricing(summary, resolvePricing, options = {}) {
   const models = Array.isArray(summary?.materialModels) ? summary.materialModels : [];
   if (models.length === 0 || typeof resolvePricing !== 'function') return {};
-  const commandTimeoutMs = Math.max(1, Math.floor(CACHE_CONTINUITY_PRICING_BUDGET_MS / models.length));
+  const configuredBudget = Number(options.budgetMs);
+  const budgetMs = Number.isFinite(configuredBudget) && configuredBudget > 0
+    ? Math.trunc(configuredBudget)
+    : CACHE_CONTINUITY_PRICING_BUDGET_MS;
+  const controller = new AbortController();
+  const timedOut = Symbol('timed-out');
+  const deadline = Date.now() + budgetMs;
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(timedOut);
+    }, budgetMs);
+  });
+  const pricingByModel = {};
   try {
-    return await resolvePricing(models.map((model) => ({ model })), { commandTimeoutMs });
-  } catch (_) {
-    return {};
+    for (const model of models) {
+      const commandTimeoutMs = deadline - Date.now();
+      if (commandTimeoutMs <= 0) break;
+      const lookup = Promise.resolve()
+        .then(() => resolvePricing([{ model }], { commandTimeoutMs, signal: controller.signal }))
+        .catch(() => ({}));
+      const result = await Promise.race([lookup, timeout]);
+      if (result === timedOut) break;
+      if (result && typeof result === 'object') Object.assign(pricingByModel, result);
+    }
+    return pricingByModel;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
