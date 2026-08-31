@@ -50,6 +50,7 @@ const {
   qoderCnDataPaths,
   resolveQoderCnPricing
 } = require('./qoderCnUsage');
+const { collectQoderCnCloudRows } = require('./qoderCnCloudUsage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./dshPaths');
 const { indexDshSessionHeaders, readDshSessionHeader, resolveDshSessionsRoot } = require('./dshSessionFiles');
@@ -1572,6 +1573,21 @@ async function collectUsageOnce(options) {
       try {
         const qoderCnSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
         qoderCnRows = await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger, sinceMs: qoderCnSinceMs });
+        // The 0.1.x Qoder CN client keeps no local token-usage database, so the
+        // legacy rows above stop at the old install. Cloud credits keep the
+        // qodercn row live: quota snapshot-diff rows, merged in the same shape.
+        // Cloud failures are non-fatal — the legacy history still reports.
+        try {
+          const qoderCnCloudRows = await collectQoderCnCloudRows({
+            homeDir: options.homeDir,
+            logger: options.logger,
+            sinceMs: qoderCnSinceMs,
+            nowMs: collectedAt.getTime()
+          });
+          if (qoderCnCloudRows.length) qoderCnRows = qoderCnRows.concat(qoderCnCloudRows);
+        } catch (cloudErr) {
+          if (typeof options.logger === 'function') options.logger(`qodercn cloud credits skipped: ${cloudErr.message}`);
+        }
         qoderCnPricing = await resolveQoderCnPricing(qoderCnRows, {
           lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
           commandTimeoutMs: options.pricingTimeoutMs,
@@ -1900,7 +1916,17 @@ async function collectUsageOnce(options) {
         // Reuse the scan's full rows on non-anchored ticks; anchored ticks read
         // only since local midnight, so the graph needs its own full read there.
         // resolveQoderCnPricing is cached (6h TTL), so the second pass is cheap.
-        const rows = (!anchorUsed && qoderCnRows) ? qoderCnRows : await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger });
+        let rows = (!anchorUsed && qoderCnRows) ? qoderCnRows : await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger });
+        try {
+          const qoderCnCloudRows = await collectQoderCnCloudRows({
+            homeDir: options.homeDir,
+            logger: options.logger,
+            nowMs: collectedAt.getTime()
+          });
+          if (qoderCnCloudRows.length) rows = rows.concat(qoderCnCloudRows);
+        } catch (cloudErr) {
+          if (typeof options.logger === 'function') options.logger(`qodercn cloud credits history skipped: ${cloudErr.message}`);
+        }
         const pricing = (!anchorUsed && qoderCnPricing) ? qoderCnPricing : await resolveQoderCnPricing(rows, {
           lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
           commandTimeoutMs: options.pricingTimeoutMs,

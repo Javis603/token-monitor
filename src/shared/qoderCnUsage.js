@@ -35,6 +35,7 @@ const QODER_CN_MODEL_DISPLAY_NAMES = Object.freeze({
   q35model_preview: 'Qwen3.8-Max-Preview',
   q36fmodel: 'Qwen3.6-Flash',
   qmodel: 'Qwen3.7-Plus',
+  qmodel_38max: 'Qwen3.8-Max-Preview', // 0.1.2 client code, same preview model
   qmodel_latest: 'Qwen3.7-Max',
   qmodel_preview: 'Qwen3.8-Max-Preview', // retired code, same preview model
   ultimate: 'Ultimate'
