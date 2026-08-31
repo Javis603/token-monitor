@@ -26,7 +26,7 @@ async function runAntigravityOAuthLogin(options = {}) {
   if (!client) {
     throw loginError(
       'OAUTH_CLIENT_NOT_FOUND',
-      'Antigravity OAuth client not found. Install Antigravity.app or configure ANTIGRAVITY_OAUTH_CLIENT_ID and ANTIGRAVITY_OAUTH_CLIENT_SECRET.'
+      'Antigravity OAuth is unavailable in this build. Update Token Monitor or configure ANTIGRAVITY_OAUTH_CLIENT_ID and ANTIGRAVITY_OAUTH_CLIENT_SECRET.'
     );
   }
   if (typeof options.openExternal !== 'function') throw new TypeError('openExternal is required');

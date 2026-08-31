@@ -62,6 +62,29 @@ test('parseClientFromText prefers the Antigravity Hub client when multiple clien
   assert.deepEqual(client, officialClient);
 });
 
+test('discoverOAuthClient uses the bundled Antigravity Hub client without an installed app', () => {
+  const officialClient = antigravityOAuth._officialOAuthClient();
+  const client = antigravityOAuth.discoverOAuthClient({
+    env: {},
+    applicationRoots: []
+  });
+  assert.deepEqual(client, officialClient);
+});
+
+test('discoverOAuthClient keeps an explicit OAuth client override ahead of the bundled client', () => {
+  const client = antigravityOAuth.discoverOAuthClient({
+    env: {
+      ANTIGRAVITY_OAUTH_CLIENT_ID: 'custom.apps.googleusercontent.com',
+      ANTIGRAVITY_OAUTH_CLIENT_SECRET: 'custom-secret'
+    },
+    applicationRoots: []
+  });
+  assert.deepEqual(client, {
+    clientId: 'custom.apps.googleusercontent.com',
+    clientSecret: 'custom-secret'
+  });
+});
+
 test('exchangeAuthorizationCode and refreshCredential preserve the refresh token', async () => {
   const requests = [];
   const exchanged = await antigravityOAuth.exchangeAuthorizationCode({
