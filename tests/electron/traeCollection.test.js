@@ -615,3 +615,94 @@ test('onSettingsChanged drops the snapshot when the key is removed', async () =>
   assert.equal(lane.status().state, 'needsKey');
   lane.stop();
 });
+
+// ---- TraeWork lane (source: 'traework') ---------------------------------
+
+function fakeTraeWorkPeriods(total = 500) {
+  return {
+    today: { clients: { traework: total }, sessions: {} },
+    month: { clients: { traework: total * 2 }, sessions: {} },
+    allTime: { clients: { traework: total * 3 }, sessions: {} }
+  };
+}
+
+function createTraeWorkLane(overrides = {}) {
+  const settings = { traeWorkCollectionEnabled: true, traeWorkDbKey: KEY };
+  if (overrides.settings) Object.assign(settings, overrides.settings);
+  const pushed = [];
+  const extractCalls = [];
+  const deps = {
+    platform: 'win32',
+    dbPath: 'C:/fake/TRAE SOLO CN/database.db',
+    now: () => overrides.now || Date.now(),
+    traeSourceSignature: () => `sig-${(signatureCounter += 1)}`,
+    collectTraeSnapshot: () => ({ rows: [{ sessionId: 'trae:work:s1', model: 'm', input: 1, output: 0, cacheRead: 0, cacheWrite: 0, createdAt: 0, messages: 1 }], pages: 3, bytes: 12288 }),
+    buildTraePeriodsNormalized: () => overrides.periods || fakeTraeWorkPeriods(),
+    buildTraeHistoryGraph: () => ({ contributions: [] }),
+    extractTraeKeyFromProcess: (args) => {
+      extractCalls.push(args);
+      return { encKey: KEY, pid: 222 };
+    },
+    ...overrides.deps
+  };
+  const lane = createTraeCollection({
+    source: 'traework',
+    getSettings: () => settings,
+    updateSettings: async (patch) => { Object.assign(settings, patch); },
+    pushStatus: (status) => pushed.push(status),
+    log: () => {},
+    userDataPath: overrides.userDataPath || '.',
+    nudgeCollector: overrides.nudgeCollector,
+    deps
+  });
+  return { lane, settings, pushed, deps, extractCalls };
+}
+
+test('the traework lane keys enabled/key state off its own settings and attributes usage to traework', async () => {
+  const { lane, settings } = createTraeWorkLane();
+  const status = await lane.collectNow('manual');
+  assert.equal(status.state, 'ok');
+  assert.equal(status.usage.today, 500, 'usage reads the traework client partition');
+  assert.equal(status.usage.allTime, 1500);
+
+  const summary = { today: { clients: {} }, month: { clients: {} }, allTime: { clients: {} } };
+  lane.applyToSummary(summary, { preview: false });
+  assert.equal(summary.today.clients.traework, 500);
+  assert.equal(summary.today.clients.trae, undefined);
+
+  settings.traeCollectionEnabled = false; // the Trae CN switch must not affect this lane
+  settings.traeWorkCollectionEnabled = false;
+  lane.onSettingsChanged();
+  assert.equal(lane.status().state, 'disabled');
+  lane.stop();
+});
+
+test('the traework lane extracts its key from the TRAE SOLO CN process and saves it under its own setting', async () => {
+  const { lane, settings, extractCalls } = createTraeWorkLane();
+  settings.traeWorkDbKey = '';
+  const result = await lane.extractAndSaveKey();
+  assert.equal(result.ok, true);
+  assert.equal(extractCalls[0].imageName, 'TRAE SOLO CN.exe');
+  assert.equal(settings.traeWorkDbKey, KEY);
+  assert.equal(settings.traeDbKey, undefined, 'the Trae CN key setting must stay untouched');
+  assert.equal(result.status.state, 'ok');
+  lane.stop();
+});
+
+test('extracting the key while the app runs arms the live watch and poller', async () => {
+  // The key lands through the lane's updateSettings seam, which bypasses the
+  // settings:update diff that calls onSettingsChanged — without an explicit
+  // refresh there, a first-run key extraction left the lane with no watch and
+  // no poller, and updates only happened on the backstop timer or a manual
+  // rescan.
+  const timing = fakeTiming();
+  const { lane, settings } = createTraeWorkLane({ deps: { ...timing.deps } });
+  settings.traeWorkDbKey = '';
+  const result = await lane.extractAndSaveKey();
+  assert.equal(result.ok, true);
+  assert.equal(timing.watchHandles.length, 1, 'the live watch must start after the key arrives');
+  assert.equal(timing.pendingPoll().length, 1, 'the signature poller must start after the key arrives');
+  assert.equal(lane.status().state, 'ok');
+  lane.stop();
+  assert.equal(timing.watchHandles[0].closed, true, 'stop must close the watch started by the extraction');
+});

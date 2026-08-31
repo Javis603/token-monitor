@@ -22,6 +22,15 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     ipcRenderer.on('trae:status', listener);
     return () => ipcRenderer.removeListener('trae:status', listener);
   },
+  traeWorkStatus: () => ipcRenderer.invoke('traeWork:getStatus'),
+  traeWorkExtractKey: () => ipcRenderer.invoke('traeWork:extractKey'),
+  traeWorkCollectNow: () => ipcRenderer.invoke('traeWork:collectNow'),
+  traeWorkRevealSource: () => ipcRenderer.invoke('traeWork:revealSource'),
+  onTraeWorkStatusPush: (callback) => {
+    const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
+    ipcRenderer.on('traeWork:status', listener);
+    return () => ipcRenderer.removeListener('traeWork:status', listener);
+  },
   lookupModelPricing: (modelId) => ipcRenderer.invoke('pricing:lookup', modelId),
   previewAppearance: (patch) => ipcRenderer.invoke('appearance:preview', patch),
   getStats: (options) => ipcRenderer.invoke('stats:get', options),

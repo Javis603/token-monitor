@@ -18,6 +18,41 @@ const { hasSummaryPeriod } = require('./archivePeriods');
 const { mergeHistories, normalizeHistory, parseGraphResult } = require('./history');
 
 const TRAE_CLIENT = 'trae';
+// Collection sources sharing one SQLCipher layout (verified against a live
+// TraeWork desktop install: same encryption parameters, same chat_turn schema,
+// same token_usage shape). Everything source-specific — data directory,
+// process image, session-key prefix, settings-key spelling — hangs off this
+// descriptor so the two collection lanes are the same code with two configs.
+const TRAE_SOURCES = {
+  trae: {
+    id: 'trae',
+    client: 'trae',
+    processImage: 'Trae CN.exe',
+    dataDir: 'Trae CN',
+    sessionPrefix: 'trae:cn',
+    envDbPath: 'TOKEN_MONITOR_TRAE_CN_DB_PATH',
+    enabledSetting: 'traeCollectionEnabled',
+    dbKeySetting: 'traeDbKey'
+  },
+  traework: {
+    id: 'traework',
+    client: 'traework',
+    processImage: 'TRAE SOLO CN.exe',
+    dataDir: 'TRAE SOLO CN',
+    sessionPrefix: 'trae:work',
+    envDbPath: 'TOKEN_MONITOR_TRAE_WORK_DB_PATH',
+    // The camelCase W keeps these distinct from the trae keys; both spellings
+    // are saved user state, so neither can be derived from the id.
+    enabledSetting: 'traeWorkCollectionEnabled',
+    dbKeySetting: 'traeWorkDbKey'
+  }
+};
+
+// Accepts a descriptor object, a source id, or null (legacy default = Trae CN).
+function traeSource(source) {
+  if (source && typeof source === 'object') return source;
+  return TRAE_SOURCES[source] || TRAE_SOURCES.trae;
+}
 const TRAE_PAGE_SZ = 4096;
 const TRAE_KEY_SZ = 32;
 const TRAE_SALT_SZ = 16;
@@ -120,17 +155,18 @@ function buildTraeWalOverlay(walPath, encKey, salt) {
 }
 
 function traeDataPaths(options = {}) {
+  const source = traeSource(options.source);
   const home = options.homeDir || os.homedir();
   const env = options.env || process.env;
   const platform = options.platform || process.platform;
   const appData = platform === 'win32'
     ? ((typeof env.APPDATA === 'string' && env.APPDATA.length > 0) ? env.APPDATA : path.join(home, 'AppData', 'Roaming'))
     : null;
-  const explicitDb = String(env.TOKEN_MONITOR_TRAE_CN_DB_PATH || '').trim();
+  const explicitDb = String(env[source.envDbPath] || '').trim();
   return {
     dbPaths: explicitDb
       ? [path.resolve(explicitDb)]
-      : (appData ? [path.join(appData, 'Trae CN', 'ModularData', 'ai-agent', 'database.db')] : [])
+      : (appData ? [path.join(appData, source.dataDir, 'ModularData', 'ai-agent', 'database.db')] : [])
   };
 }
 
@@ -287,7 +323,10 @@ function traeModelFromContext(context) {
 // Turns one chat_turn row into a usage row shaped like the qodercn/proma rows.
 // Trae reports OpenAI-style usage where prompt_tokens already includes the
 // cached/created cache tokens, so the net input is prompt minus both.
-function normalizeTraeTurnRow(row) {
+// The source descriptor keys the session/message ids — the same session_id in
+// two databases must never collapse into one session.
+function normalizeTraeTurnRow(row, source = TRAE_SOURCES.trae) {
+  const src = traeSource(source);
   let context;
   try {
     context = JSON.parse(String(row?.context ?? ''));
@@ -308,8 +347,8 @@ function normalizeTraeTurnRow(row) {
   const rowId = String(row?.rowid ?? row?.rowId ?? '').trim();
   const projectLabel = String(row?.project_label ?? row?.projectLabel ?? '').trim();
   return {
-    sessionId: `trae:cn:${sessionId}`,
-    messageId: `trae:cn:${sessionId}:${rowId || `${createdAt}`}`,
+    sessionId: `${src.sessionPrefix}:${sessionId}`,
+    messageId: `${src.sessionPrefix}:${sessionId}:${rowId || `${createdAt}`}`,
     model: traeModelFromContext(context),
     projectLabel,
     input,
@@ -356,6 +395,7 @@ function traeProjectLabelsFromDb(database) {
 // inserted); maxId always reflects the whole table so a trailing row without
 // usage cannot strand the cursor.
 function readTraeRows(decryptedDbPath, options = {}) {
+  const source = traeSource(options.source);
   const sinceId = Number.isFinite(options.sinceId) && options.sinceId > 0
     ? Math.max(0, Math.trunc(options.sinceId) - TRAE_INCREMENTAL_OVERLAP)
     : null;
@@ -390,7 +430,7 @@ function readTraeRows(decryptedDbPath, options = {}) {
         created_at: row?.created_at,
         context: row?.context,
         project_label: projectId ? (projectNames.get(projectId) || '') : ''
-      });
+      }, source);
       if (normalized) rows.push(normalized);
     }
     return { rows, maxId };
@@ -416,7 +456,7 @@ function readTraeRows(decryptedDbPath, options = {}) {
 // The result records which reader won (`targeted: true/false`) plus, on a
 // fallback, `targetedFallback` with the reason for the log line.
 function collectTraeSnapshot({
-  dbPath, encKey, workDir, signal, onProgress, sinceId,
+  dbPath, encKey, workDir, signal, onProgress, sinceId, source,
   decryptDb, readRows, targetedRead, env = process.env
 } = {}) {
   if (!workDir) throw traeErrorCode('TRAE_WORKDIR_MISSING', 'trae: work directory is not set');
@@ -430,7 +470,7 @@ function collectTraeSnapshot({
   if (!legacyMode && !targetedDisabled) {
     try {
       const readTargeted = targetedRead || require('./traeTargetedRead').readTraeTargetedRows;
-      const targeted = readTargeted({ dbPath, encKey, sinceId, signal });
+      const targeted = readTargeted({ dbPath, encKey, sinceId, signal, source });
       return {
         rows: targeted.rows,
         maxId: targeted.maxId,
@@ -454,7 +494,7 @@ function collectTraeSnapshot({
   let meta;
   try {
     meta = decrypt({ dbPath, encKey, outputPath, signal, onProgress });
-    const result = read(outputPath, { sinceId });
+    const result = read(outputPath, { sinceId, source });
     const rows = Array.isArray(result) ? result : result.rows;
     const maxId = Array.isArray(result) ? null : result.maxId;
     return {
@@ -475,7 +515,7 @@ function collectTraeSnapshot({
 
 // The qodercn/proma tokscale-JSON projection, minus pricing: Trae model names
 // have no tokscale catalog entry and the CN plans bill credits, not USD.
-function buildTraeTokscaleJson(startMs, rows, includeUndated = false) {
+function buildTraeTokscaleJson(startMs, rows, includeUndated = false, client = TRAE_CLIENT) {
   const grouped = new Map();
   for (const row of rows) {
     if (startMs && (row.createdAt ? row.createdAt < startMs : !includeUndated)) continue;
@@ -493,7 +533,7 @@ function buildTraeTokscaleJson(startMs, rows, includeUndated = false) {
     if (row.createdAt > group.lastUsedAt) group.lastUsedAt = row.createdAt;
   }
   const entries = [...grouped.values()].map((row) => ({
-    client: TRAE_CLIENT, mergedClients: null, sessionId: row.sessionId, model: row.model, provider: TRAE_CLIENT,
+    client, mergedClients: null, sessionId: row.sessionId, model: row.model, provider: client,
     input: row.input, output: row.output, cacheRead: row.cacheRead, cacheWrite: row.cacheWrite,
     reasoning: 0, messageCount: row.messages, cost: 0,
     startedAt: row.startedAt ? new Date(row.startedAt).toISOString() : '',
@@ -511,12 +551,13 @@ function buildTraeTokscaleJson(startMs, rows, includeUndated = false) {
 function buildTraePeriods(options = {}) {
   const now = options.now ? new Date(options.now) : new Date();
   const rows = Array.isArray(options.rows) ? options.rows : [];
+  const client = options.client || TRAE_CLIENT;
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
   return {
-    today: buildTraeTokscaleJson(todayStart, rows),
-    month: buildTraeTokscaleJson(monthStart, rows),
-    allTime: buildTraeTokscaleJson(options.allTimeSince ? new Date(options.allTimeSince).getTime() : 0, rows, true)
+    today: buildTraeTokscaleJson(todayStart, rows, false, client),
+    month: buildTraeTokscaleJson(monthStart, rows, false, client),
+    allTime: buildTraeTokscaleJson(options.allTimeSince ? new Date(options.allTimeSince).getTime() : 0, rows, true, client)
   };
 }
 
@@ -532,6 +573,7 @@ function buildTraePeriodsNormalized(options = {}) {
 
 function buildTraeHistoryGraph(options = {}) {
   const days = new Map();
+  const client = options.client || TRAE_CLIENT;
   for (const row of options.rows || []) {
     if (!row.createdAt) continue;
     const date = new Date(row.createdAt);
@@ -541,7 +583,7 @@ function buildTraeHistoryGraph(options = {}) {
     const day = days.get(key);
     let model = day.clients.find((entry) => entry.modelId === row.model);
     if (!model) {
-      model = { client: TRAE_CLIENT, modelId: row.model, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0, messages: 0 };
+      model = { client, modelId: row.model, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0, messages: 0 };
       day.clients.push(model);
     }
     model.tokens.input += row.input;
@@ -583,6 +625,7 @@ function applyTraeCollectionUsage(summary, snapshot, options = {}) {
   const periods = snapshot?.periods;
   if (!summary || !periods) return summary;
   const now = options.now ? new Date(options.now) : new Date();
+  const client = options.client || TRAE_CLIENT;
   const snapshotDay = snapshot.day || localDayKeyOf(snapshot.capturedAt);
   const snapshotMonth = snapshot.month || localMonthKeyOf(snapshot.capturedAt);
   const next = summary;
@@ -593,7 +636,7 @@ function applyTraeCollectionUsage(summary, snapshot, options = {}) {
     if (periodName === 'month' && snapshotMonth !== localMonthKeyOf(now)) continue;
     if (!hasSummaryPeriod(next, periodName)) continue;
     const hasUsage = Math.max(0, Number(period.totalTokens) || 0) > 0
-      || Math.max(0, Number(period.clients?.[TRAE_CLIENT]) || 0) > 0
+      || Math.max(0, Number(period.clients?.[client]) || 0) > 0
       || Object.keys(period.sessions || {}).length > 0;
     if (!hasUsage) continue;
     const container = next.periods && typeof next.periods === 'object' ? next.periods : next;
@@ -649,6 +692,7 @@ module.exports = {
   TRAE_PAGE_SZ,
   TRAE_RESERVE_SZ,
   TRAE_SALT_SZ,
+  TRAE_SOURCES,
   applyTraeCollectionHistory,
   applyTraeCollectionUsage,
   buildTraeHistoryGraph,
@@ -665,6 +709,7 @@ module.exports = {
   readTraeRows,
   traeDataPaths,
   traeErrorCode,
+  traeSource,
   traeSourceSignature,
   verifyTraeKey
 };

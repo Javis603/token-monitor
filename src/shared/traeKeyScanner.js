@@ -206,7 +206,10 @@ function extractTraeKeyFromProcess(options = {}) {
   const saltHex = dbPage1.subarray(0, 16).toString('hex');
 
   const pid = findTraeAgentPid(options);
-  if (!pid) throw traeScanError('TRAE_PROCESS_NOT_RUNNING', 'trae: Trae CN with ai_agent.dll is not running');
+  if (!pid) {
+    const image = options.imageName || TRAE_PROCESS_IMAGE;
+    throw traeScanError('TRAE_PROCESS_NOT_RUNNING', `trae: ${image} with ai_agent.dll is not running`);
+  }
 
   const koffi = options.koffi || require('koffi');
   const api = loadKernelApi(koffi);

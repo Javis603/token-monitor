@@ -1,15 +1,13 @@
 'use strict';
 
 // Trae CN collection lane (Electron main process). Owns the collect schedule,
-// the key-extraction action, and the status object shown in Settings →
-// Collection. The heavy lifting (decrypt, parse, aggregate) lives in
+// the key-extraction action, and the status object shown in Settings �?// Collection. The heavy lifting (decrypt, parse, aggregate) lives in
 // shared/traeUsage.js; this file is scheduling + state only, with every
 // effect injectable for tests.
 
 const path = require('node:path');
 const fs = require('node:fs');
 const {
-  TRAE_CLIENT,
   applyTraeCollectionHistory,
   applyTraeCollectionUsage,
   buildTraeHistoryGraph,
@@ -17,6 +15,7 @@ const {
   localDayKeyOf,
   localMonthKeyOf,
   traeDataPaths,
+  traeSource,
   traeSourceSignature
 } = require('../shared/traeUsage');
 const { collectTraeSnapshotAsync } = require('../shared/traeCollectHost');
@@ -46,7 +45,7 @@ const TRAE_WATCH_QUIET_MS = 1_500;
 const TRAE_WATCH_MAX_WAIT_MS = 8_000;
 const TRAE_WATCH_MIN_GAP_MS = 4_000;
 // fs.watch on Windows is lossy under sustained writes (coalesced events,
-// dropped notifications) — the live lane also polls the cheap 2-stat
+// dropped notifications) �?the live lane also polls the cheap 2-stat
 // signature on this cadence so a missed event costs seconds, never minutes.
 // The watch stays the low-latency path; this is the reliability floor.
 const TRAE_WATCH_POLL_MS = 2_000;
@@ -59,6 +58,13 @@ function normalizeTraeIntervalMs(value, fallback = DEFAULT_INTERVAL_MS) {
 }
 
 function createTraeCollection(options = {}) {
+  // One lane per source (trae = Trae CN, traework = TraeWork/TRAE SOLO CN):
+  // same schedule, watch, and incremental machinery, different data directory,
+  // process image, and settings keys. The trae keys keep their historical
+  // spellings -- they are saved user state.
+  const source = traeSource(options.source);
+  const { enabledSetting: enabledKey, dbKeySetting } = source;
+  const logTag = `[${source.id}-collection]`;
   const getSettings = options.getSettings || (() => ({}));
   const updateSettings = options.updateSettings || (() => {});
   const pushStatus = options.pushStatus || (() => {});
@@ -87,8 +93,7 @@ function createTraeCollection(options = {}) {
   let collecting = false;
   let extracting = false;
   let snapshot = null;
-  // Live-watch lane state (live collection mode only). Timestamps use null —
-  // not 0 — as the unset sentinel so a monotonic clock starting near zero is
+  // Live-watch lane state (live collection mode only). Timestamps use null �?  // not 0 �?as the unset sentinel so a monotonic clock starting near zero is
   // still a valid point in time.
   let watchWatcher = null;
   let watchQuietTimer = null;
@@ -117,10 +122,10 @@ function createTraeCollection(options = {}) {
   }
 
   function dbPath() {
-    return deps.dbPath || traeDataPaths().dbPaths[0] || '';
+    return deps.dbPath || traeDataPaths({ source }).dbPaths[0] || '';
   }
 
-  // Trae follows the global Collection cadence (设置 → 采集频率): live drives
+  // Trae follows the global Collection cadence (设置 �?采集频率): live drives
   // collection from a directory watch (this timer is its backstop), smart
   // keeps its 10-minute pace, and interval modes use the user's choice.
   function intervalMs() {
@@ -138,11 +143,11 @@ function createTraeCollection(options = {}) {
   }
 
   function enabled() {
-    return getSettings()?.traeCollectionEnabled !== false;
+    return getSettings()?.[enabledKey] !== false;
   }
 
   function keyPresent() {
-    return Boolean(String(getSettings()?.traeDbKey || '').trim());
+    return Boolean(String(getSettings()?.[dbKeySetting] || '').trim());
   }
 
   function status() {
@@ -162,7 +167,7 @@ function createTraeCollection(options = {}) {
     else if (lastSuccessAt) state = 'ok';
     const usage = { today: 0, month: 0, allTime: 0, models: [] };
     if (snapshot?.periods) {
-      const count = (period) => Math.max(0, Math.round(Number(period?.clients?.[TRAE_CLIENT] || 0)));
+      const count = (period) => Math.max(0, Math.round(Number(period?.clients?.[source.client] || 0)));
       usage.today = count(snapshot.periods.today);
       usage.month = count(snapshot.periods.month);
       usage.allTime = count(snapshot.periods.allTime);
@@ -238,7 +243,7 @@ function createTraeCollection(options = {}) {
       return;
     }
     lastWatchCollectAt = nowMs();
-    collectNow('watch').catch((error) => log(`[trae-collection] watch collect failed: ${error.message}`));
+    collectNow('watch').catch((error) => log(`${logTag} watch collect failed: ${error.message}`));
   }
 
   function scheduleWatchCollect() {
@@ -262,7 +267,7 @@ function createTraeCollection(options = {}) {
       if (!fsApi.existsSync(dir)) {
         if (!watchSkipLogged) {
           watchSkipLogged = true;
-          log(`[trae-collection] live watch skipped, directory not found: ${dir}`);
+          log(`${logTag} live watch skipped, directory not found: ${dir}`);
         }
         return;
       }
@@ -271,7 +276,7 @@ function createTraeCollection(options = {}) {
       // live lane silently miss every write in an otherwise-idle app.
       watchWatcher = fsApi.watch(dir, { persistent: true }, (event, filename) => {
         if (process.env.TOKEN_MONITOR_TRAE_WATCH_DEBUG) {
-          log(`[trae-collection] watch event: ${event} filename=${JSON.stringify(filename)} type=${typeof filename}`);
+          log(`${logTag} watch event: ${event} filename=${JSON.stringify(filename)} type=${typeof filename}`);
         }
         // Windows directory watches omit the filename on coalesced/high-rate
         // events; a missing name conservatively counts as a relevant write
@@ -279,14 +284,14 @@ function createTraeCollection(options = {}) {
         if (!String(filename || '').trim() || isWatchedName(String(filename))) scheduleWatchCollect();
       });
       watchWatcher.on('error', (error) => {
-        log(`[trae-collection] live watch error: ${error.message}`);
+        log(`${logTag} live watch error: ${error.message}`);
         teardownWatcher();
       });
       watchSkipLogged = false;
-      log(`[trae-collection] live watch: monitoring ${dir} for database.db/-wal writes`);
+      log(`${logTag} live watch: monitoring ${dir} for database.db/-wal writes`);
     } catch (error) {
       watchWatcher = null;
-      log(`[trae-collection] cannot watch ${dir}: ${error.message}`);
+      log(`${logTag} cannot watch ${dir}: ${error.message}`);
     }
   }
 
@@ -337,7 +342,7 @@ function createTraeCollection(options = {}) {
       if (typeof pollTimer.unref === 'function') pollTimer.unref();
       return;
     }
-    collectNow('watch').catch((error) => log(`[trae-collection] watch collect failed: ${error.message}`));
+    collectNow('watch').catch((error) => log(`${logTag} watch collect failed: ${error.message}`));
     schedulePoll();
   }
 
@@ -348,7 +353,7 @@ function createTraeCollection(options = {}) {
     timerStartedAt = nowMs();
     timer = setTimeout(() => {
       timer = null;
-      collectNow('interval').catch((error) => log(`[trae-collection] interval collect failed: ${error.message}`));
+      collectNow('interval').catch((error) => log(`${logTag} interval collect failed: ${error.message}`));
     }, delay);
     if (typeof timer.unref === 'function') timer.unref();
   }
@@ -357,9 +362,9 @@ function createTraeCollection(options = {}) {
   // must never surface as a failed collect.
   function nudgeCollectorSafely() {
     try {
-      Promise.resolve(nudgeCollector()).catch((error) => log(`[trae-collection] collector nudge failed: ${error.message}`));
+      Promise.resolve(nudgeCollector()).catch((error) => log(`${logTag} collector nudge failed: ${error.message}`));
     } catch (error) {
-      log(`[trae-collection] collector nudge failed: ${error.message}`);
+      log(`${logTag} collector nudge failed: ${error.message}`);
     }
   }
 
@@ -368,7 +373,7 @@ function createTraeCollection(options = {}) {
     if (collecting) return status();
     const settings = getSettings() || {};
     if (!enabled()) return status();
-    const encKey = String(settings.traeDbKey || '').trim();
+    const encKey = String(settings[dbKeySetting] || '').trim();
     if (!encKey) {
       lastErrorCode = 'TRAE_KEY_MISSING';
       lastError = 'trae: no database key saved yet';
@@ -377,13 +382,13 @@ function createTraeCollection(options = {}) {
     }
     const db = dbPath();
     // P1: an unchanged database (main file AND WAL) means no new turn can
-    // exist — reuse the cached snapshot without touching the 400MB decrypt.
+    // exist �?reuse the cached snapshot without touching the 400MB decrypt.
     const signature = sourceSignature(db);
     if (snapshot && signature && signature === lastSourceSignature) {
       // Log only the low-frequency backstop: watch-path skips are frequent and
       // would bury the one line that says the timer lane is healthy.
       if (reason === 'interval') {
-        log(`[trae-collection] interval collect skipped, database unchanged since ${lastSuccessAt || 'never'}`);
+        log(`${logTag} interval collect skipped, database unchanged since ${lastSuccessAt || 'never'}`);
       }
       arm(intervalMs());
       emit();
@@ -394,19 +399,20 @@ function createTraeCollection(options = {}) {
     emit();
     try {
       const collectedAt = new Date(nowMs());
-      const workDir = options.workDir || path.join(options.userDataPath || '.', 'trae-collection');
+      const workDir = options.workDir || path.join(options.userDataPath || '.', `${source.id}-collection`);
       const collectArgs = {
         dbPath: db,
         encKey,
         workDir,
         sinceId: lastMaxId || undefined,
-        onProgress: (progress) => log(`[trae-collection] decrypt ${progress.page}/${progress.totalPages} pages`)
+        source,
+        onProgress: (progress) => log(`${logTag} decrypt ${progress.page}/${progress.totalPages} pages`)
       };
       let result = await collectSnapshot(collectArgs);
       // chat_turn rebuilt under us (clear/recreate keeps a small MAX(id)): the
       // accumulated rows are stale, redo once as a full read.
       if (lastMaxId && Number.isFinite(result.maxId) && result.maxId < lastMaxId) {
-        log('[trae-collection] rowid regressed, falling back to a full read');
+        log(`${logTag} rowid regressed, falling back to a full read`);
         accumulatedRows.clear();
         lastMaxId = 0;
         result = await collectSnapshot({ ...collectArgs, sinceId: undefined });
@@ -414,7 +420,7 @@ function createTraeCollection(options = {}) {
       for (const row of result.rows) accumulatedRows.set(row.messageId, row);
       const rows = [...accumulatedRows.values()];
       if (Number.isFinite(result.maxId) && result.maxId > lastMaxId) lastMaxId = result.maxId;
-      // The newest actual turn in the data — what "last activity" should mean.
+      // The newest actual turn in the data �?what "last activity" should mean.
       // capturedAt is only the collect time and moves on every tick, so it
       // must never back the UI's last-activity display.
       let lastActivityAt = 0;
@@ -423,8 +429,8 @@ function createTraeCollection(options = {}) {
         if (at > lastActivityAt) lastActivityAt = at;
       }
       snapshot = {
-        periods: buildPeriods({ now: collectedAt, rows }),
-        graph: buildGraph({ rows }),
+        periods: buildPeriods({ now: collectedAt, rows, client: source.client }),
+        graph: buildGraph({ rows, client: source.client }),
         capturedAt: collectedAt.toISOString(),
         lastActivityAt: lastActivityAt || null,
         day: localDayKeyOf(collectedAt),
@@ -439,15 +445,15 @@ function createTraeCollection(options = {}) {
       const mode = result.targeted
         ? `targeted read, ${result.pages} pages (~${Math.max(1, Math.round((result.bytes || 0) / 1024))}KB)${walSuffix}`
         : `full decrypt, ${result.pages} pages${walSuffix}`;
-      log(`[trae-collection] collected ${result.rows.length} new rows (${rows.length} total, ${mode}) for ${reason}`);
+      log(`${logTag} collected ${result.rows.length} new rows (${rows.length} total, ${mode}) for ${reason}`);
       if (result.targetedFallback) {
-        log(`[trae-collection] targeted read fell back to full decrypt: ${result.targetedFallback.code}: ${result.targetedFallback.message}`);
+        log(`${logTag} targeted read fell back to full decrypt: ${result.targetedFallback.code}: ${result.targetedFallback.message}`);
       }
       nudgeCollectorSafely();
     } catch (error) {
       lastError = error.message;
       lastErrorCode = error.code || 'TRAE_COLLECT_FAILED';
-      log(`[trae-collection] collect failed: ${error.message}`);
+      log(`${logTag} collect failed: ${error.message}`);
     } finally {
       collecting = false;
       arm(intervalMs());
@@ -471,19 +477,25 @@ function createTraeCollection(options = {}) {
     lastExtractErrorCode = null;
     emit();
     try {
-      const found = extractKey({ dbPath: dbPath() });
-      await updateSettings({ traeDbKey: found.encKey });
-      log(`[trae-collection] key extracted from pid ${found.pid}`);
+      const found = extractKey({ dbPath: dbPath(), imageName: source.processImage });
+      await updateSettings({ [dbKeySetting]: found.encKey });
+      log(`${logTag} key extracted from pid ${found.pid}`);
     } catch (error) {
       lastExtractError = error.message;
       lastExtractErrorCode = error.code || 'TRAE_EXTRACT_FAILED';
-      log(`[trae-collection] key extraction failed: ${error.message}`);
+      log(`${logTag} key extraction failed: ${error.message}`);
       return { ok: false, error: error.message, code: lastExtractErrorCode };
     } finally {
       extracting = false;
       emit();
     }
-    // Key just arrived: collect immediately instead of waiting for the timer.
+    // Key just arrived. The key lands through the lane's updateSettings seam,
+    // not the settings:update IPC handler, so nothing else calls
+    // onSettingsChanged — without this the live watch and signature poller
+    // would never start until the next app launch, and every update would
+    // wait out the backstop interval (or a manual rescan).
+    onSettingsChanged();
+    // Collect immediately instead of waiting for the timer.
     const result = await collectNow('after-extract');
     return { ok: true, status: result };
   }
@@ -524,7 +536,7 @@ function createTraeCollection(options = {}) {
   function applyToSummary(summary, meta = {}) {
     if (!summary || !enabled() || !supported() || !snapshot) return summary;
     const now = summary.updatedAt ? new Date(summary.updatedAt) : new Date(nowMs());
-    applyTraeCollectionUsage(summary, snapshot, { now });
+    applyTraeCollectionUsage(summary, snapshot, { now, client: source.client });
     // History is only merged into ticks that actually carry one, so a history-
     // less tick cannot stomp a fuller history carried forward by the runtime.
     if (meta.preview !== true && summary.history && typeof summary.history === 'object' && snapshot.graph) {

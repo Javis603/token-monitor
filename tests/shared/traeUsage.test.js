@@ -386,3 +386,56 @@ test('localDayKeyOf/localMonthKeyOf produce local calendar keys', () => {
   assert.equal(localMonthKeyOf(date), '2026-08');
   assert.equal(localDayKeyOf(new Date('nope')), '');
 });
+
+test('normalizeTraeTurnRow keys session/message ids off the source descriptor', () => {
+  const context = JSON.stringify({
+    token_usage: { prompt_tokens: 100, completion_tokens: 10 },
+    persist_user_message_context: { model_info: { config_name: 'doubao-seed-2.1' } }
+  });
+  const traework = normalizeTraeTurnRow({ rowid: 9, session_id: 's1', created_at: 1750000000, context }, 'traework');
+  assert.equal(traework.sessionId, 'trae:work:s1');
+  assert.equal(traework.messageId, 'trae:work:s1:9');
+  assert.equal(traework.model, 'doubao-seed-2.1');
+  // The same session_id in the two databases must never collapse into one
+  // session, and the trae default keeps its historical prefix.
+  const trae = normalizeTraeTurnRow({ rowid: 9, session_id: 's1', created_at: 1750000000, context });
+  assert.notEqual(trae.sessionId, traework.sessionId);
+  assert.notEqual(trae.messageId, traework.messageId);
+  // Descriptor objects are accepted as well as ids.
+  assert.equal(normalizeTraeTurnRow({ rowid: 1, session_id: 's', created_at: 1, context }, { sessionPrefix: 'x:y' }).sessionId, 'x:y:s');
+});
+
+test('traeDataPaths resolves the TraeWork (TRAE SOLO CN) location and env override', () => {
+  const traework = traeDataPaths({
+    source: 'traework',
+    platform: 'win32',
+    homeDir: '/home/u',
+    env: { APPDATA: 'C:/Users/u/AppData/Roaming' }
+  });
+  assert.deepEqual(traework.dbPaths, [
+    path.join('C:/Users/u/AppData/Roaming', 'TRAE SOLO CN', 'ModularData', 'ai-agent', 'database.db')
+  ]);
+  const overridden = traeDataPaths({
+    source: 'traework',
+    platform: 'win32',
+    homeDir: '/home/u',
+    env: { APPDATA: 'C:/x', TOKEN_MONITOR_TRAE_WORK_DB_PATH: 'D:/tw.db' }
+  });
+  assert.deepEqual(overridden.dbPaths, [path.resolve('D:/tw.db')]);
+});
+
+test('buildTraePeriodsNormalized and the history graph attribute rows to the requested source client', () => {
+  const rows = [
+    { sessionId: 'trae:work:s1', messageId: 'w1', model: 'doubao-seed-2.1', projectLabel: '', input: 300, output: 30, cacheRead: 0, cacheWrite: 0, createdAt: Date.now() - 1000, messages: 1 }
+  ];
+  const periods = buildTraePeriodsNormalized({ rows, client: 'traework' });
+  assert.equal(periods.today.clients.traework, 330);
+  assert.equal(periods.today.clients.trae, undefined);
+  assert.ok(periods.today.sessions['traework:trae:work:s1']);
+  assert.equal(periods.today.sessions['traework:trae:work:s1'].client, 'traework');
+
+  const graph = buildTraeHistoryGraph({ rows, client: 'traework' });
+  const todayKey = localDayKeyOf(new Date());
+  const day = graph.contributions.find((entry) => entry.date === todayKey);
+  assert.equal(day.clients[0].client, 'traework');
+});

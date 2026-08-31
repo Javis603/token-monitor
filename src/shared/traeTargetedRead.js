@@ -463,7 +463,7 @@ function buildProjectAttribution(source, schemas) {
 
 // Selective equivalent of decryptTraeDb + readTraeRows. Returns the same
 // { rows, maxId } shape plus visited-page stats for logging.
-function readTraeTargetedRows({ dbPath, encKey, sinceId, signal, maxRows = TRAE_MAX_ROWS } = {}) {
+function readTraeTargetedRows({ dbPath, encKey, sinceId, signal, source: traeSource, maxRows = TRAE_MAX_ROWS } = {}) {
   if (!dbPath) throw traeErrorCode('TRAE_DB_NOT_FOUND', 'trae targeted: database path is not set');
   const key = typeof encKey === 'string' ? Buffer.from(String(encKey || ''), 'hex') : Buffer.from(encKey || []);
   if (key.length !== 32) throw traeErrorCode('TRAE_KEY_INVALID', 'trae targeted: encryption key is missing or malformed');
@@ -505,7 +505,7 @@ function readTraeTargetedRows({ dbPath, encKey, sinceId, signal, maxRows = TRAE_
         created_at: createdAt,
         context,
         project_label: projectId ? (attribution.projectNames.get(projectId) || '') : ''
-      });
+      }, traeSource);
       if (normalized) {
         rows.push(normalized);
         if (rows.length >= maxRows) {

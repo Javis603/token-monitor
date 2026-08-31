@@ -64,6 +64,7 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in m
   assert.ok(known.includes('micode'), 'micode must remain a known client');
   assert.ok(known.includes('qodercn'), 'qodercn must remain a known client');
   assert.ok(known.includes('trae'), 'trae must remain a known client (display prefs for its settings row)');
+  assert.ok(known.includes('traework'), 'traework must remain a known client (display prefs for its settings row)');
   for (const client of DEFAULT_CLIENTS.split(',')) {
     assert.ok(known.includes(client), `${client} (default-tracked) must also be known`);
   }
@@ -73,11 +74,11 @@ test('tracked client defaults, renderer, and README share one display order', ()
   const known = KNOWN_CLIENTS.split(',');
   assert.deepEqual(rendererClientIds(), known);
   assert.deepEqual(readmeTrackedClientIds(), known);
-  // trae joins micode/qodercn as opt-in: it collects through the Electron
-  // traeCollection lane, not this collector's client list.
+  // trae/traework join micode/qodercn as opt-in: they collect through the
+  // Electron traeCollection lanes, not this collector's client list.
   assert.deepEqual(
     DEFAULT_CLIENTS.split(','),
-    known.filter((client) => !['micode', 'qodercn', 'trae'].includes(client))
+    known.filter((client) => !['micode', 'qodercn', 'trae', 'traework'].includes(client))
   );
 });
 

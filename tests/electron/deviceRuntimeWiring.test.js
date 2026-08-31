@@ -26,11 +26,11 @@ test('targeted rescans stay strict while Cursor credential refresh is best effor
   const clientSourceIpc = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'clientSourceIpc.js'), 'utf8');
   assert.match(clientSourceIpc, /if \(!canRescanClient\(client\) \|\| !canRunRescan\(\)\) return false/);
   // Targeted rescans stay strict (throw on untracked clients) for every
-  // collector client; trae is the one exception — it collects through its own
-  // Electron lane, so its rescan routes there instead.
+  // collector client; trae/traework are the exceptions — they collect through
+  // their own Electron lanes, so their rescans route there instead.
   assert.match(
     main,
-    /rescanClient: \(client\) => client === 'trae'\s*\?\s*Promise\.resolve\(traeCollectionLane\?\.collectNow\('manual'\)\)\.then\(\(status\) => Boolean\(status\)\)\s*:\s*refreshUsageClient\(client, \{ forceSync: true \}\)/
+    /rescanClient: \(client\) => \{\s*if \(client === 'trae'\) \{\s*return Promise\.resolve\(traeCollectionLane\?\.collectNow\('manual'\)\)\.then\(\(status\) => Boolean\(status\)\);\s*\}\s*if \(client === 'traework'\) \{\s*return Promise\.resolve\(traeWorkCollectionLane\?\.collectNow\('manual'\)\)\.then\(\(status\) => Boolean\(status\)\);\s*\}\s*return refreshUsageClient\(client, \{ forceSync: true \}\);/
   );
   assert.match(main, /repairClientSyncLock: \(\) => repairAntigravitySyncLock/);
   assert.match(main, /lockPath: antigravitySyncLockPath\(os\.homedir\(\)\)/);
