@@ -70,7 +70,6 @@ function electronProviderDeps(deps = {}) {
   return { ...deps, fetch: electronLimitsFetch() };
 }
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
-const { limitProvidersForDetectedClients } = require('../shared/limitProviders');
 const {
   antigravitySyncLockPath,
   clientDiagnosticRoots,
@@ -81,6 +80,7 @@ const {
 } = require('../shared/collector');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
+const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
 const { createDiagnosticReportGenerator } = require('./diagnostics');
@@ -2496,12 +2496,16 @@ function saveSettings(options = {}) {
 }
 
 function seedInitialLimitProviders(summary) {
-  if (!initialLimitProvidersPending || !settings || !summary?.clientStatus) return;
-  const providers = limitProvidersForDetectedClients(summary.clientStatus).join(',');
-  settings.limitProviders = providers;
-  // Mark the decision complete only after a successful write. If persistence
-  // fails, the next collected snapshot retries while keeping the prior value.
-  if (saveSettings()) initialLimitProvidersPending = false;
+  return applyInitialLimitProviderSeed(initialLimitProvidersPending, summary, {
+    settings,
+    saveSettings,
+    onPersisted() {
+      // Consume the one-shot seed before reconfiguration can publish again.
+      initialLimitProvidersPending = false;
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      pushSettingsToRenderer();
+    }
+  });
 }
 
 function loginItemEnabledHere() {
@@ -6485,7 +6489,6 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('settings:update', (_event, patch) => {
-    if (patch?.limitProviders !== undefined) initialLimitProvidersPending = false;
     if (patch?.claudeWebCookie !== undefined) claudeWebCookieMutationRevision += 1;
     const previousSettingsState = settings;
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
@@ -6702,6 +6705,7 @@ app.whenReady().then(() => {
       settings = previousSettingsState;
       throw error;
     }
+    if (patch?.limitProviders !== undefined) initialLimitProvidersPending = false;
     if (JSON.stringify(settings.customModelPricing || []) !== previousCustomModelPricing) {
       regenerateTokscalePricing();
       refreshAfterPricingChange();

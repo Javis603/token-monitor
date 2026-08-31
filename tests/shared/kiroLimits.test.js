@@ -256,7 +256,7 @@ test('fetchKiroLimits surfaces a logged-out scan as notConfigured', async () => 
 });
 
 test('parseLimitProviders includes kiro by default and accepts it explicitly', () => {
-  assert.ok(parseLimitProviders('').includes('kiro'), 'kiro is collected by default');
+  assert.ok(parseLimitProviders().includes('kiro'), 'kiro is collected by default');
   assert.deepEqual(parseLimitProviders('kiro'), ['kiro']);
 });
 

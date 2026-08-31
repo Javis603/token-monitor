@@ -17,14 +17,15 @@ const LIMIT_WINDOW_METRICS = Object.freeze(['credits', 'spend']);
 const VALID_LIMIT_WINDOW_METRICS = new Set(LIMIT_WINDOW_METRICS);
 
 // Initial discovery is deliberately narrower than the provider list: only a
-// provider with the same id as a detected local client can be seeded. A
-// `waiting` client has a real source directory but no usage yet, so it must be
-// included just like an `active` client; `missing` means the source probe found
-// nothing and must stay disabled.
-function limitProvidersForDetectedClients(clientStatus) {
+// provider with the same id as a currently detected local source can be seeded.
+// Usage-derived client status can remain active after a source disappears, so
+// source health is the authoritative signal here.
+function limitProvidersForDetectedClients(clientHealth) {
+  const clients = clientHealth?.clients;
+  if (!clients || typeof clients !== 'object' || Array.isArray(clients)) return [];
   const detected = new Set(
-    Object.entries(clientStatus || {})
-      .filter(([, status]) => status === 'active' || status === 'waiting')
+    Object.entries(clients)
+      .filter(([, health]) => health?.source?.state === 'detected')
       .map(([client]) => String(client).trim().toLowerCase())
   );
   return LIMIT_PROVIDER_IDS.filter((provider) => detected.has(provider));
