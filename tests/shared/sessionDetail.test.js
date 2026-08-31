@@ -136,12 +136,56 @@ test('parseClaudeTranscript counts one reply once across content-block splits an
   assert.deepEqual(turns[0].tools, ['exec_command']); // tool_use merged from a later block
 });
 
-const { groupEvents, filterExchangesByPeriod, distributeCost } = require('../../src/shared/sessionDetail');
+const {
+  groupEvents,
+  filterExchangesByPeriod,
+  distributeCost,
+  summarizeCacheContinuity,
+  priceCacheContinuity
+} = require('../../src/shared/sessionDetail');
 const { localDate, localIso } = require('../helpers/localTime');
 
 function turn(ts, total, tools = []) {
   return { kind: 'turn', timestamp: ts, tokens: { input: total, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total }, tools };
 }
+
+test('Codex cache continuity measures a switch drop, recovery, loss, and API equivalent', () => {
+  const context = (timestamp, model, effort) => JSON.stringify({
+    type: 'turn_context',
+    timestamp,
+    payload: { model, effort }
+  });
+  const usage = (timestamp, cachedInputTokens) => JSON.stringify({
+    type: 'event_msg',
+    timestamp,
+    payload: {
+      type: 'token_count',
+      info: { last_token_usage: { input_tokens: 1_000_000, cached_input_tokens: cachedInputTokens, output_tokens: 1_000 } }
+    }
+  });
+  const events = parseCodexTranscript([
+    context(localIso(2026, 5, 29, 23, 59, 56), 'gpt-old', 'high'),
+    usage(localIso(2026, 5, 29, 23, 59, 57), 900_000),
+    usage(localIso(2026, 5, 29, 23, 59, 58), 900_000),
+    usage(localIso(2026, 5, 29, 23, 59, 59), 900_000),
+    context(localIso(2026, 5, 30, 0, 0, 0), 'gpt-new', 'high'),
+    usage(localIso(2026, 5, 30, 0, 0, 1), 300_000),
+    usage(localIso(2026, 5, 30, 0, 0, 2), 880_000)
+  ].join('\n'));
+  const turns = events.filter((event) => event.kind === 'turn');
+  assert.deepEqual([turns[0].model, turns[0].effort, turns[3].model], ['gpt-old', 'high', 'gpt-new']);
+
+  const summary = summarizeCacheContinuity(groupEvents(events), 'today', localDate(2026, 5, 30, 12));
+  const priced = priceCacheContinuity(summary, {
+    'gpt-new': { inputCostPerToken: 4e-6, cacheReadInputTokenCost: 0.4e-6 }
+  });
+  assert.equal(priced.switchCount, 1);
+  assert.equal(priced.materialDropCount, 1);
+  assert.equal(priced.lostTokens, 620_000);
+  assert.equal(priced.latest.recovered, true);
+  assert.equal(priced.latest.recoveryCalls, 2);
+  assert.ok(Math.abs(priced.apiEquivalentUsd - 4.464) < 1e-9);
+});
 
 test('groupEvents groups turns under the preceding prompt', () => {
   const events = [

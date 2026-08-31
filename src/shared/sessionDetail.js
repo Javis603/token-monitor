@@ -5,6 +5,10 @@ const { resolveSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { readReasonixSessionEvents } = require('./reasonixSessionDetail');
 
+const CACHE_MATERIAL_DROP_PP = 20;
+const CACHE_RECOVERY_TOLERANCE_PP = 5;
+const CACHE_LONG_CONTEXT_THRESHOLD = 272_000;
+
 function num(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -133,13 +137,18 @@ function codexToolName(payload) {
 function parseCodexTranscript(text) {
   const events = [];
   let pendingTools = [];
+  let model = 'unknown';
+  let effort = 'unknown';
   for (const line of String(text || '').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     let obj;
     try { obj = JSON.parse(trimmed); } catch (_) { continue; }
     const payload = obj.payload || {};
-    if (obj.type === 'response_item' && (payload.type === 'function_call' || payload.type === 'custom_tool_call' || payload.type === 'tool_search_call')) {
+    if (obj.type === 'turn_context') {
+      model = String(payload.model || model).trim() || model;
+      effort = String(payload.effort || payload.reasoning_effort || effort).trim() || effort;
+    } else if (obj.type === 'response_item' && (payload.type === 'function_call' || payload.type === 'custom_tool_call' || payload.type === 'tool_search_call')) {
       const name = codexToolName(payload);
       if (name) pendingTools.push(name);
     } else if (obj.type === 'event_msg' && payload.type === 'mcp_tool_call_end') {
@@ -169,7 +178,7 @@ function parseCodexTranscript(text) {
         reasoning: u.reasoning_output_tokens
       });
       if (tokens.total === 0) { pendingTools = []; continue; } // empty bookkeeping tick — skip
-      events.push({ kind: 'turn', timestamp: obj.timestamp || '', tokens, tools: uniqueTools(pendingTools) });
+      events.push({ kind: 'turn', timestamp: obj.timestamp || '', tokens, tools: uniqueTools(pendingTools), model, effort });
       pendingTools = [];
     }
   }
@@ -224,6 +233,8 @@ function groupEvents(events) {
       // event.cost is set for OpenCode (real per-message cost); claude/codex leave it undefined → 0.
       const turnEntry = {
         ...(event.type ? { type: event.type } : {}),
+        ...(event.model ? { model: event.model } : {}),
+        ...(event.effort ? { effort: event.effort } : {}),
         timestamp: event.timestamp,
         tokens: event.tokens,
         tokensAvailable: event.tokensAvailable !== false,
@@ -267,6 +278,118 @@ function filterExchangesByPeriod(exchanges, period, now = new Date()) {
     result.push(finalizeExchange(next));
   }
   return result;
+}
+
+function median(values) {
+  const sorted = values.slice().sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function summarizeCacheContinuity(exchanges, period = 'total', now = new Date()) {
+  const calls = exchanges
+    .flatMap((exchange) => exchange.turns || [])
+    .map((turn) => {
+      const cachedInputTokens = Math.max(0, num(turn.tokens?.cacheRead));
+      const inputTokens = Math.max(0, num(turn.tokens?.input)) + cachedInputTokens;
+      const model = String(turn.model || '').trim();
+      const effort = String(turn.effort || '').trim();
+      if (!inputTokens || !model || model === 'unknown' || model === 'codex-auto-review' || !effort || effort === 'unknown') return null;
+      return {
+        timestamp: turn.timestamp || '',
+        model,
+        effort,
+        inputTokens,
+        cachedInputTokens,
+        hitRate: cachedInputTokens / inputTokens * 100
+      };
+    })
+    .filter(Boolean);
+  const events = [];
+  for (let index = 1; index < calls.length; index += 1) {
+    const before = calls[index - 1];
+    const after = calls[index];
+    if (before.model === after.model && before.effort === after.effort) continue;
+    const previous = calls.slice(Math.max(0, index - 3), index)
+      .filter((call) => call.model === before.model && call.effort === before.effort)
+      .map((call) => call.hitRate);
+    if (previous.length === 0) continue;
+    const baselineHitRate = median(previous);
+    const lossCalls = [];
+    let recovered = false;
+    let recoveryCalls = 0;
+    for (const call of calls.slice(index)) {
+      if (call.model !== after.model || call.effort !== after.effort) break;
+      recoveryCalls += 1;
+      lossCalls.push({
+        model: call.model,
+        inputTokens: call.inputTokens,
+        lostTokens: Math.max(0, Math.round(call.inputTokens * baselineHitRate / 100) - call.cachedInputTokens)
+      });
+      if (call.hitRate >= baselineHitRate - CACHE_RECOVERY_TOLERANCE_PP) {
+        recovered = true;
+        break;
+      }
+    }
+    const lostTokens = lossCalls.reduce((sum, call) => sum + call.lostTokens, 0);
+    events.push({
+      timestamp: after.timestamp,
+      fromModel: before.model,
+      fromEffort: before.effort,
+      toModel: after.model,
+      toEffort: after.effort,
+      baselineHitRate,
+      firstHitRate: after.hitRate,
+      dropPp: Math.max(0, baselineHitRate - after.hitRate),
+      lostTokens,
+      recoveryCalls,
+      recovered,
+      endReason: recovered ? 'recovered' : (index + recoveryCalls < calls.length ? 'next_switch' : 'log_end'),
+      modelChanged: before.model !== after.model,
+      effortChanged: before.effort !== after.effort,
+      lossCalls
+    });
+  }
+  const scopedEvents = events.filter((event) => withinPeriod(event.timestamp, period, now));
+  if (scopedEvents.length === 0) return null;
+  const materialEvents = scopedEvents.filter((event) => event.dropPp >= CACHE_MATERIAL_DROP_PP);
+  const recoveredEvents = materialEvents.filter((event) => event.recovered);
+  return {
+    switchCount: scopedEvents.length,
+    modelSwitchCount: scopedEvents.filter((event) => event.modelChanged).length,
+    effortSwitchCount: scopedEvents.filter((event) => event.effortChanged).length,
+    materialDropCount: materialEvents.length,
+    lostTokens: materialEvents.reduce((sum, event) => sum + event.lostTokens, 0),
+    averageRecoveryCalls: recoveredEvents.length
+      ? recoveredEvents.reduce((sum, event) => sum + event.recoveryCalls, 0) / recoveredEvents.length
+      : null,
+    events: scopedEvents
+  };
+}
+
+function priceCacheContinuity(summary, pricingByModel = {}) {
+  if (!summary) return null;
+  const events = summary.events.map((event) => {
+    const pricing = pricingByModel[event.toModel];
+    const inputRate = pricing?.inputCostPerToken;
+    const cacheRate = pricing?.cacheReadInputTokenCost;
+    const priced = Number.isFinite(inputRate) && Number.isFinite(cacheRate) && inputRate >= cacheRate;
+    const apiEquivalentUsd = priced
+      ? event.lossCalls.reduce((sum, call) => (
+        sum + call.lostTokens * (inputRate - cacheRate) * (call.inputTokens > CACHE_LONG_CONTEXT_THRESHOLD ? 2 : 1)
+      ), 0)
+      : 0;
+    const { lossCalls, ...publicEvent } = event;
+    return { ...publicEvent, pricedTokens: priced ? event.lostTokens : 0, apiEquivalentUsd };
+  });
+  const materialEvents = events.filter((event) => event.dropPp >= CACHE_MATERIAL_DROP_PP);
+  return {
+    ...summary,
+    pricedTokens: materialEvents.reduce((sum, event) => sum + event.pricedTokens, 0),
+    apiEquivalentUsd: materialEvents.reduce((sum, event) => sum + event.apiEquivalentUsd, 0),
+    latest: materialEvents[materialEvents.length - 1] || null,
+    events
+  };
 }
 
 function distributeCost(exchanges, sessionCost) {
@@ -353,9 +476,19 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
   }
   const events = parseByClient(client, text);
   const now = new Date((deps.now || Date.now)());
-  const grouped = filterExchangesByPeriod(groupEvents(events), period, now);
+  const exchanges = groupEvents(events);
+  const grouped = filterExchangesByPeriod(exchanges, period, now);
   distributeCost(grouped, sessionCost);
-  return { found: true, client, sessionId, period, exchanges: grouped, totals: totalsOf(grouped, sessionCost) };
+  const cacheContinuity = client === 'codex' ? summarizeCacheContinuity(exchanges, period, now) : null;
+  return {
+    found: true,
+    client,
+    sessionId,
+    period,
+    exchanges: grouped,
+    totals: totalsOf(grouped, sessionCost),
+    ...(cacheContinuity ? { cacheContinuity } : {})
+  };
 }
 
 module.exports = {
@@ -364,6 +497,8 @@ module.exports = {
   makeTokens,
   groupEvents,
   filterExchangesByPeriod,
+  summarizeCacheContinuity,
+  priceCacheContinuity,
   distributeCost,
   readReasonixSessionDetail,
   readSessionDetail

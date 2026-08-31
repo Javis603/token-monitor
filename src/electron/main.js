@@ -75,6 +75,7 @@ const {
   clientDiagnosticRoots,
   lookupModelPricing,
   normalizeHistoryIntervalMs,
+  readTokscalePricingCatalog,
   repairAntigravitySyncLock,
   visibleDiagnosticRoots
 } = require('../shared/collector');
@@ -224,6 +225,7 @@ const {
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
+const { priceCacheContinuity } = require('../shared/sessionDetail');
 const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const {
@@ -6916,9 +6918,15 @@ app.whenReady().then(() => {
     if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
     return { ok: true, dir: result.filePaths[0] };
   });
-  ipcMain.handle('session:getDetail', (_event, args) => {
+  ipcMain.handle('session:getDetail', async (_event, args) => {
     const { client, sessionId, period, sessionCost } = args || {};
-    return readSessionDetailForPlatform({ client, sessionId, period, sessionCost });
+    const detail = await readSessionDetailForPlatform({ client, sessionId, period, sessionCost });
+    if (!detail?.cacheContinuity) return detail;
+    const pricingByModel = {};
+    for (const model of new Set(detail.cacheContinuity.events.map((event) => event.toModel))) {
+      try { pricingByModel[model] = readTokscalePricingCatalog(model); } catch (_) {}
+    }
+    return { ...detail, cacheContinuity: priceCacheContinuity(detail.cacheContinuity, pricingByModel) };
   });
   ipcMain.handle('stream:status', () => ({ connected: streamConnected, mode, ...(streamFailure || {}) }));
   ipcMain.handle('serviceStatus:get', (_event, options) => serviceStatusClient.getServiceStatus({

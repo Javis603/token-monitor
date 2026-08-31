@@ -6177,6 +6177,7 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   if (detail?.tokenDataUnavailable === true) {
     container.append(detailNote(t('detailTokenDataUnavailable') || 'Token data is unavailable for this session.'));
   }
+  if (detail?.cacheContinuity) container.append(cacheContinuityNode(detail.cacheContinuity));
 
   const sort = document.createElement('button');
   sort.className = 'detail-sort';
@@ -6193,6 +6194,33 @@ function detailNote(text) {
   note.className = 'detail-note';
   note.textContent = text;
   return note;
+}
+
+function cacheContinuityNode(summary) {
+  const card = document.createElement('div');
+  card.className = 'detail-cache-continuity';
+  card.innerHTML = '<div class="detail-cache-title"></div><div class="detail-cache-metrics"></div><div class="detail-cache-latest"></div>';
+  card.querySelector('.detail-cache-title').textContent = t('cacheContinuity') || 'Cache continuity';
+  const switches = `${summary.switchCount} switch${summary.switchCount === 1 ? '' : 'es'}`
+    + ` · ${summary.modelSwitchCount} model change${summary.modelSwitchCount === 1 ? '' : 's'}`
+    + ` · ${summary.effortSwitchCount} effort change${summary.effortSwitchCount === 1 ? '' : 's'}`;
+  if (summary.materialDropCount === 0) {
+    card.querySelector('.detail-cache-metrics').textContent = `${switches} · no material cache drops`;
+    card.querySelector('.detail-cache-latest').remove();
+    return card;
+  }
+  const estimatedCost = summary.pricedTokens
+    ? `${summary.pricedTokens < summary.lostTokens ? '~' : ''}${formatCost(summary.apiEquivalentUsd)} API equivalent`
+    : 'API equivalent unavailable';
+  card.querySelector('.detail-cache-metrics').textContent = `${switches} · ${summary.materialDropCount} material drop${summary.materialDropCount === 1 ? '' : 's'}`
+    + ` · ${formatNumber(summary.lostTokens)} estimated cache loss · ${estimatedCost}`;
+  const latest = summary.latest;
+  const recovery = latest.recovered
+    ? `recovered in ${latest.recoveryCalls} call${latest.recoveryCalls === 1 ? '' : 's'}`
+    : `${latest.endReason === 'next_switch' ? 'not recovered before next switch' : 'not yet recovered'} (${latest.recoveryCalls} calls observed)`;
+  card.querySelector('.detail-cache-latest').textContent = `Latest: ${latest.fromModel}/${latest.fromEffort} → ${latest.toModel}/${latest.toEffort}`
+    + ` · hit ${latest.baselineHitRate.toFixed(1)}% → ${latest.firstHitRate.toFixed(1)}% · ${recovery}`;
+  return card;
 }
 
 function exchangeNode(row, max) {
