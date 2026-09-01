@@ -8337,10 +8337,8 @@ function hubDraftFieldIsActive(field) {
 }
 
 function syncHubDraftDirty(field) {
-  if (!hubDraftFieldIsActive(field)) {
-    hubDraftDirty[field] = false;
-    return;
-  }
+  // Inactive fields stop affecting Save, but their drafts must survive mode switches.
+  if (!hubDraftFieldIsActive(field)) return;
   const submittedRevision = hubSaveInFlightRevisions?.[field];
   if (submittedRevision !== undefined && hubDraftRevisions[field] > submittedRevision) {
     hubDraftDirty[field] = true;
