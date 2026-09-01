@@ -3019,6 +3019,9 @@ test('collector still publishes Qoder CN transcript usage when the legacy DB rea
       watchEnabled: false,
       limitsEnabled: false,
       historyEnabled: false,
+      // Keep the tick off the network: the transcript row carries a model id
+      // the real pricing lookup would try to resolve.
+      lookupModelPricing: async () => null,
       runTokscale: async () => ({ entries: [] }),
       onUpdate: (summary) => updates.push(summary)
     });
