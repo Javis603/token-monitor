@@ -104,13 +104,9 @@ function dailyModelComponents(day, value) {
 
   const remainingTokens = totalTokens - knownTokens;
   const hasExplicitUnclassified = Object.prototype.hasOwnProperty.call(value || {}, 'unclassifiedTokens');
-  const componentsComplete = day?.tokenComponentsAvailable === true
-    && (!hasExplicitUnclassified || num(value.unclassifiedTokens) === 0);
-  const unclassifiedTokens = componentsComplete
-    ? 0
-    : Math.min(remainingTokens, Math.max(0, hasExplicitUnclassified
-      ? num(value.unclassifiedTokens)
-      : remainingTokens));
+  const unclassifiedTokens = hasExplicitUnclassified
+    ? Math.min(remainingTokens, Math.max(0, num(value.unclassifiedTokens)))
+    : day?.tokenComponentsAvailable === true ? 0 : remainingTokens;
 
   return {
     input_tokens: Math.max(0, remainingTokens - unclassifiedTokens),

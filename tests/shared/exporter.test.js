@@ -7,6 +7,7 @@ const {
   csvEscape, toCsv, buildSnapshotRows, buildDailyRows, buildDailyModelRows,
   renderSnapshotCsv, renderDailyModelsCsv, renderExportJson, exportFileSet, exportSignature, EXPORT_FILENAMES
 } = require('../../src/shared/exporter');
+const { mergeHistories } = require('../../src/shared/history');
 
 const PERIODS = {
   today: {
@@ -107,6 +108,68 @@ test('buildDailyModelRows keeps unavailable component detail unclassified', () =
     total_tokens: 12,
     cost_usd: 2
   });
+});
+
+test('buildDailyModelRows preserves exact model input beside separate legacy usage', () => {
+  const date = '2026-07-03';
+  const history = mergeHistories([
+    {
+      daily: [{
+        date,
+        tokens: 100,
+        cost: 1,
+        tokenComponentsAvailable: true,
+        perClient: {},
+        perModel: {
+          opus: {
+            tokens: 100,
+            cost: 1,
+            cacheReadTokens: 60,
+            cacheWriteTokens: 10,
+            outputTokens: 20,
+            unclassifiedTokens: 0
+          }
+        }
+      }],
+      monthly: []
+    },
+    {
+      daily: [{
+        date,
+        tokens: 50,
+        cost: 2,
+        tokenComponentsAvailable: false,
+        perClient: {},
+        perModel: { gpt: { tokens: 50, cost: 2 } }
+      }],
+      monthly: []
+    }
+  ], { todayKey: date });
+
+  assert.deepEqual(buildDailyModelRows(history), [
+    {
+      date,
+      model: 'opus',
+      input_tokens: 10,
+      output_tokens: 20,
+      cache_read_tokens: 60,
+      cache_write_tokens: 10,
+      unclassified_tokens: 0,
+      total_tokens: 100,
+      cost_usd: 1
+    },
+    {
+      date,
+      model: 'gpt',
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      unclassified_tokens: 50,
+      total_tokens: 50,
+      cost_usd: 2
+    }
+  ]);
 });
 
 test('buildDailyModelRows rejects impossible component splits without changing totals', () => {
