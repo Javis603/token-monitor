@@ -1427,7 +1427,7 @@ test('settings provider status waits for stats and refreshes when stats arrive',
     assert.match(statsRender, new RegExp(`${fn}\\(\\);`), `${fn} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
   }
-  for (const provider of ['claude', 'zai', 'volcengine', 'qoder', 'trae', 'commandcode', 'kimi', 'ollama']) {
+  for (const provider of ['claude', 'zai', 'volcengine', 'qoder', 'trae', 'commandcode', 'kimi', 'ollama', 'bailian']) {
     assert.match(statsRender, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
   }
@@ -1444,7 +1444,7 @@ test('saving Ollama credentials enables its provider and always settles validati
   const setup = functionBody(app, 'setupCursorAccountUI', 'initSettingsAnimationWrappers');
   const ollamaSetup = setup.slice(
     setup.indexOf("document.getElementById('ollamaCookieSubmit')"),
-    setup.indexOf('const kimiToggle')
+    setup.indexOf('const bailianToggle')
   );
   assert.match(selection, /selected\.add\(providerName\)/);
   assert.match(selection, /\.filter\(\(id\) => selected\.has\(id\)\)/);
@@ -1577,6 +1577,7 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
     ['qoder', 'qoderAccountGroup', 'qoderAccountStatus'],
     ['trae', 'traeAccountGroup', 'traeAccountStatus'],
     ['ollama', 'ollamaAccountGroup', 'ollamaAccountStatus'],
+    ['bailian', 'bailianAccountGroup', 'bailianAccountStatus'],
     ['thirdparty', 'thirdpartyAccountGroup', 'thirdpartyStatus']
   ];
 
@@ -1779,6 +1780,7 @@ test('dynamic account summaries are never reset by the static translation pass',
     'qoderAccountStatus',
     'traeAccountStatus',
     'ollamaAccountStatus',
+    'bailianAccountStatus',
     'kimiAccountStatus',
     'mimoAccountStatus',
     'copilotApiTokenStatus',

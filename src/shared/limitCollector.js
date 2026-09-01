@@ -48,6 +48,7 @@ const { zaiToken, zaiRegion, fetchZaiLimits } = zaiLimits;
 const zaiTeamLimits = require('./zaiTeamLimits');
 const { fetchZaiTeamLimits, zaiTeamToken } = zaiTeamLimits;
 const volcengineLimits = require('./volcengineLimits');
+const bailianLimits = require('./bailianLimits');
 const { volcengineCredentials, fetchVolcengineLimits } = volcengineLimits;
 const qoderLimits = require('./qoderLimits');
 const { qoderCookie, fetchQoderLimits } = qoderLimits;
@@ -4034,6 +4035,7 @@ function providerFetchers(deps = {}) {
     zai: (providerOptions, probeDeps) => zaiLimits.fetchZaiLimits(providerOptions, probeDeps),
     zaiteam: (providerOptions, probeDeps) => zaiTeamLimits.fetchZaiTeamLimits(providerOptions, probeDeps),
     volcengine: (providerOptions, probeDeps) => volcengineLimits.fetchVolcengineLimits(providerOptions, probeDeps),
+    bailian: (providerOptions, probeDeps) => bailianLimits.fetchBailianLimits(providerOptions, probeDeps),
     commandcode: (providerOptions, probeDeps) => commandcodeLimits.fetchCommandcodeLimits(providerOptions, probeDeps),
     qoder: (providerOptions, probeDeps) => qoderLimits.fetchQoderLimits(providerOptions, probeDeps),
     trae: (providerOptions, probeDeps) => traeLimits.fetchTraeLimits(providerOptions, probeDeps),
@@ -4433,6 +4435,9 @@ module.exports = {
   fetchZaiTeamLimits,
   volcengineCredentials,
   fetchVolcengineLimits,
+  bailianCookie: bailianLimits.bailianCookie,
+  normalizeBailianCookieHeader: bailianLimits.normalizeBailianCookieHeader,
+  fetchBailianLimits: bailianLimits.fetchBailianLimits,
   qoderCookie,
   fetchQoderLimits,
   traeAccessToken: traeLimits.traeAccessToken,

@@ -16,7 +16,7 @@ const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio',
   'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
-const limitMarksWithIcon = new Set([...clientsWithIcon, 'newapi', 'sub2api']);
+const limitMarksWithIcon = new Set([...clientsWithIcon, 'newapi', 'sub2api', 'bailian']);
 
 function osIconFor(platform) {
   const prefix = String(platform || '').toLowerCase().split('-')[0];
@@ -101,6 +101,7 @@ const LIMIT_PROVIDERS = [
   { id: 'volcengine', label: 'Volcengine' },
   { id: 'ollama', label: 'Ollama' },
   { id: 'trae', label: 'Trae CN' },
+  { id: 'bailian', label: 'Bailian', settingsLabel: 'Alibaba Bailian' },
   { id: 'thirdparty', label: 'Third-party APIs' }
 ];
 const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
@@ -122,6 +123,7 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   trae: 'traeAccountGroup',
   commandcode: 'commandcodeAccountGroup',
   ollama: 'ollamaAccountGroup',
+  bailian: 'bailianAccountGroup',
   thirdparty: 'thirdpartyAccountGroup'
 };
 const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
@@ -143,6 +145,7 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   trae: 'traeAccountStatus',
   commandcode: 'commandcodeAccountStatus',
   ollama: 'ollamaAccountStatus',
+  bailian: 'bailianAccountStatus',
   thirdparty: 'thirdpartyStatus'
 };
 const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
@@ -5180,6 +5183,16 @@ function renderProviderWindows(provider, color) {
       node.classList.add('limit-window-wide');
       windows.append(node);
     }
+  } else if (provider.provider === 'bailian') {
+    // Bailian Token Plan exposes a single monthly/billing credit pool. Render it
+    // full-width like the other monthly-only providers.
+    windows.classList.add('limit-windows-bailian');
+    const monthly = windowForKind(provider, 'billing');
+    if (monthly) {
+      const node = limitWindowNode('Monthly', monthly, color, 0.68);
+      node.classList.add('limit-window-wide');
+      windows.append(node);
+    }
   } else if (provider.provider === 'ollama') {
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
@@ -9273,6 +9286,7 @@ function syncSettingsForm() {
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
+  renderExternalProviderStatus('bailian');
   renderAntigravityStatus();
   renderMimoStatus();
   renderCopilotStatus();
@@ -12450,6 +12464,7 @@ function renderStatsUpdate() {
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
+  renderExternalProviderStatus('bailian');
   renderCopilotStatus();
   signalContentReady();
 }
@@ -14405,6 +14420,11 @@ const externalLimitAccountConfig = {
     configuredKey: 'ollamaCookieConfigured',
     sourceKey: 'ollamaCookieSource',
     pendingKey: 'ollamaPendingCheckSince'
+  },
+  bailian: {
+    configuredKey: 'bailianCookieConfigured',
+    sourceKey: 'bailianCookieSource',
+    pendingKey: 'bailianPendingCheckSince'
   }
 };
 
@@ -14575,6 +14595,10 @@ function kimiPlatformUrl() {
 
 function ollamaPlatformUrl() {
   return 'https://ollama.com/settings';
+}
+
+function bailianPlatformUrl() {
+  return 'https://bailian.console.aliyun.com/cn-beijing?tab=plan#/efm/subscription/token-plan/enterprise';
 }
 
 function commandcodePlatformUrl() {
@@ -17027,6 +17051,55 @@ function setupCursorAccountUI() {
         clearExternalProviderCheckPending('ollama');
         renderExternalProviderStatus('ollama');
         errorEl.textContent = t('settings.ollama.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
+  const bailianToggle = document.getElementById('bailianSettingsToggle');
+  if (bailianToggle) {
+    bailianToggle.addEventListener('click', () => setExternalAccountExpanded('bailian', !state.bailianAccountExpanded));
+    setExternalAccountExpanded('bailian', false);
+    renderExternalProviderStatus('bailian');
+
+    document.getElementById('bailianOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal(bailianPlatformUrl());
+    });
+    document.getElementById('bailianLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ bailianCookie: '' });
+      clearExternalProviderCheckPending('bailian');
+      clearExternalProviderPendingStatus('bailian');
+      renderExternalProviderStatus('bailian');
+      await refreshStats({ force: true });
+    });
+    document.getElementById('bailianRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+    document.getElementById('bailianCookieSubmit').addEventListener('click', async () => {
+      const input = document.getElementById('bailianCookieInput');
+      const errorEl = document.getElementById('bailianErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(input.value || '').trim()) {
+        errorEl.textContent = t('settings.bailian.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('bailian');
+        renderExternalProviderStatus('bailian');
+        await saveSettings({
+          bailianCookie: input.value,
+          limitProviders: limitProviderSelectionIncluding('bailian'),
+          limitsEnabled: true
+        });
+        input.value = '';
+        renderExternalProviderStatus('bailian');
+        await refreshStats({ force: true });
+        renderExternalProviderStatus('bailian');
+      } catch (err) {
+        clearExternalProviderCheckPending('bailian');
+        renderExternalProviderStatus('bailian');
+        errorEl.textContent = t('settings.bailian.saveFailed', { message: err.message });
         errorEl.classList.remove('hidden');
       }
     });

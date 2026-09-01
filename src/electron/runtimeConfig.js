@@ -80,6 +80,7 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
     'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
     'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'
   ],
+  bailian: ['bailianCookie'],
   qoder: ['qoderCookie', 'qoderSite'],
   trae: ['traeAccessToken', 'traeDeviceId'],
   // The desktop widget auto-detects WorkBuddy when the provider itself is
@@ -184,6 +185,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     volcengineAgentAccessKeyId: settings.volcengineAgentAccessKeyId || '',
     volcengineAgentSecretAccessKey: settings.volcengineAgentSecretAccessKey || '',
     volcengineAgentRegion: settings.volcengineAgentRegion || '',
+    bailianCookie: settings.bailianCookie || env.ALIBABA_TOKEN_PLAN_COOKIE || '',
     qoderCookie: settings.qoderCookie || '',
     qoderSite: settings.qoderSite || 'global',
     traeAccessToken: settings.traeAccessToken

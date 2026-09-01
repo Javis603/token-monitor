@@ -75,6 +75,7 @@ const supportedToolOrder = [
   'Volcengine',
   'Ollama',
   'Trae CN',
+  'Bailian',
   'Third-party APIs'
 ];
 
@@ -111,6 +112,7 @@ const supportedToolIdOrder = [
   'volcengine',
   'ollama',
   'trae',
+  'bailian',
   'thirdparty'
 ];
 

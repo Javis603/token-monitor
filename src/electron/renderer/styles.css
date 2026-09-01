@@ -3427,6 +3427,7 @@ html.is-windows .settings-panel select option {
 .row-icon-minimax    { -webkit-mask-image: url(../../../assets/icons/minimax.svg);       mask-image: url(../../../assets/icons/minimax.svg); }
 .row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
 .row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
+.row-icon-bailian        { -webkit-mask-image: url(../../../assets/icons/qwen.svg);            mask-image: url(../../../assets/icons/qwen.svg); }
 .row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
 .row-icon-trae       { -webkit-mask-image: url(../../../assets/icons/trae.svg);          mask-image: url(../../../assets/icons/trae.svg); }
 .row-icon-qodercn    { -webkit-mask-image: url(../../../assets/icons/qodercn.svg);      mask-image: url(../../../assets/icons/qodercn.svg); }
@@ -3510,6 +3511,10 @@ html.is-windows .settings-panel select option {
 .limit-icon-volcengine {
   -webkit-mask-image: url(../../../assets/icons/volcengine.svg);
   mask-image: url(../../../assets/icons/volcengine.svg);
+}
+.limit-icon-bailian {
+  -webkit-mask-image: url(../../../assets/icons/qwen.svg);
+  mask-image: url(../../../assets/icons/qwen.svg);
 }
 .limit-icon-qoder {
   -webkit-mask-image: url(../../../assets/icons/qoder.svg);

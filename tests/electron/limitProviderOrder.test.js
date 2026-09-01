@@ -54,6 +54,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'volcengine',
     'ollama',
     'trae',
+    'bailian',
     'thirdparty'
   ]);
 });

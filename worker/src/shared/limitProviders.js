@@ -9,7 +9,7 @@ const LIMIT_PROVIDER_IDS = Object.freeze([
   'claude', 'codex', 'opencode', 'cursor', 'antigravity', 'kimi', 'grok',
   'copilot', 'commandcode', 'mimo', 'zai', 'zaiteam', 'kiro', 'workbuddy',
   'qoder', 'deepseek', 'openrouter', 'minimax', 'volcengine', 'ollama', 'trae',
-  'thirdparty'
+  'bailian', 'thirdparty'
 ]);
 
 // These are the only window metrics that cross the shared limits schema.
