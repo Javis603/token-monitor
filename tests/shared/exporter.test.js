@@ -130,6 +130,27 @@ test('buildDailyModelRows rejects impossible component splits without changing t
   });
 });
 
+test('buildDailyModelRows rejects impossible splits with explicit zero unclassified tokens', () => {
+  const rows = buildDailyModelRows({
+    daily: [{
+      date: '2026-07-04',
+      tokenComponentsAvailable: true,
+      perModel: { broken: { tokens: 5, cost: 1, outputTokens: 6, unclassifiedTokens: 0 } }
+    }]
+  });
+  assert.deepEqual(rows[0], {
+    date: '2026-07-04',
+    model: 'broken',
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    unclassified_tokens: 5,
+    total_tokens: 5,
+    cost_usd: 1
+  });
+});
+
 test('renderSnapshotCsv has the expected header', () => {
   const csv = renderSnapshotCsv(PERIODS);
   assert.ok(csv.includes('period,dimension,name,tokens,cost_usd\r\n'));

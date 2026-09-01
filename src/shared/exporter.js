@@ -83,25 +83,28 @@ function buildDailyRows(history) {
 
 function dailyModelComponents(day, value) {
   const totalTokens = Math.max(0, num(value?.tokens));
-  let outputTokens = Math.max(0, num(value?.outputTokens));
-  let cacheReadTokens = Math.max(0, num(value?.cacheReadTokens));
-  let cacheWriteTokens = Math.max(0, num(value?.cacheWriteTokens));
-  let knownTokens = outputTokens + cacheReadTokens + cacheWriteTokens;
+  const outputTokens = Math.max(0, num(value?.outputTokens));
+  const cacheReadTokens = Math.max(0, num(value?.cacheReadTokens));
+  const cacheWriteTokens = Math.max(0, num(value?.cacheWriteTokens));
+  const knownTokens = outputTokens + cacheReadTokens + cacheWriteTokens;
   const invalidComponents = knownTokens > totalTokens;
 
   // Malformed or mixed-version history must keep its trusted total without
   // inventing a component split. Treat the whole row as unclassified instead.
   if (invalidComponents) {
-    outputTokens = 0;
-    cacheReadTokens = 0;
-    cacheWriteTokens = 0;
-    knownTokens = 0;
+    return {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      unclassified_tokens: totalTokens,
+      total_tokens: totalTokens
+    };
   }
 
   const remainingTokens = totalTokens - knownTokens;
   const hasExplicitUnclassified = Object.prototype.hasOwnProperty.call(value || {}, 'unclassifiedTokens');
-  const componentsComplete = !invalidComponents
-    && day?.tokenComponentsAvailable === true
+  const componentsComplete = day?.tokenComponentsAvailable === true
     && (!hasExplicitUnclassified || num(value.unclassifiedTokens) === 0);
   const unclassifiedTokens = componentsComplete
     ? 0
