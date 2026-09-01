@@ -271,7 +271,8 @@
     return (providerName === 'claude' && source === 'web')
       || providerName === 'cursor'
       || (providerName === 'opencode' && source === 'web')
-      || (providerName === 'mimo' && source === 'web');
+      || (providerName === 'mimo' && source === 'web')
+      || (providerName === 'zed' && source === 'web');
   }
 
   function limitProviderStatusLabel(provider = {}) {

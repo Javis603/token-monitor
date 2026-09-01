@@ -471,6 +471,11 @@ test('detected settings tags show only current source after status', () => {
     ['Linked', 'Web']
   );
   assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'zed', status: 'ok', source: 'web' })
+      .map((tag) => tag.label),
+    ['Linked', 'Web']
+  );
+  assert.deepEqual(
     limitProviderSettingsTags({ provider: 'codex', status: 'ok', source: 'rpc', sourceDetail: 'app' })
       .map((tag) => tag.label),
     ['Live', 'App']

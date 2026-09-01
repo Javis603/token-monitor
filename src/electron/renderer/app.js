@@ -4362,7 +4362,7 @@ function formatHomeLimitWindowValue(window, showUsed) {
     return formatCompactMoney(window.remaining, window.currency);
   }
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
-  return percent === null ? (window?.detail || '--') : `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
+  return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
 }
 
 function creditsBalanceValue(provider, credits) {

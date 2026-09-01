@@ -159,6 +159,11 @@ test('fetches dashboard usage and subscription with an explicit Cookie header', 
     'zed.token-spend',
     'zed.edit-predictions'
   ]);
+  const editPredictions = provider.windows.find((window) => window.limitId === 'zed.edit-predictions');
+  assert.equal(editPredictions.detail, 'Unlimited');
+  assert.equal(editPredictions.usedPercent, 0);
+  assert.equal(editPredictions.remainingPercent, 100);
+  assert.equal(editPredictions.showMeter, true);
   assert.deepEqual(calls.map((call) => call.url).sort(), [
     ZED_BILLING_SUBSCRIPTION_URL,
     ZED_BILLING_USAGE_URL

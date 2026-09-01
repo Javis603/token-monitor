@@ -741,7 +741,7 @@ enum WidgetFormat {
 
     static func quotaValue(_ provider: WidgetQuotaProvider) -> String {
         if let window = provider.windows.first,
-           window.detail.lowercased() == "unlimited" {
+           window.detail?.lowercased() == "unlimited" {
             return WidgetL10n.text("Unlimited")
         }
         if let balance = provider.balance, balance.amount.isFinite {
