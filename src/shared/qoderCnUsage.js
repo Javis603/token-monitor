@@ -25,6 +25,7 @@ const QODER_CN_MODEL_DISPLAY_NAMES = Object.freeze({
   dfmodel: 'DeepSeek-V4-Flash',
   dmodel: 'DeepSeek-V4-Pro',
   efficient: 'Efficient',
+  gfmodel: 'GLM-5.3-Flash', // 0.1.2 client flash slot (g = GLM family, f = Flash)
   gm51model: 'GLM-5.2',
   gmodel: 'GLM-5',
   kmodel: 'Kimi-K2.7-Code',
@@ -35,6 +36,7 @@ const QODER_CN_MODEL_DISPLAY_NAMES = Object.freeze({
   q35model_preview: 'Qwen3.8-Max-Preview',
   q36fmodel: 'Qwen3.6-Flash',
   qmodel: 'Qwen3.7-Plus',
+  qmodel_38max: 'Qwen3.8-Max-Preview', // 0.1.2 client code, same preview model
   qmodel_latest: 'Qwen3.7-Max',
   qmodel_preview: 'Qwen3.8-Max-Preview', // retired code, same preview model
   ultimate: 'Ultimate'
@@ -512,11 +514,150 @@ function buildQoderCnHistoryGraph(options = {}) {
   return { contributions: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)) };
 }
 
+const QODER_CN_TRANSCRIPTS_PROJECTS_DIR = path.join('.qoder-cn', 'projects');
+const QODER_CN_TRANSCRIPT_MAX_BYTES = 64 * 1024 * 1024;
+const QODER_CN_TRANSCRIPT_MAX_LINE_BYTES = 256 * 1024;
+
+// Since the 0.1.x rewrite the desktop client's agent runtime appends one JSON
+// line per event to ~/.qoder-cn/projects/<project>/<session>.jsonl
+// (Claude-Code-style transcripts). Assistant rows carry message.usage.credits
+// — the exact credits billed for that request — plus message.model in Qoder's
+// internal code. The cloud quota API only exposes cumulative totals, so these
+// transcripts are the only per-model usage source.
+//
+// The client zeroes every token field in usage (input_tokens, output_tokens,
+// cache_* are 0 across all rows, main.sqlite context snapshots also report
+// totalTokens: 0), and the credits unit has no official token conversion
+// (docs.qoder.cn: credits are Qoder's own metered unit per request). To keep
+// this client's rows in token units like every other client, tokens are
+// ESTIMATED from the transcript's actual conversation content:
+//   - every message's content (text/thinking/tool_use/tool_result) is counted
+//     with a blended heuristic: CJK chars / 1.5 + other chars / 4 per token;
+//   - each billed request's input = cumulative content tokens of the session
+//     so far (the context re-sent upstream), output = the request's own
+//     content tokens;
+//   - system-prompt/tool-schema overhead is not in transcripts, so totals are
+//     a slight underestimate.
+// Cross-check: implied cost lands at ~10-17K tokens/credit for Qwen-Max and
+// ~196K tokens/credit for GLM-Flash (flash models are far cheaper per token),
+// which is self-consistent with Qoder's credit pricing.
+function estimateQoderCnContentTokens(message) {
+  const content = message.content;
+  let cjk = 0;
+  let other = 0;
+  const bump = (value) => {
+    for (let i = 0; i < value.length; i++) {
+      if (value.charCodeAt(i) > 0x2E80) cjk++;
+      else other++;
+    }
+  };
+  if (typeof content === 'string') bump(content);
+  else if (Array.isArray(content)) {
+    for (const block of content) {
+      if (!block || typeof block !== 'object') continue;
+      if (typeof block.text === 'string') bump(block.text);
+      if (typeof block.thinking === 'string') bump(block.thinking);
+      if (block.input !== undefined) bump(typeof block.input === 'string' ? block.input : JSON.stringify(block.input));
+      if (block.content !== undefined) bump(typeof block.content === 'string' ? block.content : JSON.stringify(block.content));
+    }
+  }
+  return Math.ceil(cjk / 1.5) + Math.ceil(other / 4);
+}
+
+function collectQoderCnTranscriptRows(options = {}) {
+  const homeDir = options.homeDir || os.homedir();
+  const sinceMs = typeof options.sinceMs === 'number' ? options.sinceMs : undefined;
+  const projectsDir = path.join(homeDir, QODER_CN_TRANSCRIPTS_PROJECTS_DIR);
+  let projects = [];
+  try {
+    projects = fs.readdirSync(projectsDir);
+  } catch (_) {
+    return [];
+  }
+  const buckets = new Map();
+  for (const project of projects) {
+    const projectDir = path.join(projectsDir, project);
+    let files = [];
+    try {
+      if (!fs.statSync(projectDir).isDirectory()) continue;
+      files = fs.readdirSync(projectDir);
+    } catch (_) {
+      continue;
+    }
+    for (const file of files) {
+      if (!file.endsWith('.jsonl')) continue;
+      const filePath = path.join(projectDir, file);
+      let text;
+      try {
+        const stat = fs.statSync(filePath);
+        if (!stat.isFile() || stat.size <= 0 || stat.size > QODER_CN_TRANSCRIPT_MAX_BYTES) continue;
+        text = fs.readFileSync(filePath, 'utf8');
+      } catch (_) {
+        continue;
+      }
+      // File order is append order = conversation order; the cumulative
+      // counter tracks how much context the next request re-sends.
+      let cumulativeTokens = 0;
+      for (const line of text.split('\n')) {
+        if (!line || line.length > QODER_CN_TRANSCRIPT_MAX_LINE_BYTES) continue;
+        let event;
+        try {
+          event = JSON.parse(line);
+        } catch (_) {
+          continue;
+        }
+        const message = event && event.message;
+        if (!message || typeof message !== 'object') continue;
+        const messageTokens = estimateQoderCnContentTokens(message);
+        const usage = message.usage;
+        if (usage && typeof usage === 'object' && Number(usage.credits) > 0) {
+          const ts = Date.parse(typeof event.timestamp === 'string' ? event.timestamp : '');
+          if (Number.isFinite(ts)) {
+            const date = new Date(ts);
+            const dayKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+            const modelKey = typeof message.model === 'string' && message.model ? message.model : 'unknown';
+            const key = `${dayKey}|${modelKey}`;
+            const bucket = buckets.get(key) || { dayKey, modelKey, input: 0, output: 0, requests: 0 };
+            bucket.input += cumulativeTokens;
+            bucket.output += messageTokens;
+            bucket.requests += 1;
+            buckets.set(key, bucket);
+          }
+        }
+        cumulativeTokens += messageTokens;
+      }
+    }
+  }
+  const rows = [];
+  for (const bucket of buckets.values()) {
+    const createdAt = Date.parse(`${bucket.dayKey}T12:00:00`);
+    if (!Number.isFinite(createdAt)) continue;
+    if (sinceMs !== undefined && createdAt < sinceMs) continue;
+    const displayName = Object.prototype.hasOwnProperty.call(QODER_CN_MODEL_DISPLAY_NAMES, bucket.modelKey)
+      ? QODER_CN_MODEL_DISPLAY_NAMES[bucket.modelKey]
+      : bucket.modelKey;
+    rows.push({
+      sessionId: `qodercn:transcript:${bucket.dayKey}:${bucket.modelKey}`,
+      messageId: `qodercn:transcript:${bucket.dayKey}:${bucket.modelKey}`,
+      model: displayName,
+      projectLabel: '',
+      input: bucket.input,
+      output: bucket.output,
+      cacheRead: 0,
+      cacheWrite: 0,
+      createdAt,
+      messages: bucket.requests
+    });
+  }
+  return rows;
+}
+
 module.exports = {
   QODER_CN_MODEL_DISPLAY_NAMES,
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
   collectQoderCnRows,
+  collectQoderCnTranscriptRows,
   normalizeQoderCnDbRow,
   qoderCnDataPaths,
   readQoderCnDbRows,
