@@ -19,6 +19,7 @@ const {
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
 const { createTokscaleCapabilityResolver, filterSupportedClients, parseSupportedClients } = require('./tokscaleCapabilities');
 const { customPricingPath, tokscaleCacheDirs, tokscaleConfigDir } = require('./tokscaleConfig');
+const { applyGraphPricingFallback, applyScanPricingFallback, FALLBACK_PRICING_REVISION } = require('./modelPricingFallback');
 const {
   applyPeriodDelta,
   emptyPeriod,
@@ -461,6 +462,75 @@ function lookupModelPricing(modelId, commandTimeoutMs = 15000) {
   const id = String(modelId || '').trim();
   if (!id) return Promise.reject(new Error('lookupModelPricing: modelId is required'));
   return spawnTokscaleJson(['pricing', id, '--json', '--no-spinner'], commandTimeoutMs);
+}
+
+// tokscale reports a row it cannot price at `cost: 0` — for a first-party model
+// that is the gap between its release and the pricing catalogs carrying it.
+// modelPricingFallback.js re-costs exactly those rows from bundled list rates.
+// Both runners are wrapped where the collector receives them, so the watch-tick
+// --today scan, the WSL scan (which borrows runTokscaleFn) and an injected test
+// runner all inherit it. A model the user priced in tokscale's
+// custom-pricing.json is skipped: that file is tokscale's first lookup, so a $0
+// row for it is a deliberate "free", not "unknown".
+let customPricedModelIdsCache = { revision: null, ids: new Set() };
+
+// Lowercased keys of tokscale's custom-pricing.json, which is how tokscale
+// itself matches them. Re-read when the file's identity or metadata changes;
+// one stat per collection tick, never per scan.
+function customPricedModelIds() {
+  const filePath = customPricingPath();
+  let revision = `${filePath}|missing`;
+  try {
+    const stat = fs.statSync(filePath);
+    revision = `${filePath}|${stat.mtimeMs}:${stat.size}`;
+  } catch (_) {
+    // No custom pricing file: nothing is excluded.
+  }
+  if (customPricedModelIdsCache.revision === revision) return customPricedModelIdsCache.ids;
+  const ids = new Set();
+  if (!revision.endsWith('|missing')) {
+    const doc = readJson(filePath, null);
+    const models = doc && typeof doc === 'object' && doc.models && typeof doc.models === 'object' ? doc.models : {};
+    for (const key of Object.keys(models)) ids.add(key.toLowerCase());
+  }
+  customPricedModelIdsCache = { revision, ids };
+  return ids;
+}
+
+function resetCustomPricedModelIdsCache() {
+  customPricedModelIdsCache = { revision: null, ids: new Set() };
+}
+
+// One log line per model per process: the fallback runs on every scan, and a
+// watch tick can scan every few seconds.
+const pricingFallbackLogged = new Set();
+
+function resetPricingFallbackLog() {
+  pricingFallbackLogged.clear();
+}
+
+// Resolved once per collection tick so every scan in it sees the same custom
+// pricing set.
+function pricingFallbackOptions(options = {}) {
+  return {
+    customModelIds: customPricedModelIds(),
+    onApplied: ({ provider, model }) => {
+      const key = `${provider}/${model}`;
+      if (pricingFallbackLogged.has(key)) return;
+      pricingFallbackLogged.add(key);
+      if (typeof options.logger === 'function') {
+        options.logger(`pricing: ${model} costed from bundled ${provider} list rates — tokscale priced it at $0 because no pricing catalog carries it yet (a custom price wins: custom-pricing.json in tokscale's config dir, or Settings → Collection in the widget)`);
+      }
+    }
+  };
+}
+
+function withScanPricingFallback(runScan, fallbackOptions) {
+  return async (input) => applyScanPricingFallback(await runScan(input), fallbackOptions);
+}
+
+function withGraphPricingFallback(runGraph, fallbackOptions) {
+  return async (input) => applyGraphPricingFallback(await runGraph(input), fallbackOptions);
 }
 
 const PROMA_PRICING_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -1487,7 +1557,7 @@ async function collectHistoryOnce(options) {
   if (options.historyEnabled === false) return null;
   const histories = [];
   const rawGraphs = [];
-  const runGraph = options.runGraph || runTokscaleGraph;
+  const runGraph = withGraphPricingFallback(options.runGraph || runTokscaleGraph, pricingFallbackOptions(options));
   const capDays = Number.isFinite(options.capDays) ? options.capDays : HISTORY_CAP_DAYS;
   const todayKey = options.todayKey || localTodayKey();
   if (clients) {
@@ -1566,11 +1636,11 @@ async function collectUsageOnce(options) {
       // Diagnostics observers must never affect collection or cancellation.
     }
   };
-  const runTokscaleFn = options.runTokscale || ((input) => runTokscale({
+  const runTokscaleFn = withScanPricingFallback(options.runTokscale || ((input) => runTokscale({
     ...input,
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
-  }));
+  })), pricingFallbackOptions(options));
   const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
     ...input,
     terminationOptions: options.subprocessTerminationOptions,
@@ -3251,10 +3321,13 @@ function canTargetTodayPartitions(anchor, targetClients) {
 
 function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '') {
   // Deterministic string that captures the config inputs anchor correctness
-  // depends on. When this changes, the persisted anchor is invalidated.
+  // depends on. When this changes, the persisted anchor is invalidated. The
+  // bundled pricing revision is one of those inputs: an anchor costed under a
+  // previous table would otherwise feed its stale $0 rows into every warm
+  // tick's month/allTime until the hourly full scan.
   const qoderCn = String(qoderCnDbPath || '').trim();
   const qoderCnPart = qoderCn ? `|qodercn:${path.resolve(qoderCn)}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}`;
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}|pricing:${FALLBACK_PRICING_REVISION}${qoderCnPart}`;
 }
 
 function qoderCnDbPathForClients(clientsCsv, options = {}) {
@@ -4328,6 +4401,9 @@ module.exports = {
   resolvePlatformBinary,
   resolvePromaPricing,
   resetPromaPricingCache,
+  customPricedModelIds,
+  resetCustomPricedModelIdsCache,
+  resetPricingFallbackLog,
   readTokscalePricingCatalog,
   resetTokscaleCatalogCache,
   resetTokscaleCapabilityCache,

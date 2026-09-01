@@ -26,6 +26,10 @@ Click the `⚙` button in the bottom-right corner of the widget to open the sett
 
 The `⇧` button in the title bar cycles the window behavior.
 
+### Model pricing
+
+Costs come from the pricing catalogs tokscale reads (LiteLLM, OpenRouter, models.dev; refreshed about hourly). A model none of them carries yet — typically a first-party model in its first days — is otherwise counted at $0 while its tokens still show. For those, Token Monitor prices the row itself from the bundled list rates in `src/shared/modelPricingFallback.js`, and stops the moment a catalog prices the model. Custom pricing (Settings → Collection) wins over both: it is written to tokscale's `custom-pricing.json`, and a model listed there is never re-priced by the bundled rates, so an explicit `0` there means free.
+
 ---
 
 ## Headless agent & hub (`.env`)

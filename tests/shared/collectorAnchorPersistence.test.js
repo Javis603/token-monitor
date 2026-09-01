@@ -20,6 +20,7 @@ const {
 } = require('../../src/shared/collector');
 
 const { emptyPeriod } = require('../../src/shared/usage');
+const { FALLBACK_PRICING_REVISION } = require('../../src/shared/modelPricingFallback');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
 
 installInProcessWatchHost(test);
@@ -39,7 +40,7 @@ test('configFingerprint normalizes clients and includes allTimeSince and project
   const b = configFingerprint('claude,codex', '2024-01-01');
   // whitespace-normalised to the same value
   assert.equal(a, b, 'whitespace should be normalized');
-  assert.match(a, /^claude,codex\|2024-01-01\|projects:on$/);
+  assert.match(a, /^claude,codex\|2024-01-01\|projects:on\|pricing:\d+$/);
 
   const c = configFingerprint('claude', '2024-01-01');
   assert.notEqual(a, c, 'different clients should differ');
@@ -51,15 +52,22 @@ test('configFingerprint normalizes clients and includes allTimeSince and project
   assert.notEqual(a, e, 'project tracking changes should invalidate persisted anchors');
 });
 
+test('configFingerprint carries the bundled pricing revision so a table edit retires persisted anchors', () => {
+  // A restored anchor was costed under the previous build's table; a warm tick
+  // derives month/allTime from it by delta, so the stale $0 rows would survive
+  // until the hourly full scan unless the fingerprint changes with the table.
+  assert.ok(configFingerprint('claude', '2024-01-01').includes(`|pricing:${FALLBACK_PRICING_REVISION}`));
+});
+
 test('configFingerprint handles undefined and empty clients', () => {
   const a = configFingerprint(undefined, '2024-01-01');
-  assert.equal(a, '|2024-01-01|projects:on', 'undefined clients should produce empty string before pipe');
+  assert.equal(a, `|2024-01-01|projects:on|pricing:${FALLBACK_PRICING_REVISION}`, 'undefined clients should produce empty string before pipe');
 
   const b = configFingerprint('', '2024-01-01');
-  assert.equal(b, '|2024-01-01|projects:on', 'empty clients should produce same as undefined');
+  assert.equal(b, `|2024-01-01|projects:on|pricing:${FALLBACK_PRICING_REVISION}`, 'empty clients should produce same as undefined');
 
   const c = configFingerprint('claude', undefined);
-  assert.match(c, /\|undefined\|projects:on$/, 'undefined allTimeSince produces string "undefined"');
+  assert.match(c, /\|undefined\|projects:on\|pricing:\d+$/, 'undefined allTimeSince produces string "undefined"');
 });
 
 test('configFingerprint labels the Qoder CN database path explicitly', () => {
@@ -72,7 +80,7 @@ test('configFingerprint labels the Qoder CN database path explicitly', () => {
   );
   assert.equal(
     fingerprint,
-    `claude,qodercn|2024-01-01|projects:on|qodercn:${path.resolve(dbPath)}`
+    `claude,qodercn|2024-01-01|projects:on|pricing:${FALLBACK_PRICING_REVISION}|qodercn:${path.resolve(dbPath)}`
   );
 });
 
