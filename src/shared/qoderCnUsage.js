@@ -25,9 +25,9 @@ const QODER_CN_MODEL_DISPLAY_NAMES = Object.freeze({
   dfmodel: 'DeepSeek-V4-Flash',
   dmodel: 'DeepSeek-V4-Pro',
   efficient: 'Efficient',
-  gfmodel: 'GLM-5.3-Flash', // 0.1.2 client flash slot (g = GLM family, f = Flash)
   gm51model: 'GLM-5.2',
   gmodel: 'GLM-5',
+  gfmodel: 'GLM-5.3-Flash', // Qoder CN 0.1.2 client flash slot
   kmodel: 'Kimi-K2.7-Code',
   lite: 'Lite',
   mmodel: 'MiniMax-M3',
@@ -36,7 +36,6 @@ const QODER_CN_MODEL_DISPLAY_NAMES = Object.freeze({
   q35model_preview: 'Qwen3.8-Max-Preview',
   q36fmodel: 'Qwen3.6-Flash',
   qmodel: 'Qwen3.7-Plus',
-  qmodel_38max: 'Qwen3.8-Max-Preview', // 0.1.2 client code, same preview model
   qmodel_latest: 'Qwen3.7-Max',
   qmodel_preview: 'Qwen3.8-Max-Preview', // retired code, same preview model
   ultimate: 'Ultimate'
@@ -517,6 +516,7 @@ function buildQoderCnHistoryGraph(options = {}) {
 const QODER_CN_TRANSCRIPTS_PROJECTS_DIR = path.join('.qoder-cn', 'projects');
 const QODER_CN_TRANSCRIPT_MAX_BYTES = 64 * 1024 * 1024;
 const QODER_CN_TRANSCRIPT_MAX_LINE_BYTES = 256 * 1024;
+const QODER_CN_CJK_RE = /[\u{1100}-\u{11FF}\u{2E80}-\u{9FFF}\u{A960}-\u{A97F}\u{AC00}-\u{D7FF}\u{F900}-\u{FAFF}\u{FF00}-\u{FF60}\u{FF66}-\u{FF9D}\u{20000}-\u{3FFFD}]/u;
 
 // Since the 0.1.x rewrite the desktop client's agent runtime appends one JSON
 // line per event to ~/.qoder-cn/projects/<project>/<session>.jsonl
@@ -546,8 +546,8 @@ function estimateQoderCnContentTokens(message) {
   let cjk = 0;
   let other = 0;
   const bump = (value) => {
-    for (let i = 0; i < value.length; i++) {
-      if (value.charCodeAt(i) > 0x2E80) cjk++;
+    for (const ch of value) {
+      if (QODER_CN_CJK_RE.test(ch)) cjk++;
       else other++;
     }
   };
@@ -561,14 +561,24 @@ function estimateQoderCnContentTokens(message) {
       if (block.content !== undefined) bump(typeof block.content === 'string' ? block.content : JSON.stringify(block.content));
     }
   }
-  return Math.ceil(cjk / 1.5) + Math.ceil(other / 4);
+  return Math.ceil((cjk / 1.5) + (other / 4));
+}
+
+function listTranscriptFiles(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...listTranscriptFiles(full));
+    else if (entry.isFile() && entry.name.endsWith('.jsonl')) out.push(full);
+  }
+  return out;
 }
 
 function collectQoderCnTranscriptRows(options = {}) {
   const homeDir = options.homeDir || os.homedir();
   const sinceMs = typeof options.sinceMs === 'number' ? options.sinceMs : undefined;
   const projectsDir = path.join(homeDir, QODER_CN_TRANSCRIPTS_PROJECTS_DIR);
-  let projects = [];
+  let projects;
   try {
     projects = fs.readdirSync(projectsDir);
   } catch (_) {
@@ -577,16 +587,14 @@ function collectQoderCnTranscriptRows(options = {}) {
   const buckets = new Map();
   for (const project of projects) {
     const projectDir = path.join(projectsDir, project);
-    let files = [];
+    let files;
     try {
       if (!fs.statSync(projectDir).isDirectory()) continue;
-      files = fs.readdirSync(projectDir);
+      files = listTranscriptFiles(projectDir);
     } catch (_) {
       continue;
     }
-    for (const file of files) {
-      if (!file.endsWith('.jsonl')) continue;
-      const filePath = path.join(projectDir, file);
+    for (const filePath of files) {
       let text;
       try {
         const stat = fs.statSync(filePath);
@@ -658,6 +666,7 @@ module.exports = {
   buildQoderCnPeriods,
   collectQoderCnRows,
   collectQoderCnTranscriptRows,
+  estimateQoderCnContentTokens,
   normalizeQoderCnDbRow,
   qoderCnDataPaths,
   readQoderCnDbRows,
