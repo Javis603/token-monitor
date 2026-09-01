@@ -2885,6 +2885,7 @@ test('collector preserves Qoder CN while publishing other clients after a bounde
   const qoderCnUsage = require(qoderCnUsagePath);
   const originalRows = qoderCnUsage.collectQoderCnRows;
   const originalPeriods = qoderCnUsage.buildQoderCnPeriods;
+  const originalTranscriptRows = qoderCnUsage.collectQoderCnTranscriptRows;
   let failReads = false;
   let claudeTokens = 3;
   qoderCnUsage.collectQoderCnRows = async () => {
@@ -2895,6 +2896,9 @@ test('collector preserves Qoder CN while publishing other clients after a bounde
     }
     return [];
   };
+  // Pin the transcript source so the scan stays hermetic on machines that
+  // really run the Qoder CN client (~/.qoder-cn with live transcripts).
+  qoderCnUsage.collectQoderCnTranscriptRows = () => [];
   qoderCnUsage.buildQoderCnPeriods = () => ({
     today: { entries: [{ client: 'qodercn', model: 'qmodel', input: 7 }] },
     month: { entries: [{ client: 'qodercn', model: 'qmodel', input: 7 }] },
@@ -2956,6 +2960,84 @@ test('collector preserves Qoder CN while publishing other clients after a bounde
     if (handle) handle.stop();
     qoderCnUsage.collectQoderCnRows = originalRows;
     qoderCnUsage.buildQoderCnPeriods = originalPeriods;
+    qoderCnUsage.collectQoderCnTranscriptRows = originalTranscriptRows;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collector still publishes Qoder CN transcript usage when the legacy DB read fails', async () => {
+  const tmp = withTmpHome([]);
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
+  const qoderCnUsage = require(qoderCnUsagePath);
+  const originalRows = qoderCnUsage.collectQoderCnRows;
+  const originalPeriods = qoderCnUsage.buildQoderCnPeriods;
+  const originalTranscriptRows = qoderCnUsage.collectQoderCnTranscriptRows;
+  const transcriptRow = {
+    client: 'qodercn',
+    sessionId: 'transcript-session',
+    messageId: 'transcript-message',
+    model: 'gfmodel',
+    input: 11,
+    output: 5,
+    cacheRead: 0,
+    cacheWrite: 0,
+    createdAt: new Date().toISOString(),
+    messages: 1
+  };
+  qoderCnUsage.collectQoderCnRows = async () => {
+    throw new Error('qodercn sqlite read budget exceeded (rows limit 100000)');
+  };
+  qoderCnUsage.collectQoderCnTranscriptRows = () => [transcriptRow];
+  const seenRows = [];
+  qoderCnUsage.buildQoderCnPeriods = ({ rows }) => {
+    seenRows.push(rows);
+    return {
+      today: { entries: [{ client: 'qodercn', model: 'qmodel', input: 7 }] },
+      month: { entries: [{ client: 'qodercn', model: 'qmodel', input: 7 }] },
+      allTime: { entries: [{ client: 'qodercn', model: 'qmodel', input: 7 }] }
+    };
+  };
+  delete require.cache[collectorPath];
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'qodercn',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: false,
+      limitsEnabled: false,
+      historyEnabled: false,
+      runTokscale: async () => ({ entries: [] }),
+      onUpdate: (summary) => updates.push(summary)
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(updates.at(-1).today.clients.qodercn, 7, 'transcript rows keep the Qoder CN period alive');
+    const anchoredRows = seenRows.filter((rows) => Array.isArray(rows));
+    assert.ok(
+      anchoredRows.some((rows) => rows.some((row) => row.sessionId === 'transcript-session')),
+      'the period is built from transcript rows when the legacy DB fails'
+    );
+    const anchorPath = path.join(tmp, 'collector-anchor.json');
+    const anchor = JSON.parse(fs.readFileSync(anchorPath, 'utf8'));
+    assert.equal(anchor.qoderCnPeriods.today.clients.qodercn, 7, 'the anchored fallback is not used when transcripts succeed');
+  } finally {
+    if (handle) handle.stop();
+    qoderCnUsage.collectQoderCnRows = originalRows;
+    qoderCnUsage.buildQoderCnPeriods = originalPeriods;
+    qoderCnUsage.collectQoderCnTranscriptRows = originalTranscriptRows;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     delete require.cache[collectorPath];
