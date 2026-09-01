@@ -883,18 +883,42 @@ test('Grok renders its single Monthly billing window full-width instead of an em
   assert.match(renderProviderWindows, /limit-window-wide/);
 });
 
-test('Zed renders one monetary Token Spend window with reset enrichment and a Limits icon', () => {
+test('Zed renders unlimited Edit Predictions plus monetary Token Spend with a Limits icon', () => {
   const app = readRendererFile('app.js');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
   const css = readRendererFile('styles.css');
 
   assert.match(renderProviderWindows, /provider\.provider === 'zed'/);
   assert.match(renderProviderWindows, /windowsForKind\(provider, 'billing'\)/);
+  assert.match(renderProviderWindows, /billing\?\.limitId === 'zed\.edit-predictions'/);
+  assert.match(renderProviderWindows, /\? 'Unlimited'/);
   assert.match(renderProviderWindows, /billing\?\.label \|\| 'Token Spend'/);
   assert.match(renderProviderWindows, /formatMoney\(used, currency\).*formatMoney\(limit, currency\)/s);
-  assert.match(renderProviderWindows, /settings\.subscriptions\.renewsOn/);
-  assert.doesNotMatch(renderProviderWindows, /zed\.edit-predictions|zed\.billing-cycle|zed\.overdue-invoices/);
+  assert.doesNotMatch(renderProviderWindows, /settings\.subscriptions\.renewsOn|renewalDetail/);
+  assert.doesNotMatch(renderProviderWindows, /zed\.billing-cycle|zed\.overdue-invoices/);
   assert.match(css, /\.limit-icon-zed\s*\{[^}]*assets\/icons\/zed\.svg[^}]*\}/s);
+});
+
+test('Zed compact windows label unlimited Edit Predictions without a fake reset', () => {
+  const editPredictions = {
+    kind: 'billing',
+    limitId: 'zed.edit-predictions',
+    label: 'Edit Predictions',
+    usedPercent: 0,
+    detail: 'Unlimited',
+    resetDescription: 'Unlimited'
+  };
+  const tokenSpend = {
+    kind: 'billing',
+    limitId: 'zed.token-spend',
+    label: 'Token Spend',
+    usedPercent: 25
+  };
+
+  assert.deepEqual(limitProviderCompactWindows('zed', [tokenSpend, editPredictions]), [
+    tokenSpend,
+    { ...editPredictions, value: 'Unlimited', resetDescription: '' }
+  ]);
 });
 
 test('WorkBuddy renders unlimited enterprise credits without requiring a numeric balance', () => {

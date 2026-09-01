@@ -5043,25 +5043,25 @@ function renderProviderWindows(provider, color) {
   } else if (provider.provider === 'zed') {
     windows.classList.add('limit-windows-zed');
     for (const billing of windowsForKind(provider, 'billing')) {
+      const unlimitedEditPredictions = billing?.limitId === 'zed.edit-predictions'
+        && String(billing?.detail || '').trim().toLowerCase() === 'unlimited';
       const used = optionalFiniteNumber(billing?.used);
       const limit = optionalFiniteNumber(billing?.limit);
       const currency = billing?.currency || 'USD';
-      const spendValue = used !== null && limit !== null
+      const spendValue = unlimitedEditPredictions
+        ? 'Unlimited'
+        : used !== null && limit !== null
         ? `${formatMoney(used, currency)} / ${formatMoney(limit, currency)}`
         : null;
-      const renewalDate = billing?.resetsAt ? new Date(billing.resetsAt) : null;
-      const renewalDetail = renewalDate && !Number.isNaN(renewalDate.getTime())
-        ? t('settings.subscriptions.renewsOn', { date: expiryDateLabel(renewalDate) })
-        : '';
       const node = limitWindowNode(
         billing?.label || 'Token Spend',
         billing,
         color,
         0.95,
-        spendValue,
-        renewalDetail
+        spendValue
       );
       node.classList.add('limit-window-wide');
+      if (unlimitedEditPredictions) node.classList.add('limit-window-no-reset');
       windows.append(node);
     }
   } else if (provider.provider === 'zai' || provider.provider === 'zaiteam') {
@@ -14713,7 +14713,7 @@ function commandcodePlatformUrl() {
 }
 
 function zedPlatformUrl() {
-  return 'https://dashboard.zed.dev/account';
+  return 'https://dashboard.zed.dev/';
 }
 
 function ollamaValidationError(provider) {
@@ -17574,6 +17574,7 @@ function initSettingsAnimationWrappers() {
     '#volcengineManualPanel',
     '#qoderManualPanel',
     '#traeManualPanel',
+    '#zedManualPanel',
     '#commandcodeManualPanel',
     '#kimiManualPanel',
     '#ollamaManualPanel'

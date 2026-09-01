@@ -1,5 +1,5 @@
 ---
-summary: "Zed provider notes: local token tracking, dashboard billing limits, browser-cookie credentials, and platform boundaries."
+summary: "Zed provider notes: local token tracking, dashboard quotas, browser-cookie credentials, and platform boundaries."
 read_when:
   - Adding or changing Zed token or session tracking
   - Changing Zed dashboard billing endpoints or Cookie setup
@@ -14,7 +14,7 @@ Zed appears in Token Monitor in two independent data planes. Keep them separate 
 | Data plane | What it measures | Primary runtime | Inputs |
 | --- | --- | --- | --- |
 | Token/session activity | Local model-token activity attributed to Zed | Shared usage collector through `tokscale` | Local Zed conversation data |
-| Limits/billing | Zed-hosted token spend, included spend limit, plan, and billing reset | Shared limits runtime | A manually supplied Zed dashboard `Cookie` header |
+| Limits/billing | Zed-hosted token spend, included spend limit, plan, reset, and Edit Predictions entitlement | Shared limits runtime | A manually supplied Zed dashboard `Cookie` header |
 
 A dashboard Cookie is not a token-history source. Likewise, finding local Zed sessions does not authenticate the dashboard billing endpoints.
 
@@ -36,9 +36,11 @@ GET https://cloud.zed.dev/frontend/billing/subscriptions/current
 Cookie: zed.session=...; ...
 ```
 
-The usage request is required. The subscription request is optional enrichment: a failure there must not hide valid spend data that the usage endpoint already returned.
+The usage request is required. The subscription request is optional plan and account-identity enrichment: a failure there must not hide valid spend data that the usage endpoint already returned.
 
 The Zed editor's native credential and `GET /client/users/me` are deliberately not used for limits. That account response exposes plan, Edit Predictions, and a subscription period, but not the dashboard's token-spend allowance. The same native credential is rejected by the dashboard billing endpoint, so combining the two would create a second sign-in flow without authenticating the data Token Monitor intends to show.
+
+The dashboard response is authoritative for Token Spend. For plans whose published contract makes Edit Predictions unlimited (`Pro`, `Student`, `Business`, including a named Pro trial), Token Monitor also derives an `Edit Predictions: Unlimited` window from the returned plan name. Do not invent a remaining percentage for metered plans: the observed billing response does not include their accepted-prediction count, so a Free-plan Edit Predictions window stays absent unless that endpoint begins returning the actual usage fields.
 
 ## Credential and security boundary
 
@@ -58,9 +60,9 @@ GUI credentials live under the fixed `zedCookie` path in the shared credential s
 | `current_usage.token_spend.limit_in_cents` | Token Spend limit |
 | `current_usage.token_spend.updated_at` | Upstream payload timestamp for diagnostics |
 | `subscription.name` | Preferred plan label when available |
-| `subscription.period.end_at` | Token Spend reset/renewal timestamp |
+| `subscription.period.end_at` | Token Spend reset timestamp |
 
-Spend values are converted from cents to USD. The only limits window is `zed.token-spend`; the subscription period enriches that window's reset instead of becoming a separate elapsed-time bar. This avoids duplicating Token Monitor's manually recorded subscription information and avoids presenting time elapsed as quota consumed.
+Spend values are converted from cents to USD. `zed.token-spend` is the measured billing window and appears first, matching Zed's dashboard; its reset uses the subscription period end while omitting the separate renewal-date copy owned by Token Monitor's subscription feature. `zed.edit-predictions` follows only when the returned plan establishes an unlimited entitlement and does not inherit that reset.
 
 ## Identity and aggregation
 
@@ -91,7 +93,8 @@ Token/session tracking still depends on local Zed data that `tokscale` supports 
 - Usage success remains visible when the optional subscription request fails.
 - `401`/`403`, `429`, timeouts, malformed payloads, and aborted probes map to the shared provider statuses.
 - Spend cents map to the correct USD used, limit, remaining, and percentage values.
-- Subscription plan and reset enrich the same Token Spend window.
+- Unlimited Pro, Student, Business, and named Pro trial plans expose Edit Predictions without fabricating metered usage for Free.
+- Subscription data can enrich the plan and stable account identity without adding renewal copy to Token Spend.
 - Settings never echo the stored Cookie to the renderer.
 - A credential change invalidates only the Zed limits lane.
 - The Open Zed button is restricted to the approved dashboard host.

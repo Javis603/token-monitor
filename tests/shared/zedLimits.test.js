@@ -11,6 +11,7 @@ const {
   normalizeZedCookieHeader,
   parseSubscription,
   parseZedBillingUsage,
+  unlimitedEditPredictionsWindow,
   zedCookie
 } = require('../../src/shared/zedLimits');
 
@@ -75,7 +76,7 @@ test('normalizes Zed billing plan names', () => {
   assert.equal(formatPlanLabel('zed-pro'), 'Zed Pro');
 });
 
-test('parses Token Spend and enriches it with subscription plan and reset', () => {
+test('parses Token Spend first and keeps its reset without subscription renewal copy', () => {
   const parsed = parseZedBillingUsage(usagePayload(), subscriptionPayload());
   assert.equal(parsed.planLabel, 'Zed Student');
   assert.equal(parsed.subscriptionId, '1596962');
@@ -93,6 +94,27 @@ test('parses Token Spend and enriches it with subscription plan and reset', () =
     currency: 'USD',
     showMeter: true
   });
+  assert.deepEqual(parsed.windows, [parsed.window, {
+    kind: 'billing',
+    limitId: 'zed.edit-predictions',
+    label: 'Edit Predictions',
+    used: 0,
+    limit: null,
+    remaining: null,
+    usedPercent: 0,
+    resetDescription: '',
+    detail: 'Unlimited',
+    showMeter: true
+  }]);
+});
+
+test('derives unlimited Edit Predictions only for plans whose allowance is documented as unlimited', () => {
+  for (const plan of ['Zed Pro', 'Zed Pro Trial', 'Zed Student', 'Zed Business']) {
+    assert.equal(unlimitedEditPredictionsWindow(plan)?.detail, 'Unlimited');
+  }
+  assert.equal(unlimitedEditPredictionsWindow('Zed Free'), null);
+  assert.equal(unlimitedEditPredictionsWindow('Zed Free Trial'), null);
+  assert.equal(unlimitedEditPredictionsWindow(''), null);
 });
 
 test('keeps usage valid without optional subscription data', () => {
@@ -133,7 +155,10 @@ test('fetches dashboard usage and subscription with an explicit Cookie header', 
   assert.equal(provider.status, 'ok');
   assert.equal(provider.planLabel, 'Zed Student');
   assert.match(provider.accountKey, /^sha256:/u);
-  assert.equal(provider.windows[0].limitId, 'zed.token-spend');
+  assert.deepEqual(provider.windows.map((window) => window.limitId), [
+    'zed.token-spend',
+    'zed.edit-predictions'
+  ]);
   assert.deepEqual(calls.map((call) => call.url).sort(), [
     ZED_BILLING_SUBSCRIPTION_URL,
     ZED_BILLING_USAGE_URL
@@ -156,8 +181,9 @@ test('keeps Token Spend when subscription enrichment is unavailable', async () =
     }
   );
   assert.equal(provider.status, 'ok');
-  assert.equal(provider.windows[0].used, 2.5);
-  assert.equal(provider.windows[0].resetsAt, null);
+  const tokenSpend = provider.windows.find((window) => window.limitId === 'zed.token-spend');
+  assert.equal(tokenSpend.used, 2.5);
+  assert.equal(tokenSpend.resetsAt, null);
 });
 
 test('maps missing, rejected, and rate-limited Cookies to shared statuses', async () => {

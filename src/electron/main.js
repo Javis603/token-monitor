@@ -2439,12 +2439,6 @@ function readSettings() {
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
     merged.antigravityManagedAccounts = normalizeAntigravityManagedAccounts(merged.antigravityManagedAccounts);
-    // These keys existed only during development of the native Zed sign-in
-    // prototype. The dashboard billing provider uses one browser Cookie header.
-    delete merged.zedManagedAccounts;
-    delete merged.zedUserId;
-    delete merged.zedAccessToken;
-    delete merged.zedServerUrl;
     merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
     if (saved.keepAboveTaskbar !== undefined) {
       merged.keepAboveTaskbar = parseBoolean(saved.keepAboveTaskbar, false);
@@ -6540,10 +6534,6 @@ app.whenReady().then(() => {
     delete normalizedPatch.windowMaximized;
     delete normalizedPatch.codexManagedAccounts;
     delete normalizedPatch.antigravityManagedAccounts;
-    delete normalizedPatch.zedManagedAccounts;
-    delete normalizedPatch.zedUserId;
-    delete normalizedPatch.zedAccessToken;
-    delete normalizedPatch.zedServerUrl;
     delete normalizedPatch.mimoManagedAccounts;
     delete normalizedPatch.workbuddyAccessToken;
     delete normalizedPatch.workbuddyUserId;

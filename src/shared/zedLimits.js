@@ -7,7 +7,7 @@ const { runWithProbeDeadline } = require('./probeDeadline');
 
 const ZED_FETCH_TIMEOUT_MS = 12_000;
 const ZED_SUBSCRIPTION_TIMEOUT_MS = 6_000;
-const ZED_DASHBOARD_URL = 'https://dashboard.zed.dev/account';
+const ZED_DASHBOARD_URL = 'https://dashboard.zed.dev/';
 const ZED_BILLING_USAGE_URL = 'https://cloud.zed.dev/frontend/billing/usage';
 const ZED_BILLING_SUBSCRIPTION_URL = 'https://cloud.zed.dev/frontend/billing/subscriptions/current';
 
@@ -100,8 +100,24 @@ function parseSubscription(body) {
   return {
     id: String(subscription.id || '').trim(),
     planLabel: formatPlanLabel(subscription.name),
-    resetsAt: toIso(subscription?.period?.end_at),
-    periodStartedAt: toIso(subscription?.period?.start_at)
+    resetsAt: toIso(subscription?.period?.end_at)
+  };
+}
+
+function unlimitedEditPredictionsWindow(planLabel) {
+  const normalized = String(planLabel || '').trim().toLowerCase();
+  if (!/\b(pro|student|business)\b/u.test(normalized)) return null;
+  return {
+    kind: 'billing',
+    limitId: 'zed.edit-predictions',
+    label: 'Edit Predictions',
+    used: 0,
+    limit: null,
+    remaining: null,
+    usedPercent: 0,
+    resetDescription: '',
+    detail: 'Unlimited',
+    showMeter: true
   };
 }
 
@@ -118,26 +134,30 @@ function parseZedBillingUsage(body, subscriptionBody = null) {
     throw new Error('Zed billing response is missing token spend');
   }
   const subscription = parseSubscription(subscriptionBody);
+  const planLabel = subscription?.planLabel || formatPlanLabel(body.plan);
   const used = spendCents / 100;
   const limit = limitCents / 100;
   const usedPercent = Math.min(100, (spendCents / limitCents) * 100);
+  const tokenSpendWindow = {
+    kind: 'billing',
+    limitId: 'zed.token-spend',
+    label: 'Token Spend',
+    used,
+    limit,
+    remaining: Math.max(0, limit - used),
+    usedPercent,
+    remainingPercent: 100 - usedPercent,
+    resetsAt: subscription?.resetsAt || null,
+    currency: 'USD',
+    showMeter: true
+  };
+  const editPredictionsWindow = unlimitedEditPredictionsWindow(planLabel);
   return {
-    planLabel: subscription?.planLabel || formatPlanLabel(body.plan),
+    planLabel,
     subscriptionId: subscription?.id || '',
     usageUpdatedAt: toIso(tokenSpend.updated_at),
-    window: {
-      kind: 'billing',
-      limitId: 'zed.token-spend',
-      label: 'Token Spend',
-      used,
-      limit,
-      remaining: Math.max(0, limit - used),
-      usedPercent,
-      remainingPercent: 100 - usedPercent,
-      resetsAt: subscription?.resetsAt || null,
-      currency: 'USD',
-      showMeter: true
-    }
+    window: tokenSpendWindow,
+    windows: [tokenSpendWindow, editPredictionsWindow].filter(Boolean)
   };
 }
 
@@ -225,7 +245,7 @@ async function fetchZedLimits(options = {}, deps = {}) {
       source: 'web',
       status: 'ok',
       updatedAt,
-      windows: [parsed.window]
+      windows: parsed.windows
     });
   } catch (error) {
     if (error?.name === 'AbortError') throw error;
@@ -244,5 +264,6 @@ module.exports = {
   normalizeZedCookieHeader,
   parseSubscription,
   parseZedBillingUsage,
+  unlimitedEditPredictionsWindow,
   zedCookie
 };

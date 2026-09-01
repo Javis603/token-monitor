@@ -115,7 +115,6 @@
           .filter((window) => window.remainingPercent != null
             || window.planStatus === 'expired'
             || window.value
-            || (window.showMeter === false && window.detail)
             || (window.metric === 'credits' && (window.remaining != null || window.detail)))
           .sort((a, b) => {
             if (providerId === 'antigravity') return a.index - b.index;

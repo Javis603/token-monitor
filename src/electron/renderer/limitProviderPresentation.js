@@ -176,6 +176,14 @@
   function limitProviderCompactWindows(providerOrId, windows = []) {
     const provider = providerId(providerOrId);
     if (provider === 'codex') return (windows || []).filter(isCanonicalCodexWindow);
+    if (provider === 'zed') {
+      return (windows || []).map((window) => (
+        window?.limitId === 'zed.edit-predictions'
+          && normalizeId(window?.detail) === 'unlimited'
+          ? { ...window, value: 'Unlimited', resetDescription: '' }
+          : window
+      ));
+    }
     if (provider !== 'antigravity') return windows;
     const entries = (windows || []).map((window, index) => ({
       window,
