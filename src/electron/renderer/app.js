@@ -1,6 +1,6 @@
 'use strict';
 
-const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', dsh: 'DeepSeek Harness', cherrystudio: 'Cherry Studio', lmstudio: 'LM Studio' };
+const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', dsh: 'DeepSeek Harness', cherrystudio: 'Cherry Studio', lmstudio: 'LM Studio', trae: 'Trae CN', traework: 'Trae Work CN'};
 const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
@@ -14,7 +14,7 @@ const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
   'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio',
-  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
+  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'traework', 'ollama', 'thirdparty', 'hunyuan'
 ]);
 const limitMarksWithIcon = new Set([...clientsWithIcon, 'newapi', 'sub2api']);
 
@@ -77,8 +77,29 @@ const KNOWN_CLIENTS = [
   { id: 'reasonix', label: 'Reasonix' },
   { id: 'dsh', label: 'DeepSeek Harness' },
   { id: 'cherrystudio', label: 'Cherry Studio' },
-  { id: 'lmstudio', label: 'LM Studio' }
+  { id: 'lmstudio', label: 'LM Studio' },
+  { id: 'trae', label: 'Trae CN' },
+  { id: 'traework', label: 'Trae Work CN' }
 ];
+// Clients collected through their own Electron lane (createTraeCollection
+// instances in main.js) rather than the shared tokscale collector. Each one's
+// settings row renders the same disclosure panel off the lane's pushed status.
+const COLLECTION_LANE_CLIENTS = {
+  trae: {
+    statusStateKey: 'traeStatus',
+    enabledSetting: 'traeCollectionEnabled',
+    extractKey: () => window.tokenMonitor?.traeExtractKey?.(),
+    revealSource: () => window.tokenMonitor?.traeRevealSource?.()
+  },
+  traework: {
+    statusStateKey: 'traeWorkStatus',
+    enabledSetting: 'traeWorkCollectionEnabled',
+    extractKey: () => window.tokenMonitor?.traeWorkExtractKey?.(),
+    revealSource: () => window.tokenMonitor?.traeWorkRevealSource?.()
+  }
+};
+const isCollectionLaneClient = (clientId) => Boolean(COLLECTION_LANE_CLIENTS[clientId]);
+const collectionLaneClient = (clientId) => COLLECTION_LANE_CLIENTS[clientId] || null;
 const LIMIT_PROVIDERS = [
   { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
   { id: 'codex', label: 'Codex' },
@@ -325,6 +346,11 @@ state.codexResetForecastBusy = false;
 state.codexResetForecastRequestedAt = 0;
 state.codexResetForecastRetryTimer = null;
 state.clientRescans = clientRescanStateApi.createClientRescanState({
+  // The lane clients' targeted collects finish in a few hundred milliseconds,
+  // which would make their rescan buttons' disabled state flash invisibly;
+  // hold it for a visible beat. Every other client scans slowly enough on its
+  // own.
+  minimumPendingMs: (clientId) => (isCollectionLaneClient(clientId) ? 1000 : 0),
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
   }
@@ -734,7 +760,10 @@ function settingsSectionSummary(section) {
   if (section === 'tools') {
     const counts = clientHealthPresentationApi.clientHealthCountsForTracked(
       localClientHealth(),
-      enabledClientSet()
+      // The lane clients have no collector health envelope; letting them into
+      // the health counting set would flip the whole summary to the generic
+      // fallback.
+      new Set([...enabledClientSet()].filter((id) => !isCollectionLaneClient(id)))
     );
     if (counts) return t('settings.summary.toolsHealth', counts);
     return t('settings.summary.tools', {
@@ -7632,27 +7661,14 @@ function renderHome() {
   // ResizeObserver repeats the scroll + hover restoration once layout fully settles.
 }
 
-function render() {
-  const surface = visibleStatsSurface();
-  if (surface !== 'main') {
-    if (!surface) statsRenderScheduler.request();
-    return;
-  }
-  if (!state.stats) return;
-  els.toolDetailFooter.classList.add('hidden');
-  renderSessionUsageArchiveStatus();
-  ensureBreakdownVisible();
-  renderViewSwitcher();
+// The headline total + cost, driven straight off state.stats.periods. Extracted
+// from render() so the settings surface can repaint it too: with the settings
+// panel open the stats scheduler renders settings components only (lane panels
+// included), and the total shown at the bottom of the window would otherwise go
+// stale until the user clicked something that runs a full render().
+function renderMainTotal() {
   const derivedPeriod = fixedPeriodRangesApi.isDerived(state.period);
   if (derivedPeriod) {
-    const signature = fixedPeriodHistorySignature();
-    if (!state.fixedPeriodHistoryRequested
-      || state.fixedPeriodHistorySignature !== signature
-      || state.fixedPeriodHistoryBusy) {
-      // Joining an existing background preload upgrades its completion into a
-      // visible repaint, so switching to a fixed range cannot remain on loading.
-      void loadFixedPeriodHistory();
-    }
     state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
     if (state.fixedPeriodSnapshot.status === 'ready') {
       state.stats.periods[state.period] = state.fixedPeriodSnapshot.period;
@@ -7660,8 +7676,6 @@ function render() {
   } else {
     state.fixedPeriodSnapshot = null;
   }
-  if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
-  if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
   const fixedUnavailable = derivedPeriod && state.fixedPeriodSnapshot?.status !== 'ready';
   const detailUnavailable = derivedPeriod
@@ -7709,6 +7723,35 @@ function render() {
   els.cost.textContent = formatCost(period.costUsd || 0);
   renderTokenRate();
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
+}
+
+function render() {
+  const surface = visibleStatsSurface();
+  if (surface !== 'main') {
+    if (!surface) statsRenderScheduler.request();
+    return;
+  }
+  if (!state.stats) return;
+  els.toolDetailFooter.classList.add('hidden');
+  renderSessionUsageArchiveStatus();
+  ensureBreakdownVisible();
+  renderViewSwitcher();
+  if (fixedPeriodRangesApi.isDerived(state.period)) {
+    const signature = fixedPeriodHistorySignature();
+    if (!state.fixedPeriodHistoryRequested
+      || state.fixedPeriodHistorySignature !== signature
+      || state.fixedPeriodHistoryBusy) {
+      // Joining an existing background preload upgrades its completion into a
+      // visible repaint, so switching to a fixed range cannot remain on loading.
+      void loadFixedPeriodHistory();
+    }
+  }
+  if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
+  if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
+  renderMainTotal();
+  // renderMainTotal may have overlaid the fixed-period snapshot onto this
+  // period; the breakdowns below read the same (possibly overlaid) period.
+  const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');
   els.shell.classList.toggle('home-mode', state.breakdown === 'home');
   els.viewBackRow?.classList.toggle('hidden', state.breakdown === 'home' || !state.homeReturnVisible);
@@ -9372,7 +9415,14 @@ function syncSettingsForm() {
 }
 
 function enabledClientSet() {
-  return new Set(String(state.settings.clients || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+  const enabled = new Set(String(state.settings.clients || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+  // The lane clients collect through their own Electron lanes (no shared-
+  // collector adapter, so they never join the clients CSV), but the display
+  // list treats them like any other tracked client.
+  for (const [clientId, lane] of Object.entries(COLLECTION_LANE_CLIENTS)) {
+    if (state.settings?.[lane.enabledSetting] !== false) enabled.add(clientId);
+  }
+  return enabled;
 }
 
 function hiddenClientSet() {
@@ -10266,6 +10316,26 @@ function localClientStatus() {
   return localDevice()?.clientStatus || {};
 }
 
+// A lane client row's badges, off the lane's pushed status instead of the
+// collector health envelope it does not have. The shared status vocabulary
+// describes the lane state (追踪中 once a collect has succeeded, 需要处理 on
+// key problems); the reverse-engineered marker always follows, marking where
+// the data comes from.
+function laneRowTagInfos(clientId) {
+  const lane = collectionLaneClient(clientId);
+  const status = lane ? state[lane.statusStateKey] : null;
+  let statusTag;
+  if (!status) statusTag = clientStatusPresentationApi.clientStatusTag(clientId, 'waiting');
+  else if (status.state === 'unsupported') statusTag = clientStatusPresentationApi.clientStatusTag(clientId, 'missing');
+  else if (status.state === 'needsKey' || status.state === 'keyInvalid' || status.state === 'error') {
+    statusTag = { key: 'settings.tools.status.attention', tone: 'warn' };
+  } else {
+    statusTag = clientStatusPresentationApi.clientStatusTag(clientId, 'active');
+  }
+  const marker = { key: 'settings.tools.status.separate', tone: 'ok' };
+  return statusTag ? [statusTag, marker] : [marker];
+}
+
 function localClientHealth() {
   return localDevice()?.clientHealth || null;
 }
@@ -10288,7 +10358,9 @@ function setClientHealthExpanded(clientId, options = {}) {
     if (open) {
       const force = options.refreshPlaceholder === true
         && !clientHealthPresentationApi.hasClientHealth(localClientHealth(), row.dataset.client);
-      loadClientSources(row.dataset.client, { force });
+      // The lane clients have no collector sources; their panels render from
+      // the lanes' pushed status alone.
+      if (!isCollectionLaneClient(row.dataset.client)) loadClientSources(row.dataset.client, { force });
       if (container.childElementCount === 0) {
         fillClientHealthPanel(container, row.dataset.client);
       }
@@ -10443,6 +10515,10 @@ function patchRenderedNode(current, next) {
 }
 
 function fillClientHealthPanel(container, clientId) {
+  if (isCollectionLaneClient(clientId)) {
+    renderLanePanelInto(container, clientId);
+    return;
+  }
   const detail = clientHealthDetailFor(clientId);
   if (!detail) return;
   const next = clientHealthPanel(detail, clientId);
@@ -10545,6 +10621,10 @@ function clientHealthGroup(group, notes) {
         relative: relativeDayLabel(group.lastActivityDay),
         day: group.lastActivityDay
       });
+      // Trae reports last activity by date only; the lane's stamp carries a
+      // full timestamp, so the panel shows the time too — freshness at a
+      // glance instead of "is today's number actually moving?".
+      if (group.lastActivityTime) activity.textContent += ` · ${group.lastActivityTime}`;
       body.append(activity);
     }
   }
@@ -10751,6 +10831,140 @@ function renderWslPanel() {
   }
 }
 
+// Lane-client local-collection panel (Trae CN, TraeWork): rendered inside the
+// client row's disclosure in the collection list, using the exact same group
+// sections — and the exact same accordion wrappers — as the collector health
+// panels (来源 / 采集 / 用量) so every expanded row reads and collapses
+// identically. The collapse animation is a grid row squeezed to 0fr: it only
+// folds when the container's single child carries min-height:0
+// (accordion-animation-inner), so the content must never be appended to the
+// container directly.
+function renderLanePanelInto(container, clientId) {
+  if (!container) return;
+  const isWin = state.appInfo?.platform === 'win32';
+  const lane = collectionLaneClient(clientId);
+  container.replaceChildren();
+  const status = lane ? state[lane.statusStateKey] : null;
+  if (!isWin || !status) return;
+
+  const inner = document.createElement('div');
+  inner.className = 'accordion-animation-inner';
+  const box = document.createElement('div');
+  box.className = 'tool-health-inner';
+  inner.append(box);
+  const groups = document.createElement('div');
+  groups.className = 'tool-health-groups';
+
+  const dbFound = status.dbFound === true;
+  groups.append(clientHealthGroup({
+    id: 'source',
+    key: 'settings.tools.health.source',
+    state: dbFound ? 'detected' : 'missing',
+    detectedCount: dbFound ? 1 : 0,
+    checkedCount: 1,
+    checks: status.dbPath
+      ? [{ id: `${clientId}-database`, exists: dbFound, paths: [{ dir: status.dbPath, exists: dbFound }] }]
+      : []
+  }, []));
+  // No lastAttemptAt/lastSuccessAt here: the shared group would render them as
+  // "上次尝试/成功于 X 前" stamps, which the lanes should not show.
+  groups.append(clientHealthGroup({
+    id: 'collection',
+    key: 'settings.tools.health.sync',
+    state: 'direct'
+  }, []));
+
+  const usage = status.usage || { today: 0, month: 0, allTime: 0 };
+  // "Last activity" is the newest real turn in the collected data — never the
+  // snapshot capture time, which moves on every collect.
+  const lastActivityAt = Number(status.lastActivityAt) || 0;
+  groups.append(clientHealthGroup({
+    id: 'usage',
+    key: 'settings.tools.health.usage',
+    periods: [
+      { period: 'today', tokens: usage.today || 0, cost: 0 },
+      { period: 'month', tokens: usage.month || 0, cost: 0 },
+      { period: 'allTime', tokens: usage.allTime || 0, cost: 0 }
+    ],
+    lastActivityDay: lastActivityAt ? localDayKey(new Date(lastActivityAt)) : null,
+    lastActivityTime: lastActivityAt
+      ? new Date(lastActivityAt).toLocaleTimeString(currentLocale(), { hour: '2-digit', minute: '2-digit' })
+      : null
+  }, []));
+
+  if (status.lastError || status.lastExtractError) {
+    const note = document.createElement('div');
+    note.className = 'tool-health-note-line tone-warn';
+    note.textContent = status.lastError || status.lastExtractError;
+    groups.append(note);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'tool-health-actions';
+  const extractButton = document.createElement('button');
+  extractButton.type = 'button';
+  extractButton.className = 'tool-health-action';
+  extractButton.textContent = t('settings.collection.traePanel.extractKey');
+  // Only an in-flight extraction disables the button. Tying it to the
+  // collecting state made the button flash every time a watch collect ran
+  // (every few seconds on an active session), which reads as phantom clicks.
+  // A click landing during a collect is rejected main-side (TRAE_BUSY) and
+  // surfaced below without an alarming error line.
+  extractButton.disabled = status.state === 'extracting' || !isWin;
+  extractButton.addEventListener('click', async () => {
+    extractButton.disabled = true;
+    try {
+      const result = await lane.extractKey?.();
+      if (result && result.ok === false && result.error && result.code !== 'TRAE_BUSY') {
+        state[lane.statusStateKey] = { ...(state[lane.statusStateKey] || {}), lastExtractError: result.error };
+      }
+    } finally {
+      renderToolPreferences();
+    }
+  });
+  actions.append(extractButton);
+  // Same slot, label and handler shape as the health panels' rescan button:
+  // begin → rescanClient → finish, with loadClientSources on success. For the
+  // lane clients the main process routes rescanClient(clientId) to the lane.
+  const rescanState = state.clientRescans.snapshot(clientId);
+  const rescanButton = document.createElement('button');
+  rescanButton.type = 'button';
+  rescanButton.className = 'tool-health-action';
+  rescanButton.textContent = t('settings.tools.health.rescan');
+  rescanButton.id = `toolHealthRescan-${clientId}`;
+  rescanButton.dataset.healthAction = 'rescan';
+  rescanButton.disabled = rescanState.pending;
+  rescanButton.addEventListener('click', async () => {
+    const requestId = state.clientRescans.begin(clientId);
+    let succeeded = false;
+    try {
+      succeeded = await window.tokenMonitor.rescanClient(clientId) === true;
+      if (succeeded) loadClientSources(clientId, { force: true });
+    } catch (_) {
+      succeeded = false;
+    } finally {
+      state.clientRescans.finish(clientId, requestId, succeeded);
+    }
+  });
+  actions.append(rescanButton);
+  // Reveal the database file in Explorer, mirroring the health panels' reveal
+  // button; the path is resolved main-side (trae:revealSource), never sent
+  // from here.
+  if (status.dbFound && status.dbPath) {
+    const revealButton = document.createElement('button');
+    revealButton.type = 'button';
+    revealButton.className = 'tool-health-action';
+    revealButton.textContent = t('settings.tools.health.reveal');
+    revealButton.id = `toolHealthReveal-${clientId}`;
+    revealButton.dataset.healthAction = 'reveal';
+    revealButton.addEventListener('click', () => { void lane.revealSource?.(); });
+    actions.append(revealButton);
+  }
+
+  box.append(groups, actions);
+  container.append(inner);
+}
+
 // The tracked-tools list drags from the whole row too, on the same controller
 // as the limits list. What differs is the commit: its order is not one setting.
 // While the list is on its default order the pinned block is the only thing
@@ -10792,6 +11006,10 @@ function toolPreferenceRenderSignature() {
   const clientStatus = localClientStatus();
   const health = localClientHealth();
   const device = localDevice();
+  const laneStatuses = Object.fromEntries(Object.entries(COLLECTION_LANE_CLIENTS).map(([clientId, lane]) => {
+    const status = state[lane.statusStateKey];
+    return [`${clientId}Status`, status ? [status.state, status.capturedAt || '', status.keyPresent === true] : null];
+  }));
   return JSON.stringify({
     settings: [
       [...enabledClientSet()].sort(),
@@ -10804,6 +11022,9 @@ function toolPreferenceRenderSignature() {
     ],
     deviceId: device?.deviceId || '',
     clientStatus,
+    // The lane clients push their own status outside the collector health
+    // envelope; their state drives the row badges and the expanded panels.
+    ...laneStatuses,
     healthRows: KNOWN_CLIENTS.map(({ id }) => [
       id,
       health?.clients?.[id]?.overall || '',
@@ -10878,10 +11099,12 @@ function renderToolPreferencesNow() {
       // would keep reporting "Tracking" — leaving the one state this whole
       // feature exists to surface invisible until the row is expanded.
       const needsAttention = health?.clients?.[id]?.overall === 'attention';
-      const tagInfo = needsAttention
-        ? { key: 'settings.tools.status.attention', tone: 'warn' }
-        : clientStatusPresentationApi.clientStatusTag(id, clientStatus[id] || 'waiting');
-      if (tagInfo) {
+      const tagInfos = isCollectionLaneClient(id)
+        ? laneRowTagInfos(id)
+        : (needsAttention
+          ? [{ key: 'settings.tools.status.attention', tone: 'warn' }]
+          : [clientStatusPresentationApi.clientStatusTag(id, clientStatus[id] || 'waiting')].filter(Boolean));
+      for (const tagInfo of tagInfos) {
         const tag = document.createElement('span');
         tag.className = `tool-status-tag tool-status-tag-${tagInfo.tone}`;
         tag.textContent = t(tagInfo.key);
@@ -10928,9 +11151,39 @@ function renderToolPreferencesNow() {
     actions.className = 'tool-preference-actions';
     actions.append(visibility, pin);
     // Tracked tools use the health snapshot; untracked tools get an on-demand
-    // source view so every row keeps the same disclosure affordance.
-    const detail = clientHealthDetailFor(id);
-    if (detail) {
+    // source view so every row keeps the same disclosure affordance. Lane
+    // clients (Trae CN, TraeWork) mount their own lane panel (usage, key
+    // state, extract/collect actions) instead of the collector health detail
+    // they do not have.
+    if (isCollectionLaneClient(id)) {
+      const expanded = state.clientHealthExpanded === id;
+      row.classList.toggle('expanded', expanded);
+      const main = document.createElement('button');
+      main.type = 'button';
+      main.id = `toolHealthDisclosure-${id}`;
+      main.className = 'tool-preference-main';
+      main.title = t('settings.tools.health.open', { name: label });
+      main.setAttribute('aria-label', main.title);
+      main.setAttribute('aria-expanded', String(expanded));
+      const disclosureIcon = document.createElement('span');
+      disclosureIcon.className = 'cursor-disclosure-icon';
+      disclosureIcon.setAttribute('aria-hidden', 'true');
+      main.append(disclosureIcon);
+      const panel = document.createElement('div');
+      panel.id = `toolHealthPanel-${id}`;
+      panel.className = `accordion-animated-container${expanded ? '' : ' hidden'}`;
+      main.setAttribute('aria-controls', panel.id);
+      if (expanded) renderLanePanelInto(panel, id);
+      main.addEventListener('click', () => {
+        const open = state.clientHealthExpanded !== id;
+        setClientHealthExpanded(open ? id : '');
+      });
+      actions.append(main);
+      row.classList.add('has-health');
+      row.append(track, labelGroup, actions, panel);
+    } else {
+      const detail = clientHealthDetailFor(id);
+      if (detail) {
       const expanded = state.clientHealthExpanded === id;
       row.classList.toggle('expanded', expanded);
       const main = document.createElement('button');
@@ -10961,8 +11214,9 @@ function renderToolPreferencesNow() {
       actions.append(main);
       row.classList.add('has-health');
       row.append(track, labelGroup, actions, panel);
-    } else {
-      row.append(track, labelGroup, actions);
+      } else {
+        row.append(track, labelGroup, actions);
+      }
     }
     row.addEventListener('pointerdown', (event) => clientPreferenceRowDrag.startRowDrag(event, id));
     els.clientDisplayList.appendChild(row);
@@ -11364,10 +11618,20 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
 }
 
 async function onToolTrackingToggle() {
-  const checked = Array.from(els.clientDisplayList.querySelectorAll('input[data-preference="track"]'))
-    .filter((cb) => cb.checked)
+  const trackCheckboxes = Array.from(els.clientDisplayList.querySelectorAll('input[data-preference="track"]'))
+    .filter((cb) => cb.checked);
+  // The lane clients' checkboxes gate their Electron collection lanes, not the
+  // shared clients CSV — no collector adapter exists for them, and the CSV
+  // would hand an unknown id to the collector and tokscale.
+  const laneToggles = trackCheckboxes.filter((cb) => isCollectionLaneClient(cb.dataset.client));
+  const checked = trackCheckboxes
+    .filter((cb) => !isCollectionLaneClient(cb.dataset.client))
     .map((cb) => cb.dataset.client);
-  await saveSettings({ clients: checked.join(',') });
+  const patch = { clients: checked.join(',') };
+  for (const toggle of laneToggles) {
+    patch[collectionLaneClient(toggle.dataset.client).enabledSetting] = toggle.checked;
+  }
+  await saveSettings(patch);
   // `clients` is usage-structural, so settings:update schedules a latest-wins
   // usage reconciliation and the eventual collector runs its own full tick.
   // Forcing a refresh here would bypass that settling boundary, duplicate the
@@ -12508,6 +12772,26 @@ function renderConnectionStatus(surface = visibleStatsSurface()) {
   setStatus(statusTextFor(state.mode, state.streamConnected));
   if (surface === 'settings') renderSyncClientStatus();
 }
+window.tokenMonitor.onTraeStatusPush?.((payload) => {
+  state.traeStatus = payload;
+  // The collection-list row's badge and expanded panel read this status; the
+  // render signature includes it, so unchanged pushes repaint nothing.
+  renderToolPreferences();
+});
+window.tokenMonitor.traeStatus?.().then((status) => {
+  if (!status) return;
+  state.traeStatus = status;
+  renderToolPreferences();
+}).catch(() => {});
+window.tokenMonitor.onTraeWorkStatusPush?.((payload) => {
+  state.traeWorkStatus = payload;
+  renderToolPreferences();
+});
+window.tokenMonitor.traeWorkStatus?.().then((status) => {
+  if (!status) return;
+  state.traeWorkStatus = status;
+  renderToolPreferences();
+}).catch(() => {});
 
 function renderStatsUpdate() {
   const surface = visibleStatsSurface();
@@ -12522,6 +12806,10 @@ function renderStatsUpdate() {
     return;
   }
   if (surface !== 'settings') return;
+  // The total is visible below the open settings panel, so it repaints here
+  // too — render() runs on the main surface only, and without this the
+  // headline would go stale until the next interaction with the main view.
+  if (state.stats) renderMainTotal();
   renderCodexAccounts();
   renderSettingsSummaries();
   renderLimitProviderCheckboxes();

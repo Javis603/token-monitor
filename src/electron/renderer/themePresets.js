@@ -63,7 +63,7 @@
   const VENDOR_ORDER = [
     'claude', 'codex', 'hermes', 'opencode', 'openrouter', 'openclaw', 'cline', 'cursor',
     'gemini', 'antigravity', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'qoder', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'deepseek', 'xai', 'meta', 'mistral',
-    'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'minimax', 'doubao', 'hunyuan', 'volcengine', 'ollama', 'trae', 'thirdparty'
+    'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'minimax', 'doubao', 'hunyuan', 'volcengine', 'ollama', 'trae', 'traework', 'thirdparty'
   ];
 
   // Display labels for every vendor in the clientColors map. The widget also
@@ -114,6 +114,7 @@
     volcengine: 'Volcengine',
     qoder: 'Qoder',
     trae: 'Trae CN',
+    traework: 'Trae Work CN',
     ollama: 'Ollama',
     thirdparty: 'Third-party APIs',
     default: 'Default'

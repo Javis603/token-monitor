@@ -618,6 +618,29 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .settings-wsl-block { display: grid; gap: 6px; min-width: 0; }
 .settings-wsl-block.hidden { display: none; }
 .wsl-panel { display: grid; gap: 4px; margin-top: 4px; }
+.settings-trae-block { display: grid; gap: 6px; min-width: 0; }
+.settings-trae-block.hidden { display: none; }
+.trae-panel { display: grid; gap: 4px; margin-top: 4px; }
+.trae-panel-header, .trae-panel-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.trae-panel-actions { display: flex; gap: 8px; padding-left: 10px; }
+.trae-panel-help { margin: 2px 0 0 10px; }
+.trae-action-button {
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid rgba(var(--line-rgb), 0.28);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+.trae-action-button:hover:not(:disabled),
+.trae-action-button:focus-visible {
+  color: var(--text);
+  border-color: rgba(var(--line-rgb), 0.5);
+}
+.trae-action-button:disabled { opacity: 0.38; cursor: default; }
 .settings-export-block { display: grid; gap: 8px; min-width: 0; }
 /* Give the section description room under the header so the two small-text lines don't merge. */
 .settings-export-block > .settings-note { margin: 2px 0 4px; }
@@ -3429,6 +3452,7 @@ html.is-windows .settings-panel select option {
 .row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
 .row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
 .row-icon-trae       { -webkit-mask-image: url(../../../assets/icons/trae.svg);          mask-image: url(../../../assets/icons/trae.svg); }
+.row-icon-traework   { -webkit-mask-image: url(../../../assets/icons/traework.svg);      mask-image: url(../../../assets/icons/traework.svg); }
 .row-icon-qodercn    { -webkit-mask-image: url(../../../assets/icons/qodercn.svg);      mask-image: url(../../../assets/icons/qodercn.svg); }
 .row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
 .row-icon-thirdparty { -webkit-mask-image: url(../../../assets/icons/thirdparty.svg);      mask-image: url(../../../assets/icons/thirdparty.svg); }

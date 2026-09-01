@@ -23,3 +23,7 @@ worker/.wrangler/
 worker/node_modules/
 worker/.dev.vars
 devlog/
+
+# Local tool state (security-scan history, IDE scratch)
+.mimosa/
+.trae/

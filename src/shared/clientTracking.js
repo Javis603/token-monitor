@@ -16,15 +16,27 @@ function insertClientBefore(clientsCsv, clientId, beforeClientId) {
 }
 
 // Every wired client id, including opt-in ones kept out of DEFAULT_CLIENTS (micode,
-// qodercn). Display-preference normalization (hide/pin/reorder) keys off this list,
-// so an opt-in client's prefs survive a round-trip instead of being silently dropped.
-// Mirror the renderer's KNOWN_CLIENTS; add any future opt-in ids here too.
+// qodercn, trae). Display-preference normalization (hide/pin/reorder) keys off this
+// list, so an opt-in client's prefs survive a round-trip instead of being silently
+// dropped. Mirror the renderer's KNOWN_CLIENTS; add any future opt-in ids here too.
 // qodercn (Qoder CN local SQLite adapter) stays opt-in per the upstream tool-support
 // boundary — a local adapter that may break when Qoder changes its DB schema.
+// trae (Trae CN) and traework (TraeWork / TRAE SOLO CN) collect through the
+// Electron traeCollection lanes, not this collector — they are listed for
+// display preferences only. The empty before-id makes insertClientBefore
+// append, keeping the renderer's tail order.
 const KNOWN_CLIENTS = insertClientBefore(
-  insertClientBefore(DEFAULT_CLIENTS, 'micode', 'zcode'),
-  'qodercn',
-  'reasonix'
+  insertClientBefore(
+    insertClientBefore(
+      insertClientBefore(DEFAULT_CLIENTS, 'micode', 'zcode'),
+      'qodercn',
+      'reasonix'
+    ),
+    'trae',
+    'traework'
+  ),
+  'traework',
+  ''
 );
 
 function normalizeClientsCsv(value) {
