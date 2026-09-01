@@ -573,7 +573,9 @@ test('collectQoderCnTranscriptRows: skips oversized lines and bad JSON', () => {
     message: { role: 'assistant', content: 'hi', model: 'dfmodel', usage: { credits: 1 } }
   });
   const validLine2 = JSON.stringify({
-    timestamp: '2026-08-15T11:00:00Z',
+    // 30 minutes after the first line: any real timezone offset keeps both
+    // stamps on the same local day, so the merge assertion holds everywhere.
+    timestamp: '2026-08-15T10:30:00Z',
     message: { role: 'assistant', content: 'ok', model: 'dfmodel', usage: { credits: 2 } }
   });
   const oversizedLine = 'x'.repeat(300000);
