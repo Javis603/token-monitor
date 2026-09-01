@@ -97,6 +97,18 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
       return () => ipcRenderer.removeListener('antigravity:accounts', handler);
     }
   },
+  zed: {
+    accounts: () => ipcRenderer.invoke('zed:accounts'),
+    addAccount: () => ipcRenderer.invoke('zed:addAccount'),
+    cancelLogin: () => ipcRenderer.invoke('zed:cancelLogin'),
+    removeAccount: (id) => ipcRenderer.invoke('zed:removeAccount', id),
+    setAccountEnabled: (id, enabled) => ipcRenderer.invoke('zed:setAccountEnabled', id, enabled),
+    onAccounts: (callback) => {
+      const handler = (_event, accounts) => callback(accounts);
+      ipcRenderer.on('zed:accounts', handler);
+      return () => ipcRenderer.removeListener('zed:accounts', handler);
+    }
+  },
   mimo: {
     accounts: () => ipcRenderer.invoke('mimo:accounts'),
     addAccount: (cookieHeader) => ipcRenderer.invoke('mimo:addAccount', cookieHeader),

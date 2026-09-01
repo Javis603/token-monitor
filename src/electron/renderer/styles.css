@@ -3491,6 +3491,10 @@ html.is-windows .settings-panel select option {
   -webkit-mask-image: url(../../../assets/icons/copilot.svg);
   mask-image: url(../../../assets/icons/copilot.svg);
 }
+.limit-icon-zed {
+  -webkit-mask-image: url(../../../assets/icons/zed.svg);
+  mask-image: url(../../../assets/icons/zed.svg);
+}
 .limit-icon-kiro {
   -webkit-mask-image: url(../../../assets/icons/kiro.svg);
   mask-image: url(../../../assets/icons/kiro.svg);
@@ -4782,6 +4786,9 @@ html.is-windows .limit-live-badge {
 .limit-window-no-reset .limit-reset {
   display: none;
   min-height: 0;
+}
+.limit-window-warning .limit-window-text {
+  color: var(--red);
 }
 .limit-row.stale .limit-name, .limit-row.stale .limit-window-text span:last-child { color: var(--muted); }
 .footer {

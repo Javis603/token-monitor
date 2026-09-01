@@ -885,6 +885,58 @@ test('Z.ai, Volcengine, Qoder, Trae, and Ollama account panels are exposed in se
   assert.match(volcengineUrlBody, /console\.volcengine\.com\/ark\/region:ark\+cn-beijing\/openManagement/);
 });
 
+test('Zed account panel uses managed browser sign-in without renderer credentials', () => {
+  const html = readRendererFile('index.html');
+  const details = html.match(/<div id="zedSettingsDetails"[\s\S]*?<div id="zedAccountErrorMessage"[^>]*><\/div>/)?.[0] || '';
+  assert.match(details, /id="zedAccountList"/);
+  assert.match(details, /id="zedAddAccountButton"/);
+  assert.match(details, /id="zedCancelLoginButton"/);
+  assert.doesNotMatch(details, /zedUserIdInput|zedAccessTokenInput|zedServerUrlInput/);
+
+  const app = readRendererFile('app.js');
+  const connectionDetailMap = app.slice(
+    app.indexOf('const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {'),
+    app.indexOf('const TRAY_ICON_VARIANTS = [')
+  );
+  assert.doesNotMatch(connectionDetailMap, /\bzed:/);
+  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
+  assert.match(setupBody, /window\.tokenMonitor\.zed\.addAccount\(\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.zed\.cancelLogin\(\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.zed\.onAccounts/);
+  assert.doesNotMatch(setupBody, /patch\.zedUserId|patch\.zedAccessToken|zedServerUrl:\s*serverInput/);
+
+  const renderBody = functionBody(app, 'renderZedStatus', 'minimaxPlatformUrl');
+  assert.match(renderBody, /state\.settings\?\.zedManagedAccounts/);
+  assert.match(renderBody, /window\.tokenMonitor\.zed\.setAccountEnabled/);
+  assert.match(renderBody, /window\.tokenMonitor\.zed\.removeAccount/);
+  assert.match(renderBody, /limitProviderPlanDisplayLabel\('zed', provider\?\.planLabel \|\| account\.planLabel\)/);
+
+  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
+  assert.match(preload, /addAccount: \(\) => ipcRenderer\.invoke\('zed:addAccount'\)/);
+  assert.match(preload, /cancelLogin: \(\) => ipcRenderer\.invoke\('zed:cancelLogin'\)/);
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const settingsForRenderer = functionBody(main, 'settingsForRenderer', 'pushSettingsToRenderer');
+  assert.match(settingsForRenderer, /zedManagedAccounts: zedAccountsForRenderer\(\)/);
+  assert.match(settingsForRenderer, /'zedAccessToken'/);
+  assert.doesNotMatch(settingsForRenderer, /zedAccessToken:\s*settings/);
+  assert.match(main, /runZedOAuthLogin/);
+  assert.match(main, /readZedCredential/);
+  assert.match(main, /ipcMain\.handle\('zed:addAccount'/);
+
+  const i18n = readRendererFile('i18n.js');
+  assert.doesNotMatch(i18n, /settings\.limits\.connection\.zed/);
+  for (const key of [
+    'settings.zed.title',
+    'settings.zed.addAccount',
+    'settings.zed.loginStatus',
+    'settings.zed.loginTimeout',
+    'settings.zed.credentialStorageUnavailable',
+    'limits.zed.overdueInvoices'
+  ]) {
+    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+  }
+});
+
 test('Command Code account panel saves a cookie, enables its provider, and opens the allowlisted usage page', () => {
   const html = readRendererFile('index.html');
   assert.match(html, /<div id="commandcodeAccountGroup"[\s\S]*?<textarea id="commandcodeCookieInput"[\s\S]*?<button id="commandcodeCookieSubmit"[\s\S]*data-i18n="settings\.commandcode\.saveCookie">/);
@@ -2238,6 +2290,11 @@ test('main collectors share one live GUI limit credential resolver in every widg
     'volcengineRegion', 'qoderCookie', 'qoderSite', 'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken',
     'ollamaCookie'
   ]) assert.match(runtimeConfig, new RegExp(`${key}: settings\\.${key}`));
+  assert.match(runtimeConfig, /zedUserId: env\.TOKEN_MONITOR_ZED_USER_ID/);
+  assert.match(runtimeConfig, /zedAccessToken: env\.TOKEN_MONITOR_ZED_ACCESS_TOKEN/);
+  assert.match(runtimeConfig, /zedServerUrl: env\.TOKEN_MONITOR_ZED_SERVER_URL/);
+  assert.match(runtimeConfig, /zedManagedAccounts: context\.zedManagedAccounts/);
+  assert.match(main, /zedManagedAccounts: zedManagedAccountsForCollector\(\)/);
 });
 
 test('WorkBuddy Electron fetch adapter forwards parsed response JSON', () => {

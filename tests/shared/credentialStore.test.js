@@ -326,3 +326,14 @@ test('stores and removes Antigravity OAuth credentials without exposing them as 
   assert.equal(store.readAntigravityCredential('account-1'), null);
   assert.equal(store.writeAntigravityCredential('__proto__', credentials), false);
 });
+
+test('stores and removes Zed login credentials without exposing them as settings', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  const credentials = { userId: '42', accessToken: 'zed-access-secret' };
+  assert.equal(store.writeZedCredential('zed-account-1', credentials), true);
+  assert.deepEqual(store.readZedCredential('zed-account-1'), credentials);
+  assert.equal(store.settingsCredentials().zedManagedAccounts, undefined);
+  assert.equal(store.removeZedCredential('zed-account-1'), true);
+  assert.equal(store.readZedCredential('zed-account-1'), null);
+  assert.equal(store.writeZedCredential('__proto__', credentials), false);
+});

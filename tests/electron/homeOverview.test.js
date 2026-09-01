@@ -237,6 +237,54 @@ test('homeLimitAccounts keeps a real billing remaining percentage fallback', () 
   ]);
 });
 
+test('homeLimitAccounts keeps Zed unlimited predictions and billing cycle distinct', () => {
+  const [row] = homeLimitAccounts([{
+    key: 'zed:0',
+    providerId: 'zed',
+    name: 'Zed',
+    windows: [
+      {
+        kind: 'billing',
+        label: 'Edit Predictions',
+        usedPercent: 0,
+        detail: 'Unlimited',
+        showMeter: true
+      },
+      {
+        kind: 'billing',
+        label: 'Billing cycle',
+        usedPercent: 25,
+        resetsAt: '2026-10-01T00:00:00.000Z',
+        showMeter: true
+      }
+    ]
+  }]);
+
+  assert.equal(row.providerId, 'zed');
+  assert.deepEqual(row.windows.map((window) => ({
+    label: window.label,
+    remainingPercent: window.remainingPercent,
+    showMeter: window.showMeter,
+    detail: window.detail,
+    resetsAt: window.resetsAt
+  })), [
+    {
+      label: 'Edit Predictions',
+      remainingPercent: 100,
+      showMeter: true,
+      detail: 'Unlimited',
+      resetsAt: undefined
+    },
+    {
+      label: 'Billing cycle',
+      remainingPercent: 75,
+      showMeter: true,
+      detail: '',
+      resetsAt: '2026-10-01T00:00:00.000Z'
+    }
+  ]);
+});
+
 test('homeLimitAccountsForProviders includes Grok billing and DeepSeek balance rows', () => {
   const rows = homeLimitAccountsForProviders({
     providers: [

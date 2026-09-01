@@ -267,15 +267,45 @@ test('runtime config scopes Trae credentials and prefers saved settings over env
   assert.deepEqual(classification.limitScopes, [{ provider: 'trae' }]);
 });
 
+test('runtime config keeps Zed headless credentials env-only and accepts managed accounts through context', () => {
+  const settings = {
+    zedUserId: '42',
+    zedAccessToken: 'saved-token',
+    zedServerUrl: 'https://zed.example'
+  };
+  const limits = limitsConfigFromSettings(settings, {
+    env: {
+      TOKEN_MONITOR_ZED_USER_ID: '99',
+      TOKEN_MONITOR_ZED_ACCESS_TOKEN: 'env-token',
+      TOKEN_MONITOR_ZED_SERVER_URL: 'https://env.zed.example'
+    },
+    zedManagedAccounts: [{ id: 'zed-live', userId: '99', credentials: { accessToken: 'managed-token' } }]
+  });
+  assert.equal(limits.zedUserId, '99');
+  assert.equal(limits.zedAccessToken, 'env-token');
+  assert.equal(limits.zedServerUrl, 'https://env.zed.example');
+  assert.deepEqual(limits.zedManagedAccounts, [
+    { id: 'zed-live', userId: '99', credentials: { accessToken: 'managed-token' } }
+  ]);
+
+  const classification = classifySettingsChange(settings, {
+    ...settings,
+    zedUserId: '43'
+  });
+  assert.deepEqual(classification.limitScopes, []);
+});
+
 test('limits config resolves managed credentials at dispatch time through context', () => {
   const limits = limitsConfigFromSettings({ codexManagedAccounts: [{ id: 'stale' }] }, {
     env: {},
     codexManagedAccounts: [{ id: 'live', homePath: '/tmp/live' }],
     antigravityManagedAccounts: [{ id: 'antigravity', credentials: { accessToken: 'oauth' } }],
+    zedManagedAccounts: [{ id: 'zed', credentials: { accessToken: 'native-login' } }],
     mimoManagedAccounts: [{ id: 'mimo', cookieHeader: 'allowlisted' }]
   });
   assert.deepEqual(limits.codexManagedAccounts, [{ id: 'live', homePath: '/tmp/live' }]);
   assert.deepEqual(limits.antigravityManagedAccounts, [{ id: 'antigravity', credentials: { accessToken: 'oauth' } }]);
+  assert.deepEqual(limits.zedManagedAccounts, [{ id: 'zed', credentials: { accessToken: 'native-login' } }]);
   assert.deepEqual(limits.mimoManagedAccounts, [{ id: 'mimo', cookieHeader: 'allowlisted' }]);
 });
 

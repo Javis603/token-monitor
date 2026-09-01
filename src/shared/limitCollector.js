@@ -59,6 +59,7 @@ const kimiLimits = require('./kimiLimits');
 const { kimiToken, kimiWebToken, fetchKimiLimits } = kimiLimits;
 const workbuddyLimits = require('./workbuddyLimits');
 const traeLimits = require('./traeLimits');
+const zedLimits = require('./zedLimits');
 const {
   grokCredential,
   readAuthJson,
@@ -4040,6 +4041,7 @@ function providerFetchers(deps = {}) {
     workbuddy: (providerOptions, probeDeps) => workbuddyLimits.fetchWorkbuddyLimits(providerOptions, probeDeps),
     ollama: (providerOptions, probeDeps) => ollamaLimits.fetchOllamaLimits(providerOptions, probeDeps),
     kimi: (providerOptions, probeDeps) => kimiLimits.fetchKimiLimits(providerOptions, probeDeps),
+    zed: (providerOptions, probeDeps) => zedLimits.fetchZedLimits(providerOptions, probeDeps),
     thirdparty: (providerOptions, probeDeps) => thirdPartyLimits.fetchThirdPartyLimits(providerOptions, probeDeps),
     ...(deps.providerFetchers || {})
   };
@@ -4446,6 +4448,11 @@ module.exports = {
   kimiToken,
   kimiWebToken,
   fetchKimiLimits,
+  zedServerUrl: zedLimits.zedServerUrl,
+  normalizeZedAccessToken: zedLimits.normalizeZedAccessToken,
+  normalizeZedServerUrl: zedLimits.normalizeZedServerUrl,
+  normalizeZedUserId: zedLimits.normalizeZedUserId,
+  fetchZedLimits: zedLimits.fetchZedLimits,
   mapClaudeCliUsageToProvider,
   mapClaudeUsageToProvider,
   mapCodexRateLimitsToProvider,

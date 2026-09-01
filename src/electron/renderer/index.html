@@ -1122,6 +1122,24 @@
                 <div id="traeErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="zedAccountGroup" class="settings-group cursor-account-group">
+              <button id="zedSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="zedSettingsDetails">
+                <span data-i18n="settings.zed.title">Zed Accounts</span>
+                <span class="cursor-settings-summary">
+                  <span id="zedAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="zedSettingsDetails" class="cursor-settings-details hidden">
+                <div id="zedAccountList" class="managed-account-list"></div>
+                <div class="settings-actions">
+                  <button id="zedAddAccountButton" type="button" data-i18n="settings.zed.addAccount">Add Zed account</button>
+                  <button id="zedCancelLoginButton" type="button" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
+                </div>
+                <div id="zedLoginStatus" class="settings-note hidden" role="status" aria-live="polite"></div>
+                <div id="zedAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
+              </div>
+            </div>
             <div id="commandcodeAccountGroup" class="settings-group cursor-account-group">
               <button id="commandcodeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="commandcodeSettingsDetails">
                 <span data-i18n="settings.commandcode.title">Command Code Account</span>

@@ -29,6 +29,7 @@
     mimo: { web: 'Web' },
     grok: { rpc: 'CLI', web: 'Web' },
     copilot: { api: 'API' },
+    zed: { api: 'API' },
     kiro: { cli: 'CLI' },
     zai: { api: 'API' },
     zaiteam: { api: 'API' },
@@ -61,6 +62,7 @@
     mimo: ['Token Plan', 'Web'],
     grok: ['Auto', 'CLI/Web'],
     copilot: ['Manual login', 'API'],
+    zed: ['OAuth', 'API'],
     kiro: ['Auto', 'CLI'],
     zai: ['Coding Plan', 'API key'],
     zaiteam: ['Team Plan', 'API key'],
@@ -125,6 +127,16 @@
     const label = String(value || '').trim();
     if (!label || label.includes('@')) return label;
     return label.replace(/^[a-z]/, (letter) => letter.toUpperCase());
+  }
+
+  function limitProviderPlanDisplayLabel(providerOrId, value) {
+    const label = limitProviderDisplayLabel(value);
+    if (providerId(providerOrId) !== 'zed') return label;
+    // Zed's API returns canonical names such as "Zed Student" and "Zed Pro".
+    // The provider heading already supplies "Zed", so keep only the meaningful
+    // plan portion in both the Limits card and managed-account row. Unknown
+    // custom plan names pass through untouched.
+    return label.replace(/^Zed\s+/iu, '').trim() || label;
   }
 
   function codexAdditionalQuotaDisplayName(value) {
@@ -287,7 +299,7 @@
     if (status === 'notConfigured') {
       if (providerName === 'kimi') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'antigravity') return { label: 'Not set up', tone: 'setup' };
-      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama') return { label: 'Sign in', tone: 'setup' };
+      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi') return { label: 'Add API key', tone: 'setup' };
       if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };
@@ -435,6 +447,7 @@
     limitProviderCompactWindowPeriodLabel,
     limitProviderCompactWindows,
     limitProviderDisplayLabel,
+    limitProviderPlanDisplayLabel,
     limitProviderMainDeviceLabel,
     namedApiProfileStatus,
     limitProviderProvenance,

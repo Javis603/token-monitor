@@ -88,6 +88,7 @@ const LIMIT_PROVIDERS = [
   { id: 'kimi', label: 'Kimi' },
   { id: 'grok', label: 'Grok' },
   { id: 'copilot', label: 'GitHub Copilot' },
+  { id: 'zed', label: 'Zed' },
   { id: 'commandcode', label: 'Command Code' },
   { id: 'mimo', label: 'MiMo' },
   { id: 'zai', label: 'GLM' },
@@ -110,6 +111,7 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   cursor: 'cursorAccountGroup',
   antigravity: 'antigravityAccountGroup',
   kimi: 'kimiAccountGroup',
+  zed: 'zedAccountGroup',
   copilot: 'copilotAccountGroup',
   mimo: 'mimoAccountGroup',
   zai: 'zaiAccountGroup',
@@ -131,6 +133,7 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   cursor: 'cursorAccountStatus',
   antigravity: 'antigravityAccountStatus',
   kimi: 'kimiAccountStatus',
+  zed: 'zedAccountStatus',
   copilot: 'copilotApiTokenStatus',
   mimo: 'mimoAccountStatus',
   zai: 'zaiAccountStatus',
@@ -319,6 +322,9 @@ function normalizeInitialViewValue(value, allowed, fallback) {
 }
 
 const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+state.zedAccountExpanded = false;
+state.zedAccountError = '';
+state.zedSignInBusy = false;
 state.toolDetailMode = 'tokens';
 state.codexResetForecast = null;
 state.codexResetForecastBusy = false;
@@ -2401,7 +2407,7 @@ function limitProviderMeta(provider, provenance = null) {
 function limitProviderPlan(provider) {
   if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
   const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
-  if (label) return limitProviderPresentationApi.limitProviderDisplayLabel(label);
+  if (label) return limitProviderPresentationApi.limitProviderPlanDisplayLabel(provider, label);
   return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
 }
 
@@ -4335,17 +4341,19 @@ function thirdPartyQuotaWindow(provider) {
 function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
   if (hasPercent) return `${formatPercent(fillPercent)} ${limitModeSuffix(showUsed)}`;
   if (!window) return '--';
-  const remaining = Number(window?.remaining);
-  if (Number.isFinite(remaining)) {
+  if (String(window.detail || '').toLowerCase() === 'unlimited') return t('settings.thirdparty.unlimited');
+  const remaining = optionalFiniteNumber(window?.remaining);
+  if (remaining !== null) {
     return window?.showMeter === false ? formatLimitAmount(remaining) : `${formatLimitAmount(remaining)} left`;
   }
-  const limit = Number(window?.limit);
-  if (Number.isFinite(limit)) return `${formatLimitAmount(limit)} cap`;
-  return '';
+  const limit = optionalFiniteNumber(window?.limit);
+  if (limit !== null) return `${formatLimitAmount(limit)} cap`;
+  return window.detail || '';
 }
 
 function formatHomeLimitWindowValue(window, showUsed) {
   if (window?.planStatus === 'expired') return t('limits.mimo.planExpired');
+  if (String(window?.detail || '').toLowerCase() === 'unlimited') return t('settings.thirdparty.unlimited');
   if (isCreditsWindow(window)) {
     if (window.remaining == null) {
       return String(window.detail || '').toLowerCase() === 'unlimited'
@@ -4355,7 +4363,7 @@ function formatHomeLimitWindowValue(window, showUsed) {
     return formatCompactMoney(window.remaining, window.currency);
   }
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
-  return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
+  return percent === null ? (window?.detail || '--') : `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
 }
 
 function creditsBalanceValue(provider, credits) {
@@ -5031,6 +5039,35 @@ function renderProviderWindows(provider, color) {
     for (const billing of billingWindows) {
       const node = limitWindowNode(billing?.label || 'Monthly', billing, color, 0.68);
       node.classList.add('limit-window-wide');
+      windows.append(node);
+    }
+  } else if (provider.provider === 'zed') {
+    windows.classList.add('limit-windows-zed');
+    for (const billing of windowsForKind(provider, 'billing')) {
+      const isEditPredictions = billing?.limitId === 'zed.edit-predictions';
+      const isBillingCycle = billing?.limitId === 'zed.billing-cycle';
+      const isOverdue = billing?.limitId === 'zed.overdue-invoices';
+      const unlimited = isEditPredictions && String(billing?.detail || '').toLowerCase() === 'unlimited';
+      const renewalDate = isBillingCycle && billing?.resetsAt ? new Date(billing.resetsAt) : null;
+      const renewalDetail = renewalDate && !Number.isNaN(renewalDate.getTime())
+        ? t('settings.subscriptions.renewsOn', { date: expiryDateLabel(renewalDate) })
+        : '';
+      const valueOverride = unlimited
+        ? t('settings.thirdparty.unlimited')
+        : isOverdue
+          ? t('limits.zed.overdueInvoices')
+          : null;
+      const node = limitWindowNode(
+        billing?.label || 'Edit Predictions',
+        billing,
+        color,
+        isEditPredictions ? 0.95 : 0.68,
+        valueOverride,
+        renewalDetail
+      );
+      node.classList.add('limit-window-wide');
+      if (unlimited || isOverdue) node.classList.add('limit-window-no-reset');
+      if (isOverdue) node.classList.add('limit-window-warning');
       windows.append(node);
     }
   } else if (provider.provider === 'zai' || provider.provider === 'zaiteam') {
@@ -9350,6 +9387,7 @@ function syncSettingsForm() {
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
   renderExternalProviderStatus('trae');
+  renderZedStatus();
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
@@ -12537,6 +12575,7 @@ function renderStatsUpdate() {
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
   renderExternalProviderStatus('trae');
+  renderZedStatus();
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
@@ -14596,6 +14635,118 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
     error: 'settings.common.error'
   };
   return t(statusKeys[accountStatus] || 'settings.common.error');
+}
+
+function renderZedStatus() {
+  if (!isSettingsSurfaceVisible()) return;
+  const statusEl = document.getElementById('zedAccountStatus');
+  const listEl = document.getElementById('zedAccountList');
+  const errorEl = document.getElementById('zedAccountErrorMessage');
+  const statusMessage = document.getElementById('zedLoginStatus');
+  const addButton = document.getElementById('zedAddAccountButton');
+  const cancelButton = document.getElementById('zedCancelLoginButton');
+  if (!statusEl || !listEl || !errorEl || !addButton || !cancelButton) return;
+  const accounts = state.settings?.zedManagedAccounts || [];
+  const enabledCount = accounts.filter((account) => account.enabled !== false).length;
+  const envConfigured = Boolean(state.settings?.zedEnvConfigured);
+  setCursorStatusText(statusEl, accounts.length > 0
+    ? t('settings.zed.connected', { linked: enabledCount, total: accounts.length })
+    : envConfigured ? t('settings.zed.statusEnv') : t('settings.zed.notConfigured'));
+  errorEl.textContent = state.zedAccountError || '';
+  errorEl.classList.toggle('hidden', !state.zedAccountError);
+  addButton.disabled = state.zedSignInBusy;
+  addButton.textContent = t(state.zedSignInBusy ? 'settings.zed.waitingForBrowser' : 'settings.zed.addAccount');
+  cancelButton.classList.toggle('hidden', !state.zedSignInBusy);
+  if (statusMessage) {
+    statusMessage.textContent = state.zedSignInBusy ? t('settings.zed.loginStatus') : '';
+    statusMessage.classList.toggle('hidden', !state.zedSignInBusy);
+  }
+
+  listEl.replaceChildren();
+  if (accounts.length === 0 && !envConfigured) {
+    const empty = document.createElement('p');
+    empty.className = 'settings-note';
+    empty.textContent = t('settings.zed.empty');
+    listEl.append(empty);
+  }
+  const providers = localProviderStatuses('zed');
+  accounts.forEach((account, index) => {
+    const enabled = account.enabled !== false;
+    const accountName = String(account.accountName || '').trim()
+      || t('settings.zed.accountFallback', { number: index + 1 });
+    const row = document.createElement('div');
+    row.className = 'managed-account-row';
+    row.classList.toggle('disabled', !enabled);
+
+    const input = document.createElement('input');
+    input.className = 'managed-account-checkbox';
+    input.type = 'checkbox';
+    input.checked = enabled;
+    input.disabled = state.zedSignInBusy;
+    input.setAttribute('aria-label', t('settings.zed.toggleAccount', { account: accountName }));
+    input.addEventListener('change', async () => {
+      input.disabled = true;
+      const result = await window.tokenMonitor.zed.setAccountEnabled(account.id, input.checked);
+      if (!result?.ok) state.zedAccountError = result?.error || t('settings.zed.toggleFailed');
+      else {
+        state.zedAccountError = '';
+        state.settings.zedManagedAccounts = result.accounts || [];
+      }
+      renderZedStatus();
+      renderSettingsSummaries();
+    });
+
+    const main = document.createElement('div');
+    main.className = 'managed-account-main';
+    const name = document.createElement('div');
+    name.className = 'managed-account-email';
+    name.textContent = accountName;
+    main.append(name);
+
+    const right = document.createElement('span');
+    right.className = 'managed-account-right';
+    const info = document.createElement('span');
+    info.className = 'managed-account-info';
+    const provider = providers.find((candidate) => candidate?.accountKey === account.accountKey);
+    const planLabel = limitProviderPresentationApi.limitProviderPlanDisplayLabel('zed', provider?.planLabel || account.planLabel);
+    const statusLabel = provider && provider.status !== 'ok'
+      ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
+      : '';
+    info.textContent = enabled ? (planLabel || statusLabel) : t('settings.zed.disabled');
+    info.title = info.textContent;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'managed-account-remove';
+    remove.textContent = '✕';
+    remove.title = t('settings.zed.remove');
+    remove.setAttribute('aria-label', t('settings.zed.remove'));
+    remove.disabled = state.zedSignInBusy;
+    let confirmingRemove = false;
+    remove.addEventListener('click', async () => {
+      if (!confirmingRemove) {
+        confirmingRemove = true;
+        remove.classList.add('confirming');
+        remove.textContent = '✓';
+        remove.title = t('settings.zed.removeConfirm', { account: accountName });
+        remove.setAttribute('aria-label', remove.title);
+        return;
+      }
+      remove.disabled = true;
+      const result = await window.tokenMonitor.zed.removeAccount(account.id);
+      if (!result?.ok) state.zedAccountError = result?.error || t('settings.zed.removeFailed');
+      else {
+        state.zedAccountError = '';
+        state.settings.zedManagedAccounts = result.accounts || [];
+        refreshStats({ force: true }).catch(() => {});
+      }
+      renderZedStatus();
+      renderSettingsSummaries();
+    });
+    right.append(info, remove);
+    row.append(input, main, right);
+    listEl.append(row);
+  });
+  renderSettingsSummaries();
 }
 
 // Follow the region we last successfully polled so a global (minimax.io)
@@ -17006,6 +17157,63 @@ function setupCursorAccountUI() {
         errorEl.textContent = t('settings.trae.saveFailed', { message: err.message });
         errorEl.classList.remove('hidden');
       }
+    });
+  }
+
+  const zedToggle = document.getElementById('zedSettingsToggle');
+  if (zedToggle && window.tokenMonitor.zed) {
+    zedToggle.addEventListener('click', () => setExternalAccountExpanded('zed', !state.zedAccountExpanded));
+    setExternalAccountExpanded('zed', false);
+    renderZedStatus();
+
+    window.tokenMonitor.zed.onAccounts((accounts) => {
+      state.settings.zedManagedAccounts = accounts || [];
+      renderZedStatus();
+    });
+    window.tokenMonitor.zed.accounts().then((accounts) => {
+      state.settings.zedManagedAccounts = accounts || [];
+      renderZedStatus();
+    }).catch(() => {});
+
+    document.getElementById('zedAddAccountButton').addEventListener('click', async () => {
+      if (state.zedSignInBusy) return;
+      state.zedSignInBusy = true;
+      state.zedAccountError = '';
+      renderZedStatus();
+      let result;
+      try {
+        result = await window.tokenMonitor.zed.addAccount();
+      } catch (error) {
+        result = { ok: false, error: error.message };
+      } finally {
+        state.zedSignInBusy = false;
+      }
+      if (!result?.ok && result?.errorCode !== 'cancelled') {
+        const errorKeys = {
+          TIMEOUT: 'settings.zed.loginTimeout',
+          TOKEN_DECRYPT_FAILED: 'settings.zed.decryptFailed',
+          CALLBACK_UNAVAILABLE: 'settings.zed.callbackUnavailable',
+          INVALID_CALLBACK: 'settings.zed.loginFailed',
+          unauthorized: 'settings.zed.unauthorized',
+          validationFailed: 'settings.zed.validationFailed',
+          credentialStorageUnavailable: 'settings.zed.credentialStorageUnavailable',
+          loginInProgress: 'settings.zed.loginInProgress'
+        };
+        state.zedAccountError = errorKeys[result?.errorCode]
+          ? t(errorKeys[result.errorCode])
+          : result?.error || t('settings.zed.loginFailed');
+      } else if (result?.ok) {
+        state.zedAccountError = '';
+        state.settings.zedManagedAccounts = result.accounts || [];
+        refreshStats({ force: true }).catch(() => {});
+      }
+      renderZedStatus();
+    });
+
+    document.getElementById('zedCancelLoginButton').addEventListener('click', async () => {
+      await window.tokenMonitor.zed.cancelLogin();
+      state.zedSignInBusy = false;
+      renderZedStatus();
     });
   }
 

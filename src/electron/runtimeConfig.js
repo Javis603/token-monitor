@@ -194,6 +194,9 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
       || env.TOKEN_MONITOR_TRAE_DEVICE_ID
       || env.TRAE_DEVICE_ID
       || '',
+    zedUserId: env.TOKEN_MONITOR_ZED_USER_ID || '',
+    zedAccessToken: env.TOKEN_MONITOR_ZED_ACCESS_TOKEN || '',
+    zedServerUrl: env.TOKEN_MONITOR_ZED_SERVER_URL || 'https://zed.dev',
     commandcodeCookie: settings.commandcodeCookie || '',
     workbuddyAccessToken: workbuddySettings.workbuddyAccessToken
       || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN
@@ -233,6 +236,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     ollamaCookie: settings.ollamaCookie || '',
     codexManagedAccounts: context.codexManagedAccounts ?? settings.codexManagedAccounts ?? [],
     antigravityManagedAccounts: context.antigravityManagedAccounts ?? settings.antigravityManagedAccounts ?? [],
+    zedManagedAccounts: context.zedManagedAccounts ?? settings.zedManagedAccounts ?? [],
     mimoManagedAccounts: context.mimoManagedAccounts ?? settings.mimoManagedAccounts ?? [],
     thirdPartyProfiles: settings.thirdPartyProfiles || {}
   };

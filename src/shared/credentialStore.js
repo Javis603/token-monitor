@@ -386,6 +386,31 @@ class CredentialStore {
     return !this.readAntigravityCredential(accountId);
   }
 
+  readZedCredential(id, document = this.readDocument()) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId) return null;
+    const value = valueAt(document.credentials, ['providers', 'zed', 'accounts', accountId, 'credentials']);
+    return isObject(value) ? cloneJson(value) : null;
+  }
+
+  writeZedCredential(id, credentials) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId || !credentialValuePresent(credentials)) return false;
+    const document = this.readDocument();
+    setValueAt(document.credentials, ['providers', 'zed', 'accounts', accountId, 'credentials'], credentials);
+    this.writeDocument(document);
+    return true;
+  }
+
+  removeZedCredential(id) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId) return false;
+    const document = this.readDocument();
+    deleteValueAt(document.credentials, ['providers', 'zed', 'accounts', accountId]);
+    this.writeDocument(document);
+    return !this.readZedCredential(accountId);
+  }
+
   migrateLegacyMimoCredentials(entries) {
     const document = this.readDocument();
     if (Number(document.migrations.mimoFiles || 0) >= MIMO_MIGRATION_VERSION) {

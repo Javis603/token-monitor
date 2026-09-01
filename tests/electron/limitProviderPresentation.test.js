@@ -18,6 +18,7 @@ const {
   limitProviderCompactWindowPeriodLabel,
   limitProviderCompactWindows,
   limitProviderMainDeviceLabel,
+  limitProviderPlanDisplayLabel,
   namedApiProfileStatus,
   limitProviderProvenance,
   limitResetRemainingMs,
@@ -54,6 +55,15 @@ test('limitProviderDisplayLabel normalizes short account labels without rewritin
   assert.equal(limitProviderDisplayLabel('Team'), 'Team');
   assert.equal(limitProviderDisplayLabel('primary.user@example.com'), 'primary.user@example.com');
   assert.equal(limitProviderDisplayLabel(''), '');
+});
+
+test('Zed plan labels omit only the redundant provider prefix', () => {
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Student'), 'Student');
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Pro'), 'Pro');
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Pro Trial'), 'Pro Trial');
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Business'), 'Business');
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Custom Enterprise'), 'Custom Enterprise');
+  assert.equal(limitProviderPlanDisplayLabel('codex', 'ChatGPT Plus'), 'ChatGPT Plus');
 });
 
 test('Codex additional quota display names map gpt-reserve and preserve unknown names', () => {
@@ -871,6 +881,25 @@ test('Grok renders its single Monthly billing window full-width instead of an em
   assert.match(renderProviderWindows, /windowForKind\(provider, 'billing'\)/);
   assert.match(renderProviderWindows, /limitWindowNode\(monthly\.label \|\| 'Monthly', monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /limit-window-wide/);
+});
+
+test('Zed renders prediction, billing-cycle, and overdue states with a Limits icon', () => {
+  const app = readRendererFile('app.js');
+  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const css = readRendererFile('styles.css');
+
+  assert.match(renderProviderWindows, /provider\.provider === 'zed'/);
+  assert.match(renderProviderWindows, /windowsForKind\(provider, 'billing'\)/);
+  assert.match(renderProviderWindows, /billing\?\.label \|\| 'Edit Predictions'/);
+  assert.match(renderProviderWindows, /billing\?\.limitId === 'zed\.edit-predictions'/);
+  assert.match(renderProviderWindows, /billing\?\.limitId === 'zed\.billing-cycle'/);
+  assert.match(renderProviderWindows, /billing\?\.limitId === 'zed\.overdue-invoices'/);
+  assert.match(renderProviderWindows, /settings\.thirdparty\.unlimited/);
+  assert.match(renderProviderWindows, /settings\.subscriptions\.renewsOn/);
+  assert.match(renderProviderWindows, /limits\.zed\.overdueInvoices/);
+  assert.match(renderProviderWindows, /limit-window-no-reset/);
+  assert.match(renderProviderWindows, /limit-window-warning/);
+  assert.match(css, /\.limit-icon-zed\s*\{[^}]*assets\/icons\/zed\.svg[^}]*\}/s);
 });
 
 test('WorkBuddy renders unlimited enterprise credits without requiring a numeric balance', () => {
@@ -2149,6 +2178,10 @@ const presentation = require('../../src/electron/renderer/limitProviderPresentat
 
 test('Antigravity uses the shared OAuth source label', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'antigravity', source: 'oauth' }), 'OAuth');
+});
+
+test('Zed distinguishes its OAuth sign-in from its API quota source', () => {
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zed'), ['OAuth', 'API']);
 });
 
 test('Antigravity account verification is shown as an actionable status', () => {
