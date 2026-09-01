@@ -883,22 +883,17 @@ test('Grok renders its single Monthly billing window full-width instead of an em
   assert.match(renderProviderWindows, /limit-window-wide/);
 });
 
-test('Zed renders prediction, billing-cycle, and overdue states with a Limits icon', () => {
+test('Zed renders one monetary Token Spend window with reset enrichment and a Limits icon', () => {
   const app = readRendererFile('app.js');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
   const css = readRendererFile('styles.css');
 
   assert.match(renderProviderWindows, /provider\.provider === 'zed'/);
   assert.match(renderProviderWindows, /windowsForKind\(provider, 'billing'\)/);
-  assert.match(renderProviderWindows, /billing\?\.label \|\| 'Edit Predictions'/);
-  assert.match(renderProviderWindows, /billing\?\.limitId === 'zed\.edit-predictions'/);
-  assert.match(renderProviderWindows, /billing\?\.limitId === 'zed\.billing-cycle'/);
-  assert.match(renderProviderWindows, /billing\?\.limitId === 'zed\.overdue-invoices'/);
-  assert.match(renderProviderWindows, /settings\.thirdparty\.unlimited/);
+  assert.match(renderProviderWindows, /billing\?\.label \|\| 'Token Spend'/);
+  assert.match(renderProviderWindows, /formatMoney\(used, currency\).*formatMoney\(limit, currency\)/s);
   assert.match(renderProviderWindows, /settings\.subscriptions\.renewsOn/);
-  assert.match(renderProviderWindows, /limits\.zed\.overdueInvoices/);
-  assert.match(renderProviderWindows, /limit-window-no-reset/);
-  assert.match(renderProviderWindows, /limit-window-warning/);
+  assert.doesNotMatch(renderProviderWindows, /zed\.edit-predictions|zed\.billing-cycle|zed\.overdue-invoices/);
   assert.match(css, /\.limit-icon-zed\s*\{[^}]*assets\/icons\/zed\.svg[^}]*\}/s);
 });
 
@@ -2180,8 +2175,9 @@ test('Antigravity uses the shared OAuth source label', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'antigravity', source: 'oauth' }), 'OAuth');
 });
 
-test('Zed distinguishes its OAuth sign-in from its API quota source', () => {
-  assert.deepEqual(presentation.limitProviderCapabilityTags('zed'), ['OAuth', 'API']);
+test('Zed identifies its manual web-session setup and dashboard source', () => {
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zed'), ['Manual login', 'Web']);
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'zed', source: 'web' }), 'Web');
 });
 
 test('Antigravity account verification is shown as an actionable status', () => {

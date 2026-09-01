@@ -1,312 +1,248 @@
 'use strict';
 
-const crypto = require('node:crypto');
+const { BROWSER_USER_AGENT } = require('./browserUserAgent');
+const { hashKey } = require('./hashKey');
 const { normalizeLimitProvider } = require('./limits');
+const { runWithProbeDeadline } = require('./probeDeadline');
 
-const DEFAULT_ZED_SERVER_URL = 'https://zed.dev';
-const DEFAULT_ZED_API_URL = 'https://cloud.zed.dev/client/users/me';
+const ZED_FETCH_TIMEOUT_MS = 12_000;
+const ZED_SUBSCRIPTION_TIMEOUT_MS = 6_000;
+const ZED_DASHBOARD_URL = 'https://dashboard.zed.dev/account';
+const ZED_BILLING_USAGE_URL = 'https://cloud.zed.dev/frontend/billing/usage';
+const ZED_BILLING_SUBSCRIPTION_URL = 'https://cloud.zed.dev/frontend/billing/subscriptions/current';
 
-function cleanText(value) {
-  return String(value || '').trim();
-}
+// Forward only cookies observed on Zed's dashboard billing request. Requiring
+// the namespaced session cookie prevents a header copied from another site from
+// ever being sent to cloud.zed.dev; the Cloudflare cookies are optional helpers.
+const ZED_SESSION_COOKIE = 'zed.session';
+const ZED_FORWARDED_COOKIE_NAMES = new Set([
+  ZED_SESSION_COOKIE,
+  'c15t',
+  '__cf_bm',
+  'cf_clearance'
+]);
 
 function cleanSecret(value) {
-  const text = cleanText(value);
-  return text && !/[\u0000-\u001f\u007f\s]/u.test(text) ? text : '';
-}
-
-function normalizeZedUserId(value) {
-  const text = cleanText(value);
-  return /^\d+$/u.test(text) ? text : '';
-}
-
-function normalizeZedAccessToken(value) {
-  return cleanSecret(value);
-}
-
-function normalizeZedServerUrl(value, fallback = DEFAULT_ZED_SERVER_URL) {
-  const raw = cleanText(value) || fallback;
-  let parsed;
-  try { parsed = new URL(raw); } catch (_) { return ''; }
-  if (
-    parsed.protocol !== 'https:'
-    || !parsed.hostname
-    || parsed.username
-    || parsed.password
-    || parsed.search
-    || parsed.hash
-    || (parsed.pathname && parsed.pathname !== '/')
-  ) return '';
-  return parsed.origin;
-}
-
-function zedApiUrl(serverUrl) {
-  const normalized = normalizeZedServerUrl(serverUrl, '');
-  if (!normalized) return '';
-  if (normalized === DEFAULT_ZED_SERVER_URL || normalized === 'https://staging.zed.dev') {
-    return DEFAULT_ZED_API_URL;
+  if (typeof value !== 'string') return '';
+  let raw = value.trim();
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    raw = raw.slice(1, -1).trim();
   }
-  return `${normalized}/client/users/me`;
+  return raw;
 }
 
-function manualCredentials(options = {}, env = process.env) {
-  const userId = normalizeZedUserId(options.zedUserId ?? env.TOKEN_MONITOR_ZED_USER_ID);
-  const accessToken = normalizeZedAccessToken(options.zedAccessToken ?? env.TOKEN_MONITOR_ZED_ACCESS_TOKEN);
-  return userId && accessToken ? { userId, accessToken } : null;
+function hasControlCharacters(value) {
+  return /[\u0000-\u001f\u007f]/u.test(value);
 }
 
-function normalizeManagedAccounts(value, options = {}) {
-  if (!Array.isArray(value)) return [];
-  const seenIds = new Set();
-  const seenUsers = new Set();
-  return value.flatMap((entry) => {
-    const id = cleanText(entry?.id);
-    const userId = normalizeZedUserId(entry?.userId);
-    if (!id || !userId || seenIds.has(id) || seenUsers.has(userId)) return [];
-    seenIds.add(id);
-    seenUsers.add(userId);
-    const normalized = {
-      id,
-      userId,
-      accountKey: cleanText(entry?.accountKey) || accountKey(userId),
-      accountName: cleanText(entry?.accountName),
-      planLabel: cleanText(entry?.planLabel),
-      enabled: entry?.enabled !== false,
-      addedAt: cleanText(entry?.addedAt),
-      updatedAt: cleanText(entry?.updatedAt)
-    };
-    if (options.includeCredentials === true && entry?.credentials && typeof entry.credentials === 'object') {
-      const accessToken = normalizeZedAccessToken(entry.credentials.accessToken);
-      normalized.credentials = accessToken ? { userId, accessToken } : null;
-    }
-    return [normalized];
+function cookiePairs(value) {
+  let header = cleanSecret(value);
+  if (/^cookie\s*:/iu.test(header)) header = header.replace(/^cookie\s*:/iu, '').trim();
+  if (!header || hasControlCharacters(header)) return [];
+  return header.split(';').flatMap((part) => {
+    const separator = part.indexOf('=');
+    if (separator <= 0) return [];
+    const name = part.slice(0, separator).trim();
+    const cookieValue = part.slice(separator + 1).trim();
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(name) || !cookieValue) return [];
+    return [{ name, value: cookieValue }];
   });
 }
 
-function managedAccountsForCollector(value, readCredential) {
-  if (typeof readCredential !== 'function') throw new TypeError('readCredential is required');
-  return normalizeManagedAccounts(value).map((account) => ({
-    ...account,
-    credentials: readCredential(account.id)
-  }));
+function normalizeZedCookieHeader(value) {
+  const pairs = cookiePairs(value);
+  if (!pairs.some((pair) => pair.name.toLowerCase() === ZED_SESSION_COOKIE)) return '';
+  return pairs
+    .filter((pair) => ZED_FORWARDED_COOKIE_NAMES.has(pair.name.toLowerCase()))
+    .map((pair) => `${pair.name}=${pair.value}`)
+    .join('; ');
 }
 
-function zedServerUrl(options = {}, env = process.env) {
-  return normalizeZedServerUrl(options.zedServerUrl ?? env.TOKEN_MONITOR_ZED_SERVER_URL);
-}
-
-function planLabel(value) {
-  const raw = cleanText(value);
-  const known = {
-    zed_free: 'Zed Free',
-    zed_pro: 'Zed Pro',
-    zed_pro_trial: 'Zed Pro Trial',
-    zed_student: 'Zed Student',
-    zed_business: 'Zed Business'
-  };
-  if (known[raw.toLowerCase()]) return known[raw.toLowerCase()];
-  return raw.replace(/_/gu, ' ').replace(/\b\w/gu, (letter) => letter.toUpperCase()).slice(0, 32);
-}
-
-function parseUsageLimit(value) {
-  if (value === 'unlimited') return { unlimited: true, limit: null };
-  const raw = value && typeof value === 'object' ? value.limited : value;
-  const limit = Number(raw);
-  if (!Number.isFinite(limit) || limit < 0) return null;
-  return { unlimited: false, limit };
-}
-
-function subscriptionPeriodWindow(value, nowMs = Date.now()) {
-  const startedAtMs = Date.parse(value?.started_at || '');
-  const endedAtMs = Date.parse(value?.ended_at || '');
-  const currentMs = Number(nowMs);
-  if (
-    !Number.isFinite(startedAtMs)
-    || !Number.isFinite(endedAtMs)
-    || endedAtMs <= startedAtMs
-    || !Number.isFinite(currentMs)
-  ) return null;
-  const elapsed = Math.max(0, Math.min(1, (currentMs - startedAtMs) / (endedAtMs - startedAtMs)));
-  return {
-    kind: 'billing',
-    limitId: 'zed.billing-cycle',
-    label: 'Billing cycle',
-    usedPercent: elapsed * 100,
-    resetsAt: new Date(endedAtMs).toISOString(),
-    showMeter: true
-  };
-}
-
-function parseZedResponse(body, nowMs = Date.now()) {
-  const user = body?.user;
-  const userId = normalizeZedUserId(user?.id);
-  const plan = body?.plan;
-  const editPredictions = plan?.usage?.edit_predictions;
-  const used = Number(editPredictions?.used);
-  const parsedLimit = parseUsageLimit(editPredictions?.limit);
-  if (!userId || !plan || !Number.isFinite(used) || used < 0 || !parsedLimit) {
-    throw new Error('unexpected Zed account response shape');
+function zedCookie(env = process.env, options = {}) {
+  const explicit = normalizeZedCookieHeader(options.zedCookie);
+  if (explicit) return explicit;
+  for (const name of ['TOKEN_MONITOR_ZED_COOKIE', 'ZED_COOKIE']) {
+    const cookie = normalizeZedCookieHeader(env?.[name]);
+    if (cookie) return cookie;
   }
-  const clampedUsed = parsedLimit.unlimited ? used : Math.min(used, parsedLimit.limit);
-  const predictionDetail = parsedLimit.unlimited
-    ? 'Unlimited'
-    : `${clampedUsed} / ${parsedLimit.limit} predictions`;
-  const predictionWindow = parsedLimit.unlimited
-    ? {
-        kind: 'billing',
-        limitId: 'zed.edit-predictions',
-        label: 'Edit Predictions',
-        used,
-        limit: null,
-        remaining: null,
-        usedPercent: 0,
-        resetDescription: predictionDetail,
-        detail: predictionDetail,
-        showMeter: true
-      }
-    : {
-        kind: 'billing',
-        limitId: 'zed.edit-predictions',
-        label: 'Edit Predictions',
-        used: clampedUsed,
-        limit: parsedLimit.limit,
-        remaining: Math.max(0, parsedLimit.limit - clampedUsed),
-        usedPercent: parsedLimit.limit > 0 ? (clampedUsed / parsedLimit.limit) * 100 : 100,
-        resetDescription: predictionDetail,
-        detail: predictionDetail,
-        showMeter: parsedLimit.limit > 0
-      };
-  const windows = [predictionWindow];
-  const billingCycle = subscriptionPeriodWindow(plan.subscription_period, nowMs);
-  if (billingCycle) windows.push(billingCycle);
-  if (plan.has_overdue_invoices === true) {
-    windows.push({
+  return '';
+}
+
+function numberOrNull(value) {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return null;
+}
+
+function toIso(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function formatPlanLabel(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const cleaned = raw
+    .replace(/^token_based_/iu, '')
+    .replace(/[_-]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  return cleaned.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase()).slice(0, 32);
+}
+
+function parseSubscription(body) {
+  const subscription = body?.subscription;
+  if (!subscription || typeof subscription !== 'object') return null;
+  return {
+    id: String(subscription.id || '').trim(),
+    planLabel: formatPlanLabel(subscription.name),
+    resetsAt: toIso(subscription?.period?.end_at),
+    periodStartedAt: toIso(subscription?.period?.start_at)
+  };
+}
+
+function parseZedBillingUsage(body, subscriptionBody = null) {
+  const currentUsage = body?.current_usage;
+  const tokenSpend = currentUsage?.token_spend;
+  if (!currentUsage || typeof currentUsage !== 'object' || !tokenSpend || typeof tokenSpend !== 'object') {
+    throw new Error('unexpected Zed billing response shape');
+  }
+  const spendCents = numberOrNull(currentUsage.token_spend_in_cents)
+    ?? numberOrNull(tokenSpend.spend_in_cents);
+  const limitCents = numberOrNull(tokenSpend.limit_in_cents);
+  if (spendCents === null || limitCents === null || limitCents <= 0) {
+    throw new Error('Zed billing response is missing token spend');
+  }
+  const subscription = parseSubscription(subscriptionBody);
+  const used = spendCents / 100;
+  const limit = limitCents / 100;
+  const usedPercent = Math.min(100, (spendCents / limitCents) * 100);
+  return {
+    planLabel: subscription?.planLabel || formatPlanLabel(body.plan),
+    subscriptionId: subscription?.id || '',
+    usageUpdatedAt: toIso(tokenSpend.updated_at),
+    window: {
       kind: 'billing',
-      limitId: 'zed.overdue-invoices',
-      label: 'Billing',
-      resetDescription: 'Overdue invoices',
-      detail: 'Overdue invoices',
-      showMeter: false
-    });
-  }
-  return {
-    userId,
-    githubLogin: cleanText(user.github_login),
-    name: cleanText(user.name),
-    planLabel: planLabel(plan.plan_v3),
-    overdue: plan.has_overdue_invoices === true,
-    windows
+      limitId: 'zed.token-spend',
+      label: 'Token Spend',
+      used,
+      limit,
+      remaining: Math.max(0, limit - used),
+      usedPercent,
+      remainingPercent: 100 - usedPercent,
+      resetsAt: subscription?.resetsAt || null,
+      currency: 'USD',
+      showMeter: true
+    }
   };
 }
 
-function accountKey(userId) {
-  return `sha256:${crypto.createHash('sha256').update(`zed:${userId}`).digest('hex')}`;
+function errorWithStatus(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
 }
 
-function providerStatus(status, now, sourceDetail, account = {}) {
+function requestHeaders(cookie) {
+  return {
+    Cookie: cookie,
+    Accept: 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'User-Agent': BROWSER_USER_AGENT
+  };
+}
+
+async function fetchJson(url, cookie, deadlineMs, deps = {}) {
+  return runWithProbeDeadline(
+    async ({ signal }) => {
+      const response = await (deps.fetch || fetch)(url, {
+        method: 'GET',
+        headers: requestHeaders(cookie),
+        credentials: 'omit',
+        redirect: 'error',
+        signal
+      });
+      if (response.status === 401 || response.status === 403) {
+        throw errorWithStatus('unauthorized', `Zed billing request returned ${response.status}`);
+      }
+      if (response.status === 429) {
+        throw errorWithStatus('sourceRateLimited', 'Zed billing request returned 429');
+      }
+      if (!response.ok) {
+        throw errorWithStatus('unavailable', `Zed billing request returned ${response.status}`);
+      }
+      return response.json();
+    },
+    { signal: deps.signal, deadlineMs }
+  );
+}
+
+function providerStatus(status, updatedAt) {
   return normalizeLimitProvider({
     provider: 'zed',
-    accountKey: account.accountKey || '',
-    accountName: account.accountName || '',
-    planLabel: account.planLabel || '',
-    source: 'api',
-    sourceDetail,
+    source: 'web',
     status,
-    updatedAt: new Date(now).toISOString(),
+    updatedAt,
     windows: []
   });
-}
-
-async function fetchZedAccount(account, serverUrl, deps, now) {
-  const credentials = account?.credentials;
-  const sourceDetail = account?.sourceDetail || 'managed';
-  if (!credentials?.userId || !credentials?.accessToken) {
-    return providerStatus('notConfigured', now, sourceDetail, account);
-  }
-  const apiUrl = zedApiUrl(serverUrl);
-  if (!apiUrl) return providerStatus('error', now, sourceDetail, account);
-  try {
-    const response = await (deps.fetch || fetch)(apiUrl, {
-      method: 'GET',
-      headers: {
-        Authorization: `${credentials.userId} ${credentials.accessToken}`,
-        Accept: 'application/json'
-      },
-      credentials: 'omit',
-      ...(deps.signal ? { signal: deps.signal } : {})
-    });
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) return providerStatus('unauthorized', now, sourceDetail, account);
-      if (response.status === 429) return providerStatus('sourceRateLimited', now, sourceDetail, account);
-      return providerStatus('unavailable', now, sourceDetail, account);
-    }
-    const parsed = parseZedResponse(await response.json(), now);
-    const resolvedUserId = parsed.userId || credentials.userId;
-    if (resolvedUserId !== credentials.userId) return providerStatus('error', now, sourceDetail, account);
-    return normalizeLimitProvider({
-      provider: 'zed',
-      accountKey: accountKey(resolvedUserId),
-      accountName: parsed.githubLogin || parsed.name || account.accountName,
-      planLabel: parsed.planLabel || account.planLabel,
-      source: 'api',
-      sourceDetail,
-      status: 'ok',
-      updatedAt: new Date(now).toISOString(),
-      windows: parsed.windows
-    });
-  } catch (error) {
-    if (error?.name === 'AbortError') throw error;
-    return providerStatus('unavailable', now, sourceDetail, account);
-  }
 }
 
 async function fetchZedLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
-  const serverUrl = zedServerUrl(options, env);
-  if (!serverUrl) return providerStatus('error', now, 'managed');
-  const scope = options.limitRefreshScope?.provider === 'zed' ? options.limitRefreshScope : null;
-  const accounts = normalizeManagedAccounts(
-    options.zedManagedAccounts || deps.zedManagedAccounts,
-    { includeCredentials: true }
-  )
-    .filter((account) => account.enabled !== false)
-    .filter((account) => !scope || !scope.accountKey || scope.accountKey === account.accountKey)
-    .map((account) => ({ ...account, sourceDetail: 'managed' }));
-  const envCredentials = manualCredentials(options, env);
-  if (envCredentials && !accounts.some((account) => account.userId === envCredentials.userId)) {
-    const envAccount = {
-      id: 'env',
-      userId: envCredentials.userId,
-      accountKey: accountKey(envCredentials.userId),
-      accountName: '',
-      planLabel: '',
-      // Environment credentials are the unattended/headless equivalent of a
-      // managed account. The normalized wire contract intentionally has no
-      // provider-specific "env" source detail.
-      sourceDetail: 'managed',
-      credentials: envCredentials
-    };
-    if (!scope || !scope.accountKey || scope.accountKey === envAccount.accountKey) accounts.push(envAccount);
+  const updatedAt = new Date(now).toISOString();
+  const cookie = zedCookie(env, options);
+  if (!cookie) return providerStatus('notConfigured', updatedAt);
+
+  try {
+    const usagePromise = fetchJson(
+      ZED_BILLING_USAGE_URL,
+      cookie,
+      Number(deps.zedFetchTimeoutMs || ZED_FETCH_TIMEOUT_MS),
+      deps
+    );
+    const subscriptionPromise = fetchJson(
+      ZED_BILLING_SUBSCRIPTION_URL,
+      cookie,
+      Number(deps.zedSubscriptionTimeoutMs || ZED_SUBSCRIPTION_TIMEOUT_MS),
+      deps
+    ).catch((error) => {
+      if (error?.name === 'AbortError') throw error;
+      return null;
+    });
+    const [usageBody, subscriptionBody] = await Promise.all([usagePromise, subscriptionPromise]);
+    const parsed = parseZedBillingUsage(usageBody, subscriptionBody);
+    const sessionSeed = cookiePairs(cookie)
+      .find((pair) => pair.name.toLowerCase() === ZED_SESSION_COOKIE)?.value || cookie;
+    return normalizeLimitProvider({
+      provider: 'zed',
+      accountKey: hashKey('zed', parsed.subscriptionId || sessionSeed),
+      planLabel: parsed.planLabel,
+      source: 'web',
+      status: 'ok',
+      updatedAt,
+      windows: [parsed.window]
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    return providerStatus(error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable', updatedAt);
   }
-  if (accounts.length === 0) {
-    return scope ? [] : providerStatus('notConfigured', now, 'managed');
-  }
-  return Promise.all(accounts.map((account) => fetchZedAccount(account, serverUrl, deps, now)));
 }
 
 module.exports = {
-  DEFAULT_ZED_API_URL,
-  DEFAULT_ZED_SERVER_URL,
-  accountKey,
+  ZED_BILLING_SUBSCRIPTION_URL,
+  ZED_BILLING_USAGE_URL,
+  ZED_DASHBOARD_URL,
+  ZED_FETCH_TIMEOUT_MS,
+  ZED_SUBSCRIPTION_TIMEOUT_MS,
   fetchZedLimits,
-  managedAccountsForCollector,
-  manualCredentials,
-  normalizeManagedAccounts,
-  normalizeZedAccessToken,
-  normalizeZedServerUrl,
-  normalizeZedUserId,
-  parseZedResponse,
-  zedApiUrl,
-  zedServerUrl
+  formatPlanLabel,
+  normalizeZedCookieHeader,
+  parseSubscription,
+  parseZedBillingUsage,
+  zedCookie
 };

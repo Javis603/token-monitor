@@ -26,9 +26,7 @@ const motionPreferenceApi = require('./motionPreference');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./claudeWebFetch');
 const { runAntigravityOAuthLogin } = require('./antigravityOAuthLogin');
-const { runZedOAuthLogin } = require('./zedOAuthLogin');
 const antigravityOAuth = require('../shared/antigravityOAuth');
-const zedLimits = require('../shared/zedLimits');
 const {
   createWorkbuddyLocalAuth,
   isSupportedWorkbuddyLocalAppPlatform
@@ -91,7 +89,7 @@ const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
-const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
+const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
@@ -410,7 +408,6 @@ let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
 let antigravityOAuthLoginController = null;
-let zedOAuthLoginController = null;
 let sessionUsageArchive = null;
 let lastSessionUsageArchiveUpdate = {
   at: null,
@@ -598,13 +595,13 @@ function defaultSettings() {
     qoderSite: 'global',
     traeAccessToken: '',
     traeDeviceId: '',
+    zedCookie: '',
     commandcodeCookie: '',
     kimiApiKey: '',
     kimiWebAccessToken: '',
     ollamaCookie: '',
     codexManagedAccounts: [],
     antigravityManagedAccounts: [],
-    zedManagedAccounts: [],
     mimoManagedAccounts: [],
     appUpdate: {
       lastCheckedAt: null,
@@ -712,7 +709,6 @@ function electronLimitsConfig() {
     defaultLimitProviders: defaultLimitProviders(),
     codexManagedAccounts: codexManagedAccountsForCollector(),
     antigravityManagedAccounts: antigravityManagedAccountsForCollector(),
-    zedManagedAccounts: zedManagedAccountsForCollector(),
     mimoManagedAccounts: mimoManagedAccountsForCollector()
   });
 }
@@ -867,6 +863,14 @@ function normalizeTraeDeviceId(value) {
 
 function currentTraeAccessToken() {
   return settings?.traeAccessToken || traeAccessToken(process.env);
+}
+
+function normalizeZedCookie(value) {
+  return zedCookie({}, { zedCookie: String(value || '') });
+}
+
+function currentZedCookie() {
+  return settings?.zedCookie || zedCookie(process.env);
 }
 
 function normalizeCommandcodeCookie(value) {
@@ -1252,169 +1256,6 @@ function setAntigravityManagedAccountEnabled(id, enabled) {
     refresh: account.enabled
   });
   return { ok: true, accounts: antigravityAccountsForRenderer() };
-}
-
-function normalizeZedManagedAccounts(value) {
-  return zedLimits.normalizeManagedAccounts(value);
-}
-
-function zedAccountsForRenderer() {
-  return normalizeZedManagedAccounts(settings?.zedManagedAccounts);
-}
-
-function readZedCredential(id) {
-  try {
-    return ensureCredentialStore().readZedCredential(id);
-  } catch (_) {
-    return null;
-  }
-}
-
-function writeZedCredential(id, credentials) {
-  try {
-    return ensureCredentialStore().writeZedCredential(id, credentials);
-  } catch (_) {
-    return false;
-  }
-}
-
-function removeZedCredential(id) {
-  try {
-    return ensureCredentialStore().removeZedCredential(id);
-  } catch (_) {
-    return false;
-  }
-}
-
-function zedManagedAccountsForCollector() {
-  return zedLimits.managedAccountsForCollector(settings?.zedManagedAccounts, readZedCredential);
-}
-
-async function addZedManagedAccount() {
-  if (zedOAuthLoginController) return { ok: false, errorCode: 'loginInProgress' };
-  const controller = new AbortController();
-  zedOAuthLoginController = controller;
-  try {
-    const serverUrl = zedLimits.normalizeZedServerUrl(
-      process.env.TOKEN_MONITOR_ZED_SERVER_URL || zedLimits.DEFAULT_ZED_SERVER_URL,
-      ''
-    );
-    const credentials = await runZedOAuthLogin({
-      serverUrl,
-      openExternal: (url) => shell.openExternal(url),
-      signal: controller.signal
-    });
-    if (controller.signal.aborted) return { ok: false, errorCode: 'cancelled' };
-    const [provider] = await zedLimits.fetchZedLimits({
-      zedUserId: credentials.userId,
-      zedAccessToken: credentials.accessToken,
-      zedServerUrl: serverUrl
-    }, electronProviderDeps({ env: {}, signal: controller.signal }));
-    if (controller.signal.aborted) return { ok: false, errorCode: 'cancelled' };
-    if (provider?.status !== 'ok') {
-      return {
-        ok: false,
-        errorCode: provider?.status === 'unauthorized' ? 'unauthorized' : 'validationFailed'
-      };
-    }
-    const accounts = normalizeZedManagedAccounts(settings?.zedManagedAccounts);
-    const existing = accounts.find((account) => account.userId === credentials.userId);
-    const now = new Date().toISOString();
-    const account = {
-      id: existing?.id || `zed-${crypto.randomUUID()}`,
-      userId: credentials.userId,
-      accountKey: zedLimits.accountKey(credentials.userId),
-      accountName: provider.accountName || existing?.accountName || '',
-      planLabel: provider.planLabel || existing?.planLabel || '',
-      enabled: true,
-      addedAt: existing?.addedAt || now,
-      updatedAt: now
-    };
-    const previousCredential = existing ? readZedCredential(existing.id) : null;
-    if (!writeZedCredential(account.id, credentials)) {
-      return { ok: false, errorCode: 'credentialStorageUnavailable' };
-    }
-    settings.zedManagedAccounts = normalizeZedManagedAccounts([
-      ...accounts.filter((entry) => entry.id !== account.id && entry.userId !== account.userId),
-      account
-    ]);
-    try {
-      saveSettings({ throwOnError: true });
-    } catch (_) {
-      if (previousCredential) writeZedCredential(account.id, previousCredential);
-      else removeZedCredential(account.id);
-      return { ok: false, errorCode: 'credentialStorageUnavailable' };
-    }
-    pushSettingsToRenderer();
-    sendZedAccountsPush();
-    void queueLimitInvalidation({
-      provider: 'zed',
-      accountId: account.id,
-      accountKey: account.accountKey,
-      sourceDetail: 'managed'
-    }, 'account-added');
-    return { ok: true, accounts: zedAccountsForRenderer() };
-  } catch (error) {
-    const cancelled = controller.signal.aborted || error?.code === 'CANCELLED' || error?.name === 'AbortError';
-    return {
-      ok: false,
-      errorCode: cancelled ? 'cancelled' : error?.code || 'loginFailed',
-      error: cancelled ? '' : String(error?.message || error)
-    };
-  } finally {
-    if (zedOAuthLoginController === controller) zedOAuthLoginController = null;
-  }
-}
-
-function cancelZedManagedAccountLogin() {
-  if (!zedOAuthLoginController) return false;
-  zedOAuthLoginController.abort();
-  return true;
-}
-
-async function removeZedManagedAccount(id) {
-  const accountId = String(id || '').trim();
-  const accounts = normalizeZedManagedAccounts(settings?.zedManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  const previousCredential = readZedCredential(accountId);
-  if (!removeZedCredential(accountId)) return { ok: false, error: 'Could not remove stored credential' };
-  settings.zedManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (_) {
-    if (previousCredential) writeZedCredential(accountId, previousCredential);
-    return { ok: false, error: 'Could not persist account removal' };
-  }
-  pushSettingsToRenderer();
-  sendZedAccountsPush();
-  void queueLimitInvalidation({ provider: 'zed', accountId, accountKey: account.accountKey }, 'account-removed', {
-    clear: true,
-    refresh: false
-  });
-  return { ok: true, accounts: zedAccountsForRenderer() };
-}
-
-function setZedManagedAccountEnabled(id, enabled) {
-  const accountId = String(id || '').trim();
-  const accounts = normalizeZedManagedAccounts(settings?.zedManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  account.enabled = Boolean(enabled);
-  account.updatedAt = new Date().toISOString();
-  settings.zedManagedAccounts = accounts;
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (_) {
-    return { ok: false, error: 'Could not persist account state' };
-  }
-  pushSettingsToRenderer();
-  sendZedAccountsPush();
-  void queueLimitInvalidation({ provider: 'zed', accountId, accountKey: account.accountKey }, 'account-state', {
-    clear: !account.enabled,
-    refresh: account.enabled
-  });
-  return { ok: true, accounts: zedAccountsForRenderer() };
 }
 
 function normalizeMimoManagedAccounts(value) {
@@ -2598,10 +2439,9 @@ function readSettings() {
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
     merged.antigravityManagedAccounts = normalizeAntigravityManagedAccounts(merged.antigravityManagedAccounts);
-    merged.zedManagedAccounts = normalizeZedManagedAccounts(merged.zedManagedAccounts);
-    // These keys existed only during development of the Zed provider. Never
-    // keep or expose a legacy renderer-managed access token now that Zed uses
-    // the same main-process managed-account boundary as other OAuth providers.
+    // These keys existed only during development of the native Zed sign-in
+    // prototype. The dashboard billing provider uses one browser Cookie header.
+    delete merged.zedManagedAccounts;
     delete merged.zedUserId;
     delete merged.zedAccessToken;
     delete merged.zedServerUrl;
@@ -4856,6 +4696,11 @@ function settingsForRenderer() {
     : traeAccessToken(process.env)
       ? 'env'
       : '';
+  const zedCookieSource = settings?.zedCookie
+    ? 'settings'
+    : zedCookie(process.env)
+      ? 'env'
+      : '';
   const commandcodeCookieSource = settings?.commandcodeCookie
     ? 'settings'
     : commandcodeCookie(process.env)
@@ -4889,10 +4734,7 @@ function settingsForRenderer() {
     'workbuddyEnterpriseId',
     'workbuddyLocale',
     'workbuddyDomain',
-    'workbuddyDepartmentInfo',
-    'zedUserId',
-    'zedAccessToken',
-    'zedServerUrl'
+    'workbuddyDepartmentInfo'
   ]) delete rendererSettings[key];
   return {
     ...rendererSettings,
@@ -4918,6 +4760,7 @@ function settingsForRenderer() {
     qoderCookie: settings?.qoderCookie ? 'set' : '',
     traeAccessToken: settings?.traeAccessToken ? 'set' : '',
     traeDeviceId: settings?.traeDeviceId ? 'set' : '',
+    zedCookie: settings?.zedCookie ? 'set' : '',
     commandcodeCookie: settings?.commandcodeCookie ? 'set' : '',
     ollamaCookie: settings?.ollamaCookie ? 'set' : '',
     // Never ship OpenCode session cookies to the renderer; the UI only needs to
@@ -4936,7 +4779,6 @@ function settingsForRenderer() {
     thirdPartyEnvConfigured: thirdPartyLimits.configuredAccounts({}, { env: process.env }).length > 0,
     codexManagedAccounts: codexAccountsForRenderer(),
     antigravityManagedAccounts: antigravityAccountsForRenderer(),
-    zedManagedAccounts: zedAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
     claudeWebCookieConfigured: Boolean(currentClaudeWebCookie()),
     claudeWebCookieSource,
@@ -4956,7 +4798,8 @@ function settingsForRenderer() {
     qoderCookieSource,
     traeAccessTokenConfigured: Boolean(currentTraeAccessToken()),
     traeAccessTokenSource,
-    zedEnvConfigured: Boolean(zedLimits.manualCredentials({}, process.env)),
+    zedCookieConfigured: Boolean(currentZedCookie()),
+    zedCookieSource,
     commandcodeCookieConfigured: Boolean(currentCommandcodeCookie()),
     commandcodeCookieSource,
     ollamaCookieConfigured: Boolean(currentOllamaCookie()),
@@ -5079,11 +4922,6 @@ function sendMimoAccountsPush() {
 function sendAntigravityAccountsPush() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try { mainWindow.webContents.send('antigravity:accounts', antigravityAccountsForRenderer()); } catch (_) {}
-}
-
-function sendZedAccountsPush() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send('zed:accounts', zedAccountsForRenderer()); } catch (_) {}
 }
 
 function unregisterWindowToggleShortcut() {
@@ -6182,6 +6020,7 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'qoder.com' || parsed.hostname === 'www.qoder.com' || parsed.hostname === 'qoder.com.cn' || parsed.hostname === 'www.qoder.com.cn') return true;
   if (parsed.hostname === 'trae.cn' || parsed.hostname === 'www.trae.cn') return true;
   if (parsed.hostname === 'commandcode.ai' || parsed.hostname === 'www.commandcode.ai') return true;
+  if (parsed.hostname === 'dashboard.zed.dev') return true;
   if ((parsed.hostname === 'ollama.com' || parsed.hostname === 'www.ollama.com') && (parsed.pathname === '/settings' || parsed.pathname === '/signin')) return true;
   if ((parsed.hostname === 'kimi.com' || parsed.hostname === 'www.kimi.com') && parsed.pathname.startsWith('/code')) return true;
   if (STATUS_PAGE_HOSTS.has(parsed.hostname) && (parsed.pathname === '' || parsed.pathname === '/')) return true;
@@ -6752,6 +6591,7 @@ app.whenReady().then(() => {
     if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
     if (patch.traeAccessToken !== undefined) normalizedPatch.traeAccessToken = normalizeTraeAccessToken(patch.traeAccessToken);
     if (patch.traeDeviceId !== undefined) normalizedPatch.traeDeviceId = normalizeTraeDeviceId(patch.traeDeviceId);
+    if (patch.zedCookie !== undefined) normalizedPatch.zedCookie = normalizeZedCookie(patch.zedCookie);
     if (patch.commandcodeCookie !== undefined) normalizedPatch.commandcodeCookie = normalizeCommandcodeCookie(patch.commandcodeCookie);
     if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
     if (patch.kimiWebAccessToken !== undefined) normalizedPatch.kimiWebAccessToken = normalizeKimiWebAccessToken(patch.kimiWebAccessToken);
@@ -6882,6 +6722,7 @@ app.whenReady().then(() => {
       qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
       traeAccessToken: patch.traeAccessToken !== undefined ? normalizeTraeAccessToken(patch.traeAccessToken) : (settings.traeAccessToken || ''),
       traeDeviceId: patch.traeDeviceId !== undefined ? normalizeTraeDeviceId(patch.traeDeviceId) : (settings.traeDeviceId || ''),
+      zedCookie: patch.zedCookie !== undefined ? normalizeZedCookie(patch.zedCookie) : (settings.zedCookie || ''),
       commandcodeCookie: patch.commandcodeCookie !== undefined ? normalizeCommandcodeCookie(patch.commandcodeCookie) : (settings.commandcodeCookie || ''),
       ollamaCookie: patch.ollamaCookie !== undefined ? normalizeOllamaCookie(patch.ollamaCookie) : (settings.ollamaCookie || ''),
       customModelPricing: patch.customModelPricing !== undefined
@@ -7238,11 +7079,6 @@ app.whenReady().then(() => {
   ipcMain.handle('antigravity:cancelLogin', () => cancelAntigravityManagedAccountLogin());
   ipcMain.handle('antigravity:setAccountEnabled', (_event, id, enabled) => setAntigravityManagedAccountEnabled(id, enabled));
   ipcMain.handle('antigravity:removeAccount', (_event, id) => removeAntigravityManagedAccount(id));
-  ipcMain.handle('zed:accounts', () => zedAccountsForRenderer());
-  ipcMain.handle('zed:addAccount', () => addZedManagedAccount());
-  ipcMain.handle('zed:cancelLogin', () => cancelZedManagedAccountLogin());
-  ipcMain.handle('zed:setAccountEnabled', (_event, id, enabled) => setZedManagedAccountEnabled(id, enabled));
-  ipcMain.handle('zed:removeAccount', (_event, id) => removeZedManagedAccount(id));
   ipcMain.handle('mimo:accounts', () => mimoAccountsForRenderer());
   ipcMain.handle('mimo:addAccount', (_event, cookieHeader) => addMimoManagedAccount(cookieHeader));
   ipcMain.handle('mimo:openConsole', () => shell.openExternal(MIMO_PLATFORM_CONSOLE_URL)
@@ -8267,7 +8103,6 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 app.on('before-quit', () => {
   quitRequested = true;
   antigravityOAuthLoginController?.abort();
-  zedOAuthLoginController?.abort();
   resetMacWidgetReloadThrottle();
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);

@@ -1,33 +1,100 @@
-# Zed limits provider
+---
+summary: "Zed provider notes: local token tracking, dashboard billing limits, browser-cookie credentials, and platform boundaries."
+read_when:
+  - Adding or changing Zed token or session tracking
+  - Changing Zed dashboard billing endpoints or Cookie setup
+  - Debugging Zed plan, token-spend, or reset display
+  - Changing Zed credentials, headless configuration, or security boundaries
+---
 
-Token Monitor reads Zed plan and Edit Predictions quota from Zed's authenticated account endpoint:
+# Zed provider
+
+Zed appears in Token Monitor in two independent data planes. Keep them separate when changing or debugging the provider.
+
+| Data plane | What it measures | Primary runtime | Inputs |
+| --- | --- | --- | --- |
+| Token/session activity | Local model-token activity attributed to Zed | Shared usage collector through `tokscale` | Local Zed conversation data |
+| Limits/billing | Zed-hosted token spend, included spend limit, plan, and billing reset | Shared limits runtime | A manually supplied Zed dashboard `Cookie` header |
+
+A dashboard Cookie is not a token-history source. Likewise, finding local Zed sessions does not authenticate the dashboard billing endpoints.
+
+## Token and session activity
+
+`src/shared/collector.js` is the only runtime that invokes `tokscale`. Zed follows the same today/month/all-time usage pipeline, watch behavior, and platform discovery rules as the other tracked clients. Its normalized client id is `zed`.
+
+This data plane reports activity found on the current machine. It does not infer the Zed account or plan that paid for a request. BYOK models and external agents remain attributable to the provider whose local records and billing relationship produced them.
+
+Changes to dashboard authentication, limits identity, or account aggregation must not alter Zed token attribution.
+
+## Limits and billing
+
+Zed billing collection uses the dashboard's own JSON endpoints:
 
 ```text
-GET https://cloud.zed.dev/client/users/me
-Authorization: <user_id> <access_token>
+GET https://cloud.zed.dev/frontend/billing/usage
+GET https://cloud.zed.dev/frontend/billing/subscriptions/current
+Cookie: zed.session=...; ...
 ```
 
-This is separate from Zed token-usage collection through Tokscale. Zed-hosted Edit Predictions are reported here; BYOK models and external agents remain attributed to the provider that bills them.
+The usage request is required. The subscription request is optional enrichment: a failure there must not hide valid spend data that the usage endpoint already returned.
 
-## Credentials
+The Zed editor's native credential and `GET /client/users/me` are deliberately not used for limits. That account response exposes plan, Edit Predictions, and a subscription period, but not the dashboard's token-spend allowance. The same native credential is rejected by the dashboard billing endpoint, so combining the two would create a second sign-in flow without authenticating the data Token Monitor intends to show.
 
-Zed stores its own signed-in account in the operating system credential store and does not expose an app-owned `auth.json` equivalent. Token Monitor deliberately does not read macOS Keychain, Windows Credential Manager, Linux Secret Service, or browser cookies.
+## Credential and security boundary
 
-The desktop widget instead offers **Add Zed account**. It starts a loopback callback bound to `127.0.0.1`, creates an ephemeral RSA keypair, and opens Zed's native-app sign-in page in the user's browser. Zed returns the user ID and an encrypted access token to that callback. Token Monitor decrypts the token in the main process, verifies the account against `/client/users/me`, and only then commits the account metadata and credential. The private key exists only for that login attempt.
+The widget asks the user to copy the request-header `Cookie` value from a signed-in `frontend/billing/usage` browser request. It does not read browser databases, browser storage, macOS Keychain, Windows Credential Manager, or Linux Secret Service.
 
-This follows the native-app sign-in protocol implemented by the current open-source Zed client: PKCS#1 DER public-key encoding, RSA OAEP-SHA256 token encryption, and the legacy PKCS#1 v1.5 decryption fallback. It is an integration with the current client protocol rather than a separately versioned third-party OAuth contract, so a future Zed protocol change may require a Token Monitor update.
+The normalized credential must contain `zed.session`. Token Monitor forwards only the observed Zed billing cookies (`zed.session`, `c15t`, and supported Cloudflare helpers) to `cloud.zed.dev`; unrelated cookies from the copied header are discarded. Provider requests use `credentials: 'omit'` so Electron's ambient cookie jar cannot replace the explicitly managed credential.
 
-The widget stores the Zed user ID as account metadata and the access token in Token Monitor's local `credentials.json`; raw credentials never enter the renderer settings payload. Headless installations can instead set `TOKEN_MONITOR_ZED_USER_ID` and `TOKEN_MONITOR_ZED_ACCESS_TOKEN`.
-
-## Custom servers
-
-`TOKEN_MONITOR_ZED_SERVER_URL` defaults to `https://zed.dev` and is intentionally an environment-only advanced setting; the widget does not show a server URL field. The value must be an HTTPS origin without credentials, a path, query, or fragment. For `https://zed.dev` and `https://staging.zed.dev`, Token Monitor sends the account request only to `https://cloud.zed.dev/client/users/me`. A custom server uses its own `/client/users/me` endpoint, so credentials are never forwarded across origins.
+GUI credentials live under the fixed `zedCookie` path in the shared credential store. The renderer receives only configured/source markers, never the stored Cookie value. Headless installations can set `TOKEN_MONITOR_ZED_COOKIE` (or the compatibility alias `ZED_COOKIE`).
 
 ## Snapshot mapping
 
-- `plan.plan_v3` becomes the plan label.
-- `plan.usage.edit_predictions` becomes the primary Edit Predictions window. Finite plans use the reported `used` and `limit`; `unlimited` plans show a full meter with an explicit Unlimited value.
-- `plan.subscription_period.started_at` and `ended_at` become a separate Billing cycle window. Its percentage represents elapsed time in the current subscription period, not token spend; the end timestamp is the reset/renewal date.
-- `plan.has_overdue_invoices` adds an overdue Billing warning without replacing either quota window.
+| Zed field | Token Monitor output |
+| --- | --- |
+| `plan` | Plan label, with transport prefixes such as `token_based_` removed |
+| `current_usage.token_spend_in_cents` | Token Spend used amount |
+| `current_usage.token_spend.spend_in_cents` | Fallback Token Spend used amount |
+| `current_usage.token_spend.limit_in_cents` | Token Spend limit |
+| `current_usage.token_spend.updated_at` | Upstream payload timestamp for diagnostics |
+| `subscription.name` | Preferred plan label when available |
+| `subscription.period.end_at` | Token Spend reset/renewal timestamp |
 
-The Zed dashboard's Token Spend card is a separate data surface backed by its embedded metering provider. The authenticated account payload currently mapped here and by CodexBar does not provide that balance, so Token Monitor does not relabel Billing cycle progress as the plan's included token-credit usage.
+Spend values are converted from cents to USD. The only limits window is `zed.token-spend`; the subscription period enriches that window's reset instead of becoming a separate elapsed-time bar. This avoids duplicating Token Monitor's manually recorded subscription information and avoids presenting time elapsed as quota consumed.
+
+## Identity and aggregation
+
+When the optional subscription response supplies `subscription.id`, it seeds the stable hashed `accountKey`. If that endpoint is unavailable, the Zed session cookie seeds a local hashed fallback so raw credential material never enters the wire record.
+
+The fallback can change when the browser session rotates. That is acceptable for the single-cookie settings model, but a future multi-account implementation must obtain a stable dashboard account identifier before promising cross-device deduplication.
+
+## Platform behavior
+
+Manual Cookie setup and the shared outbound fetch path are platform-independent. There is no macOS-only or Windows-only credential lookup and no dependency on a locally installed Zed editor for limits refresh.
+
+Token/session tracking still depends on local Zed data that `tokscale` supports on that platform. A configured dashboard Cookie does not make missing local activity available.
+
+## Change map
+
+| Concern | Primary files |
+| --- | --- |
+| Token/session source discovery and collection | `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/usage.js` |
+| Dashboard Cookie parsing and billing requests | `src/shared/zedLimits.js`, `src/shared/limitCollector.js` |
+| Credential persistence and runtime configuration | `src/shared/credentialStore.js`, `src/electron/runtimeConfig.js`, `src/electron/main.js` |
+| Settings flow and localized setup instructions | `src/electron/renderer/index.html`, `src/electron/renderer/app.js`, `src/electron/renderer/i18n.js` |
+| Limits presentation | `src/electron/renderer/limitProviderPresentation.js`, `src/electron/renderer/app.js`, `src/shared/macWidgetSnapshot.js` |
+| Hub build identity after shared changes | `src/shared/hubBuildRegistry.json`, generated Worker registry |
+
+## Verification checklist
+
+- Cookie normalization rejects headers without `zed.session` and strips unrelated cookies.
+- Usage success remains visible when the optional subscription request fails.
+- `401`/`403`, `429`, timeouts, malformed payloads, and aborted probes map to the shared provider statuses.
+- Spend cents map to the correct USD used, limit, remaining, and percentage values.
+- Subscription plan and reset enrich the same Token Spend window.
+- Settings never echo the stored Cookie to the renderer.
+- A credential change invalidates only the Zed limits lane.
+- The Open Zed button is restricted to the approved dashboard host.
+- Token/session collection remains unchanged.
+
+Run focused tests while iterating, then finish with `npm run sync:worker` when generated shared Worker files changed, `npm run verify`, and `git diff --check`.

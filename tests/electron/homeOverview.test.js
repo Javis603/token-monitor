@@ -237,27 +237,20 @@ test('homeLimitAccounts keeps a real billing remaining percentage fallback', () 
   ]);
 });
 
-test('homeLimitAccounts keeps Zed unlimited predictions and billing cycle distinct', () => {
+test('homeLimitAccounts keeps Zed Token Spend as one reset-aware quota window', () => {
   const [row] = homeLimitAccounts([{
     key: 'zed:0',
     providerId: 'zed',
     name: 'Zed',
-    windows: [
-      {
-        kind: 'billing',
-        label: 'Edit Predictions',
-        usedPercent: 0,
-        detail: 'Unlimited',
-        showMeter: true
-      },
-      {
-        kind: 'billing',
-        label: 'Billing cycle',
-        usedPercent: 25,
-        resetsAt: '2026-10-01T00:00:00.000Z',
-        showMeter: true
-      }
-    ]
+    windows: [{
+      kind: 'billing',
+      label: 'Token Spend',
+      used: 2.5,
+      limit: 10,
+      usedPercent: 25,
+      resetsAt: '2026-10-01T00:00:00.000Z',
+      showMeter: true
+    }]
   }]);
 
   assert.equal(row.providerId, 'zed');
@@ -267,22 +260,13 @@ test('homeLimitAccounts keeps Zed unlimited predictions and billing cycle distin
     showMeter: window.showMeter,
     detail: window.detail,
     resetsAt: window.resetsAt
-  })), [
-    {
-      label: 'Edit Predictions',
-      remainingPercent: 100,
-      showMeter: true,
-      detail: 'Unlimited',
-      resetsAt: undefined
-    },
-    {
-      label: 'Billing cycle',
-      remainingPercent: 75,
-      showMeter: true,
-      detail: '',
-      resetsAt: '2026-10-01T00:00:00.000Z'
-    }
-  ]);
+  })), [{
+    label: 'Token Spend',
+    remainingPercent: 75,
+    showMeter: true,
+    detail: '',
+    resetsAt: '2026-10-01T00:00:00.000Z'
+  }]);
 });
 
 test('homeLimitAccountsForProviders includes Grok billing and DeepSeek balance rows', () => {
