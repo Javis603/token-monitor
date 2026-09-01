@@ -24,6 +24,20 @@ test('initial limit providers follow detected clients in stable provider order',
   );
 });
 
+test('initial limit providers map only corresponding Collection client aliases', () => {
+  assert.deepEqual(
+    limitProvidersForDetectedClients({
+      clients: {
+        dsh: { source: { state: 'detected' } },
+        qodercn: { source: { state: 'detected' } },
+        zcode: { source: { state: 'detected' } },
+        micode: { source: { state: 'detected' } }
+      }
+    }),
+    ['mimo', 'zai', 'qoder']
+  );
+});
+
 test('initial limit providers stay empty when discovery finds no local source', () => {
   assert.deepEqual(
     limitProvidersForDetectedClients({
