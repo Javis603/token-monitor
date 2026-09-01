@@ -545,6 +545,7 @@ function defaultSettings() {
     // Third-party global reset predictions are opt-in and remain separate from
     // the account-specific limits wire shape.
     codexResetForecastEnabled: false,
+    showCodexAdditionalLimits: true,
     showLimitUsed: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_USED, false),
     // Manual subscription metadata. Plain preferences, not credentials, so they
     // live in settings.json and cross to the renderer unredacted.
@@ -2383,6 +2384,7 @@ function readSettings() {
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
     merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
+    merged.showCodexAdditionalLimits = parseBoolean(merged.showCodexAdditionalLimits, true);
     merged.opencodeLocalLimitsEnabled = parseBoolean(merged.opencodeLocalLimitsEnabled, false);
     delete merged.workbuddyLocalAppEnabled;
     merged.windowMaximized = parseBoolean(merged.windowMaximized, false);
@@ -6647,6 +6649,7 @@ app.whenReady().then(() => {
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
       codexResetForecastEnabled: parseBoolean(patch.codexResetForecastEnabled ?? settings.codexResetForecastEnabled, false),
+      showCodexAdditionalLimits: parseBoolean(patch.showCodexAdditionalLimits ?? settings.showCodexAdditionalLimits, true),
       opencodeAmbientEnabled: parseBoolean(patch.opencodeAmbientEnabled ?? settings.opencodeAmbientEnabled, true),
       opencodeLocalLimitsEnabled: parseBoolean(patch.opencodeLocalLimitsEnabled ?? settings.opencodeLocalLimitsEnabled, false),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),

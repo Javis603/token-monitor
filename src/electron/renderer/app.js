@@ -4774,7 +4774,9 @@ function renderProviderWindows(provider, color) {
     const session = codexCanonicalWindow(provider, 'session');
     const weekly = codexCanonicalWindow(provider, 'weekly');
     const monthly = codexCanonicalWindow(provider, 'billing');
-    const additionalWindows = (provider.windows || []).filter((window) => window?.additional === true);
+    const additionalWindows = state.settings?.showCodexAdditionalLimits === false
+      ? []
+      : (provider.windows || []).filter((window) => window?.additional === true);
     if (session) {
       const sessionNode = limitWindowNode(session.label || 'Session', session, color, 0.95);
       if (!weekly && !monthly) sessionNode.classList.add('limit-window-wide');
@@ -5840,6 +5842,7 @@ function renderLimits() {
       state.settings?.showToolIcons !== false,
       state.settings?.claudePrepaidBalanceEnabled !== false,
       state.settings?.codexResetForecastEnabled === true,
+      state.settings?.showCodexAdditionalLimits !== false,
       state.settings?.currency || '',
       state.settings?.currencyRatesEffective || null,
       state.settings?.subscriptions || [],
@@ -11252,6 +11255,11 @@ const LIMIT_PROVIDER_SETTINGS = {
     defaultValue: true
   }],
   codex: [{
+    key: 'showCodexAdditionalLimits',
+    titleKey: 'settings.limits.codexAdditionalLimits',
+    descKey: 'settings.limits.codexAdditionalLimitsDesc',
+    defaultValue: true
+  }, {
     key: 'codexResetForecastEnabled',
     titleKey: 'settings.limits.codexResetForecast',
     descKey: 'settings.limits.codexResetForecastDesc',

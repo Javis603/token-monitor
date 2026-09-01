@@ -1043,6 +1043,7 @@ test('Copilot renders monthly Premium and Chat quotas as billing windows', () =>
 test('Codex renders Monthly quota and manual reset credits below rolling windows', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
   const codexAdditionalWindowLabel = functionBody(app, 'codexAdditionalWindowLabel', 'antigravityQuotaGroups');
   const resetCreditsValue = functionBody(app, 'formatCodexResetCreditsValue', 'codexResetCreditExpirationDates');
@@ -1065,7 +1066,11 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(renderProviderWindows, /if \(!session && !monthly\) weeklyNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(renderProviderWindows, /limitWindowNode\(monthly\.label \|\| 'Monthly', monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /monthlyNode\.classList\.add\('limit-window-wide'\);/);
-  assert.match(renderProviderWindows, /const additionalWindows = \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
+  assert.match(main, /showCodexAdditionalLimits: true/);
+  assert.match(main, /showCodexAdditionalLimits = parseBoolean\(merged\.showCodexAdditionalLimits, true\)/);
+  assert.match(main, /showCodexAdditionalLimits: parseBoolean\(patch\.showCodexAdditionalLimits \?\? settings\.showCodexAdditionalLimits, true\)/);
+  assert.match(app, /key: 'showCodexAdditionalLimits',[\s\S]*?defaultValue: true/);
+  assert.match(renderProviderWindows, /state\.settings\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
   assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);
   assert.match(renderProviderWindows, /additionalNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(codexAdditionalWindowLabel, /if \(!name\) return period \|\| 'Additional limit';/);
