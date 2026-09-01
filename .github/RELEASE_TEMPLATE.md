@@ -4,26 +4,28 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **LM Studio usage:** Add token usage tracking for OpenAI-compatible `/v1/chat/completions` and `/v1/responses` requests recorded in LM Studio server logs. (#546)
-- **Cursor Grok Bot quota:** Show the included weekly Grok Bot quota when it is available for the signed-in Cursor account. (#543)
-- **Codex gpt-reserve quota:** Show named `gpt-reserve` quota windows in the Limits view when returned by Codex. (#545)
+- **Antigravity accounts:** Sign in with multiple Google accounts and refresh quotas while Antigravity is closed. (#564)
+- **Tool details:** Expand a tool to reveal the new “Tokens / Models” switch and choose between token details and per-model usage. (#554)
+- **Codex reset forecast:** Shows when quotas are predicted to reset. In Settings → AI Tool Limits, expand Codex and enable “Reset forecast” (off by default). (#555)
+- **Windows taskbar:** Adds an experimental option to restore the floating widget above an overlapping taskbar after switching apps. Disabled by default; brief flickering may occur. (#548)
 
 ### Improved
-- **Cursor limits:** Use the official `Cursor Models` and `Other Models` pools, keep exhausted allowances visible, and show on-demand spend only when a cap or spend exists. (#543)
+- **Background performance:** Reduces rendering work while windows are hidden or minimized and views are inactive. (#386)
+- **Codex quota label:** Displays `gpt-reserve` as `Luna Reserve`. (#556)
 
 ### Fixed
-- **Tokscale 4.15.0:** Fix DSH usage attribution to the model that actually served the response and xAI cost estimates that were too low when long-context prompts reached 200K tokens. (#544)
-- **Windows floating widget:** Prevent the always-on-top widget from being hidden behind the taskbar when they overlap. (#541)
-- **Trae CN setup:** Correct the account setup steps to copy `Cloud-IDE-Token` from browser Local Storage; Device ID remains optional. (#553)
+- **Antigravity usage refresh:** Detects stale sync locks that block updates and offers a repair-and-rescan action. (#568)
+- **Floating bubble:** Fixes blurry graphics and Settings previews on high-density displays. (#559)
+- **Qoder CN Discord status:** Restores the missing Rich Presence icon when Qoder CN is the most-used tool.
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.50.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.50.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-Setup-0.50.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.50.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.51.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.51.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.51.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-Setup-0.51.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.51.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.51.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -61,26 +63,28 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **LM Studio 用量：** 新增 LM Studio Token 用量追踪，涵盖服务器日志中的 OpenAI 兼容 `/v1/chat/completions` 和 `/v1/responses` 请求。（#546）
-- **Cursor Grok Bot 额度：** 已登录的 Cursor 账号包含 Grok Bot 额度时，显示其每周额度。（#543）
-- **Codex gpt-reserve 额度：** Codex 返回 `gpt-reserve` 时，在“额度”视图中显示对应额度周期。（#545）
+- **Antigravity 账号：** 支持登录多个 Google 账号，关闭 Antigravity 后仍可刷新额度。（#564）
+- **工具明细：** 展开工具后，可通过新增的“Tokens／模型”切换查看 Token 明细或各模型用量。（#554）
+- **Codex 重置预测：** 支持查看额度的预计重置时间。在“设置 → AI 工具额度”中展开 Codex，开启“重置预测”（默认关闭）。（#555）
+- **Windows 任务栏：** 新增实验性选项，在切换应用后将与任务栏重叠的浮动小组件移回上方。默认关闭，可能出现短暂闪烁。（#548）
 
 ### 改进
-- **Cursor 额度：** 改用官方 `Cursor Models` 与 `Other Models` 额度池，保留已用尽的额度，并仅在存在上限或实际消费时显示按需消费。（#543）
+- **后台性能：** 减少窗口隐藏、最小化及视图未使用时的渲染开销。（#386）
+- **Codex 额度名称：** 将 `gpt-reserve` 显示为 `Luna Reserve`。（#556）
 
 ### 修复
-- **Tokscale 4.15.0：** 修正 DSH 用量的实际响应模型归属，以及 xAI 长上下文请求达到 200K Tokens 时成本估算偏低的问题。（#544）
-- **Windows 浮动小组件：** 修复小组件与任务栏重叠时，即使启用置顶仍可能被任务栏遮挡的问题。（#541）
-- **Trae CN 设置：** 修正账号设置步骤，改为从浏览器 Local Storage 复制 `Cloud-IDE-Token`；Device ID 仍为可选。（#553）
+- **Antigravity 用量刷新：** 检测阻碍更新的残留同步锁，并提供修复后重新扫描的操作。（#568）
+- **悬浮小窗：** 修复高像素密度屏幕上图像及设置预览模糊的问题。（#559）
+- **Qoder CN Discord 状态：** 修复 Qoder CN 为用量最高的工具时，Rich Presence 缺少图标的问题。
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.50.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.50.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-Setup-0.50.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.50.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.51.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.51.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.51.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-Setup-0.51.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.51.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.51.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -113,7 +117,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.49.0...v0.50.0">v0.49.0...v0.50.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.50.0...v0.51.0">v0.50.0...v0.51.0</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -131,26 +135,28 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **LM Studio 用量：** 新增 LM Studio Token 用量追蹤，涵蓋伺服器日誌中的 OpenAI 相容 `/v1/chat/completions` 與 `/v1/responses` 請求。（#546）
-- **Cursor Grok Bot 額度：** 已登入的 Cursor 帳號包含 Grok Bot 額度時，顯示其每週額度。（#543）
-- **Codex gpt-reserve 額度：** Codex 傳回 `gpt-reserve` 時，在「額度」檢視中顯示對應額度週期。（#545）
+- **Antigravity 帳號：** 支援登入多個 Google 帳號，關閉 Antigravity 後仍可重新整理額度。（#564）
+- **工具明細：** 展開工具後，可透過新增的「Tokens／模型」切換查看 Token 明細或各模型用量。（#554）
+- **Codex 重置預測：** 支援查看額度的預計重置時間。在「設定 → AI 工具額度」中展開 Codex，開啟「重置預測」（預設關閉）。（#555）
+- **Windows 工作列：** 新增實驗性選項，在切換應用程式後將與工作列重疊的浮動小工具移回上方。預設關閉，可能出現短暫閃爍。（#548）
 
 ### 改進
-- **Cursor 額度：** 改用官方 `Cursor Models` 與 `Other Models` 額度池、保留已用盡的額度，並只在存在上限或實際消費時顯示隨用隨付消費。（#543）
+- **背景效能：** 減少視窗隱藏、最小化及檢視未使用時的繪製負擔。（#386）
+- **Codex 額度名稱：** 將 `gpt-reserve` 顯示為 `Luna Reserve`。（#556）
 
 ### 修復
-- **Tokscale 4.15.0：** 修正 DSH 用量的實際回應模型歸屬，以及 xAI 長上下文請求達到 200K Tokens 時成本估算偏低的問題。（#544）
-- **Windows 浮動小工具：** 修復小工具與工作列重疊時，即使啟用置頂仍可能被工作列遮擋的問題。（#541）
-- **Trae CN 設定：** 修正帳號設定步驟，改為從瀏覽器 Local Storage 複製 `Cloud-IDE-Token`；Device ID 仍為選填。（#553）
+- **Antigravity 用量更新：** 偵測阻礙更新的殘留同步鎖，並提供修復後重新掃描的操作。（#568）
+- **懸浮小窗：** 修復高像素密度螢幕上圖像及設定預覽模糊的問題。（#559）
+- **Qoder CN Discord 狀態：** 修復 Qoder CN 為用量最高的工具時，Rich Presence 缺少圖示的問題。
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.50.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.50.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-Setup-0.50.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.50.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.51.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.51.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.51.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-Setup-0.51.0.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.51.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.51.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0.AppImage)
 
 </details>
 
@@ -163,26 +169,28 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ko:start -->
 ### 추가
-- **LM Studio 사용량:** LM Studio 서버 로그에 기록된 OpenAI 호환 `/v1/chat/completions` 및 `/v1/responses` 요청의 토큰 사용량을 추적합니다. (#546)
-- **Cursor Grok Bot 한도:** 로그인한 Cursor 계정에 Grok Bot 할당량이 포함되어 있으면 주간 한도를 표시합니다. (#543)
-- **Codex gpt-reserve 한도:** Codex가 `gpt-reserve`를 반환하면 한도 화면에 해당 한도 기간을 표시합니다. (#545)
+- **Antigravity 계정:** 여러 Google 계정으로 로그인하고 Antigravity를 닫은 상태에서도 한도를 새로고침할 수 있습니다. (#564)
+- **도구 상세 내역:** 도구를 펼치면 새로 추가된 ‘토큰 / 모델’ 전환 버튼으로 토큰 상세 내역과 모델별 사용량을 선택해 볼 수 있습니다. (#554)
+- **Codex 리셋 예측:** 한도가 초기화될 것으로 예상되는 시점을 확인할 수 있습니다. 설정 → AI 도구 한도에서 Codex를 펼친 뒤 ‘리셋 예측’을 켜면 사용할 수 있습니다. 기본적으로 꺼져 있습니다. (#555)
+- **Windows 작업 표시줄:** 앱 전환 후 작업 표시줄과 겹친 플로팅 위젯을 다시 위로 올리는 실험적 옵션을 추가했습니다. 기본적으로 꺼져 있으며 잠시 깜박일 수 있습니다. (#548)
 
 ### 개선
-- **Cursor 한도:** 공식 `Cursor Models` 및 `Other Models` 풀을 사용하고 소진된 할당량을 계속 표시하며, 상한 또는 실제 지출이 있을 때만 온디맨드 지출을 표시합니다. (#543)
+- **백그라운드 성능:** 창이 숨겨지거나 최소화된 동안, 또는 화면을 사용하지 않을 때 렌더링 부담을 줄였습니다. (#386)
+- **Codex 한도 이름:** `gpt-reserve`를 `Luna Reserve`로 표시합니다. (#556)
 
 ### 수정
-- **Tokscale 4.15.0:** DSH 사용량을 실제 응답 모델에 귀속하고, xAI 긴 컨텍스트 요청이 200K Tokens에 도달할 때 비용이 낮게 추정되던 문제를 수정했습니다. (#544)
-- **Windows 플로팅 위젯:** 항상 위로 설정한 위젯이 작업 표시줄 영역과 겹칠 때 뒤로 숨는 문제를 수정했습니다. (#541)
-- **Trae CN 설정:** 계정 설정 절차를 수정해 브라우저 Local Storage에서 `Cloud-IDE-Token`을 복사하도록 안내하며, Device ID는 선택 사항으로 유지됩니다. (#553)
+- **Antigravity 사용량 갱신:** 업데이트를 막는 오래된 동기화 잠금을 감지하고 복구 후 다시 스캔할 수 있도록 했습니다. (#568)
+- **플로팅 버블:** 고밀도 디스플레이에서 이미지와 설정 미리보기가 흐릿하게 보이던 문제를 수정했습니다. (#559)
+- **Qoder CN Discord 상태:** Qoder CN이 가장 많이 사용한 도구일 때 Rich Presence 아이콘이 표시되지 않던 문제를 수정했습니다.
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.50.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.50.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-Setup-0.50.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.50.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.51.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.51.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.51.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-Setup-0.51.0.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.51.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.51.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0.AppImage)
 
 </details>
 
@@ -195,26 +203,28 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **LM Studioの使用量：** LM Studioのサーバーログに記録されたOpenAI互換の`/v1/chat/completions`および`/v1/responses`リクエストのトークン使用量を追跡します。（#546）
-- **Cursor Grok Botの上限：** サインイン中のCursorアカウントにGrok Botの割り当てが含まれる場合、週次上限を表示します。（#543）
-- **Codex gpt-reserveの上限：** Codexから`gpt-reserve`が返された場合、「上限」画面に対象の上限期間を表示します。（#545）
+- **Antigravityアカウント：** 複数のGoogleアカウントでログインし、Antigravityを閉じたまま上限情報を更新できます。（#564）
+- **ツールの詳細：** ツールを展開すると、新しい「トークン／モデル」の切り替えが表示され、トークンの詳細とモデル別の使用量を選んで確認できます。（#554）
+- **Codexリセット予測：** 利用枠のリセット予想時刻を確認できます。「設定 → AIツール制限」でCodexを展開し、「リセット予測」をオンにすると利用できます。初期設定ではオフです。（#555）
+- **Windowsタスクバー：** アプリ切り替え後、タスクバーと重なったフローティングウィジェットを前面に戻す試験的なオプションを追加しました。初期設定ではオフで、一時的にちらつく場合があります。（#548）
 
 ### 改善
-- **Cursorの上限：** 公式の`Cursor Models`と`Other Models`のプールを使用し、使い切った割り当ても表示したまま、上限または実際の支出がある場合のみオンデマンド支出を表示します。（#543）
+- **バックグラウンドの動作：** ウィンドウの非表示・最小化中や、使用していない画面の描画負荷を軽減しました。（#386）
+- **Codexの上限名：** `gpt-reserve`を`Luna Reserve`と表示します。（#556）
 
 ### 修正
-- **Tokscale 4.15.0：** DSHの使用量を実際の応答モデルに帰属させ、xAIの長いコンテキストリクエストが200K Tokensに達した際にコストが低く見積もられる問題を修正しました。（#544）
-- **Windowsのフローティングウィジェット：** タスクバー領域と重なったとき、常に手前に表示するウィジェットがタスクバーの背後に隠れる問題を修正しました。（#541）
-- **Trae CNの設定：** アカウント設定手順を修正し、ブラウザのLocal Storageから`Cloud-IDE-Token`をコピーする案内に変更しました。Device IDは引き続き任意です。（#553）
+- **Antigravityの使用量更新：** 更新を妨げる古い同期ロックを検出し、修復して再スキャンできるようにしました。（#568）
+- **フローティングバブル：** 高密度ディスプレイで画像や設定のプレビューがぼやける問題を修正しました。（#559）
+- **Qoder CNのDiscordステータス：** Qoder CNが最も使用したツールの場合に、Rich Presenceのアイコンが表示されない問題を修正しました。
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.50.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.50.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-Setup-0.50.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.50.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.50.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.50.0/Token-Monitor-0.50.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.51.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.51.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.51.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-Setup-0.51.0.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.51.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.51.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.51.0/Token-Monitor-0.51.0.AppImage)
 
 </details>
 
