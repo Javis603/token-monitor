@@ -474,6 +474,9 @@
                   <button id="showAllClientsButton" class="tool-header-action" type="button" title="Show all" aria-label="Show all" data-i18n-title="settings.tools.showAll" data-i18n-aria-label="settings.tools.showAll"><span class="tool-header-eye" aria-hidden="true"></span></button>
                 </div>
               </div>
+              <div class="settings-list-search">
+                <input id="clientDisplaySearchInput" class="settings-list-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search tools" data-i18n-placeholder="settings.tools.search" aria-label="Search tools" data-i18n-aria-label="settings.tools.search" aria-controls="clientDisplayList" />
+              </div>
               <div id="clientDisplayList" class="tool-preference-list"></div>
             </div>
             <div class="settings-subgroup settings-collection-cadence">
@@ -602,6 +605,9 @@
           </button>
           <div id="limitsSettingsDetails" class="settings-section-details hidden">
             <p class="settings-note" data-i18n="settings.limits.reorderNote">Drag a provider to reorder the list.</p>
+            <div class="settings-list-search">
+              <input id="limitProviderSearchInput" class="settings-list-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search providers" data-i18n-placeholder="settings.limits.search" aria-label="Search providers" data-i18n-aria-label="settings.limits.search" aria-controls="limitProviderCheckboxes" />
+            </div>
             <div id="limitProviderCheckboxes" class="client-checkboxes limit-provider-list"></div>
             <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.refresh">Refresh</span></span>
               <select id="limitsRefreshInput">
@@ -1725,6 +1731,7 @@
     <script src="serviceStatusPresentation.js"></script>
     <script src="serviceStatusProviderPreferences.js"></script>
     <script src="clientDisplayPreferences.js"></script>
+    <script src="settingsListFilter.js"></script>
     <script src="viewDisplayPreferences.js"></script>
     <script src="homeModulePreferences.js"></script>
     <script src="fixedPeriodRanges.js"></script>

@@ -1741,6 +1741,63 @@ span.settings-note.settings-item-desc {
   background: currentColor;
   content: "";
 }
+/* Filter field for the two long settings lists (tracked tools, limit
+   providers). Sits outside the list container on purpose: both lists are
+   rebuilt wholesale on every stats tick, so a field inside one would lose its
+   value and focus mid-keystroke. Border, radius and background come from the
+   panel's shared input rule; only the type size, the icon inset and the icon
+   itself are set here. */
+.settings-list-search {
+  position: relative;
+  display: grid;
+  min-width: 0;
+}
+/* Drawn rather than an asset, the way the eye and pin glyphs next to it are. */
+.settings-list-search::before {
+  position: absolute;
+  top: 50%;
+  left: 9px;
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid var(--muted);
+  border-radius: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  content: "";
+}
+.settings-list-search::after {
+  position: absolute;
+  top: calc(50% + 2px);
+  left: 15px;
+  width: 4px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--muted);
+  transform: rotate(45deg);
+  transform-origin: left center;
+  pointer-events: none;
+  content: "";
+}
+.settings-panel .settings-list-search-input {
+  padding: 5px 9px 5px 24px;
+  font-size: 11px;
+}
+.settings-list-search-input::placeholder { color: var(--muted); }
+.settings-list-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  width: 9px;
+  height: 9px;
+  background:
+    linear-gradient(var(--muted), var(--muted)) center / 9px 1.5px no-repeat,
+    linear-gradient(var(--muted), var(--muted)) center / 1.5px 9px no-repeat;
+  cursor: pointer;
+  transform: rotate(45deg);
+}
+/* No matches: the note lands inside the list box, where the rows were. */
+.settings-list-empty {
+  margin: 0;
+  padding: 4px 2px;
+}
 .tool-preference-list {
   display: grid;
   min-width: 0;
@@ -2134,6 +2191,10 @@ span.settings-note.settings-item-desc {
   margin: 0 -2px;
   padding: 1px 0;
   border-radius: 6px;
+  /* The row owns the list's type size, not the disclosure button inside it: a
+     provider with nothing to expand renders no button, and its name would
+     otherwise fall through to the document's 16px default. */
+  font-size: 11px;
   touch-action: pan-y;
   transform: translateY(calc(var(--drag-y, 0px) + var(--drag-shift, 0px)));
   transition:
@@ -2158,7 +2219,6 @@ span.settings-note.settings-item-desc {
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: 11px;
   line-height: 1.3;
   text-align: left;
   cursor: pointer;

@@ -184,6 +184,7 @@ const clientSourceCacheApi = window.TokenMonitorClientSourceCache;
 const clientRescanStateApi = window.TokenMonitorClientRescanState;
 const serviceStatusPresentationApi = window.TokenMonitorServiceStatusPresentation;
 const clientDisplayPreferencesApi = window.TokenMonitorClientDisplayPreferences;
+const settingsListFilterApi = window.TokenMonitorSettingsListFilter;
 const customPricingFormApi = window.TokenMonitorCustomPricingForm;
 const viewDisplayPreferencesApi = window.TokenMonitorViewDisplayPreferences;
 const preferenceDragSortApi = window.TokenMonitorPreferenceDragSort;
@@ -323,7 +324,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '' };
 state.zedAccountExpanded = false;
 state.zedPendingCheckSince = 0;
 state.toolDetailMode = 'tokens';
@@ -468,6 +469,8 @@ Object.assign(els, {
   swapSettingsRefreshInput: document.getElementById('swapSettingsRefreshInput'),
   resetClientDisplayOrderButton: document.getElementById('resetClientDisplayOrderButton'),
   showAllClientsButton: document.getElementById('showAllClientsButton'),
+  clientDisplaySearchInput: document.getElementById('clientDisplaySearchInput'),
+  limitProviderSearchInput: document.getElementById('limitProviderSearchInput'),
   resetViewDisplayOrderButton: document.getElementById('resetViewDisplayOrderButton'),
   showAllViewsButton: document.getElementById('showAllViewsButton'),
   viewDisplayList: document.getElementById('viewDisplayList'),
@@ -6425,6 +6428,16 @@ function openTrendSettings() {
   });
 }
 
+// Cleared when the panel closes, not when it opens: `syncSettingsForm()` runs on
+// every settings write, so clearing on the open path would wipe the field the
+// moment a filtered row's checkbox was ticked.
+function resetSettingsListSearch() {
+  state.toolSearchQuery = '';
+  state.limitProviderSearchQuery = '';
+  if (els.clientDisplaySearchInput) els.clientDisplaySearchInput.value = '';
+  if (els.limitProviderSearchInput) els.limitProviderSearchInput.value = '';
+}
+
 function openSettingsPanel() {
   if (!els.settingsPanel) return;
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
@@ -6441,6 +6454,7 @@ function openViewFromTray(viewId) {
   const settingsWasOpen = isSettingsPanelOpen();
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   stopWindowShortcutRecording();
+  resetSettingsListSearch();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   state.openSession = null;
@@ -10853,6 +10867,25 @@ function renderToolPreferences() {
   return preserveSettingsPanelScroll(renderToolPreferencesNow);
 }
 
+// The filter query is transient UI state, not a setting: it lives in `state`
+// and the field itself is static markup outside the list, so a stats tick can
+// rebuild every row underneath it without touching what is being typed.
+function toolPreferenceQuery() {
+  return settingsListFilterApi.normalizeListQuery(state.toolSearchQuery);
+}
+
+function visibleToolPreferenceClients() {
+  const clients = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients);
+  return settingsListFilterApi.filterListItems(clients, state.toolSearchQuery, ({ id, label }) => `${label} ${id}`);
+}
+
+function renderSettingsListEmptyState(list) {
+  const empty = document.createElement('p');
+  empty.className = 'settings-note settings-list-empty';
+  empty.textContent = t('settings.search.noMatches');
+  list.append(empty);
+}
+
 function toolPreferenceRenderSignature() {
   const clientStatus = localClientStatus();
   const health = localClientHealth();
@@ -10867,6 +10900,7 @@ function toolPreferenceRenderSignature() {
       state.settings?.currency || '',
       state.settings?.compactTokenUnits || ''
     ],
+    query: toolPreferenceQuery(),
     deviceId: device?.deviceId || '',
     clientStatus,
     healthRows: KNOWN_CLIENTS.map(({ id }) => [
@@ -10887,10 +10921,15 @@ function renderToolPreferencesNow() {
   const sourceSignature = clientSourceCacheApi.clientSourceRequestKey(
     clientSourcesIdentity(state.clientHealthExpanded)
   );
+  const clients = visibleToolPreferenceClients();
+  // A filtered list is shorter than `KNOWN_CLIENTS`, and an empty result still
+  // renders one node (the no-matches note), so the short-circuit compares
+  // against what this query is expected to have produced.
+  const expectedRowCount = clients.length || 1;
   if (
     state.toolPreferenceRenderSignature
     && state.toolPreferenceRenderSignature === renderSignature
-    && els.clientDisplayList.children.length === KNOWN_CLIENTS.length
+    && els.clientDisplayList.children.length === expectedRowCount
   ) {
     if (state.toolPreferenceDetailSignature !== detailSignature) {
       state.toolPreferenceDetailSignature = detailSignature;
@@ -10914,7 +10953,7 @@ function renderToolPreferencesNow() {
   const pinned = pinnedClientSet();
   const clientStatus = localClientStatus();
   const health = localClientHealth();
-  const clients = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients);
+  const filtering = Boolean(toolPreferenceQuery());
   const hasCustomOrder = clientDisplayPreferencesApi.hasCustomDisplayOrder(state.settings?.clientDisplayOrder);
   const hasPinnedClients = pinned.size > 0;
   const hasHiddenClients = hidden.size > 0;
@@ -11029,9 +11068,12 @@ function renderToolPreferencesNow() {
     } else {
       row.append(track, labelGroup, actions);
     }
-    row.addEventListener('pointerdown', (event) => clientPreferenceRowDrag.startRowDrag(event, id));
+    // Reordering is suppressed while a filter is on: the drop commits the order
+    // it reads off the list, and a filtered list is only part of it.
+    if (!filtering) row.addEventListener('pointerdown', (event) => clientPreferenceRowDrag.startRowDrag(event, id));
     els.clientDisplayList.appendChild(row);
   }
+  if (!clients.length) renderSettingsListEmptyState(els.clientDisplayList);
   // Appended first and only then swapped out: replacing the list wholesale
   // would destroy the row under the pointer on every stats tick.
   for (const row of previousRows) row.remove();
@@ -11051,6 +11093,15 @@ function moveLimitProviderLiveNode(parent, node, before = null) {
   parent.moveBefore(node, before);
 }
 
+function limitProviderQuery() {
+  return settingsListFilterApi.normalizeListQuery(state.limitProviderSearchQuery);
+}
+
+function visibleLimitProviders() {
+  const providers = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder);
+  return settingsListFilterApi.filterListItems(providers, state.limitProviderSearchQuery, ({ id, label }) => `${label} ${id}`);
+}
+
 function renderLimitProviderCheckboxes() {
   if (!els.limitProviderCheckboxes) return;
   // A stats update mid-drag would replace the rows under the pointer and kill
@@ -11061,9 +11112,13 @@ function renderLimitProviderCheckboxes() {
 
 function renderLimitProviderCheckboxesNow() {
   const renderSignature = limitProviderSettingsRenderSignature();
+  const providers = visibleLimitProviders();
+  // Same reasoning as the tracked-tools list: a filtered list is shorter than
+  // `LIMIT_PROVIDERS`, and no matches still leaves the no-matches note behind.
+  const expectedRowCount = providers.length || 1;
   if (
     state.limitProviderRenderSignature === renderSignature
-    && els.limitProviderCheckboxes.children.length === LIMIT_PROVIDERS.length
+    && els.limitProviderCheckboxes.children.length === expectedRowCount
   ) {
     return;
   }
@@ -11083,7 +11138,7 @@ function renderLimitProviderCheckboxesNow() {
   }
   const enabled = enabledLimitProviderSet();
   const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
-  const providers = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder);
+  const filtering = Boolean(limitProviderQuery());
   for (const { id, label, settingsLabel } of providers) {
     const isEnabled = enabled.has(id);
     const provider = isEnabled
@@ -11205,7 +11260,9 @@ function renderLimitProviderCheckboxesNow() {
     } else {
       row.append(wrap, copy, actions);
     }
-    row.addEventListener('pointerdown', (event) => limitProviderRowDrag.startRowDrag(event, id));
+    // Reordering is suppressed while a filter is on: the drop commits the order
+    // it reads off the list, and a filtered list is only part of it.
+    if (!filtering) row.addEventListener('pointerdown', (event) => limitProviderRowDrag.startRowDrag(event, id));
     // Kept inside the row rather than as a sibling: reordering moves only
     // `.limit-provider-row` nodes, so a sibling panel would be stranded when the
     // list is dragged.
@@ -11222,6 +11279,7 @@ function renderLimitProviderCheckboxesNow() {
     // change tracking and re-render signature.
     if (id === 'opencode') moveOpenCodeLocalFallbackSetting();
   }
+  if (!providers.length) renderSettingsListEmptyState(els.limitProviderCheckboxes);
   for (const row of previousRows) row.remove();
   if (focusedId && document.activeElement === document.body) {
     document.getElementById(focusedId)?.focus({ preventScroll: true });
@@ -11377,6 +11435,7 @@ function limitProviderSettingsRenderSignature() {
       settingValues,
       state.limitProviderSettingsExpanded
     ],
+    query: limitProviderQuery(),
     providers: (state.stats?.limits?.providers || []).map(providerSignature),
     devices: (state.stats?.devices || []).map(deviceSignature)
   });
@@ -11429,9 +11488,20 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
 }
 
 async function onToolTrackingToggle() {
-  const checked = Array.from(els.clientDisplayList.querySelectorAll('input[data-preference="track"]'))
-    .filter((cb) => cb.checked)
-    .map((cb) => cb.dataset.client);
+  // The rendered rows are the *visible* ones, so a search filter would make a
+  // pure read of the DOM silently untrack every tracked client the query hides.
+  // The saved value is the stored selection with the rendered checkboxes
+  // applied over it, ordered by the full display order so an unfiltered toggle
+  // still writes exactly the CSV it wrote before.
+  const enabled = new Set(enabledClientSet());
+  for (const cb of els.clientDisplayList.querySelectorAll('input[data-preference="track"]')) {
+    if (cb.checked) enabled.add(cb.dataset.client);
+    else enabled.delete(cb.dataset.client);
+  }
+  const checked = clientDisplayPreferencesApi
+    .orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients)
+    .filter(({ id }) => enabled.has(id))
+    .map(({ id }) => id);
   await saveSettings({ clients: checked.join(',') });
   // `clients` is usage-structural, so settings:update schedules a latest-wins
   // usage reconciliation and the eventual collector runs its own full tick.
@@ -11479,9 +11549,19 @@ async function onProjectVisibilityToggle() {
 }
 
 async function onLimitProviderToggle() {
-  const checked = Array.from(els.limitProviderCheckboxes.querySelectorAll('input[type=checkbox]'))
-    .filter((cb) => cb.checked)
-    .map((cb) => cb.dataset.provider);
+  // Merged rather than read straight off the DOM, for the same reason as
+  // `onToolTrackingToggle`: a search filter hides rows, and a hidden row's
+  // provider must not be dropped from the saved selection.
+  const enabled = new Set(enabledLimitProviderSet());
+  for (const cb of els.limitProviderCheckboxes.querySelectorAll('input[type=checkbox]')) {
+    if (!cb.dataset.provider) continue;
+    if (cb.checked) enabled.add(cb.dataset.provider);
+    else enabled.delete(cb.dataset.provider);
+  }
+  const checked = limitProviderOrderApi
+    .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
+    .filter(({ id }) => enabled.has(id))
+    .map(({ id }) => id);
   if (checked.length === 0 && state.breakdown === 'limits') {
     setBreakdown('tool');
   }
@@ -11985,6 +12065,7 @@ els.settingsButton.addEventListener('click', (event) => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.toggle('hidden');
   const settingsOpen = isSettingsPanelOpen();
+  if (!settingsOpen) resetSettingsListSearch();
   if (settingsOpen) syncSettingsForm();
   else render();
   if (!settingsOpen) stopWindowShortcutRecording();
@@ -12255,6 +12336,35 @@ els.exportNowButton?.addEventListener('click', async () => {
 });
 els.resetClientDisplayOrderButton?.addEventListener('click', resetClientDisplayOrder);
 els.showAllClientsButton?.addEventListener('click', showAllClients);
+
+// Escape clears the field rather than closing the settings panel: while a
+// filter is on, that is what the key is expected to undo.
+function bindSettingsListSearch(input, apply) {
+  if (!input) return;
+  input.addEventListener('input', () => apply(input.value));
+  input.addEventListener('search', () => apply(input.value));
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !input.value) return;
+    event.preventDefault();
+    event.stopPropagation();
+    input.value = '';
+    apply('');
+  });
+}
+
+bindSettingsListSearch(els.clientDisplaySearchInput, (value) => {
+  state.toolSearchQuery = value;
+  renderToolPreferences();
+  // The Cursor row's checkbox is disabled from the account status, which is
+  // re-applied by the status render rather than by the list render. Filtering
+  // re-creates that row outside a stats tick, so re-apply it here too.
+  renderCursorStatus();
+});
+
+bindSettingsListSearch(els.limitProviderSearchInput, (value) => {
+  state.limitProviderSearchQuery = value;
+  renderLimitProviderCheckboxes();
+});
 els.resetViewDisplayOrderButton?.addEventListener('click', resetViewDisplayOrder);
 els.showAllViewsButton?.addEventListener('click', showAllViews);
 els.resetGlassButton.addEventListener('click', async () => {

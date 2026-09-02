@@ -188,7 +188,13 @@ test('reduced motion drops the transition on both whole-row lists', () => {
 // removing it leaves the list with no affordance unless the note says so.
 test('the limits section tells the user rows can be dragged', () => {
   const html = readRendererFile('index.html');
-  assert.match(html, /<p class="settings-note" data-i18n="settings\.limits\.reorderNote">[\s\S]*?<\/p>\s*<div id="limitProviderCheckboxes"/);
+  // The search field sits between the two, so this is "above the list", not
+  // "immediately before it".
+  assert.match(html, /<p class="settings-note" data-i18n="settings\.limits\.reorderNote">[\s\S]*?<\/p>[\s\S]*?<div id="limitProviderCheckboxes"/);
+  assert.ok(
+    html.indexOf('data-i18n="settings.limits.reorderNote"') < html.indexOf('id="limitProviderCheckboxes"'),
+    'the reorder note should introduce the list rather than follow it'
+  );
   const i18n = readRendererFile('i18n.js');
   assert.equal((i18n.match(/'settings\.limits\.reorderNote':/g) || []).length, 5, 'one entry per bundled locale');
 });
