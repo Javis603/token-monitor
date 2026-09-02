@@ -1865,7 +1865,9 @@ test('a saved credential folds its panel only once a fresh record confirms the a
   const app = readRendererFile('app.js');
   const renderExternalStatus = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
   const save = functionBody(app, 'saveAccountCredential', 'submitAccountCredential');
-  assert.match(renderExternalStatus, /pending \? t\('settings\.common\.checking'\)/);
+  // Limits stay buffered until the first usage baseline completes, so a
+  // fresh save on a cold start waits on the collector, not the credential:
+  assert.match(renderExternalStatus, /pending[\s\S]*?\? t\(state\.stats\?\.limits \? 'settings\.common\.checking' : 'settings\.common\.collectingBaseline'\)/);
   // The refresh after a save can return before the collector publishes the
   // checked account, so the panel stays open and folds when that record lands.
   assert.match(renderExternalStatus, /if \(wasPending && !pending && linked\) setExternalAccountExpanded\(providerName, false\);/);
