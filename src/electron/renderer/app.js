@@ -11485,7 +11485,13 @@ async function onLimitProviderToggle() {
   if (checked.length === 0 && state.breakdown === 'limits') {
     setBreakdown('tool');
   }
-  await saveSettings({ limitProviders: checked.join(','), limitsEnabled: checked.length > 0 });
+  const patch = { limitProviders: checked.join(','), limitsEnabled: checked.length > 0 };
+  // LimitsRuntime publishes its reconfigured snapshot synchronously before the
+  // main process can send settings:push. Keep the renderer on the user's new
+  // selection so that intervening stats frames cannot rebuild this checkbox
+  // from the previous settings and visibly re-check it.
+  state.settings = { ...state.settings, ...patch };
+  await saveSettings(patch);
   clearDisabledLimitProviderPendingChecks(new Set(checked));
   // settings:update reconfigures LimitsRuntime immediately. Its existing
   // snapshot and the newly enabled provider's eventual result arrive through

@@ -1883,9 +1883,92 @@ test('provider toggles converge through the limits push without a forced refresh
   const app = readRendererFile('app.js');
   const body = functionBody(app, 'onLimitProviderToggle', 'onLimitProviderMove');
 
-  assert.match(body, /saveSettings\(\{ limitProviders: checked\.join\(','\), limitsEnabled: checked\.length > 0 \}\)/);
+  assert.match(body, /const patch = \{ limitProviders: checked\.join\(','\), limitsEnabled: checked\.length > 0 \};/);
+  assert.match(body, /state\.settings = \{ \.\.\.state\.settings, \.\.\.patch \};/);
+  assert.match(body, /saveSettings\(patch\)/);
   assert.match(body, /clearDisabledLimitProviderPendingChecks\(new Set\(checked\)\)/);
   assert.doesNotMatch(body, /refreshStats\(/);
+});
+
+test('provider checkbox stays unchecked while stats arrive before the settings reply', async () => {
+  const app = readRendererFile('app.js');
+  const providerSelection = functionBody(app, 'configuredLimitProviderSelection', 'missingLimitProviderStatus');
+  const toggleStart = app.indexOf('async function onLimitProviderToggle()');
+  const toggleEnd = app.indexOf('async function onLimitProviderMove(', toggleStart);
+  assert.ok(toggleStart >= 0 && toggleEnd > toggleStart);
+  const toggle = app.slice(toggleStart, toggleEnd);
+  const saveStart = app.indexOf('async function saveSettings(');
+  const saveEnd = app.indexOf('function renderHomeIfVisible(', saveStart);
+  assert.ok(saveStart >= 0 && saveEnd > saveStart);
+  const save = app.slice(saveStart, saveEnd);
+  const statsRenderStart = app.indexOf('function renderStatsUpdate()');
+  const statsRenderEnd = app.indexOf('const statsRenderScheduler =', statsRenderStart);
+  assert.ok(statsRenderStart >= 0 && statsRenderEnd > statsRenderStart);
+  const statsRender = app.slice(statsRenderStart, statsRenderEnd);
+  const observed = [false];
+  let resolveUpdate;
+  const updateResult = new Promise((resolve) => { resolveUpdate = resolve; });
+  const context = {
+    DEFAULT_LIMIT_PROVIDER_ORDER: 'codex',
+    LIMIT_PROVIDERS: [{ id: 'codex' }],
+    limitProviderOrderApi: {
+      normalizeLimitProviderSelection(value) {
+        return String(value || '').split(',').filter(Boolean);
+      }
+    },
+    state: {
+      breakdown: 'tool',
+      settingsPushRevision: 0,
+      settings: { limitsEnabled: true, limitProviders: 'codex' },
+      stats: { limits: { providers: [{ provider: 'codex', status: 'ok' }] } }
+    },
+    els: {
+      limitProviderCheckboxes: {
+        querySelectorAll: () => [{ checked: false, dataset: { provider: 'codex' } }]
+      }
+    },
+    window: {
+      tokenMonitor: {
+        updateSettings: () => updateResult,
+        getSettings: () => Promise.resolve({ limitsEnabled: true, limitProviders: 'codex' })
+      }
+    },
+    visibleStatsSurface: () => 'settings',
+    renderConnectionStatus() {},
+    renderCodexAccounts() {},
+    renderSettingsSummaries() {},
+    renderLimitProviderCheckboxes() { observed.push(context.limitProviderEnabled('codex')); },
+    renderToolPreferences() {},
+    renderWslPanel() {},
+    updateOpenRouterProfilesStatus() {},
+    updateThirdPartyProfilesStatus() {},
+    renderDeepseekStatus() {},
+    renderMinimaxStatus() {},
+    renderExternalProviderStatus() {},
+    renderCopilotStatus() {},
+    signalContentReady() {},
+    clearDisabledLimitProviderPendingChecks() {},
+    setBreakdown() {},
+    applyEffectiveCurrencyRates() {},
+    preserveSettingsPanelScroll() {},
+    syncSettingsForm() {},
+    isSettingsSurfaceVisible: () => true,
+    statsRenderScheduler: { request() {} },
+    restartTimer() {},
+    maybeUpdateBarsIcon() {},
+    deliverTrayProviderIcons() {},
+    console
+  };
+
+  vm.createContext(context);
+  vm.runInContext(`${providerSelection}\n${save}\n${toggle}\n${statsRender}`, context);
+  context.limitProviderEnabled = vm.runInContext('limitProviderEnabled', context);
+  const pendingToggle = vm.runInContext('onLimitProviderToggle()', context);
+  vm.runInContext('renderStatsUpdate()', context);
+  resolveUpdate({ limitsEnabled: false, limitProviders: '' });
+  await pendingToggle;
+
+  assert.deepEqual(observed, [false, false]);
 });
 
 test('empty OpenCode profiles render a localized summary before returning', () => {
