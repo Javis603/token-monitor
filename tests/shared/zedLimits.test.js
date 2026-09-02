@@ -84,7 +84,6 @@ test('normalizes Zed billing plan names', () => {
 test('parses Token Spend first and keeps its reset without subscription renewal copy', () => {
   const parsed = parseZedBillingUsage(usagePayload(), subscriptionPayload());
   assert.equal(parsed.planLabel, 'Zed Student');
-  assert.equal(parsed.subscriptionId, '1596962');
   assert.equal(parsed.usageUpdatedAt, '2026-09-02T01:02:03.000Z');
   assert.deepEqual(parsed.window, {
     kind: 'billing',
@@ -161,7 +160,6 @@ test('does not infer Edit Predictions from a Business plan when usage omits the 
 test('keeps usage valid without optional subscription data', () => {
   const parsed = parseZedBillingUsage(usagePayload(), null);
   assert.equal(parsed.planLabel, 'Zed Student');
-  assert.equal(parsed.subscriptionId, '');
   assert.equal(parsed.window.resetsAt, null);
   assert.equal(parseSubscription({}), null);
 });
@@ -216,17 +214,19 @@ test('fetches dashboard usage and subscription with an explicit Cookie header', 
   }
 });
 
-test('keeps Token Spend when subscription enrichment is unavailable', async () => {
-  const provider = await fetchZedLimits(
+test('keeps Token Spend and account identity when subscription enrichment is unavailable', async () => {
+  const fetchProvider = (subscriptionStatus) => fetchZedLimits(
     { zedCookie: 'zed.session=session-secret' },
     {
       env: {},
       fetch: async (url) => url === ZED_BILLING_USAGE_URL
         ? response(200, usagePayload())
-        : response(500)
+        : response(subscriptionStatus, subscriptionPayload())
     }
   );
+  const [enriched, provider] = await Promise.all([fetchProvider(200), fetchProvider(500)]);
   assert.equal(provider.status, 'ok');
+  assert.equal(provider.accountKey, enriched.accountKey);
   const tokenSpend = provider.windows.find((window) => window.limitId === 'zed.token-spend');
   assert.equal(tokenSpend.used, 2.5);
   assert.equal(tokenSpend.resetsAt, null);

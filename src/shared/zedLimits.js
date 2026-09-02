@@ -98,7 +98,6 @@ function parseSubscription(body) {
   const subscription = body?.subscription;
   if (!subscription || typeof subscription !== 'object') return null;
   return {
-    id: String(subscription.id || '').trim(),
     planLabel: formatPlanLabel(subscription.name),
     resetsAt: toIso(subscription?.period?.end_at)
   };
@@ -169,7 +168,6 @@ function parseZedBillingUsage(body, subscriptionBody = null) {
   const editPredictionsWindow = parseEditPredictionsWindow(currentUsage);
   return {
     planLabel,
-    subscriptionId: subscription?.id || '',
     usageUpdatedAt: toIso(tokenSpend.updated_at),
     window: tokenSpendWindow,
     windows: [tokenSpendWindow, editPredictionsWindow].filter(Boolean)
@@ -255,7 +253,7 @@ async function fetchZedLimits(options = {}, deps = {}) {
       .find((pair) => pair.name.toLowerCase() === ZED_SESSION_COOKIE)?.value || cookie;
     return normalizeLimitProvider({
       provider: 'zed',
-      accountKey: hashKey('zed', parsed.subscriptionId || sessionSeed),
+      accountKey: hashKey('zed', sessionSeed),
       planLabel: parsed.planLabel,
       source: 'web',
       status: 'ok',

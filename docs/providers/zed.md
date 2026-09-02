@@ -69,9 +69,9 @@ Spend values are converted from cents to USD. `zed.token-spend` is the measured 
 
 ## Identity and aggregation
 
-When the optional subscription response supplies `subscription.id`, it seeds the stable hashed `accountKey`. If that endpoint is unavailable, the Zed session cookie seeds a local hashed fallback so raw credential material never enters the wire record.
+The required `zed.session` cookie always seeds the hashed `accountKey`, so optional subscription enrichment cannot change provider identity when it times out or fails. Raw credential material never enters the wire record; subscription metadata only enriches the plan label and Token Spend reset.
 
-The fallback can change when the browser session rotates. That is acceptable for the single-cookie settings model, but a future multi-account implementation must obtain a stable dashboard account identifier before promising cross-device deduplication.
+The key can change when the browser session rotates. That is acceptable for the single-cookie settings model, but a future multi-account implementation must obtain a stable dashboard account identifier before promising cross-device deduplication.
 
 ## Platform behavior
 
