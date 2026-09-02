@@ -63,20 +63,22 @@
   }
 
   function hasKnownCost(rows) {
-    return (Array.isArray(rows) ? rows : []).some((row) => finiteNumber(row?.cost) > 0);
+    return (Array.isArray(rows) ? rows : []).some((row) => (
+      row?.unattributed !== true && finiteNumber(row?.cost) > 0
+    ));
   }
 
-  function rankingValue(row, metric, rows = []) {
-    const useCost = normalizeRankingMetric(metric) === 'cost' && hasKnownCost(rows);
-    return Math.max(0, finiteNumber(useCost ? row?.cost : row?.value));
+  function effectiveRankingMetric(rows, metric) {
+    return normalizeRankingMetric(metric) === 'cost' && hasKnownCost(rows) ? 'cost' : 'tokens';
   }
 
-  function rankRows(rows, metric) {
-    const sourceRows = Array.isArray(rows) ? rows : [];
-    const normalizedMetric = normalizeRankingMetric(metric);
-    const useCost = normalizedMetric === 'cost' && hasKnownCost(sourceRows);
-    return [...sourceRows].sort((left, right) => {
-      if (useCost) {
+  function rankingValue(row, metric) {
+    return Math.max(0, finiteNumber(normalizeRankingMetric(metric) === 'cost' ? row?.cost : row?.value));
+  }
+
+  function sortedRowsByMetric(rows, effectiveMetric) {
+    return [...rows].sort((left, right) => {
+      if (effectiveMetric === 'cost') {
         const costDifference = finiteNumber(right?.cost) - finiteNumber(left?.cost);
         if (costDifference !== 0) return costDifference;
       }
@@ -86,6 +88,20 @@
     });
   }
 
+  function rankRows(rows, metric) {
+    const sourceRows = Array.isArray(rows) ? rows : [];
+    return sortedRowsByMetric(sourceRows, effectiveRankingMetric(sourceRows, metric));
+  }
+
+  function rankRowsWithValues(rows, metric) {
+    const sourceRows = Array.isArray(rows) ? rows : [];
+    const effectiveMetric = effectiveRankingMetric(sourceRows, metric);
+    return sortedRowsByMetric(sourceRows, effectiveMetric).map((row) => ({
+      ...row,
+      barValue: rankingValue(row, effectiveMetric)
+    }));
+  }
+
   return {
     attributionRows,
     visibleAttributionRows,
@@ -93,6 +109,7 @@
     normalizeRankingMetric,
     rankingValue,
     rankRows,
+    rankRowsWithValues,
     UNATTRIBUTED_KEY
   };
 });

@@ -11,6 +11,7 @@ const {
   attributionValue,
   normalizeRankingMetric,
   rankRows,
+  rankRowsWithValues,
   rankingValue,
   UNATTRIBUTED_KEY
 } = require('../../src/electron/renderer/usageAttributionRows');
@@ -130,9 +131,33 @@ test('cost ranking falls back to token order and token bars when no cost is know
     { key: 'middle', value: 20, cost: Number.NaN }
   ];
 
-  assert.deepEqual(rankRows(rows, 'cost').map((row) => row.key), ['large', 'middle', 'small']);
-  assert.equal(rankingValue(rows[0], 'cost', rows), 10);
-  assert.equal(rankingValue(rows[1], 'cost', rows), 50);
+  const rankedRows = rankRowsWithValues(rows, 'cost');
+  assert.deepEqual(rankedRows.map((row) => row.key), ['large', 'middle', 'small']);
+  assert.deepEqual(rankedRows.map((row) => row.barValue), [50, 20, 10]);
+});
+
+test('cost ranking ignores synthetic unattributed cost when deciding whether model costs are known', () => {
+  const rows = [
+    { key: UNATTRIBUTED_KEY, value: 10, cost: 12, unattributed: true },
+    { key: 'known-model', value: 100, cost: 0 }
+  ];
+
+  assert.deepEqual(rankRows(rows, 'cost').map((row) => row.key), [
+    'known-model',
+    UNATTRIBUTED_KEY
+  ]);
+});
+
+test('ranked rows compute matching bar values without requiring a per-row source scan', () => {
+  const rows = [
+    { key: 'cheap', value: 10_000, cost: 1 },
+    { key: 'expensive', value: 100, cost: 12 }
+  ];
+
+  assert.deepEqual(rankRowsWithValues(rows, 'cost').map(({ key, barValue }) => ({ key, barValue })), [
+    { key: 'expensive', barValue: 12 },
+    { key: 'cheap', barValue: 1 }
+  ]);
 });
 
 test('cost bars use cost while token bars keep token volume', () => {
@@ -141,9 +166,9 @@ test('cost bars use cost while token bars keep token volume', () => {
     { key: 'expensive', value: 100, cost: 12 }
   ];
 
-  assert.equal(rankingValue(rows[0], 'tokens', rows), 10_000);
-  assert.equal(rankingValue(rows[0], 'cost', rows), 1);
-  assert.equal(rankingValue(rows[1], 'cost', rows), 12);
+  assert.equal(rankingValue(rows[0], 'tokens'), 10_000);
+  assert.equal(rankingValue(rows[0], 'cost'), 1);
+  assert.equal(rankingValue(rows[1], 'cost'), 12);
 });
 
 test('Tool and Model breakdowns consume the shared token-or-cost rows', () => {
@@ -175,8 +200,8 @@ test('Model rows use the selected ranking metric for order and bar scale', () =>
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
 
   assert.match(app, /function modelRowsForPeriod\(period, rankingMetric = state\.settings\?\.modelRankingMetric\)/);
-  assert.match(app, /rankRows\(modelRows, rankingMetric\)/);
-  assert.match(app, /rankingValue\(row, rankingMetric, rows\)/);
+  assert.match(app, /rankRowsWithValues\(modelRows, rankingMetric\)/);
+  assert.match(app, /unattributed/);
   assert.match(app, /const width = rowWidth\(barValue, max\)/);
   assert.match(app, /homeModelRows\(modelRowsForPeriod\(period, 'tokens'\), period\?\.totalTokens, 5\)/);
 });

@@ -2264,11 +2264,12 @@ function toolRowsForPeriod(period) {
 }
 
 function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRankingMetric) {
-  const modelRows = periodAttributionRows(period, period?.models, period?.modelCosts).map(({ key: model, value, cost }) => ({
+  const modelRows = periodAttributionRows(period, period?.models, period?.modelCosts).map(({ key: model, value, cost, unattributed }) => ({
     key: model,
     name: model === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : model,
     value,
     cost,
+    unattributed,
     color: modelColor(model),
     stale: false,
     cacheReadTokens: attributionComponent(period, 'modelCacheReads', model),
@@ -2277,11 +2278,7 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
     unclassifiedTokens: attributionComponent(period, 'modelUnclassifiedTokens', model)
   }));
   if (modelRows.length > 0) {
-    const rows = usageAttributionRowsApi.rankRows(modelRows, rankingMetric);
-    return rows.map((row) => ({
-      ...row,
-      barValue: usageAttributionRowsApi.rankingValue(row, rankingMetric, rows)
-    }));
+    return usageAttributionRowsApi.rankRowsWithValues(modelRows, rankingMetric);
   }
   if (Number(period?.totalTokens || 0) === 0) return [];
   return toolRowsForPeriod(period);
