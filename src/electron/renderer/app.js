@@ -3941,6 +3941,19 @@ function formatCursorSpendValue(window) {
     : usedText;
 }
 
+function formatZedBillingValue(window) {
+  const editPredictions = window?.limitId === 'zed.edit-predictions';
+  if (editPredictions && String(window?.detail || '').trim().toLowerCase() === 'unlimited') {
+    return 'Unlimited';
+  }
+  const used = optionalFiniteNumber(window?.used);
+  const limit = optionalFiniteNumber(window?.limit);
+  if (used === null || limit === null) return null;
+  if (editPredictions) return `${formatNumber(used)} / ${formatNumber(limit)}`;
+  const currency = window?.currency || 'USD';
+  return `${formatMoney(used, currency)} / ${formatMoney(limit, currency)}`;
+}
+
 function formatBalanceAmount(value, source) {
   return formatMoney(value, source?.currency);
 }
@@ -5045,20 +5058,13 @@ function renderProviderWindows(provider, color) {
     for (const billing of windowsForKind(provider, 'billing')) {
       const unlimitedEditPredictions = billing?.limitId === 'zed.edit-predictions'
         && String(billing?.detail || '').trim().toLowerCase() === 'unlimited';
-      const used = optionalFiniteNumber(billing?.used);
-      const limit = optionalFiniteNumber(billing?.limit);
-      const currency = billing?.currency || 'USD';
-      const spendValue = unlimitedEditPredictions
-        ? 'Unlimited'
-        : used !== null && limit !== null
-        ? `${formatMoney(used, currency)} / ${formatMoney(limit, currency)}`
-        : null;
+      const billingValue = formatZedBillingValue(billing);
       const node = limitWindowNode(
         billing?.label || 'Token Spend',
         billing,
         color,
         0.95,
-        spendValue
+        billingValue
       );
       node.classList.add('limit-window-wide');
       if (unlimitedEditPredictions) node.classList.add('limit-window-no-reset');
