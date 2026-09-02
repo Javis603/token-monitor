@@ -416,6 +416,21 @@ test('main section holds views; appearance is its own section; window holds beha
   assert.ok(trayTextIndex > trayIconOptionsIndex, 'tray text select should be inside tray icon options');
   assert.ok(trayModeIndex > trayIconOptionsIndex, 'tray-only mode should depend on the tray icon toggle');
   assert.ok(trayModeIndex < trayIconOptionsCloseIndex, 'tray-only mode should be inside tray icon options');
+  // Hiding the Dock/taskbar entry is only recoverable through the tray icon, so
+  // the toggle has to live inside the tray icon's options. It follows tray-only
+  // mode and that mode's own note, which is only readable because the row is
+  // hidden — not dimmed — whenever tray-only mode is on.
+  const hideAppIconIndex = presenceGroup.indexOf('id="hideAppIconInput"');
+  const trayOptionsIndex = presenceGroup.indexOf('id="trayOptions"');
+  assert.ok(hideAppIconIndex > trayIconOptionsIndex, 'hiding the app icon should depend on the tray icon toggle');
+  assert.ok(hideAppIconIndex < trayIconOptionsCloseIndex, 'hiding the app icon should be inside tray icon options');
+  assert.ok(hideAppIconIndex > trayOptionsIndex, "hiding the app icon should follow tray-only mode and its note");
+  // Its explanation expands on enable like tray-only mode's, rather than sitting
+  // permanently under the row: nothing else in this nested group carries an
+  // always-on description, and one there costs two lines of height.
+  const hideAppIconOptionsIndex = presenceGroup.indexOf('id="hideAppIconOptions"');
+  assert.ok(hideAppIconOptionsIndex > hideAppIconIndex, 'the app-icon note should belong to its toggle');
+  assert.doesNotMatch(presenceGroup, /id="hideAppIconInput"[\s\S]{0,400}?settings-item-desc/);
   assert.doesNotMatch(
     presenceGroup,
     /id="trayIconOptions"[\s\S]*?<\/div>\s*<label class="checkbox-label"><input id="trayModeInput"/,
