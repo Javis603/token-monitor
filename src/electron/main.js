@@ -901,12 +901,16 @@ function currentKimiApiKey() {
 // The single paste box accepts either an access token or a refresh token; a
 // refresh token (JWT lifetime in days, not minutes) self-renews via the Kimi
 // auth endpoint, so it is stored as the seed of a rotating session instead.
-function classifyKimiWebTokenPaste(value) {
+// An access-token paste never clears a stored refresh seed: it shadows the
+// session only while fresh, and once it expires the seed must still be there
+// for the session to resume (the console's localStorage holds both keys side
+// by side, so pasting the wrong one is an easy accident).
+function classifyKimiWebTokenPaste(value, existingRefreshToken = '') {
   const token = kimiWebToken({}, String(value || ''));
   if (token && looksLikeKimiRefreshToken(token)) {
     return { kimiWebAccessToken: '', kimiWebRefreshToken: token };
   }
-  return { kimiWebAccessToken: token, kimiWebRefreshToken: '' };
+  return { kimiWebAccessToken: token, kimiWebRefreshToken: token ? String(existingRefreshToken || '') : '' };
 }
 
 function normalizeKimiWebRefreshToken(value) {
@@ -6603,7 +6607,7 @@ app.whenReady().then(() => {
     if (patch.commandcodeCookie !== undefined) normalizedPatch.commandcodeCookie = normalizeCommandcodeCookie(patch.commandcodeCookie);
     if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
     if (patch.kimiWebAccessToken !== undefined) {
-      const classified = classifyKimiWebTokenPaste(patch.kimiWebAccessToken);
+      const classified = classifyKimiWebTokenPaste(patch.kimiWebAccessToken, settings?.kimiWebRefreshToken);
       normalizedPatch.kimiWebAccessToken = classified.kimiWebAccessToken;
       normalizedPatch.kimiWebRefreshToken = classified.kimiWebRefreshToken;
     }
