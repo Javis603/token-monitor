@@ -16634,7 +16634,7 @@ function renderExternalProviderStatus(providerName) {
   // instead of a permanent spinner; the cutoff above still blocks the old
   // record from being read as a confirmed link.
   const statusProvider = provider || (settled && configured && enabled ? { status: 'noSyncedData' } : null);
-  const statusText = pending ? t('settings.common.checking')
+  const statusText = pending ? t(state.stats?.limits ? 'settings.common.checking' : 'settings.common.collectingBaseline')
     : apiKeyAccountStatusText(providerName, statusProvider, configured, source, enabled);
   setCursorStatusText(statusEl, providerName === 'claude' && !pending
     ? claudeAccountStatusText(statusText, enabled) : statusText);
