@@ -88,11 +88,6 @@
     });
   }
 
-  function rankRows(rows, metric) {
-    const sourceRows = Array.isArray(rows) ? rows : [];
-    return sortedRowsByMetric(sourceRows, effectiveRankingMetric(sourceRows, metric));
-  }
-
   function rankRowsWithValues(rows, metric) {
     const sourceRows = Array.isArray(rows) ? rows : [];
     const effectiveMetric = effectiveRankingMetric(sourceRows, metric);
@@ -108,7 +103,6 @@
     attributionValue,
     normalizeRankingMetric,
     rankingValue,
-    rankRows,
     rankRowsWithValues,
     UNATTRIBUTED_KEY
   };

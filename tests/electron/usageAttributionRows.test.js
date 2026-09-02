@@ -10,7 +10,6 @@ const {
   visibleAttributionRows,
   attributionValue,
   normalizeRankingMetric,
-  rankRows,
   rankRowsWithValues,
   rankingValue,
   UNATTRIBUTED_KEY
@@ -110,7 +109,7 @@ test('cost ranking orders known costs first and uses tokens as a stable tie-brea
     { key: 'higher-cost-more-tokens', value: 700, cost: 8 }
   ];
 
-  assert.deepEqual(rankRows(rows, 'cost').map((row) => row.key), [
+  assert.deepEqual(rankRowsWithValues(rows, 'cost').map((row) => row.key), [
     'higher-cost-more-tokens',
     'higher-cost-fewer-tokens',
     'lower-cost',
@@ -142,7 +141,7 @@ test('cost ranking ignores synthetic unattributed cost when deciding whether mod
     { key: 'known-model', value: 100, cost: 0 }
   ];
 
-  assert.deepEqual(rankRows(rows, 'cost').map((row) => row.key), [
+  assert.deepEqual(rankRowsWithValues(rows, 'cost').map((row) => row.key), [
     'known-model',
     UNATTRIBUTED_KEY
   ]);
@@ -191,7 +190,7 @@ test('Model settings expose and persist the ranking metric without changing the 
   assert.match(index, /value="cost"[^>]*data-i18n="settings\.modelRanking\.cost"/);
   assert.match(main, /modelRankingMetric:\s*'tokens'/);
   assert.match(main, /normalizeRankingMetric\(merged\.modelRankingMetric\)/);
-  assert.match(main, /patch\.modelRankingMetric[^\n]*normalizeRankingMetric/);
+  assert.match(main, /modelRankingMetric: normalizeRankingMetric\(patch\.modelRankingMetric \?\? settings\.modelRankingMetric\)/);
   assert.match(app, /modelRankingMetricInput\.value\s*=\s*usageAttributionRowsApi\.normalizeRankingMetric/);
   assert.match(app, /saveSettings\(\{ modelRankingMetric: selection \}\)/);
 });
@@ -203,5 +202,6 @@ test('Model rows use the selected ranking metric for order and bar scale', () =>
   assert.match(app, /rankRowsWithValues\(modelRows, rankingMetric\)/);
   assert.match(app, /unattributed/);
   assert.match(app, /const width = rowWidth\(barValue, max\)/);
+  assert.match(app, /const max = barScaleMax\(rows\)/);
   assert.match(app, /homeModelRows\(modelRowsForPeriod\(period, 'tokens'\), period\?\.totalTokens, 5\)/);
 });

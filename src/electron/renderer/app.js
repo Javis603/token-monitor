@@ -202,9 +202,11 @@ const trayLayoutApi = window.TokenMonitorTrayLayout;
 const sessionRowsApi = window.TokenMonitorSessionRows;
 const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
 const {
+  barScaleMax,
   createAfterLayoutScheduler,
   isLargeSessionBreakdown,
   rowRenderFingerprint,
+  rowWidth,
   shouldAnimateBreakdownRows,
   toolIconsEnabled
 } = breakdownRenderPolicyApi;
@@ -1712,11 +1714,6 @@ function applyBarScale(fill, scale) {
   animateBarBetween(fill, 0, safeScale, 0, 420);
 }
 
-function rowWidth(value, max) {
-  if (Number(value) <= 0) return 0;
-  return max > 0 ? Math.max(2, Math.min(100, (value / max) * 100)) : 0;
-}
-
 function rowTemplate(rowData) {
   const { key, name, platform, client, subtitle, detail, kind } = rowData;
   const row = document.createElement('div');
@@ -2082,7 +2079,7 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     state.rowSignature = '';
     return;
   }
-  const max = Math.max(1, ...rows.map((row) => row.barValue ?? row.value));
+  const max = barScaleMax(rows);
   const hintText = incompleteHint ? t(incompleteHint) : '';
   const signature = JSON.stringify([state.breakdown, hintText, rows.map((row) => row.key)]);
   const children = Array.from(els.breakdown.children);

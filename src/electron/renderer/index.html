@@ -208,16 +208,6 @@
                   <option value="CNY" data-i18n="settings.currency.cny">CNY - Chinese Yuan</option>
                 </select>
               </label>
-              <label class="settings-item">
-                <span class="settings-item-text">
-                  <span class="settings-item-title" data-i18n="settings.modelRanking.label">Model ranking</span>
-                </span>
-                <select id="modelRankingMetricInput">
-                  <option value="tokens" data-i18n="settings.modelRanking.tokens">Token usage</option>
-                  <option value="cost" data-i18n="settings.modelRanking.cost">Cost</option>
-                </select>
-                <span class="settings-note settings-item-desc" data-i18n="settings.modelRanking.note">Controls the order and bars in Models. Token and cost values stay visible.</span>
-              </label>
               <div id="currencyRateRow" class="currency-rate-row">
                 <div class="settings-item">
                   <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.currency.rateMode">Exchange rate</span></span>
@@ -232,6 +222,16 @@
                   <input id="currencyRateOverrideInput" type="number" step="0.0001" min="0" />
                 </div>
               </div>
+              <label class="settings-item">
+                <span class="settings-item-text">
+                  <span class="settings-item-title" data-i18n="settings.modelRanking.label">Model ranking</span>
+                </span>
+                <select id="modelRankingMetricInput">
+                  <option value="tokens" data-i18n="settings.modelRanking.tokens">Token usage</option>
+                  <option value="cost" data-i18n="settings.modelRanking.cost">Cost</option>
+                </select>
+                <span class="settings-note settings-item-desc" data-i18n="settings.modelRanking.note">Controls the order and bars in Models. Token and cost values stay visible.</span>
+              </label>
             </div>
           </div>
         </div>

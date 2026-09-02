@@ -7,14 +7,51 @@ const test = require('node:test');
 
 const {
   MAX_ANIMATED_BREAKDOWN_ROWS,
+  barScaleMax,
   createAfterLayoutScheduler,
   isLargeSessionBreakdown,
   rowRenderFingerprint,
+  rowWidth,
   shouldAnimateBreakdownRows,
   toolIconsEnabled
 } = require('../../src/electron/renderer/breakdownRenderPolicy');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
+
+test('bar scale follows the largest rendered value, including fractional costs', () => {
+  const tokenRows = [{ value: 9_000 }, { value: 3_000 }];
+  assert.equal(barScaleMax(tokenRows), 9_000);
+  assert.equal(rowWidth(9_000, barScaleMax(tokenRows)), 100);
+  assert.equal(Number(rowWidth(3_000, barScaleMax(tokenRows)).toFixed(6)), 33.333333);
+
+  // Cost-ranked bars are USD and routinely below $1. A scale floored at 1 rendered
+  // this pair as 30% / 10% instead of a full bar and a third of it.
+  const costRows = [{ value: 9_000, barValue: 0.3 }, { value: 3_000, barValue: 0.1 }];
+  assert.equal(barScaleMax(costRows), 0.3);
+  assert.equal(rowWidth(0.3, barScaleMax(costRows)), 100);
+  assert.equal(Number(rowWidth(0.1, barScaleMax(costRows)).toFixed(6)), 33.333333);
+});
+
+test('sub-cent costs stay proportional instead of collapsing onto the minimum width', () => {
+  const rows = [{ barValue: 0.008 }, { barValue: 0.002 }];
+  const max = barScaleMax(rows);
+
+  assert.equal(rowWidth(0.008, max), 100);
+  assert.equal(rowWidth(0.002, max), 25);
+});
+
+test('bar scale ignores unusable values and collapses bars when nothing is measurable', () => {
+  assert.equal(barScaleMax([]), 0);
+  assert.equal(barScaleMax(null), 0);
+  assert.equal(barScaleMax([{ value: Number.NaN }, { value: 5 }]), 5);
+  assert.equal(barScaleMax([{ value: -4 }]), 0);
+  assert.equal(rowWidth(0, barScaleMax([{ value: 0 }])), 0);
+});
+
+test('a non-zero row keeps a visible bar even when it rounds below the minimum', () => {
+  assert.equal(rowWidth(1, 1_000_000), 2);
+  assert.equal(rowWidth(0, 1_000), 0);
+});
 
 test('small breakdowns keep motion while large breakdowns skip it', () => {
   assert.equal(shouldAnimateBreakdownRows(MAX_ANIMATED_BREAKDOWN_ROWS), true);
