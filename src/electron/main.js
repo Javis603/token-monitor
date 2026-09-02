@@ -2679,10 +2679,11 @@ function applyMacSpaceBehavior(trayMode = Boolean(settings?.trayMode)) {
       // skipTransformProcessType is not just a flicker optimisation here. Left
       // at its default, Electron transforms the process back to a foreground
       // app on this call, which re-shows the Dock icon and silently undoes the
-      // accessory policy hideAppIcon depends on. Every caller of this branch
-      // (exitTrayMode, focusExistingWindow, openMainWindowFromWidget) has
-      // already run applyMacActivationPolicy(), so the process type is the one
-      // we want before we get here and the transform is pure damage.
+      // accessory policy hideAppIcon depends on. The invariant that makes
+      // skipping safe is that applyMacActivationPolicy() is the only thing that
+      // decides the process type and has already run on every path into here —
+      // enumerating those paths is what rots, so anything new that reaches this
+      // function has to apply the policy first rather than be added to a list.
       mainWindow.setVisibleOnAllWorkspaces(false, { skipTransformProcessType: true });
     }
     if (typeof mainWindow.setHiddenInMissionControl === 'function') {
@@ -8098,7 +8099,15 @@ app.whenReady().then(() => {
   });
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  // The window this builds is about to be on screen, so the policy is resolved
+  // for a visible window exactly as focusExistingWindow() does. Without it this
+  // was the one path reaching applyMacSpaceBehavior() with a process type
+  // nothing had decided, which skipTransformProcessType now preserves.
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length > 0) return;
+    applyMacActivationPolicy({ mainWindowVisible: true });
+    createWindow();
+  });
   maybeRunBackgroundUpdateCheck();
   startAppUpdateBackgroundChecks();
 });

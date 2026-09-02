@@ -74,6 +74,13 @@ test('main process reapplies the complete Space policy before showing either mod
   // option from the leave-tray-mode branch re-shows the Dock icon and undoes a
   // hideAppIcon that is still switched on.
   assert.equal((policy.match(/skipTransformProcessType: true/g) || []).length, 2);
+  // Skipping the transform is only safe because applyMacActivationPolicy() has
+  // decided the process type first on every path in. createWindow() is reached
+  // from the activate handler too, which had no policy call of its own.
+  assert.match(
+    main,
+    /app\.on\('activate', \(\) => \{[\s\S]*?applyMacActivationPolicy\(\{ mainWindowVisible: true \}\);[\s\S]*?createWindow\(\);/
+  );
   assert.match(policy, /setHiddenInMissionControl\(true\)/);
   assert.match(popover, /applyMacSpaceBehavior\(true\)[\s\S]*mainWindow\.show\(\)/);
   assert.match(focusWindow, /applyMacSpaceBehavior\(false\)[\s\S]*mainWindow\.show\(\)/);
