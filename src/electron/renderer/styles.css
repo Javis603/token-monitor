@@ -1613,6 +1613,12 @@ span.settings-note.settings-item-desc {
 .currency-rate-row.hidden, .currency-rate-manual-field.hidden { display: none; }
 /* The rate row is a sub-setting of the Currency row: keep them as one unseparated pair. */
 .settings-subgroup > .settings-item + .currency-rate-row { margin-top: 0; }
+/* The pair ends there: the next setting rejoins the grouped list with its hairline,
+   instead of floating off on the generic 8px subgroup margin. */
+.settings-subgroup > .currency-rate-row + .settings-item {
+  margin-top: 0;
+  border-top: 1px solid rgba(var(--line-rgb), 0.06);
+}
 .currency-rate-manual-field { display: flex; align-items: center; gap: 8px; min-width: 0; padding-bottom: 2px; }
 .currency-rate-prefix { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
 .settings-panel .currency-rate-manual-field input { flex: 1 1 0; width: 0; min-width: 0; font-size: 11px; }
