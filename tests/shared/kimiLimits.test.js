@@ -924,3 +924,28 @@ test('fetchKimiLimits reports unauthorized when the pasted refresh token is reje
 
   assert.equal(provider.status, 'unauthorized');
 });
+
+test('fetchKimiLimits lets the seed session serve once a pasted access token exists alongside it', async () => {
+  const now = Date.parse('2026-08-24T00:00:00Z');
+  const requests = [];
+  const provider = await fetchKimiLimits(
+    { kimiWebAccessToken: 'accidentally-pasted-access.body.sig', kimiWebRefreshToken: 'seed.body.sig' },
+    {
+      env: {},
+      now: () => now,
+      kimiManualSession: async (seed) => {
+        assert.equal(seed, 'seed.body.sig', 'the preserved seed still drives the session');
+        return desktopSession({ accessToken: 'manual-rotated.body.sig', userId: 'manual-user' });
+      },
+      fetch: async (url, init) => {
+        requests.push({ url: String(url), init });
+        return webUsageResponse();
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'ok', 'a mis-pasted access token must not brick the provider');
+  const usages = requests.find((request) => request.url === KIMI_WEB_USAGES_URL);
+  assert.equal(usages.init.headers.Authorization, 'Bearer manual-rotated.body.sig');
+  assert.equal(provider.accountKey, hashKey('kimi', 'manual:manual-user'));
+});
