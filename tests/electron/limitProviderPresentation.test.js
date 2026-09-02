@@ -1541,7 +1541,7 @@ test('saving Ollama credentials enables its provider and always settles validati
   assert.match(ollamaSetup, /if \(!validation\?\.ok\)/);
   assert.doesNotMatch(ollamaSetup, /await refreshStats\(\{ force: true \}\);/);
   assert.match(ollamaSetup, /clearExternalProviderCheckPending\('ollama'\);/);
-  assert.match(renderExternalStatus, /pending \? t\('settings\.common\.checking'\)/);
+  assert.match(renderExternalStatus, /pending[\s\S]*?\? t\(state\.stats\?\.limits \? 'settings\.common\.checking' : 'settings\.common\.collectingBaseline'\)/);
   assert.match(
     renderExternalStatus,
     /providerName === 'ollama' && wasPending && !pending && linked[\s\S]*?setExternalAccountExpanded\('ollama', false\)/,
