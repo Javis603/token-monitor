@@ -185,14 +185,14 @@ test('Model settings expose and persist the ranking metric without changing the 
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
 
-  assert.match(index, /id="modelRankingMetricInput"/);
-  assert.match(index, /value="tokens"[^>]*data-i18n="settings\.modelRanking\.tokens"/);
-  assert.match(index, /value="cost"[^>]*data-i18n="settings\.modelRanking\.cost"/);
+  assert.match(index, /role="radiogroup" aria-labelledby="modelRankingMetricLabel"/);
+  assert.match(index, /name="modelRankingMetric" value="tokens"[^>]*><span data-i18n="settings\.modelRanking\.tokens"/);
+  assert.match(index, /name="modelRankingMetric" value="cost"[^>]*><span data-i18n="settings\.modelRanking\.cost"/);
   assert.match(main, /modelRankingMetric:\s*'tokens'/);
   assert.match(main, /normalizeRankingMetric\(merged\.modelRankingMetric\)/);
   assert.match(main, /modelRankingMetric: normalizeRankingMetric\(patch\.modelRankingMetric \?\? settings\.modelRankingMetric\)/);
-  assert.match(app, /modelRankingMetricInput\.value\s*=\s*usageAttributionRowsApi\.normalizeRankingMetric/);
-  assert.match(app, /saveSettings\(\{ modelRankingMetric: selection \}\)/);
+  assert.match(app, /input\.checked = input\.value === modelRankingMetric/);
+  assert.match(app, /saveSettings\(\{ modelRankingMetric: usageAttributionRowsApi\.normalizeRankingMetric\(input\.value\) \}\)/);
 });
 
 test('Model rows use the selected ranking metric for order and bar scale', () => {

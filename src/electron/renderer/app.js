@@ -382,7 +382,7 @@ Object.assign(els, {
   monthPeriodMenu: document.getElementById('monthPeriodMenu'),
   monthPeriodTab: document.getElementById('monthPeriodTab'),
   periodMonthModeInput: document.getElementById('periodMonthModeInput'),
-  modelRankingMetricInput: document.getElementById('modelRankingMetricInput')
+  modelRankingMetricInputs: Array.from(document.querySelectorAll('input[name="modelRankingMetric"]'))
 });
 Object.assign(els, {
   appTitleMark: document.querySelector('.app-title-mark'),
@@ -9283,9 +9283,8 @@ function syncSettingsForm() {
     els.periodMonthModeInput.value = fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
   }
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
-  if (els.modelRankingMetricInput) {
-    els.modelRankingMetricInput.value = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
-  }
+  const modelRankingMetric = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
+  for (const input of els.modelRankingMetricInputs || []) input.checked = input.value === modelRankingMetric;
   syncCurrencyRateControls();
   syncHubDraftFields();
   els.limitsRefreshInput.value = state.settings.limitsRefreshMode === 'adaptive'
@@ -12038,11 +12037,13 @@ els.currencyInput?.addEventListener('change', async () => {
   await saveSettings({ currency: els.currencyInput.value });
 });
 
-els.modelRankingMetricInput?.addEventListener('change', async () => {
-  const selection = usageAttributionRowsApi.normalizeRankingMetric(els.modelRankingMetricInput.value);
-  await saveSettings({ modelRankingMetric: selection });
-  render();
-});
+for (const input of els.modelRankingMetricInputs || []) {
+  input.addEventListener('change', async () => {
+    if (!input.checked) return;
+    await saveSettings({ modelRankingMetric: usageAttributionRowsApi.normalizeRankingMetric(input.value) });
+    render();
+  });
+}
 
 els.currencyRateModeAuto?.addEventListener('change', async () => {
   if (!els.currencyRateModeAuto.checked) return;
