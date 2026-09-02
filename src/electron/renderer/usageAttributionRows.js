@@ -58,5 +58,41 @@
     return Math.max(0, finiteNumber(total) - attributed);
   }
 
-  return { attributionRows, visibleAttributionRows, attributionValue, UNATTRIBUTED_KEY };
+  function normalizeRankingMetric(value) {
+    return value === 'cost' ? 'cost' : 'tokens';
+  }
+
+  function hasKnownCost(rows) {
+    return (Array.isArray(rows) ? rows : []).some((row) => finiteNumber(row?.cost) > 0);
+  }
+
+  function rankingValue(row, metric, rows = []) {
+    const useCost = normalizeRankingMetric(metric) === 'cost' && hasKnownCost(rows);
+    return Math.max(0, finiteNumber(useCost ? row?.cost : row?.value));
+  }
+
+  function rankRows(rows, metric) {
+    const sourceRows = Array.isArray(rows) ? rows : [];
+    const normalizedMetric = normalizeRankingMetric(metric);
+    const useCost = normalizedMetric === 'cost' && hasKnownCost(sourceRows);
+    return [...sourceRows].sort((left, right) => {
+      if (useCost) {
+        const costDifference = finiteNumber(right?.cost) - finiteNumber(left?.cost);
+        if (costDifference !== 0) return costDifference;
+      }
+      const tokenDifference = finiteNumber(right?.value) - finiteNumber(left?.value);
+      if (tokenDifference !== 0) return tokenDifference;
+      return String(left?.key || left?.name || '').localeCompare(String(right?.key || right?.name || ''));
+    });
+  }
+
+  return {
+    attributionRows,
+    visibleAttributionRows,
+    attributionValue,
+    normalizeRankingMetric,
+    rankingValue,
+    rankRows,
+    UNATTRIBUTED_KEY
+  };
 });

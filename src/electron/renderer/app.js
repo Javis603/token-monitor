@@ -379,7 +379,8 @@ Object.assign(els, {
   toolDetailFooterModels: document.getElementById('toolDetailFooterModels'),
   monthPeriodMenu: document.getElementById('monthPeriodMenu'),
   monthPeriodTab: document.getElementById('monthPeriodTab'),
-  periodMonthModeInput: document.getElementById('periodMonthModeInput')
+  periodMonthModeInput: document.getElementById('periodMonthModeInput'),
+  modelRankingMetricInput: document.getElementById('modelRankingMetricInput')
 });
 Object.assign(els, {
   appTitleMark: document.querySelector('.app-title-mark'),
@@ -1925,8 +1926,8 @@ function setActiveToolDetailMode(mode) {
   renderToolDetailFooter();
 }
 
-function updateRow(row, { name, subtitle, detail, value, cost, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable }) {
-  const width = rowWidth(value, max);
+function updateRow(row, { name, subtitle, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable }) {
+  const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}`;
   row.title = local ? 'This device' : '';
@@ -2081,7 +2082,7 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     state.rowSignature = '';
     return;
   }
-  const max = Math.max(1, ...rows.map((row) => row.value));
+  const max = Math.max(1, ...rows.map((row) => row.barValue ?? row.value));
   const hintText = incompleteHint ? t(incompleteHint) : '';
   const signature = JSON.stringify([state.breakdown, hintText, rows.map((row) => row.key)]);
   const children = Array.from(els.breakdown.children);
@@ -2126,7 +2127,7 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     if (!row) continue;
     const fingerprint = nextFingerprints.get(rowData.key);
     if (rowRenderFingerprints.get(row) === fingerprint) continue;
-    updateRow(row, { ...rowData, max });
+    updateRow(row, { ...rowData, barValue: rowData.barValue ?? rowData.value, max });
     rowRenderFingerprints.set(row, fingerprint);
   }
   renderToolDetailFooter();
@@ -2262,7 +2263,7 @@ function toolRowsForPeriod(period) {
   return deviceRowsForPeriod();
 }
 
-function modelRowsForPeriod(period) {
+function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRankingMetric) {
   const modelRows = periodAttributionRows(period, period?.models, period?.modelCosts).map(({ key: model, value, cost }) => ({
     key: model,
     name: model === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : model,
@@ -2275,7 +2276,13 @@ function modelRowsForPeriod(period) {
     outputTokens: attributionComponent(period, 'modelOutputs', model),
     unclassifiedTokens: attributionComponent(period, 'modelUnclassifiedTokens', model)
   }));
-  if (modelRows.length > 0) return modelRows.sort((a, b) => b.value - a.value);
+  if (modelRows.length > 0) {
+    const rows = usageAttributionRowsApi.rankRows(modelRows, rankingMetric);
+    return rows.map((row) => ({
+      ...row,
+      barValue: usageAttributionRowsApi.rankingValue(row, rankingMetric, rows)
+    }));
+  }
   if (Number(period?.totalTokens || 0) === 0) return [];
   return toolRowsForPeriod(period);
 }
@@ -7097,7 +7104,7 @@ function renderHomeLimitModule() {
 
 function renderHomeModelModule(period) {
   const { module, body } = homeModuleShell('model', t('home.models'), 'model');
-  const rows = homeOverviewApi.homeModelRows(modelRowsForPeriod(period), period?.totalTokens, 5);
+  const rows = homeOverviewApi.homeModelRows(modelRowsForPeriod(period, 'tokens'), period?.totalTokens, 5);
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -9282,6 +9289,9 @@ function syncSettingsForm() {
     els.periodMonthModeInput.value = fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
   }
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
+  if (els.modelRankingMetricInput) {
+    els.modelRankingMetricInput.value = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
+  }
   syncCurrencyRateControls();
   syncHubDraftFields();
   els.limitsRefreshInput.value = state.settings.limitsRefreshMode === 'adaptive'
@@ -12032,6 +12042,12 @@ els.languageInput?.addEventListener('change', async () => {
 
 els.currencyInput?.addEventListener('change', async () => {
   await saveSettings({ currency: els.currencyInput.value });
+});
+
+els.modelRankingMetricInput?.addEventListener('change', async () => {
+  const selection = usageAttributionRowsApi.normalizeRankingMetric(els.modelRankingMetricInput.value);
+  await saveSettings({ modelRankingMetric: selection });
+  render();
 });
 
 els.currencyRateModeAuto?.addEventListener('change', async () => {
