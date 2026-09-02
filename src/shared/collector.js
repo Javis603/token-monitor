@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -47,6 +47,7 @@ const {
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
   collectQoderCnRows,
+  collectQoderCnTranscriptRows,
   qoderCnDataPaths,
   resolveQoderCnPricing
 } = require('./qoderCnUsage');
@@ -1685,9 +1686,29 @@ async function collectUsageOnce(options) {
       }
     }
     if (includesQoderCn && (!targetRequested || targetClients.includes('qodercn'))) {
+      const qoderCnSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
+      // Two independent usage sources: the legacy local DB and the 0.1.x
+      // client's agent transcripts. A failed legacy read must not suppress
+      // the transcript scan (and vice versa), so each is read in its own
+      // try/catch; the period only counts as failed when neither source
+      // produced rows, which keeps the anchored fallback authoritative.
+      let qoderCnLegacyReadFailed = false;
       try {
-        const qoderCnSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
         qoderCnRows = await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger, sinceMs: qoderCnSinceMs });
+      } catch (dbErr) {
+        qoderCnLegacyReadFailed = true;
+        if (typeof options.logger === 'function') options.logger(`qodercn legacy parse failed: ${dbErr.message}`);
+      }
+      try {
+        const qoderCnTranscriptRows = collectQoderCnTranscriptRows({ homeDir: options.homeDir, sinceMs: qoderCnSinceMs });
+        if (qoderCnTranscriptRows.length) qoderCnRows = (qoderCnRows || []).concat(qoderCnTranscriptRows);
+      } catch (transcriptErr) {
+        if (typeof options.logger === 'function') options.logger(`qodercn transcript rows skipped: ${transcriptErr.message}`);
+      }
+      try {
+        if (qoderCnLegacyReadFailed && !(qoderCnRows && qoderCnRows.length)) {
+          throw new Error('qodercn read failed: legacy db unreadable and no transcript rows');
+        }
         qoderCnPricing = await resolveQoderCnPricing(qoderCnRows, {
           lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
           commandTimeoutMs: options.pricingTimeoutMs,
@@ -2009,14 +2030,30 @@ async function collectUsageOnce(options) {
     // block is gated by includeHistory (historyIntervalMs), mirroring the proma
     // full-read pattern; resolveQoderCnPricing is cached (6h TTL) so the second
     // pass is cheap when the scan already priced the same models.
+    // Read the full transcript set once per tick (P2-6: avoid double scan) and
+    // fold a read failure into the history failure flag so the fallback graph
+    // is retained instead of publishing a legacy-only undercount (P2-5).
     let qoderCnGraph = null;
     let qoderCnHistoryReadFailed = false;
     if (includesQoderCn) {
+      let qoderCnTranscriptAllRows = [];
+      try {
+        qoderCnTranscriptAllRows = collectQoderCnTranscriptRows({ homeDir: options.homeDir });
+      } catch (err) {
+        qoderCnHistoryReadFailed = true;
+        if (typeof options.logger === 'function') options.logger(`qodercn transcript rows skipped: ${err.message}`);
+      }
       try {
         // Reuse the scan's full rows on non-anchored ticks; anchored ticks read
         // only since local midnight, so the graph needs its own full read there.
         // resolveQoderCnPricing is cached (6h TTL), so the second pass is cheap.
-        const rows = (!anchorUsed && qoderCnRows) ? qoderCnRows : await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger });
+        let rows = (!anchorUsed && qoderCnRows) ? qoderCnRows : await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger });
+        // Non-anchored ticks already carry transcript rows via qoderCnRows;
+        // anchored ticks need the full transcript set appended, and transcript
+        // rows are not delta-based — appending them twice would double-count.
+        if (anchorUsed && qoderCnTranscriptAllRows.length) {
+          rows = rows.concat(qoderCnTranscriptAllRows);
+        }
         const pricing = (!anchorUsed && qoderCnPricing) ? qoderCnPricing : await resolveQoderCnPricing(rows, {
           lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
           commandTimeoutMs: options.pricingTimeoutMs,
