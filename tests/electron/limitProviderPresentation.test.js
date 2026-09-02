@@ -1884,13 +1884,17 @@ test('provider toggles converge through the limits push without a forced refresh
   const body = functionBody(app, 'onLimitProviderToggle', 'onLimitProviderMove');
 
   assert.match(body, /const patch = \{ limitProviders: checked\.join\(','\), limitsEnabled: checked\.length > 0 \};/);
-  assert.match(body, /state\.settings = \{ \.\.\.state\.settings, \.\.\.patch \};/);
+  assert.match(body, /state\.pendingLimitProviderSelection = \{ revision, \.\.\.patch \};/);
   assert.match(body, /saveSettings\(patch\)/);
   assert.match(body, /clearDisabledLimitProviderPendingChecks\(new Set\(checked\)\)/);
   assert.doesNotMatch(body, /refreshStats\(/);
 });
 
-test('provider checkbox stays unchecked while stats arrive before the settings reply', async () => {
+function createLimitProviderToggleHarness({
+  providerIds = ['codex'],
+  updateSettings,
+  getSettings = () => Promise.resolve({ limitsEnabled: true, limitProviders: 'codex' })
+} = {}) {
   const app = readRendererFile('app.js');
   const providerSelection = functionBody(app, 'configuredLimitProviderSelection', 'missingLimitProviderStatus');
   const toggleStart = app.indexOf('async function onLimitProviderToggle()');
@@ -1905,12 +1909,11 @@ test('provider checkbox stays unchecked while stats arrive before the settings r
   const statsRenderEnd = app.indexOf('const statsRenderScheduler =', statsRenderStart);
   assert.ok(statsRenderStart >= 0 && statsRenderEnd > statsRenderStart);
   const statsRender = app.slice(statsRenderStart, statsRenderEnd);
-  const observed = [false];
-  let resolveUpdate;
-  const updateResult = new Promise((resolve) => { resolveUpdate = resolve; });
+  let checkedProviders = [];
+  const observedSelections = [];
   const context = {
     DEFAULT_LIMIT_PROVIDER_ORDER: 'codex',
-    LIMIT_PROVIDERS: [{ id: 'codex' }],
+    LIMIT_PROVIDERS: providerIds.map((id) => ({ id })),
     limitProviderOrderApi: {
       normalizeLimitProviderSelection(value) {
         return String(value || '').split(',').filter(Boolean);
@@ -1919,25 +1922,34 @@ test('provider checkbox stays unchecked while stats arrive before the settings r
     state: {
       breakdown: 'tool',
       settingsPushRevision: 0,
+      limitProviderSelectionRevision: 0,
+      pendingLimitProviderSelection: null,
       settings: { limitsEnabled: true, limitProviders: 'codex' },
       stats: { limits: { providers: [{ provider: 'codex', status: 'ok' }] } }
     },
     els: {
       limitProviderCheckboxes: {
-        querySelectorAll: () => [{ checked: false, dataset: { provider: 'codex' } }]
+        querySelectorAll: () => providerIds.map((id) => ({
+          checked: checkedProviders.includes(id),
+          dataset: { provider: id }
+        }))
       }
     },
     window: {
       tokenMonitor: {
-        updateSettings: () => updateResult,
-        getSettings: () => Promise.resolve({ limitsEnabled: true, limitProviders: 'codex' })
+        updateSettings,
+        getSettings
       }
     },
     visibleStatsSurface: () => 'settings',
     renderConnectionStatus() {},
     renderCodexAccounts() {},
     renderSettingsSummaries() {},
-    renderLimitProviderCheckboxes() { observed.push(context.limitProviderEnabled('codex')); },
+    renderLimitProviderCheckboxes() {
+      if (context.configuredLimitProviderSelection) {
+        observedSelections.push(Array.from(context.configuredLimitProviderSelection()));
+      }
+    },
     renderToolPreferences() {},
     renderWslPanel() {},
     updateOpenRouterProfilesStatus() {},
@@ -1957,18 +1969,95 @@ test('provider checkbox stays unchecked while stats arrive before the settings r
     restartTimer() {},
     maybeUpdateBarsIcon() {},
     deliverTrayProviderIcons() {},
-    console
+    console: { error() {} }
   };
 
   vm.createContext(context);
   vm.runInContext(`${providerSelection}\n${save}\n${toggle}\n${statsRender}`, context);
+  context.configuredLimitProviderSelection = vm.runInContext('configuredLimitProviderSelection', context);
   context.limitProviderEnabled = vm.runInContext('limitProviderEnabled', context);
-  const pendingToggle = vm.runInContext('onLimitProviderToggle()', context);
-  vm.runInContext('renderStatsUpdate()', context);
+  return {
+    context,
+    observedSelections,
+    renderStats: () => vm.runInContext('renderStatsUpdate()', context),
+    selection: () => Array.from(context.configuredLimitProviderSelection()),
+    setChecked: (ids) => { checkedProviders = ids; },
+    toggle: () => vm.runInContext('onLimitProviderToggle()', context)
+  };
+}
+
+test('provider checkbox stays unchecked while stats arrive before the settings reply', async () => {
+  let resolveUpdate;
+  const harness = createLimitProviderToggleHarness({
+    updateSettings: () => new Promise((resolve) => { resolveUpdate = resolve; })
+  });
+  harness.setChecked([]);
+
+  const pendingToggle = harness.toggle();
+  harness.renderStats();
   resolveUpdate({ limitsEnabled: false, limitProviders: '' });
   await pendingToggle;
 
-  assert.deepEqual(observed, [false, false]);
+  assert.equal(harness.observedSelections.some((selection) => selection.includes('codex')), false);
+});
+
+test('provider toggle restores the confirmed selection when persistence and recovery both fail', async () => {
+  const harness = createLimitProviderToggleHarness({
+    updateSettings: () => Promise.reject(new Error('persist failed')),
+    getSettings: () => Promise.reject(new Error('recovery failed'))
+  });
+  harness.setChecked([]);
+
+  await assert.rejects(harness.toggle(), /persist failed/);
+
+  assert.equal(harness.context.state.settings.limitsEnabled, true);
+  assert.equal(harness.context.state.settings.limitProviders, 'codex');
+});
+
+test('an older failed provider toggle does not overwrite a newer settings push', async () => {
+  let rejectUpdate;
+  const harness = createLimitProviderToggleHarness({
+    updateSettings: () => new Promise((_, reject) => { rejectUpdate = reject; }),
+    getSettings: () => Promise.reject(new Error('recovery failed'))
+  });
+  harness.setChecked([]);
+  const pendingToggle = harness.toggle();
+  harness.context.state.settingsPushRevision += 1;
+  harness.context.state.settings = { limitsEnabled: true, limitProviders: 'claude' };
+  rejectUpdate(new Error('persist failed'));
+
+  await assert.rejects(pendingToggle, /persist failed/);
+
+  assert.equal(harness.context.state.settings.limitsEnabled, true);
+  assert.equal(harness.context.state.settings.limitProviders, 'claude');
+});
+
+test('overlapping failed provider toggles fall back to the last confirmed selection', async () => {
+  const updates = [];
+  const harness = createLimitProviderToggleHarness({
+    providerIds: ['codex', 'claude'],
+    updateSettings() {
+      let reject;
+      const promise = new Promise((_, rejectPromise) => { reject = rejectPromise; });
+      updates.push({ reject });
+      return promise;
+    },
+    getSettings: () => Promise.reject(new Error('recovery failed'))
+  });
+  harness.setChecked([]);
+  const firstToggle = harness.toggle();
+  harness.setChecked(['claude']);
+  const secondToggle = harness.toggle();
+
+  updates[0].reject(new Error('first persist failed'));
+  await assert.rejects(firstToggle, /first persist failed/);
+  assert.deepEqual(harness.selection(), ['claude']);
+
+  updates[1].reject(new Error('second persist failed'));
+  await assert.rejects(secondToggle, /second persist failed/);
+  assert.equal(harness.context.state.pendingLimitProviderSelection, null);
+  assert.equal(harness.context.state.settings.limitsEnabled, true);
+  assert.equal(harness.context.state.settings.limitProviders, 'codex');
 });
 
 test('empty OpenCode profiles render a localized summary before returning', () => {
