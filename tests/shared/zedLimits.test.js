@@ -164,13 +164,41 @@ test('keeps usage valid without optional subscription data', () => {
   assert.equal(parseSubscription({}), null);
 });
 
-test('rejects billing payloads without a positive spend limit', () => {
+test('rejects billing payloads without any valid usage window', () => {
   assert.throws(
     () => parseZedBillingUsage(usagePayload({
       current_usage: { token_spend: { spend_in_cents: 0, limit_in_cents: 0 } }
     })),
-    /missing token spend/
+    /missing usage/
   );
+});
+
+test('keeps Free Edit Predictions when Token Spend is absent or zero', async () => {
+  const editPredictions = { used: 500, limit: 2000, remaining: 1500 };
+  const currentUsageVariants = [
+    { edit_predictions: editPredictions },
+    {
+      token_spend_in_cents: 0,
+      token_spend: { spend_in_cents: 0, limit_in_cents: 0 },
+      edit_predictions: editPredictions
+    }
+  ];
+  for (const currentUsage of currentUsageVariants) {
+    const provider = await fetchZedLimits(
+      { zedCookie: 'zed.session=free-session' },
+      {
+        env: {},
+        fetch: async (url) => url === ZED_BILLING_USAGE_URL
+          ? response(200, { plan: 'free', current_usage: currentUsage })
+          : response(404)
+      }
+    );
+    assert.equal(provider.status, 'ok');
+    assert.equal(provider.planLabel, 'Free');
+    assert.deepEqual(provider.windows.map((window) => window.limitId), ['zed.edit-predictions']);
+    assert.equal(provider.windows[0].used, 500);
+    assert.equal(provider.windows[0].limit, 2000);
+  }
 });
 
 test('fetches dashboard usage and subscription with an explicit Cookie header', async () => {

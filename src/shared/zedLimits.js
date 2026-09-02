@@ -137,40 +137,44 @@ function parseEditPredictionsWindow(currentUsage) {
 
 function parseZedBillingUsage(body, subscriptionBody = null) {
   const currentUsage = body?.current_usage;
-  const tokenSpend = currentUsage?.token_spend;
-  if (!currentUsage || typeof currentUsage !== 'object' || !tokenSpend || typeof tokenSpend !== 'object') {
+  if (!currentUsage || typeof currentUsage !== 'object') {
     throw new Error('unexpected Zed billing response shape');
-  }
-  const spendCents = numberOrNull(currentUsage.token_spend_in_cents)
-    ?? numberOrNull(tokenSpend.spend_in_cents);
-  const limitCents = numberOrNull(tokenSpend.limit_in_cents);
-  if (spendCents === null || limitCents === null || limitCents <= 0) {
-    throw new Error('Zed billing response is missing token spend');
   }
   const subscription = parseSubscription(subscriptionBody);
   const planLabel = subscription?.planLabel || formatPlanLabel(body.plan);
-  const used = spendCents / 100;
-  const limit = limitCents / 100;
-  const usedPercent = Math.min(100, (spendCents / limitCents) * 100);
-  const tokenSpendWindow = {
-    kind: 'billing',
-    limitId: 'zed.token-spend',
-    label: 'Token Spend',
-    used,
-    limit,
-    remaining: Math.max(0, limit - used),
-    usedPercent,
-    remainingPercent: 100 - usedPercent,
-    resetsAt: subscription?.resetsAt || null,
-    currency: 'USD',
-    showMeter: true
-  };
+  const tokenSpend = currentUsage.token_spend;
+  let tokenSpendWindow = null;
+  if (tokenSpend && typeof tokenSpend === 'object') {
+    const spendCents = numberOrNull(currentUsage.token_spend_in_cents)
+      ?? numberOrNull(tokenSpend.spend_in_cents);
+    const limitCents = numberOrNull(tokenSpend.limit_in_cents);
+    if (spendCents !== null && limitCents !== null && limitCents > 0) {
+      const used = spendCents / 100;
+      const limit = limitCents / 100;
+      const usedPercent = Math.min(100, (spendCents / limitCents) * 100);
+      tokenSpendWindow = {
+        kind: 'billing',
+        limitId: 'zed.token-spend',
+        label: 'Token Spend',
+        used,
+        limit,
+        remaining: Math.max(0, limit - used),
+        usedPercent,
+        remainingPercent: 100 - usedPercent,
+        resetsAt: subscription?.resetsAt || null,
+        currency: 'USD',
+        showMeter: true
+      };
+    }
+  }
   const editPredictionsWindow = parseEditPredictionsWindow(currentUsage);
+  const windows = [tokenSpendWindow, editPredictionsWindow].filter(Boolean);
+  if (windows.length === 0) throw new Error('Zed billing response is missing usage');
   return {
     planLabel,
-    usageUpdatedAt: toIso(tokenSpend.updated_at),
-    window: tokenSpendWindow,
-    windows: [tokenSpendWindow, editPredictionsWindow].filter(Boolean)
+    usageUpdatedAt: toIso(tokenSpend?.updated_at),
+    window: windows[0],
+    windows
   };
 }
 
