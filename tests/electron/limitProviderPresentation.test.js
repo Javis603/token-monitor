@@ -909,9 +909,9 @@ test('Zed compact windows label unlimited Edit Predictions without a fake reset'
     kind: 'billing',
     limitId: 'zed.edit-predictions',
     label: 'Edit Predictions',
-    usedPercent: 0,
     detail: 'Unlimited',
-    resetDescription: 'Unlimited'
+    resetDescription: 'Unlimited',
+    showMeter: false
   };
   const tokenSpend = {
     kind: 'billing',

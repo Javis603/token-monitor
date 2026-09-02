@@ -9,9 +9,9 @@ const {
   fetchZedLimits,
   formatPlanLabel,
   normalizeZedCookieHeader,
+  parseEditPredictionsWindow,
   parseSubscription,
   parseZedBillingUsage,
-  unlimitedEditPredictionsWindow,
   zedCookie
 } = require('../../src/shared/zedLimits');
 
@@ -24,6 +24,11 @@ function usagePayload(overrides = {}) {
         spend_in_cents: 250,
         limit_in_cents: 1000,
         updated_at: '2026-09-02T01:02:03.000Z'
+      },
+      edit_predictions: {
+        used: 0,
+        limit: null,
+        remaining: null
       }
     },
     ...overrides
@@ -98,23 +103,59 @@ test('parses Token Spend first and keeps its reset without subscription renewal 
     kind: 'billing',
     limitId: 'zed.edit-predictions',
     label: 'Edit Predictions',
-    used: 0,
-    limit: null,
-    remaining: null,
-    usedPercent: 0,
     resetDescription: '',
     detail: 'Unlimited',
-    showMeter: true
+    showMeter: false
   }]);
 });
 
-test('derives unlimited Edit Predictions only for plans whose allowance is documented as unlimited', () => {
-  for (const plan of ['Zed Pro', 'Zed Pro Trial', 'Zed Student', 'Zed Business']) {
-    assert.equal(unlimitedEditPredictionsWindow(plan)?.detail, 'Unlimited');
-  }
-  assert.equal(unlimitedEditPredictionsWindow('Zed Free'), null);
-  assert.equal(unlimitedEditPredictionsWindow('Zed Free Trial'), null);
-  assert.equal(unlimitedEditPredictionsWindow(''), null);
+test('uses upstream Edit Predictions limits instead of deriving entitlement from the plan', () => {
+  assert.deepEqual(parseEditPredictionsWindow({
+    edit_predictions: { used: 500, limit: 2000, remaining: 1500 }
+  }), {
+    kind: 'billing',
+    limitId: 'zed.edit-predictions',
+    label: 'Edit Predictions',
+    used: 500,
+    limit: 2000,
+    remaining: 1500,
+    usedPercent: 25,
+    remainingPercent: 75,
+    resetDescription: '',
+    showMeter: true
+  });
+  assert.equal(parseEditPredictionsWindow({}), null);
+  assert.equal(parseEditPredictionsWindow({ edit_predictions: { used: 0 } }), null);
+  assert.equal(parseEditPredictionsWindow({ edit_predictions: { used: 0, limit: 0 } }), null);
+});
+
+test('an upstream null Edit Predictions limit is unlimited without a synthetic meter', () => {
+  assert.deepEqual(parseEditPredictionsWindow({
+    edit_predictions: { used: 0, limit: null, remaining: null }
+  }), {
+    kind: 'billing',
+    limitId: 'zed.edit-predictions',
+    label: 'Edit Predictions',
+    resetDescription: '',
+    detail: 'Unlimited',
+    showMeter: false
+  });
+});
+
+test('does not infer Edit Predictions from a Business plan when usage omits the field', () => {
+  const parsed = parseZedBillingUsage(usagePayload({
+    plan: 'token_based_zed_business',
+    current_usage: {
+      token_spend_in_cents: 250,
+      token_spend: {
+        spend_in_cents: 250,
+        limit_in_cents: 1000,
+        updated_at: '2026-09-02T01:02:03.000Z'
+      }
+    }
+  }), subscriptionPayload({ name: 'Zed Business' }));
+  assert.equal(parsed.planLabel, 'Zed Business');
+  assert.deepEqual(parsed.windows, [parsed.window]);
 });
 
 test('keeps usage valid without optional subscription data', () => {
@@ -161,9 +202,9 @@ test('fetches dashboard usage and subscription with an explicit Cookie header', 
   ]);
   const editPredictions = provider.windows.find((window) => window.limitId === 'zed.edit-predictions');
   assert.equal(editPredictions.detail, 'Unlimited');
-  assert.equal(editPredictions.usedPercent, 0);
-  assert.equal(editPredictions.remainingPercent, 100);
-  assert.equal(editPredictions.showMeter, true);
+  assert.equal(editPredictions.usedPercent, null);
+  assert.equal(editPredictions.remainingPercent, null);
+  assert.equal(editPredictions.showMeter, false);
   assert.deepEqual(calls.map((call) => call.url).sort(), [
     ZED_BILLING_SUBSCRIPTION_URL,
     ZED_BILLING_USAGE_URL

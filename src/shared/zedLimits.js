@@ -104,19 +104,34 @@ function parseSubscription(body) {
   };
 }
 
-function unlimitedEditPredictionsWindow(planLabel) {
-  const normalized = String(planLabel || '').trim().toLowerCase();
-  if (!/\b(pro|student|business)\b/u.test(normalized)) return null;
+function parseEditPredictionsWindow(currentUsage) {
+  const input = currentUsage?.edit_predictions;
+  if (!input || typeof input !== 'object' || !Object.hasOwn(input, 'limit')) return null;
+  if (input.limit === null) {
+    return {
+      kind: 'billing',
+      limitId: 'zed.edit-predictions',
+      label: 'Edit Predictions',
+      resetDescription: '',
+      detail: 'Unlimited',
+      showMeter: false
+    };
+  }
+  const used = numberOrNull(input.used);
+  const limit = numberOrNull(input.limit);
+  if (used === null || limit === null || limit <= 0) return null;
+  const remaining = numberOrNull(input.remaining) ?? Math.max(0, limit - used);
+  const usedPercent = Math.min(100, (used / limit) * 100);
   return {
     kind: 'billing',
     limitId: 'zed.edit-predictions',
     label: 'Edit Predictions',
-    used: 0,
-    limit: null,
-    remaining: null,
-    usedPercent: 0,
+    used,
+    limit,
+    remaining,
+    usedPercent,
+    remainingPercent: 100 - usedPercent,
     resetDescription: '',
-    detail: 'Unlimited',
     showMeter: true
   };
 }
@@ -151,7 +166,7 @@ function parseZedBillingUsage(body, subscriptionBody = null) {
     currency: 'USD',
     showMeter: true
   };
-  const editPredictionsWindow = unlimitedEditPredictionsWindow(planLabel);
+  const editPredictionsWindow = parseEditPredictionsWindow(currentUsage);
   return {
     planLabel,
     subscriptionId: subscription?.id || '',
@@ -262,8 +277,8 @@ module.exports = {
   fetchZedLimits,
   formatPlanLabel,
   normalizeZedCookieHeader,
+  parseEditPredictionsWindow,
   parseSubscription,
   parseZedBillingUsage,
-  unlimitedEditPredictionsWindow,
   zedCookie
 };

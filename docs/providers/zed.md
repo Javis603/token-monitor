@@ -40,7 +40,7 @@ The usage request is required. The subscription request is optional plan and acc
 
 The Zed editor's native credential and `GET /client/users/me` are deliberately not used for limits. That account response exposes plan, Edit Predictions, and a subscription period, but not the dashboard's token-spend allowance. The same native credential is rejected by the dashboard billing endpoint, so combining the two would create a second sign-in flow without authenticating the data Token Monitor intends to show.
 
-The dashboard response is authoritative for Token Spend. For plans whose published contract makes Edit Predictions unlimited (`Pro`, `Student`, `Business`, including a named Pro trial), Token Monitor also derives an `Edit Predictions: Unlimited` window from the returned plan name. Do not invent a remaining percentage for metered plans: the observed billing response does not include their accepted-prediction count, so a Free-plan Edit Predictions window stays absent unless that endpoint begins returning the actual usage fields.
+The dashboard response is authoritative for both Token Spend and Edit Predictions. Token Monitor reads `current_usage.edit_predictions` directly instead of inferring entitlement from a plan name: a null `limit` is shown as Unlimited without a meter, a positive `limit` is shown with the returned usage, and a missing or malformed field is omitted. This matters for organization Billing Managers, who can see Business billing data without receiving the Business AI entitlement.
 
 ## Credential and security boundary
 
@@ -59,10 +59,13 @@ GUI credentials live under the fixed `zedCookie` path in the shared credential s
 | `current_usage.token_spend.spend_in_cents` | Fallback Token Spend used amount |
 | `current_usage.token_spend.limit_in_cents` | Token Spend limit |
 | `current_usage.token_spend.updated_at` | Upstream payload timestamp for diagnostics |
+| `current_usage.edit_predictions.used` | Accepted Edit Predictions used |
+| `current_usage.edit_predictions.limit` | Edit Predictions limit; `null` means Unlimited |
+| `current_usage.edit_predictions.remaining` | Accepted Edit Predictions remaining when metered |
 | `subscription.name` | Preferred plan label when available |
 | `subscription.period.end_at` | Token Spend reset timestamp |
 
-Spend values are converted from cents to USD. `zed.token-spend` is the measured billing window and appears first, matching Zed's dashboard; its reset uses the subscription period end while omitting the separate renewal-date copy owned by Token Monitor's subscription feature. `zed.edit-predictions` follows only when the returned plan establishes an unlimited entitlement and does not inherit that reset.
+Spend values are converted from cents to USD. `zed.token-spend` is the measured billing window and appears first, matching Zed's dashboard; its reset uses the subscription period end while omitting the separate renewal-date copy owned by Token Monitor's subscription feature. `zed.edit-predictions` follows only when the usage response supplies a valid quota object and does not inherit that reset.
 
 ## Identity and aggregation
 
@@ -93,7 +96,7 @@ Token/session tracking still depends on local Zed data that `tokscale` supports 
 - Usage success remains visible when the optional subscription request fails.
 - `401`/`403`, `429`, timeouts, malformed payloads, and aborted probes map to the shared provider statuses.
 - Spend cents map to the correct USD used, limit, remaining, and percentage values.
-- Unlimited Pro, Student, Business, and named Pro trial plans expose Edit Predictions without fabricating metered usage for Free.
+- Edit Predictions comes only from `current_usage.edit_predictions`: null limits render as Unlimited without a meter, positive limits preserve measured usage, and missing fields stay absent regardless of plan name.
 - Subscription data can enrich the plan and stable account identity without adding renewal copy to Token Spend.
 - Settings never echo the stored Cookie to the renderer.
 - A credential change invalidates only the Zed limits lane.
