@@ -23,8 +23,9 @@ function normalizeTrayModeSettings(settings = {}) {
   };
 }
 
-// Windows/Linux counterpart of the accessory policy above; setSkipTaskbar() is
-// a no-op on macOS.
+// Windows counterpart of the accessory policy above. Electron exposes
+// skipTaskbar on Windows and macOS only, so Linux has no way to express this
+// setting at all and the renderer does not offer it there.
 function skipTaskbarForSettings(settings = {}) {
   const normalized = normalizeTrayModeSettings(settings);
   return normalized.trayMode || normalized.hideAppIcon;

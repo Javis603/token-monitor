@@ -9262,7 +9262,13 @@ let settingsDomSyncPending = false;
 // checked state is kept in settings so the preference survives the excursion.
 function syncHideAppIconControl(showTrayIcon, trayMode) {
   if (!els.hideAppIconInput) return;
-  const applies = showTrayIcon && !trayMode;
+  // Windows drops the entry through setSkipTaskbar() and macOS through the
+  // accessory activation policy. Electron exposes neither on Linux — the
+  // toggle would save and change nothing — so the row is not offered there,
+  // and starts hidden until appInfo says which platform this is.
+  const platform = state.appInfo?.platform;
+  const supported = platform === 'win32' || platform === 'darwin';
+  const applies = supported && showTrayIcon && !trayMode;
   els.hideAppIconInput.checked = applies && state.settings.hideAppIcon === true;
   els.hideAppIconRow?.classList.toggle('hidden', !applies);
   els.hideAppIconOptions?.classList.toggle('hidden', !els.hideAppIconInput.checked);

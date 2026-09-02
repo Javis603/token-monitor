@@ -431,6 +431,13 @@ test('main section holds views; appearance is its own section; window holds beha
   const hideAppIconOptionsIndex = presenceGroup.indexOf('id="hideAppIconOptions"');
   assert.ok(hideAppIconOptionsIndex > hideAppIconIndex, 'the app-icon note should belong to its toggle');
   assert.doesNotMatch(presenceGroup, /id="hideAppIconInput"[\s\S]{0,400}?settings-item-desc/);
+  // Electron exposes skipTaskbar on Windows and macOS only, so the row must not
+  // reach Linux, where it would save a setting that changes nothing. It starts
+  // hidden so an unknown platform never flashes an unsupported control.
+  assert.match(presenceGroup, /id="hideAppIconRow"[^>]*class="[^"]*hidden"/);
+  const app = readRendererFile('app.js');
+  assert.match(app, /const supported = platform === 'win32' \|\| platform === 'darwin';/);
+  assert.match(app, /const applies = supported && showTrayIcon && !trayMode;/);
   assert.doesNotMatch(
     presenceGroup,
     /id="trayIconOptions"[\s\S]*?<\/div>\s*<label class="checkbox-label"><input id="trayModeInput"/,
