@@ -13978,7 +13978,12 @@ function renderExternalProviderStatus(providerName) {
   }
   setCursorStatusText(
     statusEl,
-    pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
+    pending
+      // Limits stay buffered until the device's first usage baseline completes,
+      // so a fresh save on a cold start waits on the collector, not on the
+      // credential. Say so instead of showing a "checking" that never lands.
+      ? t(state.stats?.limits ? 'settings.common.checking' : 'settings.common.collectingBaseline')
+      : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
   );
   // A local ZCode install keeps the Z.ai row honest when unchecked: the
   // auto-discovered plans still exist, so the pill shows auto-detect instead
