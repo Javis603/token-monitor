@@ -63,8 +63,11 @@ test('no component restates the blanket hiding rule', () => {
     '.period-menu.hidden',
     '.hidden, [hidden]'
   ];
+  // `.hidden` as a class token wherever it appears, so a compound selector like
+  // `#claudeManualPanel.hidden` — the exact form this change deleted — is caught
+  // too. The lookahead keeps a hypothetical `.hidden-sm` out.
   const offenders = rules(css)
-    .filter((r) => /(^|[^-\w])\.hidden|\[hidden\]/.test(r.selector))
+    .filter((r) => /\.hidden(?![-\w])|\[hidden\]/.test(r.selector))
     .filter((r) => !ANIMATED.includes(r.selector))
     .map((r) => r.selector);
   assert.deepEqual(offenders, [], 'these should rely on the blanket rule instead');

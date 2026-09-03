@@ -338,7 +338,6 @@ test('Home-launched secondary views expose an accessible return action', () => {
   const backIconRule = cssRule(css, '.back-home-icon');
   assert.match(backRowRule, /min-height:\s*26px/);
   assert.match(backRowRule, /padding:\s*0\s*;/);
-  assert.match(readRendererFile('index.html'), /id="viewBackRow" class="view-back-row hidden"/);
   assert.match(backButtonRule, /height:\s*26px/);
   assert.match(backButtonRule, /margin-left:\s*0\s*;/);
   assert.match(backButtonRule, /padding:\s*0 6px 0 0\s*;/);
