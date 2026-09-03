@@ -5,7 +5,7 @@
   "fork": "Javis603/tokscale",
   "commit": "b4abf21f481ea0a58803418f8cdae6733ec68e75",
   "commitTitle": "feat(sessions): add Oh My Pi (omp) as a local session source (#1161)",
-  "baseVersion": "4.15.0",
+  "baseVersion": "4.15.1",
   "baseVersionNote": "The npm-installed @tokscale/cli-<platform> package version this manifest is aligned with. It tracks the dependency in BOTH modes, and two gates enforce that: ensure-vendored-tokscale.js refuses to swap under \"override\" when the installed package reports something else, and verify-vendored-tokscale-release.js (plus its real-manifest test, so npm run verify catches it too) rejects any manifest whose baseVersion disagrees with @tokscale/cli optionalDependencies. So a tokscale bump always has to touch this file — either pin a new build or flip the mode — instead of silently leaving a stale override in place.",
   "releaseRepo": "Javis603/tokscale",
   "releaseTag": "token-monitor-b4abf21f",
