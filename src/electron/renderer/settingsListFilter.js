@@ -34,5 +34,20 @@
     return (items || []).filter((item) => listTextMatches(toText(item), normalized));
   }
 
-  return { normalizeListQuery, listTextMatches, filterListItems };
+  // Applies the rendered checkboxes over the stored selection instead of
+  // replacing it. The lists render every row and hide the non-matching ones, so
+  // today a plain read of the DOM is still the whole selection — this keeps the
+  // toggles correct if that ever changes back, since a list that omits rows
+  // would otherwise persist "unticked" for everything the query hid.
+  function mergeRenderedSelection(storedIds, renderedStates, orderedIds) {
+    const enabled = new Set(storedIds || []);
+    for (const [id, checked] of renderedStates || []) {
+      if (!id) continue;
+      if (checked) enabled.add(id);
+      else enabled.delete(id);
+    }
+    return (orderedIds || []).filter((id) => enabled.has(id));
+  }
+
+  return { normalizeListQuery, listTextMatches, filterListItems, mergeRenderedSelection };
 });

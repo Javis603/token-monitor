@@ -10874,9 +10874,17 @@ function toolPreferenceQuery() {
   return settingsListFilterApi.normalizeListQuery(state.toolSearchQuery);
 }
 
-function visibleToolPreferenceClients() {
+// Every row is rendered on every pass and the non-matching ones are hidden,
+// rather than the list rendering only what matches. That is not cosmetic: the
+// limits rows adopt singleton live nodes (account panels, status pills) out of
+// index.html by reparenting them, so a row that is simply not rendered leaves
+// its adopted children inside the outgoing row and `previousRows` removal then
+// detaches them from the document for good. Both lists follow the same rule so
+// the invariant is one rule, not a per-list exception.
+function toolPreferenceRows() {
   const clients = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients);
-  return settingsListFilterApi.filterListItems(clients, state.toolSearchQuery, ({ id, label }) => `${label} ${id}`);
+  const matches = settingsListFilterApi.filterListItems(clients, state.toolSearchQuery, ({ id, label }) => `${label} ${id}`);
+  return { clients, matched: new Set(matches.map(({ id }) => id)) };
 }
 
 function renderSettingsListEmptyState(list) {
@@ -10921,11 +10929,11 @@ function renderToolPreferencesNow() {
   const sourceSignature = clientSourceCacheApi.clientSourceRequestKey(
     clientSourcesIdentity(state.clientHealthExpanded)
   );
-  const clients = visibleToolPreferenceClients();
-  // A filtered list is shorter than `KNOWN_CLIENTS`, and an empty result still
-  // renders one node (the no-matches note), so the short-circuit compares
-  // against what this query is expected to have produced.
-  const expectedRowCount = clients.length || 1;
+  const { clients, matched } = toolPreferenceRows();
+  // Every client keeps a row; a query with no match adds the no-matches note on
+  // top of them, so the short-circuit compares against what this query is
+  // expected to have produced.
+  const expectedRowCount = clients.length + (matched.size ? 0 : 1);
   if (
     state.toolPreferenceRenderSignature
     && state.toolPreferenceRenderSignature === renderSignature
@@ -10967,6 +10975,7 @@ function renderToolPreferencesNow() {
     const isPinned = pinned.has(id);
     row.classList.toggle('is-hidden', isHidden);
     row.classList.toggle('is-pinned', isPinned);
+    row.classList.toggle('is-filtered-out', !matched.has(id));
     const labelGroup = document.createElement('div');
     labelGroup.className = 'tool-preference-label';
     const name = document.createElement('div');
@@ -11006,7 +11015,11 @@ function renderToolPreferencesNow() {
     // shortcuts. A checkbox has no native arrow-key behaviour, so the existing
     // key bindings transfer unchanged.
     trackInput.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Home End');
-    trackInput.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'client', id));
+    // Arrow/Home/End reordering derives the next order from settings rather than
+    // from the DOM, so a filter cannot corrupt it — but it would move the row
+    // through positions the query has hidden, with nothing on screen to show
+    // for it. Off while filtering, like the drag.
+    if (!filtering) trackInput.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'client', id));
     track.append(trackInput);
     const visibility = document.createElement('button');
     visibility.type = 'button';
@@ -11073,7 +11086,7 @@ function renderToolPreferencesNow() {
     if (!filtering) row.addEventListener('pointerdown', (event) => clientPreferenceRowDrag.startRowDrag(event, id));
     els.clientDisplayList.appendChild(row);
   }
-  if (!clients.length) renderSettingsListEmptyState(els.clientDisplayList);
+  if (!matched.size) renderSettingsListEmptyState(els.clientDisplayList);
   // Appended first and only then swapped out: replacing the list wholesale
   // would destroy the row under the pointer on every stats tick.
   for (const row of previousRows) row.remove();
@@ -11097,9 +11110,16 @@ function limitProviderQuery() {
   return settingsListFilterApi.normalizeListQuery(state.limitProviderSearchQuery);
 }
 
-function visibleLimitProviders() {
+function limitProviderRows() {
   const providers = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder);
-  return settingsListFilterApi.filterListItems(providers, state.limitProviderSearchQuery, ({ id, label }) => `${label} ${id}`);
+  // `settingsLabel` first because that is what the row actually shows: without
+  // it, searching a provider by the name printed in front of you hides it.
+  const matches = settingsListFilterApi.filterListItems(
+    providers,
+    state.limitProviderSearchQuery,
+    ({ id, label, settingsLabel }) => `${settingsLabel || label} ${label} ${id}`
+  );
+  return { providers, matched: new Set(matches.map(({ id }) => id)) };
 }
 
 function renderLimitProviderCheckboxes() {
@@ -11112,10 +11132,10 @@ function renderLimitProviderCheckboxes() {
 
 function renderLimitProviderCheckboxesNow() {
   const renderSignature = limitProviderSettingsRenderSignature();
-  const providers = visibleLimitProviders();
-  // Same reasoning as the tracked-tools list: a filtered list is shorter than
-  // `LIMIT_PROVIDERS`, and no matches still leaves the no-matches note behind.
-  const expectedRowCount = providers.length || 1;
+  const { providers, matched } = limitProviderRows();
+  // Same reasoning as the tracked-tools list: every provider keeps a row, and no
+  // matches leaves the no-matches note on top of them.
+  const expectedRowCount = providers.length + (matched.size ? 0 : 1);
   if (
     state.limitProviderRenderSignature === renderSignature
     && els.limitProviderCheckboxes.children.length === expectedRowCount
@@ -11145,7 +11165,7 @@ function renderLimitProviderCheckboxesNow() {
       ? (collected.get(id) || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
       : { provider: id, status: 'disabled', windows: [] };
     const row = document.createElement('div');
-    row.className = `limit-provider-row${isEnabled ? '' : ' is-disabled'}`;
+    row.className = `limit-provider-row${isEnabled ? '' : ' is-disabled'}${matched.has(id) ? '' : ' is-filtered-out'}`;
     row.dataset.provider = id;
     const wrap = document.createElement('label');
     wrap.className = 'client-checkbox limit-provider-toggle';
@@ -11159,7 +11179,8 @@ function renderLimitProviderCheckboxesNow() {
     // shortcuts. A checkbox has no native arrow-key behaviour, so the existing
     // key bindings transfer unchanged.
     cb.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Home End');
-    cb.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'provider', id));
+    // Off while filtering, for the reason given on the tracked-tools list.
+    if (!filtering) cb.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'provider', id));
     const copy = document.createElement('span');
     copy.className = 'limit-provider-copy';
     const nameLine = document.createElement('span');
@@ -11279,7 +11300,7 @@ function renderLimitProviderCheckboxesNow() {
     // change tracking and re-render signature.
     if (id === 'opencode') moveOpenCodeLocalFallbackSetting();
   }
-  if (!providers.length) renderSettingsListEmptyState(els.limitProviderCheckboxes);
+  if (!matched.size) renderSettingsListEmptyState(els.limitProviderCheckboxes);
   for (const row of previousRows) row.remove();
   if (focusedId && document.activeElement === document.body) {
     document.getElementById(focusedId)?.focus({ preventScroll: true });
@@ -11493,15 +11514,15 @@ async function onToolTrackingToggle() {
   // The saved value is the stored selection with the rendered checkboxes
   // applied over it, ordered by the full display order so an unfiltered toggle
   // still writes exactly the CSV it wrote before.
-  const enabled = new Set(enabledClientSet());
-  for (const cb of els.clientDisplayList.querySelectorAll('input[data-preference="track"]')) {
-    if (cb.checked) enabled.add(cb.dataset.client);
-    else enabled.delete(cb.dataset.client);
-  }
-  const checked = clientDisplayPreferencesApi
-    .orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients)
-    .filter(({ id }) => enabled.has(id))
-    .map(({ id }) => id);
+  const rendered = [...els.clientDisplayList.querySelectorAll('input[data-preference="track"]')]
+    .map((cb) => [cb.dataset.client, cb.checked]);
+  const checked = settingsListFilterApi.mergeRenderedSelection(
+    enabledClientSet(),
+    rendered,
+    clientDisplayPreferencesApi
+      .orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients)
+      .map(({ id }) => id)
+  );
   await saveSettings({ clients: checked.join(',') });
   // `clients` is usage-structural, so settings:update schedules a latest-wins
   // usage reconciliation and the eventual collector runs its own full tick.
@@ -11552,16 +11573,16 @@ async function onLimitProviderToggle() {
   // Merged rather than read straight off the DOM, for the same reason as
   // `onToolTrackingToggle`: a search filter hides rows, and a hidden row's
   // provider must not be dropped from the saved selection.
-  const enabled = new Set(enabledLimitProviderSet());
-  for (const cb of els.limitProviderCheckboxes.querySelectorAll('input[type=checkbox]')) {
-    if (!cb.dataset.provider) continue;
-    if (cb.checked) enabled.add(cb.dataset.provider);
-    else enabled.delete(cb.dataset.provider);
-  }
-  const checked = limitProviderOrderApi
-    .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
-    .filter(({ id }) => enabled.has(id))
-    .map(({ id }) => id);
+  const rendered = [...els.limitProviderCheckboxes.querySelectorAll('input[type=checkbox]')]
+    .filter((cb) => cb.dataset.provider)
+    .map((cb) => [cb.dataset.provider, cb.checked]);
+  const checked = settingsListFilterApi.mergeRenderedSelection(
+    enabledLimitProviderSet(),
+    rendered,
+    limitProviderOrderApi
+      .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
+      .map(({ id }) => id)
+  );
   if (checked.length === 0 && state.breakdown === 'limits') {
     setBreakdown('tool');
   }

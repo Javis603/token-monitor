@@ -1793,6 +1793,14 @@ span.settings-note.settings-item-desc {
   cursor: pointer;
   transform: rotate(45deg);
 }
+/* Filtered-out rows stay in the DOM and are hidden, never omitted: the limits
+   rows adopt singleton live nodes from index.html, and a row that is not
+   rendered would take them out of the document when the outgoing rows are
+   removed. */
+.tool-preference-row.is-filtered-out,
+.settings-panel .limit-provider-row.is-filtered-out {
+  display: none;
+}
 /* No matches: the note lands inside the list box, where the rows were. */
 .settings-list-empty {
   margin: 0;

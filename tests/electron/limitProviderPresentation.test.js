@@ -2114,7 +2114,9 @@ test('disabled providers use checkbox state instead of a redundant status tag', 
   const css = readRendererFile('styles.css');
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'limitProviderAccountGroup');
 
-  assert.match(renderSettings, /row\.className = `limit-provider-row\$\{isEnabled \? '' : ' is-disabled'\}`/);
+  // The filter appends its own class after this one, so match the disabled part
+  // rather than pinning the whole template literal.
+  assert.match(renderSettings, /row\.className = `limit-provider-row\$\{isEnabled \? '' : ' is-disabled'\}/);
   assert.match(renderSettings, /if \(\(detected \|\| !isEnabled\) && tagInfo\.kind === 'status'\) continue/);
   assert.match(css, /\.limit-provider-row\.is-disabled \.limit-provider-main\s*\{[^}]*color: var\(--muted\)/);
   assert.match(css, /\.limit-provider-row\.is-disabled \.limit-provider-tag\s*\{[^}]*color: var\(--muted\)/);

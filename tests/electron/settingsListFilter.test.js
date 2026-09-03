@@ -6,6 +6,7 @@ const test = require('node:test');
 const {
   filterListItems,
   listTextMatches,
+  mergeRenderedSelection,
   normalizeListQuery
 } = require('../../src/electron/renderer/settingsListFilter');
 
@@ -50,4 +51,20 @@ test('missing input is tolerated the way a first render supplies it', () => {
   assert.deepEqual(filterListItems(undefined, 'claude', toText), []);
   assert.ok(listTextMatches(undefined, ''));
   assert.ok(!listTextMatches(undefined, 'claude'));
+});
+
+test('mergeRenderedSelection keeps stored ids the rendered rows never mention', () => {
+  const order = ['a', 'b', 'c', 'd'];
+  assert.deepEqual(mergeRenderedSelection(['a', 'b'], [['d', true]], order), ['a', 'b', 'd']);
+  assert.deepEqual(mergeRenderedSelection(['a', 'b'], [['b', false]], order), ['a']);
+  assert.deepEqual(mergeRenderedSelection(['a', 'b'], [], order), ['a', 'b']);
+});
+
+test('mergeRenderedSelection returns the ordering it is given, not insertion order', () => {
+  assert.deepEqual(mergeRenderedSelection(['c'], [['a', true]], ['a', 'b', 'c']), ['a', 'c']);
+});
+
+test('mergeRenderedSelection drops ids missing from the order and tolerates blanks', () => {
+  assert.deepEqual(mergeRenderedSelection(['a', 'gone'], [['', true], [null, true]], ['a', 'b']), ['a']);
+  assert.deepEqual(mergeRenderedSelection(undefined, undefined, undefined), []);
 });
