@@ -14,6 +14,8 @@
   --panel-rgb: 16, 21, 30;
   --text: #eef5fb;
 }
+/* This window links styles.css before this file, so it inherits that sheet's
+   base type size and its single `.hidden` rule; nothing here restates either. */
 html, body { margin: 0; height: 100%; }
 body {
   font-family: var(--ui-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
@@ -47,7 +49,6 @@ body.flat { background: rgb(var(--glass-rgb)); }
 .dash-tab.active { opacity: 1; background: rgba(var(--overlay-rgb), 0.06); }
 
 .dash-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px; }
-.dash-pane.hidden { display: none; }
 /* The overview reads as a centred content column (like a profile page) so the summary
    strip and heatmap share one width and a wide window gets symmetric margins, not a right gap. */
 #activityPane { align-self: center; width: 100%; max-width: 1200px; margin-inline: auto; }
@@ -118,7 +119,6 @@ body.flat { background: rgb(var(--glass-rgb)); }
 .dash-bd-pct { flex: none; width: 42px; font-variant-numeric: tabular-nums; opacity: 0.55; text-align: right; }
 
 .dash-tooltip { position: fixed; z-index: 50; pointer-events: none; min-width: 130px; padding: 9px 11px; border-radius: 9px; font-size: 12px; background: rgba(var(--panel-rgb), 0.96); border: 1px solid rgba(var(--overlay-rgb), 0.1); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45); }
-.dash-tooltip.hidden { display: none; }
 .tt-head { font-weight: 600; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
 .tt-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
 .tt-dot { width: 9px; height: 9px; border-radius: 2px; flex: none; box-shadow: inset 0 0 0 1px rgba(var(--overlay-rgb), 0.18); }
@@ -128,7 +128,6 @@ body.flat { background: rgb(var(--glass-rgb)); }
 /* Spans the whole window (inset: 0); keep it click-through so the header buttons
    still work when there's no history. */
 .dash-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0.6; font-size: 13px; pointer-events: none; }
-.dash-empty.hidden { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .range-btn,

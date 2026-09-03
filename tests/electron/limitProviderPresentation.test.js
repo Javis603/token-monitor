@@ -3086,10 +3086,8 @@ test('the record kind swaps whole field groups, and the user has the last word',
   assert.match(apply, /setSubscriptionFormKind\(isCreditsProvider\(subscriptionSelectedAccount\(\)\) \? 'topup' : 'subscription'\)/);
   assert.match(mode, /els\.subscriptionPlanFields\?\.classList\.toggle\('hidden', topUp\)/);
   assert.match(mode, /els\.subscriptionTopUpFields\?\.classList\.toggle\('hidden', !topUp\)/);
-  // This stylesheet has no blanket `.hidden` rule, so toggling the class only
-  // hides anything because these wrappers declare one.
-  const styles = readRendererFile('styles.css');
-  assert.match(cssBlock(styles, '.subscription-kind-fields.hidden'), /display: none;/);
+  // Hiding is the stylesheet's one blanket rule; what matters here is which of
+  // the two groups the markup starts on.
   assert.match(html, /id="subscriptionPlanFields" class="subscription-kind-fields"/);
   assert.match(html, /id="subscriptionTopUpFields" class="subscription-kind-fields hidden"/);
 

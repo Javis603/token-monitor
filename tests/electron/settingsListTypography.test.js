@@ -17,10 +17,12 @@ function cssRule(source, selector) {
   return match[1];
 }
 
-// `html, body` set a font family but no size, so anything that neither declares
-// a font-size nor inherits one renders at the browser's 16px default — twice the
-// panel's type size, and unmistakable on screen. Each settings list row must
-// therefore own its size rather than leave it to an optional child.
+// The document now declares a base size, so a forgotten font-size degrades to
+// body text rather than to the browser's 16px. These rows keep saying their size
+// anyway: a component that reads as one type scale should not depend on the
+// document's default staying what it is today. What must not come back is the
+// original shape of this bug, where the only declaration lived on a child that
+// half the rows never render.
 test('each settings list row owns its type size rather than an optional child', () => {
   const css = readRendererFile('styles.css');
   assert.match(cssRule(css, '.settings-panel .limit-provider-row'), /font-size:\s*11px/);

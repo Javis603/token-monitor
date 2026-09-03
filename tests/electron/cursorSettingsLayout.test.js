@@ -268,10 +268,8 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(details, /<input id="opencodeApiKeyInput"[^>]*data-i18n-aria-label="settings\.opencode\.kindApi"/);
   assert.match(details, /<textarea id="opencodeCookieInput"[^>]*data-i18n-aria-label="settings\.opencode\.kindCookie"/);
   // The cookie steps live inside the block that hides, so API mode never shows
-  // DevTools instructions. This stylesheet has no global `.hidden`.
+  // DevTools instructions.
   assert.match(details, /<div id="opencodeCookieFields" class="opencode-credential-fields hidden">/);
-  const css = readRendererFile('styles.css');
-  assert.match(css, /\.opencode-credential-fields\.hidden \{ display: none; \}/);
   assert.match(details, /<div class="settings-actions">\s*<button id="opencodeCookieSubmit" data-i18n="settings\.opencode\.saveProfile">/);
   assert.match(details, /<div id="opencodeErrorMessage" class="settings-note error hidden"><\/div>/);
 
@@ -741,10 +739,13 @@ test('API key account entries share styling and Copilot uses the folded token en
   assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
 
-  assert.match(css, /#deepseekManualPanel\.hidden,\n#minimaxManualPanel\.hidden,/);
-  assert.match(css, /#minimaxManualPanel\.hidden,\n#zaiManualPanel\.hidden,\n#zaiteamManualPanel\.hidden,\n#volcengineManualPanel\.hidden,\n#qoderManualPanel\.hidden,\n#traeManualPanel\.hidden,\n#zedManualPanel\.hidden,\n#commandcodeManualPanel\.hidden,\n#ollamaManualPanel\.hidden,\n#mimoManualPanel\.hidden,\n#kimiManualPanel\.hidden,\n#copilotManualPanel\.hidden,/);
-  assert.match(css, /#copilotManualPanel\.hidden,\n#copilotManualDetails\.hidden,/);
-  assert.match(css, /#deepseekErrorMessage\.hidden,\n#minimaxErrorMessage\.hidden,\n#zaiErrorMessage\.hidden,\n#zaiteamErrorMessage\.hidden,\n#volcengineErrorMessage\.hidden,\n#qoderErrorMessage\.hidden,\n#traeErrorMessage\.hidden,\n#zedErrorMessage\.hidden,\n#commandcodeErrorMessage\.hidden,\n#ollamaErrorMessage\.hidden,\n#kimiErrorMessage\.hidden,\n#copilotErrorMessage\.hidden,/);
+  // Each provider's error line starts hidden. Hiding itself is the stylesheet's
+  // one blanket rule, so what is worth asserting here is that every provider has
+  // such a line and that none of them ship visible.
+  const html = readRendererFile('index.html');
+  for (const provider of ['deepseek', 'minimax', 'zai', 'zaiteam', 'volcengine', 'qoder', 'trae', 'zed', 'commandcode', 'ollama', 'kimi', 'copilot']) {
+    assert.match(html, new RegExp(`id="${provider}ErrorMessage"[^>]*class="[^"]*hidden"`), provider);
+  }
   assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#traeManualPanel,\n#zedManualPanel,\n#commandcodeManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
   assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#zedManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
@@ -918,9 +919,8 @@ test('Zed account panel follows the manual browser Cookie flow without exposing 
   const zedUrlBody = functionBody(app, 'zedPlatformUrl', 'ollamaValidationError');
   assert.match(zedUrlBody, /https:\/\/dashboard\.zed\.dev\//);
   const css = readRendererFile('styles.css');
-  assert.match(css, /#zedManualPanel\.hidden,/);
   assert.match(css, /#zedManualPanel textarea,/);
-  assert.match(css, /#zedErrorMessage\.hidden,/);
+  assert.match(readRendererFile('index.html'), /id="zedErrorMessage"[^>]*class="[^"]*hidden"/);
 
   const i18n = readRendererFile('i18n.js');
   assert.doesNotMatch(i18n, /settings\.limits\.connection\.zed/);
@@ -1022,8 +1022,10 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   );
 
   const css = readRendererFile('styles.css');
-  const hiddenPanelRules = cssRulesForSelector(css, '#claudeManualPanel.hidden');
-  assert.ok(hiddenPanelRules.some(rule => declaration(rule, 'display') === 'none'));
+  // The panel collapses through the shared accordion rather than disappearing:
+  // `.accordion-animated-container` carries `display: grid !important`, so the
+  // `#claudeManualPanel.hidden { display: none }` this used to assert never took
+  // effect. What the panel needs is the wrapper, asserted just above.
   const panelRules = cssRulesForSelector(css, '#claudeManualPanel');
   assert.ok(panelRules.some(rule => declaration(rule, 'min-width') === '0'));
   const innerRules = cssRulesForSelector(css, '#claudeManualPanel > .accordion-animation-inner');
@@ -1224,7 +1226,6 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(css, /#mimoManualPanel textarea,[\s\S]*font-size: 12px/);
   assert.match(css, /#qoderManualPanel textarea,[\s\S]*#mimoManualPanel textarea,[\s\S]*font-family: monospace/);
   assert.match(css, /\.managed-account-list:empty \{ display: none; \}/);
-  assert.match(css, /\.opencode-empty\.hidden \{ display: none; \}/);
   assert.match(app, /getElementById\('mimoManualPanel'\)\?\.classList\.toggle\('expanded', next\)/);
   assert.doesNotMatch(app, /settings\.mimo\.empty/);
   assert.match(app, /window\.tokenMonitor\.mimo\.openConsole\(\)/);

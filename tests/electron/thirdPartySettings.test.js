@@ -55,7 +55,7 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
   assert.match(app, /const refreshTokenKey = 'settings\.thirdparty\.refreshToken'/);
   assert.match(app, /settings\.thirdparty\.sub2ApiAccessTokenPlaceholder/);
   assert.match(app, /settings\.thirdparty\.sub2ApiRefreshTokenPlaceholder/);
-  assert.match(styles, /#thirdpartyRefreshTokenRow\.hidden,/);
+  assert.match(html, /id="thirdpartyRefreshTokenRow" class="thirdparty-field hidden"/);
   assert.match(app, /const refreshToken = String\(refreshTokenInput\?\.value \|\| ''\)\.trim\(\)/);
   assert.match(app, /thirdPartyProfileErrorText\(result, adapter\)/);
   assert.match(app, /thirdpartyCustomConfig[\s\S]*?classList\.toggle\('hidden', !customMode\)/);
