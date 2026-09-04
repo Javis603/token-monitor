@@ -54,9 +54,9 @@ Note that Token Plan's `sk-sp-` API key is an inference credential. It cannot re
 
 ## What the Team figure is
 
-Team quota is allocated **per seat** (25,000 / 100,000 / 250,000 credits per seat per month by tier), not as one shared pool. What `GetSubscriptionSummary` returns — and what this provider shows — is the account-level total across those seats: the same "overall quota usage percentage" Alibaba's own My Subscriptions page headlines, from the same endpoint behind that page. `TotalCount` is the number of subscriptions behind it.
+Team quota is allocated **per seat** (25,000 / 100,000 / 250,000 credits per seat per month by tier), not as one shared pool. This provider shows `TotalValue` / `TotalSurplusValue` from `GetSubscriptionSummary`, which is the account-level summary Alibaba's own My Subscriptions page headlines as its "overall quota usage percentage" — the same endpoint behind that page. `TotalCount` is the number of subscriptions behind it. How those fields aggregate on a multi-seat account has not been verified against a real one.
 
-That total does not reveal how the remaining credit is distributed between seats. It is still the right headline, because an exhausted seat is not cut off: Alibaba draws from the shared usage pack instead, and suspends service only once every quota is spent. But on a multi-seat team, read the figure as "credit left on the account", not as "this seat can still call".
+**This figure does not tell you whether a given seat can still call.** Alibaba's Team FAQ is explicit: "When the seat quota is exhausted, API calls are blocked and no pay-as-you-go charges apply." A seat that runs out continues only if the team has eligible shared usage pack quota left, and an admin can cap how much of that pack an individual member may draw. So on a multi-seat team, read this as overall base-plan usage across the account, never as one member's remaining callable quota.
 
 ## Personal windows
 
