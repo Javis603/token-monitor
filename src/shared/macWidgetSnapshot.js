@@ -288,6 +288,7 @@ const PROVIDER_LABELS = Object.freeze({
   workbuddy: 'WorkBuddy',
   thirdparty: 'Third-party APIs',
   volcengine: 'Volcengine',
+  alibaba: 'Alibaba Cloud',
   zai: 'GLM',
   zaiteam: 'GLM Team',
   zed: 'Zed'

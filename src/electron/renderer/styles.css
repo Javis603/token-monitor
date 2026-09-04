@@ -3495,6 +3495,7 @@ html.is-windows .settings-panel select option {
 .row-icon-minimax    { -webkit-mask-image: url(../../../assets/icons/minimax.svg);       mask-image: url(../../../assets/icons/minimax.svg); }
 .row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
 .row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
+.row-icon-alibaba    { -webkit-mask-image: url(../../../assets/icons/alibaba.svg);       mask-image: url(../../../assets/icons/alibaba.svg); }
 .row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
 .row-icon-trae       { -webkit-mask-image: url(../../../assets/icons/trae.svg);          mask-image: url(../../../assets/icons/trae.svg); }
 .row-icon-qodercn    { -webkit-mask-image: url(../../../assets/icons/qodercn.svg);      mask-image: url(../../../assets/icons/qodercn.svg); }
@@ -3582,6 +3583,10 @@ html.is-windows .settings-panel select option {
 .limit-icon-volcengine {
   -webkit-mask-image: url(../../../assets/icons/volcengine.svg);
   mask-image: url(../../../assets/icons/volcengine.svg);
+}
+.limit-icon-alibaba {
+  -webkit-mask-image: url(../../../assets/icons/alibaba.svg);
+  mask-image: url(../../../assets/icons/alibaba.svg);
 }
 .limit-icon-qoder {
   -webkit-mask-image: url(../../../assets/icons/qoder.svg);
@@ -5322,7 +5327,8 @@ html.is-windows .limit-live-badge {
 #commandcodeManualPanel > .accordion-animation-inner,
 #ollamaManualPanel > .accordion-animation-inner,
 #mimoManualPanel > .accordion-animation-inner,
-#kimiManualPanel > .accordion-animation-inner {
+#kimiManualPanel > .accordion-animation-inner,
+#alibabaManualPanel > .accordion-animation-inner {
   display: grid;
   min-width: 0;
   gap: 8px;
@@ -5360,6 +5366,8 @@ html.is-windows .limit-live-badge {
 #mimoManualPanel textarea,
 #kimiManualPanel input,
 #kimiManualPanel textarea,
+#alibabaManualPanel textarea,
+#alibabaManualPanel select,
 #copilotManualDetails input {
   width: 100%;
   font-size: 12px;

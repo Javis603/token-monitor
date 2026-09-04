@@ -40,6 +40,7 @@
     commandcode: { web: 'Web' },
     kimi: { api: 'API', web: 'Web' },
     ollama: { web: 'Web' },
+    alibaba: { web: 'Web' },
     thirdparty: { api: 'API' }
   };
 
@@ -73,6 +74,7 @@
     commandcode: ['Manual login', 'Web'],
     kimi: ['Coding Plan', 'Web/API'],
     ollama: ['Manual login', 'Web'],
+    alibaba: ['Token Plan', 'Web'],
     thirdparty: ['Relay', 'API']
   };
 
@@ -308,7 +310,7 @@
     if (status === 'notConfigured') {
       if (providerName === 'kimi') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'antigravity') return { label: 'Not set up', tone: 'setup' };
-      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama') return { label: 'Sign in', tone: 'setup' };
+      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama' || providerName === 'alibaba') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi') return { label: 'Add API key', tone: 'setup' };
       if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };

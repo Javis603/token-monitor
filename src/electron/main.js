@@ -89,7 +89,7 @@ const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
-const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie } = require('../shared/limitCollector');
+const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie, alibabaCookie, alibabaVariant, normalizeAlibabaCookieHeader } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
@@ -595,6 +595,8 @@ function defaultSettings() {
     volcengineAgentAccessKeyId: '',
     volcengineAgentSecretAccessKey: '',
     volcengineAgentRegion: '',
+    alibabaCookie: '',
+    alibabaVariant: 'cn',
     qoderCookie: '',
     qoderSite: 'global',
     traeAccessToken: '',
@@ -845,6 +847,18 @@ function currentVolcengineCredentials() {
 
 function normalizeQoderCookie(value) {
   return qoderCookie({}, { qoderCookie: String(value || '') });
+}
+
+function normalizeAlibabaCookie(value) {
+  return normalizeAlibabaCookieHeader(String(value || ''));
+}
+
+function normalizeAlibabaVariant(value) {
+  return alibabaVariant({ alibabaVariant: value }, {});
+}
+
+function currentAlibabaCookie() {
+  return settings?.alibabaCookie || alibabaCookie(process.env);
 }
 
 function normalizeQoderSite(value) {
@@ -4718,6 +4732,11 @@ function settingsForRenderer() {
     : ollamaSessionCookie(process.env)
       ? 'env'
       : '';
+  const alibabaCookieSource = settings?.alibabaCookie
+    ? 'settings'
+    : alibabaCookie(process.env)
+      ? 'env'
+      : '';
   const kimiApiKeySource = settings?.kimiApiKey
     ? 'settings'
     : kimiToken(process.env)
@@ -4764,6 +4783,8 @@ function settingsForRenderer() {
     volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
     volcengineAgentAccessKeyId: settings?.volcengineAgentAccessKeyId ? 'set' : '',
     claudeWebCookie: settings?.claudeWebCookie ? 'set' : '',
+    alibabaCookie: settings?.alibabaCookie ? 'set' : '',
+    alibabaVariant: normalizeAlibabaVariant(settings?.alibabaVariant),
     qoderCookie: settings?.qoderCookie ? 'set' : '',
     traeAccessToken: settings?.traeAccessToken ? 'set' : '',
     traeDeviceId: settings?.traeDeviceId ? 'set' : '',
@@ -4811,6 +4832,8 @@ function settingsForRenderer() {
     commandcodeCookieSource,
     ollamaCookieConfigured: Boolean(currentOllamaCookie()),
     ollamaCookieSource,
+    alibabaCookieConfigured: Boolean(currentAlibabaCookie()),
+    alibabaCookieSource,
     kimiApiKeyConfigured: Boolean(currentKimiApiKey()),
     kimiApiKeySource,
     kimiWebAccessTokenConfigured: Boolean(currentKimiWebAccessToken()),
@@ -6033,6 +6056,11 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'dashboard.zed.dev') return true;
   if ((parsed.hostname === 'ollama.com' || parsed.hostname === 'www.ollama.com') && (parsed.pathname === '/settings' || parsed.pathname === '/signin')) return true;
   if ((parsed.hostname === 'kimi.com' || parsed.hostname === 'www.kimi.com') && parsed.pathname.startsWith('/code')) return true;
+  // Token Plan lives behind a hash route, so the console's region path is all
+  // there is to match on. Kept host-scoped rather than opening the whole
+  // console, in line with every other entry here.
+  if (parsed.hostname === 'bailian.console.aliyun.com' && parsed.pathname.startsWith('/cn-beijing')) return true;
+  if (parsed.hostname === 'modelstudio.console.alibabacloud.com' && parsed.pathname.startsWith('/ap-southeast-1')) return true;
   if (STATUS_PAGE_HOSTS.has(parsed.hostname) && (parsed.pathname === '' || parsed.pathname === '/')) return true;
   return false;
 }
@@ -6595,6 +6623,8 @@ app.whenReady().then(() => {
     if (patch.volcengineAgentSecretAccessKey !== undefined) normalizedPatch.volcengineAgentSecretAccessKey = normalizeSecretSetting(patch.volcengineAgentSecretAccessKey);
     if (patch.volcengineAgentRegion !== undefined) normalizedPatch.volcengineAgentRegion = normalizeVolcengineRegion(patch.volcengineAgentRegion);
     if (patch.qoderCookie !== undefined) normalizedPatch.qoderCookie = normalizeQoderCookie(patch.qoderCookie);
+    if (patch.alibabaCookie !== undefined) normalizedPatch.alibabaCookie = normalizeAlibabaCookie(patch.alibabaCookie);
+    if (patch.alibabaVariant !== undefined) normalizedPatch.alibabaVariant = normalizeAlibabaVariant(patch.alibabaVariant);
     if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
     if (patch.traeAccessToken !== undefined) normalizedPatch.traeAccessToken = normalizeTraeAccessToken(patch.traeAccessToken);
     if (patch.traeDeviceId !== undefined) normalizedPatch.traeDeviceId = normalizeTraeDeviceId(patch.traeDeviceId);
@@ -6729,6 +6759,8 @@ app.whenReady().then(() => {
       volcengineAgentRegion: patch.volcengineAgentRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineAgentRegion) : (settings.volcengineAgentRegion || ''),
       qoderCookie: patch.qoderCookie !== undefined ? normalizeQoderCookie(patch.qoderCookie) : (settings.qoderCookie || ''),
       qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
+      alibabaCookie: patch.alibabaCookie !== undefined ? normalizeAlibabaCookie(patch.alibabaCookie) : (settings.alibabaCookie || ''),
+      alibabaVariant: patch.alibabaVariant !== undefined ? normalizeAlibabaVariant(patch.alibabaVariant) : normalizeAlibabaVariant(settings.alibabaVariant),
       traeAccessToken: patch.traeAccessToken !== undefined ? normalizeTraeAccessToken(patch.traeAccessToken) : (settings.traeAccessToken || ''),
       traeDeviceId: patch.traeDeviceId !== undefined ? normalizeTraeDeviceId(patch.traeDeviceId) : (settings.traeDeviceId || ''),
       zedCookie: patch.zedCookie !== undefined ? normalizeZedCookie(patch.zedCookie) : (settings.zedCookie || ''),
