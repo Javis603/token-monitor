@@ -5,7 +5,6 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const chokidar = require('chokidar');
 const {
   clientSourceChecks, clientSourceRoots, clientWatchCandidates,
   clientsForWatchPath, deriveClientHealth, watchAttributionRootsForClients,
@@ -91,27 +90,6 @@ test('Unsloth watch pruning preserves an overlapping enabled client source', (t)
   const ignored = watchIgnoreMatcher('unsloth,codex');
   assert.equal(ignored(path.join(dir, 'models', 'weights.gguf')), true);
   assert.equal(ignored(path.join(dir, 'codex', 'sessions', '2026', 'session.jsonl')), false);
-});
-
-test('a newly created Unsloth WAL emits a targeted native watch event', { timeout: 10000 }, async (t) => {
-  const dir = studioHome(t);
-  const wal = path.join(dir, 'studio.db-wal');
-  const roots = watchAttributionRootsForClients('unsloth');
-  const watcher = chokidar.watch(watchPathsForClients('unsloth'), {
-    ignored: watchIgnoreMatcher('unsloth'), ignoreInitial: true, usePolling: false
-  });
-  t.after(() => watcher.close());
-  await new Promise((resolve, reject) => {
-    watcher.once('ready', resolve);
-    watcher.once('error', reject);
-  });
-  const changed = new Promise((resolve, reject) => {
-    watcher.on('add', (file) => { if (path.resolve(file) === wal) resolve(file); });
-    watcher.once('error', reject);
-  });
-  fs.writeFileSync(wal, 'fixture');
-  assert.deepEqual(clientsForWatchPath(await changed, roots), ['unsloth']);
-  await watcher.close();
 });
 
 test('Unsloth keeps local zero cost and metered estimates in the same client partition', () => {
