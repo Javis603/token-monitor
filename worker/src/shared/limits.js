@@ -554,6 +554,15 @@ function providerAggregateKey(provider) {
   ) {
     return `${provider.provider}:${identity}:device:${provider.sourceDeviceId || ''}`;
   }
+  // One Alibaba Cloud account can hold a Team and a Personal subscription at the
+  // same time, with quotas counted separately. Both rows therefore carry the
+  // same console-issued account id, so identity alone would make the two plans
+  // collide here and one would silently replace the other. `region` holds the
+  // full variant (`cn`, `cn-personal`, …), which separates the plans while
+  // still merging the same plan observed from several devices.
+  if (provider.provider === 'alibaba') {
+    return `${provider.provider}:${identity}:${provider.region || ''}`;
+  }
   return `${provider.provider}:${identity}`;
 }
 

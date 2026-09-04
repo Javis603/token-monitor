@@ -1334,17 +1334,19 @@ test('aggregateLimits keeps two Alibaba accounts apart and merges one across dev
     ['Team A']
   );
 
-  // Team and Personal are separate subscriptions on one Alibaba account, so an
-  // identified Personal row must survive alongside a Team row from another
-  // device rather than being treated as the same observation.
+  // One Alibaba Cloud account can hold a Team and a Personal subscription at
+  // once, with quotas counted separately, so both rows carry the *same* account
+  // id. Identity alone would collide here and drop one plan; the aggregate key
+  // is scoped by the plan variant so both survive.
   assert.deepEqual(
     labels(aggregateLimits([
-      device('mac', alibabaRow('sha256:account-a', 'Team A')),
+      device('mac', { ...alibabaRow('sha256:account-a', 'Team A'), region: 'cn' }),
       device('win', {
         provider: 'alibaba',
-        accountKey: 'sha256:personal-a',
+        accountKey: 'sha256:account-a',
         accountLabel: 'Pro',
         workspaceKind: 'personal',
+        region: 'cn-personal',
         status: 'ok',
         source: 'web',
         updatedAt: now,
@@ -1352,6 +1354,16 @@ test('aggregateLimits keeps two Alibaba accounts apart and merges one across dev
       })
     ], 0, nowMs)),
     ['Pro', 'Team A']
+  );
+
+  // The same plan seen from two devices still merges: scoping by variant must
+  // not turn one subscription into two rows.
+  assert.deepEqual(
+    labels(aggregateLimits([
+      device('mac', { ...alibabaRow('sha256:account-a', 'Team A'), region: 'cn' }),
+      device('win', { ...alibabaRow('sha256:account-a', 'Team A'), region: 'cn' })
+    ], 0, nowMs)),
+    ['Team A']
   );
 });
 
