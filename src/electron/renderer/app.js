@@ -5349,9 +5349,19 @@ function positionCodexResetForecastTooltip(wrap) {
   tooltip.classList.toggle('is-below', roomAbove < tooltip.offsetHeight + 5);
 }
 
+function codexResetForecastType(value) {
+  const type = String(value || '').trim().toLowerCase();
+  if (type !== 'banked' && type !== 'regular') return '';
+  return t(`limits.codexResetForecast.resetType.${type}`);
+}
+
 function codexResetForecastTooltip(forecast) {
   const entries = [];
   const disclaimer = t('limits.codexResetForecast.disclaimer');
+  const latestResetType = codexResetForecastType(forecast?.latestResetType);
+  if (latestResetType) {
+    entries.push([t('limits.codexResetForecast.resetType'), latestResetType]);
+  }
   const latestReset = codexResetForecastDate(forecast?.latestResetAt);
   if (latestReset) {
     const age = codexResetForecastAge(forecast.latestResetAt);

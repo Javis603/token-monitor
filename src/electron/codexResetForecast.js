@@ -211,6 +211,13 @@ function normalizeCodexResetForecast(payload, options = {}) {
     latestResetRecord.date,
     latestResetRecord.at
   ));
+  const latestResetTypeValue = String(firstDefined(
+    latestResetRecord.resetType,
+    latestResetRecord.reset_type
+  ) || '').trim().toLowerCase();
+  const latestResetType = ['banked', 'regular'].includes(latestResetTypeValue)
+    ? latestResetTypeValue
+    : '';
   const sourceAuthor = String(firstDefined(
     source.authorHandle,
     source.author_handle,
@@ -226,6 +233,7 @@ function normalizeCodexResetForecast(payload, options = {}) {
       observedAt,
       sourceAuthor,
       latestResetAt,
+      latestResetType,
       checkedAt,
       pageUrl: CODEX_RESET_FORECAST_PAGE_URL
     };
@@ -242,6 +250,7 @@ function normalizeCodexResetForecast(payload, options = {}) {
     observedAt,
     sourceAuthor,
     latestResetAt,
+    latestResetType,
     checkedAt,
     pageUrl: CODEX_RESET_FORECAST_PAGE_URL
   }, nowMs);

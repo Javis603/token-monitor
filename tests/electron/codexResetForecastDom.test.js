@@ -43,6 +43,8 @@ test('forecast details use the shared accessible tooltip without repeating third
   const renderer = app.slice(app.indexOf('function codexResetForecastTooltip'), app.indexOf('function appendCodexResetForecast'));
   assert.match(renderer, /limitDetailInfoNode\([\s\S]*?'codex-reset-forecast-info-wrap'/);
   assert.match(renderer, /limits\.codexResetForecast\.lastReset/);
+  assert.match(renderer, /limits\.codexResetForecast\.resetType/);
+  assert.match(renderer, /codexResetForecastType\(forecast\?\.latestResetType\)/);
   assert.match(renderer, /limits\.codexResetForecast\.sourceSignal/);
   assert.match(renderer, /if \(forecast\?\.error\)[\s\S]*?limits\.codexResetForecast\.lastAttempt/);
   assert.doesNotMatch(renderer, /limits\.codexResetForecast\.checked/);
@@ -121,6 +123,7 @@ test('forecast tooltip safely stays absent before the first response arrives', (
     codexResetForecastTimeUntil: () => '',
     codexResetForecastAge: () => '',
     codexResetForecastSourceAuthor: () => '',
+    codexResetForecastType: () => '',
     limitDetailInfoNode: () => {
       detailHelperCalled = true;
       return null;
@@ -166,6 +169,19 @@ test('forecast percentage display preserves fractional percent semantics', () =>
   assert.equal(formatPercent(0.5, 'en-US'), '0.5');
   assert.equal(formatPercent(75, 'en-US'), '75');
   assert.equal(formatPercent(75.125, 'en-US'), '75.13');
+});
+
+test('forecast reset type uses localized labels only for supported API values', () => {
+  const start = app.indexOf('function codexResetForecastType');
+  const end = app.indexOf('\nfunction codexResetForecastTooltip', start);
+  const typeLabel = vm.runInNewContext(`(${app.slice(start, end)})`, {
+    String,
+    t: (key) => key
+  });
+
+  assert.equal(typeLabel('banked'), 'limits.codexResetForecast.resetType.banked');
+  assert.equal(typeLabel('regular'), 'limits.codexResetForecast.resetType.regular');
+  assert.equal(typeLabel('surprise'), '');
 });
 
 test('forecast requests use the widget outbound transport', () => {

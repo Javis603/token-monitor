@@ -10,7 +10,7 @@ const {
 
 test('normalizes an active camel-case reset watch', () => {
   const result = normalizeCodexResetForecast({
-    latestReset: { occurredAt: '2026-08-29T20:43:00Z' },
+    latestReset: { occurredAt: '2026-08-29T20:43:00Z', resetType: 'regular' },
     activeWatch: {
       active: true,
       probability: 0.75,
@@ -32,6 +32,7 @@ test('normalizes an active camel-case reset watch', () => {
     observedAt: '2026-08-30T02:30:00.000Z',
     sourceAuthor: '@thsottiaux',
     latestResetAt: '2026-08-29T20:43:00.000Z',
+    latestResetType: 'regular',
     checkedAt: '2026-08-30T04:00:00Z',
     pageUrl: CODEX_RESET_FORECAST_PAGE_URL
   });
@@ -40,7 +41,7 @@ test('normalizes an active camel-case reset watch', () => {
 test('normalizes snake-case latest reset timestamps without retaining post content', () => {
   const result = normalizeCodexResetForecast({
     data: {
-      latest_reset: { announced_at: '2026-08-29T20:43:00Z' },
+      latest_reset: { announced_at: '2026-08-29T20:43:00Z', reset_type: 'banked' },
       active_watch: {
         active: true,
         probability_percent: 89,
@@ -50,6 +51,7 @@ test('normalizes snake-case latest reset timestamps without retaining post conte
   });
 
   assert.equal(result.latestResetAt, '2026-08-29T20:43:00.000Z');
+  assert.equal(result.latestResetType, 'banked');
   assert.equal(result.sourceAuthor, '@thsottiaux');
   assert.equal(Object.hasOwn(result, 'sourceText'), false);
 });
@@ -59,6 +61,7 @@ test('normalizes the public codex-resets v1 status schema', () => {
     data: {
       latest_reset: {
         announced_at: '2026-08-29T20:43:34.000Z',
+        reset_type: 'banked',
         source: { author: 'thsottiaux' }
       },
       active_watch: {
@@ -79,6 +82,21 @@ test('normalizes the public codex-resets v1 status schema', () => {
   assert.equal(result.observedAt, '2026-08-29T21:23:38.000Z');
   assert.equal(result.sourceAuthor, 'thsottiaux');
   assert.equal(result.latestResetAt, '2026-08-29T20:43:34.000Z');
+  assert.equal(result.latestResetType, 'banked');
+});
+
+test('drops unknown reset types instead of exposing third-party values', () => {
+  const result = normalizeCodexResetForecast({
+    data: {
+      latest_reset: {
+        announced_at: '2026-08-29T20:43:34.000Z',
+        reset_type: 'surprise<script>'
+      },
+      active_watch: null
+    }
+  });
+
+  assert.equal(result.latestResetType, '');
 });
 
 test('treats the public active_watch null shape as no active signal', async () => {
