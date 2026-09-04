@@ -44,17 +44,17 @@ Two distinctions are load-bearing and should not be collapsed:
 
 An empty subscription (`TotalCount: 0`) is a healthy, authorized account with nothing to draw: the row stays visible with no window.
 
-## Coding Plan is out of scope, not dead
+## Scope and the provider id
 
-Alibaba sells a second, separate console product called Coding Plan. It is **not** end-of-life: only its Lite tier was sunset (no new subscriptions from 2026-03-20, no renewals or upgrades from 2026-04-13), while Pro is still listed and sold at $50/month with a daily replenished allocation. It is simply a different product with its own quota endpoint (`queryCodingPlanInstanceInfoV2`), its own plan-specific API key and base URL, and its own window shape (5-hour, weekly and monthly counters). This provider reads Token Plan only.
+This provider reads Token Plan. Alibaba's other console product, Coding Plan, is a separate product with its own quota endpoint and credential, and is deliberately not read here — the note exists so it is not added on the assumption that it was simply forgotten.
 
-If Coding Plan is added later it belongs as extra windows under this same provider and cookie — both plans live behind one Alibaba Cloud login — the way Volcengine carries its Coding and Agent plans together, rather than as a second provider. That is why `alibaba` is a platform-level id rather than a plan-level one.
+If it is ever added it belongs as extra windows under this same provider and cookie, since both plans live behind one Alibaba Cloud login, the way Volcengine carries its Coding and Agent plans together. That is why `alibaba` is a platform-level id rather than a plan-level one.
 
-Note that a plan-specific API key is an inference credential: it calls models, it does not read quota, which is why this provider is cookie-only. The prefix does not tell the two plans apart either — Alibaba issues `sk-sp-` keys for both Token Plan and Coding Plan, and warns that the two key/base-URL pairs are not interchangeable.
+A plan-specific API key is an inference credential: it calls models, it does not read quota. That is why this provider is cookie-only.
 
 ## What the Team figure is
 
-Team quota is allocated **per seat** (25,000 / 100,000 / 250,000 credits per seat per month by tier), not as one shared pool. This provider shows `TotalValue` / `TotalSurplusValue` from `GetSubscriptionSummary`, which is the account-level summary Alibaba's own My Subscriptions page headlines as its "overall quota usage percentage" — the same endpoint behind that page. The endpoint also returns `TotalCount`, which is read only to tell an empty subscription apart from a populated one; how it and the value fields behave on a multi-seat account has not been verified against a real one.
+Team quota is allocated **per seat**, not as one shared pool. This provider shows `TotalValue` / `TotalSurplusValue` from `GetSubscriptionSummary`, which is the account-level summary Alibaba's own My Subscriptions page headlines as its "overall quota usage percentage" — the same endpoint behind that page. The endpoint also returns `TotalCount`, which is read only to tell an empty subscription apart from a populated one; how it and the value fields behave on a multi-seat account has not been verified against a real one.
 
 **This figure does not tell you whether a given seat can still call.** Alibaba's Team FAQ is explicit: "When the seat quota is exhausted, API calls are blocked and no pay-as-you-go charges apply." A seat that runs out continues only if the team has eligible shared usage pack quota left, and an admin can cap how much of that pack an individual member may draw. So on a multi-seat team, read this as overall base-plan usage across the account, never as one member's remaining callable quota.
 
@@ -64,7 +64,7 @@ Alibaba defines a 5-hour and a 7-day window, but states that "the 5-hour limit i
 
 ## Known gaps
 
-- **Base plan quota only.** Alibaba sells add-on quota on top of the base plan — an Extra Bundle for Personal (20,000 credits, explicitly *not* subject to the 5-hour/7-day windows) and Shared quota packs for Team (625,000 credits each, which bypass per-seat limits). Neither is read here, so an account holding add-on credit can show a base window at 100% used while the service still answers. Treat a "used everything but it still works" report as this gap, not as a parsing bug.
+- **Base plan quota only.** Alibaba sells add-on quota on top of the base plan — an Extra Bundle for Personal and shared usage packs for Team — and both sit outside the base windows this provider reads. Neither is read here, so an account holding add-on credit can show a base window at 100% used while the service still answers. Treat a "used everything but it still works" report as this gap, not as a parsing bug.
 - **Multi-seat Team distribution is not shown.** Only the account-level total is read; per-seat allocation and per-member consumption live on other console pages and are not fetched. Unverified against a real multi-seat account.
 - **One credential per device.** `alibabaVariant` and `alibabaCookie` are single-valued, so a machine tracks either Team or Personal, not both — even though Alibaba lets one account hold both subscriptions with independent quotas. Two devices can cover both, and aggregation keeps them as separate rows as long as each carries an account id.
 - **A Personal row with no account id can be superseded.** The account id is read opportunistically from the Personal payloads; if the console supplies none, the row is unidentified, and the shared aggregation rule drops unidentified observations when another device reports an identified row for the same provider.
