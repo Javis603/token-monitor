@@ -90,6 +90,7 @@ const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
 const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie } = require('../shared/limitCollector');
+const { kimiDesktopTokenStoreExists, looksLikeKimiRefreshToken } = require('../shared/kimiDesktopSession');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
@@ -901,8 +902,24 @@ function currentKimiApiKey() {
   return settings?.kimiApiKey || kimiToken(process.env);
 }
 
-function normalizeKimiWebAccessToken(value) {
-  return kimiWebToken({}, String(value || ''));
+// The single paste box accepts either an access token or a refresh token; a
+// refresh token (JWT lifetime in days, not minutes) self-renews via the Kimi
+// auth endpoint, so it is stored as the seed of a rotating session instead.
+// An access-token paste never clears a stored refresh seed: it shadows the
+// session only while fresh, and once it expires the seed must still be there
+// for the session to resume (the console's localStorage holds both keys side
+// by side, so pasting the wrong one is an easy accident).
+function classifyKimiWebTokenPaste(value, existingRefreshToken = '') {
+  const token = kimiWebToken({}, String(value || ''));
+  if (token && looksLikeKimiRefreshToken(token)) {
+    return { kimiWebAccessToken: '', kimiWebRefreshToken: token };
+  }
+  return { kimiWebAccessToken: token, kimiWebRefreshToken: token ? String(existingRefreshToken || '') : '' };
+}
+
+function normalizeKimiWebRefreshToken(value) {
+  const raw = String(value || '').trim();
+  return looksLikeKimiRefreshToken(raw) ? raw : '';
 }
 
 function currentKimiWebAccessToken() {
@@ -4723,11 +4740,16 @@ function settingsForRenderer() {
     : kimiToken(process.env)
       ? 'env'
       : '';
-  const kimiWebAccessTokenSource = settings?.kimiWebAccessToken
+  // A present token-store file means the Kimi Work desktop app is installed and
+  // signed in; the collector reads its session automatically on Windows.
+  const kimiDesktopSessionAvailable = kimiDesktopTokenStoreExists(process.env);
+  const kimiWebAccessTokenSource = settings?.kimiWebAccessToken || settings?.kimiWebRefreshToken
     ? 'settings'
-    : kimiWebToken(process.env)
+    : kimiWebToken(process.env) || String(process.env.KIMI_REFRESH_TOKEN || '').trim()
       ? 'env'
-      : '';
+      : kimiDesktopSessionAvailable
+        ? 'desktop'
+        : '';
   // Default-deny every credential field added to the canonical store. The two
   // hub secrets remain explicit exceptions because the existing sync UI must
   // prefill/copy them; provider credentials only cross as blank/configured state.
@@ -4815,7 +4837,7 @@ function settingsForRenderer() {
     kimiApiKeySource,
     kimiWebAccessTokenConfigured: Boolean(currentKimiWebAccessToken()),
     kimiWebAccessTokenSource,
-    kimiCredentialConfigured: Boolean(currentKimiWebAccessToken() || currentKimiApiKey()),
+    kimiCredentialConfigured: Boolean(currentKimiWebAccessToken() || currentKimiApiKey() || kimiDesktopSessionAvailable),
     kimiCredentialSource: kimiWebAccessTokenSource || kimiApiKeySource,
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
@@ -6601,7 +6623,12 @@ app.whenReady().then(() => {
     if (patch.zedCookie !== undefined) normalizedPatch.zedCookie = normalizeZedCookie(patch.zedCookie);
     if (patch.commandcodeCookie !== undefined) normalizedPatch.commandcodeCookie = normalizeCommandcodeCookie(patch.commandcodeCookie);
     if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
-    if (patch.kimiWebAccessToken !== undefined) normalizedPatch.kimiWebAccessToken = normalizeKimiWebAccessToken(patch.kimiWebAccessToken);
+    if (patch.kimiWebAccessToken !== undefined) {
+      const classified = classifyKimiWebTokenPaste(patch.kimiWebAccessToken, settings?.kimiWebRefreshToken);
+      normalizedPatch.kimiWebAccessToken = classified.kimiWebAccessToken;
+      normalizedPatch.kimiWebRefreshToken = classified.kimiWebRefreshToken;
+    }
+    if (patch.kimiWebRefreshToken !== undefined) normalizedPatch.kimiWebRefreshToken = normalizeKimiWebRefreshToken(patch.kimiWebRefreshToken);
     if (patch.ollamaCookie !== undefined) normalizedPatch.ollamaCookie = normalizeOllamaCookie(patch.ollamaCookie);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);

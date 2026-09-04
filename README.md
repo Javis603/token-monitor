@@ -126,7 +126,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Limits, trends & export
 
-- **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 22+ providers, including multiple OpenRouter/third-party profiles and DeepSeek prepaid balance/spend
+- **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 22+ providers, including multiple OpenRouter/third-party profiles and DeepSeek prepaid balance/spend. Kimi web credentials rotate on use: once the widget owns a token pair (the desktop-app session or a pasted refresh token), using the same account's web console signs that browser session out on the next refresh
 - **Multiple accounts & Codex switching** — track several accounts per provider, each with its own limits; a tracked Codex account can be switched as the active local account in one click, without re-authenticating
 - **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
 - **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model history (bar and K-line views) across all your devices

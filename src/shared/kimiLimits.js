@@ -4,6 +4,13 @@ const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { runWithProbeDeadline } = require('./probeDeadline');
 const { BROWSER_USER_AGENT } = require('./browserUserAgent');
+const {
+  readKimiDesktopSession,
+  refreshKimiDesktopSession,
+  kimiDesktopAppRunning,
+  resolveKimiManualSession,
+  looksLikeKimiRefreshToken
+} = require('./kimiDesktopSession');
 
 const KIMI_FETCH_TIMEOUT_MS = 12_000;
 
@@ -413,11 +420,22 @@ async function fetchJson(url, init, deps, label) {
   const inputSignals = [deps.signal, init?.signal].filter(Boolean);
   const parentSignal = inputSignals.length > 1 ? AbortSignal.any(inputSignals) : inputSignals[0];
   const deadlineMs = Number(deps.kimiFetchTimeoutMs || deps.fetchTimeoutMs || KIMI_FETCH_TIMEOUT_MS);
-  return runWithProbeDeadline(async ({ signal }) => {
+  // Kimi's endpoints occasionally drop or hang a connection; one quick retry
+  // keeps a transient blip from costing the whole tick. Only fast, non-HTTP
+  // failures retry — a hung request that burned the deadline does not.
+  const attempt = async () => runWithProbeDeadline(async ({ signal }) => {
     const response = await (deps.fetch || fetch)(url, { ...init, signal });
     if (!response.ok) throw kimiRequestError(label, response);
     return response.json();
   }, { signal: parentSignal, deadlineMs });
+  const startedAt = Date.now();
+  try {
+    return await attempt();
+  } catch (error) {
+    if (error?.status || Date.now() - startedAt >= 5_000) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    return attempt();
+  }
 }
 
 function jwtSessionHeaders(token) {
@@ -553,23 +571,110 @@ function failureStatus(errors) {
   return 'unavailable';
 }
 
+// Never throws: a desktop-app store we cannot read just means "no session".
+// `deps.kimiDesktopSession` lets tests and probes inject the session.
+async function resolveKimiDesktopSession(deps) {
+  if (typeof deps.kimiDesktopSession === 'function') {
+    try {
+      return await deps.kimiDesktopSession();
+    } catch (_) {
+      return null;
+    }
+  }
+  try {
+    return await readKimiDesktopSession({ env: deps.env || process.env });
+  } catch (_) {
+    return null;
+  }
+}
+
+// A stale desktop-app token is recoverable when the app is closed: we refresh
+// the pair ourselves and write it back for the app's next start. While the app
+// is running it owns the refresh cycle (its in-memory map cannot see our file
+// writes), so we must not touch it and simply report the gap.
+async function recoverStaleDesktopSession(deps, errors) {
+  try {
+    const refreshed = await (deps.kimiDesktopSessionRefresh || refreshKimiDesktopSession)({
+      env: deps.env || process.env,
+      ...(deps.fetch ? { fetch: deps.fetch } : {})
+    });
+    if (refreshed) return refreshed;
+    const running = await (deps.kimiDesktopAppRunning || kimiDesktopAppRunning)({});
+    const idle = new Error(running
+      ? 'Kimi desktop app is running but idle; use the app once to refresh its token'
+      : 'Kimi desktop app token could not be refreshed');
+    idle.status = 'unavailable';
+    errors.push(idle);
+    return null;
+  } catch (error) {
+    const surfaced = error?.status ? error : Object.assign(new Error('Kimi desktop app token could not be refreshed'), { status: 'unavailable' });
+    // Periodic ticks swallow provider failures silently, so the refresh path
+    // logs its reason — the one failure users actually report as "quota gone".
+    console.log(`[kimi] desktop session refresh failed: ${surfaced.message}`);
+    errors.push(surfaced);
+    return null;
+  }
+}
+
+// The manually pasted refresh token becomes a self-renewing session. Never
+// throws; rejections surface through the returned error's status.
+async function resolveKimiManualWebSession(refreshToken, deps, errors) {
+  try {
+    return await (deps.kimiManualSession || ((seed) => resolveKimiManualSession(seed, {
+      env: deps.env || process.env,
+      ...(deps.fetch ? { fetch: deps.fetch } : {}),
+      ...(deps.dataDir ? { dataDir: deps.dataDir } : {})
+    })))(refreshToken);
+  } catch (error) {
+    errors.push(error?.status ? error : Object.assign(new Error('Kimi manual token could not be refreshed'), { status: 'unavailable' }));
+    return null;
+  }
+}
+
 async function fetchKimiLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
   const key = kimiToken(env, options.kimiApiKey);
-  const webToken = kimiWebToken(env, options.kimiWebAccessToken);
+  const pastedWebToken = kimiWebToken(env, options.kimiWebAccessToken);
+  const pastedRefreshToken = cleanSecret(env.KIMI_REFRESH_TOKEN || '') || cleanSecret(options.kimiWebRefreshToken || '');
+  // Manual credentials win; a pasted refresh token outranks a pasted access
+  // token because it self-renews. A legacy access-token paste that is actually
+  // long-lived is treated as the refresh token it evidently is.
+  const manualRefreshSeed = pastedRefreshToken
+    || (looksLikeKimiRefreshToken(pastedWebToken) ? pastedWebToken : '');
+  const manualWebToken = manualRefreshSeed ? '' : pastedWebToken;
+  const errors = [];
+  let manualSession = null;
+  if (manualRefreshSeed) {
+    manualSession = await resolveKimiManualWebSession(manualRefreshSeed, deps, errors);
+  }
+  // A dead refresh token means the account itself is logged out, so treat that
+  // as no session at all rather than reporting a permanent failure.
+  let desktopSession = manualSession || manualWebToken ? null : await resolveKimiDesktopSession(deps);
+  if (desktopSession && desktopSession.refreshIsDead) desktopSession = null;
+  // The desktop app rotates its access token on activity, not on a schedule;
+  // once stale, every request would 401. When the app is closed we refresh the
+  // pair ourselves instead of reporting a gap.
+  if (desktopSession?.accessIsStale) {
+    desktopSession = (await recoverStaleDesktopSession(deps, errors)) || desktopSession;
+  }
+  const usableDesktopSession = desktopSession && !desktopSession.refreshIsDead && !desktopSession.accessIsStale
+    ? desktopSession
+    : null;
+  const webToken = manualSession?.accessToken || manualWebToken || usableDesktopSession?.accessToken || '';
   if (!webToken && !key) {
+    // A failed manual/desktop session refresh must surface
+    // (unavailable/unauthorized), not masquerade as "nothing configured".
     return normalizeLimitProvider({
       provider: 'kimi',
       source: 'api',
-      status: 'notConfigured',
+      status: errors.length ? failureStatus(errors) : 'notConfigured',
       updatedAt,
       windows: []
     });
   }
 
-  const errors = [];
   let webWindows = [];
   let codeWindows = [];
   if (webToken) {
@@ -589,12 +694,17 @@ async function fetchKimiLimits(options = {}, deps = {}) {
   const windows = mergeKimiWindows(webWindows, codeWindows);
   const source = webWindows.length ? 'web' : 'api';
   // Keep the configured logical account stable when a temporary web failure
-  // makes this tick report Code API fallback windows only.
-  const accountSecret = webToken || key;
+  // makes this tick report Code API fallback windows only. For rotating
+  // sessions the stable identity is the account's user id, not the token.
+  const accountSecret = manualWebToken
+    || (manualSession?.userId ? `manual:${manualSession.userId}` : '')
+    || (usableDesktopSession?.userId ? `desktop:${usableDesktopSession.userId}` : '')
+    || key;
   return normalizeLimitProvider({
     provider: 'kimi',
     accountKey: accountSecret ? hashKey('kimi', accountSecret) : '',
     source,
+    ...(usableDesktopSession && webWindows.length ? { sourceDetail: 'app' } : {}),
     status: windows.length ? 'ok' : failureStatus(errors),
     updatedAt,
     windows
