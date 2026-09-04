@@ -9,8 +9,8 @@
 // than separate site/plan settings: no combination outside these four exists,
 // and two independent settings would let a user select one that does not.
 //
-//   cn             Bailian       Team      GetSubscriptionSummary -> one billing pool
-//   intl           Model Studio  Team      GetSubscriptionSummary -> one billing pool
+//   cn             Bailian       Team      GetSubscriptionSummary -> account billing total
+//   intl           Model Studio  Team      GetSubscriptionSummary -> account billing total
 //   cn-personal    Bailian       Personal  rolling-window API     -> 5h + 7d windows
 //   intl-personal  Model Studio  Personal  rolling-window API     -> 5h + 7d windows
 //

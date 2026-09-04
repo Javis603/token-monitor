@@ -54,7 +54,7 @@ Note that Token Plan's `sk-sp-` API key is an inference credential. It cannot re
 
 ## What the Team figure is
 
-Team quota is allocated **per seat** (25,000 / 100,000 / 250,000 credits per seat per month by tier), not as one shared pool. This provider shows `TotalValue` / `TotalSurplusValue` from `GetSubscriptionSummary`, which is the account-level summary Alibaba's own My Subscriptions page headlines as its "overall quota usage percentage" — the same endpoint behind that page. `TotalCount` is the number of subscriptions behind it. How those fields aggregate on a multi-seat account has not been verified against a real one.
+Team quota is allocated **per seat** (25,000 / 100,000 / 250,000 credits per seat per month by tier), not as one shared pool. This provider shows `TotalValue` / `TotalSurplusValue` from `GetSubscriptionSummary`, which is the account-level summary Alibaba's own My Subscriptions page headlines as its "overall quota usage percentage" — the same endpoint behind that page. The endpoint also returns `TotalCount`, which is read only to tell an empty subscription apart from a populated one; how it and the value fields behave on a multi-seat account has not been verified against a real one.
 
 **This figure does not tell you whether a given seat can still call.** Alibaba's Team FAQ is explicit: "When the seat quota is exhausted, API calls are blocked and no pay-as-you-go charges apply." A seat that runs out continues only if the team has eligible shared usage pack quota left, and an admin can cap how much of that pack an individual member may draw. So on a multi-seat team, read this as overall base-plan usage across the account, never as one member's remaining callable quota.
 
@@ -70,4 +70,4 @@ Alibaba defines a 5-hour and a 7-day window, but states that "the 5-hour limit i
 - **A Personal row with no account id can be superseded.** The account id is read opportunistically from the Personal payloads; if the console supplies none, the row is unidentified, and the shared aggregation rule drops unidentified observations when another device reports an identified row for the same provider.
 - **An env cookie can be paired with a GUI-selected variant.** `ALIBABA_TOKEN_PLAN_COOKIE` is not cleared by changing the console in Settings, so the two can disagree. The result is a clean `unauthorized` from the newly selected console rather than wrong figures, so this is left as a documented sharp edge rather than a disabled control; set `ALIBABA_TOKEN_PLAN_VARIANT` alongside the cookie for headless installs.
 - Personal/Solo reports percentages. Absolute totals appear only when the quota-config endpoint recognises the plan code.
-- Team quota is a token-value pool, not money, so its windows carry no `credits` metric and no currency.
+- The Team figure is a token-value quota, not money, so its windows carry no `credits` metric and no currency.
