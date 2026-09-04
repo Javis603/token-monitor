@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
-const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider, normalizeClaudeWebCookieInput } = require('../../src/shared/limitCollector');
+const { claudeCommandCandidates, claudeWebCookie, collectLimitsOnce, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider, normalizeClaudeWebCookieInput } = require('../../src/shared/limitCollector');
 
 function fakeSpawnForClaudeUsage(expectedCommand = 'claude.cmd') {
   return (command, args) => {
@@ -541,9 +541,11 @@ test('Claude Web authentication failure does not silently fall back to another l
   assert.equal(spawned, false);
 });
 
-test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is unavailable', async () => {
+test('Claude CLI fallback requires positive non-interactive authentication evidence', async () => {
+  let authChecks = 0;
   const provider = await fetchClaudeLimits({}, {
     platform: 'win32',
+    env: {},
     now: () => Date.parse('2026-06-11T00:00:00Z'),
     claudeCredentialPath: 'C:\\Users\\Javis\\.claude\\.credentials.json',
     stat: async () => ({ mtimeMs: 1 }),
@@ -558,10 +560,16 @@ test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is
       ok: false,
       status: 500
     }),
+    isClaudeCliAuthenticated: async (evidence) => {
+      authChecks += 1;
+      assert.deepEqual(evidence, { credentialSource: 'file', platform: 'win32' });
+      return true;
+    },
     existsSync: () => false,
     spawn: fakeSpawnForClaudeUsage()
   });
 
+  assert.equal(authChecks, 1);
   assert.equal(provider.provider, 'claude');
   assert.equal(provider.status, 'ok');
   assert.equal(provider.source, 'cli');
@@ -571,10 +579,11 @@ test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is
   assert.equal(provider.windows[1].usedPercent, 20);
 });
 
-test('Claude limits fall back to CLI usage when OAuth credentials are not discoverable', async () => {
-  let cliCalls = 0;
-  const provider = await fetchClaudeLimits({}, {
-    platform: 'darwin',
+test('unattended Claude collection stays notConfigured without any auth-capable process attempt', async () => {
+  const attempts = { authCheck: 0, cli: 0, spawn: 0, touchAuth: 0, fetch: 0 };
+  const summary = await collectLimitsOnce({ limitProviders: 'claude' }, {
+    platform: 'linux',
+    env: {},
     now: () => Date.parse('2026-07-15T00:00:00Z'),
     claudeCredentialPath: '/tmp/missing-claude-credentials.json',
     stat: async () => {
@@ -582,26 +591,107 @@ test('Claude limits fall back to CLI usage when OAuth credentials are not discov
       error.code = 'ENOENT';
       throw error;
     },
-    readMacKeychain: false,
+    fetch: async () => {
+      attempts.fetch += 1;
+      throw new Error('must not make a provider request');
+    },
+    isClaudeCliAuthenticated: async () => {
+      attempts.authCheck += 1;
+      return true;
+    },
     runClaudeUsageCli: async () => {
-      cliCalls += 1;
-      return [
-        'Current session',
-        '95% left',
-        'Resets 6pm',
-        'Current week',
-        '80% left',
-        'Resets Jul 22'
-      ].join('\n');
+      attempts.cli += 1;
+      throw new Error('must not launch Claude CLI');
+    },
+    touchClaudeAuthPath: async () => {
+      attempts.touchAuth += 1;
+      throw new Error('must not launch Claude authentication');
+    },
+    spawn: () => {
+      attempts.spawn += 1;
+      throw new Error('must not spawn');
     }
   });
 
-  assert.equal(cliCalls, 1);
-  assert.equal(provider.provider, 'claude');
-  assert.equal(provider.status, 'ok');
-  assert.equal(provider.source, 'cli');
-  assert.equal(provider.windows[0].usedPercent, 5);
-  assert.equal(provider.windows[1].usedPercent, 20);
+  assert.equal(summary.providers.length, 1);
+  assert.equal(summary.providers[0].provider, 'claude');
+  assert.equal(summary.providers[0].status, 'notConfigured');
+  assert.deepEqual(attempts, { authCheck: 0, cli: 0, spawn: 0, touchAuth: 0, fetch: 0 });
+});
+
+test('Claude OAuth outages and rate limits do not broaden into interactive authentication', async () => {
+  for (const { httpStatus, expectedStatus } of [
+    { httpStatus: 500, expectedStatus: 'unavailable' },
+    { httpStatus: 429, expectedStatus: 'sourceRateLimited' }
+  ]) {
+    const attempts = { cli: 0, spawn: 0, touchAuth: 0 };
+    const summary = await collectLimitsOnce({ limitProviders: 'claude' }, {
+      platform: 'linux',
+      env: {},
+      now: () => Date.parse('2026-07-15T00:00:00Z'),
+      claudeCredentialPath: '/tmp/claude-credentials.json',
+      stat: async () => ({ mtimeMs: 1 }),
+      readFile: async () => JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'configured-access-token',
+          refreshToken: 'configured-refresh-token',
+          expiresAt: Date.parse('2026-07-16T00:00:00Z')
+        }
+      }),
+      fetch: async () => ({ ok: false, status: httpStatus }),
+      runClaudeUsageCli: async () => {
+        attempts.cli += 1;
+        throw new Error('must not launch Claude CLI');
+      },
+      touchClaudeAuthPath: async () => {
+        attempts.touchAuth += 1;
+        throw new Error('must not launch Claude authentication');
+      },
+      spawn: () => {
+        attempts.spawn += 1;
+        throw new Error('must not spawn');
+      }
+    });
+
+    assert.equal(summary.providers.length, 1);
+    assert.equal(summary.providers[0].status, expectedStatus);
+    assert.deepEqual(attempts, { cli: 0, spawn: 0, touchAuth: 0 });
+  }
+});
+
+test('expired macOS OAuth credentials never launch Claude to refresh authentication', async () => {
+  const attempts = { cli: 0, spawn: 0, touchAuth: 0 };
+  const summary = await collectLimitsOnce({ limitProviders: 'claude' }, {
+    platform: 'darwin',
+    env: {},
+    now: () => Date.parse('2026-07-15T00:00:00Z'),
+    claudeCredentialPath: '/tmp/claude-credentials.json',
+    stat: async () => ({ mtimeMs: 1 }),
+    readFile: async () => JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'expired-access-token',
+        refreshToken: 'configured-refresh-token',
+        expiresAt: Date.parse('2026-07-14T00:00:00Z')
+      }
+    }),
+    fetch: async () => ({ ok: false, status: 401 }),
+    runClaudeUsageCli: async () => {
+      attempts.cli += 1;
+      throw new Error('must not launch Claude CLI');
+    },
+    touchClaudeAuthPath: async () => {
+      attempts.touchAuth += 1;
+      throw new Error('must not launch Claude authentication');
+    },
+    spawn: () => {
+      attempts.spawn += 1;
+      throw new Error('must not spawn');
+    }
+  });
+
+  assert.equal(summary.providers.length, 1);
+  assert.equal(summary.providers[0].status, 'unauthorized');
+  assert.deepEqual(attempts, { cli: 0, spawn: 0, touchAuth: 0 });
 });
 
 test('Claude limits read Windows Credential Manager credentials when credential files are absent', async () => {
