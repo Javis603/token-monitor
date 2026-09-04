@@ -46,11 +46,11 @@ An empty subscription (`TotalCount: 0`) is a healthy, authorized account with no
 
 ## Coding Plan is out of scope, not dead
 
-Alibaba sells a second, separate console product called Coding Plan. It is **not** end-of-life: only its Lite tier was sunset (no new subscriptions from 2026-03-20, no renewals or upgrades from 2026-04-13), while Pro is still listed and sold at $50/month with a daily replenished allocation. It is simply a different product with its own endpoint (`queryCodingPlanInstanceInfoV2`), its own credential (a `cpk-` API key as well as a console cookie), and its own window shape (5-hour, weekly and monthly counters). This provider reads Token Plan only.
+Alibaba sells a second, separate console product called Coding Plan. It is **not** end-of-life: only its Lite tier was sunset (no new subscriptions from 2026-03-20, no renewals or upgrades from 2026-04-13), while Pro is still listed and sold at $50/month with a daily replenished allocation. It is simply a different product with its own quota endpoint (`queryCodingPlanInstanceInfoV2`), its own plan-specific API key and base URL, and its own window shape (5-hour, weekly and monthly counters). This provider reads Token Plan only.
 
 If Coding Plan is added later it belongs as extra windows under this same provider and cookie — both plans live behind one Alibaba Cloud login — the way Volcengine carries its Coding and Agent plans together, rather than as a second provider. That is why `alibaba` is a platform-level id rather than a plan-level one.
 
-Note that Token Plan's `sk-sp-` API key is an inference credential. It cannot read quota, which is why this provider is cookie-only.
+Note that a plan-specific API key is an inference credential: it calls models, it does not read quota, which is why this provider is cookie-only. The prefix does not tell the two plans apart either — Alibaba issues `sk-sp-` keys for both Token Plan and Coding Plan, and warns that the two key/base-URL pairs are not interchangeable.
 
 ## What the Team figure is
 
