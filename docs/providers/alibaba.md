@@ -12,10 +12,10 @@ Reads Token Plan quota from the Alibaba Cloud console. One provider id (`alibaba
 
 | Variant | Console | Plan | Quota endpoint | Windows |
 |---|---|---|---|---|
-| `cn` | `bailian.console.aliyun.com` | Team | `GetSubscriptionSummary` | one `billing` pool |
-| `intl` | `modelstudio.console.alibabacloud.com` | Team | `GetSubscriptionSummary` | one `billing` pool |
-| `cn-personal` | `bailian.console.aliyun.com` | Personal/Solo | `bailian-cs.console.aliyun.com` rolling-window API | `session` (5h) + `weekly` |
-| `intl-personal` | `modelstudio.console.alibabacloud.com` | Personal/Solo | `bailian-singapore-cs.alibabacloud.com` rolling-window API | `session` (5h) + `weekly` |
+| `cn` | `bailian.console.aliyun.com` | Team | `GetSubscriptionSummary` | account-level `billing` total |
+| `intl` | `modelstudio.console.alibabacloud.com` | Team | `GetSubscriptionSummary` | account-level `billing` total |
+| `cn-personal` | `bailian.console.aliyun.com` | Personal/Solo | `bailian-cs.console.aliyun.com` rolling-window API | `weekly`, plus `session` (5h) when reported |
+| `intl-personal` | `modelstudio.console.alibabacloud.com` | Personal/Solo | `bailian-singapore-cs.alibabacloud.com` rolling-window API | `weekly`, plus `session` (5h) when reported |
 
 The variant is one enum rather than separate site and plan settings because host, product code, gateway action and window shape all move together — two settings would let a user pick a combination that does not exist.
 
@@ -52,9 +52,20 @@ If Coding Plan is added later it belongs as extra windows under this same provid
 
 Note that Token Plan's `sk-sp-` API key is an inference credential. It cannot read quota, which is why this provider is cookie-only.
 
+## What the Team figure is
+
+Team quota is allocated **per seat** (25,000 / 100,000 / 250,000 credits per seat per month by tier), not as one shared pool. What `GetSubscriptionSummary` returns — and what this provider shows — is the account-level total across those seats: the same "overall quota usage percentage" Alibaba's own My Subscriptions page headlines, from the same endpoint behind that page. `TotalCount` is the number of subscriptions behind it.
+
+That total does not reveal how the remaining credit is distributed between seats. It is still the right headline, because an exhausted seat is not cut off: Alibaba draws from the shared usage pack instead, and suspends service only once every quota is spent. But on a multi-seat team, read the figure as "credit left on the account", not as "this seat can still call".
+
+## Personal windows
+
+Alibaba defines a 5-hour and a 7-day window, but states that "the 5-hour limit is currently lifted for a limited time and is not enforced". The parser reflects whatever the gateway reports rather than assuming both exist — a response carrying only the weekly window produces only a weekly row, and no placeholder 5-hour row is synthesized.
+
 ## Known gaps
 
 - **Base plan quota only.** Alibaba sells add-on quota on top of the base plan — an Extra Bundle for Personal (20,000 credits, explicitly *not* subject to the 5-hour/7-day windows) and Shared quota packs for Team (625,000 credits each, which bypass per-seat limits). Neither is read here, so an account holding add-on credit can show a base window at 100% used while the service still answers. Treat a "used everything but it still works" report as this gap, not as a parsing bug.
+- **Multi-seat Team distribution is not shown.** Only the account-level total is read; per-seat allocation and per-member consumption live on other console pages and are not fetched. Unverified against a real multi-seat account.
 - **One credential per device.** `alibabaVariant` and `alibabaCookie` are single-valued, so a machine tracks either Team or Personal, not both — even though Alibaba lets one account hold both subscriptions with independent quotas. Two devices can cover both, and aggregation keeps them as separate rows as long as each carries an account id.
 - **A Personal row with no account id can be superseded.** The account id is read opportunistically from the Personal payloads; if the console supplies none, the row is unidentified, and the shared aggregation rule drops unidentified observations when another device reports an identified row for the same provider.
 - **An env cookie can be paired with a GUI-selected variant.** `ALIBABA_TOKEN_PLAN_COOKIE` is not cleared by changing the console in Settings, so the two can disagree. The result is a clean `unauthorized` from the newly selected console rather than wrong figures, so this is left as a documented sharp edge rather than a disabled control; set `ALIBABA_TOKEN_PLAN_VARIANT` alongside the cookie for headless installs.
