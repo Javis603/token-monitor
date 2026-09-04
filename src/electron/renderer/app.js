@@ -8061,6 +8061,15 @@ function setBreakdown(breakdown, options = {}) {
 
 function renderBreakdownChange(breakdown, options = {}) {
   if (!setBreakdown(breakdown, options)) return false;
+  // Switching views always leaves the settings overlay. While the panel is
+  // open, visibleStatsSurface() reports 'settings' and render() returns early,
+  // so the view switcher would update its label without repainting the view.
+  if (isSettingsPanelOpen()) {
+    resetSettingsListSearch();
+    stopWindowShortcutRecording();
+    els.settingsPanel.classList.add('hidden');
+    els.shell.classList.remove('settings-open');
+  }
   state.animateBarsFromZero = true;
   state.animateChartsOnRender = true;
   let renderSucceeded = false;
