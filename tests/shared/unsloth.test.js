@@ -20,7 +20,8 @@ const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 installSourceEnvGuard(test);
 
 function studioHome(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'unsloth-source-'));
+  // Windows CI uses an 8.3 temp path; match the collector's canonical watch roots.
+  const dir = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'unsloth-source-'));
   process.env.UNSLOTH_STUDIO_HOME = dir;
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
