@@ -82,6 +82,21 @@ test('normalizeAlibabaCookieHeader rejects anything without a name=value pair', 
   }
 });
 
+// A pasted URL carries `?name=value` on its query string. A looser guard would
+// save it as a cookie that can only ever answer `unauthorized`.
+test('normalizeAlibabaCookieHeader rejects a pasted URL that carries a query string', () => {
+  for (const input of [
+    'https://bailian.console.aliyun.com/cn-beijing?spm=abc',
+    'https://modelstudio.console.alibabacloud.com/?tab=plan&x=1'
+  ]) {
+    assert.equal(normalizeAlibabaCookieHeader(input), '', `expected ${input} to be rejected`);
+  }
+  assert.equal(
+    normalizeAlibabaCookieHeader('cna=abc; login_aliyunid_pk=def'),
+    'cna=abc; login_aliyunid_pk=def'
+  );
+});
+
 test('alibabaCookie prefers the explicit option over the environment', () => {
   assert.equal(
     alibabaCookie({ ALIBABA_TOKEN_PLAN_COOKIE: 'env=1' }, { alibabaCookie: 'opt=1' }),
@@ -184,6 +199,13 @@ test('parseTeamSummary prefers a reported used over deriving it', () => {
   assert.equal(summary.remaining, null);
 });
 
+// Both consoles run on UTC+8 (Beijing and ap-southeast-1). Reading a bare
+// console timestamp as UTC would report every reset eight hours early.
+test('parseTeamSummary reads a zoneless reset timestamp at the console offset', () => {
+  const summary = parseTeamSummary({ Data: { TotalValue: 100, TotalSurplusValue: 40, EndTime: '2026-09-28 16:00:00' } });
+  assert.equal(summary.resetsAt, '2026-09-28T08:00:00.000Z');
+});
+
 test('secTokenFromHtml reads the console shell’s unquoted upper-case key', () => {
   assert.equal(secTokenFromHtml('window.ALIYUN_CONSOLE_CONFIG={SEC_TOKEN:"abc123",X:1}'), 'abc123');
   assert.equal(secTokenFromHtml('{"secToken":"def456"}'), 'def456');
@@ -280,6 +302,29 @@ test('parsePersonalUsage maps both rolling windows and the plan totals', () => {
   assert.equal(usage.fiveHourResetsAt, new Date(1784813220000).toISOString());
   assert.ok(Math.abs(usage.weeklyPercent - 10.007527475) < 1e-9);
   assert.equal(usage.weeklyTotal, 20000);
+});
+
+// Personal is not live-verified, so a differently-cased live key must not
+// silently drop a window. It reads through the same case-insensitive traversal
+// as the Team parser.
+test('parsePersonalUsage matches window and quota keys regardless of case', () => {
+  const usage = parsePersonalUsage(
+    { Data: { DATAV2: { Data: { Success: true, DATA: {
+      PER5HOURPERCENTAGE: 0.25,
+      Per5HourResetTime: 1784813220000,
+      per1weekpercentage: 0.5,
+      PER1WEEKRESETTIME: 1785234900000
+    } } } } },
+    { data: { SPECCODE: 'PRO' } },
+    { data: { PRO: { FIVE_HOUR: 1000, Weekly: 20000 } } }
+  );
+
+  assert.equal(usage.fiveHourPercent, 25);
+  assert.equal(usage.weeklyPercent, 50);
+  assert.equal(usage.fiveHourTotal, 1000);
+  assert.equal(usage.weeklyTotal, 20000);
+  assert.equal(usage.planName, 'Pro');
+  assert.equal(usage.fiveHourResetsAt, new Date(1784813220000).toISOString());
 });
 
 test('parsePersonalUsage accepts a weekly-only response', () => {

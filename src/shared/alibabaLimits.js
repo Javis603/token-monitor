@@ -126,10 +126,12 @@ function normalizeAlibabaCookieHeader(value) {
     raw = raw.slice(1, -1).trim();
   }
   raw = raw.replace(/^cookie\s*:\s*/i, '').trim();
-  // A usable Cookie header carries at least one name=value pair. Anything else
-  // is a mis-paste (a URL, a bearer token, the request name) and is rejected
-  // here rather than saved and left to fail as `unauthorized` forever.
-  return /[^;=\s]+=/.test(raw) ? raw : '';
+  // A usable Cookie header carries at least one `name=value` pair whose name is
+  // an RFC 6265 token, anchored to the start or to a `; ` separator. A looser
+  // test passes a pasted URL on its query string (`...?spm=abc`), which then
+  // saves as a bogus cookie and fails as `unauthorized` forever — exactly the
+  // state this guard exists to prevent.
+  return /(?:^|;\s*)[A-Za-z0-9!#$%&'*+\-.^_`|~]+=/.test(raw) ? raw : '';
 }
 
 function alibabaCookie(env = process.env, options = {}) {
@@ -201,12 +203,13 @@ function toIsoDate(value) {
   }
   const text = toText(value);
   if (!text) return null;
-  // A bare `yyyy-MM-dd HH:mm[:ss]` has no zone; the console means Beijing time
-  // for the mainland variants and there is no reliable marker for the others,
-  // so it is read as UTC rather than as the *device's* zone — a laptop that
-  // travels must not move a quota reset.
+  // A bare `yyyy-MM-dd HH:mm[:ss]` carries no zone. Both consoles run on UTC+8
+  // — Beijing for the mainland variants, ap-southeast-1/Singapore for the
+  // international ones — so it is pinned to that offset rather than read as UTC
+  // (eight hours early) or as the *device's* zone, which would move a quota
+  // reset every time the laptop travelled.
   const spaceSeparated = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/.test(text)
-    ? `${text.replace(' ', 'T')}Z`
+    ? `${text.replace(' ', 'T')}+08:00`
     : text;
   const parsed = new Date(spaceSeparated);
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
@@ -218,10 +221,22 @@ function percentagePoints(ratio) {
   return Math.min(Math.max(value, 0), 1) * 100;
 }
 
+// Reads one own key case-insensitively. The console disagrees with itself about
+// capitalisation between variants, so an exact-case read is a silent data loss.
+function pickKey(object, name) {
+  if (!isPlainObject(object)) return undefined;
+  const wanted = String(name).toLowerCase();
+  for (const [key, value] of Object.entries(object)) {
+    if (key.toLowerCase() === wanted) return value;
+  }
+  return undefined;
+}
+
 // Finds the first object anywhere in the tree that owns any of `keys`.
 function findObjectWithAnyKey(value, keys) {
+  const wanted = keys.map((key) => String(key).toLowerCase());
   if (isPlainObject(value)) {
-    if (keys.some((key) => key in value)) return value;
+    if (Object.keys(value).some((key) => wanted.includes(key.toLowerCase()))) return value;
     for (const nested of Object.values(value)) {
       const found = findObjectWithAnyKey(nested, keys);
       if (found) return found;
@@ -467,8 +482,8 @@ function subscriptionSummaryFrame(payload) {
   const lowered = new Set(quotaKeys.map((key) => key.toLowerCase()));
   const hasQuotaKey = (frame) => Object.keys(frame).some((key) => lowered.has(key.toLowerCase()));
 
-  for (const key of ['Data', 'data', 'successResponse']) {
-    const frame = findObjectWithAnyKey(payload, [key])?.[key];
+  for (const key of ['data', 'successResponse']) {
+    const frame = pickKey(findObjectWithAnyKey(payload, [key]), key);
     if (!isPlainObject(frame)) continue;
     if (hasQuotaKey(frame)) return frame;
     const nested = findObjectWithAnyKey(frame, quotaKeys);
@@ -553,14 +568,7 @@ const PERSONAL_PLAN_LABELS = Object.freeze({
 });
 
 function personalPlanCode(payload) {
-  if (!isPlainObject(payload)) return '';
-  const frame = findObjectWithAnyKey(payload, ['specCode', 'spec_code', 'planName', 'plan_name']);
-  if (!frame) return '';
-  for (const key of ['specCode', 'spec_code', 'planName', 'plan_name']) {
-    const value = toText(frame[key]).toLowerCase();
-    if (value) return value;
-  }
-  return '';
+  return firstString(payload, ['specCode', 'spec_code', 'planName', 'plan_name']).toLowerCase();
 }
 
 function personalQuotaTotals(payload, planCode) {
@@ -568,18 +576,14 @@ function personalQuotaTotals(payload, planCode) {
   const quota = findByKey(payload, planCode, (value) => (isPlainObject(value) ? value : null));
   if (!isPlainObject(quota)) return { fiveHour: null, weekly: null };
   return {
-    fiveHour: toNumber(quota.five_hour ?? quota.fiveHour),
-    weekly: toNumber(quota.weekly)
+    fiveHour: firstNumber(quota, ['five_hour', 'fiveHour']),
+    weekly: firstNumber(quota, ['weekly'])
   };
 }
 
 function parsePersonalUsage(usagePayload, subscriptionPayload, quotaConfigPayload) {
-  const usage = findObjectWithAnyKey(usagePayload, ['per5HourPercentage', 'per1WeekPercentage']);
-  if (!usage) {
-    throw new AlibabaLimitsError('windowsUnavailable', 'Alibaba Token Plan returned no usage windows');
-  }
-  const fiveHourPercent = percentagePoints(usage.per5HourPercentage);
-  const weeklyPercent = percentagePoints(usage.per1WeekPercentage);
+  const fiveHourPercent = percentagePoints(firstNumber(usagePayload, ['per5HourPercentage']));
+  const weeklyPercent = percentagePoints(firstNumber(usagePayload, ['per1WeekPercentage']));
   if (fiveHourPercent === null && weeklyPercent === null) {
     throw new AlibabaLimitsError('windowsUnavailable', 'Alibaba Token Plan returned no usage windows');
   }
@@ -590,10 +594,10 @@ function parsePersonalUsage(usagePayload, subscriptionPayload, quotaConfigPayloa
     planName: planCode ? (PERSONAL_PLAN_LABELS[planCode] || planCode) : 'Personal',
     fiveHourPercent,
     fiveHourTotal: quota.fiveHour,
-    fiveHourResetsAt: toIsoDate(usage.per5HourResetTime),
+    fiveHourResetsAt: firstDate(usagePayload, ['per5HourResetTime']),
     weeklyPercent,
     weeklyTotal: quota.weekly,
-    weeklyResetsAt: toIsoDate(usage.per1WeekResetTime)
+    weeklyResetsAt: firstDate(usagePayload, ['per1WeekResetTime'])
   };
 }
 

@@ -5243,11 +5243,11 @@ function renderProviderWindows(provider, color) {
       windows.append(node);
     }
     if (session) {
-      const node = limitWindowNode('5h', session, color, 0.95);
+      const node = limitWindowNode(session.label || '5-hour', session, color, 0.95);
       if (!weekly) node.classList.add('limit-window-wide');
       windows.append(node);
     }
-    if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
+    if (weekly) windows.append(limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68));
   } else if (provider.provider === 'ollama') {
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
@@ -17431,6 +17431,7 @@ function setupCursorAccountUI() {
         clearExternalProviderCheckPending('alibaba');
         clearExternalProviderPendingStatus('alibaba');
         renderExternalProviderStatus('alibaba');
+        await refreshStats({ force: true });
       });
     }
     renderAlibabaVariantHints();
@@ -17487,7 +17488,6 @@ function setupCursorAccountUI() {
     ollamaToggle.addEventListener('click', () => setExternalAccountExpanded('ollama', !state.ollamaAccountExpanded));
     setExternalAccountExpanded('ollama', false);
     renderExternalProviderStatus('ollama');
-  renderExternalProviderStatus('alibaba');
 
     document.getElementById('ollamaOpenBrowser').addEventListener('click', () => {
       window.tokenMonitor.openExternal(ollamaPlatformUrl());
@@ -17497,7 +17497,6 @@ function setupCursorAccountUI() {
       clearExternalProviderCheckPending('ollama');
       clearExternalProviderPendingStatus('ollama');
       renderExternalProviderStatus('ollama');
-  renderExternalProviderStatus('alibaba');
       await refreshStats({ force: true });
     });
     document.getElementById('ollamaRefreshButton').addEventListener('click', async () => {
@@ -17515,12 +17514,10 @@ function setupCursorAccountUI() {
       try {
         markExternalProviderCheckPending('ollama');
         renderExternalProviderStatus('ollama');
-  renderExternalProviderStatus('alibaba');
         const validation = await window.tokenMonitor.ollama.validateCookie(input.value);
         if (!validation?.ok) {
           clearExternalProviderCheckPending('ollama');
           renderExternalProviderStatus('ollama');
-  renderExternalProviderStatus('alibaba');
           errorEl.textContent = ollamaValidationError(validation);
           errorEl.classList.remove('hidden');
           return;
@@ -17533,18 +17530,15 @@ function setupCursorAccountUI() {
         if (!state.settings?.ollamaCookieConfigured) {
           clearExternalProviderCheckPending('ollama');
           renderExternalProviderStatus('ollama');
-  renderExternalProviderStatus('alibaba');
           errorEl.textContent = t('settings.ollama.validationInvalid');
           errorEl.classList.remove('hidden');
           return;
         }
         input.value = '';
         renderExternalProviderStatus('ollama');
-  renderExternalProviderStatus('alibaba');
       } catch (err) {
         clearExternalProviderCheckPending('ollama');
         renderExternalProviderStatus('ollama');
-  renderExternalProviderStatus('alibaba');
         errorEl.textContent = t('settings.ollama.saveFailed', { message: err.message });
         errorEl.classList.remove('hidden');
       }

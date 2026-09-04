@@ -854,7 +854,10 @@ function normalizeAlibabaCookie(value) {
 }
 
 function normalizeAlibabaVariant(value) {
-  return alibabaVariant({ alibabaVariant: value }, {});
+  // Env is consulted here, not just in the collector: resolving it in only one
+  // of the two leaves the settings UI showing a different console than the one
+  // the quota request actually goes to.
+  return alibabaVariant({ alibabaVariant: value }, process.env);
 }
 
 function currentAlibabaCookie() {
