@@ -20,7 +20,8 @@ const SOURCE_ENV_KEYS = Object.freeze([
   'GROK_HOME',
   'KIMI_CODE_HOME',
   'GEMINI_CLI_HOME',
-  'HERMES_HOME'
+  'HERMES_HOME',
+  'UNSLOTH_STUDIO_HOME'
 ]);
 
 // Applied to a whole file rather than case by case, so a test added later is

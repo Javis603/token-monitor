@@ -110,8 +110,10 @@ test('discordRpc KNOWN_CLIENT_ASSETS and CLIENT_LABELS stay in sync with KNOWN_C
   const orphanedInAssets = [...knownClientAssets].filter((id) => !knownClientIds.has(id));
   const orphanedInLabels = Object.keys(clientLabels).filter((id) => !knownClientIds.has(id));
 
+  // Unsloth is label-only until the app owner uploads its Discord asset.
+  // Keep the exception exact so other missing assets still fail this guard.
   assert.deepEqual(
-    missingFromAssets, [],
+    missingFromAssets, ['unsloth'],
     'KNOWN_CLIENTS ids missing from discordRpc.js KNOWN_CLIENT_ASSETS — Rich ' +
     'Presence will show no icon for these clients when they are the top client today'
   );

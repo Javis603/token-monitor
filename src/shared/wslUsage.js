@@ -50,7 +50,8 @@ const WSL_DATA_MARKERS = [
   '.codebuddy/projects',
   '.workbuddy',
   '.proma/agent-sessions',
-  '.lmstudio/server-logs'
+  '.lmstudio/server-logs',
+  '.unsloth/studio/studio.db'
 ];
 
 // Maps every WSL_DATA_MARKERS entry to the tracked-client id that owns it, so a
@@ -94,7 +95,8 @@ const MARKER_CLIENTS = {
   '.codebuddy/projects': 'codebuddy',
   '.workbuddy': 'workbuddy',
   '.proma/agent-sessions': 'proma',
-  '.lmstudio/server-logs': 'lmstudio'
+  '.lmstudio/server-logs': 'lmstudio',
+  '.unsloth/studio/studio.db': 'unsloth'
 };
 
 // Default command runner. reg output is ANSI/utf8; wsl.exe output is UTF-16LE.

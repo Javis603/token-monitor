@@ -166,3 +166,14 @@ test('LM Studio has a label and uses the standard mask-safe icon path', () => {
   assert.equal(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'lmstudio.svg')), true);
   assert.equal(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'lmstudio.png')), true);
 });
+
+test('Unsloth has a label and uses the standard mask-safe icon path', () => {
+  const source = rendererSource();
+  const styles = rendererStyles();
+  assert.ok(clientLabelIds(source).has('unsloth'));
+  assert.match(source, /clientsWithIcon = new Set\([\s\S]*'unsloth'/);
+  assert.match(styles, /\.row-icon-unsloth\s*\{[^}]*mask-image:\s*url\([^)]*assets\/icons\/unsloth\.svg\)/s);
+  assert.doesNotMatch(styles, /\.row-icon-unsloth\s*\{[^}]*background-image:/s);
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'unsloth.svg')));
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'unsloth.png')));
+});
