@@ -61,14 +61,8 @@ function dateMs(value) {
 function forecastAtTime(forecast, nowMs) {
   if (forecast?.status !== 'active') return forecast;
   const expiresAtMs = dateMs(forecast.expiresAt);
-  const observedAtMs = dateMs(forecast.observedAt);
-  const latestResetAtMs = dateMs(forecast.latestResetAt);
   const expired = expiresAtMs !== null && expiresAtMs <= nowMs;
-  const superseded = forecast.latestResetType !== 'banked'
-    && observedAtMs !== null
-    && latestResetAtMs !== null
-    && latestResetAtMs >= observedAtMs;
-  return expired || superseded ? { ...forecast, status: 'inactive' } : forecast;
+  return expired ? { ...forecast, status: 'inactive' } : forecast;
 }
 
 function cacheDurationForForecast(forecast, nowMs, maximumMs) {

@@ -173,31 +173,12 @@ test('treats an expired forecast as inactive at the expiry boundary', () => {
   assert.equal(normalizeCodexResetForecast(payload, { checkedAt: '2026-08-30T04:00:00.000Z' }).status, 'inactive');
 });
 
-test('treats a watch observed before the latest reset as inactive', () => {
+test('keeps the API active watch when the latest reset is newer', () => {
   const result = normalizeCodexResetForecast({
     data: {
       latest_reset: {
         announced_at: '2026-08-30T04:00:00Z',
         reset_type: 'regular'
-      },
-      active_watch: {
-        active: true,
-        reset_chance_percent: 75,
-        observed_at: '2026-08-30T04:00:00Z',
-        expires_at: '2026-08-30T05:00:00Z'
-      }
-    }
-  }, { checkedAt: '2026-08-30T04:01:00Z' });
-
-  assert.equal(result.status, 'inactive');
-});
-
-test('does not supersede an active watch with a later banked reset', () => {
-  const result = normalizeCodexResetForecast({
-    data: {
-      latest_reset: {
-        announced_at: '2026-08-30T04:00:00Z',
-        reset_type: 'banked'
       },
       active_watch: {
         active: true,
@@ -209,26 +190,7 @@ test('does not supersede an active watch with a later banked reset', () => {
   }, { checkedAt: '2026-08-30T04:01:00Z' });
 
   assert.equal(result.status, 'active');
-});
-
-test('keeps legacy supersession when a later reset type is unknown', () => {
-  const result = normalizeCodexResetForecast({
-    data: {
-      latest_reset: {
-        announced_at: '2026-08-30T04:00:00Z',
-        reset_type: 'future-reset-type'
-      },
-      active_watch: {
-        active: true,
-        reset_chance_percent: 75,
-        observed_at: '2026-08-30T03:00:00Z',
-        expires_at: '2026-08-30T05:00:00Z'
-      }
-    }
-  }, { checkedAt: '2026-08-30T04:01:00Z' });
-
-  assert.equal(result.latestResetType, '');
-  assert.equal(result.status, 'inactive');
+  assert.equal(result.latestResetType, 'regular');
 });
 
 test('returns inactive for an explicit closed watch', () => {
