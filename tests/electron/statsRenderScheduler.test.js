@@ -232,6 +232,53 @@ test('Settings remains open while its background view changes', () => {
   assert.match(trayView, /els\.shell\.classList\.remove\('settings-open'\)/);
 });
 
+test('leaving Settings no longer needs a catch-up repaint', () => {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const settingsToggle = app.slice(
+    app.indexOf("els.settingsButton.addEventListener('click'"),
+    app.indexOf("els.saveSettingsButton.addEventListener('click'")
+  );
+  const trayView = app.slice(
+    app.indexOf('function openViewFromTray('),
+    app.indexOf('\nconst HOME_HISTORY_MAX_RETRIES')
+  );
+
+  // The main surface keeps rendering behind the overlay, so neither exit path
+  // may repaint merely because Settings happened to be open.
+  assert.doesNotMatch(settingsToggle, /render\(\)/);
+  assert.match(settingsToggle, /if \(settingsOpen\) \{\s+syncSettingsForm\(\);\s+\} else \{/);
+  assert.doesNotMatch(trayView, /settingsWasOpen/);
+  // Tray navigation to the view already on screen still repaints, because it
+  // clears the open session and nothing else redraws that.
+  assert.match(trayView, /if \(!renderBreakdownChange\(viewId, \{ allowHidden: true \}\)\) render\(\);/);
+});
+
+test('stats-derived Settings rows refresh behind an open panel', () => {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const renderBody = app.slice(
+    app.indexOf('function render() {'),
+    app.indexOf('\nfunction setStatus(')
+  );
+  const archiveBody = app.slice(
+    app.indexOf('function renderSessionUsageArchiveStatus()'),
+    app.indexOf('const HUB_DRAFT_FIELDS')
+  );
+  const surfaceBody = app.slice(
+    app.indexOf('function visibleStatsSurface()'),
+    app.indexOf('function isSettingsSurfaceVisible()')
+  );
+
+  // The archived session count is Settings content derived from state.stats, and
+  // the only thing that redraws it is the main render. It goes stale for as long
+  // as anything stops render() from running while the panel is open, which is how
+  // it used to need a close and reopen to catch up.
+  assert.match(archiveBody, /sessionRowsApi\.archivedSessionCount\(state\.stats\)/);
+  assert.doesNotMatch(archiveBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
+  assert.match(renderBody, /renderSessionUsageArchiveStatus\(\);/);
+  assert.doesNotMatch(renderBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
+  assert.doesNotMatch(surfaceBody, /isSettingsPanelOpen/);
+});
+
 test('a stats update repaints main and the visible Settings overlay', () => {
   const calls = [];
   const settingsRenderers = [

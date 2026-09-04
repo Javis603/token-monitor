@@ -6485,14 +6485,15 @@ function openSettingsPanel() {
 
 function openViewFromTray(viewId) {
   if (!availableBreakdownIds().includes(viewId)) return;
-  const settingsWasOpen = isSettingsPanelOpen();
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   stopWindowShortcutRecording();
   resetSettingsListSearch();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   state.openSession = null;
-  if (!renderBreakdownChange(viewId, { allowHidden: true }) && settingsWasOpen) render();
+  // Navigating to the view already on screen changes no breakdown, so it never
+  // repaints on its own — but the open session was just cleared above.
+  if (!renderBreakdownChange(viewId, { allowHidden: true })) render();
   ensureServiceStatusTicker();
 }
 
@@ -12121,10 +12122,15 @@ els.settingsButton.addEventListener('click', (event) => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.toggle('hidden');
   const settingsOpen = isSettingsPanelOpen();
-  if (!settingsOpen) resetSettingsListSearch();
-  if (settingsOpen) syncSettingsForm();
-  else render();
-  if (!settingsOpen) stopWindowShortcutRecording();
+  // Settings is an overlay over a surface that keeps rendering behind it, so
+  // closing it needs no catch-up repaint. Only the panel's own DOM has to be
+  // caught up when it opens, because its renderers idle while it is closed.
+  if (settingsOpen) {
+    syncSettingsForm();
+  } else {
+    resetSettingsListSearch();
+    stopWindowShortcutRecording();
+  }
   els.shell.classList.toggle('settings-open', settingsOpen);
   if (!settingsOpen && event.detail > 0) els.settingsButton.blur();
   els.shell.style.transform = 'translateZ(0)';
