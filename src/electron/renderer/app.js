@@ -6386,13 +6386,14 @@ function isRendererWindowHidden() {
 function visibleStatsSurface() {
   return statsRenderSchedulerApi.visibleStatsSurface(
     isRendererWindowHidden(),
-    state.floatingBubble.collapsed,
-    isSettingsPanelOpen()
+    state.floatingBubble.collapsed
   );
 }
 
 function isSettingsSurfaceVisible() {
-  return visibleStatsSurface() === 'settings';
+  return !isRendererWindowHidden()
+    && !state.floatingBubble.collapsed
+    && isSettingsPanelOpen();
 }
 
 function serviceStatusSurfaceVisible() {
@@ -8061,15 +8062,6 @@ function setBreakdown(breakdown, options = {}) {
 
 function renderBreakdownChange(breakdown, options = {}) {
   if (!setBreakdown(breakdown, options)) return false;
-  // Switching views always leaves the settings overlay. While the panel is
-  // open, visibleStatsSurface() reports 'settings' and render() returns early,
-  // so the view switcher would update its label without repainting the view.
-  if (isSettingsPanelOpen()) {
-    resetSettingsListSearch();
-    stopWindowShortcutRecording();
-    els.settingsPanel.classList.add('hidden');
-    els.shell.classList.remove('settings-open');
-  }
   state.animateBarsFromZero = true;
   state.animateChartsOnRender = true;
   let renderSucceeded = false;
@@ -8576,12 +8568,8 @@ function applyFloatingBubbleState(payload = {}, options = {}) {
   }
   if (options.renderContent === false) return;
   if (wasCollapsed && !state.floatingBubble.collapsed) {
-    if (isSettingsPanelOpen()) {
-      syncSettingsForm();
-      renderConnectionStatus('settings');
-    } else {
-      renderStatsUpdate();
-    }
+    if (isSettingsPanelOpen()) syncSettingsForm();
+    renderStatsUpdate();
   } else {
     renderFloatingBubbleContent();
   }
@@ -11851,7 +11839,7 @@ async function saveSettings(patch) {
     try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
     applyEffectiveCurrencyRates();
     preserveSettingsPanelScroll(syncSettingsForm);
-    if (!isSettingsSurfaceVisible()) statsRenderScheduler.request();
+    if (isSettingsSurfaceVisible()) render(); else statsRenderScheduler.request();
     restartTimer();
     maybeUpdateBarsIcon();
     throw error;
@@ -11863,7 +11851,7 @@ async function saveSettings(patch) {
   // their accordion/switch layout transition.
   if (state.settingsPushRevision === settingsPushRevision) {
     preserveSettingsPanelScroll(syncSettingsForm);
-    if (!isSettingsSurfaceVisible()) statsRenderScheduler.request();
+    if (isSettingsSurfaceVisible()) render(); else statsRenderScheduler.request();
   }
   restartTimer();
   maybeUpdateBarsIcon();
@@ -12689,7 +12677,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   state.settings = next;
   applyEffectiveCurrencyRates();
   preserveSettingsPanelScroll(syncSettingsForm);
-  if (!isSettingsSurfaceVisible()) statsRenderScheduler.request();
+  if (isSettingsSurfaceVisible()) render(); else statsRenderScheduler.request();
   maybeUpdateBarsIcon();
 });
 
@@ -12728,25 +12716,23 @@ window.tokenMonitor.onTokscalePush?.((payload) => {
 });
 
 function renderConnectionStatus(surface = visibleStatsSurface()) {
-  if (surface !== 'main' && surface !== 'settings') return;
+  if (surface !== 'main') return;
   setLiveDot(state.streamConnected);
   setStatus(statusTextFor(state.mode, state.streamConnected));
-  if (surface === 'settings') renderSyncClientStatus();
+  if (isSettingsSurfaceVisible()) renderSyncClientStatus();
 }
 
 function renderStatsUpdate() {
   const surface = visibleStatsSurface();
   renderConnectionStatus(surface);
-  if (surface === 'main') {
-    render();
-    return;
-  }
   if (surface === 'bubble') {
     renderFloatingBubbleContent();
     signalContentReady();
     return;
   }
-  if (surface !== 'settings') return;
+  if (surface !== 'main') return;
+  render();
+  if (!isSettingsSurfaceVisible()) return;
   renderCodexAccounts();
   renderSettingsSummaries();
   renderLimitProviderCheckboxes();
@@ -12781,17 +12767,14 @@ function handleWindowVisibilityChange() {
   if (!isRendererWindowHidden() && state.settings?.hubMode === 'client' && hubBuildStatusRefreshDue()) {
     void refreshHubBuildStatus();
   }
-  if (isSettingsSurfaceVisible()) {
-    statsRenderScheduler.clear();
-    syncSettingsForm();
-    renderConnectionStatus('settings');
-    // syncSettingsForm() covers what the dropped catch-up render would have
-    // drawn, but it is not a stats render and never reaches signalContentReady().
-    // A window revealed straight into Settings must still report it has painted.
+  const settingsVisible = isSettingsSurfaceVisible();
+  if (settingsVisible || settingsDomSyncPending) syncSettingsForm();
+  statsRenderScheduler.flush();
+  if (settingsVisible) {
+    renderConnectionStatus();
+    // syncSettingsForm() is not a stats render, so a window revealed straight
+    // into Settings still needs to report that its visible content has painted.
     signalContentReady();
-  } else {
-    if (settingsDomSyncPending) syncSettingsForm();
-    statsRenderScheduler.flush();
   }
   ensureServiceStatusTicker();
 }

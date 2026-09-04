@@ -5,10 +5,10 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorStatsRenderScheduler = api;
 })(typeof window !== 'undefined' ? window : null, function createStatsRenderSchedulerApi() {
-  function visibleStatsSurface(rendererHidden, floatingBubbleCollapsed, settingsOpen) {
+  function visibleStatsSurface(rendererHidden, floatingBubbleCollapsed) {
     if (rendererHidden) return null;
     if (floatingBubbleCollapsed) return 'bubble';
-    return settingsOpen ? 'settings' : 'main';
+    return 'main';
   }
 
   function createStatsRenderScheduler({ isHidden, render }) {
@@ -32,10 +32,6 @@
       renderPending = false;
     }
 
-    function clear() {
-      renderPending = false;
-    }
-
     function visibilityChanged() {
       const hidden = isHidden();
       if (hidden === rendererHidden) return false;
@@ -44,7 +40,6 @@
     }
 
     return {
-      clear,
       flush,
       request,
       visibilityChanged

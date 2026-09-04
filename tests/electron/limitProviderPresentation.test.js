@@ -2038,7 +2038,7 @@ test('provider option rerenders reuse the existing switch DOM', () => {
   assert.doesNotMatch(renderList, /renderLimits\(\);/);
 });
 
-test('settings pushes do not trigger a second full settings sync after save', () => {
+test('settings pushes sync once while repainting the background main view', () => {
   const app = readRendererFile('app.js');
   const save = functionBody(app, 'saveSettings', 'renderHomeIfVisible');
   const syncSettings = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
@@ -2049,7 +2049,8 @@ test('settings pushes do not trigger a second full settings sync after save', ()
   assert.match(settingsPush, /state\.settingsPushRevision \+= 1;/);
   assert.match(syncSettings, /if \(!isSettingsSurfaceVisible\(\)\) return;/);
   assert.doesNotMatch(syncSettings, /\b(?:render|renderLimits|applyFloatingBubbleState)\(/);
-  assert.match(settingsPush, /if \(!isSettingsSurfaceVisible\(\)\) statsRenderScheduler\.request\(\);/);
+  assert.match(settingsPush, /if \(isSettingsSurfaceVisible\(\)\) render\(\); else statsRenderScheduler\.request\(\);/);
+  assert.equal([...settingsPush.matchAll(/syncSettingsForm/g)].length, 1);
 });
 
 test('main limits rerenders coalesce identical visible provider data', () => {
