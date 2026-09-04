@@ -64,7 +64,8 @@ function forecastAtTime(forecast, nowMs) {
   const observedAtMs = dateMs(forecast.observedAt);
   const latestResetAtMs = dateMs(forecast.latestResetAt);
   const expired = expiresAtMs !== null && expiresAtMs <= nowMs;
-  const superseded = observedAtMs !== null
+  const superseded = forecast.latestResetType !== 'banked'
+    && observedAtMs !== null
     && latestResetAtMs !== null
     && latestResetAtMs >= observedAtMs;
   return expired || superseded ? { ...forecast, status: 'inactive' } : forecast;
