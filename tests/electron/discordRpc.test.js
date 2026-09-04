@@ -114,6 +114,15 @@ test('Discord Rich Presence uses labels and asset keys for newer tracked clients
   }
 });
 
+test('Discord Rich Presence uses the Unsloth label and uploaded asset key', () => {
+  const payload = loadBuildPayload()({
+    periods: { today: { totalTokens: 12345, costUsd: 0, clients: { unsloth: 12345 } } }
+  });
+  assert.equal(payload.details, 'Unsloth · 12.3K tokens');
+  assert.equal(payload.smallImageKey, 'unsloth');
+  assert.equal(payload.smallImageText, 'Unsloth');
+});
+
 test('Discord Rich Presence formats today cost with selected currency', () => {
   const buildPayload = loadBuildPayload();
   const payload = buildPayload({

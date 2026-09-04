@@ -68,26 +68,29 @@ test('applyControlLayout keeps both controls in the footer and swaps their roles
   assert.doesNotMatch(body, /titlebarSlot\.appendChild/);
 });
 
-test('window-actions and tabs fade out after a leave grace delay, in instantly', () => {
+test('window-actions and tabs fade out after a short leave grace delay, in instantly', () => {
   const css = readRendererFile('styles.css');
 
   const actions = cssRule(css, '.window-actions');
-  assert.match(declaration(actions, 'transition'), /280ms/, 'window-actions resting state carries the 280ms leave delay');
+  assert.match(declaration(actions, 'transition'), /140ms/, 'window-actions resting state carries the 140ms leave delay');
+  assert.equal(declaration(actions, 'width'), '114px', 'window actions occupy only their three 34px buttons and two 6px gaps');
 
   const reveal = cssRule(css, '.actions-hotspot:hover ~ .window-actions, .window-actions:hover, .window-actions:focus-within, .shell.settings-open .window-actions');
   assert.equal(declaration(reveal, 'transition-delay'), '0ms', 'revealed state shows instantly');
 
   const tabs = cssRule(css, '.title-controls .tabs');
-  assert.match(declaration(tabs, 'transition'), /280ms/, 'tabs restore after the same 280ms grace');
+  assert.match(declaration(tabs, 'transition'), /140ms/, 'tabs restore after the same 140ms grace');
 });
 
-test('hover hotspot stays right-anchored and never extends left over the tabs', () => {
+test('hover hotspot covers the rounded corner without intercepting the period tabs', () => {
   const css = readRendererFile('styles.css');
   const hotspot = cssRule(css, '.actions-hotspot');
-  assert.ok(declaration(hotspot, 'right'), 'hotspot is anchored from the right edge');
+  assert.equal(declaration(hotspot, 'top'), '-12px', 'hotspot starts at the shell top padding');
+  assert.equal(declaration(hotspot, 'right'), '-14px', 'hotspot reaches through the shell right padding');
+  assert.equal(declaration(hotspot, 'width'), '28px', 'hotspot leaves a deliberate 14px corner span inside the content edge');
+  assert.equal(declaration(hotspot, 'height'), '28px', 'hotspot reaches down through the right shell padding');
+  assert.match(declaration(hotspot, 'clip-path'), /polygon/, 'hotspot removes the lower-left area that would cover TOTAL');
   assert.equal(declaration(hotspot, 'left'), '', 'hotspot must not set left (would overlap DAY/MONTH/TOTAL)');
-  const width = parseInt(declaration(hotspot, 'width'), 10);
-  assert.ok(width > 0 && width <= 32, `hotspot width stays small to clear the TOTAL tab (got ${width})`);
 });
 
 test('the reveal trigger is never fired by hovering the period tabs', () => {
@@ -126,6 +129,21 @@ test('pointer-closing Settings clears sticky focus without blurring keyboard act
 
   assert.match(handler, /addEventListener\('click', \(event\) =>/);
   assert.match(handler, /if \(!settingsOpen && event\.detail > 0\) els\.settingsButton\.blur\(\)/);
+});
+
+test('pointer-activated window controls clear sticky focus without blurring keyboard activation', () => {
+  const app = readRendererFile('app.js');
+  const pinStart = app.indexOf("els.pinButton.addEventListener('click'");
+  const pinEnd = app.indexOf("els.settingsButton.addEventListener('click'", pinStart);
+  const pinHandler = app.slice(pinStart, pinEnd);
+  const minStart = app.indexOf("els.minButton.addEventListener('click'");
+  const minEnd = app.indexOf("els.trendsPanel.addEventListener('click'", minStart);
+  const windowHandlers = app.slice(minStart, minEnd);
+
+  assert.match(pinHandler, /addEventListener\('click', \(event\) =>/);
+  assert.match(pinHandler, /if \(event\.detail > 0\) els\.pinButton\.blur\(\)/);
+  assert.match(windowHandlers, /if \(event\.detail > 0\) els\.minButton\.blur\(\)/);
+  assert.match(windowHandlers, /if \(event\.detail > 0\) els\.closeButton\.blur\(\)/);
 });
 
 test('Refresh discloses to the left of Settings on hover and keyboard focus', () => {

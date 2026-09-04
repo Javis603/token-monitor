@@ -1,6 +1,6 @@
 'use strict';
 
-const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', dsh: 'DeepSeek Harness', cherrystudio: 'Cherry Studio', lmstudio: 'LM Studio' };
+const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', dsh: 'DeepSeek Harness', cherrystudio: 'Cherry Studio', lmstudio: 'LM Studio', unsloth: 'Unsloth' };
 const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
@@ -13,7 +13,7 @@ const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio',
+  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
   'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
 const limitMarksWithIcon = new Set([...clientsWithIcon, 'newapi', 'sub2api', 'alibaba']);
@@ -77,7 +77,8 @@ const KNOWN_CLIENTS = [
   { id: 'reasonix', label: 'Reasonix' },
   { id: 'dsh', label: 'DeepSeek Harness' },
   { id: 'cherrystudio', label: 'Cherry Studio' },
-  { id: 'lmstudio', label: 'LM Studio' }
+  { id: 'lmstudio', label: 'LM Studio' },
+  { id: 'unsloth', label: 'Unsloth' }
 ];
 const LIMIT_PROVIDERS = [
   { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
@@ -12102,7 +12103,11 @@ els.breakdown.addEventListener('click', (event) => {
   });
 });
 
-els.pinButton.addEventListener('click', () => {
+els.pinButton.addEventListener('click', (event) => {
+  // Pointer focus would keep .window-actions:focus-within true after the cursor
+  // leaves, pinning the hover-only controls open. Keyboard activation keeps
+  // focus so the controls remain reachable without a pointer.
+  if (event.detail > 0) els.pinButton.blur();
   saveSettings({ windowBehavior: nextWindowBehavior(currentWindowBehavior()) });
 });
 els.settingsButton.addEventListener('click', (event) => {
@@ -12582,8 +12587,14 @@ els.refreshButton.addEventListener('click', () => {
   // on every one of them.
   else refreshStats({ force: true, forceHistory: true, forceSelfSync: true, feedback: true });
 });
-els.minButton.addEventListener('click', () => window.tokenMonitor.minimize());
-els.closeButton.addEventListener('click', () => window.tokenMonitor.close());
+els.minButton.addEventListener('click', (event) => {
+  if (event.detail > 0) els.minButton.blur();
+  window.tokenMonitor.minimize();
+});
+els.closeButton.addEventListener('click', (event) => {
+  if (event.detail > 0) els.closeButton.blur();
+  window.tokenMonitor.close();
+});
 els.trendsPanel.addEventListener('click', (event) => {
   if (event.target.closest('.trends-spark, .trends-open-hint')) window.tokenMonitor.openDashboard();
 });

@@ -6,7 +6,7 @@
 // the imported rows aren't cleanly separable (MiMo is multi-model). It stays a known
 // client — one click to enable in Settings → tools — until tokscale dedups upstream.
 const PARSE_LOCAL_CLIENTS = Object.freeze(['proma', 'qodercn']);
-const DEFAULT_CLIENTS = 'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,kimi,qwen,grok,copilot,pi,zed,kilocode,commandcode,zcode,kiro,codebuddy,workbuddy,proma,reasonix,dsh,cherrystudio,lmstudio';
+const DEFAULT_CLIENTS = 'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,kimi,qwen,grok,copilot,pi,zed,kilocode,commandcode,zcode,kiro,codebuddy,workbuddy,proma,reasonix,dsh,cherrystudio,lmstudio,unsloth';
 
 function insertClientBefore(clientsCsv, clientId, beforeClientId) {
   const clients = clientsCsv.split(',');

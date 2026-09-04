@@ -359,19 +359,23 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   width: 148px;
   height: 30px;
 }
+/* Cover the whole top-right rounded corner without covering the period tabs:
+   the top arm occupies the 12px shell padding and the right arm continues down
+   through the 14px side padding. The parent's rounded clip supplies the arc. */
 .actions-hotspot {
   position: absolute;
-  top: -14px;
-  right: -12px;
+  top: -12px;
+  right: -14px;
   width: 28px;
-  height: 22px;
+  height: 28px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 100%, 50% 42.857%, 0 42.857%);
   z-index: 5;
 }
 .window-actions {
   position: absolute;
   top: 0;
   right: 0;
-  width: 154px;
+  width: 114px;
   height: 30px;
   display: flex;
   justify-content: flex-end;
@@ -379,7 +383,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   opacity: 0;
   pointer-events: none;
   transform: translateY(-2px);
-  transition: opacity 160ms ease 280ms, transform 160ms ease 280ms;
+  transition: opacity 160ms ease 140ms, transform 160ms ease 140ms;
   z-index: 4;
 }
 #footerActionSlot { display: contents; }
@@ -456,7 +460,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   position: absolute;
   inset: 0;
   width: 100%;
-  transition: opacity 160ms ease 280ms, transform 160ms ease 280ms;
+  transition: opacity 160ms ease 140ms, transform 160ms ease 140ms;
 }
 .title-controls:has(.actions-hotspot:hover) .tabs, .title-controls:has(.window-actions:hover) .tabs, .title-controls:has(.window-actions:focus-within) .tabs, .shell.settings-open .title-controls .tabs {
   opacity: 0;
@@ -3477,6 +3481,7 @@ html.is-windows .settings-panel select option {
 .row-icon-dsh        { -webkit-mask-image: url(../../../assets/icons/dsh.svg);            mask-image: url(../../../assets/icons/dsh.svg); }
 .row-icon-cherrystudio { -webkit-mask-image: url(../../../assets/icons/cherrystudio.svg); mask-image: url(../../../assets/icons/cherrystudio.svg); }
 .row-icon-lmstudio  { -webkit-mask-image: url(../../../assets/icons/lmstudio.svg);      mask-image: url(../../../assets/icons/lmstudio.svg); }
+.row-icon-unsloth   { -webkit-mask-image: url(../../../assets/icons/unsloth.svg);       mask-image: url(../../../assets/icons/unsloth.svg); }
 .row-icon-opencode   { -webkit-mask-image: url(../../../assets/icons/opencode.svg);      mask-image: url(../../../assets/icons/opencode.svg); }
 .row-icon-openrouter { -webkit-mask-image: url(../../../assets/icons/openrouter.svg);    mask-image: url(../../../assets/icons/openrouter.svg); }
 .row-icon-openclaw   { -webkit-mask-image: url(../../../assets/icons/openclaw.svg);      mask-image: url(../../../assets/icons/openclaw.svg); }

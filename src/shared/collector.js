@@ -2554,6 +2554,8 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // as unset, so keep the watcher and source-health path on the same fallback.
   const lmStudioHome = nonBlankEnvPath('LM_STUDIO_HOME', path.join(home, '.lmstudio'), env);
   add('lmstudio', ['lmstudio-server-logs', path.join(lmStudioHome, 'server-logs')]);
+  const unslothHome = nonBlankEnvPath('UNSLOTH_STUDIO_HOME', path.join(home, '.unsloth', 'studio'), env);
+  add('unsloth', ['unsloth-db', unslothHome, path.join(unslothHome, 'studio.db')]);
   return byClient;
 }
 
@@ -2724,6 +2726,7 @@ const KIRO_DB_WATCH_PATTERN = /^data\.sqlite3(?:-(?:wal|shm))?$/;
 const ZED_DB_WATCH_PATTERN = /^threads\.db(?:-(?:wal|shm))?$/;
 const COPILOT_DB_WATCH_PATTERN = /^data\.db(?:-(?:wal|shm))?$/;
 const ZCODE_DB_WATCH_PATTERN = /^db\.sqlite(?:-(?:wal|shm))?$/;
+const UNSLOTH_DB_WATCH_PATTERN = /^studio\.db(?:-(?:wal|shm))?$/;
 const GROK_UNIFIED_LOG_FILE = 'unified.jsonl';
 // Tokscale scans only these two CodeBuddy extension log subtrees. Keep their
 // recursive layout intact, but prune unrelated siblings under Logs before
@@ -2896,6 +2899,7 @@ function watchPolicyEntries(clientsCsv) {
   // Tokscale reads only direct children of each MiMo root, so log/* and every
   // other recursive subtree is pruned before chokidar descends into it.
   bound('micode', candidates.micode || [], directChildOnly((name) => MICODE_DB_WATCH_PATTERN.test(name)));
+  bound('unsloth', candidates.unsloth || [], directChildOnly((name) => UNSLOTH_DB_WATCH_PATTERN.test(name)));
   // The dual-source Grok scanner derives exactly logs/unified.jsonl from each
   // Grok home.
   bound('grok', withBasename('grok', 'logs'), directChildOnly((name) => name === GROK_UNIFIED_LOG_FILE));
