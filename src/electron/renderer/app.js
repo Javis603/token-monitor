@@ -14925,6 +14925,17 @@ const ALIBABA_DASHBOARD_URLS = {
   'intl-personal': 'https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=plan#/efm/subscription/token-plan/personal'
 };
 
+// Mirrors normalizeAlibabaCookieHeader's preprocessing in the main process:
+// surrounding quotes and a `Cookie:` prefix come off before the pair check, so
+// the two sides accept and reject exactly the same inputs.
+function alibabaCookieCandidate(value) {
+  let raw = String(value || '').trim();
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    raw = raw.slice(1, -1).trim();
+  }
+  return raw.replace(/^cookie\s*:\s*/i, '').trim();
+}
+
 function alibabaVariantOr(value) {
   return ALIBABA_DASHBOARD_URLS[value] ? value : 'cn';
 }
@@ -17459,7 +17470,7 @@ function setupCursorAccountUI() {
       // Same anchored rule as normalizeAlibabaCookieHeader in the main process.
       // A looser test here lets a pasted URL pass, save as empty, and surface as
       // "Not configured" instead of telling the user the paste was wrong.
-      if (!/(?:^|;\s*)[A-Za-z0-9!#$%&'*+\-.^_`|~]+=/.test(String(input.value || '').trim().replace(/^cookie\s*:\s*/i, ''))) {
+      if (!/(?:^|;\s*)[A-Za-z0-9!#$%&'*+\-.^_`|~]+=/.test(alibabaCookieCandidate(input.value))) {
         errorEl.textContent = t('settings.alibaba.invalidCookie');
         errorEl.classList.remove('hidden');
         return;

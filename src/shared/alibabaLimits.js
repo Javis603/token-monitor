@@ -590,7 +590,16 @@ function parsePersonalUsage(usagePayload, subscriptionPayload, quotaConfigPayloa
 
   const planCode = personalPlanCode(subscriptionPayload);
   const quota = personalQuotaTotals(quotaConfigPayload, planCode);
+  // Read opportunistically: an account id is what stops a Personal row from
+  // being discarded when another device reports an identified Team row for the
+  // same provider. The cookie is never used for this — it rotates on re-login,
+  // which would split one account's history in two.
+  const uidValue = firstNumber(usagePayload, UID_KEYS)
+    ?? firstString(usagePayload, UID_KEYS)
+    ?? firstNumber(subscriptionPayload, UID_KEYS)
+    ?? firstString(subscriptionPayload, UID_KEYS);
   return {
+    uid: uidValue === null || uidValue === undefined || uidValue === '' ? '' : String(uidValue),
     planName: planCode ? (PERSONAL_PLAN_LABELS[planCode] || planCode) : 'Personal',
     fiveHourPercent,
     fiveHourTotal: quota.fiveHour,
@@ -902,10 +911,7 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
       const usage = await fetchPersonalUsage(cookieHeader, variant, secToken, deps);
       return [normalizeLimitProvider({
         provider: 'alibaba',
-        // The cookie is not an identity: it rotates on every re-login, and an
-        // accountKey that moves with it would split one account's history in
-        // two. Personal has no uid in its payload, so it stays unkeyed rather
-        // than keyed on something unstable.
+        accountKey: usage.uid ? hashKey('alibaba', usage.uid) : '',
         accountLabel: usage.planName,
         planLabel: usage.planName,
         source: 'web',
