@@ -73,22 +73,22 @@ Per-setting precedence for the agent and hub: `CLI flag → env var (real or .en
 
 ### Adding a tracked client
 
-The default client CSV lives in **one** place: `DEFAULT_CLIENTS` in `src/shared/clientTracking.js` (`src/electron/main.js` and `src/agent/agent.js` both derive from it). But adding a *new* client means touching several spots that must all agree on the id:
+Tracked-client identity lives in **one** place: `CLIENT_CATALOG` in `src/shared/clientCatalog.js`. `src/shared/clientTracking.js` projects it into the CSV shapes settings and the collector already speak (`src/electron/main.js` and `src/agent/agent.js` derive from those). But adding a *new* client means touching several spots that must all agree on the id:
 
 | Touch point | Where |
 |---|---|
-| Default client list | `DEFAULT_CLIENTS` in `src/shared/clientTracking.js` |
+| Client identity | one entry in `CLIENT_CATALOG` (`src/shared/clientCatalog.js`): id, label, display position, `defaultTracked`, `locallyParsed`. `DEFAULT_CLIENTS` / `KNOWN_CLIENTS` / `PARSE_LOCAL_CLIENTS` in `clientTracking.js` and the renderer's `clientLabels` / `KNOWN_CLIENTS` are all derived from it, so the tracked-client id, label and display order used by tracking and the widget renderer are declared once — Discord's `CLIENT_LABELS` and `themePresets`'s `VENDOR_LABELS` still carry their own |
 | Source roots | the `add(...)` call in `clientSourceRoots()` (`src/shared/collector.js`) — one `[checkId, dir]`, or `[checkId, watchDir, sourcePath]` when tokscale reads one exact file. `clientWatchCandidates()` is only a projection of this table; nothing is declared there |
 | Source check ids | every `checkId` above must be in `CLIENT_SOURCE_CHECK_IDS` (`src/shared/clientHealth.js`), kept alphabetical, then `npm run sync:worker` for the Worker copy. An id missing from that allowlist makes `normalizeClientHealth` drop the client's whole `checks` array, not just the unknown entry |
 | XDG vs home-relative | mirror tokscale, do not guess: a root is XDG-derived only if `clients.rs` declares it `PathRoot::XdgData` or `scanner.rs` resolves it through the `dirs` crate. Those `dirs` lookups are invisible to `strings` on the binary and to `tokscale clients`, so read the Rust at the version tag (`tmp/tokscale`). Roots spelled as home-relative literals upstream must stay home-relative here |
 | Name normalization | the `normalizeClientName()` branch in `src/shared/usage.js` |
-| Renderer maps | `clientLabels` / `clientsWithIcon` / `KNOWN_CLIENTS` in `src/electron/renderer/app.js`; provider artwork in `src/electron/renderer/trayProviderIcons.js`; `VENDOR_ORDER` / `VENDOR_LABELS` in `themePresets.js`; `clientColors` in `usageCharts.js` |
+| Renderer maps | `clientsWithIcon` in `src/electron/renderer/app.js` — deliberately not catalog-derived: it also holds model-vendor ids and (via `limitMarksWithIcon`) limits marks, so it is an icon table, not a client list; provider artwork in `src/electron/renderer/trayProviderIcons.js`; `VENDOR_ORDER` / `VENDOR_LABELS` in `themePresets.js`; `clientColors` in `usageCharts.js` |
 | Discord RPC | `KNOWN_CLIENT_ASSETS` / `CLIENT_LABELS` in `src/electron/discordRpc.js` |
 | Row icon CSS | the `.row-icon-<id>` rule in `src/electron/renderer/styles.css` |
 | Icon assets | `assets/icons/<id>.svg` + `.github/assets/tools-icon/<id>.png` |
 | WSL discovery | marker(s) in `WSL_DATA_MARKERS` **and** the marker→id mapping in `MARKER_CLIENTS` (`src/shared/wslUsage.js`) — use the exact roots tokscale reads, including alternate roots. A marker without a `MARKER_CLIENTS` entry attributes to nothing, so a WSL home holding only that client's data would be skipped |
 | Docs & env examples | the supported-tools table in `README.md` and its translations (`README.*.md`) + the client CSV in `.env.example`. Every locale's prose tool/provider counts must match its own table — `tests/docs/readmeConsistency.test.js` fails on a stale count or a table that drifts between locales |
-| Guard tests | the expected-client lists in `tests/shared/clientTracking.test.js` |
+| Guard tests | the expected-client lists in `tests/shared/clientTracking.test.js`, plus the pinned CSVs in `tests/shared/clientCatalog.test.js` (they guard a persisted-settings surface, so update them deliberately) |
 
 One caveat on top of the table:
 

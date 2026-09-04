@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
+const { CLIENT_LABELS, CLIENT_IDS } = require('../../src/shared/clientCatalog');
 
 function rendererSource() {
   return fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
@@ -14,28 +15,27 @@ function rendererStyles() {
   return fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'styles.css'), 'utf8');
 }
 
-function clientLabelIds(source) {
-  const match = source.match(/const clientLabels = \{([^}]+)\};/);
-  assert.ok(match, 'clientLabels declaration should exist');
-  return new Set([...match[1].matchAll(/([a-z0-9_-]+)\s*:/g)].map((item) => item[1]));
+// clientLabels and KNOWN_CLIENTS are destructured out of the shared catalog
+// now, so read that contract directly instead of regex-scraping app.js for
+// declarations that have moved. The clientsWithIcon and styles.css checks below
+// still scrape on purpose — that wiring has not been migrated.
+function clientLabelIds() {
+  return new Set(Object.keys(CLIENT_LABELS));
 }
 
-function knownClientIds(source) {
-  const match = source.match(/const KNOWN_CLIENTS = \[([\s\S]*?)\];/);
-  assert.ok(match, 'KNOWN_CLIENTS declaration should exist');
-  return [...match[1].matchAll(/id:\s*'([^']+)'/g)].map((item) => item[1]);
+function knownClientIds() {
+  return [...CLIENT_IDS];
 }
 
 test('renderer client labels cover every known client', () => {
-  const source = rendererSource();
-  const labels = clientLabelIds(source);
-  const missing = knownClientIds(source).filter((id) => !labels.has(id));
+  const labels = clientLabelIds();
+  const missing = knownClientIds().filter((id) => !labels.has(id));
 
   assert.deepEqual(missing, []);
 });
 
 test('renderer known clients include current tokscale-supported tools', () => {
-  const clients = knownClientIds(rendererSource());
+  const clients = knownClientIds();
   for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh']) {
     assert.ok(clients.includes(client), `${client} should be a known renderer client`);
   }
@@ -159,7 +159,7 @@ test('LM Studio has a label and uses the standard mask-safe icon path', () => {
   const source = rendererSource();
   const styles = rendererStyles();
 
-  assert.ok(clientLabelIds(source).has('lmstudio'));
+  assert.ok(clientLabelIds().has('lmstudio'));
   assert.match(source, /clientsWithIcon = new Set\([\s\S]*'lmstudio'/);
   assert.match(styles, /\.row-icon-lmstudio\s*\{[^}]*mask-image:\s*url\([^)]*assets\/icons\/lmstudio\.svg\)/s);
   assert.doesNotMatch(styles, /\.row-icon-lmstudio\s*\{[^}]*background-image:/s);
@@ -170,7 +170,7 @@ test('LM Studio has a label and uses the standard mask-safe icon path', () => {
 test('Unsloth has a label and uses the standard mask-safe icon path', () => {
   const source = rendererSource();
   const styles = rendererStyles();
-  assert.ok(clientLabelIds(source).has('unsloth'));
+  assert.ok(clientLabelIds().has('unsloth'));
   assert.match(source, /clientsWithIcon = new Set\([\s\S]*'unsloth'/);
   assert.match(styles, /\.row-icon-unsloth\s*\{[^}]*mask-image:\s*url\([^)]*assets\/icons\/unsloth\.svg\)/s);
   assert.doesNotMatch(styles, /\.row-icon-unsloth\s*\{[^}]*background-image:/s);

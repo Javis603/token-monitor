@@ -11,12 +11,15 @@ try {
 } catch (_) {}
 
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = trackingApi;
+const { KNOWN_CLIENT_LIST } = require('../../src/shared/clientCatalog');
 const rootDir = path.join(__dirname, '..', '..');
 
+// The renderer no longer keeps its own copy of this list — it destructures
+// KNOWN_CLIENT_LIST out of the same catalog. Assert that projection instead of
+// scraping app.js, so this keeps checking the contract rather than a file
+// layout that the later #550 steps are expected to move.
 function rendererClientIds() {
-  const app = fs.readFileSync(path.join(rootDir, 'src/electron/renderer/app.js'), 'utf8');
-  const block = app.slice(app.indexOf('const KNOWN_CLIENTS = ['), app.indexOf('const LIMIT_PROVIDERS'));
-  return [...block.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1]);
+  return KNOWN_CLIENT_LIST.map((client) => client.id);
 }
 
 function readmeTrackedClientIds() {
