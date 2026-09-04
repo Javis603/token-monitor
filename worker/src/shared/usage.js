@@ -216,9 +216,25 @@ function normalizeModelName(value) {
 
 function normalizeModelNameForClient(value, client) {
   const normalized = normalizeModelName(value);
-  if (!normalized || normalizeClientName(client) !== REASONIX_CLIENT) return normalized;
-  const qualified = normalized.match(/^(?:deepseek|deepseek-flash)\/(.+)$/);
-  return qualified?.[1] || normalized;
+  if (!normalized) return normalized;
+  const clientId = normalizeClientName(client);
+  if (clientId === REASONIX_CLIENT) {
+    const qualified = normalized.match(/^(?:deepseek|deepseek-flash)\/(.+)$/);
+    return qualified?.[1] || normalized;
+  }
+  // Claude Code's transcript records custom models bare (e.g. "MiniMax-M3"),
+  // but tokscale's Claude parser canonicalizes them through its pricing alias
+  // table, which can emit a provider-qualified id (e.g. "minimax/MiniMax-M3",
+  // deliberately pinned so the first-party price resolves instead of a
+  // zero-priced reseller row). The same model used in another tool (mcode,
+  // commandcode, …) is keyed bare, so a leading "<provider>/" segment must be
+  // stripped here or that model's usage/cost splits across two keys. Native
+  // Claude models never contain '/', so they are untouched.
+  if (clientId === 'claude') {
+    const slash = normalized.indexOf('/');
+    if (slash > 0 && slash < normalized.length - 1) return normalized.slice(slash + 1);
+  }
+  return normalized;
 }
 
 function normalizeSessionId(value) {
