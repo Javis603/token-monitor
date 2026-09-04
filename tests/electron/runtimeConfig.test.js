@@ -16,6 +16,7 @@ const {
   usageConfigFingerprint,
   usageConfigFromSettings
 } = require('../../src/electron/runtimeConfig');
+const { alibabaVariant } = require('../../src/shared/alibabaLimits');
 
 const BASE_USAGE_SETTINGS = Object.freeze({
   clients: 'claude',
@@ -499,4 +500,27 @@ test('third-party profile changes invalidate only the third-party limits lane', 
     }
   );
   assert.deepEqual(classification.limitScopes, [{ provider: 'thirdparty' }]);
+});
+
+// The desktop default for this setting is deliberately empty. A concrete default
+// would be merged into settings before any read and would then satisfy the
+// provider's `options || env` fallback, making ALIBABA_TOKEN_PLAN_VARIANT dead in
+// both the settings UI and the collector.
+test('an unset Alibaba variant leaves the env var reachable by the collector', () => {
+  const fromEnv = limitsConfigFromSettings(
+    { alibabaCookie: 'login_aliyunid_pk=abc', alibabaVariant: '' },
+    { env: { ALIBABA_TOKEN_PLAN_VARIANT: 'intl-personal' } }
+  );
+  assert.equal(fromEnv.alibabaVariant, '');
+  assert.equal(alibabaVariant(fromEnv, { ALIBABA_TOKEN_PLAN_VARIANT: 'intl-personal' }), 'intl-personal');
+
+  // An explicit choice still wins over the environment.
+  const explicit = limitsConfigFromSettings(
+    { alibabaCookie: 'login_aliyunid_pk=abc', alibabaVariant: 'cn' },
+    { env: { ALIBABA_TOKEN_PLAN_VARIANT: 'intl-personal' } }
+  );
+  assert.equal(alibabaVariant(explicit, { ALIBABA_TOKEN_PLAN_VARIANT: 'intl-personal' }), 'cn');
+
+  // With neither, the provider falls back to mainland Team.
+  assert.equal(alibabaVariant(limitsConfigFromSettings({}, { env: {} }), {}), 'cn');
 });

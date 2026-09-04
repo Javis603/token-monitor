@@ -44,15 +44,16 @@ Two distinctions are load-bearing and should not be collapsed:
 
 An empty subscription (`TotalCount: 0`) is a healthy, authorized account with nothing to draw: the row stays visible with no window.
 
-## Coding Plan is deliberately not supported
+## Coding Plan is out of scope, not dead
 
-Alibaba's other console plan, Coding Plan, is end-of-life: Lite stopped new purchases on 2026-03-20 and stopped renewals and upgrades on 2026-04-13, and Pro was a limited run that is not being restocked. Token Plan is the plan Alibaba sells and maintains. Adding a Coding Plan reader would mean carrying an unverifiable code path for a shrinking, one-way population, so `alibaba` covers Token Plan only.
+Alibaba sells a second, separate console product called Coding Plan. It is **not** end-of-life: only its Lite tier was sunset (no new subscriptions from 2026-03-20, no renewals or upgrades from 2026-04-13), while Pro is still listed and sold at $50/month with a daily replenished allocation. It is simply a different product with its own endpoint (`queryCodingPlanInstanceInfoV2`), its own credential (a `cpk-` API key as well as a console cookie), and its own window shape (5-hour, weekly and monthly counters). This provider reads Token Plan only.
 
-This is why `alibaba` is a platform-level id rather than a plan-level one and still holds a single plan: there is no second live plan to widen it for. If Alibaba ships another console plan, it belongs as extra windows under this same provider and cookie, the way Volcengine carries its Coding and Agent plans together — not as a second provider.
+If Coding Plan is added later it belongs as extra windows under this same provider and cookie — both plans live behind one Alibaba Cloud login — the way Volcengine carries its Coding and Agent plans together, rather than as a second provider. That is why `alibaba` is a platform-level id rather than a plan-level one.
 
 Note that Token Plan's `sk-sp-` API key is an inference credential. It cannot read quota, which is why this provider is cookie-only.
 
 ## Known gaps
 
+- **Base plan quota only.** Alibaba sells add-on quota on top of the base plan — an Extra Bundle for Personal (20,000 credits, explicitly *not* subject to the 5-hour/7-day windows) and Shared quota packs for Team (625,000 credits each, which bypass per-seat limits). Neither is read here, so an account holding add-on credit can show a base window at 100% used while the service still answers. Treat a "used everything but it still works" report as this gap, not as a parsing bug.
 - Personal/Solo reports percentages. Absolute totals appear only when the quota-config endpoint recognises the plan code.
 - Team quota is a token-value pool, not money, so its windows carry no `credits` metric and no currency.

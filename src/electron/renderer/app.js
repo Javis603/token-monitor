@@ -17456,7 +17456,10 @@ function setupCursorAccountUI() {
       // The main process rejects a header with no name=value pair, so catching
       // it here keeps a mis-paste from being reported back as "saved" while the
       // stored value is silently empty.
-      if (!/[^;=\s]+=/.test(String(input.value || ''))) {
+      // Same anchored rule as normalizeAlibabaCookieHeader in the main process.
+      // A looser test here lets a pasted URL pass, save as empty, and surface as
+      // "Not configured" instead of telling the user the paste was wrong.
+      if (!/(?:^|;\s*)[A-Za-z0-9!#$%&'*+\-.^_`|~]+=/.test(String(input.value || '').trim().replace(/^cookie\s*:\s*/i, ''))) {
         errorEl.textContent = t('settings.alibaba.invalidCookie');
         errorEl.classList.remove('hidden');
         return;

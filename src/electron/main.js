@@ -596,7 +596,11 @@ function defaultSettings() {
     volcengineAgentSecretAccessKey: '',
     volcengineAgentRegion: '',
     alibabaCookie: '',
-    alibabaVariant: 'cn',
+    // Empty, not 'cn': defaults are merged into settings before any read, so a
+    // concrete value here would satisfy the `options || env` fallback and make
+    // ALIBABA_TOKEN_PLAN_VARIANT unreachable in both the UI and the collector.
+    // The effective variant is resolved at use, never stored eagerly.
+    alibabaVariant: '',
     qoderCookie: '',
     qoderSite: 'global',
     traeAccessToken: '',
@@ -6763,7 +6767,7 @@ app.whenReady().then(() => {
       qoderCookie: patch.qoderCookie !== undefined ? normalizeQoderCookie(patch.qoderCookie) : (settings.qoderCookie || ''),
       qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
       alibabaCookie: patch.alibabaCookie !== undefined ? normalizeAlibabaCookie(patch.alibabaCookie) : (settings.alibabaCookie || ''),
-      alibabaVariant: patch.alibabaVariant !== undefined ? normalizeAlibabaVariant(patch.alibabaVariant) : normalizeAlibabaVariant(settings.alibabaVariant),
+      alibabaVariant: patch.alibabaVariant !== undefined ? normalizeAlibabaVariant(patch.alibabaVariant) : (settings.alibabaVariant || ''),
       traeAccessToken: patch.traeAccessToken !== undefined ? normalizeTraeAccessToken(patch.traeAccessToken) : (settings.traeAccessToken || ''),
       traeDeviceId: patch.traeDeviceId !== undefined ? normalizeTraeDeviceId(patch.traeDeviceId) : (settings.traeDeviceId || ''),
       zedCookie: patch.zedCookie !== undefined ? normalizeZedCookie(patch.zedCookie) : (settings.zedCookie || ''),
