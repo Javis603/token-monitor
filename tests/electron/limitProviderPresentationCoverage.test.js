@@ -152,6 +152,7 @@ test('sharing one mask table keeps Grok the mark that differs between the two', 
   assert.ok(override, 'the Limits list needs a .limit-icon.row-icon-grok override');
   assert.match(override[1], /icons\/grok\.svg/, 'the Limits mark should stay the Grok mark');
   const shared = styles.match(/^\.row-icon-grok(?=\s*[,{])[^{}]*\{([^}]*)\}/m);
+  assert.ok(shared, 'the shared table needs a .row-icon-grok rule in styles.css');
   assert.match(shared[1], /icons\/xai\.svg/, 'the client row should stay the vendor mark');
 });
 

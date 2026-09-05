@@ -74,7 +74,6 @@ test('renderer wires limit provider brand icons for Z.ai, Volcengine, and Qoder'
   assert.match(styles, /^\.row-icon-volcengine\s*\{[^}]*assets\/icons\/volcengine\.svg/m);
   assert.match(styles, /^\.row-icon-qoder\s*\{[^}]*assets\/icons\/qoder\.svg/m);
   assert.match(styles, /^\.row-icon-ollama\s*\{[^}]*assets\/icons\/ollama\.svg/m);
-  assert.match(styles, /\.row-icon-ollama\s*\{[^}]*assets\/icons\/ollama\.svg/s);
 });
 
 test('renderer wires the Doubao vendor icon for Doubao model rows', () => {
