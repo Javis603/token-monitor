@@ -34,9 +34,10 @@ test('every provider has a display label', () => {
   assert.deepEqual(Object.keys(LIMIT_PROVIDER_LABELS), [...LIMIT_PROVIDER_IDS]);
 });
 
-// settingsLabel is optional and overrides the name in the AI Tool Limits
-// settings list only. An entry carrying one identical to its label is dead
-// weight that reads like a deliberate distinction.
+// settingsLabel is optional and renames the provider across every
+// configuration and subscription surface at once (see the module comment).
+// An entry carrying one identical to its label is dead weight that reads like
+// a deliberate distinction.
 test('settingsLabel is only present where it differs from the label', () => {
   for (const { id, label, settingsLabel } of LIMIT_PROVIDER_PRESENTATION) {
     if (settingsLabel === undefined) continue;

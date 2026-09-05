@@ -26,9 +26,12 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorLimitProviderLabels = api;
 })(typeof window !== 'undefined' ? window : null, function createLimitProviderLabelsApi() {
-  // `settingsLabel` overrides the name in the AI Tool Limits settings list only,
-  // where the provider is being connected as a specific tool rather than named
-  // as a quota source.
+  // `settingsLabel` overrides `label` wherever the desktop names the provider as
+  // a tool you configure or pay for: the AI Tool Limits and Home provider lists,
+  // the settings search index, and every subscription surface through
+  // subscriptionProviderLabel(). It is not scoped to one list — adding one
+  // renames the provider on all of them at once. Surfaces that name a live
+  // quota rather than a configured tool keep `label`, as the tray detail does.
   const LIMIT_PROVIDER_PRESENTATION = Object.freeze([
     { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
     { id: 'codex', label: 'Codex' },
