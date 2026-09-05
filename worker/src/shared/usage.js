@@ -188,6 +188,12 @@ function normalizeClientName(value) {
   if (raw.includes('kilocode')) return 'kilocode';
   if (/command[\s_-]*code/.test(raw)) return 'commandcode';
   if (raw.includes('micode')) return 'micode';
+  // MiniMax Code's product label normalizes to the same mcode client id as the
+  // tokscale id and the Desktop-adapter rows. Checked before `mcode` so
+  // "minimax-code" is not left to the generic fallback (which would yield
+  // "minimax-code" and split one client into two).
+  if (raw.includes('minimax-code') || raw.includes('minimax code')) return 'mcode';
+  if (raw.includes('mcode')) return 'mcode';
   if (raw.includes('zcode')) return 'zcode';
   if (raw.includes('kiro')) return 'kiro';
   if (raw.includes('codebuddy')) return 'codebuddy';

@@ -50,6 +50,12 @@ const {
   qoderCnDataPaths,
   resolveQoderCnPricing
 } = require('./qoderCnUsage');
+const {
+  buildMcodeDesktopHistoryGraph,
+  buildMcodeDesktopPeriods,
+  collectMcodeDesktopRows,
+  mcodeDesktopSessionsRoot
+} = require('./mcodeDesktopUsage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./dshPaths');
 const { indexDshSessionHeaders, readDshSessionHeader, resolveDshSessionsRoot } = require('./dshSessionFiles');
@@ -1514,6 +1520,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
   }
+  if (options.mcodeDesktopGraph) {
+    rawGraphs.push(options.mcodeDesktopGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.mcodeDesktopGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -1608,6 +1618,7 @@ async function collectUsageOnce(options) {
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
+  const includesMcodeDesktop = normalizedClients.split(',').includes('mcode');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -1638,11 +1649,16 @@ async function collectUsageOnce(options) {
   let qoderCnRows = null;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
+  let mcodeDesktopPeriods = null;
+  let mcodeDesktopRows = null;
+  let mcodeDesktopPricing = null;
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     const progress = { ...periods };
     if (qoderCnPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, qoderCnPeriods.today);
     if (qoderCnPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, qoderCnPeriods.month);
+    if (mcodeDesktopPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, mcodeDesktopPeriods.today);
+    if (mcodeDesktopPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, mcodeDesktopPeriods.month);
     try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
   };
   if (normalizedClients) {
@@ -1709,6 +1725,28 @@ async function collectUsageOnce(options) {
         qoderCnPeriods = options.qoderCnFallbackPeriods || null;
       }
     }
+    if (includesMcodeDesktop && (!targetRequested || targetClients.includes('mcode'))) {
+      try {
+        // Anchored (watch/interval) ticks collect rows only since local midnight
+        // for the period delta, matching the tokscale --today scan scope.
+        const mcodeSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
+        mcodeDesktopRows = collectMcodeDesktopRows({ homeDir: options.homeDir, sinceMs: mcodeSinceMs });
+        mcodeDesktopPricing = await resolveModelPricing(mcodeDesktopRows, {
+          lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs,
+          pricingRevision: options.pricingRevision
+        });
+        const mcodeJson = buildMcodeDesktopPeriods({ now: collectedAt, allTimeSince, rows: mcodeDesktopRows, pricingByModel: mcodeDesktopPricing });
+        mcodeDesktopPeriods = {
+          today: extractUsageFromTokscale(mcodeJson.today),
+          month: extractUsageFromTokscale(mcodeJson.month),
+          allTime: extractUsageFromTokscale(mcodeJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`mcode desktop parse failed: ${err.message}`);
+        mcodeDesktopPeriods = null;
+      }
+    }
     throwIfAborted(options.signal);
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
@@ -1759,6 +1797,13 @@ async function collectUsageOnce(options) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
         freshPartitions.qodercn = anchor.todayPartitions.qodercn;
+      }
+      // The MiniMax Code Desktop adapter is a local source, but mcode itself is
+      // also a tokscale client (headless capture), so the mcode partition must
+      // MERGE both rather than replace — a watch tick targeting mcode would
+      // otherwise drop the headless-capture rows for the desktop rows.
+      if (mcodeDesktopPeriods) {
+        freshPartitions.mcode = mergePeriods(freshPartitions.mcode || emptyPeriod(), mcodeDesktopPeriods.today);
       }
       if (!useTargetedPartitions) {
         // The fallback rebuilds every Tokscale partition, but parse-local
@@ -1826,6 +1871,15 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, qoderCnPeriods.month);
       allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), qodercn: qoderCnPeriods.today };
+    }
+    if (mcodeDesktopPeriods && !anchorUsed) {
+      today = mergePeriods(today, mcodeDesktopPeriods.today);
+      month = mergePeriods(month, mcodeDesktopPeriods.month);
+      allTime = mergePeriods(allTime, mcodeDesktopPeriods.allTime);
+      todayPartitions = {
+        ...(todayPartitions || {}),
+        mcode: mergePeriods(todayPartitions?.mcode || emptyPeriod(), mcodeDesktopPeriods.today)
+      };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -2033,11 +2087,29 @@ async function collectUsageOnce(options) {
     const historyQoderCnGraph = qoderCnHistoryReadFailed
       ? options.qoderCnHistoryFallbackGraph
       : qoderCnGraph;
+    // MiniMax Code Desktop history graph: like Qoder CN, the graph needs the
+    // full row set (anchored ticks read only since local midnight), so read the
+    // transcripts fresh here when the scan's rows are the midnight-truncated set.
+    let mcodeDesktopGraph = null;
+    if (includesMcodeDesktop) {
+      try {
+        const rows = (!anchorUsed && mcodeDesktopRows) ? mcodeDesktopRows : collectMcodeDesktopRows({ homeDir: options.homeDir });
+        const pricing = (!anchorUsed && mcodeDesktopPricing) ? mcodeDesktopPricing : await resolveModelPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs,
+          pricingRevision: options.pricingRevision
+        });
+        mcodeDesktopGraph = buildMcodeDesktopHistoryGraph({ rows, pricingByModel: pricing });
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`mcode desktop history parse failed: ${err.message}`);
+      }
+    }
     throwIfAborted(options.signal);
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
       qoderCnGraph: historyQoderCnGraph || null,
+      mcodeDesktopGraph: mcodeDesktopGraph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -2424,6 +2496,25 @@ function clientSourceRoots(clientsCsv, options = {}) {
     'micode',
     ['mimocode-data', path.join(xdgHome, 'mimocode')],
     ['mimocode-orca-data', path.join(home, 'Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data')]
+  );
+  // MiniMax Code: two independent local sources merge into the `mcode` client.
+  // 1. tokscale 4.13.0 captures `mcode exec --output-format stream-json` CLI
+  //    streams under its own headless roots (TOKSCALE_HEADLESS_DIR or the
+  //    `<home>/.config/tokscale/headless` + Application Support pair, mirroring
+  //    codex) — it deliberately does NOT scan MiniMax Code's Desktop/Runtime
+  //    session store, where the originating surface is not distinguishable.
+  //    Those roots are `optional` because nobody has them unless they opted
+  //    into a capture workflow, so the diagnostics panel hides them while
+  //    absent; watching them gives seconds-level refresh when a capture lands.
+  // 2. mcodeDesktopUsage.js reads the Desktop app's own session store
+  //    (`~/.minimax/v2/sessions/**/messages.jsonl`) directly — the Desktop app
+  //    (not the CLI) is the common surface, so its transcripts are a first-class
+  //    local source like Proma/Qoder CN. The root is not optional: an installed
+  //    Desktop app creates it, and its absence is a real signal.
+  add(
+    'mcode',
+    ...tokscaleHeadlessRoots(home).map(({ dir, optional }) => ['mcode-headless', path.join(dir, 'mcode'), null, optional]),
+    ['mcode-desktop-sessions', mcodeDesktopSessionsRoot({ homeDir: home })]
   );
   const zcodeDbDir = path.join(home, '.zcode', 'cli', 'db');
   add(
