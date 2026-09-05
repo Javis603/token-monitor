@@ -71,13 +71,20 @@ test('every catalog provider reaches an account group or a connection explainer'
 });
 
 test('every mapped settings element exists in index.html', () => {
-  // Strip comments first: getElementById cannot see a commented-out element, so
-  // matching inside one would report a surface the settings page has not got.
-  const html = read('index.html').replace(/<!--[\s\S]*?-->/g, '');
+  const html = read('index.html');
+  // Locate the tag and reject one that falls inside a comment, rather than
+  // stripping comments out of the document first: getElementById cannot see a
+  // commented-out element, so counting it would report a surface the settings
+  // page has not got. A comment runs to its first `-->`, which is how the parser
+  // reads it too.
+  const commentSpans = [...html.matchAll(/<!--[\s\S]*?-->/g)]
+    .map((comment) => [comment.index, comment.index + comment[0].length]);
+  const inComment = (index) => commentSpans.some(([start, end]) => index >= start && index < end);
   // Require whitespace before the attribute. A bare `id="x"` also matches
   // data-id="x", and so does `\bid="x"` — the hyphen is a word boundary — and
   // neither is an element the renderer can look up.
-  const tagWithId = (elementId) => html.match(new RegExp(`<[^>]*\\sid="${elementId}"[^>]*>`));
+  const tagWithId = (elementId) => [...html.matchAll(new RegExp(`<[^>]*\\sid="${elementId}"[^>]*>`, 'g'))]
+    .find((match) => !inComment(match.index));
   for (const [provider, groupId] of Object.entries(accountGroups)) {
     assert.ok(tagWithId(groupId), `${provider} maps to a missing #${groupId}`);
   }
