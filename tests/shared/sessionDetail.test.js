@@ -136,12 +136,228 @@ test('parseClaudeTranscript counts one reply once across content-block splits an
   assert.deepEqual(turns[0].tools, ['exec_command']); // tool_use merged from a later block
 });
 
-const { groupEvents, filterExchangesByPeriod, distributeCost } = require('../../src/shared/sessionDetail');
+const {
+  groupEvents,
+  filterExchangesByPeriod,
+  distributeCost,
+  summarizeCacheContinuity,
+  resolveCacheContinuityPricing,
+  priceCacheContinuity
+} = require('../../src/shared/sessionDetail');
 const { localDate, localIso } = require('../helpers/localTime');
 
 function turn(ts, total, tools = []) {
   return { kind: 'turn', timestamp: ts, tokens: { input: total, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total }, tools };
 }
+
+function cacheTurn(timestamp, model, effort, cacheRead, inputTokens = 1_000_000) {
+  return {
+    timestamp,
+    model,
+    effort,
+    tokens: { input: inputTokens - cacheRead, cacheRead }
+  };
+}
+
+test('Codex cache continuity measures a switch drop, recovery, loss, and API equivalent', () => {
+  const context = (timestamp, model, effort) => JSON.stringify({
+    type: 'turn_context',
+    timestamp,
+    payload: { model, effort }
+  });
+  const usage = (timestamp, cachedInputTokens) => JSON.stringify({
+    type: 'event_msg',
+    timestamp,
+    payload: {
+      type: 'token_count',
+      info: { last_token_usage: { input_tokens: 1_000_000, cached_input_tokens: cachedInputTokens, output_tokens: 1_000 } }
+    }
+  });
+  const events = parseCodexTranscript([
+    context(localIso(2026, 5, 29, 23, 59, 56), 'gpt-old', 'high'),
+    usage(localIso(2026, 5, 29, 23, 59, 57), 900_000),
+    usage(localIso(2026, 5, 29, 23, 59, 58), 900_000),
+    usage(localIso(2026, 5, 29, 23, 59, 59), 900_000),
+    context(localIso(2026, 5, 30, 0, 0, 0), 'GPT-New', 'high'),
+    usage(localIso(2026, 5, 30, 0, 0, 1), 300_000),
+    usage(localIso(2026, 5, 30, 0, 0, 2), 880_000)
+  ].join('\n'));
+  const turns = events.filter((event) => event.kind === 'turn');
+  assert.deepEqual([turns[0].model, turns[0].effort, turns[3].model], ['gpt-old', 'high', 'GPT-New']);
+
+  const summary = summarizeCacheContinuity(groupEvents(events), 'today', localDate(2026, 5, 30, 12));
+  const basePriced = priceCacheContinuity(summary, {
+    'gpt-new': { inputCostPerToken: 4e-6, cacheReadInputTokenCost: 0.4e-6 }
+  });
+  const priced = priceCacheContinuity(summary, {
+    'gpt-new': {
+      inputCostPerToken: 4e-6,
+      cacheReadInputTokenCost: 0.4e-6,
+      inputCostPerTokenAbove272kTokens: 8e-6,
+      cacheReadInputTokenCostAbove272kTokens: 0.8e-6
+    }
+  });
+  const unavailable = priceCacheContinuity(summary);
+  const inputTierOnly = priceCacheContinuity(summary, {
+    'gpt-new': {
+      inputCostPerToken: 4e-6,
+      cacheReadInputTokenCost: 0.4e-6,
+      inputCostPerTokenAbove272kTokens: 8e-6
+    }
+  });
+  const cacheTierOnly = priceCacheContinuity(summary, {
+    'gpt-new': {
+      inputCostPerToken: 4e-6,
+      cacheReadInputTokenCost: 0.4e-6,
+      cacheReadInputTokenCostAbove272kTokens: 0.8e-6
+    }
+  });
+  assert.equal(priced.switchCount, 1);
+  assert.equal(priced.materialDropCount, 1);
+  assert.equal(priced.lostTokens, 620_000);
+  assert.equal(priced.latest.recovered, true);
+  assert.equal(priced.latest.recoveryCalls, 2);
+  assert.ok(Math.abs(basePriced.apiEquivalentUsd - 2.232) < 1e-9);
+  assert.ok(Math.abs(priced.apiEquivalentUsd - 4.464) < 1e-9);
+  assert.ok(Math.abs(inputTierOnly.apiEquivalentUsd - 4.712) < 1e-9);
+  assert.ok(Math.abs(cacheTierOnly.apiEquivalentUsd - 1.984) < 1e-9);
+  assert.equal(unavailable.pricedTokens, 0);
+});
+
+test('cache continuity detects model-only and effort-only switches', () => {
+  const modelOnly = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'model-a', 'unknown', 900_000),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'model-a', 'unknown', 900_000),
+    cacheTurn('2026-05-30T06:00:02.000Z', 'model-b', 'unknown', 200_000)
+  ] }]);
+  const effortOnly = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'unknown', 'high', 900_000),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'unknown', 'high', 900_000),
+    cacheTurn('2026-05-30T06:00:02.000Z', 'unknown', 'low', 200_000)
+  ] }]);
+  const sameModel = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'GPT-5', 'high', 900_000),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'gpt-5', 'high', 100_000)
+  ] }]);
+
+  assert.deepEqual([modelOnly.switchCount, modelOnly.modelSwitchCount, modelOnly.effortSwitchCount], [1, 1, 0]);
+  assert.deepEqual([effortOnly.switchCount, effortOnly.modelSwitchCount, effortOnly.effortSwitchCount], [1, 0, 1]);
+  assert.deepEqual(effortOnly.materialModels, []);
+  assert.equal(sameModel, null);
+});
+
+test('cache continuity stops a partial episode at the next detected switch', () => {
+  const summary = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'model-a', 'unknown', 90, 100),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'model-b', 'unknown', 0, 100),
+    cacheTurn('2026-05-30T06:00:02.000Z', 'model-b', 'low', 80, 100),
+    cacheTurn('2026-05-30T06:00:03.000Z', 'model-b', 'high', 50, 100)
+  ] }]);
+
+  assert.equal(summary.events[0].recoveryCalls, 2);
+  assert.equal(summary.events[0].recovered, false);
+  assert.equal(summary.events[0].endReason, 'next_switch');
+  assert.equal(summary.events[0].lostTokens, 100);
+  assert.equal(summary.lostTokens, 130);
+});
+
+test('cache continuity prices known models discovered inside a partial episode', () => {
+  const summary = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'unknown', 'high', 80, 100),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'unknown', 'low', 0, 100),
+    cacheTurn('2026-05-30T06:00:02.000Z', 'gpt-5', 'low', 10, 100)
+  ] }]);
+  const priced = priceCacheContinuity(summary, {
+    'gpt-5': { inputCostPerToken: 2e-6, cacheReadInputTokenCost: 0.2e-6 }
+  });
+
+  assert.deepEqual(summary.materialModels, ['gpt-5']);
+  assert.equal(priced.lostTokens, 150);
+  assert.equal(priced.pricedTokens, 70);
+  assert.ok(Math.abs(priced.apiEquivalentUsd - 0.000126) < 1e-12);
+});
+
+test('cache continuity includes exact material and recovery thresholds', () => {
+  const material = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'model-a', 'high', 1, 3),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'model-b', 'high', 2, 15)
+  ] }]);
+  const recovered = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'model-a', 'high', 5, 6),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'model-b', 'high', 0, 60),
+    cacheTurn('2026-05-30T06:00:02.000Z', 'model-b', 'high', 47, 60)
+  ] }]);
+
+  assert.equal(material.materialDropCount, 1);
+  assert.equal(recovered.events[0].recovered, true);
+  assert.equal(recovered.events[0].recoveryCalls, 2);
+});
+
+test('cache continuity baseline uses matching calls only within the prior three positions', () => {
+  const summary = summarizeCacheContinuity([{ turns: [
+    cacheTurn('2026-05-30T06:00:00.000Z', 'model-a', 'high', 90, 100),
+    cacheTurn('2026-05-30T06:00:01.000Z', 'model-a', 'high', 80, 100),
+    cacheTurn('2026-05-30T06:00:02.000Z', 'model-b', 'high', 10, 100),
+    cacheTurn('2026-05-30T06:00:03.000Z', 'model-a', 'high', 70, 100),
+    cacheTurn('2026-05-30T06:00:04.000Z', 'model-c', 'high', 59, 100)
+  ] }]);
+
+  assert.equal(summary.events.at(-1).baselineHitRate, 75);
+  assert.equal(summary.events.at(-1).dropPp, 16);
+});
+
+test('cache continuity stays linear across many switches', () => {
+  const turns = Array.from({ length: 100_000 }, (_, index) => ({
+    timestamp: new Date(1_700_000_000_000 + index).toISOString(),
+    model: index % 2 ? 'model-a' : 'model-b',
+    effort: 'high',
+    tokens: { input: 900, cacheRead: 100 }
+  }));
+  const startedAt = performance.now();
+  const summary = summarizeCacheContinuity([{ turns }]);
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.equal(summary.switchCount, turns.length - 1);
+  assert.ok(elapsedMs < 1200, `cache continuity took ${Math.round(elapsedMs)}ms`);
+});
+
+test('cache continuity pricing skips non-material sessions and enforces one deadline', async () => {
+  let calls = 0;
+  assert.deepEqual(await resolveCacheContinuityPricing({ materialModels: [] }, () => { calls += 1; }), {});
+  assert.equal(calls, 0);
+
+  const seen = [];
+  const signals = [];
+  const retryTimedOut = [];
+  const fallbackHooks = [];
+  const work = resolveCacheContinuityPricing(
+    { materialModels: ['model-a', 'model-b', 'model-c'] },
+    async (rows, options) => {
+      calls += 1;
+      seen.push(rows[0].model);
+      signals.push(options.signal);
+      retryTimedOut.push(options.retryTimedOut);
+      fallbackHooks.push(typeof options.onFallback);
+      if (rows[0].model === 'model-a') return { 'model-a': { inputCostPerToken: 1 } };
+      options.onFallback({ 'model-b': { inputCostPerToken: 2 } });
+      return new Promise(() => {});
+    },
+    { budgetMs: 20 }
+  );
+  let testTimer;
+  const result = await Promise.race([
+    work,
+    new Promise((_, reject) => { testTimer = setTimeout(() => reject(new Error('shared deadline was not enforced')), 250); })
+  ]).finally(() => clearTimeout(testTimer));
+  assert.equal(calls, 2);
+  assert.deepEqual(seen, ['model-a', 'model-b']);
+  assert.equal(signals[0], signals[1]);
+  assert.equal(signals[0].aborted, true);
+  assert.deepEqual(retryTimedOut, [true, true]);
+  assert.deepEqual(fallbackHooks, ['function', 'function']);
+  assert.equal(result['model-a'].inputCostPerToken, 1);
+  assert.equal(result['model-b'].inputCostPerToken, 2);
+});
 
 test('groupEvents groups turns under the preceding prompt', () => {
   const events = [

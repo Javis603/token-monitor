@@ -6205,6 +6205,7 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   if (detail?.tokenDataUnavailable === true) {
     container.append(detailNote(t('detailTokenDataUnavailable') || 'Token data is unavailable for this session.'));
   }
+  if (detail?.cacheContinuity) container.append(cacheContinuityNode(detail.cacheContinuity));
 
   const sort = document.createElement('button');
   sort.className = 'detail-sort';
@@ -6221,6 +6222,46 @@ function detailNote(text) {
   note.className = 'detail-note';
   note.textContent = text;
   return note;
+}
+
+function cacheContinuityNode(summary) {
+  const card = document.createElement('div');
+  card.className = 'detail-cache-continuity';
+  card.innerHTML = '<div class="detail-cache-title"></div><div class="detail-cache-metrics"></div><div class="detail-cache-latest"></div>';
+  card.querySelector('.detail-cache-title').textContent = t('cacheContinuity');
+  const switches = t('cacheContinuitySwitchSummary', {
+    switches: summary.switchCount,
+    models: summary.modelSwitchCount,
+    efforts: summary.effortSwitchCount
+  });
+  if (summary.materialDropCount === 0) {
+    card.querySelector('.detail-cache-metrics').textContent = `${switches} · ${t('cacheContinuityNoDrops')}`;
+    card.querySelector('.detail-cache-latest').remove();
+    return card;
+  }
+  const estimatedCost = summary.pricedTokens
+    ? t('cacheContinuityApiEquivalent', { cost: `${summary.pricedTokens < summary.lostTokens ? '~' : ''}${formatCost(summary.apiEquivalentUsd)}` })
+    : t('cacheContinuityApiUnavailable');
+  card.querySelector('.detail-cache-metrics').textContent = `${switches} · ${t('cacheContinuityDropSummary', {
+    drops: summary.materialDropCount,
+    lost: formatNumber(summary.lostTokens),
+    cost: estimatedCost
+  })}`;
+  const latest = summary.latest;
+  const notRecoveredKey = latest.endReason === 'next_switch'
+    ? 'cacheContinuityNotRecoveredBeforeSwitch'
+    : 'cacheContinuityNotRecoveredYet';
+  const recovery = latest.recovered
+    ? t('cacheContinuityRecovered', { calls: latest.recoveryCalls })
+    : t(latest.recoveryCalls === 1 ? `${notRecoveredKey}One` : notRecoveredKey, { calls: latest.recoveryCalls });
+  card.querySelector('.detail-cache-latest').textContent = t('cacheContinuityLatest', {
+    from: `${latest.fromModel}/${latest.fromEffort}`,
+    to: `${latest.toModel}/${latest.toEffort}`,
+    baseline: latest.baselineHitRate.toFixed(1),
+    first: latest.firstHitRate.toFixed(1),
+    recovery
+  });
+  return card;
 }
 
 function exchangeNode(row, max) {

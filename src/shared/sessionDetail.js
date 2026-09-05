@@ -5,6 +5,12 @@ const { resolveSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { readReasonixSessionEvents } = require('./reasonixSessionDetail');
 
+const CACHE_MATERIAL_DROP_PP = 20;
+const CACHE_RECOVERY_TOLERANCE_PP = 5;
+const CACHE_PERCENT_EPSILON = 1e-9;
+const CACHE_LONG_CONTEXT_THRESHOLD = 272_000;
+const CACHE_CONTINUITY_PRICING_BUDGET_MS = 3000;
+
 function num(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -133,13 +139,18 @@ function codexToolName(payload) {
 function parseCodexTranscript(text) {
   const events = [];
   let pendingTools = [];
+  let model = 'unknown';
+  let effort = 'unknown';
   for (const line of String(text || '').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     let obj;
     try { obj = JSON.parse(trimmed); } catch (_) { continue; }
     const payload = obj.payload || {};
-    if (obj.type === 'response_item' && (payload.type === 'function_call' || payload.type === 'custom_tool_call' || payload.type === 'tool_search_call')) {
+    if (obj.type === 'turn_context') {
+      model = String(payload.model || model).trim() || model;
+      effort = String(payload.effort || payload.reasoning_effort || effort).trim() || effort;
+    } else if (obj.type === 'response_item' && (payload.type === 'function_call' || payload.type === 'custom_tool_call' || payload.type === 'tool_search_call')) {
       const name = codexToolName(payload);
       if (name) pendingTools.push(name);
     } else if (obj.type === 'event_msg' && payload.type === 'mcp_tool_call_end') {
@@ -169,7 +180,7 @@ function parseCodexTranscript(text) {
         reasoning: u.reasoning_output_tokens
       });
       if (tokens.total === 0) { pendingTools = []; continue; } // empty bookkeeping tick — skip
-      events.push({ kind: 'turn', timestamp: obj.timestamp || '', tokens, tools: uniqueTools(pendingTools) });
+      events.push({ kind: 'turn', timestamp: obj.timestamp || '', tokens, tools: uniqueTools(pendingTools), model, effort });
       pendingTools = [];
     }
   }
@@ -224,6 +235,8 @@ function groupEvents(events) {
       // event.cost is set for OpenCode (real per-message cost); claude/codex leave it undefined → 0.
       const turnEntry = {
         ...(event.type ? { type: event.type } : {}),
+        ...(event.model ? { model: event.model } : {}),
+        ...(event.effort ? { effort: event.effort } : {}),
         timestamp: event.timestamp,
         tokens: event.tokens,
         tokensAvailable: event.tokensAvailable !== false,
@@ -267,6 +280,209 @@ function filterExchangesByPeriod(exchanges, period, now = new Date()) {
     result.push(finalizeExchange(next));
   }
   return result;
+}
+
+function median(values) {
+  const sorted = values.slice().sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function knownCoordinate(value) {
+  return Boolean(value && value !== 'unknown');
+}
+
+function matchesKnownConfiguration(call, configuration) {
+  return (!knownCoordinate(configuration.model) || call.model === configuration.model)
+    && (!knownCoordinate(configuration.effort) || call.effort === configuration.effort);
+}
+
+function switchCoordinates(before, after) {
+  return {
+    modelChanged: knownCoordinate(before.model) && knownCoordinate(after.model) && before.model !== after.model,
+    effortChanged: knownCoordinate(before.effort) && knownCoordinate(after.effort) && before.effort !== after.effort
+  };
+}
+
+function isMaterialDrop(event) {
+  return event.dropPp + CACHE_PERCENT_EPSILON >= CACHE_MATERIAL_DROP_PP;
+}
+
+function summarizeCacheContinuity(exchanges, period = 'total', now = new Date()) {
+  const calls = exchanges
+    .flatMap((exchange) => exchange.turns || [])
+    .map((turn) => {
+      const cachedInputTokens = Math.max(0, num(turn.tokens?.cacheRead));
+      const inputTokens = Math.max(0, num(turn.tokens?.input)) + cachedInputTokens;
+      const model = String(turn.model || '').trim().toLowerCase();
+      const effort = String(turn.effort || '').trim();
+      const modelKnown = knownCoordinate(model);
+      const effortKnown = knownCoordinate(effort);
+      if (!inputTokens || model === 'codex-auto-review' || (!modelKnown && !effortKnown)) return null;
+      return {
+        timestamp: turn.timestamp || '',
+        model: modelKnown ? model : 'unknown',
+        effort: effortKnown ? effort : 'unknown',
+        inputTokens,
+        cachedInputTokens,
+        hitRate: cachedInputTokens / inputTokens * 100
+      };
+    })
+    .filter(Boolean);
+  const events = [];
+  for (let index = 1; index < calls.length; index += 1) {
+    const before = calls[index - 1];
+    const after = calls[index];
+    const { modelChanged, effortChanged } = switchCoordinates(before, after);
+    if (!modelChanged && !effortChanged) continue;
+    // Mirror Cache Meter: inspect the previous three chronological calls, then keep the old config.
+    // This avoids reviving a stale baseline from an earlier run of the same configuration.
+    const previous = calls.slice(Math.max(0, index - 3), index)
+      .filter((call) => matchesKnownConfiguration(call, before))
+      .map((call) => call.hitRate);
+    if (previous.length === 0) continue;
+    const baselineHitRate = median(previous);
+    const lossCalls = [];
+    let recovered = false;
+    let recoveryCalls = 0;
+    let endedBySwitch = false;
+    for (let callIndex = index; callIndex < calls.length; callIndex += 1) {
+      const call = calls[callIndex];
+      if (callIndex > index) {
+        const boundary = switchCoordinates(calls[callIndex - 1], call);
+        if (boundary.modelChanged || boundary.effortChanged) {
+          endedBySwitch = true;
+          break;
+        }
+      }
+      if (!matchesKnownConfiguration(call, after)) break;
+      recoveryCalls += 1;
+      lossCalls.push({
+        model: call.model,
+        inputTokens: call.inputTokens,
+        lostTokens: Math.max(0, Math.round(call.inputTokens * baselineHitRate / 100) - call.cachedInputTokens)
+      });
+      if (call.hitRate + CACHE_PERCENT_EPSILON >= baselineHitRate - CACHE_RECOVERY_TOLERANCE_PP) {
+        recovered = true;
+        break;
+      }
+    }
+    const lostTokens = lossCalls.reduce((sum, call) => sum + call.lostTokens, 0);
+    events.push({
+      timestamp: after.timestamp,
+      fromModel: before.model,
+      fromEffort: before.effort,
+      toModel: after.model,
+      toEffort: after.effort,
+      baselineHitRate,
+      firstHitRate: after.hitRate,
+      dropPp: Math.max(0, baselineHitRate - after.hitRate),
+      lostTokens,
+      recoveryCalls,
+      recovered,
+      endReason: recovered ? 'recovered' : (endedBySwitch ? 'next_switch' : 'log_end'),
+      modelChanged,
+      effortChanged,
+      lossCalls
+    });
+  }
+  // An episode belongs to its first post-switch call; period views never split one loss episode.
+  const scopedEvents = events.filter((event) => withinPeriod(event.timestamp, period, now));
+  if (scopedEvents.length === 0) return null;
+  const materialEvents = scopedEvents.filter(isMaterialDrop);
+  const recoveredEvents = materialEvents.filter((event) => event.recovered);
+  return {
+    switchCount: scopedEvents.length,
+    modelSwitchCount: scopedEvents.filter((event) => event.modelChanged).length,
+    effortSwitchCount: scopedEvents.filter((event) => event.effortChanged).length,
+    materialDropCount: materialEvents.length,
+    lostTokens: materialEvents.reduce((sum, event) => sum + event.lostTokens, 0),
+    materialModels: Array.from(new Set(materialEvents
+      .flatMap((event) => event.lossCalls.map((call) => call.model))
+      .filter(knownCoordinate))),
+    averageRecoveryCalls: recoveredEvents.length
+      ? recoveredEvents.reduce((sum, event) => sum + event.recoveryCalls, 0) / recoveredEvents.length
+      : null,
+    events: scopedEvents
+  };
+}
+
+async function resolveCacheContinuityPricing(summary, resolvePricing, options = {}) {
+  const models = Array.isArray(summary?.materialModels) ? summary.materialModels : [];
+  if (models.length === 0 || typeof resolvePricing !== 'function') return {};
+  const configuredBudget = Number(options.budgetMs);
+  const budgetMs = Number.isFinite(configuredBudget) && configuredBudget > 0
+    ? Math.trunc(configuredBudget)
+    : CACHE_CONTINUITY_PRICING_BUDGET_MS;
+  const controller = new AbortController();
+  const timedOut = Symbol('timed-out');
+  const deadline = Date.now() + budgetMs;
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(timedOut);
+    }, budgetMs);
+  });
+  const pricingByModel = {};
+  try {
+    for (const model of models) {
+      const commandTimeoutMs = deadline - Date.now();
+      if (commandTimeoutMs <= 0) break;
+      const fallback = {};
+      const lookup = Promise.resolve()
+        .then(() => resolvePricing([{ model }], {
+          commandTimeoutMs,
+          signal: controller.signal,
+          retryTimedOut: true,
+          onFallback(pricing) {
+            if (pricing && typeof pricing === 'object') Object.assign(fallback, pricing);
+          }
+        }))
+        .catch(() => ({}));
+      const result = await Promise.race([lookup, timeout]);
+      if (result === timedOut) {
+        Object.assign(pricingByModel, fallback);
+        break;
+      }
+      Object.assign(pricingByModel, fallback);
+      if (result && typeof result === 'object') Object.assign(pricingByModel, result);
+    }
+    return pricingByModel;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function priceCacheContinuity(summary, pricingByModel = {}) {
+  if (!summary) return null;
+  const events = summary.events.map((event) => {
+    let apiEquivalentUsd = 0;
+    let pricedTokens = 0;
+    for (const call of event.lossCalls) {
+      const pricing = pricingByModel[String(call.model || '').trim().toLowerCase()];
+      const longContext = call.inputTokens > CACHE_LONG_CONTEXT_THRESHOLD;
+      const inputRate = longContext && Number.isFinite(pricing?.inputCostPerTokenAbove272kTokens)
+        ? pricing.inputCostPerTokenAbove272kTokens
+        : pricing?.inputCostPerToken;
+      const cacheRate = longContext && Number.isFinite(pricing?.cacheReadInputTokenCostAbove272kTokens)
+        ? pricing.cacheReadInputTokenCostAbove272kTokens
+        : pricing?.cacheReadInputTokenCost;
+      if (!Number.isFinite(inputRate) || !Number.isFinite(cacheRate) || inputRate < cacheRate) continue;
+      pricedTokens += call.lostTokens;
+      apiEquivalentUsd += call.lostTokens * (inputRate - cacheRate);
+    }
+    const { lossCalls, ...publicEvent } = event;
+    return { ...publicEvent, pricedTokens, apiEquivalentUsd };
+  });
+  const materialEvents = events.filter(isMaterialDrop);
+  return {
+    ...summary,
+    pricedTokens: materialEvents.reduce((sum, event) => sum + event.pricedTokens, 0),
+    apiEquivalentUsd: materialEvents.reduce((sum, event) => sum + event.apiEquivalentUsd, 0),
+    latest: materialEvents[materialEvents.length - 1] || null,
+    events
+  };
 }
 
 function distributeCost(exchanges, sessionCost) {
@@ -353,9 +569,19 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
   }
   const events = parseByClient(client, text);
   const now = new Date((deps.now || Date.now)());
-  const grouped = filterExchangesByPeriod(groupEvents(events), period, now);
+  const exchanges = groupEvents(events);
+  const grouped = filterExchangesByPeriod(exchanges, period, now);
   distributeCost(grouped, sessionCost);
-  return { found: true, client, sessionId, period, exchanges: grouped, totals: totalsOf(grouped, sessionCost) };
+  const cacheContinuity = client === 'codex' ? summarizeCacheContinuity(exchanges, period, now) : null;
+  return {
+    found: true,
+    client,
+    sessionId,
+    period,
+    exchanges: grouped,
+    totals: totalsOf(grouped, sessionCost),
+    ...(cacheContinuity ? { cacheContinuity } : {})
+  };
 }
 
 module.exports = {
@@ -364,6 +590,9 @@ module.exports = {
   makeTokens,
   groupEvents,
   filterExchangesByPeriod,
+  summarizeCacheContinuity,
+  resolveCacheContinuityPricing,
+  priceCacheContinuity,
   distributeCost,
   readReasonixSessionDetail,
   readSessionDetail

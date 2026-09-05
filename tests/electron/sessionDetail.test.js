@@ -7,8 +7,10 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const { exchangeRows, formatToolList } = require('../../src/electron/renderer/sessionDetail');
+const { MESSAGES, translate } = require('../../src/electron/renderer/i18n');
 
 const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+const mainSource = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 
 function deferred() {
   let resolve;
@@ -114,6 +116,38 @@ test('exchangeRows labels compaction usage without consuming a reply number', ()
 test('formatToolList dedupes and truncates', () => {
   assert.equal(formatToolList(['Read', 'Read', 'Bash']), 'Read · Bash');
   assert.equal(formatToolList([]), '');
+});
+
+test('cache continuity copy is complete in every locale', () => {
+  const keys = [
+    'cacheContinuity',
+    'cacheContinuitySwitchSummary',
+    'cacheContinuityNoDrops',
+    'cacheContinuityDropSummary',
+    'cacheContinuityApiEquivalent',
+    'cacheContinuityApiUnavailable',
+    'cacheContinuityLatest',
+    'cacheContinuityRecovered',
+    'cacheContinuityNotRecoveredBeforeSwitch',
+    'cacheContinuityNotRecoveredBeforeSwitchOne',
+    'cacheContinuityNotRecoveredYet',
+    'cacheContinuityNotRecoveredYetOne'
+  ];
+  for (const [locale, messages] of Object.entries(MESSAGES)) {
+    for (const key of keys) assert.equal(typeof messages[key], 'string', `${locale} is missing ${key}`);
+  }
+  assert.equal(translate('zh-CN', 'cacheContinuity'), '缓存连续性');
+  assert.match(translate('en', 'cacheContinuityRecovered', { calls: 2 }), /2 calls/);
+  assert.match(translate('en', 'cacheContinuityNotRecoveredYetOne'), /1 call observed/);
+  assert.match(rendererSource, /latest\.recoveryCalls === 1 \? `\$\{notRecoveredKey\}One` : notRecoveredKey/);
+});
+
+test('session detail resolves custom model pricing through the bounded shared resolver', () => {
+  const start = mainSource.indexOf("ipcMain.handle('session:getDetail'");
+  const end = mainSource.indexOf("ipcMain.handle('stream:status'", start);
+  const handler = mainSource.slice(start, end);
+  assert.match(handler, /await resolveCacheContinuityPricing\(detail\.cacheContinuity, resolvePromaPricing\)/);
+  assert.doesNotMatch(handler, /readTokscalePricingCatalog/);
 });
 
 test('openSessionDetail ignores a stale period result that completes last', async () => {

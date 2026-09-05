@@ -5432,6 +5432,10 @@ html.is-windows .limit-live-badge {
 .detail-back { background: transparent; border: 0; color: var(--muted, #8a8a90); font: inherit; cursor: pointer; padding: 0; }
 .detail-sort { background: transparent; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: var(--muted, #8a8a90); font: inherit; font-size: 11px; cursor: pointer; padding: 2px 8px; margin-block: -4px; }
 .detail-note { color: var(--muted, #8a8a90); padding: 16px 4px; text-align: center; }
+.detail-cache-continuity { display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--line); border-radius: 8px; background: rgba(var(--panel-rgb), 0.35); padding: 8px 10px; }
+.detail-cache-title { color: var(--accent); font-weight: 600; }
+.detail-cache-metrics { color: var(--text); line-height: 1.35; }
+.detail-cache-latest { color: var(--muted); font-size: 10px; line-height: 1.35; }
 .detail-exchange { border-bottom: 1px dashed rgba(255,255,255,0.08); padding: 6px 0; }
 .detail-exchange .bar { height: 3px; margin-left: 20px; width: auto; }
 .detail-ex-head { display: flex; align-items: baseline; gap: 8px; cursor: pointer; }
