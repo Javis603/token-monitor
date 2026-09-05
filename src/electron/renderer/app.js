@@ -5054,17 +5054,26 @@ function renderProviderWindows(provider, color) {
       )),
       weekly && limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68),
       ...oneTimeWindows.map((window) => limitWindowNode(window.label || 'Start Plan', window, color, 0.68)),
-      mcp && !oneTimeWindows.length && limitWindowNode('MCP', mcp, color, 0.68),
-      balanceWindow && limitWindowNode(
+      mcp && !oneTimeWindows.length && limitWindowNode('MCP', mcp, color, 0.68)
+    ].filter(Boolean);
+    if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
+    windows.append(...nodes);
+    // Balance sits at the bottom on its own full-width row: coding-plan quota
+    // is consumed before the cash pool, so the money line reads as the last
+    // resort.
+    if (balanceWindow) {
+      const balanceNode = limitWindowNode(
         'Balance',
         { remainingPercent: creditsMeterPercent(provider, balanceWindow) },
         color,
         0.95,
         formatMoney(balanceWindow.remaining, balanceWindow.currency)
-      )
-    ].filter(Boolean);
-    if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
-    windows.append(...nodes);
+      );
+      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
+      windows.append(balanceNode);
+      const spendNode = provider.balance && providerSpendNode(provider.balance);
+      if (spendNode) windows.append(spendNode);
+    }
   } else if (provider.provider === 'volcengine') {
     const session = windowForKind(provider, 'session');
     const daily = windowForKind(provider, 'daily');

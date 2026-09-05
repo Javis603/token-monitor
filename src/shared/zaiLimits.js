@@ -7,6 +7,8 @@ const path = require('node:path');
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { runWithProbeDeadline } = require('./probeDeadline');
+const { sharedDataDir } = require('./config');
+const { recordConsumption } = require('./deepseekBalanceHistory');
 const { discoverZcodeConnection } = require('./zcodeDiscovery');
 
 const ZAI_FETCH_TIMEOUT_MS = 12_000;
@@ -326,13 +328,43 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       const balanceWindow = balanceResult.status === 'fulfilled'
         ? zaiBalanceWindow(balanceResult.value, region)
         : null;
+      // Spend tracking mirrors DeepSeek: the report's cumulative total goes
+      // through the shared balance history, which derives the today/week/
+      // month deltas the finance report does not return.
+      let balance = null;
+      if (balanceWindow) {
+        const balanceData = balanceResult.status === 'fulfilled' ? balanceResult.value?.data : null;
+        const totalSpend = numberOrNull(balanceData?.totalSpendAmount);
+        let spend = null;
+        if (totalSpend !== null) {
+          try {
+            spend = recordConsumption({
+              accountKey: hashKey('zai', key),
+              currency: balanceWindow.currency,
+              paid: totalSpend,
+              now,
+              storePath: deps.zaiBalanceStorePath || path.join(sharedDataDir({ env }), 'zai-balance.json')
+            }, deps);
+          } catch (_) {}
+        }
+        balance = {
+          amount: balanceWindow.remaining,
+          currency: balanceWindow.currency,
+          todaySpend: spend ? spend.todaySpend : numberOrNull(balanceData?.todaySpendAmount),
+          allTimeSpend: totalSpend,
+          ...(spend ? {
+            weekSpend: spend.weekSpend,
+            monthSpend: spend.monthSpend,
+            trackingSince: spend.trackingSince,
+            monthSinceTracking: spend.monthSinceTracking
+          } : {})
+        };
+      }
       return {
         windows: balanceWindow ? [...usage.windows, balanceWindow] : usage.windows,
         plan: usage.plan,
         accountKey: hashKey('zai', key),
-        balance: balanceWindow
-          ? { amount: balanceWindow.remaining, currency: balanceWindow.currency }
-          : null,
+        balance,
         hasAnything: usage.windows.length > 0 || Boolean(balanceWindow),
         quotaFailed: false
       };
