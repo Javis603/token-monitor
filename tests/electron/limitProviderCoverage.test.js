@@ -72,6 +72,23 @@ test('every catalog provider reaches an account group or a connection explainer'
   assert.deepEqual([...configured].sort(), [...LIMIT_PROVIDER_IDS].sort());
 });
 
+test('each mapped element belongs to the provider that points at it', () => {
+  // Existing in index.html is not enough: `cursor: 'claudeAccountGroup'` resolves
+  // to a real element, so the DOM check passes while the settings page drives
+  // Claude's controls from Cursor's row. Every id today is its provider id
+  // followed by a capitalised suffix, and requiring the capital is what keeps
+  // zai from claiming zaiteam's elements.
+  for (const [map, name] of [[accountGroups, 'account group'], [accountStatuses, 'status pill']]) {
+    for (const [provider, elementId] of Object.entries(map)) {
+      assert.match(
+        elementId,
+        new RegExp(`^${provider}[A-Z]`),
+        `${provider} points at a ${name} named for another provider: #${elementId}`
+      );
+    }
+  }
+});
+
 test('every mapped settings element exists in index.html', () => {
   const html = read('index.html');
   // Locate the tag and reject one that falls inside a comment, rather than
