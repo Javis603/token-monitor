@@ -1098,19 +1098,23 @@ test('Volcengine renders quota windows as paired rows with an odd final window f
   assert.match(renderProviderWindows, /windows\.append\(\.\.\.nodes\)/);
 });
 
-test('Z.ai renders 5-hour and Weekly first, then MCP full-width', () => {
+test('Z.ai renders session, daily and billing windows with their own labels', () => {
   const app = readRendererFile('app.js');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
 
   assert.match(renderProviderWindows, /provider\.provider === 'zai'/);
-  assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
+  assert.match(renderProviderWindows, /const session = windowForKind\(provider, 'session'\);/);
   assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
   assert.match(renderProviderWindows, /const mcp = windowForKind\(provider, 'billing'\);/);
-  assert.match(renderProviderWindows, /const fiveHourNode = limitWindowNode\('5-hour', fiveHour, color, 0\.95\)/);
-  assert.match(renderProviderWindows, /if \(!weekly\) fiveHourNode\.classList\.add\('limit-window-wide'\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\('Weekly', weekly, color, 0\.68\)/);
-  assert.match(renderProviderWindows, /const mcpNode = limitWindowNode\('MCP', mcp, color, 0\.68\)/);
-  assert.match(renderProviderWindows, /mcpNode\.classList\.add\('limit-window-wide'\)/);
+  assert.match(renderProviderWindows, /const dailyWindows = windowsForKind\(provider, 'daily'\);/);
+  // Start/Weekend plan buckets arrive per model with their own labels; the
+  // subscription MCP window must only render when no plan bucket claimed the
+  // billing lane.
+  assert.match(renderProviderWindows, /dailyWindows\.map\(\(window, index\)/);
+  // Plan buckets carry their ZCode plan id in limitId; the subscription MCP
+  // window never does, so the billing lane owner is decided by presence.
+  assert.match(renderProviderWindows, /window\?\.kind === 'billing' && window\?\.limitId/);
+  assert.match(renderProviderWindows, /mcp && !oneTimeWindows\.length && limitWindowNode\('MCP', mcp, color, 0\.68\)/);
 });
 
 test('Copilot renders monthly Premium and Chat quotas as billing windows', () => {

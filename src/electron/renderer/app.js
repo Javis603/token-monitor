@@ -5030,20 +5030,33 @@ function renderProviderWindows(provider, color) {
       windows.append(node);
     }
   } else if (provider.provider === 'zai' || provider.provider === 'zaiteam') {
-    const fiveHour = windowForKind(provider, 'session');
+    // Subscription quota keeps the canonical 5-hour/Weekly/MCP trio; Start and
+    // Weekend plan buckets arrive per model (daily or one-time billing) and
+    // render as their own labeled rows. The subscription MCP window only owns
+    // the billing lane when no plan bucket does.
+    const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
     const mcp = windowForKind(provider, 'billing');
-    if (fiveHour) {
-      const fiveHourNode = limitWindowNode('5-hour', fiveHour, color, 0.95);
-      if (!weekly) fiveHourNode.classList.add('limit-window-wide');
-      windows.append(fiveHourNode);
-    }
-    if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
-    if (mcp) {
-      const mcpNode = limitWindowNode('MCP', mcp, color, 0.68);
-      mcpNode.classList.add('limit-window-wide');
-      windows.append(mcpNode);
-    }
+    const dailyWindows = windowsForKind(provider, 'daily');
+    const oneTimeWindows = (provider.windows || []).filter((window) => (
+      // Plan buckets carry their ZCode plan id; the subscription MCP window
+      // never does.
+      window?.kind === 'billing' && window?.limitId
+    ));
+    const nodes = [
+      session && limitWindowNode(session.label || '5-hour', session, color, 0.95),
+      ...dailyWindows.map((window, index) => limitWindowNode(
+        window.label || (dailyWindows.length > 1 ? `Daily ${index + 1}` : 'Daily'),
+        window,
+        color,
+        0.78
+      )),
+      weekly && limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68),
+      ...oneTimeWindows.map((window) => limitWindowNode(window.label || 'Start Plan', window, color, 0.68)),
+      mcp && !oneTimeWindows.length && limitWindowNode('MCP', mcp, color, 0.68)
+    ].filter(Boolean);
+    if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
+    windows.append(...nodes);
   } else if (provider.provider === 'volcengine') {
     const session = windowForKind(provider, 'session');
     const daily = windowForKind(provider, 'daily');
@@ -14801,7 +14814,9 @@ function copilotAccountStatusText(provider, configured, source, enabled = true) 
 function apiKeyAccountStatusText(providerName, provider, configured, source, enabled = true) {
   const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
   if (accountStatus === 'linked') {
-    return t(source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`);
+    if (source === 'env') return t(`settings.${providerName}.statusEnv`);
+    if (source === 'zcode-auto') return t(`settings.${providerName}.statusZcode`);
+    return t(`settings.${providerName}.statusSet`);
   }
   if (accountStatus === 'invalid') return t(`settings.${providerName}.statusInvalid`);
   if (accountStatus === 'notConfigured') return t(`settings.${providerName}.statusNotSet`);
@@ -14998,8 +15013,11 @@ function renderExternalProviderStatus(providerName) {
     statusEl,
     pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
   );
-  manualPanel.classList.toggle('hidden', linked);
-  openBtn.classList.toggle('hidden', linked);
+  // zcode-auto keeps the manual panel reachable: the discovered login is not
+  // user-entered, so the override input stays available without hiding it.
+  const autoDiscovered = providerName === 'zai' && source === 'zcode-auto';
+  manualPanel.classList.toggle('hidden', linked && !autoDiscovered);
+  openBtn.classList.toggle('hidden', linked && !autoDiscovered);
   const canClearConfiguredClaude = providerName === 'claude' && configured;
   logoutBtn.classList.toggle('hidden', source !== 'settings' || (!linked && !canClearConfiguredClaude));
   refreshBtn.classList.toggle('hidden', !configured);
