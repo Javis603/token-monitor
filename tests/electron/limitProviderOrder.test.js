@@ -1,8 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -13,9 +11,7 @@ const {
   reorderLimitProvider
 } = require('../../src/electron/renderer/limitProviderOrder');
 const { parseLimitProviders } = require('../../src/shared/limitCollector');
-
-const rootDir = path.join(__dirname, '..', '..');
-const read = (file) => fs.readFileSync(path.join(rootDir, file), 'utf8');
+const { LIMIT_PROVIDER_PRESENTATION } = require('../../src/shared/limitProviderLabels');
 
 const providers = [
   { id: 'claude', label: 'Claude' },
@@ -24,13 +20,11 @@ const providers = [
   { id: 'antigravity', label: 'Antigravity' }
 ];
 
+// The expected list stays spelled out rather than derived: this order is the
+// default a fresh install writes to settings.limitProviderOrder, so changing it
+// is a compatibility decision that should have to be made in a diff.
 test('default provider order follows tracked tools, named services, then third-party fallback', () => {
-  const app = read('src/electron/renderer/app.js');
-  const block = app.slice(
-    app.indexOf('const LIMIT_PROVIDERS = ['),
-    app.indexOf('const TRAY_ICON_VARIANTS')
-  );
-  const ids = [...block.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1]);
+  const ids = LIMIT_PROVIDER_PRESENTATION.map((provider) => provider.id);
 
   assert.deepEqual(ids, [
     'claude',
@@ -61,12 +55,7 @@ test('default provider order follows tracked tools, named services, then third-p
 });
 
 test('renderer provider order matches the collector default for new settings', () => {
-  const app = read('src/electron/renderer/app.js');
-  const block = app.slice(
-    app.indexOf('const LIMIT_PROVIDERS = ['),
-    app.indexOf('const TRAY_ICON_VARIANTS')
-  );
-  const ids = [...block.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1]);
+  const ids = LIMIT_PROVIDER_PRESENTATION.map((provider) => provider.id);
 
   assert.deepEqual(ids, parseLimitProviders());
 });

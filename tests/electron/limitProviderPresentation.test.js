@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
+const { LIMIT_PROVIDER_PRESENTATION, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviderLabels');
 
 const {
   antigravityQuotaWindow,
@@ -2411,7 +2412,7 @@ test('Kimi credential statuses are localized in settings', () => {
 
 test('Kimi usage and limits share the canonical provider id and vendor color', () => {
   const app = readRendererFile('app.js');
-  assert.match(app, /\{ id: 'kimi', label: 'Kimi' \}/);
+  assert.equal(LIMIT_PROVIDER_LABELS.kimi, 'Kimi');
   assert.match(app, /const color = id === 'mimo' \? clientColors\.xiaomi : \(clientColors\[id\] \|\| clientColors\.default\)/);
 });
 
@@ -3533,10 +3534,7 @@ test('removing a ledger entry has to be confirmed, like the rows above it', () =
 test('every provider a subscription can name has a mark to identify it by', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  const providerBlock = app.slice(app.indexOf('const LIMIT_PROVIDERS = ['));
-  const ids = [...providerBlock.slice(0, providerBlock.indexOf('];')).matchAll(/\bid: '([^']+)'/g)]
-    .map((match) => match[1]);
-  assert.ok(ids.length >= 19, 'LIMIT_PROVIDERS should be parsed, not empty');
+  const ids = LIMIT_PROVIDER_PRESENTATION.map((provider) => provider.id);
 
   // .row-icon paints currentColor through a mask, so an id with no mask rule
   // behind it renders as a solid square — worse than no icon at all.

@@ -2,6 +2,7 @@
 
 const { KNOWN_CLIENTS } = require('./clientTracking');
 const { LIMIT_PROVIDER_IDS, VALID_LIMIT_WINDOW_METRICS } = require('./limitProviders');
+const { LIMIT_PROVIDER_LABELS } = require('./limitProviderLabels');
 
 const MAC_WIDGET_SCHEMA_VERSION = 6;
 const MAC_WIDGET_FRESHNESS_HEARTBEAT_MS = 5 * 60 * 1000;
@@ -264,38 +265,10 @@ function buildQuota(limits) {
   }).map(({ _providerOrdinal, ...provider }) => provider).slice(0, 10);
 }
 
-// Mirrors LIMIT_PROVIDERS in src/electron/renderer/app.js: this is the name the
-// widget actually shows, since buildQuota stamps it onto every row as
+// The name the widget actually shows: buildQuota stamps it onto every row as
 // displayName and the Swift side prefers that over its own fallback map.
-const PROVIDER_LABELS = Object.freeze({
-  antigravity: 'Antigravity',
-  claude: 'Claude',
-  codex: 'Codex',
-  commandcode: 'Command Code',
-  copilot: 'GitHub Copilot',
-  cursor: 'Cursor',
-  deepseek: 'DeepSeek',
-  grok: 'Grok',
-  kiro: 'Kiro',
-  kimi: 'Kimi',
-  minimax: 'Minimax',
-  mimo: 'MiMo',
-  ollama: 'Ollama',
-  opencode: 'OpenCode',
-  openrouter: 'OpenRouter',
-  qoder: 'Qoder',
-  trae: 'Trae CN',
-  workbuddy: 'WorkBuddy',
-  thirdparty: 'Third-party APIs',
-  volcengine: 'Volcengine',
-  alibaba: 'Alibaba Cloud',
-  zai: 'GLM',
-  zaiteam: 'GLM Team',
-  zed: 'Zed'
-});
-
 function providerLabel(provider) {
-  return PROVIDER_LABELS[provider] || provider;
+  return LIMIT_PROVIDER_LABELS[provider] || provider;
 }
 
 function buildModels(period) {

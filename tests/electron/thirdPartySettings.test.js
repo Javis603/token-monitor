@@ -9,6 +9,7 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..', '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 const { VENDOR_LABELS, VENDOR_ORDER } = require('../../src/electron/renderer/themePresets');
+const { LIMIT_PROVIDER_PRESENTATION, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviderLabels');
 
 test('third-party settings separate presets, scope, and safe custom mappings', () => {
   const html = read('src/electron/renderer/index.html');
@@ -121,7 +122,7 @@ test('third-party Limits presentation uses compact scope labels and a details to
   const styles = read('src/electron/renderer/styles.css');
   const colors = read('src/electron/renderer/usageCharts.js');
 
-  assert.match(app, /\{ id: 'thirdparty', label: 'Third-party APIs' \}/);
+  assert.equal(LIMIT_PROVIDER_LABELS.thirdparty, 'Third-party APIs');
   assert.match(app, /provider\.provider === 'thirdparty'/);
   assert.match(app, /function thirdPartyQuotaWindow/);
   assert.match(app, /quotaWindow\?\.label \|\| 'Balance'/);
@@ -295,11 +296,8 @@ test('third-party fallback stays last after named providers across product surfa
   assert.ok(html.indexOf('id="thirdpartyAccountGroup"') > html.indexOf('id="copilotAccountGroup"'));
 
   const app = read('src/electron/renderer/app.js');
-  const providerOrder = app.slice(
-    app.indexOf('const LIMIT_PROVIDERS = ['),
-    app.indexOf('const DEFAULT_LIMIT_PROVIDER_ORDER')
-  );
-  assert.ok(providerOrder.indexOf("{ id: 'thirdparty'") > providerOrder.indexOf("{ id: 'ollama'"));
+  const providerOrder = LIMIT_PROVIDER_PRESENTATION.map((provider) => provider.id);
+  assert.ok(providerOrder.indexOf('thirdparty') > providerOrder.indexOf('ollama'));
   const iconProviders = app.slice(
     app.indexOf('const clientsWithIcon = new Set(['),
     app.indexOf('function osIconFor')

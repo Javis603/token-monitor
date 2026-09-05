@@ -53,32 +53,7 @@ function iconKindFor(rowData, breakdown) {
     : { kind: 'dot' };
 }
 
-const LIMIT_PROVIDERS = [
-  { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'opencode', label: 'OpenCode' },
-  { id: 'cursor', label: 'Cursor' },
-  { id: 'antigravity', label: 'Antigravity' },
-  { id: 'kimi', label: 'Kimi' },
-  { id: 'grok', label: 'Grok' },
-  { id: 'copilot', label: 'GitHub Copilot' },
-  { id: 'zed', label: 'Zed' },
-  { id: 'commandcode', label: 'Command Code' },
-  { id: 'mimo', label: 'MiMo' },
-  { id: 'zai', label: 'GLM' },
-  { id: 'zaiteam', label: 'GLM Team' },
-  { id: 'kiro', label: 'Kiro' },
-  { id: 'workbuddy', label: 'WorkBuddy' },
-  { id: 'qoder', label: 'Qoder' },
-  { id: 'deepseek', label: 'DeepSeek' },
-  { id: 'openrouter', label: 'OpenRouter' },
-  { id: 'minimax', label: 'Minimax' },
-  { id: 'volcengine', label: 'Volcengine' },
-  { id: 'ollama', label: 'Ollama' },
-  { id: 'trae', label: 'Trae CN' },
-  { id: 'alibaba', label: 'Alibaba Cloud' },
-  { id: 'thirdparty', label: 'Third-party APIs' }
-];
+const LIMIT_PROVIDERS = window.TokenMonitorLimitProviderLabels.LIMIT_PROVIDER_PRESENTATION;
 const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   claude: 'claudeAccountGroup',
   codex: 'codexAccountGroup',
