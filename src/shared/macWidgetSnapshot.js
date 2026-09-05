@@ -1,8 +1,7 @@
 'use strict';
 
 const { KNOWN_CLIENTS } = require('./clientTracking');
-const { LIMIT_PROVIDER_IDS, VALID_LIMIT_WINDOW_METRICS } = require('./limitProviders');
-const { LIMIT_PROVIDER_LABELS } = require('./limitProviderLabels');
+const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } = require('./limitProviders');
 
 const MAC_WIDGET_SCHEMA_VERSION = 6;
 const MAC_WIDGET_FRESHNESS_HEARTBEAT_MS = 5 * 60 * 1000;

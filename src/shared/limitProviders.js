@@ -1,45 +1,103 @@
 'use strict';
 
-// Keep provider order stable: it is also the default order for a new install.
-// Saved user ordering is parsed separately and must not be overwritten.
-const LIMIT_PROVIDER_IDS = Object.freeze([
-  'claude', 'codex', 'opencode', 'cursor', 'antigravity', 'kimi', 'grok',
-  'copilot', 'zed', 'commandcode', 'mimo', 'zai', 'zaiteam', 'kiro', 'workbuddy',
-  'qoder', 'deepseek', 'openrouter', 'minimax', 'volcengine', 'ollama', 'trae',
-  'alibaba', 'thirdparty'
-]);
+// The AI Tool Limits provider catalog: one entry per wired provider, in the
+// order a fresh install gets.
+//
+// This is the single source of truth for a provider's identity — id, display
+// order, and the name every desktop surface shows. Ids are derived from the
+// catalog rather than listed again, so the two cannot drift.
+//
+// Labels live here rather than in a desktop-only module because the split was
+// not worth its own file: adding or reordering a provider changes the id list
+// anyway, which is what moves the Hub core build id, and a label has been
+// renamed on its own exactly once in this project's history. The Worker carries
+// a few strings it never reads; that is the whole cost.
+//
+// Pure data plus one pure function, no DOM and no Node built-ins, so the widget
+// renderer can load it as a plain <script>, the Worker can vendor it, and
+// node:test can require it.
+(function exposeLimitProviders(root, factory) {
+  const api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  if (root) root.TokenMonitorLimitProviders = api;
+})(typeof window !== 'undefined' ? window : null, function createLimitProvidersApi() {
+  // Order here IS the provider order: it is what the renderer spreads into
+  // DEFAULT_LIMIT_PROVIDER_ORDER, so changing it changes what a fresh install
+  // writes to settings. Saved user ordering is parsed separately and must not
+  // be overwritten. tests/electron/limitProviderOrder.test.js pins this order.
+  //
+  // `settingsLabel` overrides `label` wherever the desktop names the provider as
+  // a tool you configure or pay for: the AI Tool Limits and Home provider lists,
+  // the settings search index, and every subscription surface through
+  // subscriptionProviderLabel(). It is not scoped to one list — adding one
+  // renames the provider on all of them at once. Surfaces that name a live
+  // quota rather than a configured tool keep `label`, as the tray detail does.
+  const LIMIT_PROVIDER_CATALOG = Object.freeze([
+    { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
+    { id: 'codex', label: 'Codex' },
+    { id: 'opencode', label: 'OpenCode' },
+    { id: 'cursor', label: 'Cursor' },
+    { id: 'antigravity', label: 'Antigravity' },
+    { id: 'kimi', label: 'Kimi' },
+    { id: 'grok', label: 'Grok' },
+    { id: 'copilot', label: 'GitHub Copilot' },
+    { id: 'zed', label: 'Zed' },
+    { id: 'commandcode', label: 'Command Code' },
+    { id: 'mimo', label: 'MiMo' },
+    { id: 'zai', label: 'GLM' },
+    { id: 'zaiteam', label: 'GLM Team' },
+    { id: 'kiro', label: 'Kiro' },
+    { id: 'workbuddy', label: 'WorkBuddy' },
+    { id: 'qoder', label: 'Qoder' },
+    { id: 'deepseek', label: 'DeepSeek' },
+    { id: 'openrouter', label: 'OpenRouter' },
+    { id: 'minimax', label: 'Minimax' },
+    { id: 'volcengine', label: 'Volcengine' },
+    { id: 'ollama', label: 'Ollama' },
+    { id: 'trae', label: 'Trae CN' },
+    { id: 'alibaba', label: 'Alibaba Cloud' },
+    { id: 'thirdparty', label: 'Third-party APIs' }
+  ].map((provider) => Object.freeze({ ...provider })));
 
-// Collection client ids normally match their Limits provider id. Keep the
-// exceptions explicit here.
-const LIMIT_PROVIDER_BY_CLIENT = Object.freeze({
-  micode: 'mimo',
-  zcode: 'zai',
-  qodercn: 'qoder'
-});
+  const LIMIT_PROVIDER_IDS = Object.freeze(LIMIT_PROVIDER_CATALOG.map((provider) => provider.id));
+  const LIMIT_PROVIDER_LABELS = Object.freeze(Object.fromEntries(
+    LIMIT_PROVIDER_CATALOG.map(({ id, label }) => [id, label])
+  ));
 
-// These are the only window metrics that cross the shared limits schema.
-const LIMIT_WINDOW_METRICS = Object.freeze(['credits', 'spend']);
-const VALID_LIMIT_WINDOW_METRICS = new Set(LIMIT_WINDOW_METRICS);
+  // Collection client ids normally match their Limits provider id. Keep the
+  // exceptions explicit here.
+  const LIMIT_PROVIDER_BY_CLIENT = Object.freeze({
+    micode: 'mimo',
+    zcode: 'zai',
+    qodercn: 'qoder'
+  });
 
-// Initial discovery is deliberately narrower than the provider list: only a
-// provider mapped from a currently detected local source can be seeded.
-// Usage-derived client status can remain active after a source disappears, so
-// source health is the authoritative signal here.
-function limitProvidersForDetectedClients(clientHealth) {
-  const clients = clientHealth?.clients;
-  if (!clients || typeof clients !== 'object' || Array.isArray(clients)) return [];
-  const detectedProviders = new Set();
-  for (const [client, health] of Object.entries(clients)) {
-    if (health?.source?.state !== 'detected') continue;
-    const clientId = String(client).trim().toLowerCase();
-    detectedProviders.add(LIMIT_PROVIDER_BY_CLIENT[clientId] || clientId);
+  // These are the only window metrics that cross the shared limits schema.
+  const LIMIT_WINDOW_METRICS = Object.freeze(['credits', 'spend']);
+  const VALID_LIMIT_WINDOW_METRICS = new Set(LIMIT_WINDOW_METRICS);
+
+  // Initial discovery is deliberately narrower than the provider list: only a
+  // provider mapped from a currently detected local source can be seeded.
+  // Usage-derived client status can remain active after a source disappears, so
+  // source health is the authoritative signal here.
+  function limitProvidersForDetectedClients(clientHealth) {
+    const clients = clientHealth?.clients;
+    if (!clients || typeof clients !== 'object' || Array.isArray(clients)) return [];
+    const detectedProviders = new Set();
+    for (const [client, health] of Object.entries(clients)) {
+      if (health?.source?.state !== 'detected') continue;
+      const clientId = String(client).trim().toLowerCase();
+      detectedProviders.add(LIMIT_PROVIDER_BY_CLIENT[clientId] || clientId);
+    }
+    return LIMIT_PROVIDER_IDS.filter((provider) => detectedProviders.has(provider));
   }
-  return LIMIT_PROVIDER_IDS.filter((provider) => detectedProviders.has(provider));
-}
 
-module.exports = {
-  LIMIT_PROVIDER_IDS,
-  LIMIT_WINDOW_METRICS,
-  VALID_LIMIT_WINDOW_METRICS,
-  limitProvidersForDetectedClients
-};
+  return {
+    LIMIT_PROVIDER_CATALOG,
+    LIMIT_PROVIDER_IDS,
+    LIMIT_PROVIDER_LABELS,
+    LIMIT_WINDOW_METRICS,
+    VALID_LIMIT_WINDOW_METRICS,
+    limitProvidersForDetectedClients
+  };
+});

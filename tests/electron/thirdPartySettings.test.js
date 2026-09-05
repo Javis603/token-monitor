@@ -9,7 +9,7 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..', '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 const { VENDOR_LABELS, VENDOR_ORDER } = require('../../src/electron/renderer/themePresets');
-const { LIMIT_PROVIDER_PRESENTATION, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviderLabels');
+const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 
 test('third-party settings separate presets, scope, and safe custom mappings', () => {
   const html = read('src/electron/renderer/index.html');
@@ -296,7 +296,7 @@ test('third-party fallback stays last after named providers across product surfa
   assert.ok(html.indexOf('id="thirdpartyAccountGroup"') > html.indexOf('id="copilotAccountGroup"'));
 
   const app = read('src/electron/renderer/app.js');
-  const providerOrder = LIMIT_PROVIDER_PRESENTATION.map((provider) => provider.id);
+  const providerOrder = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
   assert.ok(providerOrder.indexOf('thirdparty') > providerOrder.indexOf('ollama'));
   const iconProviders = app.slice(
     app.indexOf('const clientsWithIcon = new Set(['),

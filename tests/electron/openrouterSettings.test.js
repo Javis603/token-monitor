@@ -8,7 +8,7 @@ const vm = require('node:vm');
 
 const root = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
-const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviderLabels');
+const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 
 function functionBody(source, name, nextName) {
   const start = source.indexOf(`function ${name}(`);

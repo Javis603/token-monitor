@@ -4,8 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
-const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviderLabels');
+const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 const { buildMacWidgetSnapshot } = require('../../src/shared/macWidgetSnapshot');
 
 const rootDir = path.join(__dirname, '..', '..');

@@ -6,7 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
-const { LIMIT_PROVIDER_PRESENTATION, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviderLabels');
+const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 
 const {
   antigravityQuotaWindow,
@@ -3534,7 +3534,7 @@ test('removing a ledger entry has to be confirmed, like the rows above it', () =
 test('every provider a subscription can name has a mark to identify it by', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  const ids = LIMIT_PROVIDER_PRESENTATION.map((provider) => provider.id);
+  const ids = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
 
   // .row-icon paints currentColor through a mask, so an id with no mask rule
   // behind it renders as a solid square — worse than no icon at all.

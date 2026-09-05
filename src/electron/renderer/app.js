@@ -53,7 +53,7 @@ function iconKindFor(rowData, breakdown) {
     : { kind: 'dot' };
 }
 
-const LIMIT_PROVIDERS = window.TokenMonitorLimitProviderLabels.LIMIT_PROVIDER_PRESENTATION;
+const LIMIT_PROVIDERS = window.TokenMonitorLimitProviders.LIMIT_PROVIDER_CATALOG;
 const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   claude: 'claudeAccountGroup',
   codex: 'codexAccountGroup',

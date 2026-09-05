@@ -11,7 +11,7 @@ const {
   reorderLimitProvider
 } = require('../../src/electron/renderer/limitProviderOrder');
 const { parseLimitProviders } = require('../../src/shared/limitCollector');
-const { LIMIT_PROVIDER_PRESENTATION } = require('../../src/shared/limitProviderLabels');
+const { LIMIT_PROVIDER_CATALOG } = require('../../src/shared/limitProviders');
 
 const providers = [
   { id: 'claude', label: 'Claude' },
@@ -24,7 +24,7 @@ const providers = [
 // default a fresh install writes to settings.limitProviderOrder, so changing it
 // is a compatibility decision that should have to be made in a diff.
 test('default provider order follows tracked tools, named services, then third-party fallback', () => {
-  const ids = LIMIT_PROVIDER_PRESENTATION.map((provider) => provider.id);
+  const ids = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
 
   assert.deepEqual(ids, [
     'claude',
@@ -55,7 +55,7 @@ test('default provider order follows tracked tools, named services, then third-p
 });
 
 test('renderer provider order matches the collector default for new settings', () => {
-  const ids = LIMIT_PROVIDER_PRESENTATION.map((provider) => provider.id);
+  const ids = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
 
   assert.deepEqual(ids, parseLimitProviders());
 });
