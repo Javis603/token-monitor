@@ -118,7 +118,7 @@ test('settingsLabel is only present where it differs from the label', () => {
 // against a list nothing renders.
 test('the renderer derives its provider list from this catalog', () => {
   const app = read('src', 'electron', 'renderer', 'app.js');
-  assert.match(app, /const LIMIT_PROVIDERS = window\.TokenMonitorLimitProviders\.LIMIT_PROVIDER_CATALOG;/);
+  assert.match(app, /const \{ LIMIT_PROVIDER_CATALOG: LIMIT_PROVIDERS, LIMIT_PROVIDER_IDS \} = window\.TokenMonitorLimitProviders;/);
   assert.doesNotMatch(app, /const LIMIT_PROVIDERS = \[/);
 
   const html = read('src', 'electron', 'renderer', 'index.html');
