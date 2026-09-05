@@ -4,6 +4,7 @@ const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { runWithProbeDeadline } = require('./probeDeadline');
 const { BROWSER_USER_AGENT } = require('./browserUserAgent');
+const { fetchQoderCnCloudLimits } = require('./qoderCnCloudUsage');
 
 const QODER_FETCH_TIMEOUT_MS = 12_000;
 
@@ -207,6 +208,13 @@ async function fetchQoderLimits(options = {}, deps = {}) {
   const cookie = qoderCookie(env, options);
   const site = qoderSite(options, env);
   if (!cookie) {
+    // CN accounts have no web cookie by default: the Qoder CN client keeps a
+    // dt- token on disk, and cloud credits can be read with it. A null result
+    // (no local client/token) falls through to the quiet notConfigured state.
+    if (site === 'cn') {
+      const cloudLimits = await fetchQoderCnCloudLimits(options, deps);
+      if (cloudLimits) return cloudLimits;
+    }
     return normalizeLimitProvider({
       provider: 'qoder',
       source: 'web',
