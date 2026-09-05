@@ -148,8 +148,16 @@ test('parseZaiUsage reads official plan labels from subscription or quota payloa
   );
 });
 
-test('fetchZaiLimits returns notConfigured without an API key', async () => {
-  const provider = await fetchZaiLimits({}, { env: {}, now: () => Date.parse('2026-07-06T00:00:00Z') });
+test('fetchZaiLimits returns notConfigured without an API key or local ZCode login', async () => {
+  const provider = await fetchZaiLimits({}, {
+    env: {},
+    now: () => Date.parse('2026-07-06T00:00:00Z'),
+    // No ZCode install on disk: discovery resolves to kind 'none', so the
+    // billing lane has no credential and the provider stays notConfigured.
+    readFileSync: () => {
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    }
+  });
   assert.equal(provider.provider, 'zai');
   assert.equal(provider.source, 'api');
   assert.equal(provider.status, 'notConfigured');

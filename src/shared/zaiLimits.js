@@ -1,8 +1,13 @@
 'use strict';
 
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { runWithProbeDeadline } = require('./probeDeadline');
+const { discoverZcodeConnection } = require('./zcodeDiscovery');
 
 const ZAI_FETCH_TIMEOUT_MS = 12_000;
 
@@ -299,15 +304,11 @@ async function fetchZaiLimits(options = {}, deps = {}) {
   const updatedAt = new Date(now).toISOString();
   const key = zaiToken(env, options.zaiApiKey);
   const region = zaiRegion(options, env);
+  // The console key owns the subscription quota lane. Without it, a locally
+  // logged-in ZCode install is the only other credential source, serving the
+  // Start/Weekend plan billing lane — the two lanes never merge.
   if (!key) {
-    return normalizeLimitProvider({
-      provider: 'zai',
-      source: 'api',
-      status: 'notConfigured',
-      updatedAt,
-      windows: [],
-      region
-    });
+    return fetchZcodeStartPlanLimits(options, deps);
   }
 
   try {
@@ -339,6 +340,149 @@ async function fetchZaiLimits(options = {}, deps = {}) {
   }
 }
 
+// ZCode Start/Weekend plan quota lives on ZCode's own billing endpoint, not
+// the shared subscription quota above. Single origin, no region split; the
+// gateway rejects requests without the ZCode client's device id (code 3001
+// "parameter error"), so the id rides along from ZCode's own telemetry state.
+
+// The billing gateway rejects requests without the ZCode client's device id
+// (code 3001 "parameter error"), so it reads ZCode's own telemetry state.
+function zcodeDeviceMid(deps = {}) {
+  const readFileSync = deps.readFileSync || fs.readFileSync;
+  const homeDir = deps.homeDir || os.homedir();
+  try {
+    const state = JSON.parse(readFileSync(path.join(homeDir, '.zcode', 'v2', 'telemetry-state.json'), 'utf8'));
+    const deviceMid = String(state?.deviceMid || '').trim();
+    return deviceMid || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function zcodeStartPlanBalanceUrl() {
+  return 'https://zcode.z.ai/api/v1/zcode-plan/billing/balance';
+}
+
+// Mirrors ZCode's normalizeZaiStartPlanBalanceLimits: one window per balance
+// bucket. The grant period lives on the plan entitlement, not the bucket, so
+// callers pass an entitlement_id → period map alongside the payload; daily
+// grants map to the shared daily lane, one-time grants take the billing lane
+// without windowMinutes.
+function zcodeBalanceWindow(balance, periodByEntitlement = {}) {
+  const total = numberOrNull(balance?.total_units);
+  const used = numberOrNull(balance?.used_units);
+  const remaining = numberOrNull(balance?.remaining_units);
+  if (total === null && used === null && remaining === null) return null;
+  const usedPercent = total !== null && total > 0 && remaining !== null
+    ? clampPercent(100 - (remaining / total) * 100)
+    : clampPercent(balance?.percentage);
+  const label = String(balance?.show_name || '').trim() || 'Start Plan';
+  const resetsAt = toIso(balance?.expires_at ?? balance?.period_end);
+  const period = periodByEntitlement[String(balance?.entitlement_id || '').trim()]
+    || String(balance?.period || '');
+  const window = {
+    kind: period === 'daily' ? 'daily' : 'billing',
+    label,
+    limitId: String(balance?.plan_id || '').trim(),
+    ...(usedPercent !== null ? { usedPercent, remainingPercent: Math.max(0, Math.min(100, 100 - usedPercent)) } : {}),
+    showMeter: usedPercent !== null,
+    ...(period === 'daily' ? { windowMinutes: 24 * 60 } : {})
+  };
+  if (used !== null) window.used = used;
+  if (remaining !== null) window.remaining = remaining;
+  if (total !== null) window.limit = total;
+  if (resetsAt) window.resetsAt = resetsAt;
+  return window;
+}
+
+function zcodePeriodByEntitlement(payload) {
+  const periodByEntitlement = {};
+  const plans = Array.isArray(payload?.data?.plans) ? payload.data.plans : [];
+  for (const plan of plans) {
+    const entitlements = Array.isArray(plan?.entitlements) ? plan.entitlements : [];
+    for (const entitlement of entitlements) {
+      const id = String(entitlement?.entitlement_id || '').trim();
+      const period = String(entitlement?.period || '').trim();
+      if (id && period) periodByEntitlement[id] = period;
+    }
+  }
+  return periodByEntitlement;
+}
+
+function parseZcodeStartPlanBalances(payload) {
+  const periodByEntitlement = zcodePeriodByEntitlement(payload);
+  const balances = Array.isArray(payload?.data?.balances) ? payload.data.balances : [];
+  const windows = balances.map((balance) => zcodeBalanceWindow(balance, periodByEntitlement)).filter(Boolean);
+  const plan = Array.isArray(payload?.data?.plans)
+    ? payload.data.plans.find((entry) => entry?.status === 'active')
+    : null;
+  return { plan: String(plan?.name || '').trim(), windows };
+}
+
+function zcodeStatusProvider(status, options = {}, deps = {}) {
+  const now = (deps.now || Date.now)();
+  return normalizeLimitProvider({
+    provider: 'zai',
+    source: 'api',
+    status,
+    updatedAt: new Date(now).toISOString(),
+    windows: [],
+    region: zaiRegion(options, deps.env || process.env)
+  });
+}
+
+// Start/Weekend plans authorize with ZCode's own login token rather than the
+// console API key, so this lane runs only when the console key is absent and
+// discovery found an entitled local ZCode login. 401/403 fall back to the
+// not-configured state: the token is ZCode-managed and will be rotated there.
+async function fetchZcodeStartPlanLimits(options = {}, deps = {}) {
+  const env = deps.env || process.env;
+  const now = (deps.now || Date.now)();
+  const discovery = discoverZcodeConnection(options, {
+    readFileSync: deps.readFileSync || fs.readFileSync,
+    homeDir: deps.homeDir || options.homeDir || os.homedir()
+  });
+  if (discovery.kind !== 'start-billing' || !discovery.entitled || !discovery.credential) {
+    return zcodeStatusProvider('notConfigured', options, deps);
+  }
+
+  try {
+    const payload = await runWithProbeDeadline(async ({ signal }) => {
+      const deviceMid = zcodeDeviceMid(deps);
+      const response = await (deps.fetch || fetch)(zcodeStartPlanBalanceUrl(), {
+        headers: {
+          Authorization: `Bearer ${discovery.credential.token}`,
+          Accept: 'application/json',
+          ...(deviceMid ? { 'X-Device-Mid': deviceMid } : {})
+        },
+        signal
+      });
+      if (!response.ok) {
+        const error = new Error(`zcode billing returned ${response.status}`);
+        error.status = response.status === 401 || response.status === 403
+          ? 'unauthorized'
+          : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
+        throw error;
+      }
+      return response.json();
+    }, { signal: deps.signal, deadlineMs: Number(deps.zaiFetchTimeoutMs || deps.fetchTimeoutMs || ZAI_FETCH_TIMEOUT_MS) });
+    const usage = parseZcodeStartPlanBalances(payload);
+    return normalizeLimitProvider({
+      provider: 'zai',
+      accountKey: hashKey('zai', discovery.credential.token),
+      accountLabel: usage.plan,
+      source: 'api',
+      status: usage.windows.length ? 'ok' : 'unavailable',
+      updatedAt: new Date(now).toISOString(),
+      windows: usage.windows,
+      region: zaiRegion(options, env)
+    });
+  } catch (error) {
+    if (error?.status === 'unauthorized') return zcodeStatusProvider('notConfigured', options, deps);
+    return zcodeStatusProvider(error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable', options, deps);
+  }
+}
+
 module.exports = {
   ZAI_FETCH_TIMEOUT_MS,
   ZAI_QUOTA_URL,
@@ -349,5 +493,7 @@ module.exports = {
   zaiSubscriptionUrl,
   zaiDashboardUrl,
   parseZaiUsage,
+  parseZcodeStartPlanBalances,
+  fetchZcodeStartPlanLimits,
   fetchZaiLimits
 };
