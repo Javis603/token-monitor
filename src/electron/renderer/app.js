@@ -15013,11 +15013,14 @@ function renderExternalProviderStatus(providerName) {
     statusEl,
     pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
   );
-  // zcode-auto keeps the manual panel reachable: the discovered login is not
-  // user-entered, so the override input stays available without hiding it.
-  const autoDiscovered = providerName === 'zai' && source === 'zcode-auto';
-  manualPanel.classList.toggle('hidden', linked && !autoDiscovered);
-  openBtn.classList.toggle('hidden', linked && !autoDiscovered);
+  manualPanel.classList.toggle('hidden', linked);
+  openBtn.classList.toggle('hidden', linked);
+  if (providerName === 'zai' && source === 'zcode-auto') {
+    // The discovered login is not user-entered, so the override input and the
+    // console link stay reachable instead of hiding behind linked.
+    manualPanel.classList.remove('hidden');
+    openBtn.classList.remove('hidden');
+  }
   const canClearConfiguredClaude = providerName === 'claude' && configured;
   logoutBtn.classList.toggle('hidden', source !== 'settings' || (!linked && !canClearConfiguredClaude));
   refreshBtn.classList.toggle('hidden', !configured);

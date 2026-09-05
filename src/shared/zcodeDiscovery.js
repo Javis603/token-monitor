@@ -1,17 +1,17 @@
 'use strict';
 
 // Read-only discovery of the locally installed ZCode desktop app's connection
-// state. ZCode persists its provider registry, current selection and OAuth
-// credentials under ~/.zcode/v2/ as plain JSON; this module reads those files
-// on every call (no caching — the on-disk state is the source of truth for
-// account switches, mirroring how codexAuth re-reads auth.json each refresh)
-// and derives which GLM quota lane applies: the Coding Plan subscription quota
-// endpoint, the ZCode Start/Weekend plan billing endpoint, or neither.
+// state. ZCode persists its provider registry and current selection under
+// ~/.zcode/v2/ as plain JSON; this module reads those files on every call (no
+// caching — the on-disk state is the source of truth for account switches,
+// mirroring how codexAuth re-reads auth.json each refresh) and derives which
+// GLM quota lane applies: the Coding Plan subscription quota endpoint, the
+// ZCode Start/Weekend plan billing endpoint, or neither.
 //
 // Missing files are normal (ZCode not installed) and resolve to kind 'none';
 // malformed JSON is treated the same way rather than surfacing as an error.
-// Credentials are returned for in-memory use only and are never logged or
-// persisted by the caller.
+// The credential returned for the billing lane is ZCode's own on-disk mirror
+// key, for in-memory use only — never logged or persisted by the caller.
 
 const fs = require('node:fs');
 const os = require('node:os');

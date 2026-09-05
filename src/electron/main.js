@@ -90,6 +90,7 @@ const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
 const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie, alibabaCookie, alibabaVariant, normalizeAlibabaCookieHeader } = require('../shared/limitCollector');
+const { discoverZcodeConnection } = require('../shared/zcodeDiscovery');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
 const {
@@ -826,6 +827,15 @@ function normalizeZaiApiRegion(value) {
 
 function currentZaiApiKey() {
   return settings?.zaiApiKey || zaiToken(process.env);
+}
+
+// A locally logged-in ZCode install is a credential source for the GLM lane
+// even when no console key was entered. Reads up to four small JSON files
+// synchronously; settingsForRenderer renders at human interaction speed, so
+// the cost is bounded by how often that runs, not by any refresh loop.
+function currentZcodeAutoCredential() {
+  const discovery = discoverZcodeConnection();
+  return discovery.entitled && discovery.credential ? discovery : null;
 }
 
 function normalizeZaiTeamApiKey(value) {
@@ -4699,11 +4709,14 @@ function settingsForRenderer() {
     : copilotToken(process.env)
       ? 'env'
       : '';
+  const zcodeAutoCredential = currentZcodeAutoCredential();
   const zaiApiKeySource = settings?.zaiApiKey
     ? 'settings'
     : zaiToken(process.env)
       ? 'env'
-      : '';
+      : zcodeAutoCredential
+        ? 'zcode-auto'
+        : '';
   const zaiTeamApiKeySource = settings?.zaiTeamApiKey
     ? 'settings'
     : zaiTeamToken(process.env)
@@ -4823,7 +4836,7 @@ function settingsForRenderer() {
     minimaxApiKeySource,
     copilotApiTokenConfigured: Boolean(currentCopilotApiToken()),
     copilotApiTokenSource,
-    zaiApiKeyConfigured: Boolean(currentZaiApiKey()),
+    zaiApiKeyConfigured: Boolean(currentZaiApiKey() || zcodeAutoCredential),
     zaiApiKeySource,
     zaiTeamApiKeyConfigured: Boolean(currentZaiTeamApiKey()),
     zaiTeamApiKeySource,
