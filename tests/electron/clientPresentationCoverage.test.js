@@ -23,14 +23,8 @@ const { VENDOR_ORDER, VENDOR_LABELS } = require('../../src/electron/renderer/the
 const { clientColors } = require('../../src/electron/renderer/usageCharts');
 
 const rootDir = path.join(__dirname, '..', '..');
-
-function rendererSource() {
-  return fs.readFileSync(path.join(rootDir, 'src/electron/renderer/app.js'), 'utf8');
-}
-
-function rendererStyles() {
-  return fs.readFileSync(path.join(rootDir, 'src/electron/renderer/styles.css'), 'utf8');
-}
+const rendererPath = path.join(rootDir, 'src/electron/renderer/app.js');
+const stylesPath = path.join(rootDir, 'src/electron/renderer/styles.css');
 
 test('every catalog client has a usage chart colour', () => {
   for (const id of CLIENT_IDS) {
@@ -52,9 +46,13 @@ test('clientsWithIcon covers every catalog client', () => {
   // correctly there. Read from source because the Set is still declared inside
   // app.js; when the renderer boundary is split this can read a module instead,
   // without the invariant changing.
-  const block = rendererSource().match(/const clientsWithIcon = new Set\(\[([\s\S]*?)\]\)/);
+  const source = fs.readFileSync(rendererPath, 'utf8');
+  const block = source.match(/const clientsWithIcon = new Set\(\[([\s\S]*?)\]\)/);
   assert.ok(block, 'clientsWithIcon declaration should exist in app.js');
-  const iconIds = new Set([...block[1].matchAll(/'([a-z0-9-]+)'/g)].map((match) => match[1]));
+  // Strip comments first: a commented-out id is absent from the runtime Set, so
+  // counting it would report coverage the renderer does not have.
+  const entries = block[1].replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const iconIds = new Set([...entries.matchAll(/'([a-z0-9-]+)'/g)].map((match) => match[1]));
   for (const id of CLIENT_IDS) {
     assert.ok(iconIds.has(id), `${id} should resolve to an icon row`);
   }
@@ -66,18 +64,23 @@ test('every catalog client resolves to an icon asset through its CSS rule', () =
   // (hermes → hermes-agent.svg, grok → xai.svg, micode → xiaomi.svg,
   // zcode → zai.svg), so the CSS rule is the mapping and the asset is checked
   // through it rather than assumed from the id.
-  const styles = rendererStyles();
+  const styles = fs.readFileSync(stylesPath, 'utf8');
   for (const id of CLIENT_IDS) {
-    // The class must be terminated by a selector separator, not just a word
-    // boundary: the renderer applies exactly `row-icon-${client}`, so a suffixed
-    // rule such as .row-icon-<id>-sm would satisfy \b while rendering nothing.
-    const rule = styles.match(new RegExp(`\\.row-icon-${id}(?=[\\s,{])[^{}]*\\{([^}]*)\\}`));
+    // The class must be terminated by a selector separator: the renderer applies
+    // exactly `row-icon-${client}`, so neither a suffixed rule
+    // (.row-icon-<id>-sm) nor a descendant rule (.row-icon-<id> .child) styles
+    // the element this guard is about, and both would otherwise satisfy it.
+    const rule = styles.match(new RegExp(`\\.row-icon-${id}(?=\\s*[,{])[^{}]*\\{([^}]*)\\}`));
     assert.ok(rule, `${id} needs a .row-icon-${id} rule in styles.css`);
-    const asset = rule[1].match(/assets\/icons\/([a-z0-9-]+)\.svg/);
-    assert.ok(asset, `.row-icon-${id} should reference an icon under assets/icons/`);
+    // Resolve the URL the way the browser does — relative to styles.css — so a
+    // wrong number of parent segments fails here instead of rendering a broken
+    // icon. Matching the basename alone would accept any depth.
+    const url = rule[1].match(/url\(\s*['"]?([^'")\s]+\.svg)['"]?\s*\)/);
+    assert.ok(url, `.row-icon-${id} should reference an .svg through url()`);
+    const resolved = path.resolve(path.dirname(stylesPath), url[1]);
     assert.ok(
-      fs.existsSync(path.join(rootDir, 'assets', 'icons', `${asset[1]}.svg`)),
-      `.row-icon-${id} references assets/icons/${asset[1]}.svg, which does not exist`
+      fs.existsSync(resolved),
+      `.row-icon-${id} references ${url[1]}, which resolves to a missing file: ${resolved}`
     );
   }
 });
