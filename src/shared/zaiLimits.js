@@ -312,20 +312,29 @@ async function fetchZaiLimits(options = {}, deps = {}) {
   }
 
   try {
-    const quota = await fetchJson(zaiQuotaUrl(region), key, deps);
+    // Balance rides alongside the quota: it answers a different account pool
+    // (cash vs subscription), so one failing must not blank the other.
+    const [quotaResult, balanceResult] = await Promise.allSettled([
+      fetchJson(zaiQuotaUrl(region), key, deps),
+      fetchJson(zaiBalanceUrl(region), key, deps)
+    ]);
     let subscription = null;
     try {
       subscription = await fetchJson(zaiSubscriptionUrl(region), key, deps);
     } catch (_) {}
-    const usage = parseZaiUsage(quota, subscription);
+    if (quotaResult.status === 'rejected') throw quotaResult.reason;
+    const usage = parseZaiUsage(quotaResult.value, subscription);
+    const balanceWindow = balanceResult.status === 'fulfilled'
+      ? zaiBalanceWindow(balanceResult.value, region)
+      : null;
     return normalizeLimitProvider({
       provider: 'zai',
       accountKey: hashKey('zai', key),
       accountLabel: usage.plan,
       source: 'api',
-      status: usage.windows.length ? 'ok' : 'unavailable',
+      status: usage.windows.length || balanceWindow ? 'ok' : 'unavailable',
       updatedAt,
-      windows: usage.windows,
+      windows: balanceWindow ? [...usage.windows, balanceWindow] : usage.windows,
       region
     });
   } catch (error) {
@@ -338,6 +347,32 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       region
     });
   }
+}
+
+// Cash balance for a console API key, from the same endpoint BigModel's own
+// finance page renders. Amounts come back as high-precision decimals
+// ("0E-9"); the console rounds them to 2 places before display. Currency is
+// not in the response — it follows the region: USD on z.ai, CNY on BigModel.
+function zaiBalanceUrl(region) {
+  return `${zaiBaseUrl(region)}/api/biz/account/query-customer-account-report`;
+}
+
+function zaiBalanceCurrency(region) {
+  return zaiRegion({ zaiApiRegion: region }) === 'bigmodel-cn' ? 'CNY' : 'USD';
+}
+
+function zaiBalanceWindow(payload, region) {
+  const data = payload?.data;
+  const remaining = numberOrNull(data?.availableBalance);
+  if (remaining === null) return null;
+  return {
+    kind: 'billing',
+    metric: 'credits',
+    label: 'Balance',
+    remaining: Math.max(0, remaining),
+    currency: zaiBalanceCurrency(region),
+    showMeter: false
+  };
 }
 
 // ZCode Start/Weekend plan quota lives on ZCode's own billing endpoint, not

@@ -163,7 +163,7 @@ test('fetchZaiLimits returns notConfigured without an API key or local ZCode log
   assert.equal(provider.status, 'notConfigured');
 });
 
-test('fetchZaiLimits requests quota and subscription with bearer auth', async () => {
+test('fetchZaiLimits queries quota, subscription and balance in parallel', async () => {
   const urls = [];
   const auth = [];
   const provider = await fetchZaiLimits(
@@ -187,6 +187,13 @@ test('fetchZaiLimits requests quota and subscription with bearer auth', async ()
             })
           };
         }
+        if (String(url).includes('query-customer-account-report')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ code: 200, data: { availableBalance: '0E-9', balance: '0E-9' } })
+          };
+        }
         return {
           ok: true,
           status: 200,
@@ -198,12 +205,16 @@ test('fetchZaiLimits requests quota and subscription with bearer auth', async ()
 
   assert.equal(provider.status, 'ok');
   assert.equal(provider.accountLabel, 'GLM Coding');
-  assert.equal(provider.windows.length, 1);
+  assert.equal(provider.windows.length, 2);
+  const balance = provider.windows.find((window) => window.metric === 'credits');
+  assert.equal(balance.remaining, 0);
+  assert.equal(balance.currency, 'USD');
   assert.deepEqual(urls, [
     'https://api.z.ai/api/monitor/usage/quota/limit',
+    'https://api.z.ai/api/biz/account/query-customer-account-report',
     'https://api.z.ai/api/biz/subscription/list'
   ]);
-  assert.deepEqual(auth, ['Bearer zai-token', 'Bearer zai-token']);
+  assert.deepEqual(auth, ['Bearer zai-token', 'Bearer zai-token', 'Bearer zai-token']);
 });
 
 test('fetchZaiLimits requests the selected BigModel CN region', async () => {
@@ -228,6 +239,13 @@ test('fetchZaiLimits requests the selected BigModel CN region', async () => {
             })
           };
         }
+        if (String(url).includes('query-customer-account-report')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ code: 200, data: { availableBalance: '12.5' } })
+          };
+        }
         return {
           ok: true,
           status: 200,
@@ -241,8 +259,12 @@ test('fetchZaiLimits requests the selected BigModel CN region', async () => {
   assert.equal(provider.region, 'bigmodel-cn');
   assert.deepEqual(urls, [
     'https://open.bigmodel.cn/api/monitor/usage/quota/limit',
+    'https://open.bigmodel.cn/api/biz/account/query-customer-account-report',
     'https://open.bigmodel.cn/api/biz/subscription/list'
   ]);
+  const balance = provider.windows.find((window) => window.metric === 'credits');
+  assert.equal(balance.remaining, 12.5);
+  assert.equal(balance.currency, 'CNY');
 });
 
 test('fetchZaiLimits physically aborts a hung request within its configured bound', async () => {

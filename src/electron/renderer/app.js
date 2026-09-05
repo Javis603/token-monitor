@@ -5043,6 +5043,7 @@ function renderProviderWindows(provider, color) {
       // never does.
       window?.kind === 'billing' && window?.limitId
     ));
+    const balanceWindow = (provider.windows || []).find((window) => window?.metric === 'credits');
     const nodes = [
       session && limitWindowNode(session.label || '5-hour', session, color, 0.95),
       ...dailyWindows.map((window, index) => limitWindowNode(
@@ -5053,7 +5054,14 @@ function renderProviderWindows(provider, color) {
       )),
       weekly && limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68),
       ...oneTimeWindows.map((window) => limitWindowNode(window.label || 'Start Plan', window, color, 0.68)),
-      mcp && !oneTimeWindows.length && limitWindowNode('MCP', mcp, color, 0.68)
+      mcp && !oneTimeWindows.length && limitWindowNode('MCP', mcp, color, 0.68),
+      balanceWindow && limitWindowNode(
+        'Balance',
+        { ...balanceWindow, label: 'Balance' },
+        color,
+        0.68,
+        formatMoney(balanceWindow.remaining, balanceWindow.currency)
+      )
     ].filter(Boolean);
     if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
     windows.append(...nodes);
