@@ -101,7 +101,7 @@
     CLIENT_CATALOG.filter((client) => client.locallyParsed).map((client) => client.id)
   );
 
-  // Renderer-facing projections. CLIENT_LABELS carries the legacy ids too
+  // Renderer-facing projections. CLIENT_LABELS carries the non-catalog ids too
   // because it is a lookup, while KNOWN_CLIENT_LIST is a display list.
   const CLIENT_LABELS = Object.freeze(Object.fromEntries([
     ...CLIENT_CATALOG.map((client) => [client.id, client.label]),

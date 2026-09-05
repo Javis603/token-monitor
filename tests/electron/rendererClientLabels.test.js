@@ -27,11 +27,16 @@ function knownClientIds() {
   return [...CLIENT_IDS];
 }
 
-test('renderer client labels cover every known client', () => {
-  const labels = clientLabelIds();
-  const missing = knownClientIds().filter((id) => !labels.has(id));
-
-  assert.deepEqual(missing, []);
+test('app.js takes client identity from the catalog and keeps no copy of it', () => {
+  // An ownership boundary, not a data layout: that CLIENT_LABELS covers every
+  // catalog id is asserted in tests/shared/clientCatalog.test.js, so repeating it
+  // here would only compare the catalog with itself. What is worth guarding is
+  // that the renderer still sources identity from the catalog and has not grown a
+  // second copy of the list.
+  const source = rendererSource();
+  assert.match(source, /window\.TokenMonitorClientCatalog/);
+  assert.doesNotMatch(source, /const clientLabels = \{/);
+  assert.doesNotMatch(source, /const KNOWN_CLIENTS = \[/);
 });
 
 test('renderer known clients include current tokscale-supported tools', () => {

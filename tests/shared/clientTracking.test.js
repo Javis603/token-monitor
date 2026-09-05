@@ -11,16 +11,7 @@ try {
 } catch (_) {}
 
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = trackingApi;
-const { KNOWN_CLIENT_LIST } = require('../../src/shared/clientCatalog');
 const rootDir = path.join(__dirname, '..', '..');
-
-// The renderer no longer keeps its own copy of this list — it destructures
-// KNOWN_CLIENT_LIST out of the same catalog. Assert that projection instead of
-// scraping app.js, so this keeps checking the contract rather than a file
-// layout that the later #550 steps are expected to move.
-function rendererClientIds() {
-  return KNOWN_CLIENT_LIST.map((client) => client.id);
-}
 
 function readmeTrackedClientIds() {
   const iconToClient = {
@@ -71,9 +62,13 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in m
   }
 });
 
-test('tracked client defaults, renderer, and README share one display order', () => {
+// The renderer is no longer a third party to compare against: it destructures
+// the same catalog these CSVs are projected from, so asserting it here would be
+// the catalog against itself. That the renderer actually consumes the catalog is
+// guarded in tests/electron/rendererClientLabels.test.js. README stays a real
+// cross-check because it is hand-authored.
+test('tracked client defaults and README share one display order', () => {
   const known = KNOWN_CLIENTS.split(',');
-  assert.deepEqual(rendererClientIds(), known);
   assert.deepEqual(readmeTrackedClientIds(), known);
   assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => !['micode', 'qodercn'].includes(client)));
 });
