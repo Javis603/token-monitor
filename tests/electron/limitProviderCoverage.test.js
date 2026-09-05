@@ -21,6 +21,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
 const { MESSAGES } = require('../../src/electron/renderer/i18n');
@@ -33,15 +34,16 @@ const read = (file) => fs.readFileSync(path.join(rendererDir, file), 'utf8');
 // required instead, without any invariant here changing.
 function providerMap(source, name) {
   const start = source.indexOf(`const ${name} = {`);
-  assert.notEqual(start, -1, `${name} should be declared in app.js`);
+  assert.notEqual(start, -1, `${name} should be declared in app.js as a plain object literal`);
   const end = source.indexOf('\n};', start);
   assert.notEqual(end, -1, `${name} should be a closed object literal`);
-  // Strip comments first: a commented-out entry is absent from the runtime map,
-  // so counting it would report coverage the renderer does not have.
-  const body = source.slice(start, end).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-  return Object.fromEntries(
-    [...body.matchAll(/^\s+([A-Za-z0-9_]+):\s*'([^']+)'/gm)].map((entry) => [entry[1], entry[2]])
-  );
+  // Evaluate the literal rather than pattern-matching its entries. A parser that
+  // recognises one spelling of an entry drops what it cannot read, and a dropped
+  // entry weakens the checks below without failing any of them: antigravity is in
+  // both the account-group and connection-detail maps, so losing its group would
+  // leave key-equality and the union green while nothing checked its DOM nodes.
+  // Evaluating also lets the JS parser decide what a comment is.
+  return vm.runInNewContext(`(${source.slice(source.indexOf('{', start), end + 2)})`);
 }
 
 const app = read('app.js');
