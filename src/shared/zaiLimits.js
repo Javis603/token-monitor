@@ -298,55 +298,110 @@ async function fetchJson(url, key, deps = {}) {
   }, { signal: deps.signal, deadlineMs });
 }
 
+// Three independent account pools feed one GLM row, in parallel: the paid
+// subscription quota (console key), the cash balance (console key), and the
+// ZCode Start/Weekend plan buckets (local ZCode login). A pool only renders
+// when it actually has something — an empty pool is absent, not zero. The
+// console key also answers quota for users without ZCode; the ZCode login
+// also answers plan buckets for users without a console key.
 async function fetchZaiLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
   const key = zaiToken(env, options.zaiApiKey);
   const region = zaiRegion(options, env);
-  // The console key owns the subscription quota lane. Without it, a locally
-  // logged-in ZCode install is the only other credential source, serving the
-  // Start/Weekend plan billing lane — the two lanes never merge.
-  if (!key) {
-    return fetchZcodeStartPlanLimits(options, deps);
+
+  const keyLane = key
+    ? (async () => {
+      const [quotaResult, balanceResult] = await Promise.allSettled([
+        fetchJson(zaiQuotaUrl(region), key, deps),
+        fetchJson(zaiBalanceUrl(region), key, deps)
+      ]);
+      let subscription = null;
+      try {
+        subscription = await fetchJson(zaiSubscriptionUrl(region), key, deps);
+      } catch (_) {}
+      if (quotaResult.status === 'rejected') throw quotaResult.reason;
+      const usage = parseZaiUsage(quotaResult.value, subscription);
+      const balanceWindow = balanceResult.status === 'fulfilled'
+        ? zaiBalanceWindow(balanceResult.value, region)
+        : null;
+      return {
+        windows: balanceWindow ? [...usage.windows, balanceWindow] : usage.windows,
+        plan: usage.plan,
+        accountKey: hashKey('zai', key),
+        hasAnything: usage.windows.length > 0 || Boolean(balanceWindow),
+        quotaFailed: false
+      };
+    })()
+    : Promise.resolve({ windows: [], plan: '', accountKey: '', hasAnything: false, quotaFailed: false });
+
+  const planLane = (async () => {
+    const discovery = discoverZcodeConnection(options, {
+      readFileSync: deps.readFileSync || fs.readFileSync,
+      homeDir: deps.homeDir || options.homeDir || os.homedir()
+    });
+    if (discovery.kind !== 'start-billing' || !discovery.entitled || !discovery.credential) {
+      return { windows: [], plan: '', accountKey: '', hasAnything: false };
+    }
+    const payload = await runWithProbeDeadline(async ({ signal }) => {
+      const deviceMid = zcodeDeviceMid(deps);
+      const response = await (deps.fetch || fetch)(zcodeStartPlanBalanceUrl(), {
+        headers: {
+          Authorization: `Bearer ${discovery.credential.token}`,
+          Accept: 'application/json',
+          ...(deviceMid ? { 'X-Device-Mid': deviceMid } : {})
+        },
+        signal
+      });
+      if (!response.ok) {
+        const error = new Error(`zcode billing returned ${response.status}`);
+        error.status = response.status === 401 || response.status === 403
+          ? 'unauthorized'
+          : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
+        throw error;
+      }
+      return response.json();
+    }, { signal: deps.signal, deadlineMs: Number(deps.zaiFetchTimeoutMs || deps.fetchTimeoutMs || ZAI_FETCH_TIMEOUT_MS) });
+    const usage = parseZcodeStartPlanBalances(payload);
+    return {
+      windows: usage.windows,
+      plan: usage.plan,
+      accountKey: hashKey('zai', discovery.credential.token),
+      hasAnything: usage.windows.length > 0
+    };
+  })();
+
+  const [keyResult, planResult] = await Promise.allSettled([keyLane, planLane]);
+
+  if (keyResult.status === 'rejected' && planResult.status === 'rejected') {
+    const error = keyResult.reason;
+    if (error?.status === 'unauthorized') return zcodeStatusProvider('notConfigured', options, deps);
+    return zcodeStatusProvider(error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable', options, deps);
   }
 
-  try {
-    // Balance rides alongside the quota: it answers a different account pool
-    // (cash vs subscription), so one failing must not blank the other.
-    const [quotaResult, balanceResult] = await Promise.allSettled([
-      fetchJson(zaiQuotaUrl(region), key, deps),
-      fetchJson(zaiBalanceUrl(region), key, deps)
-    ]);
-    let subscription = null;
-    try {
-      subscription = await fetchJson(zaiSubscriptionUrl(region), key, deps);
-    } catch (_) {}
-    if (quotaResult.status === 'rejected') throw quotaResult.reason;
-    const usage = parseZaiUsage(quotaResult.value, subscription);
-    const balanceWindow = balanceResult.status === 'fulfilled'
-      ? zaiBalanceWindow(balanceResult.value, region)
-      : null;
-    return normalizeLimitProvider({
-      provider: 'zai',
-      accountKey: hashKey('zai', key),
-      accountLabel: usage.plan,
-      source: 'api',
-      status: usage.windows.length || balanceWindow ? 'ok' : 'unavailable',
-      updatedAt,
-      windows: balanceWindow ? [...usage.windows, balanceWindow] : usage.windows,
-      region
-    });
-  } catch (error) {
-    return normalizeLimitProvider({
-      provider: 'zai',
-      source: 'api',
-      status: error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable',
-      updatedAt,
-      windows: [],
-      region
-    });
+  const lanes = [keyResult, planResult].filter((result) => result.status === 'fulfilled');
+  const windows = lanes.flatMap((result) => result.value.windows);
+  // The console key's quota is the authoritative failure signal: when it was
+  // asked for and rejected, the whole row is that failure even if the plan
+  // lane still has buckets to show.
+  if (key && keyResult.status === 'rejected') {
+    const error = keyResult.reason;
+    return zcodeStatusProvider(error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable', options, deps);
   }
+  const accountKey = lanes.map((result) => result.value.accountKey).filter(Boolean)[0] || '';
+  const accountLabel = lanes.map((result) => result.value.plan).filter(Boolean)[0] || '';
+  const hasAnything = lanes.some((result) => result.value.hasAnything);
+  return normalizeLimitProvider({
+    provider: 'zai',
+    ...(accountKey ? { accountKey } : {}),
+    ...(accountLabel ? { accountLabel } : {}),
+    source: 'api',
+    status: hasAnything ? 'ok' : key ? 'unavailable' : 'notConfigured',
+    updatedAt,
+    windows,
+    region
+  });
 }
 
 // Cash balance for a console API key, from the same endpoint BigModel's own

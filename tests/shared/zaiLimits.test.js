@@ -171,6 +171,7 @@ test('fetchZaiLimits queries quota, subscription and balance in parallel', async
     {
       env: {},
       now: () => Date.parse('2026-07-06T00:00:00Z'),
+      readFileSync: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
       fetch: async (url, init) => {
         urls.push(String(url));
         auth.push(init.headers.Authorization);
@@ -224,6 +225,7 @@ test('fetchZaiLimits requests the selected BigModel CN region', async () => {
     {
       env: {},
       now: () => Date.parse('2026-07-06T00:00:00Z'),
+      readFileSync: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
       fetch: async (url) => {
         urls.push(String(url));
         if (String(url).includes('/quota/limit')) {
@@ -265,6 +267,63 @@ test('fetchZaiLimits requests the selected BigModel CN region', async () => {
   const balance = provider.windows.find((window) => window.metric === 'credits');
   assert.equal(balance.remaining, 12.5);
   assert.equal(balance.currency, 'CNY');
+});
+
+test('fetchZaiLimits merges the key and ZCode plan lanes when both exist', async () => {
+  const settings = {
+    providerFamilyDomain: 'zai',
+    modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-start-plan' }
+  };
+  const registry = {
+    provider: { 'builtin:zai-start-plan': { enabled: true, options: { apiKey: 'mirror-jwt' } } }
+  };
+  const cache = { entryStatus: { items: { 'builtin:zai-start-plan': { status: 'available' } } } };
+  const provider = await fetchZaiLimits(
+    { zaiApiKey: 'zai-token' },
+    {
+      env: {},
+      now: () => Date.parse('2026-09-05T12:00:00Z'),
+      readFileSync: (filePath) => {
+        const key = String(filePath).split('/').pop();
+        const files = {
+          'setting.json': JSON.stringify(settings),
+          'config.json': JSON.stringify(registry),
+          'coding-plan-cache.json': JSON.stringify(cache),
+          'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+        };
+        if (Object.hasOwn(files, key)) return files[key];
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      },
+      fetch: async (url) => {
+        const target = String(url);
+        if (target.includes('/quota/limit')) {
+          return { ok: true, status: 200, json: async () => ({ data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }] } }) };
+        }
+        if (target.includes('query-customer-account-report')) {
+          return { ok: true, status: 200, json: async () => ({ code: 200, data: { availableBalance: '2.50' } }) };
+        }
+        if (target.includes('zcode-plan/billing/balance')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              code: 0,
+              data: {
+                plans: [{ plan_id: 'zcode-v3-x', name: 'ZCode Start Plan', status: 'active', entitlements: [{ entitlement_id: 'e1', period: 'daily' }] }],
+                balances: [{ entitlement_id: 'e1', plan_id: 'zcode-v3-x', show_name: 'GLM-5.3', total_units: 100, used_units: 10, remaining_units: 90, expires_at: 1788706800 }]
+              }
+            })
+          };
+        }
+        return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      }
+    }
+  );
+  assert.equal(provider.status, 'ok');
+  const kinds = provider.windows.map((window) => window.metric === 'credits' ? 'credits' : (window.limitId ? 'plan-bucket' : window.kind));
+  assert.ok(kinds.includes('credits'), 'balance window present');
+  assert.ok(kinds.includes('plan-bucket'), 'ZCode plan buckets present');
+  assert.ok(kinds.includes('session') || kinds.includes('weekly'), 'subscription quota present');
 });
 
 test('fetchZaiLimits physically aborts a hung request within its configured bound', async () => {
