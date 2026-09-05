@@ -157,8 +157,10 @@ function errorWithStatus(status, message) {
   return error;
 }
 
-function shouldTryClaudeCliFallback(error) {
-  return ['notConfigured', 'sourceRateLimited', 'unavailable', 'error'].includes(error?.status);
+function shouldTryClaudeCliFallback(error, credentials, deps = {}) {
+  return Boolean(credentials)
+    && typeof deps.isClaudeCliAuthenticated === 'function'
+    && ['sourceRateLimited', 'unavailable', 'error'].includes(error?.status);
 }
 
 function normalizeClaudeWebCookie(value) {
@@ -1508,17 +1510,11 @@ async function resolveClaudeOauthIdentity(credentials, deps = {}) {
   }
 }
 
-async function delegatedClaudeRefresh(currentCredentials, deps = {}) {
-  // Spawn `claude /status` in a PTY and let Claude Code itself refresh the token.
-  // Matches CodexBar's strategy — Claude Code is a native Anthropic application,
-  // so OAuth credential use stays within sanctioned channels. Best-effort: if the
-  // probe fails we still re-read in case Claude Code touched the credentials.
-  await touchClaudeAuthPath(deps).catch(() => null);
-  const fresh = await readClaudeCredentials(deps);
-  if (!fresh.accessToken || fresh.accessToken === currentCredentials.accessToken) {
-    throw errorWithStatus('unauthorized', 'Claude Code did not refresh the OAuth token');
-  }
-  return fresh;
+async function delegatedClaudeRefresh() {
+  // Claude Code has no non-interactive refresh command. Starting its TUI from an
+  // unattended quota tick can initiate browser OAuth, so macOS credentials must
+  // be refreshed by signing in through Claude Code itself.
+  throw errorWithStatus('unauthorized', 'Claude OAuth credentials require refresh in Claude Code');
 }
 
 async function refreshClaudeCredentials(currentCredentials, deps = {}) {
@@ -1538,16 +1534,17 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
   const webCookie = claudeWebCookie(deps.env || process.env, options);
   if (webCookie) return fetchClaudeWebLimits(webCookie, deps, options);
   let oauthIdentity = null;
+  let credentials = null;
   try {
-    let credentials = await readClaudeCredentials(deps);
+    credentials = await readClaudeCredentials(deps);
     oauthIdentity = claudeCachedIdentity(
       claudeOauthIdentityFingerprint(credentials),
       deps,
       { allowStale: true }
     )?.identity || null;
 
-    // Proactive refresh only on non-darwin: mac uses delegated (spawning Claude Code)
-    // which is expensive; CodexBar's design likewise refreshes reactively, not on expiry.
+    // Proactive refresh only on non-darwin. macOS stores OAuth in Keychain, and
+    // Token Monitor cannot safely refresh that source without launching Claude's TUI.
     if (platform !== 'darwin' && credentials.refreshToken && credentials.expiresAt
       && credentials.expiresAt - nowMs < CLAUDE_REFRESH_LEEWAY_MS) {
       try {
@@ -1589,9 +1586,22 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
     // create a new row keyed by credential storage location or a different
     // fallback source. Let LimitsRuntime retain the previous account row.
     if (error?.code === 'CLAUDE_IDENTITY_UNAVAILABLE') throw error;
-    if (!shouldTryClaudeCliFallback(error)) throw error;
+    if (!shouldTryClaudeCliFallback(error, credentials, deps)) throw error;
+
+    // Never launch Claude's interactive TUI merely because OAuth collection is
+    // unavailable. A fallback is reachable only when an injected, non-interactive
+    // detector has positively established that this exact local CLI is already
+    // authenticated; Token Monitor currently provides no such detector.
+    let cliAuthenticated = false;
     try {
-      const text = await runClaudeUsageCli(deps);
+      cliAuthenticated = await deps.isClaudeCliAuthenticated({
+        credentialSource: credentials.source,
+        platform
+      }) === true;
+    } catch (_) {}
+    if (!cliAuthenticated) throw error;
+    try {
+      const text = await runClaudeUsageCli({ ...deps, claudeCliAuthenticationVerified: true });
       const provider = mapClaudeCliUsageToProvider(text, {
         updatedAt: nowIso(nowMs),
         now: new Date(nowMs)
@@ -1975,6 +1985,9 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
 }
 
 async function runClaudeUsageCli(deps = {}) {
+  if (deps.claudeCliAuthenticationVerified !== true) {
+    throw errorWithStatus('notConfigured', 'Authenticated Claude CLI state was not verified');
+  }
   if (deps.runClaudeUsageCli) return deps.runClaudeUsageCli();
   if ((deps.platform || process.platform) === 'win32') return runClaudeDirectUsageCli(deps);
   return runClaudePtyProbe('/usage', 'currentsession.*?[0-9]{1,3}(?:\\.[0-9]+)?%', deps);
@@ -1993,17 +2006,10 @@ function runClaudeDirectUsageCli(deps = {}) {
   });
 }
 
-async function touchClaudeAuthPath(deps = {}) {
-  if (deps.touchClaudeAuthPath) return deps.touchClaudeAuthPath();
-  // Spawn `claude /status` in PTY to let Claude Code itself perform an auth check
-  // and refresh the OAuth token if needed. We don't parse output — the side-effect
-  // (mutated credentials file / Keychain entry) is the signal. Permissive exit
-  // marker matches common /status output tokens so we exit promptly on success.
-  return runClaudePtyProbe('/status', '(?:loggedin|subscription|account|model|version|email|organization)', {
-    ...deps,
-    claudeCliTimeoutSeconds: deps.claudeStatusTimeoutSeconds || 20,
-    claudeCliTimeoutMs: deps.claudeStatusTimeoutMs || 25000
-  });
+async function touchClaudeAuthPath() {
+  // Kept as an internal compatibility export, but deliberately cannot launch
+  // Claude: unattended authentication belongs in Claude Code, never in a quota tick.
+  throw errorWithStatus('unauthorized', 'Interactive Claude authentication is disabled');
 }
 
 function codexWindowKind(name, window) {
