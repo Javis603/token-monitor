@@ -10,7 +10,6 @@ const {
   orderedLimitProviders,
   reorderLimitProvider
 } = require('../../src/electron/renderer/limitProviderOrder');
-const { parseLimitProviders } = require('../../src/shared/limitCollector');
 const { LIMIT_PROVIDER_CATALOG } = require('../../src/shared/limitProviders');
 
 const providers = [
@@ -22,7 +21,10 @@ const providers = [
 
 // The expected list stays spelled out rather than derived: this order is the
 // default a fresh install writes to settings.limitProviderOrder, so changing it
-// is a compatibility decision that should have to be made in a diff.
+// is a compatibility decision that should have to be made in a diff. Since the
+// catalog became the single source for both the ids and the renderer's list,
+// this hand-written copy is the only independent check left on that order —
+// comparing the catalog against anything derived from it proves nothing.
 test('default provider order follows tracked tools, named services, then third-party fallback', () => {
   const ids = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
 
@@ -52,12 +54,6 @@ test('default provider order follows tracked tools, named services, then third-p
     'alibaba',
     'thirdparty'
   ]);
-});
-
-test('renderer provider order matches the collector default for new settings', () => {
-  const ids = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
-
-  assert.deepEqual(ids, parseLimitProviders());
 });
 
 test('normalizeLimitProviderOrder drops invalid entries and appends missing providers', () => {
