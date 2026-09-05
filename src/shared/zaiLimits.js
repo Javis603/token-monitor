@@ -330,6 +330,9 @@ async function fetchZaiLimits(options = {}, deps = {}) {
         windows: balanceWindow ? [...usage.windows, balanceWindow] : usage.windows,
         plan: usage.plan,
         accountKey: hashKey('zai', key),
+        balance: balanceWindow
+          ? { amount: balanceWindow.remaining, currency: balanceWindow.currency }
+          : null,
         hasAnything: usage.windows.length > 0 || Boolean(balanceWindow),
         quotaFailed: false
       };
@@ -392,10 +395,12 @@ async function fetchZaiLimits(options = {}, deps = {}) {
   const accountKey = lanes.map((result) => result.value.accountKey).filter(Boolean)[0] || '';
   const accountLabel = lanes.map((result) => result.value.plan).filter(Boolean)[0] || '';
   const hasAnything = lanes.some((result) => result.value.hasAnything);
+  const balance = lanes.map((result) => result.value.balance).filter(Boolean)[0] || null;
   return normalizeLimitProvider({
     provider: 'zai',
     ...(accountKey ? { accountKey } : {}),
     ...(accountLabel ? { accountLabel } : {}),
+    ...(balance ? { balance } : {}),
     source: 'api',
     status: hasAnything ? 'ok' : key ? 'unavailable' : 'notConfigured',
     updatedAt,
@@ -425,8 +430,7 @@ function zaiBalanceWindow(payload, region) {
     metric: 'credits',
     label: 'Balance',
     remaining: Math.max(0, remaining),
-    currency: zaiBalanceCurrency(region),
-    showMeter: false
+    currency: zaiBalanceCurrency(region)
   };
 }
 

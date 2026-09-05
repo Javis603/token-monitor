@@ -5057,9 +5057,9 @@ function renderProviderWindows(provider, color) {
       mcp && !oneTimeWindows.length && limitWindowNode('MCP', mcp, color, 0.68),
       balanceWindow && limitWindowNode(
         'Balance',
-        { ...balanceWindow, label: 'Balance' },
+        { remainingPercent: creditsMeterPercent(provider, balanceWindow) },
         color,
-        0.68,
+        0.95,
         formatMoney(balanceWindow.remaining, balanceWindow.currency)
       )
     ].filter(Boolean);
