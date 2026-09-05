@@ -68,7 +68,10 @@ test('every catalog client resolves to an icon asset through its CSS rule', () =
   // through it rather than assumed from the id.
   const styles = rendererStyles();
   for (const id of CLIENT_IDS) {
-    const rule = styles.match(new RegExp(`\\.row-icon-${id}\\b[^{}]*\\{([^}]*)\\}`));
+    // The class must be terminated by a selector separator, not just a word
+    // boundary: the renderer applies exactly `row-icon-${client}`, so a suffixed
+    // rule such as .row-icon-<id>-sm would satisfy \b while rendering nothing.
+    const rule = styles.match(new RegExp(`\\.row-icon-${id}(?=[\\s,{])[^{}]*\\{([^}]*)\\}`));
     assert.ok(rule, `${id} needs a .row-icon-${id} rule in styles.css`);
     const asset = rule[1].match(/assets\/icons\/([a-z0-9-]+)\.svg/);
     assert.ok(asset, `.row-icon-${id} should reference an icon under assets/icons/`);
