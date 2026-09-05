@@ -12,7 +12,7 @@ const {
   LIMIT_PROVIDER_LABELS,
   limitProvidersForDetectedClients
 } = require('../../src/shared/limitProviders');
-const { parseLimitProviders } = require('../../src/shared/limitCollector');
+const { parseLimitProviders, providerFetchers } = require('../../src/shared/limitCollector');
 
 const rootDir = path.join(__dirname, '..', '..');
 const read = (...parts) => fs.readFileSync(path.join(rootDir, ...parts), 'utf8');
@@ -77,6 +77,20 @@ test('only an omitted provider selection defaults to all providers', () => {
   assert.deepEqual(parseLimitProviders(), LIMIT_PROVIDER_IDS);
   assert.deepEqual(parseLimitProviders(''), []);
   assert.deepEqual(parseLimitProviders([]), []);
+});
+
+// Dispatch coverage. collectLimitsOnce resolves a provider through this table,
+// so a catalog entry with no fetcher is a provider the collector silently skips:
+// it renders in settings, accepts a credential, and never reports a window.
+test('every provider in the catalog has a limits fetcher', () => {
+  // Called with no deps on purpose. deps.providerFetchers spreads over the
+  // defaults as a test seam, so passing anything here would let an injected
+  // stub stand in for a provider that has no real fetcher.
+  const fetchers = providerFetchers();
+  assert.deepEqual(Object.keys(fetchers).sort(), [...LIMIT_PROVIDER_IDS].sort());
+  for (const [id, fetcher] of Object.entries(fetchers)) {
+    assert.equal(typeof fetcher, 'function', `${id} should map to a fetcher function`);
+  }
 });
 
 test('every provider has a display label', () => {

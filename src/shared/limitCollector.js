@@ -4397,6 +4397,7 @@ module.exports = {
   resolveProviderFetch,
   createLimitsCollector,
   probeLimitProvider,
+  providerFetchers,
   providerPhysicalBoundMs,
   fetchAntigravityLimits,
   fetchOpenCodeLimits,
