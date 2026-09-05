@@ -175,9 +175,35 @@ function sessionsWithoutReasonix(sessions) {
   return removed ? sanitized : sessions;
 }
 
+function periodHasClientModelTokenComponents(period) {
+  return Boolean(
+    period
+    && typeof period === 'object'
+    && period.clientModelTokenComponents
+    && typeof period.clientModelTokenComponents === 'object'
+    && Object.keys(period.clientModelTokenComponents).length > 0
+  );
+}
+
+function stripClientModelTokenComponents(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  let omitted = false;
+  for (const periodName of ['today', 'month', 'allTime']) {
+    const period = payload[periodName];
+    if (!periodHasClientModelTokenComponents(period)) continue;
+    payload[periodName] = { ...period };
+    delete payload[periodName].clientModelTokenComponents;
+    omitted = true;
+  }
+  if (omitted) payload.clientModelTokenComponentsOmitted = true;
+  else delete payload.clientModelTokenComponentsOmitted;
+  return payload;
+}
+
 function buildSyncPayload(summary, {
   omitAllTimeProjects = false,
-  omitHistoryTokenComponents = false
+  omitHistoryTokenComponents = false,
+  omitClientModelTokenComponents = false
 } = {}) {
   if (!summary || typeof summary !== 'object') return summary;
   const payload = { ...summary, limits: syncLimits(summary.limits) };
@@ -198,6 +224,7 @@ function buildSyncPayload(summary, {
   delete payload.allTimeProjectsIncomplete;
   delete payload.sessionDetailsOmitted;
   delete payload.periodProjectsOmitted;
+  delete payload.clientModelTokenComponentsOmitted;
 
   for (const periodName of ['today', 'month']) {
     const period = summary[periodName];
@@ -219,6 +246,7 @@ function buildSyncPayload(summary, {
       payload.allTimeProjectsOmitted = true;
     }
   }
+  if (omitClientModelTokenComponents) stripClientModelTokenComponents(payload);
   return payload;
 }
 
@@ -227,7 +255,8 @@ function serializeSyncPayload(summary, options = {}) {
   const buildOptions = {
     ...options,
     omitAllTimeProjects: options.omitAllTimeProjects === true,
-    omitHistoryTokenComponents: options.omitHistoryTokenComponents === true
+    omitHistoryTokenComponents: options.omitHistoryTokenComponents === true,
+    omitClientModelTokenComponents: options.omitClientModelTokenComponents === true
   };
   let payload = buildSyncPayload(summary, buildOptions);
   if (!payload || typeof payload !== 'object') {
@@ -239,6 +268,14 @@ function serializeSyncPayload(summary, options = {}) {
     // Component detail is additive. Never let it evict an existing project/session
     // payload or turn a previously uploadable History V1 record into a 413.
     buildOptions.omitHistoryTokenComponents = true;
+    payload = buildSyncPayload(summary, buildOptions);
+    body = JSON.stringify(payload);
+  }
+  if (
+    Buffer.byteLength(body, 'utf8') > maxBytes
+    && ['today', 'month', 'allTime'].some((periodName) => periodHasClientModelTokenComponents(payload?.[periodName]))
+  ) {
+    buildOptions.omitClientModelTokenComponents = true;
     payload = buildSyncPayload(summary, buildOptions);
     body = JSON.stringify(payload);
   }
@@ -288,6 +325,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
   const retrySerialized = response.status === 413
     ? serializeSyncPayload(summary, {
         omitHistoryTokenComponents: true,
+        omitClientModelTokenComponents: true,
         omitAllTimeProjects: true
       })
     : null;

@@ -165,6 +165,11 @@ function emptyPeriod() {
     modelUnclassifiedTokens: {},
     clientModels: {},
     clientModelCosts: {},
+    // Exact row-level provenance for pricing.  The older per-model maps above
+    // are deliberately not used to reconstruct this cross-product: doing so
+    // would guess a category split when a model appears under more than one
+    // client.
+    clientModelTokenComponents: {},
     projects: Object.create(null),
     sessions: {}
   };
@@ -690,6 +695,53 @@ function normalizePeriod(input, options = {}) {
       }
     }
   }
+  if (input.clientModelTokenComponents && typeof input.clientModelTokenComponents === 'object') {
+    for (const [client, models] of Object.entries(input.clientModelTokenComponents)) {
+      const clientKey = normalizeClientName(client);
+      if (!clientKey || !models || typeof models !== 'object') continue;
+      for (const [model, raw] of Object.entries(models)) {
+        const modelKey = normalizeModelNameForClient(model, clientKey);
+        if (!modelKey || !raw || typeof raw !== 'object') continue;
+        const component = {};
+        let total = 0;
+        for (const key of ['input', 'output', 'cacheRead', 'cacheWrite', 'unclassified']) {
+          const value = Math.max(0, Math.round(asNumber(raw[key])));
+          if (value > 0) component[key] = value;
+          total += value;
+        }
+        // Do not preserve a claimed "complete" bit unless its categories close
+        // over the row total.  This makes malformed remote records fail closed.
+        if (total === 0 && raw.complete !== true) continue;
+        component.complete = raw.complete === true && !component.unclassified;
+        if (!period.clientModelTokenComponents[clientKey]) period.clientModelTokenComponents[clientKey] = {};
+        const modelTotal = Math.max(0, Math.round(asNumber(period.clientModels?.[clientKey]?.[modelKey])));
+        if (modelTotal > 0 && total > modelTotal) {
+          period.clientModelTokenComponents[clientKey][modelKey] = {
+            unclassified: modelTotal,
+            complete: false
+          };
+          continue;
+        }
+        const previous = period.clientModelTokenComponents[clientKey][modelKey];
+        if (!previous) period.clientModelTokenComponents[clientKey][modelKey] = component;
+        else {
+          for (const key of ['input', 'output', 'cacheRead', 'cacheWrite', 'unclassified']) {
+            const next = (previous[key] || 0) + (component[key] || 0);
+            if (next > 0) previous[key] = next;
+          }
+          previous.complete = previous.complete === true && component.complete === true;
+          const mergedTotal = ['input', 'output', 'cacheRead', 'cacheWrite', 'unclassified']
+            .reduce((sum, key) => sum + (previous[key] || 0), 0);
+          if (modelTotal > 0 && mergedTotal > modelTotal) {
+            period.clientModelTokenComponents[clientKey][modelKey] = {
+              unclassified: modelTotal,
+              complete: false
+            };
+          }
+        }
+      }
+    }
+  }
   if (input.sessions && typeof input.sessions === 'object') {
     for (const [key, value] of Object.entries(input.sessions)) {
       const session = normalizeSession(value, key);
@@ -758,6 +810,27 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   if (client && model && tokens > 0) {
     if (!period.clientModels[client]) period.clientModels[client] = {};
     period.clientModels[client][model] = (period.clientModels[client][model] || 0) + Math.round(tokens);
+    // A row tells us its own total and component fields.  Only this row-local
+    // closure permits the remainder to be called ordinary input; aggregate
+    // counters and old payloads remain explicitly unclassified.
+    const total = Math.max(0, Math.round(tokens));
+    const known = cacheRead + cacheWrite + output;
+    if (!period.clientModelTokenComponents[client]) period.clientModelTokenComponents[client] = {};
+    const components = period.clientModelTokenComponents[client][model]
+      || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, unclassified: 0, complete: true };
+    if (known > total) {
+      // Fail closed: a malformed row cannot keep known categories and also
+      // count the whole total as unclassified.
+      components.unclassified += total;
+      components.complete = false;
+    } else {
+      components.input += total - known;
+      components.output += output;
+      components.cacheRead += cacheRead;
+      components.cacheWrite += cacheWrite;
+      components.complete = components.complete === true;
+    }
+    period.clientModelTokenComponents[client][model] = components;
   }
   if (client && model && cost > 0) {
     if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
@@ -921,6 +994,16 @@ function addClientModelUsage(target, source, client) {
     target.modelCosts[model] = (target.modelCosts[model] || 0) + cost;
     if (!target.clientModelCosts[client]) target.clientModelCosts[client] = {};
     target.clientModelCosts[client][model] = (target.clientModelCosts[client][model] || 0) + cost;
+  }
+  for (const [model, sourceComponent] of Object.entries(source.clientModelTokenComponents?.[client] || {})) {
+    if (!target.clientModelTokenComponents[client]) target.clientModelTokenComponents[client] = {};
+    const component = target.clientModelTokenComponents[client][model]
+      || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, unclassified: 0, complete: true };
+    for (const key of ['input', 'output', 'cacheRead', 'cacheWrite', 'unclassified']) {
+      component[key] += Math.max(0, Math.round(asNumber(sourceComponent?.[key])));
+    }
+    component.complete = component.complete === true && sourceComponent?.complete === true;
+    target.clientModelTokenComponents[client][model] = component;
   }
 }
 
@@ -1260,6 +1343,18 @@ function addPeriodInto(target, source) {
     if (!target.clientModelCosts[client]) target.clientModelCosts[client] = {};
     for (const [model, cost] of Object.entries(models)) {
       target.clientModelCosts[client][model] = (target.clientModelCosts[client][model] || 0) + cost;
+    }
+  }
+  for (const [client, models] of Object.entries(source.clientModelTokenComponents || {})) {
+    if (!target.clientModelTokenComponents[client]) target.clientModelTokenComponents[client] = {};
+    for (const [model, sourceComponent] of Object.entries(models || {})) {
+      const component = target.clientModelTokenComponents[client][model]
+        || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, unclassified: 0, complete: true };
+      for (const key of ['input', 'output', 'cacheRead', 'cacheWrite', 'unclassified']) {
+        component[key] += Math.max(0, Math.round(asNumber(sourceComponent?.[key])));
+      }
+      component.complete = component.complete === true && sourceComponent?.complete === true;
+      target.clientModelTokenComponents[client][model] = component;
     }
   }
   for (const [key, project] of Object.entries(source.projects || {})) addProjectInto(target.projects, key, project);

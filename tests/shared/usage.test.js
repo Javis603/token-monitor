@@ -5,11 +5,13 @@ const test = require('node:test');
 
 const {
   aggregateDevices,
+  applyPeriodDelta,
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,
   mergeDeviceRecord,
   mergePeriods,
   normalizeClientName,
+  normalizePeriod,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('../../src/shared/usage');
 
@@ -1234,4 +1236,144 @@ test('aggregateDevices falls back to UTC-day compare for old agents without peri
     today: { totalTokens: 7 }
   }], 10 * 60 * 1000, Date.parse('2026-06-26T06:00:00.000Z'));
   assert.equal(kept.periods.today.totalTokens, 7);
+});
+
+test('extractUsageFromTokscale keeps row-local component closure per client and model', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 100, inputTokens: 60, outputTokens: 10, cacheReadTokens: 20, cacheWriteTokens: 10 },
+    { client: 'Cursor', model: 'gpt-5', totalTokens: 40, cacheReadTokens: 40 }
+  ]);
+  assert.deepEqual(period.clientModelTokenComponents.codex['gpt-5'], {
+    input: 60, output: 10, cacheRead: 20, cacheWrite: 10, unclassified: 0, complete: true
+  });
+  assert.deepEqual(period.clientModelTokenComponents.cursor['gpt-5'], {
+    input: 0, output: 0, cacheRead: 40, cacheWrite: 0, unclassified: 0, complete: true
+  });
+});
+
+test('extractUsageFromTokscale fails closed when cache and output exceed the row total', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 10, outputTokens: 8, cacheReadTokens: 5, cacheWriteTokens: 5 }
+  ]);
+  assert.deepEqual(period.clientModelTokenComponents.codex['gpt-5'], {
+    input: 0, output: 0, cacheRead: 0, cacheWrite: 0, unclassified: 10, complete: false
+  });
+  const accounted = ['input', 'output', 'cacheRead', 'cacheWrite', 'unclassified']
+    .reduce((sum, key) => sum + period.clientModelTokenComponents.codex['gpt-5'][key], 0);
+  assert.equal(accounted, period.clientModels.codex['gpt-5']);
+});
+
+test('normalizePeriod fails closed when remote component claims exceed the client model total', () => {
+  const period = normalizePeriod({
+    clients: { codex: 100 },
+    clientModels: { codex: { 'gpt-5': 100 } },
+    clientModelTokenComponents: { codex: { 'gpt-5': { input: 150, complete: true } } }
+  });
+  assert.deepEqual(period.clientModelTokenComponents.codex['gpt-5'], { unclassified: 100, complete: false });
+
+  const claimed = normalizePeriod({
+    clients: { codex: 100 },
+    clientModels: { codex: { 'gpt-5': 100 } },
+    clientModelTokenComponents: { codex: { 'gpt-5': { input: 60, output: 10, complete: true } } }
+  });
+  // Under-closing categories keep their own row evidence (and its claimed
+  // complete bit, which describes the source row, not the trusted model
+  // total). Closing over the trusted total is re-validated by the consumer
+  // (deriveCodexExclusiveUsage); normalization only force-fails claims that
+  // EXCEED the trusted total.
+  assert.equal(claimed.clientModelTokenComponents.codex['gpt-5'].complete, true);
+  assert.equal(claimed.clientModelTokenComponents.codex['gpt-5'].input, 60);
+});
+
+test('normalizePeriod does not fabricate client model components for older payloads', () => {
+  const period = normalizePeriod({
+    clients: { codex: 100 },
+    clientModels: { codex: { 'gpt-5': 100 } },
+    modelCacheReads: { 'gpt-5': 20 },
+    capabilities: { tokenComponents: true }
+  });
+  assert.deepEqual(period.clientModelTokenComponents, {});
+});
+
+test('mergePeriods sums client model components and propagates fail-closed rows', () => {
+  const left = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 100, inputTokens: 60, outputTokens: 10, cacheReadTokens: 20, cacheWriteTokens: 10 }
+  ]);
+  const right = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 50, inputTokens: 30, outputTokens: 5, cacheReadTokens: 10, cacheWriteTokens: 5 }
+  ]);
+  const merged = mergePeriods(left, right);
+  assert.deepEqual(merged.clientModelTokenComponents.codex['gpt-5'], {
+    input: 90, output: 15, cacheRead: 30, cacheWrite: 15, unclassified: 0, complete: true
+  });
+
+  const withUnpriced = mergePeriods(merged, extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 50, cacheReadTokens: 90, cacheWriteTokens: 90, outputTokens: 90 }
+  ]));
+  const components = withUnpriced.clientModelTokenComponents.codex['gpt-5'];
+  assert.equal(components.complete, false);
+  assert.equal(components.unclassified, 50);
+  const accounted = ['input', 'output', 'cacheRead', 'cacheWrite', 'unclassified']
+    .reduce((sum, key) => sum + components[key], 0);
+  assert.equal(accounted, withUnpriced.clientModels.codex['gpt-5']);
+});
+
+test('applyPeriodDelta carries client model components exactly across a watch tick', () => {
+  const anchorToday = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 100, inputTokens: 60, outputTokens: 10, cacheReadTokens: 20, cacheWriteTokens: 10 }
+  ]);
+  const freshToday = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 150, inputTokens: 90, outputTokens: 15, cacheReadTokens: 30, cacheWriteTokens: 15 }
+  ]);
+  const baseAllTime = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 500, inputTokens: 300, outputTokens: 50, cacheReadTokens: 100, cacheWriteTokens: 50 }
+  ]);
+  const result = applyPeriodDelta(baseAllTime, freshToday, anchorToday);
+  assert.deepEqual(result.clientModelTokenComponents.codex['gpt-5'], {
+    input: 330, output: 55, cacheRead: 110, cacheWrite: 55, unclassified: 0, complete: true
+  });
+  assert.equal(result.clientModels.codex['gpt-5'], 550);
+});
+
+test('mergeDeviceRecord preserves retained client model components for untracked clients', () => {
+  const existing = {
+    deviceId: 'macbook',
+    hostname: 'macbook.local',
+    platform: 'darwin',
+    updatedAt: '2026-05-27T00:00:00.000Z',
+    receivedAt: '2026-05-27T00:00:00.000Z',
+    today: extractUsageFromTokscale([
+      { client: 'Codex', model: 'gpt-5', totalTokens: 100, inputTokens: 60, outputTokens: 10, cacheReadTokens: 20, cacheWriteTokens: 10 }
+    ]),
+    month: extractUsageFromTokscale([
+      { client: 'Codex', model: 'gpt-5', totalTokens: 200, inputTokens: 120, outputTokens: 20, cacheReadTokens: 40, cacheWriteTokens: 20 }
+    ]),
+    allTime: extractUsageFromTokscale([
+      { client: 'Codex', model: 'gpt-5', totalTokens: 300, inputTokens: 180, outputTokens: 30, cacheReadTokens: 60, cacheWriteTokens: 30 }
+    ]),
+    trackedClients: ['codex']
+  };
+  const incoming = {
+    deviceId: 'macbook',
+    hostname: 'macbook.local',
+    platform: 'darwin',
+    updatedAt: '2026-05-27T00:01:00.000Z',
+    receivedAt: '2026-05-27T00:01:00.000Z',
+    today: extractUsageFromTokscale([
+      { client: 'Cursor', model: 'x', totalTokens: 7 }
+    ]),
+    month: extractUsageFromTokscale([
+      { client: 'Cursor', model: 'x', totalTokens: 7 }
+    ]),
+    allTime: extractUsageFromTokscale([
+      { client: 'Cursor', model: 'x', totalTokens: 7 }
+    ]),
+    trackedClients: ['cursor']
+  };
+  const merged = mergeDeviceRecord(existing, incoming);
+  const today = merged.periods.today;
+  assert.equal(today.clientModels.codex['gpt-5'], 100);
+  assert.equal(today.clientModelTokenComponents.codex['gpt-5'].input, 60);
+  assert.equal(today.clientModelTokenComponents.codex['gpt-5'].complete, true);
+  assert.equal(today.clientModels.cursor.x, 7);
 });
