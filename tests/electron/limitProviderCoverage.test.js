@@ -57,24 +57,34 @@ test('every account group reports its state through a status pill', () => {
 });
 
 test('every catalog provider reaches an account group or a connection explainer', () => {
-  // renderLimitProviderCheckboxes gates the whole options block on
-  // `accountGroup || settings || connectionDetailKey`, so a provider in neither
-  // map has nothing to expand into. The two are deliberately not exclusive —
-  // antigravity carries both, an explainer above its account group — so this
-  // asserts the union rather than a partition.
+  // A deliberate contract, and stricter than the renderer's own
+  // `accountGroup || settings || connectionDetailKey` gate. LIMIT_PROVIDER_SETTINGS
+  // is that third path, but it holds display toggles — Claude prepaid balance,
+  // Codex additional limits, OpenCode local limits — so a provider carrying only
+  // a toggle would expand into options that cannot connect it. What is asserted
+  // here is that every provider offers somewhere to put a credential, or an
+  // explanation of how it connects without one.
+  // The two maps are deliberately not exclusive — antigravity carries an
+  // explainer above its account group — so this is a union, not a partition.
   const configured = new Set([...Object.keys(accountGroups), ...Object.keys(connectionDetails)]);
   assert.deepEqual([...configured].sort(), [...LIMIT_PROVIDER_IDS].sort());
 });
 
 test('every mapped settings element exists in index.html', () => {
-  const html = read('index.html');
+  // Strip comments first: getElementById cannot see a commented-out element, so
+  // matching inside one would report a surface the settings page has not got.
+  const html = read('index.html').replace(/<!--[\s\S]*?-->/g, '');
+  // Require whitespace before the attribute. A bare `id="x"` also matches
+  // data-id="x", and so does `\bid="x"` — the hyphen is a word boundary — and
+  // neither is an element the renderer can look up.
+  const tagWithId = (elementId) => html.match(new RegExp(`<[^>]*\\sid="${elementId}"[^>]*>`));
   for (const [provider, groupId] of Object.entries(accountGroups)) {
-    assert.match(html, new RegExp(`id="${groupId}"`), `${provider} maps to a missing #${groupId}`);
+    assert.ok(tagWithId(groupId), `${provider} maps to a missing #${groupId}`);
   }
   for (const [provider, statusId] of Object.entries(accountStatuses)) {
     // Match the tag, then its attributes separately: the pill class is the
     // contract, the order it is written in is not.
-    const tag = html.match(new RegExp(`<[^>]*\\bid="${statusId}"[^>]*>`));
+    const tag = tagWithId(statusId);
     assert.ok(tag, `${provider} maps to a missing #${statusId}`);
     assert.match(tag[0], /class="[^"]*\bcursor-status-pill\b/, `#${statusId} should render as a status pill`);
   }
