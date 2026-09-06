@@ -739,6 +739,7 @@ function sanitizeDiagnosticSnapshot(input = {}) {
       hubTarget: text(topology.hubTarget),
       hubTransport: text(topology.hubTransport),
       externalAgentAlive: topology.externalAgentAlive === true,
+      icloudWidgetProducerActive: topology.icloudWidgetProducerActive === true,
       usageOwner: text(topology.usageOwner),
       limitsOwner: text(topology.limitsOwner),
       streamState: text(topology.streamState),
@@ -950,7 +951,10 @@ function renderReport(snapshot, selected) {
   }
   lines.push(section('Hub Devices', hubDeviceLines));
 
-  const usageLines = Object.entries(snapshot.usage).map(([key, value]) => line(key, value));
+  const usageLines = [
+    line('icloudWidgetProducerActive', snapshot.topology.icloudWidgetProducerActive),
+    ...Object.entries(snapshot.usage).map(([key, value]) => line(key, value))
+  ];
   lines.push(section('Usage and Limits Topology', usageLines));
   const collectorLines = Object.entries(snapshot.collector)
     .filter(([key]) => key !== 'wslStatus')

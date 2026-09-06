@@ -1,13 +1,17 @@
 'use strict';
 
 // iCloud Drive is deliberately a small, file-backed adapter at the Electron
-// boundary.  It has no bearing on the Hub protocol or the portable usage core:
+// boundary. It has no bearing on the Hub protocol or the portable usage core:
 // each writer owns one file, and readers reduce the valid files locally.
 const crypto = require('node:crypto');
-const fs = require('node:fs');
+const fsConstants = require('node:fs').constants;
+const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const { TextEncoder } = require('node:util');
 
+const { MAX_JSON_BODY_BYTES } = require('../shared/http');
+const { staleAfterMsForSyncUpload } = require('../shared/syncUploadInterval');
 const { normalizeDeviceRecord } = require('../shared/usage');
 const { syncPayload } = require('../shared/syncPayload');
 const {
@@ -23,8 +27,23 @@ const WRITER_FILE_RE = /^writer-([a-f0-9]{64})\.json$/;
 const MAX_DEVICE_ID_LENGTH = 512;
 const MAX_WRITER_ID_LENGTH = 512;
 
-function nowIso() {
-  return new Date().toISOString();
+// The sync payload is already reduced below the Hub's one-megabyte request
+// limit. Keeping the document cap at that limit leaves room for the device
+// envelope and avoids making a valid Hub payload impossible to persist here.
+const MAX_ICLOUD_DOCUMENT_BYTES = MAX_JSON_BODY_BYTES;
+const MAX_REVISION_LEDGER_BYTES = 64 * 1024;
+const MAX_DELETIONS_PER_WRITER = 512;
+const DEFAULT_STALE_AFTER_MS = 10 * 60 * 1000;
+const REVISION_LEDGER_SCHEMA_VERSION = 1;
+
+function resolveFsApi(fsApi) {
+  if (fsApi && typeof fsApi.lstat === 'function' && typeof fsApi.open === 'function') return fsApi;
+  if (fsApi?.promises && typeof fsApi.promises.lstat === 'function') return fsApi.promises;
+  return fs;
+}
+
+function nowIso(now = () => Date.now()) {
+  return new Date(now()).toISOString();
 }
 
 function cleanId(value, maxLength) {
@@ -34,7 +53,9 @@ function cleanId(value, maxLength) {
 }
 
 function idHash(value) {
-  return crypto.createHash('sha256').update(String(value)).digest('hex');
+  // This is a deterministic filename digest for validated device/writer
+  // identifiers, not password or credential storage.
+  return crypto.createHash('sha256').update(new TextEncoder().encode(String(value))).digest('hex');
 }
 
 function deviceFilenameForId(deviceId) {
@@ -61,31 +82,34 @@ function defaultCloudDocsRoot(home = os.homedir()) {
   return path.join(home, 'Library', 'Mobile Documents', 'com~apple~CloudDocs');
 }
 
+function defaultRevisionLedgerPath(home, writerId) {
+  return path.join(
+    home,
+    'Library',
+    'Application Support',
+    'Token Monitor',
+    `icloud-revisions-${idHash(writerId)}.json`
+  );
+}
+
 function safePathForDisplay(root, home = os.homedir()) {
   const value = String(root || '');
   const homePrefix = `${path.resolve(home)}${path.sep}`;
   const resolved = path.resolve(value);
   if (resolved === path.resolve(home)) return '~';
   if (resolved.startsWith(homePrefix)) return `~/${resolved.slice(homePrefix.length).replaceAll(path.sep, '/')}`;
-  // A caller may inject a temporary root in tests.  Returning a stable redacted
+  // A caller may inject a temporary root in tests. Returning a stable redacted
   // marker keeps diagnostics useful without leaking a username or full path.
   return '[redacted]/Token Monitor/sync-v1';
 }
 
-function isDirectory(fsApi, target) {
-  try {
-    return fsApi.lstatSync(target).isDirectory();
-  } catch (_) {
-    return false;
-  }
-}
-
-function pathState({ platform = process.platform, home = os.homedir(), cloudDocsRoot, fsApi = fs } = {}) {
+function pathLayout({ platform = process.platform, home = os.homedir(), cloudDocsRoot } = {}) {
   const root = path.resolve(cloudDocsRoot || defaultCloudDocsRoot(home));
   const syncRoot = path.join(root, ICLOUD_SYNC_DIR, ICLOUD_SYNC_VERSION_DIR);
   const devicesRoot = path.join(syncRoot, 'devices');
   const subscriptionsRoot = path.join(syncRoot, 'subscriptions');
-  const base = {
+  const deletionsRoot = path.join(syncRoot, 'deletions');
+  return {
     supported: platform === 'darwin',
     available: false,
     status: platform === 'darwin' ? 'waiting' : 'unsupported',
@@ -94,73 +118,194 @@ function pathState({ platform = process.platform, home = os.homedir(), cloudDocs
     syncRoot,
     devicesRoot,
     subscriptionsRoot,
+    deletionsRoot,
     displayRoot: safePathForDisplay(syncRoot, home)
   };
+}
+
+async function pathState({ platform = process.platform, home = os.homedir(), cloudDocsRoot, fsApi = fs } = {}) {
+  const api = resolveFsApi(fsApi);
+  const base = pathLayout({ platform, home, cloudDocsRoot });
   if (!base.supported) return base;
   try {
-    const stat = fsApi.lstatSync(root);
+    const stat = await api.lstat(base.cloudDocsRoot);
     if (!stat.isDirectory()) {
       return { ...base, status: 'error', reason: 'icloud-root-not-directory' };
     }
-    return { ...base, available: true, status: isDirectory(fsApi, syncRoot) ? 'available' : 'initializing', reason: '' };
+    let syncAvailable = false;
+    try {
+      syncAvailable = (await api.lstat(base.syncRoot)).isDirectory();
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        return { ...base, available: true, status: 'error', reason: 'icloud-sync-root-unreadable' };
+      }
+    }
+    return {
+      ...base,
+      available: true,
+      status: syncAvailable ? 'available' : 'initializing',
+      reason: ''
+    };
   } catch (error) {
     if (error?.code === 'ENOENT') return base;
     return { ...base, status: 'error', reason: 'icloud-root-unreadable', error };
   }
 }
 
-function ensureDirectory(fsApi, target) {
-  fsApi.mkdirSync(target, { recursive: true });
+async function ensureDirectory(fsApi, target) {
+  await fsApi.mkdir(target, { recursive: true });
 }
 
-function ensureSyncDirectories(paths, fsApi = fs) {
+async function ensureSyncDirectories(paths, fsApi = fs) {
   if (!paths.supported || !paths.available) return paths;
-  ensureDirectory(fsApi, paths.syncRoot);
-  ensureDirectory(fsApi, paths.devicesRoot);
-  ensureDirectory(fsApi, paths.subscriptionsRoot);
+  await ensureDirectory(fsApi, paths.syncRoot);
+  await ensureDirectory(fsApi, paths.devicesRoot);
+  await ensureDirectory(fsApi, paths.subscriptionsRoot);
+  await ensureDirectory(fsApi, paths.deletionsRoot);
   return { ...paths, status: 'available', reason: '' };
 }
 
-function isRegularFile(fsApi, target) {
+function readOpenFlags(platform = process.platform, hostPlatform = process.platform) {
+  const noFollow = fsConstants.O_NOFOLLOW;
+  if (platform === 'darwin' && hostPlatform === 'darwin' && typeof noFollow !== 'number') {
+    const error = new Error('iCloud file reads require O_NOFOLLOW on macOS');
+    error.code = 'symlink-not-allowed';
+    throw error;
+  }
+  return Number(fsConstants.O_RDONLY || 0) | (typeof noFollow === 'number' ? noFollow : 0);
+}
+
+function readErrorReason(error) {
+  if (error?.code === 'ENOENT') return 'missing';
+  if (error?.code === 'ELOOP' || error?.code === 'EMLINK') return 'symlink-not-allowed';
+  return 'read-failed';
+}
+
+async function readJsonFile(
+  fsApi,
+  target,
+  maxBytes = MAX_ICLOUD_DOCUMENT_BYTES,
+  platform = process.platform,
+  hostPlatform = process.platform
+) {
+  let handle;
   try {
-    return fsApi.lstatSync(target).isFile();
-  } catch (_) {
-    return false;
+    handle = await fsApi.open(target, readOpenFlags(platform, hostPlatform));
+  } catch (error) {
+    return {
+      ok: false,
+      reason: readErrorReason(error),
+      error
+    };
+  }
+  try {
+    if (typeof handle.stat !== 'function' || typeof handle.readFile !== 'function') {
+      return { ok: false, reason: 'read-failed' };
+    }
+    let stat;
+    try {
+      stat = await handle.stat();
+    } catch (error) {
+      return { ok: false, reason: readErrorReason(error), error };
+    }
+    if (!stat?.isFile?.()) return { ok: false, reason: 'not-regular-file' };
+    if (Number.isFinite(stat.size) && stat.size > maxBytes) {
+      return { ok: false, reason: 'document-too-large', size: stat.size };
+    }
+    let body;
+    try {
+      body = await handle.readFile('utf8');
+    } catch (error) {
+      return { ok: false, reason: readErrorReason(error), error };
+    }
+    // The stat is on the same open handle as the read. This second bound still
+    // protects against filesystems whose reported size is stale or incomplete.
+    const bytes = Buffer.byteLength(body, 'utf8');
+    if (bytes > maxBytes) return { ok: false, reason: 'document-too-large', size: bytes };
+    return { ok: true, value: JSON.parse(body) };
+  } catch (error) {
+    return { ok: false, reason: 'invalid-json', error };
+  } finally {
+    try { await handle.close(); } catch (_) { /* best effort after the result */ }
   }
 }
 
-function readJsonFile(fsApi, target) {
-  if (!isRegularFile(fsApi, target)) return { ok: false, reason: 'not-regular-file' };
+function unsupportedDirectorySync(error) {
+  return ['EISDIR', 'EINVAL', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EPERM'].includes(String(error?.code || ''));
+}
+
+async function syncDirectory(
+  fsApi,
+  directory,
+  _platform = process.platform,
+  hostPlatform = process.platform
+) {
+  let handle;
   try {
-    const value = JSON.parse(fsApi.readFileSync(target, 'utf8'));
-    return { ok: true, value };
-  } catch (_) {
-    return { ok: false, reason: 'invalid-json' };
+    handle = await fsApi.open(directory, 'r');
+    if (typeof handle.sync !== 'function') {
+      const error = new Error('directory fsync is unavailable');
+      error.code = 'ENOSYS';
+      throw error;
+    }
+    await handle.sync();
+    return { durable: true };
+  } catch (error) {
+    // The logical product platform may be injected as darwin in a test running
+    // on Windows. Downgrade only when the actual filesystem host lacks the
+    // primitive; a real macOS host must still report a directory fsync failure.
+    if (hostPlatform !== 'darwin' && unsupportedDirectorySync(error)) return { durable: false, degraded: true };
+    throw error;
+  } finally {
+    try { await handle?.close(); } catch (_) { /* best effort after the result */ }
   }
 }
 
-function atomicWriteJson(fsApi, target, value) {
+function documentTooLargeError(bytes, maxBytes) {
+  const error = new Error(`iCloud document exceeds ${maxBytes} bytes`);
+  error.code = 'document_too_large';
+  error.bytes = bytes;
+  error.maxBytes = maxBytes;
+  return error;
+}
+
+async function atomicWriteJson(fsApi, target, value, options = {}) {
+  const api = resolveFsApi(fsApi);
+  const platform = options.platform || process.platform;
+  const hostPlatform = options.hostPlatform || process.platform;
+  const maxBytes = Number.isFinite(options.maxBytes) ? options.maxBytes : MAX_ICLOUD_DOCUMENT_BYTES;
+  const body = `${JSON.stringify(value)}\n`;
+  const bytes = Buffer.byteLength(body, 'utf8');
+  if (bytes > maxBytes) throw documentTooLargeError(bytes, maxBytes);
+
   const directory = path.dirname(target);
-  ensureDirectory(fsApi, directory);
+  await ensureDirectory(api, directory);
   const temp = path.join(
     directory,
     `.${path.basename(target)}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`
   );
-  const body = `${JSON.stringify(value)}\n`;
-  let fd = null;
+  let handle = null;
+  let renamed = false;
   try {
-    fd = fsApi.openSync(temp, 'wx', 0o600);
-    fsApi.writeSync(fd, body, null, 'utf8');
-    if (typeof fsApi.fsyncSync === 'function') fsApi.fsyncSync(fd);
-    fsApi.closeSync(fd);
-    fd = null;
-    if (typeof fsApi.chmodSync === 'function') fsApi.chmodSync(temp, 0o600);
-    fsApi.renameSync(temp, target);
-  } catch (error) {
-    if (fd !== null) {
-      try { fsApi.closeSync(fd); } catch (_) { /* best effort */ }
+    handle = await api.open(temp, 'wx', 0o600);
+    await handle.writeFile(body, 'utf8');
+    if (typeof handle.sync !== 'function') {
+      const error = new Error('file fsync is unavailable');
+      error.code = 'ENOSYS';
+      throw error;
     }
-    try { fsApi.unlinkSync(temp); } catch (_) { /* best effort */ }
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    if (typeof api.chmod === 'function') await api.chmod(temp, 0o600);
+    await api.rename(temp, target);
+    renamed = true;
+    await syncDirectory(api, directory, platform, hostPlatform);
+  } catch (error) {
+    try { await handle?.close(); } catch (_) { /* best effort */ }
+    if (!renamed) {
+      try { await api.unlink(temp); } catch (_) { /* best effort */ }
+    }
     throw error;
   }
 }
@@ -204,7 +349,8 @@ function validDeviceDocument(document, expectedFilename) {
   // Re-apply the boundary scrub on reads as well as writes. A manually placed
   // or older file must not be able to smuggle a credential-shaped field into
   // the in-process aggregate merely because it passed JSON parsing.
-  const record = normalizeDeviceRecord(stripSensitive(document.record));
+  let record;
+  try { record = normalizeDeviceRecord(stripSensitive(document.record)); } catch (_) { return null; }
   if (record.deviceId !== deviceId) return null;
   return {
     schemaVersion: ICLOUD_SCHEMA_VERSION,
@@ -217,7 +363,7 @@ function validDeviceDocument(document, expectedFilename) {
 }
 
 function revisionToken(revision) {
-  if (!revision || !Number.isSafeInteger(Number(revision.counter)) || !revision.writerId) return '';
+  if (!revision || !Number.isSafeInteger(Number(revision.counter)) || revision.counter < 1 || !revision.writerId) return '';
   return `${Number(revision.counter)}:${revision.writerId}`;
 }
 
@@ -258,37 +404,199 @@ function validSubscriptionDocument(document, expectedFilename) {
   };
 }
 
+function validDeletionDocument(document, expectedFilename) {
+  if (!document || typeof document !== 'object' || Array.isArray(document)) return null;
+  if (document.schemaVersion !== ICLOUD_SCHEMA_VERSION || document.kind !== 'device-deletions') return null;
+  const writerId = cleanId(document.writerId, MAX_WRITER_ID_LENGTH);
+  if (!writerId || writerFilenameForId(writerId) !== expectedFilename) return null;
+  const counter = Number(document.revision?.counter);
+  if (!Number.isSafeInteger(counter) || counter < 1) return null;
+  if (String(document.revision?.writerId || '') !== writerId) return null;
+  if (!Array.isArray(document.deletions) || document.deletions.length > MAX_DELETIONS_PER_WRITER) return null;
+  const seen = new Set();
+  const deletions = [];
+  for (const entry of document.deletions) {
+    const targetDeviceId = cleanId(entry?.targetDeviceId, MAX_DEVICE_ID_LENGTH);
+    const targetDeviceRevision = Number(entry?.targetDeviceRevision);
+    if (
+      !targetDeviceId
+      || !Number.isSafeInteger(targetDeviceRevision)
+      || targetDeviceRevision < 0
+      || seen.has(targetDeviceId)
+    ) return null;
+    seen.add(targetDeviceId);
+    deletions.push({ targetDeviceId, targetDeviceRevision });
+  }
+  deletions.sort((left, right) => left.targetDeviceId.localeCompare(right.targetDeviceId));
+  return {
+    schemaVersion: ICLOUD_SCHEMA_VERSION,
+    kind: 'device-deletions',
+    writerId,
+    revision: { counter, writerId },
+    updatedAt: typeof document.updatedAt === 'string' ? document.updatedAt : '',
+    deletions
+  };
+}
+
+function emptyRevisionLedger() {
+  return {
+    schemaVersion: REVISION_LEDGER_SCHEMA_VERSION,
+    kind: 'icloud-revision-ledger',
+    devices: Object.create(null),
+    subscriptionCounter: 0,
+    deletionCounter: 0
+  };
+}
+
+function validRevisionLedger(document) {
+  if (!document || typeof document !== 'object' || Array.isArray(document)) return null;
+  if (document.schemaVersion !== REVISION_LEDGER_SCHEMA_VERSION || document.kind !== 'icloud-revision-ledger') return null;
+  if (!document.devices || typeof document.devices !== 'object' || Array.isArray(document.devices)) return null;
+  const devices = Object.create(null);
+  const entries = Object.entries(document.devices);
+  if (entries.length > MAX_DELETIONS_PER_WRITER) return null;
+  for (const [deviceId, revision] of entries) {
+    if (!cleanId(deviceId, MAX_DEVICE_ID_LENGTH)) return null;
+    const numeric = Number(revision);
+    if (!Number.isSafeInteger(numeric) || numeric < 0) return null;
+    devices[deviceId] = numeric;
+  }
+  const subscriptionCounter = Number(document.subscriptionCounter || 0);
+  const deletionCounter = Number(document.deletionCounter || 0);
+  if (
+    !Number.isSafeInteger(subscriptionCounter) || subscriptionCounter < 0
+    || !Number.isSafeInteger(deletionCounter) || deletionCounter < 0
+  ) return null;
+  return {
+    schemaVersion: REVISION_LEDGER_SCHEMA_VERSION,
+    kind: 'icloud-revision-ledger',
+    devices,
+    subscriptionCounter,
+    deletionCounter
+  };
+}
+
+function stableSerialize(value) {
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
+  if (!value || typeof value !== 'object') return JSON.stringify(value);
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(value[key])}`).join(',')}}`;
+}
+
+function semanticDeviceFingerprint(record) {
+  const semantic = record && typeof record === 'object' && !Array.isArray(record) ? { ...record } : record;
+  if (semantic && typeof semantic === 'object') {
+    // These are publication freshness fields only. Nested timestamps such as
+    // limit resets and history data remain part of the semantic fingerprint.
+    delete semantic.updatedAt;
+    delete semantic.receivedAt;
+  }
+  return crypto.createHash('sha256').update(stableSerialize(semantic)).digest('hex');
+}
+
 function createIcloudSyncStore(options = {}) {
-  const fsApi = options.fsApi || fs;
+  const fsApi = resolveFsApi(options.fsApi);
   const platform = options.platform || process.platform;
+  const hostPlatform = options.hostPlatform || process.platform;
   const home = options.home || os.homedir();
   const writerId = cleanId(options.writerId || options.deviceId || os.hostname(), MAX_WRITER_ID_LENGTH) || 'unknown-writer';
+  const revisionLedgerPath = options.revisionLedgerPath || defaultRevisionLedgerPath(home, writerId);
+  const staleAfterMs = Number.isFinite(options.staleAfterMs) && options.staleAfterMs > 0
+    ? options.staleAfterMs
+    : DEFAULT_STALE_AFTER_MS;
+  const now = typeof options.now === 'function' ? options.now : () => Date.now();
   const deviceCache = new Map();
   const subscriptionCache = new Map();
-  let lastPaths = pathState({ platform, home, cloudDocsRoot: options.cloudDocsRoot, fsApi });
+  const deletionCache = new Map();
+  let lastPaths = pathLayout({ platform, home, cloudDocsRoot: options.cloudDocsRoot });
   let lastError = null;
   let pathStatusOverride = null;
+  let pathProbePromise = null;
+  let revisionLedger = emptyRevisionLedger();
+  let revisionLedgerLoaded = false;
+  let revisionLedgerLoadPromise = null;
+  let revisionLedgerQueue = Promise.resolve();
+  let deviceMutationQueue = Promise.resolve();
+  let subscriptionMutationQueue = Promise.resolve();
+  let acceptingMutations = true;
+  let closePromise = null;
+  let lastDeviceFingerprint = '';
+  let lastDeviceWriteAt = null;
 
-  function paths() {
-    const current = pathState({ platform, home, cloudDocsRoot: options.cloudDocsRoot, fsApi });
-    if (!current.available) {
-      pathStatusOverride = null;
+  function stoppedMutationError() {
+    const error = new Error('iCloud sync store is closed');
+    error.code = 'icloud_stopped';
+    return error;
+  }
+
+  function enqueueDeviceMutation(run) {
+    if (!acceptingMutations) return Promise.reject(stoppedMutationError());
+    const task = deviceMutationQueue.then(run, run);
+    deviceMutationQueue = task.catch(() => {});
+    return task;
+  }
+
+  function enqueueSubscriptionMutation(run) {
+    if (!acceptingMutations) return Promise.reject(stoppedMutationError());
+    const task = subscriptionMutationQueue.then(run, run);
+    subscriptionMutationQueue = task.catch(() => {});
+    return task;
+  }
+
+  async function waitForIdle() {
+    while (true) {
+      const queues = [deviceMutationQueue, subscriptionMutationQueue, revisionLedgerQueue];
+      await Promise.allSettled(queues);
+      if (
+        queues[0] === deviceMutationQueue
+        && queues[1] === subscriptionMutationQueue
+        && queues[2] === revisionLedgerQueue
+      ) return;
     }
+  }
+
+  function whenIdle() {
+    return closePromise || waitForIdle();
+  }
+
+  function close() {
+    acceptingMutations = false;
+    if (!closePromise) closePromise = waitForIdle();
+    return closePromise;
+  }
+
+  async function refreshPaths() {
+    if (!pathProbePromise) {
+      pathProbePromise = pathState({
+        platform,
+        home,
+        cloudDocsRoot: options.cloudDocsRoot,
+        fsApi
+      }).finally(() => { pathProbePromise = null; });
+    }
+    const current = await pathProbePromise;
+    if (!current.available) pathStatusOverride = null;
     lastPaths = pathStatusOverride && pathStatusOverride.syncRoot === current.syncRoot
       ? { ...current, status: pathStatusOverride.status, reason: pathStatusOverride.reason }
       : current;
     return lastPaths;
   }
 
-  function availablePaths() {
-    const current = paths();
+  function paths() {
+    return lastPaths;
+  }
+
+  async function availablePaths() {
+    const current = await refreshPaths();
     if (!current.supported || !current.available) return { paths: current, error: null };
     try {
-      return { paths: ensureSyncDirectories(current, fsApi), error: null };
+      const ensured = await ensureSyncDirectories(current, fsApi);
+      lastPaths = ensured;
+      return { paths: ensured, error: null };
     } catch (error) {
       lastError = { category: 'root-create-failed', error };
       pathStatusOverride = { syncRoot: current.syncRoot, status: 'error', reason: 'root-create-failed' };
-      return { paths: { ...current, status: 'error', reason: 'root-create-failed', error }, error };
+      lastPaths = { ...current, status: 'error', reason: 'root-create-failed', error };
+      return { paths: lastPaths, error };
     }
   }
 
@@ -303,61 +611,209 @@ function createIcloudSyncStore(options = {}) {
       syncRoot: current.syncRoot,
       devicesRoot: current.devicesRoot,
       subscriptionsRoot: current.subscriptionsRoot,
+      deletionsRoot: current.deletionsRoot,
+      revisionLedgerPath,
       lastErrorCategory: lastError?.category || ''
     };
   }
 
-  function listFiles(directory, matcher) {
+  function clearError() {
+    lastError = null;
+  }
+
+  async function listFiles(directory, matcher) {
     try {
-      return fsApi.readdirSync(directory).filter((filename) => matcher(filename));
+      const filenames = await fsApi.readdir(directory);
+      return { ok: true, files: filenames.filter((filename) => matcher(filename)).sort() };
     } catch (error) {
-      if (error?.code === 'ENOENT') return [];
-      throw error;
+      return {
+        ok: false,
+        reason: error?.code === 'ENOENT' ? 'directory-unavailable' : 'directory-read-failed',
+        error
+      };
     }
   }
 
-  function discoverDevices() {
-    const available = availablePaths();
+  function cacheRecordsForDeletionTargets() {
+    const targets = new Map();
+    for (const document of deletionCache.values()) {
+      for (const entry of document.deletions) {
+        targets.set(entry.targetDeviceId, Math.max(targets.get(entry.targetDeviceId) || 0, entry.targetDeviceRevision));
+      }
+    }
+    return targets;
+  }
+
+  function visibleDeviceEntries() {
+    const deletionTargets = cacheRecordsForDeletionTargets();
+    return [...deviceCache.values()].filter(({ document }) => {
+      const targetRevision = deletionTargets.get(document.deviceId);
+      return !Number.isSafeInteger(targetRevision) || document.revision > targetRevision;
+    });
+  }
+
+  async function discoverDevices() {
+    const available = await availablePaths();
     if (available.error || !available.paths.available) {
+      const visible = visibleDeviceEntries();
       return {
-        records: [...deviceCache.values()].map((entry) => entry.record),
-        documents: [...deviceCache.values()].map((entry) => entry.document),
+        records: visible.map((entry) => entry.record),
+        documents: visible.map((entry) => entry.document),
         status: status(),
         errors: available.error ? [{ category: available.paths.reason || 'root-unavailable' }] : []
       };
     }
-    const currentFiles = new Set();
     const errors = [];
-    try {
-      for (const filename of listFiles(available.paths.devicesRoot, isKnownDeviceFilename)) {
-        currentFiles.add(filename);
-        const result = readJsonFile(fsApi, path.join(available.paths.devicesRoot, filename));
-        const document = result.ok ? validDeviceDocument(result.value, filename) : null;
-        if (!document) {
-          errors.push({ category: result.reason || 'invalid-device-document', filename });
-          continue;
-        }
-        const prior = deviceCache.get(filename);
-        if (!prior || document.revision >= prior.document.revision) {
-          deviceCache.set(filename, { document, record: document.record });
-        }
+    const [deviceListing, deletionListing] = await Promise.all([
+      listFiles(available.paths.devicesRoot, isKnownDeviceFilename),
+      listFiles(available.paths.deletionsRoot, isKnownWriterFilename)
+    ]);
+    if (!deviceListing.ok) errors.push({ category: deviceListing.reason });
+    if (!deletionListing.ok) errors.push({ category: deletionListing.reason });
+
+    for (const filename of deviceListing.files || []) {
+      const result = await readJsonFile(
+        fsApi,
+        path.join(available.paths.devicesRoot, filename),
+        MAX_ICLOUD_DOCUMENT_BYTES,
+        platform,
+        hostPlatform
+      );
+      const document = result.ok ? validDeviceDocument(result.value, filename) : null;
+      if (!document) {
+        errors.push({ category: result.reason || 'invalid-device-document', filename });
+        continue;
       }
-      for (const filename of [...deviceCache.keys()]) {
-        if (!currentFiles.has(filename)) deviceCache.delete(filename);
+      const prior = deviceCache.get(filename);
+      if (!prior || document.revision > prior.document.revision) {
+        deviceCache.set(filename, { document, record: document.record });
       }
-    } catch (error) {
-      lastError = { category: 'device-reconcile-failed', error };
-      errors.push({ category: lastError.category });
     }
+    for (const filename of deletionListing.files || []) {
+      const result = await readJsonFile(
+        fsApi,
+        path.join(available.paths.deletionsRoot, filename),
+        MAX_ICLOUD_DOCUMENT_BYTES,
+        platform,
+        hostPlatform
+      );
+      const document = result.ok ? validDeletionDocument(result.value, filename) : null;
+      if (!document) {
+        errors.push({ category: result.reason || 'invalid-device-deletion-document', filename });
+        continue;
+      }
+      const prior = deletionCache.get(filename);
+      if (!prior || compareSubscriptionRevision(document.revision, prior.revision) > 0) {
+        deletionCache.set(filename, document);
+      }
+    }
+
+    const visible = visibleDeviceEntries();
     return {
-      records: [...deviceCache.values()].map((entry) => entry.record),
-      documents: [...deviceCache.values()].map((entry) => entry.document),
+      records: visible.map((entry) => entry.record),
+      documents: visible.map((entry) => entry.document),
       status: status(),
       errors
     };
   }
 
-  function writeDevice(record) {
+  async function loadRevisionLedger() {
+    if (revisionLedgerLoaded) return revisionLedger;
+    if (!revisionLedgerLoadPromise) {
+      revisionLedgerLoadPromise = (async () => {
+        const result = await readJsonFile(fsApi, revisionLedgerPath, MAX_REVISION_LEDGER_BYTES, platform, hostPlatform);
+        if (!result.ok) {
+          if (result.reason === 'missing') {
+            revisionLedger = emptyRevisionLedger();
+            revisionLedgerLoaded = true;
+            return revisionLedger;
+          }
+          const error = new Error(`iCloud revision ledger unavailable: ${result.reason}`);
+          error.code = result.reason === 'document-too-large' ? 'revision-ledger-too-large' : 'revision-ledger-invalid';
+          throw error;
+        }
+        const valid = validRevisionLedger(result.value);
+        if (!valid) {
+          const error = new Error('Invalid iCloud revision ledger');
+          error.code = 'revision-ledger-invalid';
+          throw error;
+        }
+        revisionLedger = valid;
+        revisionLedgerLoaded = true;
+        return revisionLedger;
+      })().finally(() => { revisionLedgerLoadPromise = null; });
+    }
+    return revisionLedgerLoadPromise;
+  }
+
+  async function refreshRevisionLedger() {
+    const current = await loadRevisionLedger();
+    const result = await readJsonFile(fsApi, revisionLedgerPath, MAX_REVISION_LEDGER_BYTES, platform, hostPlatform);
+    if (!result.ok) {
+      if (result.reason === 'missing') return current;
+      const error = new Error(`iCloud revision ledger unavailable: ${result.reason}`);
+      error.code = result.reason === 'document-too-large' ? 'revision-ledger-too-large' : 'revision-ledger-invalid';
+      throw error;
+    }
+    const disk = validRevisionLedger(result.value);
+    if (!disk) {
+      const error = new Error('Invalid iCloud revision ledger');
+      error.code = 'revision-ledger-invalid';
+      throw error;
+    }
+    const devices = { ...current.devices };
+    for (const [deviceId, revision] of Object.entries(disk.devices)) {
+      devices[deviceId] = Math.max(Number(devices[deviceId] || 0), revision);
+    }
+    return {
+      ...current,
+      devices,
+      subscriptionCounter: Math.max(current.subscriptionCounter, disk.subscriptionCounter),
+      deletionCounter: Math.max(current.deletionCounter, disk.deletionCounter)
+    };
+  }
+
+  function allocateRevision(update) {
+    const task = revisionLedgerQueue.then(async () => {
+      const current = await refreshRevisionLedger();
+      const next = await update(current);
+      await atomicWriteJson(fsApi, revisionLedgerPath, next.ledger, {
+        platform,
+        hostPlatform,
+        maxBytes: MAX_REVISION_LEDGER_BYTES
+      });
+      revisionLedger = next.ledger;
+      return next.revision;
+    });
+    revisionLedgerQueue = task.catch(() => {});
+    return task;
+  }
+
+  async function nextDeviceRevision(deviceId, observedRevision) {
+    return allocateRevision(async (ledger) => {
+      const previous = Number(ledger.devices[deviceId] || 0);
+      const revision = Math.max(previous, observedRevision || 0) + 1;
+      const nextLedger = {
+        ...ledger,
+        devices: { ...ledger.devices, [deviceId]: revision }
+      };
+      return { revision, ledger: nextLedger };
+    });
+  }
+
+  async function nextCounter(field, observedCounter) {
+    return allocateRevision(async (ledger) => {
+      const revision = Math.max(Number(ledger[field] || 0), observedCounter || 0) + 1;
+      return { revision, ledger: { ...ledger, [field]: revision } };
+    });
+  }
+
+  function deviceHeartbeatMs(wire) {
+    const effectiveStaleAfterMs = staleAfterMsForSyncUpload(wire?.syncUploadIntervalMs, staleAfterMs);
+    return effectiveStaleAfterMs > 0 ? Math.max(1_000, Math.floor(effectiveStaleAfterMs / 2)) : 0;
+  }
+
+  async function writeDeviceNow(record) {
     const wire = toWireRecord(record);
     if (!wire) {
       const error = new Error('Invalid iCloud device record');
@@ -371,40 +827,62 @@ function createIcloudSyncStore(options = {}) {
       error.code = 'invalid_device_id';
       throw error;
     }
-    const available = availablePaths();
+    const available = await availablePaths();
     if (available.error || !available.paths.available) {
       const error = new Error('iCloud Drive is unavailable');
       error.code = available.paths.reason || 'icloud_unavailable';
       throw error;
     }
+    const target = path.join(available.paths.devicesRoot, filename);
     const prior = deviceCache.get(filename);
-    let revision = Number(prior?.document?.revision || 0) + 1;
-    if (!prior) {
-      const existing = readJsonFile(fsApi, path.join(available.paths.devicesRoot, filename));
-      const existingDocument = existing.ok ? validDeviceDocument(existing.value, filename) : null;
-      revision = Number(existingDocument?.revision || 0) + 1;
+    const existing = await readJsonFile(fsApi, target, MAX_ICLOUD_DOCUMENT_BYTES, platform, hostPlatform);
+    const existingDocument = existing.ok ? validDeviceDocument(existing.value, filename) : null;
+    const observedRevision = Math.max(
+      Number(prior?.document?.revision || 0),
+      Number(existingDocument?.revision || 0)
+    );
+    const fingerprint = semanticDeviceFingerprint(wire);
+    const elapsedMs = lastDeviceWriteAt === null ? Number.POSITIVE_INFINITY : Math.max(0, now() - lastDeviceWriteAt);
+    if (
+      lastDeviceFingerprint === fingerprint
+      && (existingDocument || prior)
+      && deviceHeartbeatMs(wire) > elapsedMs
+    ) {
+      return { ...(existingDocument || prior).document, skipped: true };
     }
+
+    const revision = await nextDeviceRevision(deviceId, observedRevision);
     const document = {
       schemaVersion: ICLOUD_SCHEMA_VERSION,
       kind: 'device',
       deviceId,
       revision,
-      updatedAt: String(wire.updatedAt || nowIso()),
+      updatedAt: String(wire.updatedAt || nowIso(now)),
       record: wire
     };
     try {
-      atomicWriteJson(fsApi, path.join(available.paths.devicesRoot, filename), document);
+      await atomicWriteJson(fsApi, target, document, {
+        platform,
+        hostPlatform,
+        maxBytes: MAX_ICLOUD_DOCUMENT_BYTES
+      });
     } catch (error) {
-      lastError = { category: 'device-write-failed', error };
+      lastError = { category: error.code === 'document_too_large' ? 'document-too-large' : 'device-write-failed', error };
       error.code = error.code || lastError.category;
       throw error;
     }
     const normalized = validDeviceDocument(document, filename);
     deviceCache.set(filename, { document: normalized, record: normalized.record });
-    return normalized;
+    lastDeviceFingerprint = fingerprint;
+    lastDeviceWriteAt = now();
+    return { ...normalized, skipped: false };
   }
 
-  function deleteDevice(deviceId) {
+  function writeDevice(record) {
+    return enqueueDeviceMutation(() => writeDeviceNow(record));
+  }
+
+  async function deleteDeviceNow(deviceId) {
     const id = cleanId(deviceId, MAX_DEVICE_ID_LENGTH);
     const filename = deviceFilenameForId(id);
     if (!filename) {
@@ -412,106 +890,171 @@ function createIcloudSyncStore(options = {}) {
       error.code = 'invalid_device_id';
       throw error;
     }
-    const available = availablePaths();
+    const available = await availablePaths();
     if (available.error || !available.paths.available) {
       const error = new Error('iCloud Drive is unavailable');
       error.code = available.paths.reason || 'icloud_unavailable';
       throw error;
     }
-    const target = path.join(available.paths.devicesRoot, filename);
+    // Refresh first so a device that is present in the last-good cache, but
+    // temporarily absent from the directory, still gets a precise tombstone.
+    await discoverDevices();
+    const existingDevice = await readJsonFile(
+      fsApi,
+      path.join(available.paths.devicesRoot, filename),
+      MAX_ICLOUD_DOCUMENT_BYTES,
+      platform,
+      hostPlatform
+    );
+    const existingDocument = existingDevice.ok ? validDeviceDocument(existingDevice.value, filename) : null;
+    const targetDeviceRevision = Math.max(
+      Number(deviceCache.get(filename)?.document?.revision || 0),
+      Number(existingDocument?.revision || 0)
+    );
+    const deletionFilename = writerFilenameForId(writerId);
+    const prior = deletionCache.get(deletionFilename);
+    const deletionMap = new Map((prior?.deletions || []).map((entry) => [entry.targetDeviceId, entry.targetDeviceRevision]));
+    deletionMap.set(id, Math.max(deletionMap.get(id) || 0, targetDeviceRevision));
+    const deletions = [...deletionMap.entries()]
+      .map(([targetDeviceId, targetDeviceRevision]) => ({ targetDeviceId, targetDeviceRevision }))
+      .sort((left, right) => left.targetDeviceId.localeCompare(right.targetDeviceId));
+    if (deletions.length > MAX_DELETIONS_PER_WRITER) {
+      const error = new Error('Too many iCloud device deletion markers');
+      error.code = 'deletion-ledger-full';
+      throw error;
+    }
+    const observedCounter = Number(prior?.revision?.counter || 0);
+    const revision = await nextCounter('deletionCounter', observedCounter);
+    const document = {
+      schemaVersion: ICLOUD_SCHEMA_VERSION,
+      kind: 'device-deletions',
+      writerId,
+      revision: { counter: revision, writerId },
+      updatedAt: nowIso(now),
+      deletions
+    };
     try {
-      if (isRegularFile(fsApi, target)) fsApi.unlinkSync(target);
-      deviceCache.delete(filename);
-      return { deleted: true, deviceId: id };
+      await atomicWriteJson(
+        fsApi,
+        path.join(available.paths.deletionsRoot, deletionFilename),
+        document,
+        { platform, hostPlatform, maxBytes: MAX_ICLOUD_DOCUMENT_BYTES }
+      );
     } catch (error) {
       lastError = { category: 'device-delete-failed', error };
       error.code = error.code || lastError.category;
       throw error;
     }
+    deletionCache.set(deletionFilename, validDeletionDocument(document, deletionFilename));
+    return { deleted: true, deviceId: id, targetDeviceRevision };
   }
 
-  function discoverSubscriptions() {
-    const available = availablePaths();
+  function deleteDevice(deviceId) {
+    return enqueueDeviceMutation(() => deleteDeviceNow(deviceId));
+  }
+
+  async function discoverSubscriptions() {
+    const available = await availablePaths();
     if (available.error || !available.paths.available) {
       const documents = [...subscriptionCache.values()];
-      const winner = documents.sort((left, right) => compareSubscriptionRevision(left.revision, right.revision)).at(-1) || null;
-      return { documents, winner, revisionToken: revisionToken(winner?.revision), status: status(), errors: [] };
+      const winner = documents.slice().sort((left, right) => compareSubscriptionRevision(left.revision, right.revision)).at(-1) || null;
+      return {
+        documents,
+        winner,
+        revisionToken: revisionToken(winner?.revision),
+        status: status(),
+        errors: available.error ? [{ category: available.paths.reason || 'root-unavailable' }] : []
+      };
     }
-    const currentFiles = new Set();
-    const errors = [];
-    try {
-      for (const filename of listFiles(available.paths.subscriptionsRoot, isKnownWriterFilename)) {
-        currentFiles.add(filename);
-        const result = readJsonFile(fsApi, path.join(available.paths.subscriptionsRoot, filename));
-        const document = result.ok ? validSubscriptionDocument(result.value, filename) : null;
-        if (!document) {
-          errors.push({ category: result.reason || 'invalid-subscription-document', filename });
-          continue;
-        }
-        const prior = subscriptionCache.get(filename);
-        if (!prior || compareSubscriptionRevision(document.revision, prior.revision) >= 0) {
-          subscriptionCache.set(filename, document);
-        }
+    const listing = await listFiles(available.paths.subscriptionsRoot, isKnownWriterFilename);
+    const errors = listing.ok ? [] : [{ category: listing.reason }];
+    for (const filename of listing.files || []) {
+      const result = await readJsonFile(
+        fsApi,
+        path.join(available.paths.subscriptionsRoot, filename),
+        MAX_ICLOUD_DOCUMENT_BYTES,
+        platform,
+        hostPlatform
+      );
+      const document = result.ok ? validSubscriptionDocument(result.value, filename) : null;
+      if (!document) {
+        errors.push({ category: result.reason || 'invalid-subscription-document', filename });
+        continue;
       }
-      for (const filename of [...subscriptionCache.keys()]) {
-        if (!currentFiles.has(filename)) subscriptionCache.delete(filename);
+      const prior = subscriptionCache.get(filename);
+      if (!prior || compareSubscriptionRevision(document.revision, prior.revision) > 0) {
+        subscriptionCache.set(filename, document);
       }
-    } catch (error) {
-      lastError = { category: 'subscription-reconcile-failed', error };
-      errors.push({ category: lastError.category });
     }
     const documents = [...subscriptionCache.values()];
     const winner = documents.slice().sort((left, right) => compareSubscriptionRevision(left.revision, right.revision)).at(-1) || null;
     return { documents, winner, revisionToken: revisionToken(winner?.revision), status: status(), errors };
   }
 
-  function writeSubscriptions(subscriptions, { baseRevision = '' } = {}) {
+  async function writeSubscriptionsNow(subscriptions, { baseRevision = '' } = {}) {
     const normalized = normalizeSubscriptions(subscriptions);
     if (!Array.isArray(subscriptions) || normalized.length !== subscriptions.length) {
       const error = new Error('Invalid iCloud subscriptions');
       error.code = 'invalid_subscriptions';
       throw error;
     }
-    const available = availablePaths();
+    const available = await availablePaths();
     if (available.error || !available.paths.available) {
       const error = new Error('iCloud Drive is unavailable');
       error.code = available.paths.reason || 'icloud_unavailable';
       throw error;
     }
-    const current = discoverSubscriptions();
-    if (current.winner && baseRevision !== current.revisionToken) {
+    const current = await discoverSubscriptions();
+    // A non-empty base is proof that the caller edited a known snapshot. If
+    // that snapshot is temporarily invisible, accepting the write would let a
+    // stale editor reset the shared list or its counter.
+    if ((current.winner && baseRevision !== current.revisionToken) || (baseRevision && !current.winner)) {
       const error = new Error('The iCloud subscription list changed on another device');
       error.code = 'stale_write';
       error.current = current;
       throw error;
     }
     const maxCounter = current.documents.reduce((max, document) => Math.max(max, document.revision.counter), 0);
+    const counter = await nextCounter('subscriptionCounter', maxCounter);
     const document = {
       schemaVersion: ICLOUD_SCHEMA_VERSION,
       kind: 'subscriptions',
       writerId,
-      revision: { counter: maxCounter + 1, writerId },
-      updatedAt: nowIso(),
+      revision: { counter, writerId },
+      updatedAt: nowIso(now),
+      // An empty array is an explicit, valid snapshot. Absence of files is not.
       subscriptions: normalized
     };
     const filename = writerFilenameForId(writerId);
     try {
-      atomicWriteJson(fsApi, path.join(available.paths.subscriptionsRoot, filename), document);
+      await atomicWriteJson(
+        fsApi,
+        path.join(available.paths.subscriptionsRoot, filename),
+        document,
+        { platform, hostPlatform, maxBytes: MAX_ICLOUD_DOCUMENT_BYTES }
+      );
     } catch (error) {
-      lastError = { category: 'subscription-write-failed', error };
+      lastError = { category: error.code === 'document_too_large' ? 'document-too-large' : 'subscription-write-failed', error };
       error.code = error.code || lastError.category;
       throw error;
     }
-    subscriptionCache.set(filename, document);
-    const refreshed = discoverSubscriptions();
+    subscriptionCache.set(filename, validSubscriptionDocument(document, filename));
+    const refreshed = await discoverSubscriptions();
     return { ...refreshed, written: document };
   }
 
+  function writeSubscriptions(subscriptions, options = {}) {
+    return enqueueSubscriptionMutation(() => writeSubscriptionsNow(subscriptions, options));
+  }
+
   return {
+    clearError,
+    close,
     deleteDevice,
     discoverDevices,
     discoverSubscriptions,
-    getLastGoodDevices: () => [...deviceCache.values()].map((entry) => entry.record),
+    getLastGoodDevices: () => visibleDeviceEntries().map((entry) => entry.record),
+    whenIdle,
     paths,
     status,
     writeDevice,
@@ -523,15 +1066,22 @@ module.exports = {
   ICLOUD_SCHEMA_VERSION,
   ICLOUD_SYNC_DIR,
   ICLOUD_SYNC_VERSION_DIR,
+  MAX_ICLOUD_DOCUMENT_BYTES,
   atomicWriteJson,
   createIcloudSyncStore,
   defaultCloudDocsRoot,
+  defaultRevisionLedgerPath,
   deviceFilenameForId,
   isKnownDeviceFilename,
   isKnownWriterFilename,
   pathState,
+  readJsonFile,
+  readOpenFlags,
   revisionToken,
   safePathForDisplay,
+  semanticDeviceFingerprint,
   stripSensitive,
+  syncDirectory,
+  validDeletionDocument,
   writerFilenameForId
 };

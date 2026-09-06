@@ -26,7 +26,7 @@ function selectLocalDeviceRecord(options = {}) {
     .find((device) => device?.deviceId === deviceId) || null;
   const displayHubRecord = (Array.isArray(options.latestStats?.devices) ? options.latestStats.devices : [])
     .find((device) => device?.deviceId === deviceId) || null;
-  if (options.externalAgentActive === true) return rawHubRecord;
+  if (options.externalAgentActive === true && options.hubMode !== 'icloud') return rawHubRecord;
 
   const candidates = [options.lastCollectedDevice, options.localDevice, displayHubRecord, rawHubRecord]
     .filter((device) => device?.deviceId === deviceId);
@@ -146,20 +146,25 @@ function createDiagnosticSnapshotBuilder(options = {}) {
     const externalAgentActive = Boolean(getExternalAgentActive());
     const runtimeHandle = getDeviceRuntime();
     const icloud = getIcloudSync() || null;
+    const icloudWidgetProducerActive = hubMode === 'icloud' && Boolean(runtimeHandle && icloud);
     const runtimeDiagnostics = runtimeHandle?.getDiagnostics?.() || {};
     const usageDiagnostics = runtimeDiagnostics.usage || null;
     const limitsDiagnostics = runtimeDiagnostics.limits || null;
-    const usageOwner = externalAgentActive
-      ? 'external-agent'
-      : usageDiagnostics && canRefreshUsageRuntime(getMode(), () => false)
-        ? 'electron-widget'
-        : 'none';
+    const usageOwner = icloudWidgetProducerActive
+      ? 'electron-widget'
+      : externalAgentActive
+        ? 'external-agent'
+        : usageDiagnostics && canRefreshUsageRuntime(getMode(), () => false)
+          ? 'electron-widget'
+          : 'none';
     const limitsOwner = limitsDiagnostics ? 'electron-widget' : 'none';
-    const usageCompleteness = externalAgentActive
-      ? 'partial-external-owner'
-      : usageDiagnostics
-        ? 'full'
-        : 'partial-no-runtime';
+    const usageCompleteness = icloudWidgetProducerActive
+      ? 'full'
+      : externalAgentActive
+        ? 'partial-external-owner'
+        : usageDiagnostics
+          ? 'full'
+          : 'partial-no-runtime';
     const limitsCompleteness = limitsDiagnostics ? 'full' : 'partial-no-runtime';
     let hubKind = 'none';
     let hubSoftwareVersion = 'not-applicable';
@@ -232,6 +237,7 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       limitsOwner,
       usageCompleteness,
       limitsCompleteness,
+      icloudWidgetProducerActive,
       hubStatsCacheMatchesMode,
       hubRuntime,
       icloud,
@@ -240,6 +246,7 @@ function createDiagnosticSnapshotBuilder(options = {}) {
         hubTarget: hubRuntime.hubTarget,
         hubTransport: hubRuntime.hubTransport,
         externalAgentAlive: externalAgentActive,
+        icloudWidgetProducerActive,
         usageOwner,
         limitsOwner,
         streamState,
@@ -354,7 +361,7 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       },
       collector: {
         ...(runtime.usageDiagnostics || { state: 'unavailable' }),
-        detailsAvailable: !runtime.externalAgentActive && Boolean(runtime.usageDiagnostics)
+        detailsAvailable: runtime.usageOwner === 'electron-widget' && Boolean(runtime.usageDiagnostics)
       },
       clients,
       limits: runtime.limitsDiagnostics || { enabled: false, active: 0, maxConcurrency: null, queued: 0, providers: [] },

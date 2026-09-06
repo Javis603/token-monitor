@@ -703,7 +703,7 @@ function electronUsageConfig(errorPrefix) {
     watchTriggersCollection: collectorWatchTriggersCollection(),
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
-    dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
+    dailyHistoryArchiveWriteEnabled: () => settings?.hubMode === 'icloud' || !isExternalAgentActive(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
     logger: (message) => console.log(`[${errorPrefix}] ${message}`)
   });
@@ -2596,6 +2596,7 @@ function localArchiveSourceDevice() {
   return selectLocalDeviceRecord({
     deviceId: settings?.deviceId || defaultDeviceId(),
     externalAgentActive: isExternalAgentActive(),
+    hubMode: settings?.hubMode,
     lastCollectedDevice,
     localDevice,
     latestHubStats: currentHubStatsCache(),
@@ -2818,6 +2819,7 @@ let mode = 'idle';
 let deviceRuntimeHandle = null;
 let icloudRuntimeHandle = null;
 let icloudRuntimeEpoch = 0;
+let icloudRuntimeStopPromise = Promise.resolve();
 const USAGE_RECONFIGURE_SETTLE_MS = 750;
 const USAGE_RECONFIGURE_RETRY_DELAYS_MS = Object.freeze([1000, 3000, 10_000]);
 const usageRuntimeReconciler = createLatestWinsReconciler({
@@ -3074,7 +3076,7 @@ function bestEffortTrackedUsageRefresh(clientId, options = {}) {
   const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
   if (
     !tracked.has(client)
-    || !canRefreshUsageRuntime(mode, isExternalAgentActive)
+    || (settings?.hubMode !== 'icloud' && !canRefreshUsageRuntime(mode, isExternalAgentActive))
   ) return;
   try {
     void refreshUsageClient(client, options).catch((error) => {
@@ -3092,7 +3094,7 @@ function drainPendingUsageClientRefreshes(runtime) {
     (error) => {
       console.log(`[usage-runtime] pending client refresh failed: ${error.message}`);
     },
-    { enabled: canRefreshUsageRuntime(mode, isExternalAgentActive) }
+    { enabled: settings?.hubMode === 'icloud' || canRefreshUsageRuntime(mode, isExternalAgentActive) }
   );
 }
 
@@ -3203,7 +3205,7 @@ function isExternalAgentActive() {
 function ownsUsageRuntime() {
   return Boolean(
     deviceRuntimeHandle
-    && canRefreshUsageRuntime(mode, isExternalAgentActive)
+    && (settings?.hubMode === 'icloud' || canRefreshUsageRuntime(mode, isExternalAgentActive))
   );
 }
 
@@ -3646,24 +3648,10 @@ async function refreshSharedSubscriptionsNow({ seedFromLocal = false } = {}) {
         ? { ...written.winner, revisionToken: written.revisionToken || '' }
         : null;
     }
-    if (!document) {
-      // A successfully reconciled, available root with no valid subscription
-      // winner represents an intentional empty list (for example after a
-      // delete). An unavailable root or a malformed file must retain the
-      // last-good UI cache instead of turning it into an empty document.
-      const runtimeStatus = runtime.getStatus?.() || {};
-      if (
-        runtimeStatus.availability !== 'available'
-        || runtimeStatus.lastSubscriptionReconcileErrorCategory
-        || runtimeStatus.lastReconcileErrorCategory === 'invalid-subscription-document'
-      ) return false;
-      return cacheSharedSubscriptions({
-        version: 1,
-        updatedAt: '',
-        subscriptions: [],
-        revisionToken: ''
-      }, hub);
-    }
+    // No winner means no valid snapshot exists. Missing, malformed, or
+    // temporarily unavailable files are not an authoritative empty list; only
+    // a valid winner whose subscriptions array is [] can clear the cache.
+    if (!document) return false;
     const normalizedDocument = {
       version: 1,
       updatedAt: document.updatedAt || '',
@@ -3856,15 +3844,25 @@ function stopSyncCollector(options = {}) {
   deviceRuntimeHandle = null;
 }
 
-function stopIcloudRuntime() {
+async function stopIcloudRuntime() {
   // The hub-mode generation changes for mode switches, but a sink-only restart
   // (for example, changing the upload cadence) keeps that generation. This
   // separate epoch fences callbacks from the replaced filesystem runtime too.
   icloudRuntimeEpoch += 1;
-  if (icloudRuntimeHandle) {
-    try { void icloudRuntimeHandle.stop(); } catch (_) {}
-  }
+  const oldRuntime = icloudRuntimeHandle;
   icloudRuntimeHandle = null;
+  if (!oldRuntime) return icloudRuntimeStopPromise;
+  icloudRuntimeStopPromise = icloudRuntimeStopPromise.then(async () => {
+    try {
+      await oldRuntime.stop();
+    } catch (error) {
+      // A failed watcher close or store cleanup must not prevent the next mode
+      // from starting. The runtime has fenced its callbacks; keep the error
+      // visible and let the replacement proceed.
+      console.log(`[icloud] runtime teardown failed: ${error?.message || error}`);
+    }
+  });
+  return icloudRuntimeStopPromise;
 }
 
 // iCloud mode keeps the normal Electron collector and limits runtime, but its
@@ -3872,7 +3870,7 @@ function stopIcloudRuntime() {
 // below owns reconciliation and aggregation, so a temporarily absent iCloud
 // Drive never turns a last-good multi-device snapshot into zeroes.
 async function startIcloudCollector() {
-  stopIcloudRuntime();
+  await stopIcloudRuntime();
   stopSyncCollector();
   if (process.platform !== 'darwin') return;
   const generation = hubModeGeneration;
@@ -3888,7 +3886,9 @@ async function startIcloudCollector() {
     platform: process.platform,
     home: app.getPath('home'),
     deviceId: settings.deviceId,
-    writerId: settings.deviceId
+    writerId: settings.deviceId,
+    revisionLedgerPath: path.join(app.getPath('userData'), 'icloud-revisions.json'),
+    staleAfterMs: 10 * 60 * 1000
   });
   const runtime = createIcloudSyncRuntime({
     store,
@@ -3966,7 +3966,9 @@ async function startIcloudCollector() {
   const sink = {
     async enqueue(summary) {
       seedInitialLimitProviders(summary);
-      if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
+      // The headless agent intentionally has no iCloud sink. In iCloud mode the
+      // widget remains this device's authoritative DeviceRecord producer even
+      // when an external agent happens to be alive for another mode.
       const visibleSummary = {
         ...summary,
         syncUploadIntervalMs: syncUploadIntervalMs()
@@ -5521,18 +5523,23 @@ function startMode() {
   hubModeGeneration += 1;
   advanceMacWidgetProducerAndSourceEpoch();
   clearLatestHubStatsCache();
+  const icloudStop = stopIcloudRuntime();
   // Tear down collectors synchronously so they can't double-run while the
-  // async reconciliation below is queued.
+  // async reconciliation below is queued. iCloud's filesystem teardown is
+  // awaited by the mode lane before any replacement runtime is created.
   stopLocalCollector();
   stopStatsStream();
   stopHostStats();
   stopSyncCollector();
-  stopIcloudRuntime();
   // Serialize the hub-side work so rapid UI events (mode change immediately
   // followed by a port edit or secret regenerate) reconcile in order rather
   // than racing — otherwise an in-flight start could finish with the old
   // port/secret after the UI already advertises the new ones.
   modeQueue = modeQueue.then(async () => {
+    await icloudStop;
+    // A prior queued mode may have created an iCloud runtime after this call's
+    // initial stop. Drain that runtime as well before applying the latest mode.
+    await stopIcloudRuntime();
     if (settings.hubMode === 'host') {
       await stopEmbeddedHub();
       const handle = await startEmbeddedHub();
@@ -5602,8 +5609,7 @@ function restartDeviceRuntimeForMode() {
     return;
   }
   if (settings.hubMode === 'icloud') {
-    void startIcloudCollector();
-    return;
+    return startIcloudCollector();
   }
   if (effectiveHubConfig().url) startSyncCollector();
   else startLocalCollector();

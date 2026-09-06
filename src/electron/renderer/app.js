@@ -1702,6 +1702,41 @@ function rowTemplate(rowData) {
   return row;
 }
 
+const DEVICE_DELETE_CONFIRMATION_MS = 3000;
+const armedDeviceDeleteButtons = new Set();
+const deviceDeleteConfirmationTimers = new WeakMap();
+
+function clearDeviceDeleteConfirmationTimer(remove) {
+  const timer = deviceDeleteConfirmationTimers.get(remove);
+  if (timer === undefined) return;
+  clearTimeout(timer);
+  deviceDeleteConfirmationTimers.delete(remove);
+}
+
+function resetDeviceDeleteConfirmation(remove, defaultText = '') {
+  clearDeviceDeleteConfirmationTimer(remove);
+  armedDeviceDeleteButtons.delete(remove);
+  remove.dataset.confirm = '';
+  remove.textContent = defaultText;
+}
+
+function armDeviceDeleteConfirmation(remove, defaultText, confirmationText) {
+  clearDeviceDeleteConfirmationTimer(remove);
+  armedDeviceDeleteButtons.add(remove);
+  remove.dataset.confirm = 'true';
+  remove.textContent = confirmationText;
+  const timer = setTimeout(() => resetDeviceDeleteConfirmation(remove, defaultText), DEVICE_DELETE_CONFIRMATION_MS);
+  deviceDeleteConfirmationTimers.set(remove, timer);
+}
+
+document.addEventListener('pointerdown', (event) => {
+  for (const remove of armedDeviceDeleteButtons) {
+    if (remove !== event.target && !remove.contains?.(event.target)) {
+      resetDeviceDeleteConfirmation(remove, t('settings.sync.icloudDelete'));
+    }
+  }
+});
+
 function renderDeviceAccordion(accordionInner, deviceDetail) {
   const signature = JSON.stringify([
     toolIconsEnabled(state.settings?.showToolIcons),
@@ -1715,8 +1750,10 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
       Math.round(tool.percent),
       tool.color,
       tool.models.map((model) => [model.key, model.value])
-    ])
+      ])
   ]);
+  const previousDelete = accordionInner.querySelector?.('.device-delete-button');
+  if (previousDelete) resetDeviceDeleteConfirmation(previousDelete);
   if (accordionInner.dataset.signature === signature) return;
 
   const content = document.createElement('div');
@@ -1784,21 +1821,24 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'device-delete-button';
-    remove.textContent = t('settings.sync.icloudDelete');
+    const deleteText = t('settings.sync.icloudDelete');
+    const deleteConfirmText = t('settings.sync.icloudDeleteConfirm');
+    remove.textContent = deleteText;
+    const resetConfirmation = () => resetDeviceDeleteConfirmation(remove, deleteText);
+    remove.addEventListener('blur', resetConfirmation);
     remove.addEventListener('click', async () => {
       if (remove.dataset.confirm !== 'true') {
-        remove.dataset.confirm = 'true';
-        remove.textContent = t('settings.sync.icloudDeleteConfirm');
+        armDeviceDeleteConfirmation(remove, deleteText, deleteConfirmText);
         return;
       }
       remove.disabled = true;
       try {
         await window.tokenMonitor.deleteDevice(deviceDetail.deviceId);
+        resetConfirmation();
         await refreshStats();
       } catch (_) {
         remove.disabled = false;
-        remove.dataset.confirm = '';
-        remove.textContent = t('settings.sync.icloudDelete');
+        resetConfirmation();
       }
     });
     content.append(remove);

@@ -44,12 +44,16 @@ test('resolves iCloud history and device histories through the in-process aggreg
   const devices = [
     {
       deviceId: 'mac-a',
+      date: '2026-08-01',
+      tokens: 11,
       today: { totalTokens: 11 },
       historyAvailable: true,
       history: { daily: [{ date: '2026-08-01', tokens: 11 }], monthly: [], summary: {} }
     },
     {
       deviceId: 'mac-b',
+      date: '2026-08-01',
+      tokens: 7,
       today: { totalTokens: 7 },
       historyAvailable: true,
       history: { daily: [{ date: '2026-08-01', tokens: 7 }], monthly: [], summary: {} }
@@ -65,7 +69,11 @@ test('resolves iCloud history and device histories through the in-process aggreg
     hubMode: 'icloud', mode: 'sync', icloudSync, aggregateHistory: aggregate
   });
   assert.deepEqual(fixed.deviceHistories.map((entry) => entry.deviceId), ['mac-a', 'mac-b']);
-  assert.equal(fixed.history.daily.length, 2);
+  assert.deepEqual(fixed.history.daily.map(({ date, tokens }) => ({ date, tokens })), [
+    { date: '2026-08-01', tokens: 11 },
+    { date: '2026-08-01', tokens: 7 }
+  ]);
+  assert.equal(fixed.history.summary.totalTokens, 18);
 });
 
 test('fetches and parses the complete client history endpoint', async () => {

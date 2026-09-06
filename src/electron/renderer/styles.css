@@ -5673,7 +5673,7 @@ html.is-windows .limit-live-badge {
   align-self: flex-start;
   margin-top: 8px;
   padding: 3px 7px;
-  border: 1px solid rgba(var(--red-rgb), 0.35);
+  border: 1px solid rgba(244, 119, 136, 0.35);
   border-radius: 5px;
   color: var(--red);
   background: transparent;

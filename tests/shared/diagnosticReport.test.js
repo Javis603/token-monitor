@@ -105,6 +105,7 @@ test('archive stat projection distinguishes absent, disabled, and unreadable arc
 
 test('iCloud diagnostics are allowlisted and redact absolute roots', () => {
   const snapshot = sanitizeDiagnosticSnapshot(baseSnapshot({
+    topology: { icloudWidgetProducerActive: true },
     icloud: {
       state: 'error',
       availability: 'available',
@@ -124,7 +125,13 @@ test('iCloud diagnostics are allowlisted and redact absolute roots', () => {
   assert.equal(snapshot.icloud.deviceCount, 3);
   assert.equal(snapshot.icloud.lastSubscriptionReconcileErrorCategory, 'invalid-subscription-document');
   assert.equal(snapshot.icloud.subscriptionRevision, '7:[redacted]');
-  assert.match(formatDiagnosticReport(baseSnapshot({ icloud: snapshot.icloud })).text, /\[iCloud Sync\]/);
+  assert.equal(snapshot.topology.icloudWidgetProducerActive, true);
+  const report = formatDiagnosticReport(baseSnapshot({
+    topology: { icloudWidgetProducerActive: true },
+    icloud: snapshot.icloud
+  }));
+  assert.match(report.text, /\[iCloud Sync\]/);
+  assert.match(report.text, /icloudWidgetProducerActive: true/);
 });
 
 test('hub device projection removes identifiers and groups full OS compatibility data', () => {

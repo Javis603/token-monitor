@@ -13,14 +13,14 @@ function callSafely(callback, value) {
   try { callback(value); } catch (_) { /* observers must not stop reconciliation */ }
 }
 
-function mergeByDeviceId(records, localRecord) {
+function mergeByDeviceId(records, localRecord, { includeLocalRecord = true } = {}) {
   const map = new Map();
   for (const record of Array.isArray(records) ? records : []) {
     if (!record || typeof record !== 'object') continue;
     const id = String(record.deviceId || record.id || '').trim();
     if (id) map.set(id, record);
   }
-  if (localRecord) {
+  if (includeLocalRecord && localRecord) {
     const id = String(localRecord.deviceId || localRecord.id || '').trim();
     if (id) map.set(id, localRecord);
   }
@@ -65,6 +65,7 @@ function createIcloudSyncRuntime(options = {}) {
   let reconcileGeneration = null;
   let reconcileAgain = false;
   let localRecord = null;
+  let localRecordOverlayAllowed = true;
   let records = [];
   let stats = null;
   let subscriptionDocument = null;
@@ -75,6 +76,8 @@ function createIcloudSyncRuntime(options = {}) {
   let lastReconcileErrorCategory = '';
   let lastSubscriptionReconcileErrorCategory = '';
   let reconcileState = 'idle';
+  let stopPromise = null;
+  let needsTeardown = false;
 
   function storeStatus() {
     try { return typeof store.status === 'function' ? store.status() : {}; } catch (_) { return {}; }
@@ -126,8 +129,8 @@ function createIcloudSyncRuntime(options = {}) {
     };
   }
 
-  function updateRecords(nextRecords, { publish = true } = {}) {
-    records = mergeByDeviceId(nextRecords, localRecord);
+  function updateRecords(nextRecords, { publish = true, includeLocalRecord = localRecordOverlayAllowed } = {}) {
+    records = mergeByDeviceId(nextRecords, localRecord, { includeLocalRecord });
     stats = buildStats(records);
     if (publish) publishStats();
     publishStatus();
@@ -140,13 +143,17 @@ function createIcloudSyncRuntime(options = {}) {
   }
 
   function closeWatcher() {
-    if (!watcher) return;
+    const currentWatcher = watcher;
+    watcher = null;
+    if (!currentWatcher || typeof currentWatcher.close !== 'function') return Promise.resolve();
     try {
-      if (typeof watcher.close === 'function') watcher.close();
+      return Promise.resolve(currentWatcher.close()).catch((error) => {
+        if (active) reportError(error, 'watcher-close-failed');
+      });
     } catch (error) {
       if (active) reportError(error, 'watcher-close-failed');
+      return Promise.resolve();
     }
-    watcher = null;
   }
 
   function scheduleReconcile(reason = 'watch') {
@@ -224,7 +231,29 @@ function createIcloudSyncRuntime(options = {}) {
       lastSubscriptionReconcileErrorCategory = subscriptions?.errors?.[0]?.category || '';
       lastReconcileErrorCategory = discovered.errors?.[0]?.category
         || lastSubscriptionReconcileErrorCategory;
-      if (lastReconcileErrorCategory) lastErrorCategory = lastReconcileErrorCategory;
+      if (lastReconcileErrorCategory) {
+        lastErrorCategory = lastReconcileErrorCategory;
+      } else {
+        // A successful, error-free reconciliation clears the current error.
+        // Historical events remain in the diagnostic journal; the live status
+        // must not continue to report a problem that has already recovered.
+        lastErrorCategory = '';
+        try { store.clearError?.(); } catch (_) { /* status cleanup is best effort */ }
+      }
+      const localDeviceId = String(localRecord?.deviceId || localRecord?.id || '').trim();
+      const discoveredLocalRecord = localDeviceId
+        && Array.isArray(discovered.records)
+        && discovered.records.some((record) => String(record?.deviceId || record?.id || '').trim() === localDeviceId);
+      const discoverySucceeded = Array.isArray(discovered.records)
+        && Array.isArray(discovered.errors)
+        && discovered.errors.length === 0;
+      // A clean discovery that omits this writer's device is authoritative: the
+      // omission may be a remote tombstone, so the local last-good overlay must
+      // not resurrect the record. An errored/unavailable discovery still keeps
+      // the overlay because iCloud invisibility is not deletion.
+      if (localDeviceId && discoverySucceeded && !discoveredLocalRecord) {
+        localRecordOverlayAllowed = false;
+      }
       updateRecords(discovered.records, { publish: false });
       const winnerToken = subscriptions?.revisionToken || '';
       if (winnerToken !== lastSubscriptionRevision) {
@@ -232,10 +261,10 @@ function createIcloudSyncRuntime(options = {}) {
         subscriptionDocument = subscriptions?.winner
           ? { ...subscriptions.winner, revisionToken: winnerToken }
           : null;
-        const emptyWinnerIsAuthoritative = !subscriptions?.winner
-          && subscriptions?.status?.available === true
-          && !(subscriptions.errors?.length);
-        if (subscriptions?.winner || emptyWinnerIsAuthoritative) {
+        // An absent writer file is not an authoritative empty list. A real
+        // clear is represented by a valid winner whose subscriptions array is
+        // explicitly empty.
+        if (subscriptions?.winner) {
           callSafely(options.onSubscriptions, subscriptionDocument);
         }
       }
@@ -271,7 +300,9 @@ function createIcloudSyncRuntime(options = {}) {
   }
 
   async function start() {
+    if (stopPromise) await stopPromise;
     if (active) return publicStatus();
+    needsTeardown = true;
     active = true;
     generation += 1;
     const expectedGeneration = generation;
@@ -286,22 +317,43 @@ function createIcloudSyncRuntime(options = {}) {
     return publicStatus();
   }
 
-  async function stop() {
-    active = false;
-    generation += 1;
-    if (debounceTimer !== null) clearTimeoutFn(debounceTimer);
-    if (reconcileTimer !== null) clearIntervalFn(reconcileTimer);
-    debounceTimer = null;
-    reconcileTimer = null;
-    reconcileAgain = false;
-    closeWatcher();
-    watcherState = 'inactive';
-    reconcileState = 'idle';
-    // A late sink completion from the stopped generation must not be overlaid
-    // on a later start of this runtime. Last-good discovered records remain in
-    // `records`; only the in-memory writer overlay belongs to the old lifetime.
-    localRecord = null;
-    publishStatus();
+  function stop() {
+    if (stopPromise) return stopPromise;
+    if (!active && !needsTeardown) return Promise.resolve();
+    needsTeardown = false;
+    const pendingReconcile = reconcilePromise;
+    stopPromise = (async () => {
+      active = false;
+      generation += 1;
+      if (debounceTimer !== null) clearTimeoutFn(debounceTimer);
+      if (reconcileTimer !== null) clearIntervalFn(reconcileTimer);
+      debounceTimer = null;
+      reconcileTimer = null;
+      reconcileAgain = false;
+      const watcherClose = closeWatcher();
+      let storeIdle = Promise.resolve();
+      try {
+        if (typeof store.close === 'function') storeIdle = Promise.resolve(store.close());
+        else if (typeof store.whenIdle === 'function') storeIdle = Promise.resolve(store.whenIdle());
+      } catch (error) {
+        storeIdle = Promise.reject(error);
+      }
+      watcherState = 'inactive';
+      reconcileState = 'idle';
+      // A late sink completion from the stopped generation must not be overlaid
+      // on a later start of this runtime. Last-good discovered records remain in
+      // `records`; only the in-memory writer overlay belongs to the old lifetime.
+      localRecord = null;
+      localRecordOverlayAllowed = true;
+      publishStatus();
+      // Store close rejects new mutations and resolves only after all accepted
+      // device/subscription/revision work is quiescent. The current reconcile is
+      // also drained so its reads cannot overlap the next runtime's filesystem
+      // activity.
+      await Promise.allSettled([pendingReconcile, watcherClose, storeIdle]);
+    })();
+    stopPromise = stopPromise.finally(() => { stopPromise = null; });
+    return stopPromise;
   }
 
   async function writeDevice(record) {
@@ -310,9 +362,14 @@ function createIcloudSyncRuntime(options = {}) {
     const expectedGeneration = generation;
     localRecord = normalized;
     try {
-      await Promise.resolve(store.writeDevice(record));
+      const written = await Promise.resolve(store.writeDevice(record));
       if (!active || expectedGeneration !== generation) return false;
-      lastWriteAt = new Date(now()).toISOString();
+      if (written?.skipped !== true) {
+        // Only a successful, non-deduplicated publish may lift a tombstone's
+        // suppression. A failed or heartbeat-skipped write must stay hidden.
+        localRecordOverlayAllowed = true;
+        lastWriteAt = new Date(now()).toISOString();
+      }
       lastErrorCategory = '';
       await reconcile('write');
       if (!active || expectedGeneration !== generation) return false;
@@ -341,7 +398,10 @@ function createIcloudSyncRuntime(options = {}) {
         error.code = 'icloud_stopped';
         throw error;
       }
-      if (String(localRecord?.deviceId || '') === String(deviceId)) localRecord = null;
+      if (String(localRecord?.deviceId || '') === String(deviceId)) {
+        localRecord = null;
+        localRecordOverlayAllowed = false;
+      }
       await reconcile('delete');
       if (!active || expectedGeneration !== generation) {
         const error = new Error('iCloud sync is stopped');

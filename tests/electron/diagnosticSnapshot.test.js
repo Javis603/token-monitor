@@ -249,3 +249,29 @@ test('iCloud snapshots expose safe sync diagnostics without a Hub URL', () => {
   assert.equal(snapshot.icloud.deviceCount, 2);
   assert.equal(snapshot.icloud.root, '~/Library/Mobile Documents/com~apple~CloudDocs/Token Monitor/sync-v1');
 });
+
+test('iCloud keeps the widget as the usage producer when an external agent is alive', () => {
+  const nowMs = Date.parse('2026-08-06T10:00:00.000Z');
+  const { builder } = createBuilder({
+    getSettings: () => ({ hubMode: 'icloud', deviceId: 'local-device', clients: 'codex', language: 'en' }),
+    getMode: () => 'sync',
+    getExternalAgentActive: () => true,
+    getDeviceRuntime: () => ({
+      getDiagnostics: () => ({
+        usage: {
+          state: 'idle',
+          lastTickSuccessAt: new Date(nowMs - 1000).toISOString()
+        },
+        limits: { enabled: true, providers: [] }
+      })
+    }),
+    getIcloudSync: () => ({ state: 'available', availability: 'available', supported: true }),
+    getNowMs: () => nowMs
+  });
+
+  const snapshot = builder.build(new Date(nowMs));
+  assert.equal(snapshot.usage.usageOwner, 'electron-widget');
+  assert.equal(snapshot.usage.usageCompleteness, 'full');
+  assert.equal(snapshot.topology.icloudWidgetProducerActive, true);
+  assert.equal(snapshot.collector.detailsAvailable, true);
+});
