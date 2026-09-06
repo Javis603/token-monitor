@@ -33,6 +33,15 @@ function inProcessRequested(env = process.env) {
 }
 
 function createInProcessWatcherHost(config = {}, handlers = {}) {
+  // The in-process host is the chokidar-based test seam (collector watch-behaviour
+  // tests stub `chokidar.watch` to control event delivery) and the production
+  // worker-fallback path when the worker module load fails. The macOS native
+  // `fs.watch({recursive: true})` memory optimisation lives in the worker half
+  // (`watcherWorker.js` + `nativeWatcher.js`) — never here — so the test seam
+  // keeps intercepting chokidar.watch the way the test suite assumes, and a
+  // worker-failure path stays on the conservative, well-trodden chokidar
+  // behaviour rather than swapping to a different backend mid-degraded-run.
+  //
   // Required lazily so a worker-hosted run never loads chokidar on the owning
   // thread, and so the collector's tests can still swap chokidar.watch.
   const chokidar = require('chokidar');

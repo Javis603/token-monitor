@@ -1,23 +1,25 @@
 'use strict';
 
-// Worker half of the watch host. chokidar's close() walks every watched entry
-// and its cost is superlinear in that count, so running it on the thread that
-// owns the collector froze the UI for about a second on every runtime restart.
+// Worker half of the watch host. The owning thread would otherwise block on
+// chokidar's close() (superlinear in watched-directory count), so the watcher
+// runs here, isolated from the UI.
 //
-// This thread is the only place a chokidar instance ever exists. The production
-// owner recycles the whole thread on a collector replacement so its native
-// allocation high-water is released. A defensive in-thread reconfigure still
-// closes and awaits the previous watcher before opening the next, so descriptors
-// never overlap even if a caller replaces an owner without closing it first.
+// The macOS optimisation: a single `fs.watch(root, { recursive: true })` per
+// top-level dir replaces chokidar's per-directory handles, so a 10k-dir tree
+// like OpenClaw's agent dir costs one FSEvents stream per root instead of
+// 10k descriptors. See `src/shared/nativeWatcher.js` for the strategy
+// selection (macOS only; polling override still flips us back to chokidar).
+// The worker still owns the watcher so other platforms keep their close()
+// isolation, and so a collect-restart can recycle the thread to release
+// any native allocation high-water.
 //
-// Nothing but the watcher lives here. Roots, attribution, debouncing and every
-// tick decision stay on the owning thread, so there is no collector state to
-// keep in sync.
+// Nothing but the watcher lives here. Roots, attribution, debouncing and
+// every tick decision stay on the owning thread, so there is no collector
+// state to keep in sync.
 
 const { parentPort, workerData } = require('node:worker_threads');
-const chokidar = require('chokidar');
 
-const { watcherOptions, watchIgnoreMatcher } = require('./collector');
+const { createPlatformWatcher } = require('./nativeWatcher');
 
 // Latest-wins rather than a queue. A teardown can run for seconds, and a user
 // flipping several settings in that window must not make the worker replay
@@ -34,19 +36,35 @@ function post(message) {
 }
 
 function wire(instance, revision) {
+  // Per-instance rather than one worker-wide flag: a flag would let a
+  // teardown we asked for mask a genuine failure of the watcher that
+  // replaced it. The flag only gates 'ready' — a single broken root out
+  // of many must not suppress events from the valid roots (the collector's
+  // reaction logic is identical for events from any root, and a teardown
+  // here would just hide live work behind a single bad entry in
+  // `watchClientRootsForClients()`'s output). The 'all' handler posts as
+  // long as the watcher instance is still the live one.
+  let failed = false;
   instance.on('all', (event, filePath) => {
-    // Keyed on the live watcher rather than the applied revision: a teardown
-    // has not finished applying the next config yet, so comparing against
-    // appliedRevision would keep forwarding events from roots being released.
     if (revision !== watcherRevision) return;
     post({ type: 'event', revision, event, filePath });
   });
-  instance.on('error', (error) => post({
-    type: 'error',
-    revision,
-    message: error?.message || String(error),
-    code: error?.code || ''
-  }));
+  instance.on('error', (error) => {
+    failed = true;
+    post({
+      type: 'error',
+      revision,
+      message: error?.message || String(error),
+      code: error?.code || ''
+    });
+  });
+  instance.on('ready', () => {
+    // An initialisation error is not readiness, and a watcher that has
+    // since been replaced must not announce itself.
+    if (failed) return;
+    if (watcher !== instance || watcherRevision !== revision) return;
+    post({ type: 'ready', revision });
+  });
 }
 
 async function closeCurrent() {
@@ -54,10 +72,11 @@ async function closeCurrent() {
   const instance = watcher;
   watcher = null;
   watcherRevision = -1;
-  // chokidar's close() is documented as async and only settles once every
-  // closer has run. Reporting before it resolves would let the owner start a
-  // new watcher while these descriptors are still held, which is the overlap
-  // this design exists to prevent.
+  // The platform watcher's close() is async to match the chokidar shape; the
+  // native backend's close resolves synchronously, so its await is cheap.
+  // Reporting before the close settles would let the owner start the next
+  // watcher while the old one still holds descriptors — the overlap this
+  // design exists to prevent.
   try { await instance.close(); } catch (_) { /* teardown must not throw */ }
 }
 
@@ -74,26 +93,11 @@ async function pump() {
       if (target.config) {
         try {
           const { dirs, clients, usePolling } = target.config;
-          const instance = chokidar.watch(dirs, watcherOptions(usePolling === true, watchIgnoreMatcher(clients)));
+          const instance = createPlatformWatcher({ dirs, clients, usePolling });
           watcher = instance;
           watcherRevision = target.revision;
           appliedRevision = target.revision;
           wire(instance, target.revision);
-          // `ready` is a notification, not a lifecycle step. Awaiting it here
-          // held the pump for the length of an initial scan, so a configure
-          // arriving in that window waited on a watcher that was already being
-          // replaced and the new roots went unwatched for that long. Only
-          // close() has to be serialised, because only close() owns
-          // descriptors that must be gone before the next watch allocates.
-          let failed = false;
-          instance.once('error', () => { failed = true; });
-          instance.once('ready', () => {
-            // An initialisation error is not readiness, and a watcher that has
-            // since been replaced must not announce itself.
-            if (failed) return;
-            if (watcher !== instance || watcherRevision !== target.revision) return;
-            post({ type: 'ready', revision: target.revision });
-          });
         } catch (error) {
           appliedRevision = target.revision;
           post({
