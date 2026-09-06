@@ -159,7 +159,7 @@ test('fetchZaiLimits returns notConfigured without an API key or local ZCode log
     }
   });
   assert.equal(provider.provider, 'zai');
-  assert.equal(provider.source, 'api');
+  assert.equal(provider.source, '');
   assert.equal(provider.status, 'notConfigured');
 });
 

@@ -428,12 +428,15 @@ async function fetchZaiLimits(options = {}, deps = {}) {
   const accountLabel = lanes.map((result) => result.value.plan).filter(Boolean)[0] || '';
   const hasAnything = lanes.some((result) => result.value.hasAnything);
   const balance = lanes.map((result) => result.value.balance).filter(Boolean)[0] || null;
+  // The plan buckets come from the local ZCode login, not the console key, so
+  // a ZCode-only row reports oauth while a keyed row reports api.
+  const source = key ? 'api' : (hasAnything ? 'oauth' : '');
   return normalizeLimitProvider({
     provider: 'zai',
     ...(accountKey ? { accountKey } : {}),
     ...(accountLabel ? { accountLabel } : {}),
     ...(balance ? { balance } : {}),
-    source: 'api',
+    source,
     status: hasAnything ? 'ok' : key ? 'unavailable' : 'notConfigured',
     updatedAt,
     windows,
@@ -545,11 +548,11 @@ function parseZcodeStartPlanBalances(payload) {
   return { plan: String(plan?.name || '').trim(), windows };
 }
 
-function zcodeStatusProvider(status, options = {}, deps = {}) {
+function zcodeStatusProvider(status, options = {}, deps = {}, source = 'api') {
   const now = (deps.now || Date.now)();
   return normalizeLimitProvider({
     provider: 'zai',
-    source: 'api',
+    source,
     status,
     updatedAt: new Date(now).toISOString(),
     windows: [],
@@ -597,7 +600,7 @@ async function fetchZcodeStartPlanLimits(options = {}, deps = {}) {
       provider: 'zai',
       accountKey: hashKey('zai', discovery.credential.token),
       accountLabel: usage.plan,
-      source: 'api',
+      source: 'oauth',
       status: usage.windows.length ? 'ok' : 'unavailable',
       updatedAt: new Date(now).toISOString(),
       windows: usage.windows,
