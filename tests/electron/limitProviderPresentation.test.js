@@ -1113,6 +1113,13 @@ test('Z.ai renders session, daily and billing windows with their own labels', ()
   assert.match(renderProviderWindows, /const planBuckets = billingWindows\.filter\(\(window\) => window\?\.limitId\);/);
   assert.match(renderProviderWindows, /const mcp = billingWindows\.find\(\(window\) => !window\?\.metric && !window\?\.limitId\);/);
   assert.match(renderProviderWindows, /const balanceWindow = \(provider\.windows \|\| \[\]\)\.find\(\(window\) => window\?\.metric === 'credits'\);/);
+  // The declared splits must actually render: every slot appends through
+  // the shared nodes list, an odd count widens the final row, and the
+  // balance sits alone on a full-width no-reset row with its spend line.
+  assert.match(renderProviderWindows, /windows\.append\(\.\.\.nodes\);/);
+  assert.match(renderProviderWindows, /if \(nodes\.length % 2 === 1\) nodes\.at\(-1\)\.classList\.add\('limit-window-wide'\);/);
+  assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide', 'limit-window-no-reset'\);/);
+  assert.match(renderProviderWindows, /provider\.balance && providerSpendNode\(provider\.balance\)/);
 });
 
 test('Copilot renders monthly Premium and Chat quotas as billing windows', () => {

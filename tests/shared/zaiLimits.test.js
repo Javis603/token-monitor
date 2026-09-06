@@ -464,6 +464,9 @@ test('fetchZaiLimits tracks cumulative spend and ignores a missing total', async
     const first = await call({ availableBalance: '5.00', totalSpendAmount: '100' });
     assert.equal(first.balance.todaySpend, 0);
     assert.equal(first.balance.allTimeSpend, 0);
+    // Tracking began within the same local month, so the not-yet-a-month
+    // flag is true; the old month-key comparison never matched a day key.
+    assert.equal(first.balance.monthSinceTracking, true);
 
     // A report without the cumulative total must not rebase the baseline:
     // Number(null) is 0, so a null check — not isFinite alone — gates it.
@@ -506,6 +509,9 @@ test('fetchZaiLimits tracks cumulative spend and ignores a missing total', async
     );
     assert.equal(later.balance.todaySpend, 30);
     assert.equal(later.balance.allTimeSpend, 90);
+    // October reading against a September baseline: a full month boundary
+    // has passed, so the flag flips off.
+    assert.equal(later.balance.monthSinceTracking, false);
     const stored = JSON.parse(fs.readFileSync(storePath, 'utf8'));
     const dayKeys = Object.keys(Object.values(stored.accounts)[0].dailySpend);
     assert.ok(!dayKeys.includes('2026-09-05'), 'old day bucket pruned');

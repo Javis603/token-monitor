@@ -227,6 +227,18 @@ const BILLING_PAYLOAD = {
         period_start: 1788537600,
         period_end: 1788623999,
         expires_at: 1788623999
+      },
+      {
+        // Some buckets omit remaining_units; used/total must still yield a
+        // meter instead of falling through to an absent percentage field.
+        entitlement_id: 'ent-no-remaining',
+        plan_id: 'zcode-v3-start-plan-0817',
+        show_name: 'GLM-5.3-Air',
+        total_units: 2000000,
+        used_units: 500000,
+        period_start: 1788537600,
+        period_end: 1788623999,
+        expires_at: 1788623999
       }
     ]
   }
@@ -235,7 +247,7 @@ const BILLING_PAYLOAD = {
 test('parseZcodeStartPlanBalances maps buckets to daily and billing windows', () => {
   const { plan, windows } = parseZcodeStartPlanBalances(BILLING_PAYLOAD);
   assert.equal(plan, 'ZCode Weekend Build');
-  assert.equal(windows.length, 4);
+  assert.equal(windows.length, 5);
   const byLabel = new Map(windows.map((window) => [`${window.limitId}:${window.label}`, window]));
   const weekend = byLabel.get('zcode-v3-start-plan-wk-0904:GLM-5.3-Flash');
   assert.equal(weekend.kind, 'billing');
@@ -250,6 +262,10 @@ test('parseZcodeStartPlanBalances maps buckets to daily and billing windows', ()
   assert.equal(daily.remaining, 2578372);
   // Unknown models surface as their own windows instead of being filtered.
   assert.equal(byLabel.get('zcode-v3-future-plan:GLM-5.5').usedPercent, 0);
+  // A bucket without remaining_units still meters from used/total.
+  const noRemaining = byLabel.get('zcode-v3-start-plan-0817:GLM-5.3-Air');
+  assert.equal(noRemaining.usedPercent, 25);
+  assert.equal(noRemaining.showMeter, true);
 });
 
 test('discoverZcodeConnection re-reads disk on every call — an account switch lands next round', () => {

@@ -503,6 +503,13 @@ function zaiLocalDayKey(ms) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+function startOfLocalMonth(ms) {
+  const date = new Date(ms);
+  date.setHours(0, 0, 0, 0);
+  date.setDate(1);
+  return date.getTime();
+}
+
 // The report's spend total only ever grows in normal use, so consumption is
 // the positive delta between observations. A drop (refund, plan reset) moves
 // the baseline without recording negative spend.
@@ -568,7 +575,10 @@ function zcodeRecordCumulativeSpend({ accountKey, totalSpent, now, storePath, re
     monthSpend: Math.round(sumSince((key) => key.startsWith(monthKey)) * 100) / 100,
     allTimeSpend: entry.allTimeSpend,
     trackingSince: entry.trackingSince,
-    monthSinceTracking: monthKey === zaiLocalDayKey(entry.trackingSince)
+    // Same rule as DeepSeek's balance history: true while tracking began
+    // within the current local month (monthKey alone is YYYY-MM, so an
+    // equality against a YYYY-MM-DD day key never matched).
+    monthSinceTracking: Number(entry.trackingSince) > startOfLocalMonth(nowMs)
   };
 }
 
@@ -606,9 +616,15 @@ function zcodePlanBucketWindow(balance, periodByEntitlement = {}) {
   const used = numberOrNull(balance?.used_units);
   const remaining = numberOrNull(balance?.remaining_units);
   if (total === null && used === null && remaining === null) return null;
-  const usedPercent = total !== null && total > 0 && remaining !== null
-    ? clampPercent(100 - (remaining / total) * 100)
-    : clampPercent(balance?.percentage);
+  // Derive from whichever pair the bucket reports: remaining wins (the
+  // same rule as the quota windows), used alone still yields a meter, and
+  // a percentage field is the last resort.
+  let usedPercent = null;
+  if (total !== null && total > 0) {
+    if (remaining !== null) usedPercent = clampPercent(100 - (remaining / total) * 100);
+    else if (used !== null) usedPercent = clampPercent((used / total) * 100);
+  }
+  if (usedPercent === null) usedPercent = clampPercent(balance?.percentage);
   const label = String(balance?.show_name || '').trim() || 'Start Plan';
   const resetsAt = toIso(balance?.expires_at ?? balance?.period_end);
   const period = periodByEntitlement[String(balance?.entitlement_id || '').trim()]
