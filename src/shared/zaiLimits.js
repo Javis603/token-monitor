@@ -8,7 +8,7 @@ const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { runWithProbeDeadline } = require('./probeDeadline');
 const { readJson, writeJsonAtomic, sharedDataDir } = require('./config');
-const { discoverZcodeConnection } = require('./zcodeDiscovery');
+const { discoverZcodeConnection, zcodeDataBaseDir } = require('./zcodeDiscovery');
 
 const ZAI_FETCH_TIMEOUT_MS = 12_000;
 
@@ -505,6 +505,9 @@ function zaiCashBalanceWindow(payload, region) {
 }
 
 const ZAI_SPEND_STORE_VERSION = 1;
+// Same retention window as DeepSeek's balance history: today/week/month
+// aggregates never need anything older, and the store stops growing.
+const ZAI_SPEND_RETENTION_MS = 40 * 24 * 60 * 60 * 1000;
 
 function zaiLocalDayKey(ms) {
   const date = new Date(ms);
@@ -533,17 +536,31 @@ function zcodeRecordCumulativeSpend({ accountKey, totalSpent, now, storePath, re
     store = { version: ZAI_SPEND_STORE_VERSION, accounts: {} };
   }
   const entry = store.accounts[accountKey] || { lastTotal: null, allTimeSpend: 0, dailySpend: {}, trackingSince: nowMs };
+  let changed = false;
   if (entry.lastTotal === null) {
     entry.lastTotal = total;
+    changed = true;
   } else if (entry.lastTotal !== total) {
     const consumed = Math.max(0, total - entry.lastTotal);
     const dayKey = zaiLocalDayKey(nowMs);
     entry.dailySpend[dayKey] = Math.round(((entry.dailySpend[dayKey] || 0) + consumed) * 100) / 100;
     entry.allTimeSpend = Math.round((Number(entry.allTimeSpend || 0) + consumed) * 100) / 100;
     entry.lastTotal = total;
+    changed = true;
+  }
+  // Prune day buckets past the retention window; allTimeSpend keeps
+  // accumulating after the buckets are gone, as on DeepSeek.
+  const cutoff = nowMs - ZAI_SPEND_RETENTION_MS;
+  const pruned = {};
+  for (const [key, amount] of Object.entries(entry.dailySpend || {})) {
+    if (key >= zaiLocalDayKey(cutoff)) pruned[key] = amount;
+  }
+  if (Object.keys(pruned).length !== Object.keys(entry.dailySpend || {}).length) {
+    entry.dailySpend = pruned;
+    changed = true;
   }
   store.accounts[accountKey] = entry;
-  write(storePath, store);
+  if (changed) write(storePath, store);
 
   const todayKey = zaiLocalDayKey(nowMs);
   const monthKey = todayKey.slice(0, 7);
@@ -570,9 +587,13 @@ function zcodeRecordCumulativeSpend({ accountKey, totalSpent, now, storePath, re
 // "parameter error"), so the id rides along from ZCode's own telemetry state.
 function zcodeDeviceMid(deps = {}) {
   const readFileSync = deps.readFileSync || fs.readFileSync;
+  const env = deps.env || process.env;
   const homeDir = deps.homeDir || os.homedir();
   try {
-    const state = JSON.parse(readFileSync(path.join(homeDir, '.zcode', 'v2', 'telemetry-state.json'), 'utf8'));
+    const state = JSON.parse(readFileSync(
+      path.join(zcodeDataBaseDir(env, homeDir), '.zcode', 'v2', 'telemetry-state.json'),
+      'utf8'
+    ));
     const deviceMid = String(state?.deviceMid || '').trim();
     return deviceMid || null;
   } catch (_) {

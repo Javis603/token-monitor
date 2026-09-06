@@ -69,10 +69,21 @@ function billingCredential(provider) {
   return null;
 }
 
+// ZCode resolves its data base as env ZCODE_DATA_BASE_DIR (Windows installs
+// may also set ZCODE_WINDOWS_APP_INSTALL_DIR), then HOME, then os.homedir()
+// — join(<base>, '.zcode', 'v2'). Mirrors that chain so an env-redirected
+// install is found, the same way CODEX_HOME redirects the Codex roots.
+function zcodeDataBaseDir(env = process.env, homeDir = os.homedir()) {
+  const fromEnv = String(env.ZCODE_DATA_BASE_DIR || env.ZCODE_WINDOWS_APP_INSTALL_DIR || '').trim();
+  if (fromEnv) return fromEnv;
+  return String(env.HOME || '').trim() || homeDir;
+}
+
 function discoverZcodeConnection(options = {}, deps = {}) {
   const readFileSync = deps.readFileSync || fs.readFileSync;
+  const env = deps.env || process.env;
   const homeDir = deps.homeDir || options.homeDir || os.homedir();
-  const base = deps.zcodeDir || path.join(homeDir, ZCODE_DIR);
+  const base = deps.zcodeDir || path.join(zcodeDataBaseDir(env, homeDir), ZCODE_DIR);
 
   const settings = readJson(path.join(base, 'setting.json'), readFileSync);
   const registry = readJson(path.join(base, 'config.json'), readFileSync);
@@ -118,5 +129,6 @@ function discoverZcodeConnection(options = {}, deps = {}) {
 
 module.exports = {
   ZCODE_PROVIDER_IDS,
+  zcodeDataBaseDir,
   discoverZcodeConnection
 };

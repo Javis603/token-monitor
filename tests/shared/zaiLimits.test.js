@@ -443,6 +443,32 @@ test('fetchZaiLimits tracks cumulative spend and ignores a missing total', async
     const second = await call({ availableBalance: '5.00', totalSpendAmount: '150' });
     assert.equal(second.balance.todaySpend, 50);
     assert.equal(second.balance.allTimeSpend, 50);
+
+    // Day buckets past the 40-day retention window are pruned while
+    // allTimeSpend keeps accumulating, as on DeepSeek's balance history.
+    const later = await fetchZaiLimits(
+      { zaiApiKey: 'zai-token' },
+      {
+        env: {},
+        now: () => Date.parse('2026-10-20T12:00:00Z'),
+        zaiBalanceStorePath: storePath,
+        ...noZcode,
+        fetch: async (url) => {
+          if (String(url).includes('query-customer-account-report')) {
+            return { ok: true, status: 200, json: async () => ({ code: 200, data: { availableBalance: '5.00', totalSpendAmount: '160' } }) };
+          }
+          if (String(url).includes('/quota/limit')) {
+            return { ok: true, status: 200, json: async () => ({ data: { limits: [] } }) };
+          }
+          return { ok: true, status: 200, json: async () => ({ data: [] }) };
+        }
+      }
+    );
+    assert.equal(later.balance.todaySpend, 10);
+    assert.equal(later.balance.allTimeSpend, 60);
+    const stored = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+    const dayKeys = Object.keys(Object.values(stored.accounts)[0].dailySpend);
+    assert.ok(!dayKeys.includes('2026-09-05'), 'old day bucket pruned');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

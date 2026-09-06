@@ -85,6 +85,16 @@ test('discoverZcodeConnection resolves the selected plan, or none on a broken in
   })).kind, 'none');
 });
 
+test('discoverZcodeConnection follows a redirected data base dir', () => {
+  // ZCode resolves its base as ZCODE_DATA_BASE_DIR (Windows installs may
+  // also set ZCODE_WINDOWS_APP_INSTALL_DIR), then HOME, then os.homedir().
+  const env = { ZCODE_DATA_BASE_DIR: '/opt/zcode-data' };
+  const deps = { readFileSync: fileSystem(HAPPY_FILES), homeDir: '/home/test', env };
+  assert.equal(discoverZcodeConnection({}, deps).kind, 'start-billing');
+  const windowsDeps = { readFileSync: fileSystem(HAPPY_FILES), homeDir: 'C:\\Users\\test', env: { ZCODE_WINDOWS_APP_INSTALL_DIR: 'D:\\zcode' } };
+  assert.equal(discoverZcodeConnection({}, windowsDeps).kind, 'start-billing');
+});
+
 test('discoverZcodeConnection returns a coding-quota credential from the mirror key', () => {
   const discovery = discoverZcodeConnection({}, discoveryDeps({
     'setting.json': JSON.stringify({
