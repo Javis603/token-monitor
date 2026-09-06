@@ -151,15 +151,70 @@ test('parseZaiUsage reads official plan labels from subscription or quota payloa
   );
 });
 
+const noZcode = {
+  readFileSync: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }
+};
+
+// Console-key lane responder: quota, finance report, subscription list.
+function keyLaneResponses({ balance, subscription }) {
+  return async (url) => {
+    if (String(url).includes('/quota/limit')) {
+      return { ok: true, status: 200, json: async () => ({ data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }] } }) };
+    }
+    if (String(url).includes('query-customer-account-report')) {
+      return { ok: true, status: 200, json: async () => ({ code: 200, data: { availableBalance: balance } }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ data: [{ product_name: subscription }] }) };
+  };
+}
+
+// ZCode on-disk fixture for the plan-lane tests: an entitled provider
+// selection ('start-plan' or 'coding-plan') with a mirror key and a
+// telemetry device id.
+function zcodeLaneDeps(fetchMock, selection = 'start-plan') {
+  const providerId = `builtin:zai-${selection}`;
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      modelProviderFamilySelectedKeys: { zai: `coding-plan:${providerId}` }
+    }),
+    'config.json': JSON.stringify({
+      provider: { [providerId]: { enabled: true, options: { apiKey: 'mirror-jwt' } } }
+    }),
+    'coding-plan-cache.json': JSON.stringify({
+      entryStatus: { items: { [providerId]: { status: 'available' } } }
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  return {
+    readFileSync: (filePath) => {
+      const name = String(filePath).split('/').pop();
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    ...(fetchMock ? { fetch: fetchMock } : {})
+  };
+}
+
+const BILLING_OK = {
+  ok: true,
+  status: 200,
+  json: async () => ({
+    code: 0,
+    data: {
+      plans: [{ plan_id: 'zcode-v3-x', name: 'ZCode Start Plan', status: 'active', entitlements: [{ entitlement_id: 'e1', period: 'daily' }] }],
+      balances: [{ entitlement_id: 'e1', plan_id: 'zcode-v3-x', show_name: 'GLM-5.3', total_units: 100, used_units: 10, remaining_units: 90 }]
+    }
+  })
+};
+
 test('fetchZaiLimits returns notConfigured without an API key or local ZCode login', async () => {
+  // No ZCode install on disk: discovery resolves to kind 'none', so the
+  // billing lane has no credential and the provider stays notConfigured.
   const provider = await fetchZaiLimits({}, {
     env: {},
     now: () => Date.parse('2026-07-06T00:00:00Z'),
-    // No ZCode install on disk: discovery resolves to kind 'none', so the
-    // billing lane has no credential and the provider stays notConfigured.
-    readFileSync: () => {
-      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-    }
+    ...noZcode
   });
   assert.equal(provider.provider, 'zai');
   assert.equal(provider.source, '');
@@ -174,35 +229,11 @@ test('fetchZaiLimits queries quota, subscription and balance in parallel', async
     {
       env: {},
       now: () => Date.parse('2026-07-06T00:00:00Z'),
-      readFileSync: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
+      ...noZcode,
       fetch: async (url, init) => {
         urls.push(String(url));
         auth.push(init.headers.Authorization);
-        if (String(url).includes('/quota/limit')) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              data: {
-                limits: [
-                  { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }
-                ]
-              }
-            })
-          };
-        }
-        if (String(url).includes('query-customer-account-report')) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({ code: 200, data: { availableBalance: '0E-9', balance: '0E-9' } })
-          };
-        }
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ data: [{ product_name: 'GLM Coding' }] })
-        };
+        return keyLaneResponses({ balance: '0E-9', subscription: 'GLM Coding' })(url, init);
       }
     }
   );
@@ -228,34 +259,10 @@ test('fetchZaiLimits requests the selected BigModel CN region', async () => {
     {
       env: {},
       now: () => Date.parse('2026-07-06T00:00:00Z'),
-      readFileSync: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
+      ...noZcode,
       fetch: async (url) => {
         urls.push(String(url));
-        if (String(url).includes('/quota/limit')) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              data: {
-                limits: [
-                  { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 20 }
-                ]
-              }
-            })
-          };
-        }
-        if (String(url).includes('query-customer-account-report')) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({ code: 200, data: { availableBalance: '12.5' } })
-          };
-        }
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ data: [{ product_name: 'GLM Coding CN' }] })
-        };
+        return keyLaneResponses({ balance: '12.5', subscription: 'GLM Coding CN' })(url);
       }
     }
   );
@@ -273,55 +280,20 @@ test('fetchZaiLimits requests the selected BigModel CN region', async () => {
 });
 
 test('fetchZaiLimits merges the key and ZCode plan lanes when both exist', async () => {
-  const settings = {
-    providerFamilyDomain: 'zai',
-    modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-start-plan' }
-  };
-  const registry = {
-    provider: { 'builtin:zai-start-plan': { enabled: true, options: { apiKey: 'mirror-jwt' } } }
-  };
-  const cache = { entryStatus: { items: { 'builtin:zai-start-plan': { status: 'available' } } } };
   let billingHeaders = null;
+  const keyLane = keyLaneResponses({ balance: '2.50', subscription: 'GLM Coding' });
   const provider = await fetchZaiLimits(
     { zaiApiKey: 'zai-token' },
     {
       env: {},
       now: () => Date.parse('2026-09-05T12:00:00Z'),
-      readFileSync: (filePath) => {
-        const key = String(filePath).split('/').pop();
-        const files = {
-          'setting.json': JSON.stringify(settings),
-          'config.json': JSON.stringify(registry),
-          'coding-plan-cache.json': JSON.stringify(cache),
-          'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
-        };
-        if (Object.hasOwn(files, key)) return files[key];
-        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-      },
-      fetch: async (url, init) => {
-        const target = String(url);
-        if (target.includes('/quota/limit')) {
-          return { ok: true, status: 200, json: async () => ({ data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }] } }) };
-        }
-        if (target.includes('query-customer-account-report')) {
-          return { ok: true, status: 200, json: async () => ({ code: 200, data: { availableBalance: '2.50' } }) };
-        }
-        if (target.includes('zcode-plan/billing/balance')) {
+      ...zcodeLaneDeps(async (url, init) => {
+        if (String(url).includes('zcode-plan/billing/balance')) {
           billingHeaders = init.headers;
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              code: 0,
-              data: {
-                plans: [{ plan_id: 'zcode-v3-x', name: 'ZCode Start Plan', status: 'active', entitlements: [{ entitlement_id: 'e1', period: 'daily' }] }],
-                balances: [{ entitlement_id: 'e1', plan_id: 'zcode-v3-x', show_name: 'GLM-5.3', total_units: 100, used_units: 10, remaining_units: 90, expires_at: 1788706800 }]
-              }
-            })
-          };
+          return BILLING_OK;
         }
-        return { ok: true, status: 200, json: async () => ({ data: [] }) };
-      }
+        return keyLane(url, init);
+      })
     }
   );
   assert.equal(provider.status, 'ok');
@@ -336,79 +308,23 @@ test('fetchZaiLimits merges the key and ZCode plan lanes when both exist', async
 });
 
 test('fetchZaiLimits serves Coding Plan quota from the ZCode mirror key', async () => {
-  const settings = {
-    providerFamilyDomain: 'zai',
-    modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-coding-plan' }
-  };
-  const registry = {
-    provider: { 'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'coding-mirror-key', baseURL: 'https://api.z.ai/api/anthropic' } } }
-  };
-  const cache = { entryStatus: { items: { 'builtin:zai-coding-plan': { status: 'available' } } } };
   const provider = await fetchZaiLimits({}, {
     env: {},
     now: () => Date.parse('2026-09-05T12:00:00Z'),
-    readFileSync: (filePath) => {
-      const key = String(filePath).split('/').pop();
-      const files = {
-        'setting.json': JSON.stringify(settings),
-        'config.json': JSON.stringify(registry),
-        'coding-plan-cache.json': JSON.stringify(cache)
-      };
-      if (Object.hasOwn(files, key)) return files[key];
-      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-    },
-    fetch: async (url) => {
+    ...zcodeLaneDeps(async (url) => {
       if (!String(url).includes('/quota/limit')) throw new Error('unexpected url ' + url);
       return {
         ok: true,
         status: 200,
         json: async () => ({ data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }], planName: 'GLM Coding Pro' } })
       };
-    }
+    }, 'coding-plan')
   });
   assert.equal(provider.status, 'ok');
   assert.equal(provider.accountLabel, 'GLM Coding Pro');
   assert.equal(provider.windows[0].kind, 'session');
   assert.equal(provider.windows[0].source, 'local');
 });
-
-// ZCode on-disk fixture for the lane tests below: an entitled start-plan
-// selection with a mirror key and a telemetry device id.
-function zcodeLaneDeps(fetchMock) {
-  const files = {
-    'setting.json': JSON.stringify({
-      providerFamilyDomain: 'zai',
-      modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-start-plan' }
-    }),
-    'config.json': JSON.stringify({
-      provider: { 'builtin:zai-start-plan': { enabled: true, options: { apiKey: 'mirror-jwt' } } }
-    }),
-    'coding-plan-cache.json': JSON.stringify({
-      entryStatus: { items: { 'builtin:zai-start-plan': { status: 'available' } } }
-    }),
-    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
-  };
-  return {
-    readFileSync: (filePath) => {
-      const name = String(filePath).split('/').pop();
-      if (Object.hasOwn(files, name)) return files[name];
-      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-    },
-    ...(fetchMock ? { fetch: fetchMock } : {})
-  };
-}
-
-const BILLING_OK = {
-  ok: true,
-  status: 200,
-  json: async () => ({
-    code: 0,
-    data: {
-      plans: [{ plan_id: 'zcode-v3-x', name: 'ZCode Start Plan', status: 'active', entitlements: [{ entitlement_id: 'e1', period: 'daily' }] }],
-      balances: [{ entitlement_id: 'e1', plan_id: 'zcode-v3-x', show_name: 'GLM-5.3', total_units: 100, used_units: 10, remaining_units: 90 }]
-    }
-  })
-};
 
 test('fetchZaiLimits keeps ZCode plan windows when the console key quota fails', async () => {
   // The lane merge used to throw a TDZ ReferenceError on this path.
@@ -482,24 +398,10 @@ test('fetchZaiLimits treats a mirror key without a subscription as unavailable',
   const provider = await fetchZaiLimits({}, {
     env: {},
     now: () => Date.parse('2026-09-05T12:00:00Z'),
-    readFileSync: (filePath) => {
-      const name = String(filePath).split('/').pop();
-      const files = {
-        'setting.json': JSON.stringify({
-          providerFamilyDomain: 'zai',
-          modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-coding-plan' }
-        }),
-        'config.json': JSON.stringify({
-          provider: { 'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'coding-mirror-key' } } }
-        }),
-        'coding-plan-cache.json': JSON.stringify({
-          entryStatus: { items: { 'builtin:zai-coding-plan': { status: 'available' } } }
-        })
-      };
-      if (Object.hasOwn(files, name)) return files[name];
-      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-    },
-    fetch: async () => ({ ok: true, status: 200, json: async () => ({ code: 500, msg: '当前用户不存在coding plan' }) })
+    ...zcodeLaneDeps(
+      async () => ({ ok: true, status: 200, json: async () => ({ code: 500, msg: '当前用户不存在coding plan' }) }),
+      'coding-plan'
+    )
   });
   assert.equal(provider.status, 'unavailable');
   assert.equal(provider.source, 'oauth');
@@ -515,7 +417,7 @@ test('fetchZaiLimits tracks cumulative spend and ignores a missing total', async
         env: {},
         now: () => Date.parse('2026-09-05T12:00:00Z'),
         zaiBalanceStorePath: storePath,
-        readFileSync: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
+        ...noZcode,
         fetch: async (url) => {
           if (String(url).includes('query-customer-account-report')) {
             return { ok: true, status: 200, json: async () => ({ code: 200, data }) };
@@ -553,7 +455,7 @@ test('fetchZaiLimits physically aborts a hung request within its configured boun
     {
       env: {},
       zaiFetchTimeoutMs: 5,
-      readFileSync: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
+      ...noZcode,
       fetch: async (_url, init) => {
         signal = init.signal;
         return new Promise(() => {});
