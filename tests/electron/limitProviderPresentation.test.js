@@ -6,6 +6,8 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
+const limitProviderOrderApi = require('../../src/electron/renderer/limitProviderOrder');
+const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 
 const {
@@ -1902,6 +1904,7 @@ function createLimitProviderToggleHarness({
 } = {}) {
   const app = readRendererFile('app.js');
   const providerSelection = functionBody(app, 'configuredLimitProviderSelection', 'missingLimitProviderStatus');
+  const enabledProviderSelection = functionBody(app, 'enabledLimitProviderSet', 'limitProviderEnabled');
   const toggleStart = app.indexOf('async function onLimitProviderToggle()');
   const toggleEnd = app.indexOf('async function onLimitProviderMove(', toggleStart);
   assert.ok(toggleStart >= 0 && toggleEnd > toggleStart);
@@ -1910,11 +1913,8 @@ function createLimitProviderToggleHarness({
   const context = {
     DEFAULT_LIMIT_PROVIDER_ORDER: 'codex',
     LIMIT_PROVIDERS: providerIds.map((id) => ({ id })),
-    limitProviderOrderApi: {
-      normalizeLimitProviderSelection(value) {
-        return String(value || '').split(',').filter(Boolean);
-      }
-    },
+    limitProviderOrderApi,
+    settingsListFilterApi,
     state: {
       breakdown: 'tool',
       limitProviderSelectionRevision: 0,
@@ -1936,7 +1936,7 @@ function createLimitProviderToggleHarness({
   };
 
   vm.createContext(context);
-  vm.runInContext(`${providerSelection}\n${toggle}`, context);
+  vm.runInContext(`${providerSelection}\n${enabledProviderSelection}\n${toggle}`, context);
   context.configuredLimitProviderSelection = vm.runInContext('configuredLimitProviderSelection', context);
   return {
     context,
