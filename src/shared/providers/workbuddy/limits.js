@@ -1,7 +1,8 @@
 'use strict';
 
 const { hashKey } = require('../../hashKey');
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
+const { cleanSecret, numberOrNull } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 
 const WORKBUDDY_FETCH_TIMEOUT_MS = 12_000;
@@ -10,15 +11,9 @@ const WORKBUDDY_PERSONAL_PATH = '/v2/billing/meter/get-user-resource';
 const WORKBUDDY_ENTERPRISE_PATH = '/v2/billing/meter/get-enterprise-user-usage';
 const WORKBUDDY_PRODUCT_CODE = 'p_tcaca';
 
-function cleanSecret(value) {
-  if (typeof value !== 'string') return '';
-  let raw = value.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
-
+// WorkBuddy is the only provider reading a credential this way: Trae needs the
+// same precedence but its own stricter cleaner, so this stays local rather than
+// becoming a shared helper with one caller.
 function firstSetting(options, env, settingName, envNames) {
   const explicit = cleanSecret(options?.[settingName]);
   if (explicit) return explicit;
@@ -72,15 +67,6 @@ function workbuddyLocale(env = process.env, options = {}) {
   if (value.startsWith('en')) return 'en';
   if (value.startsWith('zh')) return 'zh';
   return '';
-}
-
-function numberOrNull(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
 }
 
 // WorkBuddy's numeric timestamp strings are milliseconds, unlike the Unix

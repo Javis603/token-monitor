@@ -8,7 +8,8 @@
 // therefore read whatever percent is present, and only suppress the
 // status==3 placeholder lane that cc-switch / CodexBar both guard against.
 
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
+const { cleanSecret } = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 
 const MINIMAX_KEY_NAMES = ['MINIMAX_CODING_API_KEY'];
@@ -20,16 +21,6 @@ const MINIMAX_TOKEN_PLAN_REMAINS_URL_EN = 'https://api.minimax.io/v1/token_plan/
 
 const MINIMAX_WINDOW_MINUTES_5H = 5 * 60;
 const MINIMAX_WINDOW_MINUTES_WEEKLY = 7 * 24 * 60;
-
-function cleanSecret(value) {
-  let raw = value;
-  if (typeof raw !== 'string') return '';
-  raw = raw.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
 
 function minimaxToken(env = process.env, explicitKey = '') {
   const explicit = cleanSecret(explicitKey);

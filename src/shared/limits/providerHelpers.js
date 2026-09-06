@@ -1,16 +1,11 @@
 'use strict';
 
 // Helpers shared by more than one limits provider implementation: process and
-// JSON transport, plan-label formatting, and the small path/env/hash utilities
-// the provider modules all reach for. Provider-specific behaviour does not
-// belong here — it belongs in src/shared/providers/<id>/.
-//
-// This lives beside src/shared/limits.js while the limits infrastructure is
-// being folderized. Node resolves require('./limits') to the file, not this
-// directory, so the two do not collide.
+// JSON transport, plan-label formatting, credential cleaning, and the small
+// value/path/env utilities the provider modules all reach for. Provider-specific
+// behaviour does not belong here — it belongs in src/shared/providers/<id>/.
 
 const { spawn } = require('node:child_process');
-const crypto = require('node:crypto');
 const path = require('node:path');
 const { appVersion } = require('../appVersion');
 const { abortError } = require('../probeDeadline');
@@ -27,10 +22,44 @@ function parseBoolean(value, fallback = true) {
   return !['0', 'false', 'no', 'off'].includes(String(value).trim().toLowerCase());
 }
 
-function hashKey(...parts) {
-  const hash = crypto.createHash('sha256');
-  for (const part of parts) hash.update(String(part || '')).update('\0');
-  return `sha256:${hash.digest('hex')}`;
+// Credentials arrive from .env files, shell exports and pasted GUI fields, so a
+// value may carry surrounding whitespace and one layer of quotes the user did
+// not mean to include. Strip both; a non-string is treated as absent.
+function cleanSecret(value) {
+  if (typeof value !== 'string') return '';
+  let raw = value.trim();
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    raw = raw.slice(1, -1).trim();
+  }
+  return raw;
+}
+
+// Provider payloads spell numbers as both JSON numbers and strings. Anything
+// that is neither a finite number nor a numeric string reads as absent rather
+// than as zero, so a missing quota never renders as a real 0.
+function numberOrNull(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+// Reset timestamps arrive as ISO strings, epoch seconds and epoch milliseconds.
+// The cutoff picks the unit: a value below 20_000_000_000 cannot be a plausible
+// millisecond timestamp (that is 1970-08-20), so it is read as seconds. A
+// numeric *string* is not treated as an epoch — it goes to Date's own string
+// parsing, where '1700000000' is not a date. No provider is known to send one;
+// this matches what the per-provider copies did before they were merged.
+function toIso(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const date = new Date(value < 20_000_000_000 ? value * 1000 : value);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 function errorWithStatus(status, message) {
@@ -188,6 +217,15 @@ function pathDelimiterForPlatform(platform = process.platform) {
   return platform === 'win32' ? ';' : ':';
 }
 
+// The HTTP status a provider answers with, mapped to the shared provider
+// status vocabulary. Kept beside providerStatusFromError so the two agree on
+// what counts as a credential problem rather than an outage.
+function statusForHttp(code) {
+  if (code === 401 || code === 403) return 'unauthorized';
+  if (code === 429) return 'sourceRateLimited';
+  return 'unavailable';
+}
+
 function providerStatusFromError(error) {
   if (['disabled', 'notConfigured', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error'].includes(error?.status)) return error.status;
   if (error?.code === 'ENOENT') return 'notConfigured';
@@ -198,17 +236,20 @@ module.exports = {
   PLAN_LABEL_ALIASES,
   TOKEN_MONITOR_USER_AGENT,
   cleanPlanText,
+  cleanSecret,
   displayPlanText,
   envValue,
   errorWithStatus,
   fetchJson,
-  hashKey,
   nowIso,
+  numberOrNull,
   parseBoolean,
   pathApiForPlatform,
   pathDelimiterForPlatform,
   planLabelFromParts,
   providerStatusFromError,
   runProcessText,
+  statusForHttp,
+  toIso,
   uniqueStrings
 };

@@ -18,6 +18,7 @@ const path = require('node:path');
 
 const { createOutboundFetch } = require('../../outboundFetch');
 const { resolveDataDir } = require('./goLimits');
+const { cleanSecret } = require('../../limits/providerHelpers');
 
 const GO_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
 
@@ -37,14 +38,6 @@ const WINDOW_MAP = [
   ['weekly', 'weekly', 10080],
   ['monthly', 'monthly', 43200]
 ];
-
-function cleanSecret(value) {
-  let raw = typeof value === 'string' ? value.trim() : '';
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
 
 // A cancelled probe must not be reported as a provider status: the limits lane
 // is latest-wins, and turning an abort into an `unavailable` row would publish
@@ -140,7 +133,7 @@ function readGoApiKey(env = process.env) {
 // safe direction: an over-eager constant would instead merge two *different*
 // people's accounts on a shared hub and show one of them the other's quota.
 // A cookie yields the real workspace identity regardless; see
-// openCodeWebIdentity in limitCollector.js.
+// openCodeWebIdentity in ./limits.js.
 function goApiIdentity(apiKey) {
   // Full digest: truncating buys nothing here (this value is never displayed or
   // typed) and only narrows the space in which two accounts could collide.

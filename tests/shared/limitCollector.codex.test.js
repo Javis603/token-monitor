@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const test = require('node:test');
 
-const { codexCommandCandidates, codexCommandSourceDetail, createLimitsCollector, fetchCodexLimits, mapCodexRateLimitsToProvider } = require('../../src/shared/limitCollector');
+const { codexCommandCandidates, codexCommandSourceDetail, createLimitsCollector, fetchCodexLimits, mapCodexRateLimitsToProvider } = require('../../src/shared/limits/collector');
 const { codexAccountKey, hashAccountKey } = require('../../src/shared/providers/codex/auth');
 
 function dirent(name, directory = true) {

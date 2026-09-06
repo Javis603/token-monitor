@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { fetchAntigravityLimits } = require('../../src/shared/limitCollector');
+const { fetchAntigravityLimits } = require('../../src/shared/limits/collector');
 
 test('fetchAntigravityLimits returns notConfigured when probe says LS not running', async () => {
   const result = await fetchAntigravityLimits({}, {

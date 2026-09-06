@@ -1,21 +1,16 @@
 'use strict';
 
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
+const {
+  cleanSecret,
+  numberOrNull,
+  toIso
+} = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 
 const QODER_FETCH_TIMEOUT_MS = 12_000;
-
-function cleanSecret(value) {
-  let raw = value;
-  if (typeof raw !== 'string') return '';
-  raw = raw.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
 
 function qoderCookie(env = process.env, options = {}) {
   const explicit = cleanSecret(options.qoderCookie);
@@ -43,25 +38,6 @@ function qoderUsageUrl(site = 'global') {
 
 function qoderUserPlanUrl(site = 'global') {
   return `${qoderOrigin(site)}/api/v1/me/userplan`;
-}
-
-function numberOrNull(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
-}
-
-function toIso(value) {
-  if (value === null || value === undefined || value === '') return null;
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    const date = new Date(value < 20_000_000_000 ? value * 1000 : value);
-    return Number.isNaN(date.getTime()) ? null : date.toISOString();
-  }
-  const parsed = new Date(String(value));
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 function read(obj, camel, snake) {

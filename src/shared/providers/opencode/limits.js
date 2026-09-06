@@ -2,7 +2,7 @@
 
 // OpenCode limits provider: the remote Zen/Go account view, layered over the
 // local Go ledger in ./goLimits.js and the profile store in ./profiles.js.
-// Reached through providerFetchers() in src/shared/limitCollector.js.
+// Reached through providerFetchers() in src/shared/limits/collector.js.
 
 const crypto = require('node:crypto');
 const opencodeGoApi = require('./goApi');
@@ -12,11 +12,9 @@ const opencodeWeb = require('./web');
 const {
   normalizeLimitProvider,
   openCodeWindowKey
-} = require('../../limits');
-const {
-  hashKey,
-  nowIso
-} = require('../../limits/providerHelpers');
+} = require('../../limits/core');
+const { hashKey } = require('../../hashKey');
+const { nowIso } = require('../../limits/providerHelpers');
 
 function openCodeWebIdentity(goWeb, zen, cookie) {
   const goWorkspaceId = goWeb?.status === 'ok' ? String(goWeb.workspaceId || '') : '';

@@ -14,7 +14,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
+const { cleanSecret } = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { createOutboundFetch } = require('../../outboundFetch');
 const { abortError } = require('../../probeDeadline');
@@ -38,20 +39,10 @@ function grokAuthPath(home) {
     : path.join(home, 'auth.json');
 }
 
-function cleanSecret(value) {
-  let raw = value;
-  if (typeof raw !== 'string') return '';
-  raw = raw.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
-
 // Read ~/.grok/auth.json. Prefer OIDC scope (SuperGrok), fall back to legacy
 // /sign-in, then fall back to any entry with a non-empty `key` field.
 // Returns { token, source, path } or null. Synchronous — uses fs.readFileSync
-// because auth.json is tiny and the only async entry point (limitCollector)
+// because auth.json is tiny and the only async entry point (limits/collector.js)
 // just needs the data ready before issuing the HTTP fetch.
 function readAuthJson(env = process.env, deps = {}) {
   const home = deps.grokHome || resolveGrokHome(env);

@@ -73,7 +73,7 @@ const {
   LIMITS_RESET_BOUNDARY_MAX_TIMER_MS,
   nextLimitsResetBoundary,
   pruneAttemptedResetBoundaries
-} = require('./limitResetBoundary');
+} = require('./limits/resetBoundary');
 
 function toUnpackedPath(p) {
   // electron-builder asarUnpack stores real files at .../app.asar.unpacked/...

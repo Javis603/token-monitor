@@ -40,7 +40,7 @@ function text(value) {
   return String(value ?? '').trim();
 }
 
-// Mirrors the provider key in limitResetBoundary.js rather than the runtime's
+// Mirrors the provider key in resetBoundary.js rather than the runtime's
 // lane identity: this key only has to be stable and unique per account within
 // this module, and matching the other snapshot-driven scheduler keeps the two
 // reading the same way. A label rename restarts that window's history, which

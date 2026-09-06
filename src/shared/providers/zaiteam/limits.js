@@ -1,6 +1,7 @@
 'use strict';
 
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
+const { cleanSecret } = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { parseZaiUsage } = require('../zai/limits');
 const { runWithProbeDeadline } = require('../../probeDeadline');
@@ -16,16 +17,6 @@ const ZAI_TEAM_QUOTA_URL = `${ZAI_TEAM_BASE_URL}${ZAI_TEAM_QUOTA_PATH}?${ZAI_TEA
 const ZAI_TEAM_DASHBOARD_URL = 'https://bigmodel.cn/coding-plan/team/usage-stats';
 const ZAI_TEAM_KEY_NAMES = ['ZAI_TEAM_API_KEY', 'BIGMODEL_TEAM_API_KEY'];
 const ZAI_TEAM_REGION = 'bigmodel-cn';
-
-function cleanSecret(value) {
-  let raw = value;
-  if (typeof raw !== 'string') return '';
-  raw = raw.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
 
 function zaiTeamToken(env = process.env, explicitKey = '') {
   const explicit = cleanSecret(explicitKey);

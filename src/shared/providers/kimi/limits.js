@@ -1,6 +1,11 @@
 'use strict';
 
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
+const {
+  cleanSecret,
+  numberOrNull,
+  toIso
+} = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
@@ -23,16 +28,6 @@ const KIMI_MEMBERSHIP_GRACE_MS = 2000;
 const KIMI_SESSION_MAX_MINUTES = 6 * 60;
 const KIMI_SESSION_WINDOW_MINUTES = 5 * 60;
 const KIMI_WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
-
-function cleanSecret(value) {
-  let raw = value;
-  if (typeof raw !== 'string') return '';
-  raw = raw.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
 
 function kimiToken(env = process.env, explicitKey = '') {
   const explicit = cleanSecret(explicitKey);
@@ -62,25 +57,6 @@ function kimiWebToken(env = process.env, explicitToken = '') {
     if (token) return token;
   }
   return '';
-}
-
-function numberOrNull(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
-}
-
-function toIso(value) {
-  if (value === null || value === undefined || value === '') return null;
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    const date = new Date(value < 20_000_000_000 ? value * 1000 : value);
-    return Number.isNaN(date.getTime()) ? null : date.toISOString();
-  }
-  const parsed = new Date(String(value));
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 // Best-effort duration+timeUnit -> minutes conversion. Stay defensive about

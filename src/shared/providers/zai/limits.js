@@ -1,6 +1,11 @@
 'use strict';
 
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
+const {
+  cleanSecret,
+  numberOrNull,
+  toIso
+} = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 
@@ -21,25 +26,6 @@ const ZAI_SUBSCRIPTION_PATH = '/api/biz/subscription/list';
 const ZAI_QUOTA_URL = `${ZAI_REGIONS.global.baseUrl}${ZAI_QUOTA_PATH}`;
 const ZAI_SUBSCRIPTION_URL = `${ZAI_REGIONS.global.baseUrl}${ZAI_SUBSCRIPTION_PATH}`;
 const ZAI_KEY_NAMES = ['ZAI_API_KEY', 'Z_AI_API_KEY', 'GLM_API_KEY', 'ZHIPU_API_KEY'];
-
-function cleanSecret(value) {
-  let raw = value;
-  if (typeof raw !== 'string') return '';
-  raw = raw.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
-
-function numberOrNull(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
-}
 
 function clampPercent(value) {
   const parsed = numberOrNull(value);
@@ -74,16 +60,6 @@ function zaiUsedPercent(limit) {
     }
   }
   return clampPercent(limit?.percentage ?? limit?.usedPercent ?? limit?.used_percent);
-}
-
-function toIso(value) {
-  if (value === null || value === undefined || value === '') return null;
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    const date = new Date(value < 20_000_000_000 ? value * 1000 : value);
-    return Number.isNaN(date.getTime()) ? null : date.toISOString();
-  }
-  const parsed = new Date(String(value));
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 function displayPlanText(value) {

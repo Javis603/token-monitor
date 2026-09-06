@@ -1,9 +1,9 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { collectLimitsOnce: collectLimitsOnceRaw } = require('../../src/shared/limitCollector');
+const { collectLimitsOnce: collectLimitsOnceRaw } = require('../../src/shared/limits/collector');
 const { hashKey } = require('../../src/shared/hashKey');
-const { aggregateLimits } = require('../../src/shared/limits');
+const { aggregateLimits } = require('../../src/shared/limits/core');
 const { goApiIdentity } = require('../../src/shared/providers/opencode/goApi');
 
 // The Go usage API is a zero-config path: left unstubbed it would read the

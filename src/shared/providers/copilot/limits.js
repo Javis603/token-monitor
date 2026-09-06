@@ -4,22 +4,16 @@
 // The GitHub OAuth token from device flow is used directly here, matching the
 // CodexBar implementation this feature was based on.
 
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
+const {
+  cleanSecret,
+  errorWithStatus
+} = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 
 const COPILOT_DEFAULT_HOST = 'github.com';
 const COPILOT_USER_AGENT = 'GitHubCopilotChat/0.26.7';
 const COPILOT_TOKEN_NAMES = ['COPILOT_API_TOKEN', 'GITHUB_COPILOT_TOKEN'];
-
-function cleanSecret(value) {
-  let raw = value;
-  if (typeof raw !== 'string') return '';
-  raw = raw.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
 
 function copilotToken(env = process.env, options = {}) {
   const explicit = cleanSecret(options.copilotApiToken || options.copilotToken || '');
@@ -230,12 +224,6 @@ function mapCopilotUsageToProvider(usage, meta = {}) {
     updatedAt: meta.updatedAt,
     windows
   });
-}
-
-function errorWithStatus(status, message) {
-  const error = new Error(message || status);
-  error.status = status;
-  return error;
 }
 
 async function fetchJson(url, headers, deps = {}) {

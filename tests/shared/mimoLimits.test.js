@@ -11,7 +11,7 @@ const {
   parseMimoPlanUsage,
   parseMimoProfile
 } = require('../../src/shared/providers/mimo/limits');
-const { createLimitsCollector } = require('../../src/shared/limitCollector');
+const { createLimitsCollector } = require('../../src/shared/limits/collector');
 
 const COOKIE = 'unrelated=drop; userId=123; api-platform_serviceToken=secret; api-platform_ph=optional';
 

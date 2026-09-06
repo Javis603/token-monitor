@@ -2,20 +2,16 @@
 
 const { createOutboundFetch } = require('../../outboundFetch');
 const { hashKey } = require('../../hashKey');
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
+const {
+  cleanSecret,
+  statusForHttp
+} = require('../../limits/providerHelpers');
 const { normalizeNamedProfileName } = require('../../namedProfile');
 
 const OPENROUTER_KEY_URL = 'https://openrouter.ai/api/v1/key';
 const OPENROUTER_CREDITS_URL = 'https://openrouter.ai/api/v1/credits';
 const OPENROUTER_ENV_ACCOUNT_NAME = 'environment';
-
-function cleanSecret(value) {
-  let raw = typeof value === 'string' ? value.trim() : '';
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
 
 function openrouterToken(env = process.env, explicitKey = '') {
   return cleanSecret(explicitKey)
@@ -34,12 +30,6 @@ function openrouterProfileName(value) {
   return normalizeNamedProfileName(value, {
     reservedNames: [OPENROUTER_ENV_ACCOUNT_NAME, 'default (env)']
   });
-}
-
-function statusForHttp(code) {
-  if (code === 401 || code === 403) return 'unauthorized';
-  if (code === 429) return 'sourceRateLimited';
-  return 'unavailable';
 }
 
 async function requestJson(url, apiKey, deps = {}) {

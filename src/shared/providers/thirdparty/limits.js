@@ -2,7 +2,8 @@
 
 const { createOutboundFetch } = require('../../outboundFetch');
 const { hashKey } = require('../../hashKey');
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
+const { statusForHttp } = require('../../limits/providerHelpers');
 const { normalizeNamedProfileName } = require('../../namedProfile');
 
 const DEFAULT_QUOTA_PER_UNIT = 500_000;
@@ -346,12 +347,6 @@ function customBalanceQuota(payload, account) {
     used: mappedNumber(account.usedPath),
     total: mappedNumber(account.totalPath)
   });
-}
-
-function statusForHttp(code) {
-  if (code === 401 || code === 403) return 'unauthorized';
-  if (code === 429) return 'sourceRateLimited';
-  return 'unavailable';
 }
 
 function resolvedTimeZone(deps = {}) {

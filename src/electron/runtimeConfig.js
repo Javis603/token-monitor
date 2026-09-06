@@ -6,7 +6,7 @@ const {
   normalizeLimitsRefreshMode,
   normalizeLimitsRefreshMs,
   parseLimitProviders
-} = require('../shared/limitCollector');
+} = require('../shared/limits/collector');
 const { normalizeSyncUploadIntervalMs } = require('../shared/syncUploadInterval');
 
 const DEFAULT_ALL_TIME_SINCE = '2024-01-01';

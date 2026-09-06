@@ -2,7 +2,7 @@
 
 // Claude limits provider: OAuth and Web session credentials, the CLI fallback,
 // identity/prepaid caches, and the usage → provider-window mapping. Reached
-// through providerFetchers() in src/shared/limitCollector.js, which re-exports
+// through providerFetchers() in src/shared/limits/collector.js, which re-exports
 // the handful of names the widget and the tests use.
 
 const { spawn } = require('node:child_process');
@@ -10,8 +10,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
 const { abortError } = require('../../probeDeadline');
+const { hashKey } = require('../../hashKey');
 const {
   PLAN_LABEL_ALIASES,
   TOKEN_MONITOR_USER_AGENT,
@@ -19,7 +20,6 @@ const {
   envValue,
   errorWithStatus,
   fetchJson,
-  hashKey,
   nowIso,
   parseBoolean,
   pathApiForPlatform,

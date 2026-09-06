@@ -6,15 +6,10 @@ const { spawn } = require('node:child_process');
 const https = require('node:https');
 const http = require('node:http');
 const { appVersion } = require('../../appVersion');
+const { errorWithStatus } = require('../../limits/providerHelpers');
 
 const DEFAULT_PROBE_TIMEOUT_MS = 8000;
 const DEFAULT_RPC_TIMEOUT_MS = 12000;
-
-function errorWithStatus(status, message) {
-  const error = new Error(message || status);
-  error.status = status;
-  return error;
-}
 
 function probeTimeoutError() {
   return errorWithStatus('unavailable', 'Antigravity probe timed out');

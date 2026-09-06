@@ -1,16 +1,16 @@
 'use strict';
 
 // Antigravity limits provider: RPC snapshot plus the OAuth/probe helpers in
-// this folder. Reached through providerFetchers() in src/shared/limitCollector.js.
+// this folder. Reached through providerFetchers() in src/shared/limits/collector.js.
 
 const antigravityOAuth = require('./oauth');
 const antigravityProbe = require('./probe');
 const {
   normalizeLimitProvider
-} = require('../../limits');
+} = require('../../limits/core');
+const { hashKey } = require('../../hashKey');
 const {
   cleanPlanText,
-  hashKey,
   nowIso,
   planLabelFromParts,
   providerStatusFromError

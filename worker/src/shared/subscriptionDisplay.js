@@ -235,7 +235,7 @@
   // A subscription describes an account, not a machine, so when devices share a
   // hub they share ONE list rather than each carrying their own copy inside its
   // device record. That choice is what keeps the arithmetic honest: account keys
-  // are not stable across platforms (see the collapse pass in limits.js — the
+  // are not stable across platforms (see the collapse pass in limits/core.js — the
   // same OAuth login hashes differently on macOS and Windows), so a per-device
   // copy could not be reliably deduped and the monthly total would double on
   // exactly the two-machine setup this exists for. One list also means a delete

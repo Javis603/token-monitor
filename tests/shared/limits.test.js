@@ -10,8 +10,8 @@ const {
   normalizeLimitWindow,
   publicLimits,
   syncLimits
-} = require('../../src/shared/limits');
-const { collectLimitsOnce } = require('../../src/shared/limitCollector');
+} = require('../../src/shared/limits/core');
+const { collectLimitsOnce } = require('../../src/shared/limits/collector');
 const { codexAccountKey } = require('../../src/shared/providers/codex/auth');
 const { hashKey } = require('../../src/shared/hashKey');
 

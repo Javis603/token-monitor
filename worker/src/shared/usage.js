@@ -4,7 +4,7 @@
 'use strict';
 
 const PERIODS = ['today', 'month', 'allTime'];
-const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
+const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
   coerceHistory, dayKeyAddDays, hasDisjointReasoning, localDayKey, mergeHistories,
