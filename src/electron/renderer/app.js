@@ -15030,6 +15030,12 @@ function renderExternalProviderStatus(providerName) {
     statusEl,
     pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
   );
+  // A local ZCode install keeps the Z.ai row honest when unchecked: the
+  // auto-discovered plans still exist, so the pill shows auto-detect instead
+  // of the final "disabled" state the generic seven-state map lands on.
+  if (providerName === 'zai' && !enabled && state.settings?.zcodeLoginDetected === true) {
+    setCursorStatusText(statusEl, t('settings.limits.connection.autoDetect'));
+  }
   manualPanel.classList.toggle('hidden', linked);
   openBtn.classList.toggle('hidden', linked);
   if (providerName === 'zai' && source === 'zcode-auto') {

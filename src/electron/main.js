@@ -4710,6 +4710,9 @@ function settingsForRenderer() {
       ? 'env'
       : '';
   const zcodeAutoCredential = currentZcodeAutoCredential();
+  // "A local ZCode install exists" — advertised so the renderer can show the
+  // auto-detect state instead of "disabled" when the provider is unchecked.
+  const zcodeLoginDetected = discoverZcodeConnection().kind !== 'none';
   const zaiApiKeySource = settings?.zaiApiKey
     ? 'settings'
     : zaiToken(process.env)
@@ -4838,6 +4841,7 @@ function settingsForRenderer() {
     copilotApiTokenSource,
     zaiApiKeyConfigured: Boolean(currentZaiApiKey() || zcodeAutoCredential),
     zaiApiKeySource,
+    zcodeLoginDetected,
     zaiTeamApiKeyConfigured: Boolean(currentZaiTeamApiKey()),
     zaiTeamApiKeySource,
     volcengineCredentialsConfigured: Boolean(currentVolcengineCredentials()),
