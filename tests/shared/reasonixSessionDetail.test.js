@@ -7,7 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { readSessionDetail } = require('../../src/shared/sessionDetail');
-const { REASONIX_META_MAX_BYTES } = require('../../src/shared/reasonixFileIo');
+const { REASONIX_META_MAX_BYTES } = require('../../src/shared/providers/reasonix/fileIo');
 const {
   countReasonixProviderMessages,
   parseReasonixEventLog,
@@ -15,7 +15,7 @@ const {
   readReasonixSessionEvents,
   REASONIX_EVENT_REPLAY_LIMITS,
   REASONIX_EVENT_REPLAY_PROBE_MAX_BYTES
-} = require('../../src/shared/reasonixSessionDetail');
+} = require('../../src/shared/providers/reasonix/sessionDetail');
 const { localIso, localMs } = require('../helpers/localTime');
 
 function writeJson(filePath, value) {

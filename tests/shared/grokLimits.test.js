@@ -14,7 +14,7 @@ const {
   resolveGrokCredential,
   isRetryableNetworkError,
   validateGrokGrpcStatus
-} = require('../../src/shared/grokLimits');
+} = require('../../src/shared/providers/grok/limits');
 const {
   grokCredential,
   readAuthJson,

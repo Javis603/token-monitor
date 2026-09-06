@@ -560,7 +560,7 @@ test('collectUsageOnce omits history entirely on a non-history tick', async () =
 });
 
 test('collectUsageOnce includes Proma history without starting tokscale graph', async () => {
-  const promaPath = require.resolve('../../src/shared/promaUsage');
+  const promaPath = require.resolve('../../src/shared/providers/proma/usage');
   const collectorPath = require.resolve('../../src/shared/collector');
   const promaUsage = require(promaPath);
   const originalRows = promaUsage.collectPromaRows;

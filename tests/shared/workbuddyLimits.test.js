@@ -9,7 +9,7 @@ const {
   parseEnterpriseUsage,
   parsePersonalUsage,
   workbuddyAccountKey
-} = require('../../src/shared/workbuddyLimits');
+} = require('../../src/shared/providers/workbuddy/limits');
 const { collectLimitsOnce } = require('../../src/shared/limitCollector');
 
 const NOW = Date.parse('2026-08-09T10:00:00Z');

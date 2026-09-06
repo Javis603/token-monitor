@@ -11,7 +11,7 @@ const {
   moveCredential,
   renameProfile,
   removeCredential
-} = require('../../src/shared/opencodeProfiles');
+} = require('../../src/shared/providers/opencode/profiles');
 
 const AMBIENT = { useAmbientKey: true, enabled: true };
 const cookie = (value = 'auth=a') => ({ cookie: value, enabled: true });

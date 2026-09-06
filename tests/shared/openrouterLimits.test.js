@@ -11,7 +11,7 @@ const {
   keyLimitWindow,
   openrouterProfileName,
   openrouterToken
-} = require('../../src/shared/openrouterLimits');
+} = require('../../src/shared/providers/openrouter/limits');
 
 function response(status, body) {
   return {

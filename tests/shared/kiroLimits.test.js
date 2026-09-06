@@ -10,7 +10,7 @@ const {
   existingKiroCli,
   runKiroUsageCli,
   fetchKiroLimits
-} = require('../../src/shared/kiroLimits');
+} = require('../../src/shared/providers/kiro/limits');
 const { parseLimitProviders, fetchKiroLimits: fetchKiroLimitsViaCollector } = require('../../src/shared/limitCollector');
 
 const LEGACY_BASIC = [

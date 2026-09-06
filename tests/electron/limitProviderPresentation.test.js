@@ -1606,7 +1606,7 @@ test('Grok is automatic provider UI, while env token remains documented for head
   const i18n = readRendererFile('i18n.js');
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
-  const grokLimits = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'grokLimits.js'), 'utf8');
+  const grokLimits = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'providers', 'grok', 'limits.js'), 'utf8');
   const rendererSettings = main.slice(
     main.indexOf('function settingsForRenderer'),
     main.indexOf('function pushSettingsToRenderer')

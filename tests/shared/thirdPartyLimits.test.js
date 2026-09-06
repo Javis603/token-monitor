@@ -39,7 +39,7 @@ const {
   quotaPerUnit,
   readCustomJsonPath,
   thirdPartyProfileName
-} = require('../../src/shared/thirdPartyLimits');
+} = require('../../src/shared/providers/thirdparty/limits');
 
 function response(status, body) {
   return {

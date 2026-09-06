@@ -9,7 +9,7 @@ const path = require('node:path');
 let sqlite = null;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
 
-const ocs = require('../../src/shared/opencodeSession');
+const ocs = require('../../src/shared/providers/opencode/session');
 const { pickRecentUsageActivity } = require('../../src/shared/trayText');
 
 // The whole suite needs node:sqlite (Node >= 22.5 / Electron 42). Skip cleanly when absent.

@@ -2269,7 +2269,7 @@ test('cursor sync runs at most once per throttle window across ticks', async () 
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   childProcess.spawn = recordingSpawn([]);
-  const cursorAuth = require('../../src/shared/cursorAuth');
+  const cursorAuth = require('../../src/shared/providers/cursor/auth');
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
   let syncCalls = 0;
@@ -2300,7 +2300,7 @@ test('forced Cursor sync bypasses signed-out throttling without saved credential
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   childProcess.spawn = recordingSpawn([]);
-  const cursorAuth = require('../../src/shared/cursorAuth');
+  const cursorAuth = require('../../src/shared/providers/cursor/auth');
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
   let syncCalls = 0;
@@ -2335,7 +2335,7 @@ test('cursor discovery retries after a transient sync failure', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   childProcess.spawn = recordingSpawn([]);
-  const cursorAuth = require('../../src/shared/cursorAuth');
+  const cursorAuth = require('../../src/shared/providers/cursor/auth');
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
   let syncCalls = 0;
@@ -2371,7 +2371,7 @@ test('cursor sync failure metadata reaches client health without stderr or paths
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   childProcess.spawn = recordingSpawn([]);
-  const cursorAuth = require('../../src/shared/cursorAuth');
+  const cursorAuth = require('../../src/shared/providers/cursor/auth');
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
   cursorAuth.readActiveAccount = () => ({ accessToken: 'token' });
@@ -2410,7 +2410,7 @@ test('cursor sync failure metadata reaches client health without stderr or paths
 test('a Cursor report with implicit sync blocks logout until the report closes', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
-  const cursorAuth = require('../../src/shared/cursorAuth');
+  const cursorAuth = require('../../src/shared/providers/cursor/auth');
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
   let reportChild;
@@ -2478,7 +2478,7 @@ test('a targeted tick does not sync an unrelated self-synced client', async () =
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   childProcess.spawn = recordingSpawn([]);
-  const cursorAuth = require('../../src/shared/cursorAuth');
+  const cursorAuth = require('../../src/shared/providers/cursor/auth');
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
   let syncCalls = 0;
@@ -2890,7 +2890,7 @@ test('collector preserves Qoder CN while publishing other clients after a bounde
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
+  const qoderCnUsagePath = require.resolve('../../src/shared/providers/qodercn/usage');
   const qoderCnUsage = require(qoderCnUsagePath);
   const originalRows = qoderCnUsage.collectQoderCnRows;
   const originalPeriods = qoderCnUsage.buildQoderCnPeriods;
@@ -2995,7 +2995,7 @@ test('collector does not reuse persisted Qoder CN periods after the DB path chan
     fullScanAt: new Date(Date.now() - 5 * 60 * 1000).toISOString()
   }));
 
-  const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
+  const qoderCnUsagePath = require.resolve('../../src/shared/providers/qodercn/usage');
   const qoderCnUsage = require(qoderCnUsagePath);
   const originalRows = qoderCnUsage.collectQoderCnRows;
   qoderCnUsage.collectQoderCnRows = async () => {
@@ -3041,7 +3041,7 @@ test('collector publishes other clients when Qoder CN fails before the first com
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
+  const qoderCnUsagePath = require.resolve('../../src/shared/providers/qodercn/usage');
   const qoderCnUsage = require(qoderCnUsagePath);
   const originalRows = qoderCnUsage.collectQoderCnRows;
   let qoderCnReads = 0;
@@ -3093,7 +3093,7 @@ test('collector publishes live periods when only Qoder CN history read fails', a
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
+  const qoderCnUsagePath = require.resolve('../../src/shared/providers/qodercn/usage');
   const qoderCnUsage = require(qoderCnUsagePath);
   const originalRows = qoderCnUsage.collectQoderCnRows;
   const originalHistory = qoderCnUsage.buildQoderCnHistoryGraph;
@@ -3178,7 +3178,7 @@ test('smart collection coalesces watch events into one targeted interval tick', 
   const originalSpawn = childProcess.spawn;
   const calls = [];
   childProcess.spawn = recordingSpawn(calls);
-  const cursorAuth = require('../../src/shared/cursorAuth');
+  const cursorAuth = require('../../src/shared/providers/cursor/auth');
   const originalRunCursorSync = cursorAuth.runCursorSync;
   cursorAuth.runCursorSync = async () => {};
 
@@ -3337,7 +3337,7 @@ test('smart collection retries a failed activity scan on the next interval', asy
     });
     return child;
   };
-  const cursorAuth = require('../../src/shared/cursorAuth');
+  const cursorAuth = require('../../src/shared/providers/cursor/auth');
   const originalRunCursorSync = cursorAuth.runCursorSync;
   cursorAuth.runCursorSync = async () => {};
 
