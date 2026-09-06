@@ -4,17 +4,45 @@
 //
 // macOS: one `fs.watch(dir, { recursive: true })` per top-level root. The
 // recursive form is FSEvents-backed on darwin — one handle per root covers
-// the entire subtree, no per-directory descriptor allocation. This is the
-// change that brings the installed app's memory from ~2.2 GB to <1 GB on
-// directories the size of OpenClaw's `~/.openclaw/agents/` (~9,700 dirs,
-// ~22,300 files), where chokidar's per-dir model falls back to polling and
-// pins the native allocator high-water.
+// the entire subtree, so nothing allocates per directory. chokidar opens one
+// watch handle per directory instead, and that count is the whole problem.
+// Measured on macOS (kern.maxfilesperproc 61440) against a synthetic tree,
+// as RSS delta after ready and the cost of close():
+//
+//        dirs   chokidar                     native
+//         500   +50 MB, close 0.4 s          +0.4 MB, close 1 ms
+//       2,000   +121 MB, close 10.4 s        +0.5 MB, close 1 ms
+//       5,000   EMFILE, tree never opens     +0.5 MB, close 1 ms
+//      10,000   EMFILE, tree never opens     +0.5 MB, close 1 ms
+//
+// So on a tree the size of OpenClaw's `~/.openclaw/agents/` (~9,700 dirs)
+// chokidar does not just cost memory, it exhausts the per-process descriptor
+// budget — and EMFILE is in WATCH_DESCRIPTOR_ERROR_CODES, so `handleWatchError`
+// then drops the process to 2 s polling for the rest of its life, deliberately
+// stickily. The installed app sat at ~2.2 GB there, and at <1 GB after this.
 //
 // Linux/Windows or any user opt-in to polling: fall back to chokidar, which
 // is the only option that supports polling, atomic-write stability, and
 // cross-platform inotify/ReadDirectoryChangesW semantics. fs.watch's
 // recursive form is documented as not fully supported on Linux, so it is
 // not a drop-in there.
+//
+// Two things chokidar does that the native backend deliberately does not, both
+// accepted for the memory win and both macOS-only:
+//   - `followSymlinks` (chokidar default true). FSEvents subscribes to a path
+//     prefix, so a symlinked *subdirectory* inside a root is not traversed and
+//     writes underneath it deliver no event. A symlinked root itself is fine —
+//     the subscription resolves it. A user who relocates part of a client's
+//     data dir behind a symlink falls back to the periodic full scan for that
+//     subtree rather than getting 3–5 s refresh.
+//   - `awaitWriteFinish` (500 ms stability in `watcherOptions()`). Native
+//     events fire mid-write, so a watch tick can read a partially appended
+//     JSONL line. `applyPeriodDelta()` is anchored rather than accumulated, so
+//     that shows up as a transient dip corrected by the next event, not as
+//     drift.
+// Note that FSEvents subscribes by path, not by inode, so a root deleted and
+// recreated at the same path keeps delivering — the inode caveat in the
+// `fs.watch` docs applies to the inotify/kqueue backends, not to this one.
 //
 // Event protocol mirrors chokidar's `('all', event, filePath)` shape so the
 // existing collector logic (`handleWatchEvent`, `clientsForWatchPath`,
@@ -53,20 +81,27 @@ function createNativeWatcher(dirs, clients) {
   // ready event after listeners are in place, matching the chokidar path's
   // async-ready contract.
   queueMicrotask(() => {
-    try {
     if (closed) return;
     for (const dir of dirs) {
       let watcher;
       try {
         watcher = fs.watch(dir, { recursive: true, persistent: false }, (eventType, filename) => {
           if (closed) return;
-          // Some FSEvents deliveries (root removal, race on close) come with a
-          // null filename; nothing to attribute, drop them.
-          if (!filename) return;
-          const fullPath = path.join(dir, filename);
-          // fs.watch has no `ignored` option. The matcher is a pure function
-          // of the path (per its contract), so applying it post-event matches
-          // what chokidar would have done at watch creation.
+          // `filename` is documented as possibly null, and macOS delivers that
+          // for some root-level changes. Something moved inside a watched root
+          // even when we cannot localise it, so attribute the event to the root
+          // rather than dropping a real signal: `clientsForWatchPath` matches
+          // `resolved === root`, so this scans exactly that root's clients
+          // instead of degrading to an all-client scan or to nothing at all.
+          const fullPath = filename ? path.join(dir, filename) : dir;
+          // fs.watch has no `ignored` option, so the matcher runs per event
+          // instead of per traversal entry. That is only equivalent to what
+          // chokidar would have done because every policy in
+          // `watchPolicyEntries()` is prefix-closed: chokidar never descends
+          // into a directory it ignores, so a policy that pruned a directory
+          // while keeping a path underneath it would be right for chokidar and
+          // would leak those events here. Nothing in the type system enforces
+          // that, so `watchPolicyPrefixClosure.test.js` asserts it.
           //
           // The matcher follows the chokidar `ignored` contract: truthy =
           // drop the event (the path is not part of a tracked source), falsy
@@ -87,6 +122,11 @@ function createNativeWatcher(dirs, clients) {
         // sees the real code and keeps unrelated roots up if only one dir is
         // broken. The deferred construction guarantees the worker's error
         // listener is in place by the time we get here.
+        //
+        // This is the only shape a setup failure takes: fs.watch reports it by
+        // throwing from the constructor, not by emitting on the FSWatcher, so
+        // there is no window between constructing and attaching the listener
+        // below that needs its own guard.
         emitter.emit('error', error);
         continue;
       }
@@ -100,17 +140,6 @@ function createNativeWatcher(dirs, clients) {
     if (failed || ready) return;
     ready = true;
     emitter.emit('ready');
-    } catch (error) {
-      // Defense in depth: the per-dir try/catch above handles synchronous
-      // fs.watch throws, but libuv's ENOENT on macOS can also surface as
-      // an async 'error' event on the FSWatcher that fires before our
-      // re-emit listener attaches, in which case the throw escapes both
-      // try blocks. Forward it to the helper's 'error' channel rather
-      // than letting it become an uncaughtException (the host's
-      // 'error' handler in handleWatchError already routes ENOENT into
-      // the per-root error path it expects).
-      emitter.emit('error', error);
-    }
   });
 
   return Object.assign(emitter, {

@@ -18,7 +18,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
-const { createPlatformWatcher, shouldUseNativeWatcher } = require('../../src/shared/nativeWatcher');
+const { createPlatformWatcher, createNativeWatcher, shouldUseNativeWatcher } = require('../../src/shared/nativeWatcher');
 const { watchIgnoreMatcher } = require('../../src/shared/collector');
 
 installSourceEnvGuard(test);
@@ -102,6 +102,24 @@ function withControlledOpencodeHome(homeDir, fn) {
   }
 }
 
+// Re-touch until the event lands, rather than writing once and waiting.
+// FSEvents coalesces and can drop the very first change under load — the whole
+// suite runs test files in parallel, and a single write racing a busy fseventsd
+// is how these tests fail on a correct build. Repeating the write costs nothing
+// when delivery is prompt and removes the race when it is not. The assertion is
+// still "the event arrives", not "it arrives within one write".
+async function touchUntilSeen(file, seen, contents) {
+  const timer = setInterval(() => {
+    try { fs.appendFileSync(file, contents); } catch (_) { /* dir removed by teardown */ }
+  }, 500);
+  try {
+    fs.writeFileSync(file, contents);
+    return await seen;
+  } finally {
+    clearInterval(timer);
+  }
+}
+
 function waitForEvent(watcher, predicate, label) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -152,8 +170,7 @@ test('native watcher delivers a change for a file in a deeply nested subdirector
       (_event, filePath) => path.basename(filePath) === 'session.jsonl',
       'a session.jsonl event under a/b/c'
     );
-    fs.appendFileSync(target, '{"tokens":2}\n');
-    const observed = await seen;
+    const observed = await touchUntilSeen(target, seen, '{"tokens":2}\n');
     assert.ok(
       observed.filePath.endsWith(path.join('a', 'b', 'c', 'session.jsonl')),
       `expected nested session.jsonl path, got ${observed.filePath}`
@@ -253,8 +270,7 @@ test('native watcher applies the ignore matcher post-event', { skip: !IS_DARWIN 
       // ignored one should not (it is dropped by the matcher before the
       // handler fires). Two touches spaced past awaitWriteFinish's window
       // matches the chokidar test's pattern for shared-runner noise.
-      fs.writeFileSync(trackedFile, '{"tokens":2}\n');
-      await seen;
+      await touchUntilSeen(trackedFile, seen, '{"tokens":2}\n');
       fs.writeFileSync(ignoredFile, 'more noise\n');
       await new Promise((resolve) => setTimeout(resolve, 250));
       fs.appendFileSync(ignoredFile, 'more noise\n');
@@ -304,8 +320,7 @@ test('native watcher keeps valid roots live after another root fails', { skip: !
       (_event, filePath) => path.resolve(filePath) === path.resolve(target),
       'an event from the valid root after the invalid root fails'
     );
-    fs.appendFileSync(target, '{"tokens":2}\n');
-    await seen;
+    await touchUntilSeen(target, seen, '{"tokens":2}\n');
   } finally {
     await watcher.close();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -323,4 +338,42 @@ test('native watcher close() resolves cleanly', { skip: !IS_DARWIN }, async () =
   // await doesn't block the next config application.
   await watcher.close();
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// Not darwin-gated: it stubs fs.watch and calls createNativeWatcher directly,
+// so it asserts the event-mapping contract without needing FSEvents. That also
+// keeps the mapping covered on the Linux and Windows CI legs, where every other
+// test in this file skips.
+test('a null filename is attributed to the watched root instead of dropped', async () => {
+  const dir = withTmpDir();
+  const realWatch = fs.watch;
+  const seen = [];
+  let deliver = null;
+  fs.watch = (target, options, listener) => {
+    assert.equal(options.recursive, true, 'the native backend must watch recursively');
+    deliver = (eventType, filename) => listener(eventType, filename);
+    return Object.assign(new (require('node:events').EventEmitter)(), { close() {} });
+  };
+  let watcher;
+  try {
+    watcher = createNativeWatcher([dir], 'claude');
+    watcher.on('all', (event, filePath) => seen.push({ event, filePath }));
+    await waitForReadyOrError(watcher, 'the stubbed native watcher');
+    assert.ok(deliver, 'expected the stub to have captured the fs.watch listener');
+    // macOS delivers a null filename for some root-level changes. Something
+    // moved inside a watched root, and the root is attributable
+    // (clientsForWatchPath matches `resolved === root`), so dropping it would
+    // throw away a real refresh signal.
+    deliver('rename', null);
+    deliver('change', path.join('sub', 'session.jsonl'));
+  } finally {
+    fs.watch = realWatch;
+    if (watcher) await watcher.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  assert.deepEqual(
+    seen.map((entry) => entry.filePath),
+    [dir, path.join(dir, 'sub', 'session.jsonl')],
+    'a null filename maps to the root; a real filename joins onto it'
+  );
 });
