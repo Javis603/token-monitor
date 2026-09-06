@@ -125,6 +125,10 @@
       {
         "revision": 31,
         "buildId": "sha256:65330451639ea14fcb5be7fac23c1e242cfeb0cf630d5a457210001ecf54dff3"
+      },
+      {
+        "revision": 32,
+        "buildId": "sha256:ac2720471a16d249629770202cf1215384ef1e54b6d258bc4a3b852bfc904927"
       }
     ],
     "node-hub": [

@@ -2753,3 +2753,18 @@ test('the row id is a pure function of the name, shared by both call sites', () 
   assert.equal((app.match(/opencodeRowId\('opencode-info-', name\)/g) || []).length, 2);
   assert.equal((app.match(/opencodeRowId\('opencode-credentials-', name\)/g) || []).length, 1);
 });
+
+test('a ZCode-discovered GLM login reads as connected, not API-key configured', () => {
+  const app = readRendererFile('app.js');
+  const statusBody = functionBody(app, 'apiKeyAccountStatusText', 'minimaxPlatformUrl');
+  // The linked pill picks the OAuth-style key only for a zcode-auto source;
+  // pasted and env keys keep their existing API-key pills.
+  assert.match(statusBody, /providerName === 'zai' && source === 'zcode-auto' \? 'settings\.zai\.statusLinked'/);
+  assert.match(statusBody, /source === 'env' \? `settings\.\$\{providerName\}\.statusEnv` : `settings\.\$\{providerName\}\.statusSet`/);
+
+  const i18n = readRendererFile('i18n.js');
+  // Five locales carry the key; translate() falls back to the raw key, so a
+  // missing entry would surface as literal text on the pill.
+  assert.equal((i18n.match(/'settings\.zai\.statusLinked'/g) || []).length, 5);
+  assert.ok(/'settings\.zai\.statusLinked': 'Connected'/.test(i18n));
+});

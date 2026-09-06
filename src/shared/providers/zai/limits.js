@@ -1,5 +1,9 @@
 'use strict';
 
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
 const { normalizeLimitProvider } = require('../../limits/core');
 const {
   cleanSecret,
@@ -8,6 +12,8 @@ const {
 } = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { runWithProbeDeadline } = require('../../probeDeadline');
+const { readJson, writeJsonAtomic, sharedDataDir } = require('../../config');
+const { discoverZcodeConnection, zcodeDataBaseDir } = require('./zcodeDiscovery');
 
 const ZAI_FETCH_TIMEOUT_MS = 12_000;
 
@@ -269,50 +275,430 @@ async function fetchJson(url, key, deps = {}) {
   }, { signal: deps.signal, deadlineMs });
 }
 
+// Three independent account pools feed one GLM row, in parallel: the paid
+// subscription quota (console key), the cash balance (console key), and the
+// ZCode Start/Weekend plan buckets (local ZCode login). A pool only renders
+// when it actually has something — an empty pool is absent, not zero. The
+// console key also answers quota for users without ZCode; the ZCode login
+// also answers plan buckets for users without a console key.
+// An empty lane: attempted marks a lane that ran and found nothing, so the
+// row reports unavailable rather than contradicting the detected-login pill.
+const emptyLane = (attempted = false) => ({ windows: [], plan: '', accountKey: '', hasAnything: false, attempted });
+
+// Maps a lane error onto a provider status: timeouts degrade to unavailable,
+// every other classified status (unauthorized, sourceRateLimited, …) passes
+// through so the pill can say what actually happened.
+const laneErrorStatus = (error) => (error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable');
+
 async function fetchZaiLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
   const key = zaiToken(env, options.zaiApiKey);
   const region = zaiRegion(options, env);
-  if (!key) {
-    return normalizeLimitProvider({
-      provider: 'zai',
-      source: 'api',
-      status: 'notConfigured',
-      updatedAt,
-      windows: [],
-      region
+
+  const keyLane = key
+    ? (async () => {
+      const [quotaResult, balanceResult] = await Promise.allSettled([
+        fetchJson(zaiQuotaUrl(region), key, deps),
+        fetchJson(zaiBalanceUrl(region), key, deps)
+      ]);
+      let subscription = null;
+      try {
+        subscription = await fetchJson(zaiSubscriptionUrl(region), key, deps);
+      } catch (_) {}
+      if (quotaResult.status === 'rejected') throw quotaResult.reason;
+      const usage = parseZaiUsage(quotaResult.value, subscription);
+      const balanceWindow = balanceResult.status === 'fulfilled'
+        ? zaiCashBalanceWindow(balanceResult.value, region)
+        : null;
+      // The finance report exposes a cumulative spend total; the today/week/
+      // month deltas come from tracking that total locally. A report without
+      // the total yields no spend fields — the balance row alone remains.
+      let balance = null;
+      if (balanceWindow) {
+        const balanceData = balanceResult.status === 'fulfilled' ? balanceResult.value?.data : null;
+        balance = {
+          amount: balanceWindow.remaining,
+          currency: balanceWindow.currency,
+          ...zcodeRecordCumulativeSpend({
+            accountKey: hashKey('zai', key),
+            totalSpent: numberOrNull(balanceData?.totalSpendAmount),
+            now,
+            storePath: deps.zaiBalanceStorePath || path.join(sharedDataDir({ env }), 'zai-balance.json'),
+            readJson: deps.readJson,
+            writeJsonAtomic: deps.writeJsonAtomic
+          })
+        };
+      }
+      // Window-level source only exists for non-console origins ('local' is
+      // the sole whitelisted value) — key-lane windows carry no source.
+      const keyWindows = balanceWindow ? [...usage.windows, balanceWindow] : usage.windows;
+      return {
+        windows: keyWindows,
+        plan: usage.plan,
+        accountKey: hashKey('zai', key),
+        balance,
+        hasAnything: usage.windows.length > 0 || Boolean(balanceWindow)
+      };
+    })()
+    : Promise.resolve(emptyLane());
+
+  const planLane = (async () => {
+    const discovery = discoverZcodeConnection(options, {
+      readFileSync: deps.readFileSync || fs.readFileSync,
+      env,
+      homeDir: deps.homeDir || options.homeDir || os.homedir()
     });
+    // Coding Plan quota rides the same quota endpoint the console key uses,
+    // keyed by the mirror key ZCode stores on the provider entry. The lane is
+    // best-effort (failures keep it empty) but marks itself attempted: a
+    // detected ZCode login must not read as not-configured while its query
+    // fails or reports no subscription under that key.
+    // The lane is best-effort on empty results, but a classified failure
+    // (429, auth) still propagates: the row merge surfaces the specific
+    // state the way the start-billing lane already does, instead of
+    // flattening every error to empty-attempted/unavailable.
+    if (discovery.kind === 'coding-quota' && discovery.entitled) {
+      const mirrorKey = discovery.credential?.token;
+      if (mirrorKey) {
+        const quotaHost = discovery.family === 'bigmodel' ? 'https://open.bigmodel.cn' : 'https://api.z.ai';
+        const quota = await fetchJson(`${quotaHost}/api/monitor/usage/quota/limit`, mirrorKey, deps);
+        const usage = parseZaiUsage(quota, null);
+        return {
+          windows: usage.windows.map((window) => ({ ...window, source: 'local' })),
+          plan: usage.plan,
+          accountKey: hashKey('zai', mirrorKey),
+          hasAnything: usage.windows.length > 0,
+          attempted: true
+        };
+      }
+      return emptyLane(true);
+    }
+    if (discovery.kind !== 'start-billing' || !discovery.entitled || !discovery.credential) {
+      return emptyLane();
+    }
+    const payload = await runWithProbeDeadline(async ({ signal }) => {
+      const deviceMid = zcodeDeviceMid({ ...deps, env, homeDir: deps.homeDir || options.homeDir });
+      const response = await (deps.fetch || fetch)(zcodeStartPlanBalanceUrl(), {
+        headers: {
+          Authorization: `Bearer ${discovery.credential.token}`,
+          Accept: 'application/json',
+          ...(deviceMid ? { 'X-Device-Mid': deviceMid } : {})
+        },
+        signal
+      });
+      if (!response.ok) {
+        const error = new Error(`zcode billing returned ${response.status}`);
+        error.status = response.status === 401 || response.status === 403
+          ? 'unauthorized'
+          : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
+        throw error;
+      }
+      return response.json();
+    }, { signal: deps.signal, deadlineMs: Number(deps.zaiFetchTimeoutMs || deps.fetchTimeoutMs || ZAI_FETCH_TIMEOUT_MS) });
+    const usage = parseZcodeStartPlanBalances(payload);
+    // Empty balances with an active plan are a legal mid-state (a grant not
+    // yet effective), so a fulfilled-but-empty lane still counts as attempted.
+    return {
+      windows: usage.windows.map((window) => ({ ...window, source: 'local' })),
+      plan: usage.plan,
+      accountKey: hashKey('zai', discovery.credential.token),
+      hasAnything: usage.windows.length > 0,
+      attempted: true
+    };
+  })();
+
+  const [keyResult, planResult] = await Promise.allSettled([keyLane, planLane]);
+
+  // Both lanes failed: the console key's error wins the status because it is
+  // the credential the user actually manages — but it reports through the
+  // same mapper the single-lane path uses, so a revoked key reads as
+  // unauthorized (notConfigured would contradict the Configured pill) no
+  // matter what the unrelated plan lane did.
+  if (keyResult.status === 'rejected' && planResult.status === 'rejected') {
+    return zaiStatusProvider(laneErrorStatus(keyResult.reason), options, deps);
   }
 
-  try {
-    const quota = await fetchJson(zaiQuotaUrl(region), key, deps);
-    let subscription = null;
-    try {
-      subscription = await fetchJson(zaiSubscriptionUrl(region), key, deps);
-    } catch (_) {}
-    const usage = parseZaiUsage(quota, subscription);
+  const lanes = [keyResult, planResult].filter((result) => result.status === 'fulfilled');
+  const windows = lanes.flatMap((result) => result.value.windows);
+  const accountKey = lanes.map((result) => result.value.accountKey).filter(Boolean)[0] || '';
+  const accountLabel = lanes.map((result) => result.value.plan).filter(Boolean)[0] || '';
+  // The console key's quota is the authoritative failure signal for its own
+  // lane, but plan buckets that did load still render — an unavailable key
+  // does not erase a live Weekend bucket.
+  if (key && keyResult.status === 'rejected') {
+    const error = keyResult.reason;
     return normalizeLimitProvider({
       provider: 'zai',
-      accountKey: hashKey('zai', key),
-      accountLabel: usage.plan,
+      ...(accountKey ? { accountKey } : {}),
+      ...(accountLabel ? { accountLabel } : {}),
       source: 'api',
-      status: usage.windows.length ? 'ok' : 'unavailable',
+      status: laneErrorStatus(error),
       updatedAt,
-      windows: usage.windows,
-      region
-    });
-  } catch (error) {
-    return normalizeLimitProvider({
-      provider: 'zai',
-      source: 'api',
-      status: error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable',
-      updatedAt,
-      windows: [],
+      windows,
       region
     });
   }
+  const hasAnything = lanes.some((result) => result.value.hasAnything);
+  const balance = lanes.map((result) => result.value.balance).filter(Boolean)[0] || null;
+  // The plan buckets come from the local ZCode login, not the console key, so
+  // a ZCode-only row reports oauth while a keyed row reports api. A lane that
+  // ran but produced nothing — an entitled plan whose grants are not yet
+  // effective, or a mirror key with no subscription under it — reports
+  // unavailable rather than notConfigured: the login is detected, so "not
+  // configured" would contradict the settings pill. Billing 401/403 also maps
+  // to unavailable, mirroring ZCode's own classifyAvailabilityError: the
+  // mirror token is ZCode-managed and rotates there, not here.
+  const planError = !key && planResult.status === 'rejected' ? planResult.reason : null;
+  const planAttempted = !key && planResult.status === 'fulfilled' && Boolean(planResult.value.attempted);
+  const source = key ? 'api' : (hasAnything || planError || planAttempted ? 'oauth' : '');
+  return normalizeLimitProvider({
+    provider: 'zai',
+    ...(accountKey ? { accountKey } : {}),
+    ...(accountLabel ? { accountLabel } : {}),
+    ...(balance ? { balance } : {}),
+    source,
+    status: hasAnything ? 'ok'
+      : key || planAttempted ? 'unavailable'
+        : planError
+          ? (planError?.status === 'sourceRateLimited' ? 'sourceRateLimited' : 'unavailable')
+          : 'notConfigured',
+    updatedAt,
+    windows,
+    region
+  });
+}
+
+// Cash balance for a console API key, from the same endpoint BigModel's own
+// finance page renders. Amounts come back as high-precision decimals
+// ("0E-9"); the console rounds them to 2 places before display. Currency is
+// not in the response — it follows the region: USD on z.ai, CNY on BigModel.
+function zaiBalanceUrl(region) {
+  return `${zaiBaseUrl(region)}/api/biz/account/query-customer-account-report`;
+}
+
+function zaiBalanceCurrency(region) {
+  return zaiRegion({ zaiApiRegion: region }) === 'bigmodel-cn' ? 'CNY' : 'USD';
+}
+
+function zaiCashBalanceWindow(payload, region) {
+  const data = payload?.data;
+  const remaining = numberOrNull(data?.availableBalance);
+  if (remaining === null) return null;
+  return {
+    kind: 'billing',
+    metric: 'credits',
+    label: 'Balance',
+    remaining: Math.max(0, remaining),
+    currency: zaiBalanceCurrency(region)
+  };
+}
+
+const ZAI_SPEND_STORE_VERSION = 1;
+// Same retention window as DeepSeek's balance history: today/week/month
+// aggregates never need anything older, and the store stops growing.
+const ZAI_SPEND_RETENTION_MS = 40 * 24 * 60 * 60 * 1000;
+
+function zaiLocalDayKey(ms) {
+  const date = new Date(ms);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function startOfLocalMonth(ms) {
+  const date = new Date(ms);
+  date.setHours(0, 0, 0, 0);
+  date.setDate(1);
+  return date.getTime();
+}
+
+// The report's spend total only ever grows in normal use, so consumption is
+// the positive delta between observations. A drop (refund, plan reset) moves
+// the baseline without recording negative spend.
+function zcodeRecordCumulativeSpend({ accountKey, totalSpent, now, storePath, readJson: readOverride, writeJsonAtomic: writeOverride }) {
+  // totalSpent is null when the report omits the cumulative total; Number(null)
+  // is 0, so the null check must come before the finite check or a missing
+  // field would silently rebase the tracked total to zero.
+  if (!accountKey || totalSpent === null || !Number.isFinite(totalSpent) || !storePath) return null;
+  const read = readOverride || readJson;
+  const write = writeOverride || writeJsonAtomic;
+  const nowMs = Number(now);
+  const total = Math.max(0, totalSpent);
+  let store;
+  try {
+    // config.readJson returns null on ENOENT instead of throwing, so a null
+    // check — not just the try/catch — is what makes a fresh store.
+    store = read(storePath, 'utf8');
+  } catch (_) {}
+  if (!store || typeof store !== 'object' || !store.accounts || typeof store.accounts !== 'object') {
+    store = { version: ZAI_SPEND_STORE_VERSION, accounts: {} };
+  }
+  const entry = store.accounts[accountKey] || { lastTotal: null, allTimeSpend: 0, dailySpend: {}, trackingSince: nowMs };
+  let changed = false;
+  if (entry.lastTotal === null) {
+    entry.lastTotal = total;
+    changed = true;
+  } else if (entry.lastTotal !== total) {
+    const consumed = Math.max(0, total - entry.lastTotal);
+    const dayKey = zaiLocalDayKey(nowMs);
+    entry.dailySpend[dayKey] = Math.round(((entry.dailySpend[dayKey] || 0) + consumed) * 100) / 100;
+    entry.allTimeSpend = Math.round((Number(entry.allTimeSpend || 0) + consumed) * 100) / 100;
+    entry.lastTotal = total;
+    changed = true;
+  }
+  // Prune day buckets past the retention window; allTimeSpend keeps
+  // accumulating after the buckets are gone, as on DeepSeek.
+  const cutoff = nowMs - ZAI_SPEND_RETENTION_MS;
+  const pruned = {};
+  for (const [key, amount] of Object.entries(entry.dailySpend || {})) {
+    if (key >= zaiLocalDayKey(cutoff)) pruned[key] = amount;
+  }
+  if (Object.keys(pruned).length !== Object.keys(entry.dailySpend || {}).length) {
+    entry.dailySpend = pruned;
+    changed = true;
+  }
+  store.accounts[accountKey] = entry;
+  // The spend record is best-effort: a failed write (read-only dir, disk
+  // full) must not reject the key lane and discard a successful quota and
+  // balance response — the next round re-reads the old baseline and its
+  // delta still lands.
+  if (changed) {
+    try {
+      write(storePath, store);
+    } catch (_) {}
+  }
+
+  const todayKey = zaiLocalDayKey(nowMs);
+  const monthKey = todayKey.slice(0, 7);
+  // Rolling 7 days, matching DeepSeek's balance history so the same wire
+  // field means the same thing across providers.
+  const weekStart = new Date(nowMs);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - 6);
+  const weekKey = zaiLocalDayKey(weekStart.getTime());
+  const sumSince = (predicate) => Object.entries(entry.dailySpend)
+    .filter(([key]) => predicate(key))
+    .reduce((sum, [, amount]) => sum + amount, 0);
+  return {
+    todaySpend: entry.dailySpend[todayKey] || 0,
+    weekSpend: Math.round(sumSince((key) => key >= weekKey) * 100) / 100,
+    monthSpend: Math.round(sumSince((key) => key.startsWith(monthKey)) * 100) / 100,
+    allTimeSpend: entry.allTimeSpend,
+    trackingSince: entry.trackingSince,
+    // Same rule as DeepSeek's balance history: true while tracking began
+    // within the current local month (monthKey alone is YYYY-MM, so an
+    // equality against a YYYY-MM-DD day key never matched).
+    monthSinceTracking: Number(entry.trackingSince) > startOfLocalMonth(nowMs)
+  };
+}
+
+// ZCode Start/Weekend plan quota lives on ZCode's own billing endpoint, not
+// the shared subscription quota above. Single origin, no region split; the
+// gateway rejects requests without the ZCode client's device id (code 3001
+// "parameter error"), so the id rides along from ZCode's own telemetry state.
+function zcodeDeviceMid(deps = {}) {
+  const readFileSync = deps.readFileSync || fs.readFileSync;
+  const env = deps.env || process.env;
+  const homeDir = deps.homeDir || os.homedir();
+  try {
+    const state = JSON.parse(readFileSync(
+      path.join(zcodeDataBaseDir(env, homeDir), '.zcode', 'v2', 'telemetry-state.json'),
+      'utf8'
+    ));
+    const deviceMid = String(state?.deviceMid || '').trim();
+    return deviceMid || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function zcodeStartPlanBalanceUrl() {
+  return 'https://zcode.z.ai/api/v1/zcode-plan/billing/balance';
+}
+
+// Mirrors ZCode's normalizeZaiStartPlanBalanceLimits: one window per balance
+// bucket. The grant period lives on the plan entitlement, not the bucket, so
+// callers pass an entitlement_id → period map alongside the payload; daily
+// grants map to the shared daily lane, one-time grants take the billing lane
+// without windowMinutes.
+function zcodePlanBucketWindow(balance, periodByEntitlement = {}) {
+  const total = numberOrNull(balance?.total_units);
+  const used = numberOrNull(balance?.used_units);
+  const remaining = numberOrNull(balance?.remaining_units);
+  if (total === null && used === null && remaining === null) return null;
+  // Derive from whichever pair the bucket reports: remaining wins (the
+  // same rule as the quota windows), used alone still yields a meter, and
+  // a percentage field is the last resort.
+  let usedPercent = null;
+  if (total !== null && total > 0) {
+    if (remaining !== null) usedPercent = clampPercent(100 - (remaining / total) * 100);
+    else if (used !== null) usedPercent = clampPercent((used / total) * 100);
+  }
+  if (usedPercent === null) usedPercent = clampPercent(balance?.percentage);
+  const label = String(balance?.show_name || '').trim() || 'Start Plan';
+  const resetsAt = toIso(balance?.expires_at ?? balance?.period_end);
+  const period = periodByEntitlement[String(balance?.entitlement_id || '').trim()]
+    || String(balance?.period || '');
+  const window = {
+    kind: period === 'daily' ? 'daily' : 'billing',
+    label,
+    // One-time grants never renew; the description keeps that visible on
+    // surfaces that render resets as text. An unknown period (entitlement
+    // missing from the map, no period field) stays unlabeled rather than
+    // claiming one-time semantics.
+    ...(period === 'one_time' ? { resetDescription: 'One-time' } : {}),
+    limitId: String(balance?.plan_id || '').trim(),
+    ...(usedPercent !== null ? { usedPercent, remainingPercent: Math.max(0, Math.min(100, 100 - usedPercent)) } : {}),
+    showMeter: usedPercent !== null,
+    ...(period === 'daily' ? { windowMinutes: 24 * 60 } : {})
+  };
+  if (used !== null) window.used = used;
+  if (remaining !== null) window.remaining = remaining;
+  if (total !== null) window.limit = total;
+  if (resetsAt) window.resetsAt = resetsAt;
+  return window;
+}
+
+function zcodePeriodByEntitlement(payload) {
+  const periodByEntitlement = {};
+  const plans = Array.isArray(payload?.data?.plans) ? payload.data.plans : [];
+  for (const plan of plans) {
+    const entitlements = Array.isArray(plan?.entitlements) ? plan.entitlements : [];
+    for (const entitlement of entitlements) {
+      const id = String(entitlement?.entitlement_id || '').trim();
+      const period = String(entitlement?.period || '').trim();
+      if (id && period) periodByEntitlement[id] = period;
+    }
+  }
+  return periodByEntitlement;
+}
+
+function parseZcodeStartPlanBalances(payload) {
+  const periodByEntitlement = zcodePeriodByEntitlement(payload);
+  const balances = Array.isArray(payload?.data?.balances) ? payload.data.balances : [];
+  const windows = balances.map((balance) => zcodePlanBucketWindow(balance, periodByEntitlement)).filter(Boolean);
+  // Mirrors ZCode's pickCurrentZaiStartPlan: the first active plan whose
+  // plan_id or name carries the start-plan identity — Weekend ids do
+  // ("zcode-v3-start-plan-wk-…"), and a non-start plan must not steal the
+  // label even if it sorts first.
+  const startIdentity = (entry) => [entry?.plan_id, entry?.name]
+    .some((value) => /start[- ]plan/.test(String(value || '').toLowerCase()));
+  const plan = Array.isArray(payload?.data?.plans)
+    ? payload.data.plans.find((entry) => entry?.status === 'active' && startIdentity(entry))
+    : null;
+  return { plan: String(plan?.name || '').trim(), windows };
+}
+
+function zaiStatusProvider(status, options = {}, deps = {}) {
+  const now = (deps.now || Date.now)();
+  return normalizeLimitProvider({
+    provider: 'zai',
+    source: 'api',
+    status,
+    updatedAt: new Date(now).toISOString(),
+    windows: [],
+    region: zaiRegion(options, deps.env || process.env)
+  });
 }
 
 module.exports = {
@@ -325,5 +711,6 @@ module.exports = {
   zaiSubscriptionUrl,
   zaiDashboardUrl,
   parseZaiUsage,
+  parseZcodeStartPlanBalances,
   fetchZaiLimits
 };
