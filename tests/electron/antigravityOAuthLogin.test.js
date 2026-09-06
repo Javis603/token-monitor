@@ -6,7 +6,7 @@ const { once } = require('node:events');
 const net = require('node:net');
 const test = require('node:test');
 
-const { runAntigravityOAuthLogin } = require('../../src/electron/antigravityOAuthLogin');
+const { runAntigravityOAuthLogin } = require('../../src/electron/providers/antigravity/oauthLogin');
 
 function response(status, body) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
@@ -118,7 +118,7 @@ test('Antigravity OAuth login does not wait for a retained callback socket', asy
 });
 
 test('Antigravity OAuth callback says sign-in was received before account persistence finishes', () => {
-  const { _callbackPage } = require('../../src/electron/antigravityOAuthLogin');
+  const { _callbackPage } = require('../../src/electron/providers/antigravity/oauthLogin');
   const page = _callbackPage(true);
   assert.match(page, /Sign-in received/);
   assert.match(page, /Return to Token Monitor to finish connecting this account/);

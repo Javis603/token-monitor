@@ -4,8 +4,8 @@ const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const { throwIfAborted } = require('./abortSignal');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
-const { REASONIX_CLIENT } = require('./reasonixPaths');
-const { buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
+const { buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 

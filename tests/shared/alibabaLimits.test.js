@@ -15,7 +15,7 @@ const {
   parsePersonalUsage,
   parseTeamSummary,
   secTokenFromHtml
-} = require('../../src/shared/alibabaLimits');
+} = require('../../src/shared/providers/alibaba/limits');
 
 // The one payload in this file captured from a real account (mainland Team, via
 // the report on #567). Every other fixture reproduces a shape the console is

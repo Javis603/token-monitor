@@ -3,7 +3,7 @@
 // Client identity — ids, labels and display order — comes from the shared
 // catalog (loaded as a script before this file). Destructured to the bare
 // names the call sites below already use.
-const { CLIENT_LABELS: clientLabels, KNOWN_CLIENT_LIST: KNOWN_CLIENTS } = window.TokenMonitorClientCatalog;
+const { CLIENT_IDS, CLIENT_LABELS: clientLabels, KNOWN_CLIENT_LIST: KNOWN_CLIENTS } = window.TokenMonitorClientCatalog;
 // Limits provider identity comes from its own shared catalog, bound here rather
 // than at its first use below because the icon tables are derived from it.
 const { LIMIT_PROVIDER_CATALOG: LIMIT_PROVIDERS, LIMIT_PROVIDER_IDS } = window.TokenMonitorLimitProviders;
@@ -309,6 +309,8 @@ state.toolPreferenceSourceSignature = '';
 state.limitProviderRenderSignature = '';
 state.limitPanelRenderSignature = '';
 state.settingsPushRevision = 0;
+state.limitProviderSelectionRevision = 0;
+state.pendingLimitProviderSelection = null;
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.homeReturnVisible = false;
@@ -2520,8 +2522,16 @@ function subscriptionLocalDate(dateString) {
 // (openrouter, deepseek, thirdparty, zai…) simply produce nothing, which is the
 // correct answer: their spend is either pay-as-you-go or spread across clients
 // with no way to attribute it.
+//
+// Membership comes from the catalog rather than from clientLabels. That map is a
+// display lookup and deliberately carries ids that are not tracked clients, so
+// keying off it would let "we can render a name for this" stand in for "this
+// provider names a client we count tokens for". The two happen to agree today
+// only because the one label-only id is not a limits provider.
+const catalogClientIds = new Set(CLIENT_IDS);
+
 function subscriptionUsageCostUsd(providerId) {
-  if (!Object.prototype.hasOwnProperty.call(clientLabels, providerId)) return null;
+  if (!catalogClientIds.has(providerId)) return null;
   const month = state.stats?.periods?.month;
   const cost = Number(month?.clientCosts?.[providerId] || 0);
   return cost > 0 ? cost : null;
@@ -3804,13 +3814,14 @@ function configuredLimitProviderOrder() {
 }
 
 function configuredLimitProviderSelection() {
-  const raw = state.settings?.limitProviders;
+  const raw = state.pendingLimitProviderSelection?.limitProviders ?? state.settings?.limitProviders;
   const source = raw === undefined || raw === null ? DEFAULT_LIMIT_PROVIDER_ORDER : raw;
   return limitProviderOrderApi.normalizeLimitProviderSelection(source, LIMIT_PROVIDERS);
 }
 
 function enabledLimitProviderSet() {
-  if (state.settings?.limitsEnabled === false) return new Set();
+  const limitsEnabled = state.pendingLimitProviderSelection?.limitsEnabled ?? state.settings?.limitsEnabled;
+  if (limitsEnabled === false) return new Set();
   return new Set(configuredLimitProviderSelection());
 }
 
@@ -11582,13 +11593,27 @@ async function onLimitProviderToggle() {
   if (checked.length === 0 && state.breakdown === 'limits') {
     setBreakdown('tool');
   }
-  await saveSettings({ limitProviders: checked.join(','), limitsEnabled: checked.length > 0 });
-  clearDisabledLimitProviderPendingChecks(new Set(checked));
-  // settings:update reconfigures LimitsRuntime immediately. Its existing
-  // snapshot and the newly enabled provider's eventual result arrive through
-  // the normal stats push, so a forced usage + all-provider refresh here only
-  // replaces stable account summaries with an interim snapshot and duplicates
-  // collection work.
+  const patch = { limitProviders: checked.join(','), limitsEnabled: checked.length > 0 };
+  // LimitsRuntime publishes its reconfigured snapshot synchronously before the
+  // main process can send settings:push. Keep the renderer on the user's new
+  // selection so that intervening stats frames cannot rebuild this checkbox
+  // from the previous settings and visibly re-check it.
+  const revision = ++state.limitProviderSelectionRevision;
+  state.pendingLimitProviderSelection = { revision, ...patch };
+  try {
+    await saveSettings(patch);
+    clearDisabledLimitProviderPendingChecks(new Set(checked));
+    // settings:update reconfigures LimitsRuntime immediately. Its existing
+    // snapshot and the newly enabled provider's eventual result arrive through
+    // the normal stats push, so a forced usage + all-provider refresh here only
+    // replaces stable account summaries with an interim snapshot and duplicates
+    // collection work.
+  } finally {
+    if (state.pendingLimitProviderSelection?.revision === revision) {
+      state.pendingLimitProviderSelection = null;
+      renderLimitProviderCheckboxes();
+    }
+  }
 }
 
 async function onLimitProviderMove(providerId, direction) {

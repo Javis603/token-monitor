@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const probe = require('../../src/shared/antigravityProbe');
+const probe = require('../../src/shared/providers/antigravity/probe');
 const rootPackage = require('../../package.json');
 
 test('probe stops waiting for process discovery when the parent signal aborts', async () => {

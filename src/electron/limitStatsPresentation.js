@@ -1,6 +1,6 @@
 'use strict';
 
-const { aggregateLimits } = require('../shared/limits');
+const { aggregateLimits } = require('../shared/limits/core');
 const { DEFAULT_STALE_AFTER_MS } = require('../shared/syncUploadInterval');
 
 const OPENCODE_COMPONENT_PROVENANCE_DETAIL = 'managed';

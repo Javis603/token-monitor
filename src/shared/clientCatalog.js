@@ -88,9 +88,9 @@
   // (usageCharts.js), clientsWithIcon (app.js) and VENDOR_LABELS
   // (themePresets.js), and does not depend on this map.
   //
-  // Keep it minimal: subscriptionUsageCostUsd() in app.js reads a key in the
-  // merged CLIENT_LABELS as "this provider id names a client", so every id added
-  // here widens that test too.
+  // Keep it minimal anyway. This is a label lookup, so an id belongs here only
+  // when a row that can actually appear would otherwise render as the bare id —
+  // not as a cheap way to register a client.
   const NON_CATALOG_CLIENT_LABELS = Object.freeze({ gemini: 'Gemini' });
 
   const CLIENT_IDS = Object.freeze(CLIENT_CATALOG.map((client) => client.id));

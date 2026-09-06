@@ -6,7 +6,7 @@ const test = require('node:test');
 const {
   codexLoginUrlFromOutput,
   isAllowedCodexLoginUrl
-} = require('../../src/shared/codexLogin');
+} = require('../../src/shared/providers/codex/login');
 
 test('isAllowedCodexLoginUrl accepts only OpenAI OAuth login URLs', () => {
   assert.equal(isAllowedCodexLoginUrl('https://auth.openai.com/oauth/authorize?client_id=app'), true);

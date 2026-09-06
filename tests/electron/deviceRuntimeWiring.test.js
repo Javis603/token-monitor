@@ -12,7 +12,7 @@ const {
   runManualDeviceRefresh,
   settingsLimitInvalidationPlan
 } = require('../../src/electron/deviceRuntimeCoordinator');
-const { createLimitsRuntime } = require('../../src/shared/limitsRuntime');
+const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
 
 function deferred() {
   let resolve;

@@ -12,7 +12,7 @@ const {
   LIMIT_PROVIDER_LABELS,
   limitProvidersForDetectedClients
 } = require('../../src/shared/limitProviders');
-const { parseLimitProviders, providerFetchers } = require('../../src/shared/limitCollector');
+const { parseLimitProviders, providerFetchers } = require('../../src/shared/limits/collector');
 
 const rootDir = path.join(__dirname, '..', '..');
 const read = (...parts) => fs.readFileSync(path.join(rootDir, ...parts), 'utf8');

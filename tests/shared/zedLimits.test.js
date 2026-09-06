@@ -13,7 +13,7 @@ const {
   parseSubscription,
   parseZedBillingUsage,
   zedCookie
-} = require('../../src/shared/zedLimits');
+} = require('../../src/shared/providers/zed/limits');
 
 function usagePayload(overrides = {}) {
   return {

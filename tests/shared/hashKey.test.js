@@ -33,7 +33,7 @@ test('hashKey coerces non-string parts via String()', () => {
 });
 
 test('hashKey requires a sha256 prefix that downstream code parses', () => {
-  // limitCollector and the renderer both branch on the 'sha256:' prefix
+  // the limits collector and the renderer both branch on the 'sha256:' prefix
   // to distinguish already-hashed accountKeys from raw seeds. If this
   // prefix ever changes, downstream code breaks silently.
   assert.ok(hashKey('seed').startsWith('sha256:'));

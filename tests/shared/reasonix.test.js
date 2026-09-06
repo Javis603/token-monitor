@@ -12,7 +12,7 @@ const {
   cleanEnvDir,
   resolveReasonixHome,
   resolveReasonixStatsDir
-} = require('../../src/shared/reasonixPaths');
+} = require('../../src/shared/providers/reasonix/paths');
 const {
   clientSourceChecks,
   clientSourceRoots,

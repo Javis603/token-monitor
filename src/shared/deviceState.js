@@ -1,7 +1,7 @@
 'use strict';
 
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
-const { filterReasonixSyntheticSessions } = require('./reasonixSessionGuard');
+const { filterReasonixSyntheticSessions } = require('./providers/reasonix/sessionGuard');
 
 const PARTIAL_USAGE_CARRY_FIELDS = Object.freeze([
   'month',

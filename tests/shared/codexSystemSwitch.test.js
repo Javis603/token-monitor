@@ -13,7 +13,7 @@ const {
   liveCodexAuthPath,
   readCodexAuthMaterial,
   writeCodexAuthFile
-} = require('../../src/shared/codexSystemSwitch');
+} = require('../../src/shared/providers/codex/systemSwitch');
 
 function makeIdToken(payload) {
   const segment = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
-const { parseGrokBotUsage, parseUsageSummary, parseUserInfo, probe } = require('../../src/shared/cursorProbe');
+const { parseGrokBotUsage, parseUsageSummary, parseUserInfo, probe } = require('../../src/shared/providers/cursor/probe');
 
 test('parseUsageSummary maps cents to USD and reads billing cycle end', () => {
   const input = {

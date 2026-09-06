@@ -6,7 +6,7 @@ const {
   CODEX_RESET_FORECAST_PAGE_URL,
   createCodexResetForecastClient,
   normalizeCodexResetForecast
-} = require('../../src/electron/codexResetForecast');
+} = require('../../src/electron/providers/codex/resetForecast');
 
 test('normalizes an active camel-case reset watch', () => {
   const result = normalizeCodexResetForecast({

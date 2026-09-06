@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { fetchCursorLimits } = require('../../src/shared/limitCollector');
+const { fetchCursorLimits } = require('../../src/shared/limits/collector');
 
 test('fetchCursorLimits returns notConfigured when no active account', async () => {
   const result = await fetchCursorLimits({}, {

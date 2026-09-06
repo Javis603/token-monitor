@@ -16,7 +16,7 @@ const {
   usageConfigFingerprint,
   usageConfigFromSettings
 } = require('../../src/electron/runtimeConfig');
-const { alibabaVariant } = require('../../src/shared/alibabaLimits');
+const { alibabaVariant } = require('../../src/shared/providers/alibaba/limits');
 
 const BASE_USAGE_SETTINGS = Object.freeze({
   clients: 'claude',

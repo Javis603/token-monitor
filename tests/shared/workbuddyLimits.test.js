@@ -9,8 +9,8 @@ const {
   parseEnterpriseUsage,
   parsePersonalUsage,
   workbuddyAccountKey
-} = require('../../src/shared/workbuddyLimits');
-const { collectLimitsOnce } = require('../../src/shared/limitCollector');
+} = require('../../src/shared/providers/workbuddy/limits');
+const { collectLimitsOnce } = require('../../src/shared/limits/collector');
 
 const NOW = Date.parse('2026-08-09T10:00:00Z');
 
@@ -442,7 +442,7 @@ test('WorkBuddy Local App reports unsupported desktop platforms without reading 
   assert.equal(called, false);
 });
 
-test('limitCollector dispatches the WorkBuddy provider through the shared provider lane', async () => {
+test('the limits collector dispatches the WorkBuddy provider through the shared provider lane', async () => {
   const summary = await collectLimitsOnce(
     { limitsEnabled: true, limitProviders: 'workbuddy', workbuddyAccessToken: 'fixture-token' },
     {

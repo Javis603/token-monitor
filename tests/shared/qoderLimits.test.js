@@ -11,7 +11,7 @@ const {
   parseQoderPlanLabel,
   parseQoderUsage,
   fetchQoderLimits
-} = require('../../src/shared/qoderLimits');
+} = require('../../src/shared/providers/qoder/limits');
 
 test('qoderCookie reads settings before env and trims quoted cookies', () => {
   assert.equal(qoderCookie({ QODER_COOKIE: 'env-cookie' }, { qoderCookie: '  "settings-cookie"  ' }), 'settings-cookie');

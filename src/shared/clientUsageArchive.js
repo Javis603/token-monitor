@@ -1,7 +1,16 @@
 'use strict';
 
 const { PERIODS, normalizePeriod } = require('./usage');
-const { hasSummaryPeriod } = require('./archivePeriods');
+const {
+  cloneJson,
+  hasSummaryPeriod,
+  localDay,
+  localMonth,
+  numberValue,
+  periodFor,
+  targetPeriod,
+  toDate
+} = require('./archiveHelpers');
 
 function normalizeClientId(value) {
   const raw = String(value || '').trim().toLowerCase();
@@ -13,30 +22,6 @@ function clientSet(value) {
   if (value instanceof Set) return new Set(Array.from(value).map(normalizeClientId).filter(Boolean));
   if (Array.isArray(value)) return new Set(value.map(normalizeClientId).filter(Boolean));
   return new Set(String(value || '').split(',').map(normalizeClientId).filter(Boolean));
-}
-
-function toDate(value) {
-  const date = value instanceof Date ? value : new Date(value || Date.now());
-  return Number.isNaN(date.getTime()) ? new Date() : date;
-}
-
-function pad2(value) {
-  return String(value).padStart(2, '0');
-}
-
-function localDay(dateValue) {
-  const date = toDate(dateValue);
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
-}
-
-function localMonth(dateValue) {
-  const date = toDate(dateValue);
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
-}
-
-function numberValue(value) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function archivedPeriod(input) {
@@ -70,10 +55,6 @@ function normalizedModelMap(input, roundTokens = true) {
     if (next > 0) result[key] = (result[key] || 0) + next;
   }
   return result;
-}
-
-function periodFor(record, periodName) {
-  return normalizePeriod(record?.periods?.[periodName] || record?.[periodName]);
 }
 
 function clientUsageFromPeriod(period, client) {
@@ -143,19 +124,6 @@ function captureArchivedClientUsage(existingArchive, deviceRecord, clients, capt
   }
 
   return archive;
-}
-
-function cloneSummary(summary) {
-  return JSON.parse(JSON.stringify(summary || {}));
-}
-
-function targetPeriod(summary, periodName) {
-  if (summary.periods && typeof summary.periods === 'object') {
-    summary.periods[periodName] = normalizePeriod(summary.periods[periodName]);
-    return summary.periods[periodName];
-  }
-  summary[periodName] = normalizePeriod(summary[periodName]);
-  return summary[periodName];
 }
 
 function addClientUsage(period, client, usage) {
@@ -258,7 +226,7 @@ function applyArchivedClientUsage(summary, archive, options = {}) {
   const normalizedArchive = normalizeArchivedClientUsage(archive);
   const activeClients = clientSet(options.activeClients);
   const now = toDate(options.now);
-  const next = cloneSummary(summary);
+  const next = cloneJson(summary);
 
   for (const [client, entry] of Object.entries(normalizedArchive.clients)) {
     if (activeClients.has(client)) continue;

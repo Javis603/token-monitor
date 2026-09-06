@@ -16,7 +16,7 @@ const {
   resolveDshSessionsRoot,
   scanZstdFrames,
   zstdAvailable
-} = require('../../src/shared/dshSessionFiles');
+} = require('../../src/shared/providers/dsh/sessionFiles');
 
 const hasZstd = zstdAvailable();
 

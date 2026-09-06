@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { EventEmitter } = require('node:events');
 
-const { runCodexLogin } = require('../../src/shared/limitCollector');
+const { runCodexLogin } = require('../../src/shared/limits/collector');
 
 function fakeChild() {
   const child = new EventEmitter();
