@@ -18,6 +18,7 @@ const path = require('node:path');
 
 const { createOutboundFetch } = require('../../outboundFetch');
 const { resolveDataDir } = require('./goLimits');
+const { cleanSecret } = require('../../limits/providerHelpers');
 
 const GO_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
 
@@ -37,14 +38,6 @@ const WINDOW_MAP = [
   ['weekly', 'weekly', 10080],
   ['monthly', 'monthly', 43200]
 ];
-
-function cleanSecret(value) {
-  let raw = typeof value === 'string' ? value.trim() : '';
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
 
 // A cancelled probe must not be reported as a provider status: the limits lane
 // is latest-wins, and turning an abort into an `unavailable` row would publish

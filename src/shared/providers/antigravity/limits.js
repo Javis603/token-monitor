@@ -8,9 +8,9 @@ const antigravityProbe = require('./probe');
 const {
   normalizeLimitProvider
 } = require('../../limits');
+const { hashKey } = require('../../hashKey');
 const {
   cleanPlanText,
-  hashKey,
   nowIso,
   planLabelFromParts,
   providerStatusFromError

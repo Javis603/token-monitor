@@ -13,10 +13,8 @@ const {
   normalizeLimitProvider,
   openCodeWindowKey
 } = require('../../limits');
-const {
-  hashKey,
-  nowIso
-} = require('../../limits/providerHelpers');
+const { hashKey } = require('../../hashKey');
+const { nowIso } = require('../../limits/providerHelpers');
 
 function openCodeWebIdentity(goWeb, zen, cookie) {
   const goWorkspaceId = goWeb?.status === 'ok' ? String(goWeb.workspaceId || '') : '';

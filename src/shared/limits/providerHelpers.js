@@ -10,7 +10,6 @@
 // directory, so the two do not collide.
 
 const { spawn } = require('node:child_process');
-const crypto = require('node:crypto');
 const path = require('node:path');
 const { appVersion } = require('../appVersion');
 const { abortError } = require('../probeDeadline');
@@ -27,10 +26,41 @@ function parseBoolean(value, fallback = true) {
   return !['0', 'false', 'no', 'off'].includes(String(value).trim().toLowerCase());
 }
 
-function hashKey(...parts) {
-  const hash = crypto.createHash('sha256');
-  for (const part of parts) hash.update(String(part || '')).update('\0');
-  return `sha256:${hash.digest('hex')}`;
+// Credentials arrive from .env files, shell exports and pasted GUI fields, so a
+// value may carry surrounding whitespace and one layer of quotes the user did
+// not mean to include. Strip both; a non-string is treated as absent.
+function cleanSecret(value) {
+  if (typeof value !== 'string') return '';
+  let raw = value.trim();
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    raw = raw.slice(1, -1).trim();
+  }
+  return raw;
+}
+
+// Provider payloads spell numbers as both JSON numbers and strings. Anything
+// that is neither a finite number nor a numeric string reads as absent rather
+// than as zero, so a missing quota never renders as a real 0.
+function numberOrNull(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+// Reset timestamps arrive as ISO strings, epoch seconds and epoch milliseconds.
+// The cutoff picks the unit: a value below 20_000_000_000 cannot be a plausible
+// millisecond timestamp (that is 1970-08-20), so it is read as seconds.
+function toIso(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const date = new Date(value < 20_000_000_000 ? value * 1000 : value);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 function errorWithStatus(status, message) {
@@ -188,6 +218,27 @@ function pathDelimiterForPlatform(platform = process.platform) {
   return platform === 'win32' ? ';' : ':';
 }
 
+// The HTTP status a provider answers with, mapped to the shared provider
+// status vocabulary. Kept beside providerStatusFromError so the two agree on
+// what counts as a credential problem rather than an outage.
+function statusForHttp(code) {
+  if (code === 401 || code === 403) return 'unauthorized';
+  if (code === 429) return 'sourceRateLimited';
+  return 'unavailable';
+}
+
+// Resolve a credential the GUI setting owns first and the environment second,
+// which is the precedence every provider that accepts both already follows.
+function firstSetting(options, env, settingName, envNames) {
+  const explicit = cleanSecret(options?.[settingName]);
+  if (explicit) return explicit;
+  for (const name of envNames) {
+    const value = cleanSecret(env?.[name]);
+    if (value) return value;
+  }
+  return '';
+}
+
 function providerStatusFromError(error) {
   if (['disabled', 'notConfigured', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error'].includes(error?.status)) return error.status;
   if (error?.code === 'ENOENT') return 'notConfigured';
@@ -198,17 +249,21 @@ module.exports = {
   PLAN_LABEL_ALIASES,
   TOKEN_MONITOR_USER_AGENT,
   cleanPlanText,
+  cleanSecret,
   displayPlanText,
   envValue,
   errorWithStatus,
   fetchJson,
-  hashKey,
+  firstSetting,
   nowIso,
+  numberOrNull,
   parseBoolean,
   pathApiForPlatform,
   pathDelimiterForPlatform,
   planLabelFromParts,
   providerStatusFromError,
   runProcessText,
+  statusForHttp,
+  toIso,
   uniqueStrings
 };

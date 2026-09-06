@@ -2,6 +2,10 @@
 
 const crypto = require('node:crypto');
 const { normalizeLimitProvider } = require('../../limits');
+const {
+  cleanSecret,
+  numberOrNull
+} = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 
@@ -22,16 +26,6 @@ const VOLCENGINE_ARK_PROBE_MODELS = [
   'doubao-1.5-pro-32k',
   'doubao-lite-32k'
 ];
-
-function cleanSecret(value) {
-  let raw = value;
-  if (typeof raw !== 'string') return '';
-  raw = raw.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
 
 function pickFirst(env, names) {
   for (const name of names) {
@@ -81,15 +75,6 @@ function volcengineCredentials(env = process.env, options = {}) {
     };
   }
   if (apiKey) return { mode: 'ark', apiKey, region };
-  return null;
-}
-
-function numberOrNull(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
   return null;
 }
 

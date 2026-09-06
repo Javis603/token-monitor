@@ -15,6 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { normalizeLimitProvider } = require('../../limits');
+const { cleanSecret } = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { createOutboundFetch } = require('../../outboundFetch');
 const { abortError } = require('../../probeDeadline');
@@ -36,16 +37,6 @@ function grokAuthPath(home) {
   return String(home).startsWith('\\\\wsl$\\')
     ? `${home}\\auth.json`
     : path.join(home, 'auth.json');
-}
-
-function cleanSecret(value) {
-  let raw = value;
-  if (typeof raw !== 'string') return '';
-  raw = raw.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
 }
 
 // Read ~/.grok/auth.json. Prefer OIDC scope (SuperGrok), fall back to legacy

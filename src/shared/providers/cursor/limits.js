@@ -6,10 +6,10 @@
 
 const cursorAuth = require('./auth');
 const cursorProbe = require('./probe');
+const { hashKey } = require('../../hashKey');
 const {
   cleanPlanText,
-  displayPlanText,
-  hashKey
+  displayPlanText
 } = require('../../limits/providerHelpers');
 
 function hashCursorAccountKey(account, resolvedUserId = '') {

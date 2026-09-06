@@ -1,6 +1,10 @@
 'use strict';
 
 const { normalizeLimitProvider } = require('../../limits');
+const {
+  cleanSecret,
+  errorWithStatus
+} = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 
@@ -16,15 +20,6 @@ const OLLAMA_SESSION_COOKIE_NAMES = new Set([
   '__Secure-next-auth.session-token',
   'next-auth.session-token'
 ]);
-
-function cleanSecret(value) {
-  if (typeof value !== 'string') return '';
-  let raw = value.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
 
 function cookiePairs(value) {
   let header = cleanSecret(value);
@@ -273,12 +268,6 @@ async function fetchOllamaLimits(options = {}, deps = {}) {
   } finally {
     if (timer) clearTimeout(timer);
   }
-}
-
-function errorWithStatus(status, message) {
-  const error = new Error(message || status);
-  error.status = status;
-  return error;
 }
 
 module.exports = {

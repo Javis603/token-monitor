@@ -10,23 +10,14 @@ const { sharedDataDir } = require('../../config');
 const {
   normalizeLimitProvider
 } = require('../../limits');
+const { hashKey } = require('../../hashKey');
 const {
+  cleanSecret,
   errorWithStatus,
   fetchJson,
-  hashKey,
   nowIso,
   providerStatusFromError
 } = require('../../limits/providerHelpers');
-
-function cleanSecret(value) {
-  let raw = value;
-  if (typeof raw !== 'string') return '';
-  raw = raw.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
 
 function deepseekToken(env = process.env, explicitKey = '') {
   const explicit = cleanSecret(explicitKey);

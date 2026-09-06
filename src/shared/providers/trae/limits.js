@@ -3,6 +3,7 @@
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { hashKey } = require('../../hashKey');
 const { normalizeLimitProvider } = require('../../limits');
+const { numberOrNull } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 
 const TRAE_FETCH_TIMEOUT_MS = 12_000;
@@ -18,6 +19,9 @@ function cleanSecret(value) {
   return /[\r\n]/.test(raw) ? '' : raw;
 }
 
+// Deliberately not the shared firstSetting: a Trae credential goes into a
+// request header, so it must be cleaned by the local cleanSecret above, which
+// also rejects a value carrying CR/LF.
 function firstSetting(options, env, settingName, envNames) {
   const explicit = cleanSecret(options?.[settingName]);
   if (explicit) return explicit;
@@ -47,15 +51,6 @@ function traeDeviceId(env = process.env, options = {}) {
 
 function traeEntUsageUrl() {
   return `${TRAE_API_ORIGIN}${TRAE_ENT_USAGE_PATH}`;
-}
-
-function numberOrNull(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
 }
 
 function entitlementPacks(body) {

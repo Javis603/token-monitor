@@ -1,17 +1,12 @@
 'use strict';
 
 const { normalizedEnterpriseHost } = require('./limits');
+const { errorWithStatus } = require('../../limits/providerHelpers');
 
 const COPILOT_DEVICE_CLIENT_ID = 'Iv1.b507a08c87ecfe98';
 const COPILOT_DEVICE_SCOPE = 'read:user';
 const DEFAULT_POLL_INTERVAL_SEC = 5;
 const SLOW_DOWN_EXTRA_MS = 5000;
-
-function errorWithStatus(status, message) {
-  const error = new Error(message || status);
-  error.status = status;
-  return error;
-}
 
 function deviceFlowHost(enterpriseHost) {
   return normalizedEnterpriseHost(enterpriseHost);

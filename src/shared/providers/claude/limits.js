@@ -12,6 +12,7 @@ const path = require('node:path');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { normalizeLimitProvider } = require('../../limits');
 const { abortError } = require('../../probeDeadline');
+const { hashKey } = require('../../hashKey');
 const {
   PLAN_LABEL_ALIASES,
   TOKEN_MONITOR_USER_AGENT,
@@ -19,7 +20,6 @@ const {
   envValue,
   errorWithStatus,
   fetchJson,
-  hashKey,
   nowIso,
   parseBoolean,
   pathApiForPlatform,

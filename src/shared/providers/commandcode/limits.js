@@ -1,6 +1,10 @@
 'use strict';
 
 const { normalizeLimitProvider } = require('../../limits');
+const {
+  cleanSecret,
+  errorWithStatus
+} = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
@@ -89,15 +93,6 @@ const COMMANDCODE_PLANS = Object.freeze({
   'individual-max': { label: 'Max 10x', monthlyCreditsUsd: 150, fiveHourCapUsd: 45, weeklyCapUsd: 90 },
   'individual-ultra': { label: 'Max 20x', monthlyCreditsUsd: 300, fiveHourCapUsd: 90, weeklyCapUsd: 180 }
 });
-
-function cleanSecret(value) {
-  if (typeof value !== 'string') return '';
-  let raw = value.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
 
 // A cookie value may not carry control characters; a pasted header that does is
 // a mangled copy rather than a session, and forwarding it would build an
@@ -307,12 +302,6 @@ function parseCommandcodeSubscription(body) {
     status: String(body.data.status || '').trim().toLowerCase(),
     currentPeriodEnd: toIso(body.data.currentPeriodEnd ?? body.data.current_period_end)
   };
-}
-
-function errorWithStatus(status, message) {
-  const error = new Error(message || status);
-  error.status = status;
-  return error;
 }
 
 function requestHeaders(cookie) {

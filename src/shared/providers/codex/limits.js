@@ -18,6 +18,7 @@ const {
   codexOAuthRequestContext,
   codexStoredAccountId
 } = require('./auth');
+const { hashKey } = require('../../hashKey');
 const {
   TOKEN_MONITOR_USER_AGENT,
   cleanPlanText,
@@ -25,7 +26,6 @@ const {
   envValue,
   errorWithStatus,
   fetchJson,
-  hashKey,
   nowIso,
   pathApiForPlatform,
   pathDelimiterForPlatform,

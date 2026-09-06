@@ -3,6 +3,10 @@
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { hashKey } = require('../../hashKey');
 const { normalizeLimitProvider } = require('../../limits');
+const {
+  cleanSecret,
+  errorWithStatus
+} = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 
 const ZED_FETCH_TIMEOUT_MS = 12_000;
@@ -21,15 +25,6 @@ const ZED_FORWARDED_COOKIE_NAMES = new Set([
   '__cf_bm',
   'cf_clearance'
 ]);
-
-function cleanSecret(value) {
-  if (typeof value !== 'string') return '';
-  let raw = value.trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
 
 function hasControlCharacters(value) {
   return /[\u0000-\u001f\u007f]/u.test(value);
@@ -176,12 +171,6 @@ function parseZedBillingUsage(body, subscriptionBody = null) {
     window: windows[0],
     windows
   };
-}
-
-function errorWithStatus(status, message) {
-  const error = new Error(message);
-  error.status = status;
-  return error;
 }
 
 function requestHeaders(cookie) {
