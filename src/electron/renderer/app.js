@@ -3,7 +3,7 @@
 // Client identity — ids, labels and display order — comes from the shared
 // catalog (loaded as a script before this file). Destructured to the bare
 // names the call sites below already use.
-const { CLIENT_LABELS: clientLabels, KNOWN_CLIENT_LIST: KNOWN_CLIENTS } = window.TokenMonitorClientCatalog;
+const { CLIENT_IDS, CLIENT_LABELS: clientLabels, KNOWN_CLIENT_LIST: KNOWN_CLIENTS } = window.TokenMonitorClientCatalog;
 // Limits provider identity comes from its own shared catalog, bound here rather
 // than at its first use below because the icon tables are derived from it.
 const { LIMIT_PROVIDER_CATALOG: LIMIT_PROVIDERS, LIMIT_PROVIDER_IDS } = window.TokenMonitorLimitProviders;
@@ -2520,8 +2520,16 @@ function subscriptionLocalDate(dateString) {
 // (openrouter, deepseek, thirdparty, zai…) simply produce nothing, which is the
 // correct answer: their spend is either pay-as-you-go or spread across clients
 // with no way to attribute it.
+//
+// Membership comes from the catalog rather than from clientLabels. That map is a
+// display lookup and deliberately carries ids that are not tracked clients, so
+// keying off it would let "we can render a name for this" stand in for "this
+// provider names a client we count tokens for". The two happen to agree today
+// only because the one label-only id is not a limits provider.
+const catalogClientIds = new Set(CLIENT_IDS);
+
 function subscriptionUsageCostUsd(providerId) {
-  if (!Object.prototype.hasOwnProperty.call(clientLabels, providerId)) return null;
+  if (!catalogClientIds.has(providerId)) return null;
   const month = state.stats?.periods?.month;
   const cost = Number(month?.clientCosts?.[providerId] || 0);
   return cost > 0 ? cost : null;
