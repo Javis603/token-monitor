@@ -2,8 +2,8 @@
 
 const fs = require('node:fs');
 const { resolveSessionFile } = require('./sessionFiles');
-const opencodeSession = require('./opencodeSession');
-const { readReasonixSessionEvents } = require('./reasonixSessionDetail');
+const opencodeSession = require('./providers/opencode/session');
+const { readReasonixSessionEvents } = require('./providers/reasonix/sessionDetail');
 
 function num(value) {
   const n = Number(value);

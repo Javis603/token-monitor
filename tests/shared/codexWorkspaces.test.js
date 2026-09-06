@@ -9,7 +9,7 @@ const {
   codexOAuthCredentials,
   listCodexWorkspaces,
   normalizeCodexWorkspaces
-} = require('../../src/shared/codexWorkspaces');
+} = require('../../src/shared/providers/codex/workspaces');
 
 function jwt(payload) {
   const seg = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');

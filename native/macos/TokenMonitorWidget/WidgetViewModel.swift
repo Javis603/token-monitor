@@ -730,6 +730,7 @@ enum WidgetFormat {
         case "openrouter": "OpenRouter"
         case "minimax": "Minimax"
         case "volcengine": "Volcengine"
+        case "alibaba": "Alibaba Cloud"
         case "qoder": "Qoder"
         case "trae": "Trae CN"
         case "workbuddy": "WorkBuddy"

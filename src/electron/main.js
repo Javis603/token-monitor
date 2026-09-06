@@ -24,13 +24,13 @@ const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/tray
 const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
-const { createClaudeWebFetch } = require('./claudeWebFetch');
-const { runAntigravityOAuthLogin } = require('./antigravityOAuthLogin');
-const antigravityOAuth = require('../shared/antigravityOAuth');
+const { createClaudeWebFetch } = require('./providers/claude/webFetch');
+const { runAntigravityOAuthLogin } = require('./providers/antigravity/oauthLogin');
+const antigravityOAuth = require('../shared/providers/antigravity/oauth');
 const {
   createWorkbuddyLocalAuth,
   isSupportedWorkbuddyLocalAppPlatform
-} = require('./workbuddyLocalAuth');
+} = require('./providers/workbuddy/localAuth');
 const { createElectronLimitsFetch } = require('./limitsFetch');
 const {
   expandedBoundsForCollapse,
@@ -71,13 +71,15 @@ function electronProviderDeps(deps = {}) {
 }
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const {
-  antigravitySyncLockPath,
   clientDiagnosticRoots,
   lookupModelPricing,
   normalizeHistoryIntervalMs,
-  repairAntigravitySyncLock,
   visibleDiagnosticRoots
 } = require('../shared/collector');
+const {
+  antigravitySyncLockPath,
+  repairAntigravitySyncLock
+} = require('../shared/providers/antigravity/selfSync');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
@@ -89,9 +91,9 @@ const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
-const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie } = require('../shared/limitCollector');
-const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
-const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
+const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie, alibabaCookie, alibabaVariant, normalizeAlibabaCookieHeader } = require('../shared/limits/collector');
+const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/providers/ollama/limits');
+const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const {
   codexAuthIdentity,
   codexAccountKey,
@@ -100,16 +102,16 @@ const {
   hashAccountKey,
   preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity
-} = require('../shared/codexAuth');
-const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/codexLogin');
-const { listCodexWorkspaces, normalizeWorkspaceId } = require('../shared/codexWorkspaces');
+} = require('../shared/providers/codex/auth');
+const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/providers/codex/login');
+const { listCodexWorkspaces, normalizeWorkspaceId } = require('../shared/providers/codex/workspaces');
 const {
   codexAuthMaterialForWorkspace,
   codexAccountMatchesIdentity,
   liveCodexAuthPath,
   readCodexAuthMaterial,
   writeCodexAuthFile
-} = require('../shared/codexSystemSwitch');
+} = require('../shared/providers/codex/systemSwitch');
 const {
   normalizeClientDisplayOrder,
   normalizeHiddenClients,
@@ -149,11 +151,11 @@ const {
   shouldSkipAppUpdateCheck,
   updateInstallQuitPolicy
 } = require('../shared/appUpdater');
-const cursorAuth = require('../shared/cursorAuth');
-const cursorProbe = require('../shared/cursorProbe');
-const opencodeWeb = require('../shared/opencodeWeb');
-const opencodeGoApi = require('../shared/opencodeGoApi');
-const opencodeProfiles = require('../shared/opencodeProfiles');
+const cursorAuth = require('../shared/providers/cursor/auth');
+const cursorProbe = require('../shared/providers/cursor/probe');
+const opencodeWeb = require('../shared/providers/opencode/web');
+const opencodeGoApi = require('../shared/providers/opencode/goApi');
+const opencodeProfiles = require('../shared/providers/opencode/profiles');
 
 // The collector reaches the usage API behind a probe deadline; these settings
 // paths call it directly, so they need their own bound or a hung request leaves
@@ -191,8 +193,8 @@ async function probeOpenCodeApiKey(apiKey) {
     return { status: 'unavailable', windows: [] };
   }
 }
-const openrouterLimits = require('../shared/openrouterLimits');
-const thirdPartyLimits = require('../shared/thirdPartyLimits');
+const openrouterLimits = require('../shared/providers/openrouter/limits');
+const thirdPartyLimits = require('../shared/providers/thirdparty/limits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
 const { normalizeCompactTokenUnits } = require('../shared/compactTokens');
@@ -222,7 +224,7 @@ const {
   createMimoManagedAccount,
   fetchMimoLimits,
   normalizeMimoCookieHeader
-} = require('../shared/mimoLimits');
+} = require('../shared/providers/mimo/limits');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
@@ -275,7 +277,7 @@ const {
   trayToggleAction
 } = require('./trayModeSettings');
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
-const { createCodexResetForecastClient } = require('./codexResetForecast');
+const { createCodexResetForecastClient } = require('./providers/codex/resetForecast');
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
 const {
@@ -595,6 +597,12 @@ function defaultSettings() {
     volcengineAgentAccessKeyId: '',
     volcengineAgentSecretAccessKey: '',
     volcengineAgentRegion: '',
+    alibabaCookie: '',
+    // Empty, not 'cn': defaults are merged into settings before any read, so a
+    // concrete value here would satisfy the `options || env` fallback and make
+    // ALIBABA_TOKEN_PLAN_VARIANT unreachable in both the UI and the collector.
+    // The effective variant is resolved at use, never stored eagerly.
+    alibabaVariant: '',
     qoderCookie: '',
     qoderSite: 'global',
     traeAccessToken: '',
@@ -845,6 +853,21 @@ function currentVolcengineCredentials() {
 
 function normalizeQoderCookie(value) {
   return qoderCookie({}, { qoderCookie: String(value || '') });
+}
+
+function normalizeAlibabaCookie(value) {
+  return normalizeAlibabaCookieHeader(String(value || ''));
+}
+
+function normalizeAlibabaVariant(value) {
+  // Env is consulted here, not just in the collector: resolving it in only one
+  // of the two leaves the settings UI showing a different console than the one
+  // the quota request actually goes to.
+  return alibabaVariant({ alibabaVariant: value }, process.env);
+}
+
+function currentAlibabaCookie() {
+  return settings?.alibabaCookie || alibabaCookie(process.env);
 }
 
 function normalizeQoderSite(value) {
@@ -4718,6 +4741,11 @@ function settingsForRenderer() {
     : ollamaSessionCookie(process.env)
       ? 'env'
       : '';
+  const alibabaCookieSource = settings?.alibabaCookie
+    ? 'settings'
+    : alibabaCookie(process.env)
+      ? 'env'
+      : '';
   const kimiApiKeySource = settings?.kimiApiKey
     ? 'settings'
     : kimiToken(process.env)
@@ -4764,6 +4792,8 @@ function settingsForRenderer() {
     volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
     volcengineAgentAccessKeyId: settings?.volcengineAgentAccessKeyId ? 'set' : '',
     claudeWebCookie: settings?.claudeWebCookie ? 'set' : '',
+    alibabaCookie: settings?.alibabaCookie ? 'set' : '',
+    alibabaVariant: normalizeAlibabaVariant(settings?.alibabaVariant),
     qoderCookie: settings?.qoderCookie ? 'set' : '',
     traeAccessToken: settings?.traeAccessToken ? 'set' : '',
     traeDeviceId: settings?.traeDeviceId ? 'set' : '',
@@ -4811,6 +4841,8 @@ function settingsForRenderer() {
     commandcodeCookieSource,
     ollamaCookieConfigured: Boolean(currentOllamaCookie()),
     ollamaCookieSource,
+    alibabaCookieConfigured: Boolean(currentAlibabaCookie()),
+    alibabaCookieSource,
     kimiApiKeyConfigured: Boolean(currentKimiApiKey()),
     kimiApiKeySource,
     kimiWebAccessTokenConfigured: Boolean(currentKimiWebAccessToken()),
@@ -6033,6 +6065,11 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'dashboard.zed.dev') return true;
   if ((parsed.hostname === 'ollama.com' || parsed.hostname === 'www.ollama.com') && (parsed.pathname === '/settings' || parsed.pathname === '/signin')) return true;
   if ((parsed.hostname === 'kimi.com' || parsed.hostname === 'www.kimi.com') && parsed.pathname.startsWith('/code')) return true;
+  // Token Plan lives behind a hash route, so the console's region path is all
+  // there is to match on. Kept host-scoped rather than opening the whole
+  // console, in line with every other entry here.
+  if (parsed.hostname === 'bailian.console.aliyun.com' && parsed.pathname.startsWith('/cn-beijing')) return true;
+  if (parsed.hostname === 'modelstudio.console.alibabacloud.com' && parsed.pathname.startsWith('/ap-southeast-1')) return true;
   if (STATUS_PAGE_HOSTS.has(parsed.hostname) && (parsed.pathname === '' || parsed.pathname === '/')) return true;
   return false;
 }
@@ -6595,6 +6632,8 @@ app.whenReady().then(() => {
     if (patch.volcengineAgentSecretAccessKey !== undefined) normalizedPatch.volcengineAgentSecretAccessKey = normalizeSecretSetting(patch.volcengineAgentSecretAccessKey);
     if (patch.volcengineAgentRegion !== undefined) normalizedPatch.volcengineAgentRegion = normalizeVolcengineRegion(patch.volcengineAgentRegion);
     if (patch.qoderCookie !== undefined) normalizedPatch.qoderCookie = normalizeQoderCookie(patch.qoderCookie);
+    if (patch.alibabaCookie !== undefined) normalizedPatch.alibabaCookie = normalizeAlibabaCookie(patch.alibabaCookie);
+    if (patch.alibabaVariant !== undefined) normalizedPatch.alibabaVariant = normalizeAlibabaVariant(patch.alibabaVariant);
     if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
     if (patch.traeAccessToken !== undefined) normalizedPatch.traeAccessToken = normalizeTraeAccessToken(patch.traeAccessToken);
     if (patch.traeDeviceId !== undefined) normalizedPatch.traeDeviceId = normalizeTraeDeviceId(patch.traeDeviceId);
@@ -6729,6 +6768,8 @@ app.whenReady().then(() => {
       volcengineAgentRegion: patch.volcengineAgentRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineAgentRegion) : (settings.volcengineAgentRegion || ''),
       qoderCookie: patch.qoderCookie !== undefined ? normalizeQoderCookie(patch.qoderCookie) : (settings.qoderCookie || ''),
       qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
+      alibabaCookie: patch.alibabaCookie !== undefined ? normalizeAlibabaCookie(patch.alibabaCookie) : (settings.alibabaCookie || ''),
+      alibabaVariant: patch.alibabaVariant !== undefined ? normalizeAlibabaVariant(patch.alibabaVariant) : (settings.alibabaVariant || ''),
       traeAccessToken: patch.traeAccessToken !== undefined ? normalizeTraeAccessToken(patch.traeAccessToken) : (settings.traeAccessToken || ''),
       traeDeviceId: patch.traeDeviceId !== undefined ? normalizeTraeDeviceId(patch.traeDeviceId) : (settings.traeDeviceId || ''),
       zedCookie: patch.zedCookie !== undefined ? normalizeZedCookie(patch.zedCookie) : (settings.zedCookie || ''),

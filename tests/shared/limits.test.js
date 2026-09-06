@@ -10,9 +10,9 @@ const {
   normalizeLimitWindow,
   publicLimits,
   syncLimits
-} = require('../../src/shared/limits');
-const { collectLimitsOnce } = require('../../src/shared/limitCollector');
-const { codexAccountKey } = require('../../src/shared/codexAuth');
+} = require('../../src/shared/limits/core');
+const { collectLimitsOnce } = require('../../src/shared/limits/collector');
+const { codexAccountKey } = require('../../src/shared/providers/codex/auth');
 const { hashKey } = require('../../src/shared/hashKey');
 
 function codexProvider(accountKey, accountEmail, remainingPercent, updatedAt) {
@@ -1294,6 +1294,77 @@ test('aggregateLimits keeps the Volcengine Coding and Agent plans as two rows', 
   const volcengineRows = aggregate.providers.filter((provider) => provider.provider === 'volcengine');
   assert.equal(volcengineRows.length, 2);
   assert.deepEqual(volcengineRows.map((provider) => provider.accountLabel), ['Agent Plan Medium', 'Coding Plan']);
+});
+
+// Alibaba's accountKey is the console-issued account UID, so it is identical on
+// every platform: two keys mean two accounts. Without provider-scoped collapse
+// the second pass would fold them into one row and let whichever device synced
+// last silently replace the other.
+test('aggregateLimits keeps two Alibaba accounts apart and merges one across devices', () => {
+  const now = '2026-06-24T10:00:00.000Z';
+  const nowMs = Date.parse('2026-06-24T10:02:00.000Z');
+  const alibabaRow = (accountKey, accountLabel) => ({
+    provider: 'alibaba',
+    accountKey,
+    accountLabel,
+    status: 'ok',
+    source: 'web',
+    updatedAt: now,
+    windows: [{ kind: 'billing', used: 1, limit: 10 }]
+  });
+  const device = (deviceId, provider) => ({ deviceId, limits: { updatedAt: now, providers: [provider] } });
+  const labels = (aggregate) => aggregate.providers
+    .filter((provider) => provider.provider === 'alibaba')
+    .map((provider) => provider.accountLabel)
+    .sort();
+
+  assert.deepEqual(
+    labels(aggregateLimits([
+      device('mac', alibabaRow('sha256:account-a', 'Team A')),
+      device('win', alibabaRow('sha256:account-b', 'Team B'))
+    ], 0, nowMs)),
+    ['Team A', 'Team B']
+  );
+
+  assert.deepEqual(
+    labels(aggregateLimits([
+      device('mac', alibabaRow('sha256:account-a', 'Team A')),
+      device('win', alibabaRow('sha256:account-a', 'Team A'))
+    ], 0, nowMs)),
+    ['Team A']
+  );
+
+  // One Alibaba Cloud account can hold a Team and a Personal subscription at
+  // once, with quotas counted separately, so both rows carry the *same* account
+  // id. Identity alone would collide here and drop one plan; the aggregate key
+  // is scoped by the plan variant so both survive.
+  assert.deepEqual(
+    labels(aggregateLimits([
+      device('mac', { ...alibabaRow('sha256:account-a', 'Team A'), region: 'cn' }),
+      device('win', {
+        provider: 'alibaba',
+        accountKey: 'sha256:account-a',
+        accountLabel: 'Pro',
+        workspaceKind: 'personal',
+        region: 'cn-personal',
+        status: 'ok',
+        source: 'web',
+        updatedAt: now,
+        windows: [{ kind: 'session', usedPercent: 40 }]
+      })
+    ], 0, nowMs)),
+    ['Pro', 'Team A']
+  );
+
+  // The same plan seen from two devices still merges: scoping by variant must
+  // not turn one subscription into two rows.
+  assert.deepEqual(
+    labels(aggregateLimits([
+      device('mac', { ...alibabaRow('sha256:account-a', 'Team A'), region: 'cn' }),
+      device('win', { ...alibabaRow('sha256:account-a', 'Team A'), region: 'cn' })
+    ], 0, nowMs)),
+    ['Team A']
+  );
 });
 
 // Regression guard for the renderer's localProviderStatus(): a sync-mode account

@@ -7,6 +7,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
+const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
 const {
   accountEmailLabel,
   accountTitleLabel,
@@ -54,16 +55,6 @@ function balancedBlock(source, header) {
     }
   }
   assert.fail(`${header} should close`);
-}
-
-function limitProviderIds(source) {
-  const block = source.slice(
-    source.indexOf('const LIMIT_PROVIDERS = ['),
-    source.indexOf('const TRAY_ICON_VARIANTS')
-  );
-  const ids = [...block.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1]);
-  assert.ok(ids.length > 0, 'LIMIT_PROVIDERS should list provider ids');
-  return ids;
 }
 
 // The renderer is a plain browser script, so run the title functions (plus the
@@ -128,7 +119,7 @@ test('account email masking is applied by the shared limits title resolver', () 
 // through one table, and a provider that is missing from it must still mask.
 test('no limits provider can render a raw account email while masking is on', () => {
   const app = readRendererFile('app.js');
-  const providers = [...limitProviderIds(app), 'future-provider'];
+  const providers = [...LIMIT_PROVIDER_IDS, 'future-provider'];
 
   for (const id of providers) {
     for (const account of [

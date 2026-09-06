@@ -13,12 +13,6 @@ try {
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = trackingApi;
 const rootDir = path.join(__dirname, '..', '..');
 
-function rendererClientIds() {
-  const app = fs.readFileSync(path.join(rootDir, 'src/electron/renderer/app.js'), 'utf8');
-  const block = app.slice(app.indexOf('const KNOWN_CLIENTS = ['), app.indexOf('const LIMIT_PROVIDERS'));
-  return [...block.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1]);
-}
-
 function readmeTrackedClientIds() {
   const iconToClient = {
     deepseek: 'dsh',
@@ -46,7 +40,7 @@ test('clientsCsvForSetting uses defaults only for missing settings', () => {
 
 test('default tracked clients include current tokscale-supported tools', () => {
   const clients = DEFAULT_CLIENTS.split(',');
-  for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio']) {
+  for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth']) {
     assert.ok(clients.includes(client), `${client} should be tracked by default`);
   }
 });
@@ -68,9 +62,13 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in m
   }
 });
 
-test('tracked client defaults, renderer, and README share one display order', () => {
+// The renderer is no longer a third party to compare against: it destructures
+// the same catalog these CSVs are projected from, so asserting it here would be
+// the catalog against itself. That the renderer actually consumes the catalog is
+// guarded in tests/electron/rendererClientLabels.test.js. README stays a real
+// cross-check because it is hand-authored.
+test('tracked client defaults and README share one display order', () => {
   const known = KNOWN_CLIENTS.split(',');
-  assert.deepEqual(rendererClientIds(), known);
   assert.deepEqual(readmeTrackedClientIds(), known);
   assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => !['micode', 'qodercn'].includes(client)));
 });

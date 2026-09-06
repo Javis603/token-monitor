@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { normalizeLimitProvider } = require('../../src/shared/limits');
+const { normalizeLimitProvider } = require('../../src/shared/limits/core');
 
 test('normalizeLimitProvider accepts deepseek + api source + balance block', () => {
   const p = normalizeLimitProvider({

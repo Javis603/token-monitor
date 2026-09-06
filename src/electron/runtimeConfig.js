@@ -6,7 +6,7 @@ const {
   normalizeLimitsRefreshMode,
   normalizeLimitsRefreshMs,
   parseLimitProviders
-} = require('../shared/limitCollector');
+} = require('../shared/limits/collector');
 const { normalizeSyncUploadIntervalMs } = require('../shared/syncUploadInterval');
 
 const DEFAULT_ALL_TIME_SINCE = '2024-01-01';
@@ -80,6 +80,7 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
     'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
     'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'
   ],
+  alibaba: ['alibabaCookie', 'alibabaVariant'],
   qoder: ['qoderCookie', 'qoderSite'],
   trae: ['traeAccessToken', 'traeDeviceId'],
   zed: ['zedCookie'],
@@ -185,6 +186,8 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     volcengineAgentAccessKeyId: settings.volcengineAgentAccessKeyId || '',
     volcengineAgentSecretAccessKey: settings.volcengineAgentSecretAccessKey || '',
     volcengineAgentRegion: settings.volcengineAgentRegion || '',
+    alibabaCookie: settings.alibabaCookie || '',
+    alibabaVariant: settings.alibabaVariant || '',
     qoderCookie: settings.qoderCookie || '',
     qoderSite: settings.qoderSite || 'global',
     traeAccessToken: settings.traeAccessToken

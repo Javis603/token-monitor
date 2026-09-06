@@ -474,6 +474,9 @@
                   <button id="showAllClientsButton" class="tool-header-action" type="button" title="Show all" aria-label="Show all" data-i18n-title="settings.tools.showAll" data-i18n-aria-label="settings.tools.showAll"><span class="tool-header-eye" aria-hidden="true"></span></button>
                 </div>
               </div>
+              <div class="settings-list-search">
+                <input id="clientDisplaySearchInput" class="settings-list-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search tools" data-i18n-placeholder="settings.tools.search" aria-label="Search tools" data-i18n-aria-label="settings.tools.search" aria-controls="clientDisplayList" />
+              </div>
               <div id="clientDisplayList" class="tool-preference-list"></div>
             </div>
             <div class="settings-subgroup settings-collection-cadence">
@@ -602,6 +605,9 @@
           </button>
           <div id="limitsSettingsDetails" class="settings-section-details hidden">
             <p class="settings-note" data-i18n="settings.limits.reorderNote">Drag a provider to reorder the list.</p>
+            <div class="settings-list-search">
+              <input id="limitProviderSearchInput" class="settings-list-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search providers" data-i18n-placeholder="settings.limits.search" aria-label="Search providers" data-i18n-aria-label="settings.limits.search" aria-controls="limitProviderCheckboxes" />
+            </div>
             <div id="limitProviderCheckboxes" class="client-checkboxes limit-provider-list"></div>
             <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.refresh">Refresh</span></span>
               <select id="limitsRefreshInput">
@@ -1191,6 +1197,45 @@
                 <div id="commandcodeErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="alibabaAccountGroup" class="settings-group cursor-account-group">
+              <button id="alibabaSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="alibabaSettingsDetails">
+                <span data-i18n="settings.alibaba.title">Alibaba Cloud Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="alibabaAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="alibabaSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="alibabaOpenBrowser" data-i18n="settings.alibaba.openBrowser">Open Token Plan page</button>
+                  <button id="alibabaLogoutButton" class="hidden" data-i18n="settings.alibaba.clearCookie">Clear cookie</button>
+                  <button id="alibabaRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="alibabaManualPanel">
+                  <div class="settings-row">
+                    <label for="alibabaVariantInput" data-i18n="settings.alibaba.variant">Console</label>
+                    <select id="alibabaVariantInput">
+                      <option value="cn" data-i18n="settings.alibaba.variantCn">China mainland - Team</option>
+                      <option value="intl" data-i18n="settings.alibaba.variantIntl">International - Team</option>
+                      <option value="cn-personal" data-i18n="settings.alibaba.variantCnPersonal">China mainland - Personal/Solo</option>
+                      <option value="intl-personal" data-i18n="settings.alibaba.variantIntlPersonal">International - Personal/Solo</option>
+                    </select>
+                  </div>
+                  <p class="settings-note">
+                    <strong>1.</strong> <span data-i18n="settings.alibaba.step1">Open the Token Plan page in your browser (button above) and sign in.</span><br>
+                    <strong>2.</strong> <span data-i18n="settings.alibaba.step2Before">Open DevTools (F12 or Cmd+Opt+I) -&gt; Network, reload the page, then select the</span> <code id="alibabaRequestHint">GetSubscriptionSummary</code> <span data-i18n="settings.alibaba.step2After">request.</span><br>
+                    <strong>3.</strong> <span data-i18n="settings.alibaba.step3">In Headers -&gt; Request Headers, copy the full Cookie value.</span><br>
+                    <strong>4.</strong> <span data-i18n="settings.alibaba.step4">Paste it below and click Save cookie.</span>
+                  </p>
+                  <p id="alibabaPersonalNote" class="settings-note hidden" data-i18n="settings.alibaba.personalNote">Personal/Solo reads its quota from a different host than the dashboard, so the cookie has to come from that usage request rather than from the page itself.</p>
+                  <textarea id="alibabaCookieInput" rows="3" spellcheck="false" placeholder="login_aliyunid_pk=...; login_aliyunid_ticket=..." data-i18n-placeholder="settings.alibaba.cookiePlaceholder"></textarea>
+                  <div class="settings-actions">
+                    <button id="alibabaCookieSubmit" data-i18n="settings.alibaba.saveCookie">Save cookie</button>
+                  </div>
+                </div>
+                <div id="alibabaErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
             <div id="ollamaAccountGroup" class="settings-group cursor-account-group">
               <button id="ollamaSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="ollamaSettingsDetails">
                 <span data-i18n="settings.ollama.title">Ollama Account</span>
@@ -1706,6 +1751,8 @@
     <button id="floatingBubbleTab" class="floating-bubble-tab" type="button" title="Show Token Monitor" aria-label="Show Token Monitor" data-i18n-title="floatingBubble.expand" data-i18n-aria-label="floatingBubble.expand">
       <span id="floatingBubbleContent" aria-hidden="true">Σ</span>
     </button>
+    <script src="../../shared/clientCatalog.js"></script>
+    <script src="../../shared/limitProviders.js"></script>
     <script src="../../shared/limitBalanceDisplay.js"></script>
     <script src="trayBars.js"></script>
     <script src="usageCharts.js"></script>
@@ -1725,6 +1772,7 @@
     <script src="serviceStatusPresentation.js"></script>
     <script src="serviceStatusProviderPreferences.js"></script>
     <script src="clientDisplayPreferences.js"></script>
+    <script src="settingsListFilter.js"></script>
     <script src="viewDisplayPreferences.js"></script>
     <script src="homeModulePreferences.js"></script>
     <script src="fixedPeriodRanges.js"></script>
@@ -1732,7 +1780,7 @@
     <script src="verticalDragSort.js"></script>
     <script src="rowDragController.js"></script>
     <script src="i18n.js"></script>
-    <script src="../../shared/reasonixSessionGuard.js"></script>
+    <script src="../../shared/providers/reasonix/sessionGuard.js"></script>
     <script src="sessionRows.js"></script>
     <script src="breakdownRenderPolicy.js"></script>
     <script src="statsRenderScheduler.js"></script>

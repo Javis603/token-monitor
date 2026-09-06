@@ -4,8 +4,8 @@ const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const { throwIfAborted } = require('./abortSignal');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
-const { REASONIX_CLIENT } = require('./reasonixPaths');
-const { buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
+const { buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 
@@ -50,7 +50,8 @@ const WSL_DATA_MARKERS = [
   '.codebuddy/projects',
   '.workbuddy',
   '.proma/agent-sessions',
-  '.lmstudio/server-logs'
+  '.lmstudio/server-logs',
+  '.unsloth/studio/studio.db'
 ];
 
 // Maps every WSL_DATA_MARKERS entry to the tracked-client id that owns it, so a
@@ -94,7 +95,8 @@ const MARKER_CLIENTS = {
   '.codebuddy/projects': 'codebuddy',
   '.workbuddy': 'workbuddy',
   '.proma/agent-sessions': 'proma',
-  '.lmstudio/server-logs': 'lmstudio'
+  '.lmstudio/server-logs': 'lmstudio',
+  '.unsloth/studio/studio.db': 'unsloth'
 };
 
 // Default command runner. reg output is ANSI/utf8; wsl.exe output is UTF-16LE.

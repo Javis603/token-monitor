@@ -14,7 +14,7 @@
 // Passing a null/absent localDevice yields just the month baseline, which is exactly the
 // desired startup placeholder.
 
-const { filterReasonixSyntheticSessions } = require('./reasonixSessionGuard');
+const { filterReasonixSyntheticSessions } = require('./providers/reasonix/sessionGuard');
 
 function asSessions(value) {
   return value && typeof value === 'object' ? value : null;

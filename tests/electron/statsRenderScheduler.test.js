@@ -52,21 +52,6 @@ test('visible stats updates continue rendering every push', () => {
   assert.equal(renders, 2);
 });
 
-test('clearing a hidden update prevents a redundant catch-up render', () => {
-  let hidden = true;
-  let renders = 0;
-  const scheduler = createStatsRenderScheduler({
-    isHidden: () => hidden,
-    render: () => { renders += 1; }
-  });
-
-  scheduler.request();
-  scheduler.clear();
-  hidden = false;
-  scheduler.flush();
-  assert.equal(renders, 0);
-});
-
 test('page and native visibility signals report each combined edge once', () => {
   let pageHidden = false;
   let nativeVisible = true;
@@ -92,12 +77,11 @@ test('page and native visibility signals report each combined edge once', () => 
   }
 });
 
-test('visible stats update only the exposed surface', () => {
-  assert.equal(visibleStatsSurface(false, false, false), 'main');
-  assert.equal(visibleStatsSurface(false, false, true), 'settings');
-  assert.equal(visibleStatsSurface(false, true, false), 'bubble');
-  assert.equal(visibleStatsSurface(true, false, false), null);
-  assert.equal(visibleStatsSurface(true, true, false), null);
+test('visible stats update only the primary exposed surface', () => {
+  assert.equal(visibleStatsSurface(false, false), 'main');
+  assert.equal(visibleStatsSurface(false, true), 'bubble');
+  assert.equal(visibleStatsSurface(true, false), null);
+  assert.equal(visibleStatsSurface(true, true), null);
 });
 
 test('a hidden floating-bubble state update changes state without touching DOM', () => {
@@ -175,7 +159,8 @@ test('renderer wires visibility scheduling without deferring tray icon updates',
   assert.match(app, /document\.addEventListener\('visibilitychange', handleWindowVisibilityChange\)/);
   assert.match(visibilityListener, /cancelTokenRateBoost\(\)/);
   assert.match(visibilityListener, /!isRendererWindowHidden\(\)[\s\S]*hubBuildStatusRefreshDue\(\)[\s\S]*refreshHubBuildStatus\(\)/);
-  assert.match(visibilityListener, /if \(isSettingsSurfaceVisible\(\)\)[\s\S]*statsRenderScheduler\.clear\(\)[\s\S]*syncSettingsForm\(\)[\s\S]*else[\s\S]*statsRenderScheduler\.flush\(\)/);
+  assert.match(visibilityListener, /const settingsVisible = isSettingsSurfaceVisible\(\);[\s\S]*if \(settingsVisible \|\| settingsDomSyncPending\) syncSettingsForm\(\);[\s\S]*statsRenderScheduler\.flush\(\)/);
+  assert.doesNotMatch(visibilityListener, /statsRenderScheduler\.clear\(\)/);
   assert.match(app, /isHidden: isRendererWindowHidden/);
   assert.match(app, /onWindowVisibilityPush\?\.\(\(visible\) => \{/);
   assert.match(
@@ -222,15 +207,113 @@ test('a window revealed straight into Settings still reports painted content', (
     app.indexOf('function handleWindowVisibilityChange()'),
     app.indexOf("document.addEventListener('visibilitychange'")
   );
-  const settingsBranch = visibilityHandler.slice(
-    visibilityHandler.indexOf('if (isSettingsSurfaceVisible())'),
-    visibilityHandler.indexOf('} else {')
+  // Settings is an overlay, so revealing into it must flush the pending main
+  // repaint as well as syncing the visible form and reporting painted content.
+  assert.match(visibilityHandler, /if \(settingsVisible \|\| settingsDomSyncPending\) syncSettingsForm\(\);/);
+  assert.match(visibilityHandler, /statsRenderScheduler\.flush\(\);/);
+  assert.match(visibilityHandler, /if \(settingsVisible\) \{[\s\S]*signalContentReady\(\);/);
+  assert.doesNotMatch(visibilityHandler, /statsRenderScheduler\.clear\(\)/);
+});
+
+test('Settings remains open while its background view changes', () => {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const changeView = app.slice(
+    app.indexOf('function renderBreakdownChange('),
+    app.indexOf('\nfunction restartTimer(')
+  );
+  const trayView = app.slice(
+    app.indexOf('function openViewFromTray('),
+    app.indexOf('\nconst HOME_HISTORY_MAX_RETRIES')
   );
 
-  // clear() drops the catch-up render that would otherwise have signalled, and
-  // syncSettingsForm() is not a stats render, so the signal has to be explicit.
-  assert.match(settingsBranch, /statsRenderScheduler\.clear\(\)/);
-  assert.match(settingsBranch, /signalContentReady\(\);/);
+  assert.doesNotMatch(changeView, /settingsPanel|settings-open|resetSettingsListSearch|stopWindowShortcutRecording/);
+  assert.match(changeView, /setBreakdown\([\s\S]*render\(\)/);
+  assert.match(trayView, /settingsPanel\?\.classList\.add\('hidden'\)/);
+  assert.match(trayView, /els\.shell\.classList\.remove\('settings-open'\)/);
+});
+
+test('leaving Settings no longer needs a catch-up repaint', () => {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const settingsToggle = app.slice(
+    app.indexOf("els.settingsButton.addEventListener('click'"),
+    app.indexOf("els.saveSettingsButton.addEventListener('click'")
+  );
+  const trayView = app.slice(
+    app.indexOf('function openViewFromTray('),
+    app.indexOf('\nconst HOME_HISTORY_MAX_RETRIES')
+  );
+
+  // The main surface keeps rendering behind the overlay, so neither exit path
+  // may repaint merely because Settings happened to be open.
+  assert.doesNotMatch(settingsToggle, /render\(\)/);
+  assert.match(settingsToggle, /if \(settingsOpen\) \{\s+syncSettingsForm\(\);\s+\} else \{/);
+  assert.doesNotMatch(trayView, /settingsWasOpen/);
+  // Tray navigation to the view already on screen still repaints, because it
+  // clears the open session and nothing else redraws that.
+  assert.match(trayView, /if \(!renderBreakdownChange\(viewId, \{ allowHidden: true \}\)\) render\(\);/);
+});
+
+test('stats-derived Settings rows refresh behind an open panel', () => {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const renderBody = app.slice(
+    app.indexOf('function render() {'),
+    app.indexOf('\nfunction setStatus(')
+  );
+  const archiveBody = app.slice(
+    app.indexOf('function renderSessionUsageArchiveStatus()'),
+    app.indexOf('const HUB_DRAFT_FIELDS')
+  );
+  const surfaceBody = app.slice(
+    app.indexOf('function visibleStatsSurface()'),
+    app.indexOf('function isSettingsSurfaceVisible()')
+  );
+
+  // The archived session count is Settings content derived from state.stats, and
+  // the only thing that redraws it is the main render. It goes stale for as long
+  // as anything stops render() from running while the panel is open, which is how
+  // it used to need a close and reopen to catch up.
+  assert.match(archiveBody, /sessionRowsApi\.archivedSessionCount\(state\.stats\)/);
+  assert.doesNotMatch(archiveBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
+  assert.match(renderBody, /renderSessionUsageArchiveStatus\(\);/);
+  assert.doesNotMatch(renderBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
+  assert.doesNotMatch(surfaceBody, /isSettingsPanelOpen/);
+});
+
+test('a stats update repaints main and the visible Settings overlay', () => {
+  const calls = [];
+  const settingsRenderers = [
+    'renderCodexAccounts',
+    'renderSettingsSummaries',
+    'renderLimitProviderCheckboxes',
+    'renderToolPreferences',
+    'renderWslPanel',
+    'updateOpenRouterProfilesStatus',
+    'updateThirdPartyProfilesStatus',
+    'renderDeepseekStatus',
+    'renderMinimaxStatus',
+    'renderCopilotStatus'
+  ];
+  const context = {
+    visibleStatsSurface: () => 'main',
+    renderConnectionStatus: (surface) => calls.push(`connection:${surface}`),
+    render: () => calls.push('main'),
+    isSettingsSurfaceVisible: () => true,
+    renderFloatingBubbleContent: () => calls.push('bubble'),
+    signalContentReady: () => calls.push('ready')
+  };
+  for (const name of settingsRenderers) context[name] = () => calls.push(name);
+  context.renderExternalProviderStatus = (provider) => calls.push(`external:${provider}`);
+
+  const renderStatsUpdate = rendererFunction(
+    'renderStatsUpdate',
+    '\nconst statsRenderScheduler =',
+    context
+  );
+  renderStatsUpdate();
+
+  assert.deepEqual(calls.slice(0, 2), ['connection:main', 'main']);
+  assert.ok(calls.indexOf('renderSettingsSummaries') > calls.indexOf('main'));
+  assert.equal(calls.at(-1), 'ready');
 });
 
 test('the closed-Settings guard does not strand main-surface controls', () => {
@@ -313,7 +396,7 @@ test('a hidden Session detail result waits for the main surface to return', () =
   assert.deepEqual(rendered, []);
   assert.equal(request.renderOptions, options);
 
-  surface = 'settings';
+  surface = 'bubble';
   applySessionDetailResult(request, options);
   assert.equal(scheduled, 1);
   assert.deepEqual(rendered, []);
@@ -332,7 +415,7 @@ test('a hidden Session detail result waits for the main surface to return', () =
 });
 
 test('a direct main render defers only while the window is hidden', () => {
-  let surface = 'settings';
+  let surface = 'bubble';
   let scheduled = 0;
   const render = rendererFunction('render', '\nfunction setStatus(', {
     visibleStatsSurface: () => surface,
@@ -340,8 +423,6 @@ test('a direct main render defers only while the window is hidden', () => {
     state: { stats: null }
   });
 
-  render();
-  surface = 'bubble';
   render();
   assert.equal(scheduled, 0);
 
@@ -368,8 +449,8 @@ test('hidden event sources defer DOM work and visible surfaces catch up', () => 
   assert.doesNotMatch(statsPush, /\b(?:setLiveDot|setStatus|renderSyncClientStatus)\(/);
   assert.match(statsPush, /if \(isRendererWindowHidden\(\)\) statsRenderScheduler\.request\(\);[\s\S]*else renderConnectionStatus\(\);/);
   assert.match(statsRender, /renderConnectionStatus\(surface\)/);
-  assert.match(bubbleState, /isSettingsPanelOpen\(\)[\s\S]*syncSettingsForm\(\)[\s\S]*renderStatsUpdate\(\)/);
-  assert.match(bubbleState, /syncSettingsForm\(\);[\s\S]*renderConnectionStatus\('settings'\)/);
+  assert.match(bubbleState, /if \(isSettingsPanelOpen\(\)\) syncSettingsForm\(\);[\s\S]*renderStatsUpdate\(\)/);
+  assert.doesNotMatch(bubbleState, /renderConnectionStatus\('settings'\)/);
   assert.ok(hiddenGuard < settingsSync.indexOf('applyInitialBreakdownPreference()'));
   assert.ok(settingsSync.indexOf('applyInitialBreakdownPreference()') < hiddenReturn);
   assert.ok(hiddenGuard < settingsSync.indexOf('applyVendorColorOverrides('));
@@ -379,7 +460,7 @@ test('hidden event sources defer DOM work and visible surfaces catch up', () => 
   }
   assert.match(settingsSync, /if \(isRendererWindowHidden\(\)\) \{[\s\S]*settingsDomSyncPending = true;[\s\S]*return;/);
   assert.match(visibilityHandler, /else applyFloatingBubbleState\(state\.floatingBubble, \{ renderContent: false \}\);/);
-  assert.match(visibilityHandler, /else \{[\s\S]*if \(settingsDomSyncPending\) syncSettingsForm\(\);[\s\S]*statsRenderScheduler\.flush\(\);/);
+  assert.match(visibilityHandler, /if \(settingsVisible \|\| settingsDomSyncPending\) syncSettingsForm\(\);[\s\S]*statsRenderScheduler\.flush\(\);/);
 });
 
 test('all stats refreshes use visibility-aware rendering', () => {

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const test = require('node:test');
 
-const { deepseekToken, parseLimitProviders, selectFundedRow, fetchDeepSeekLimits } = require('../../src/shared/limitCollector');
+const { deepseekToken, parseLimitProviders, selectFundedRow, fetchDeepSeekLimits } = require('../../src/shared/limits/collector');
 
 function memStoreDeps(initial = {}) {
   const box = { value: JSON.parse(JSON.stringify(initial)) };

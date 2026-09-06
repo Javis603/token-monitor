@@ -4,22 +4,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
+const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 const { buildMacWidgetSnapshot } = require('../../src/shared/macWidgetSnapshot');
 
 const rootDir = path.join(__dirname, '..', '..');
 const read = (...parts) => fs.readFileSync(path.join(rootDir, ...parts), 'utf8');
-
-function rendererProviderLabels() {
-  const app = read('src', 'electron', 'renderer', 'app.js');
-  const block = app.slice(app.indexOf('const LIMIT_PROVIDERS = ['));
-  const entries = block.slice(0, block.indexOf('];'));
-  const labels = new Map();
-  for (const match of entries.matchAll(/\bid: '([^']+)',\s*label: '([^']+)'/g)) {
-    labels.set(match[1], match[2]);
-  }
-  return labels;
-}
 
 function widgetFallbackLabels() {
   const swift = read('native', 'macos', 'TokenMonitorWidget', 'WidgetViewModel.swift');
@@ -59,20 +48,13 @@ function quotaRowFor(provider) {
 // so a guard that only compares the Swift map passes while the shipped snapshot
 // still carries stale names.
 test('the snapshot names every limits provider exactly as the app does', () => {
-  const renderer = rendererProviderLabels();
-  assert.deepEqual(
-    [...renderer.keys()].sort(),
-    [...LIMIT_PROVIDER_IDS].sort(),
-    'renderer LIMIT_PROVIDERS should cover LIMIT_PROVIDER_IDS'
-  );
-
   for (const id of LIMIT_PROVIDER_IDS) {
     const row = quotaRowFor(id);
     assert.equal(row?.provider, id, `"${id}" should reach the snapshot`);
     assert.equal(
       row.displayName,
-      renderer.get(id),
-      `snapshot displayName for "${id}" should match the renderer label`
+      LIMIT_PROVIDER_LABELS[id],
+      `snapshot displayName for "${id}" should match the shared label`
     );
   }
 });
@@ -80,13 +62,12 @@ test('the snapshot names every limits provider exactly as the app does', () => {
 // The Swift map only runs for rows without a displayName, but it is what those
 // rows fall back to, so it must not disagree with the source above it.
 test('the Widget fallback map agrees with the snapshot labels', () => {
-  const renderer = rendererProviderLabels();
   const fallback = widgetFallbackLabels();
 
   const missing = LIMIT_PROVIDER_IDS.filter((id) => !fallback.has(id));
   assert.deepEqual(missing, [], 'every provider id needs an explicit case');
 
   for (const id of LIMIT_PROVIDER_IDS) {
-    assert.equal(fallback.get(id), renderer.get(id), `WidgetFormat.provider("${id}")`);
+    assert.equal(fallback.get(id), LIMIT_PROVIDER_LABELS[id], `WidgetFormat.provider("${id}")`);
   }
 });

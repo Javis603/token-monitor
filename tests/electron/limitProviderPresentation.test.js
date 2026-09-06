@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
+const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 
 const {
   antigravityQuotaWindow,
@@ -905,7 +906,7 @@ test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with
   );
   assert.doesNotMatch(renderProviderWindows, /settings\.subscriptions\.renewsOn|renewalDetail/);
   assert.doesNotMatch(renderProviderWindows, /zed\.billing-cycle|zed\.overdue-invoices/);
-  assert.match(css, /\.limit-icon-zed\s*\{[^}]*assets\/icons\/zed\.svg[^}]*\}/s);
+  assert.match(css, /^\.row-icon-zed\s*\{[^}]*assets\/icons\/zed\.svg[^}]*\}/m);
 });
 
 test('Zed details follow showLimitUsed: counts for Edit Predictions, money for Token Spend', () => {
@@ -1605,7 +1606,7 @@ test('Grok is automatic provider UI, while env token remains documented for head
   const i18n = readRendererFile('i18n.js');
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
-  const grokLimits = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'grokLimits.js'), 'utf8');
+  const grokLimits = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'providers', 'grok', 'limits.js'), 'utf8');
   const rendererSettings = main.slice(
     main.indexOf('function settingsForRenderer'),
     main.indexOf('function pushSettingsToRenderer')
@@ -2150,7 +2151,7 @@ test('provider option rerenders reuse the existing switch DOM', () => {
   assert.doesNotMatch(renderList, /renderLimits\(\);/);
 });
 
-test('settings pushes do not trigger a second full settings sync after save', () => {
+test('settings pushes sync once while repainting the background main view', () => {
   const app = readRendererFile('app.js');
   const save = functionBody(app, 'saveSettings', 'renderHomeIfVisible');
   const syncSettings = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
@@ -2161,7 +2162,8 @@ test('settings pushes do not trigger a second full settings sync after save', ()
   assert.match(settingsPush, /state\.settingsPushRevision \+= 1;/);
   assert.match(syncSettings, /if \(!isSettingsSurfaceVisible\(\)\) return;/);
   assert.doesNotMatch(syncSettings, /\b(?:render|renderLimits|applyFloatingBubbleState)\(/);
-  assert.match(settingsPush, /if \(!isSettingsSurfaceVisible\(\)\) statsRenderScheduler\.request\(\);/);
+  assert.match(settingsPush, /if \(isSettingsSurfaceVisible\(\)\) render\(\); else statsRenderScheduler\.request\(\);/);
+  assert.equal([...settingsPush.matchAll(/syncSettingsForm/g)].length, 1);
 });
 
 test('main limits rerenders coalesce identical visible provider data', () => {
@@ -2226,7 +2228,9 @@ test('disabled providers use checkbox state instead of a redundant status tag', 
   const css = readRendererFile('styles.css');
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'limitProviderAccountGroup');
 
-  assert.match(renderSettings, /row\.className = `limit-provider-row\$\{isEnabled \? '' : ' is-disabled'\}`/);
+  // The filter appends its own class after this one, so match the disabled part
+  // rather than pinning the whole template literal.
+  assert.match(renderSettings, /row\.className = `limit-provider-row\$\{isEnabled \? '' : ' is-disabled'\}/);
   assert.match(renderSettings, /if \(\(detected \|\| !isEnabled\) && tagInfo\.kind === 'status'\) continue/);
   assert.match(css, /\.limit-provider-row\.is-disabled \.limit-provider-main\s*\{[^}]*color: var\(--muted\)/);
   assert.match(css, /\.limit-provider-row\.is-disabled \.limit-provider-tag\s*\{[^}]*color: var\(--muted\)/);
@@ -2520,7 +2524,7 @@ test('Kimi credential statuses are localized in settings', () => {
 
 test('Kimi usage and limits share the canonical provider id and vendor color', () => {
   const app = readRendererFile('app.js');
-  assert.match(app, /\{ id: 'kimi', label: 'Kimi' \}/);
+  assert.equal(LIMIT_PROVIDER_LABELS.kimi, 'Kimi');
   assert.match(app, /const color = id === 'mimo' \? clientColors\.xiaomi : \(clientColors\[id\] \|\| clientColors\.default\)/);
 });
 
@@ -3196,10 +3200,8 @@ test('the record kind swaps whole field groups, and the user has the last word',
   assert.match(apply, /setSubscriptionFormKind\(isCreditsProvider\(subscriptionSelectedAccount\(\)\) \? 'topup' : 'subscription'\)/);
   assert.match(mode, /els\.subscriptionPlanFields\?\.classList\.toggle\('hidden', topUp\)/);
   assert.match(mode, /els\.subscriptionTopUpFields\?\.classList\.toggle\('hidden', !topUp\)/);
-  // This stylesheet has no blanket `.hidden` rule, so toggling the class only
-  // hides anything because these wrappers declare one.
-  const styles = readRendererFile('styles.css');
-  assert.match(cssBlock(styles, '.subscription-kind-fields.hidden'), /display: none;/);
+  // Hiding is the stylesheet's one blanket rule; what matters here is which of
+  // the two groups the markup starts on.
   assert.match(html, /id="subscriptionPlanFields" class="subscription-kind-fields"/);
   assert.match(html, /id="subscriptionTopUpFields" class="subscription-kind-fields hidden"/);
 
@@ -3644,20 +3646,10 @@ test('removing a ledger entry has to be confirmed, like the rows above it', () =
 test('every provider a subscription can name has a mark to identify it by', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  const providerBlock = app.slice(app.indexOf('const LIMIT_PROVIDERS = ['));
-  const ids = [...providerBlock.slice(0, providerBlock.indexOf('];')).matchAll(/\bid: '([^']+)'/g)]
-    .map((match) => match[1]);
-  assert.ok(ids.length >= 19, 'LIMIT_PROVIDERS should be parsed, not empty');
 
-  // .row-icon paints currentColor through a mask, so an id with no mask rule
-  // behind it renders as a solid square — worse than no icon at all.
-  for (const id of ids) {
-    assert.ok(
-      new RegExp(`\\.row-icon-${id}\\b[^{]*\\{`).test(styles),
-      `.row-icon-${id} mask rule should exist for LIMIT_PROVIDERS id ${id}`
-    );
-  }
-
+  // That every catalog provider has a mask rule to paint is asserted from the
+  // catalog in limitProviderPresentationCoverage.test.js. What is subscription
+  // wiring, and lives here, is that a subscription row asks for one.
   const iconClass = functionBody(app, 'subscriptionProviderIconClass', 'isCreditsProvider');
   const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
   // Unknown ids are the case the mask list cannot cover: a record stays bound to

@@ -1,14 +1,14 @@
 'use strict';
 
 const PERIODS = ['today', 'month', 'allTime'];
-const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
+const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
   coerceHistory, dayKeyAddDays, hasDisjointReasoning, localDayKey, mergeHistories,
   normalizeTokscaleClientName
 } = require('./history');
-const { REASONIX_CLIENT } = require('./reasonixPaths');
-const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./reasonixSessionGuard');
+const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
+const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
 const { normalizeSyncUploadIntervalMs, staleAfterMsForSyncUpload } = require('./syncUploadInterval');
 const TOKEN_KEYS = ['totalTokens', 'total_tokens', 'totalTokenCount', 'total_token_count', 'tokens', 'tokenCount', 'token_count'];
@@ -194,6 +194,7 @@ function normalizeClientName(value) {
   if (raw.includes('reasonix')) return 'reasonix';
   if (/cherry[\s_-]*studio/.test(raw)) return 'cherrystudio';
   if (/lm[\s_-]*studio/.test(raw)) return 'lmstudio';
+  if (/^unsloth(?:[\s_-]+(?:studio|api))?$/.test(raw)) return 'unsloth';
   if (raw.includes('dsh')) return 'dsh';
   if (raw.includes('opencode')) return 'opencode';
   if (raw.includes('openclaw') || raw.includes('clawd') || raw.includes('moltbot') || raw.includes('moldbot')) return 'openclaw';

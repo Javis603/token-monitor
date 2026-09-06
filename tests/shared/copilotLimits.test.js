@@ -14,8 +14,8 @@ const {
   parseQuotaResetDate,
   mapCopilotUsageToProvider,
   fetchCopilotLimits
-} = require('../../src/shared/copilotLimits');
-const { parseLimitProviders } = require('../../src/shared/limitCollector');
+} = require('../../src/shared/providers/copilot/limits');
+const { parseLimitProviders } = require('../../src/shared/limits/collector');
 
 test('parseLimitProviders includes Copilot in the default provider set', () => {
   assert.ok(parseLimitProviders().includes('copilot'));

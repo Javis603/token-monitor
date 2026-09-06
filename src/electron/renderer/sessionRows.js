@@ -6,7 +6,7 @@
   if (root) root.TokenMonitorSessionRows = api;
 })(typeof window !== 'undefined' ? window : null, function createSessionRowsApi(root) {
   const reasonixSessionGuard = typeof module === 'object' && module.exports
-    ? require('../../shared/reasonixSessionGuard')
+    ? require('../../shared/providers/reasonix/sessionGuard')
     : root?.TokenMonitorReasonixSessionGuard;
   const isReasonixSyntheticSession = reasonixSessionGuard?.isReasonixSyntheticSession || (() => false);
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];

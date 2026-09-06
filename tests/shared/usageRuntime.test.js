@@ -10,7 +10,7 @@ const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-usage-runtime-'));
 process.env.TOKEN_MONITOR_SHARED_DIR = sharedDir;
 process.on('exit', () => { try { fs.rmSync(sharedDir, { recursive: true, force: true }); } catch (_) {} });
 
-const cursorAuth = require('../../src/shared/cursorAuth');
+const cursorAuth = require('../../src/shared/providers/cursor/auth');
 const { collectUsageOnce, startCollector } = require('../../src/shared/collector');
 const { createUsageRuntime } = require('../../src/shared/usageRuntime');
 const { installInProcessWatchHost } = require('../helpers/watchHost');

@@ -70,11 +70,13 @@ const supportedToolOrder = [
   'DeepSeek / DeepSeek Harness',
   'Cherry Studio',
   'LM Studio',
+  'Unsloth Studio',
   'OpenRouter',
   'Minimax',
   'Volcengine',
   'Ollama',
   'Trae CN',
+  'Alibaba Cloud',
   'Third-party APIs'
 ];
 
@@ -106,11 +108,13 @@ const supportedToolIdOrder = [
   'deepseek',
   'cherrystudio',
   'lmstudio',
+  'unsloth',
   'openrouter',
   'minimax',
   'volcengine',
   'ollama',
   'trae',
+  'alibaba',
   'thirdparty'
 ];
 
@@ -198,6 +202,15 @@ const README_ICON_TO_LIMIT_PROVIDERS = {
   'mimo-code': ['mimo'],
   zcode: ['zai', 'zaiteam']
 };
+
+test('localized READMEs disclose the Unsloth database and inference scope', () => {
+  for (const file of localizedReadmes) {
+    const text = read(file);
+    assert.match(text, /Unsloth Studio \| `~\/\.unsloth\/studio\/studio\.db` \| ✅ \| — \| — \|/, file);
+    assert.ok(text.includes('`$UNSLOTH_STUDIO_HOME`'), file);
+    assert.ok(text.includes('(docs/providers/unsloth.md)'), file);
+  }
+});
 
 test('limit provider order follows the supported-tools table', () => {
   const text = read('README.md');

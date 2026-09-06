@@ -50,6 +50,9 @@ test('fallbackModelColors never collides with a named provider color', () => {
 test('modelVendorFor maps families and modelColor falls back deterministically', () => {
   assert.equal(modelVendorFor('claude-sonnet-4'), 'claude');
   assert.equal(modelVendorFor('gpt-5'), 'codex');
+  assert.equal(modelVendorFor('muse-spark-1.2-contributor-free'), 'meta');
+  assert.equal(modelVendorFor('muse-spark-1.3-contributor-free'), 'meta');
+  assert.equal(modelVendorFor('opencode/muse-spark-1.3-contributor-free'), 'meta');
   assert.equal(modelVendorFor('kimi-k2'), 'kimi');
   assert.equal(modelVendorFor('moonshot-v1'), 'kimi');
   assert.equal(modelVendorFor('k2d6-agent'), 'kimi');

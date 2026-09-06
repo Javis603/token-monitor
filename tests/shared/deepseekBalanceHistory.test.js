@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { recordConsumption } = require('../../src/shared/deepseekBalanceHistory');
+const { recordConsumption } = require('../../src/shared/providers/deepseek/balanceHistory');
 
 function memoryStore(initial = {}) {
   const box = { value: JSON.parse(JSON.stringify(initial)), writes: 0 };

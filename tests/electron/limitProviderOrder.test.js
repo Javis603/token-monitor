@@ -1,8 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -12,10 +10,7 @@ const {
   orderedLimitProviders,
   reorderLimitProvider
 } = require('../../src/electron/renderer/limitProviderOrder');
-const { parseLimitProviders } = require('../../src/shared/limitCollector');
-
-const rootDir = path.join(__dirname, '..', '..');
-const read = (file) => fs.readFileSync(path.join(rootDir, file), 'utf8');
+const { LIMIT_PROVIDER_CATALOG } = require('../../src/shared/limitProviders');
 
 const providers = [
   { id: 'claude', label: 'Claude' },
@@ -24,13 +19,14 @@ const providers = [
   { id: 'antigravity', label: 'Antigravity' }
 ];
 
+// The expected list stays spelled out rather than derived: this order is the
+// default a fresh install writes to settings.limitProviderOrder, so changing it
+// is a compatibility decision that should have to be made in a diff. Since the
+// catalog became the single source for both the ids and the renderer's list,
+// this hand-written copy is the only independent check left on that order —
+// comparing the catalog against anything derived from it proves nothing.
 test('default provider order follows tracked tools, named services, then third-party fallback', () => {
-  const app = read('src/electron/renderer/app.js');
-  const block = app.slice(
-    app.indexOf('const LIMIT_PROVIDERS = ['),
-    app.indexOf('const TRAY_ICON_VARIANTS')
-  );
-  const ids = [...block.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1]);
+  const ids = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
 
   assert.deepEqual(ids, [
     'claude',
@@ -55,19 +51,9 @@ test('default provider order follows tracked tools, named services, then third-p
     'volcengine',
     'ollama',
     'trae',
+    'alibaba',
     'thirdparty'
   ]);
-});
-
-test('renderer provider order matches the collector default for new settings', () => {
-  const app = read('src/electron/renderer/app.js');
-  const block = app.slice(
-    app.indexOf('const LIMIT_PROVIDERS = ['),
-    app.indexOf('const TRAY_ICON_VARIANTS')
-  );
-  const ids = [...block.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1]);
-
-  assert.deepEqual(ids, parseLimitProviders());
 });
 
 test('normalizeLimitProviderOrder drops invalid entries and appends missing providers', () => {

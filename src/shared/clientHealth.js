@@ -25,8 +25,8 @@
 // Node-builtin-free: this module is vendored into worker/src/shared/ by
 // `npm run sync:worker`.
 
-const { REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
-const { DSH_SOURCE_CHECK_ID } = require('./dshPaths');
+const { REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
+const { DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 
 const CLIENT_HEALTH_VERSION = 1;
 
@@ -210,6 +210,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'qwen-projects',
   'tokscale-antigravity-cache',
   'tokscale-cursor-cache',
+  'unsloth-db',
   'vscode-workspace-storage',
   'workbuddy-projects',
   'zcode-cli-db',

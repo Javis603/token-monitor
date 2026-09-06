@@ -16,7 +16,7 @@ const {
   isAllowedWorkbuddyApiUrl,
   normalizeStoredSession,
   sanitizeRequestInit
-} = require('../../src/electron/workbuddyLocalAuth');
+} = require('../../src/electron/providers/workbuddy/localAuth');
 
 function sessionDocument(overrides = {}) {
   const account = {

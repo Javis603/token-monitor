@@ -1,0 +1,73 @@
+---
+summary: "Alibaba Token Plan provider notes: the four console variants, cookie scope, sec_token resolution, and which variants are verified."
+read_when:
+  - Adding or modifying the Alibaba Token Plan provider
+  - Debugging an Alibaba cookie that saves but reports unauthorized or unavailable
+  - Explaining Alibaba Token Plan setup or its verification status to users
+---
+
+# Alibaba Token Plan
+
+Reads Token Plan quota from the Alibaba Cloud console. One provider id (`alibaba`), four console variants selected by `alibabaVariant`.
+
+| Variant | Console | Plan | Quota endpoint | Windows |
+|---|---|---|---|---|
+| `cn` | `bailian.console.aliyun.com` | Team | `GetSubscriptionSummary` | account-level `billing` total |
+| `intl` | `modelstudio.console.alibabacloud.com` | Team | `GetSubscriptionSummary` | account-level `billing` total |
+| `cn-personal` | `bailian.console.aliyun.com` | Personal/Solo | `bailian-cs.console.aliyun.com` rolling-window API | `weekly`, plus `session` (5h) when reported |
+| `intl-personal` | `modelstudio.console.alibabacloud.com` | Personal/Solo | `bailian-singapore-cs.alibabacloud.com` rolling-window API | `weekly`, plus `session` (5h) when reported |
+
+The variant is one enum rather than separate site and plan settings because host, product code, gateway action and window shape all move together — two settings would let a user pick a combination that does not exist.
+
+## Verification status
+
+Only `cn` has been exercised against a real account, from the capture reported on #567 and pinned in `tests/shared/alibabaLimits.test.js`. The other three are implemented from the same published console contract and covered by fixtures, but no one has confirmed them live. Treat a user report about them as authoritative over the fixtures.
+
+## Auth
+
+A console `Cookie` request header, pasted in the GUI or set through `ALIBABA_TOKEN_PLAN_COOKIE`. There is no API-token path.
+
+The cookie is scoped to the console it was copied from, so switching variants clears the stored cookie rather than leaving one that can only answer `unauthorized`.
+
+**Personal/Solo reads its quota from a different host than its dashboard.** Its cookie has to come from the `/tokenplan/personal/api/v2/usage` request, not from the dashboard page — the settings panel names the right request per variant. Team copies from the `GetSubscriptionSummary` request instead.
+
+`sec_token` is resolved before the quota call, best effort, in this order: the console shell's HTML, `/tool/user/info.json`, then a `sec_token` cookie. Some accounts are rejected without it; plenty answer fine without one, so a missing token is never an error. The HTML hop sends navigation headers because the shell only server-renders the token for what looks like a real document navigation — Chromium strips the `Sec-Fetch-*` family from a `fetch()`, so under the widget transport that hop usually falls through to the JSON endpoint.
+
+## Error mapping
+
+The gateway answers HTTP 200 for authentication failures, permission failures and errors alike, carrying the real outcome in the body — sometimes in a JSON string nested inside the JSON, sometimes in an inner frame wrapped by a successful outer envelope. `parseConsoleBody` funnels every response through expansion, envelope inspection and login-HTML detection before any figure is read.
+
+Two distinctions are load-bearing and should not be collapsed:
+
+- A stale session (`Login.NotLogined`, a login HTML shell, HTTP 401/403) is `unauthorized`, so the UI tells the user to paste a fresh cookie. Everything else that fails is `unavailable`.
+- `Workspace.NotAuthorised` is **not** a credential failure. Reporting it as one asks the user to replace a cookie that is already valid, and the replacement fails identically.
+
+An empty subscription (`TotalCount: 0`) is a healthy, authorized account with nothing to draw: the row stays visible with no window.
+
+## Scope and the provider id
+
+This provider reads Token Plan. Alibaba's other console product, Coding Plan, is a separate product with its own quota endpoint and credential, and is deliberately not read here — the note exists so it is not added on the assumption that it was simply forgotten.
+
+If it is ever added it belongs as extra windows under this same provider and cookie, since both plans live behind one Alibaba Cloud login, the way Volcengine carries its Coding and Agent plans together. That is why `alibaba` is a platform-level id rather than a plan-level one.
+
+A plan-specific API key is an inference credential: it calls models, it does not read quota. That is why this provider is cookie-only.
+
+## What the Team figure is
+
+Team quota is allocated **per seat**, not as one shared pool. This provider shows `TotalValue` / `TotalSurplusValue` from `GetSubscriptionSummary`, which is the account-level summary Alibaba's own My Subscriptions page headlines as its "overall quota usage percentage" — the same endpoint behind that page. The endpoint also returns `TotalCount`, which is read only to tell an empty subscription apart from a populated one; how it and the value fields behave on a multi-seat account has not been verified against a real one.
+
+**This figure does not tell you whether a given seat can still call.** Alibaba's Team FAQ is explicit: "When the seat quota is exhausted, API calls are blocked and no pay-as-you-go charges apply." A seat that runs out continues only if the team has eligible shared usage pack quota left, and an admin can cap how much of that pack an individual member may draw. So on a multi-seat team, read this as overall base-plan usage across the account, never as one member's remaining callable quota.
+
+## Personal windows
+
+Alibaba defines a 5-hour and a 7-day window, but states that "the 5-hour limit is currently lifted for a limited time and is not enforced". The parser reflects whatever the gateway reports rather than assuming both exist — a response carrying only the weekly window produces only a weekly row, and no placeholder 5-hour row is synthesized.
+
+## Known gaps
+
+- **Base plan quota only.** Alibaba sells add-on quota on top of the base plan — an Extra Bundle for Personal and shared usage packs for Team — and both sit outside the base windows this provider reads. Neither is read here, so an account holding add-on credit can show a base window at 100% used while the service still answers. Treat a "used everything but it still works" report as this gap, not as a parsing bug.
+- **Multi-seat Team distribution is not shown.** Only the account-level total is read; per-seat allocation and per-member consumption live on other console pages and are not fetched. Unverified against a real multi-seat account.
+- **One credential per device.** `alibabaVariant` and `alibabaCookie` are single-valued, so a machine tracks either Team or Personal, not both — even though Alibaba lets one account hold both subscriptions with independent quotas. Two devices can cover both, and aggregation keeps them as separate rows as long as each carries an account id.
+- **A Personal row with no account id can be superseded.** The account id is read opportunistically from the Personal payloads; if the console supplies none, the row is unidentified, and the shared aggregation rule drops unidentified observations when another device reports an identified row for the same provider.
+- **An env cookie can be paired with a GUI-selected variant.** `ALIBABA_TOKEN_PLAN_COOKIE` is not cleared by changing the console in Settings, so the two can disagree. The result is a clean `unauthorized` from the newly selected console rather than wrong figures, so this is left as a documented sharp edge rather than a disabled control; set `ALIBABA_TOKEN_PLAN_VARIANT` alongside the cookie for headless installs.
+- Personal/Solo reports percentages. Absolute totals appear only when the quota-config endpoint recognises the plan code.
+- The Team figure is a token-value quota, not money, so its windows carry no `credits` metric and no currency.

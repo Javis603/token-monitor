@@ -9,6 +9,7 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..', '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 const { VENDOR_LABELS, VENDOR_ORDER } = require('../../src/electron/renderer/themePresets');
+const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 
 test('third-party settings separate presets, scope, and safe custom mappings', () => {
   const html = read('src/electron/renderer/index.html');
@@ -55,7 +56,7 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
   assert.match(app, /const refreshTokenKey = 'settings\.thirdparty\.refreshToken'/);
   assert.match(app, /settings\.thirdparty\.sub2ApiAccessTokenPlaceholder/);
   assert.match(app, /settings\.thirdparty\.sub2ApiRefreshTokenPlaceholder/);
-  assert.match(styles, /#thirdpartyRefreshTokenRow\.hidden,/);
+  assert.match(html, /id="thirdpartyRefreshTokenRow" class="thirdparty-field hidden"/);
   assert.match(app, /const refreshToken = String\(refreshTokenInput\?\.value \|\| ''\)\.trim\(\)/);
   assert.match(app, /thirdPartyProfileErrorText\(result, adapter\)/);
   assert.match(app, /thirdpartyCustomConfig[\s\S]*?classList\.toggle\('hidden', !customMode\)/);
@@ -121,7 +122,7 @@ test('third-party Limits presentation uses compact scope labels and a details to
   const styles = read('src/electron/renderer/styles.css');
   const colors = read('src/electron/renderer/usageCharts.js');
 
-  assert.match(app, /\{ id: 'thirdparty', label: 'Third-party APIs' \}/);
+  assert.equal(LIMIT_PROVIDER_LABELS.thirdparty, 'Third-party APIs');
   assert.match(app, /provider\.provider === 'thirdparty'/);
   assert.match(app, /function thirdPartyQuotaWindow/);
   assert.match(app, /quotaWindow\?\.label \|\| 'Balance'/);
@@ -159,9 +160,9 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(app, /function renderThirdPartyAccountGroup/);
   assert.match(app, /renderNamedApiAccountGroup\('thirdparty'/);
   assert.match(presentation, /thirdparty: \['Relay', 'API'\]/);
-  assert.match(styles, /\.limit-icon-sub2api/);
+  assert.match(styles, /^\.row-icon-sub2api/m);
   assert.match(styles, /assets\/icons\/sub2api\.svg/);
-  assert.match(styles, /\.limit-icon-thirdparty[\s\S]*?assets\/icons\/thirdparty\.svg/);
+  assert.match(styles, /^\.row-icon-thirdparty[\s\S]*?assets\/icons\/thirdparty\.svg/m);
   assert.doesNotMatch(styles, /customapi\.svg/);
   assert.match(app, /custom: \{ color: '#8A96A8', markId: 'thirdparty' \}/);
   assert.doesNotMatch(app, /mark\.style\.color/);
@@ -295,11 +296,8 @@ test('third-party fallback stays last after named providers across product surfa
   assert.ok(html.indexOf('id="thirdpartyAccountGroup"') > html.indexOf('id="copilotAccountGroup"'));
 
   const app = read('src/electron/renderer/app.js');
-  const providerOrder = app.slice(
-    app.indexOf('const LIMIT_PROVIDERS = ['),
-    app.indexOf('const DEFAULT_LIMIT_PROVIDER_ORDER')
-  );
-  assert.ok(providerOrder.indexOf("{ id: 'thirdparty'") > providerOrder.indexOf("{ id: 'ollama'"));
+  const providerOrder = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
+  assert.ok(providerOrder.indexOf('thirdparty') > providerOrder.indexOf('ollama'));
   const iconProviders = app.slice(
     app.indexOf('const clientsWithIcon = new Set(['),
     app.indexOf('function osIconFor')
@@ -326,7 +324,7 @@ test('third-party fallback stays last after named providers across product surfa
   for (const file of ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md']) {
     const content = read(file);
     assert.ok(
-      content.indexOf('tools-icon/thirdparty.png') > content.indexOf('tools-icon/ollama.png'),
+      content.indexOf('tools-icon/thirdparty.gif') > content.indexOf('tools-icon/ollama.png'),
       file
     );
   }
@@ -335,7 +333,7 @@ test('third-party fallback stays last after named providers across product surfa
 test('third-party adapters share one documentation icon and preserve compatibility guidance', () => {
   for (const file of ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md']) {
     const content = read(file);
-    assert.match(content, /\.github\/assets\/tools-icon\/thirdparty\.png"/, file);
+    assert.match(content, /\.github\/assets\/tools-icon\/thirdparty\.gif"/, file);
     assert.doesNotMatch(content, /\.github\/assets\/tools-icon\/newapi\.png"/, file);
     assert.match(content, /Third-party APIs|第三方 API|サードパーティAPI|서드파티 API/, file);
     assert.match(content, /New API \/ Sub2API/, file);
@@ -347,7 +345,7 @@ test('third-party adapters share one documentation icon and preserve compatibili
   assert.match(env, /TOKEN_MONITOR_NEWAPI_ACCESS_TOKEN=/);
   assert.match(env, /TOKEN_MONITOR_NEWAPI_USER_ID=/);
   assert.match(env, /TOKEN_MONITOR_NEWAPI_API_KEY=/);
-  assert.equal(fs.existsSync(path.join(root, '.github/assets/tools-icon/thirdparty.png')), true);
+  assert.equal(fs.existsSync(path.join(root, '.github/assets/tools-icon/thirdparty.gif')), true);
   assert.equal(fs.existsSync(path.join(root, '.github/assets/tools-icon/newapi.png')), false);
   assert.equal(fs.existsSync(path.join(root, 'assets/icons/newapi.svg')), true);
 });
