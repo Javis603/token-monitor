@@ -29,7 +29,7 @@ const {
   UNATTRIBUTED_USAGE_CLIENT
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
-const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles');
+const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { createWatcherHost } = require('./watcherHost');
 const { localDayKey, mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
@@ -37,29 +37,29 @@ const {
   createSubprocessTermination,
   terminationUnconfirmedError
 } = require('./subprocessTermination');
-const cursorAuth = require('./cursorAuth');
-const { withCursorLifecycle } = require('./cursorLifecycle');
-const { claudeSessionRoots } = require('./claudePaths');
+const cursorAuth = require('./providers/cursor/auth');
+const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
+const { claudeSessionRoots } = require('./providers/claude/paths');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
-const opencodeSession = require('./opencodeSession');
-const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const opencodeSession = require('./providers/opencode/session');
+const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
 const {
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
   collectQoderCnRows,
   qoderCnDataPaths,
   resolveQoderCnPricing
-} = require('./qoderCnUsage');
-const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
-const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./dshPaths');
-const { indexDshSessionHeaders, readDshSessionHeader, resolveDshSessionsRoot } = require('./dshSessionFiles');
+} = require('./providers/qodercn/usage');
+const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
+const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
+const { indexDshSessionHeaders, readDshSessionHeader, resolveDshSessionsRoot } = require('./providers/dsh/sessionFiles');
 const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
   isReasonixNativeSessionSidecar,
   reasonixNativeSessionWatchRoots,
   emptyNativeView
-} = require('./reasonixSessions');
+} = require('./providers/reasonix/sessions');
 const { hashKey } = require('./hashKey');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
 const {

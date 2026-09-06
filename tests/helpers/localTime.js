@@ -2,7 +2,7 @@
 
 // Fixtures that exercise day or month bucketing have to state their instants in
 // the same clock the product code buckets by, and that clock is local: usage
-// periods are cut at local midnight (`src/shared/qoderCnUsage.js`, the archive
+// periods are cut at local midnight (`src/shared/providers/qodercn/usage.js`, the archive
 // modules, the widget trend), because a desktop widget belongs to the calendar
 // the person reading it lives in.
 //

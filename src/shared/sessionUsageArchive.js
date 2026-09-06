@@ -6,7 +6,7 @@ const { isDeepStrictEqual } = require('node:util');
 const { PERIODS, normalizePeriod } = require('./usage');
 const { hasSummaryPeriod } = require('./archivePeriods');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
-const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./reasonixSessionGuard');
+const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
 
 function numberValue(value) {
   const parsed = Number(value || 0);

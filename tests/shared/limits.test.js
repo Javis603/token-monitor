@@ -12,7 +12,7 @@ const {
   syncLimits
 } = require('../../src/shared/limits');
 const { collectLimitsOnce } = require('../../src/shared/limitCollector');
-const { codexAccountKey } = require('../../src/shared/codexAuth');
+const { codexAccountKey } = require('../../src/shared/providers/codex/auth');
 const { hashKey } = require('../../src/shared/hashKey');
 
 function codexProvider(accountKey, accountEmail, remainingPercent, updatedAt) {

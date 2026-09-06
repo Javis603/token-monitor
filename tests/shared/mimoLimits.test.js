@@ -10,7 +10,7 @@ const {
   parseMimoPlanDetail,
   parseMimoPlanUsage,
   parseMimoProfile
-} = require('../../src/shared/mimoLimits');
+} = require('../../src/shared/providers/mimo/limits');
 const { createLimitsCollector } = require('../../src/shared/limitCollector');
 
 const COOKIE = 'unrelated=drop; userId=123; api-platform_serviceToken=secret; api-platform_ph=optional';

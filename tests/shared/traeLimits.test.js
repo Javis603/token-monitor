@@ -9,7 +9,7 @@ const {
   traeAccessToken,
   traeDeviceId,
   traeEntUsageUrl
-} = require('../../src/shared/traeLimits');
+} = require('../../src/shared/providers/trae/limits');
 
 function response(body, status = 200) {
   return {

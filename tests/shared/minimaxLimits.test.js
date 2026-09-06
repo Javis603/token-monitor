@@ -13,7 +13,7 @@ const {
   MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
   MINIMAX_REMAINS_URL_CN,
   MINIMAX_REMAINS_URL_EN
-} = require('../../src/shared/minimaxLimits');
+} = require('../../src/shared/providers/minimax/limits');
 const { parseLimitProviders } = require('../../src/shared/limitCollector');
 
 function okResponse(body) {

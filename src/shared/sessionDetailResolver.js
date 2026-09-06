@@ -4,7 +4,7 @@ const os = require('node:os');
 const { Worker } = require('node:worker_threads');
 
 const { readSessionDetail } = require('./sessionDetail');
-const { readDshSessionDetail } = require('./dshSessionDetail');
+const { readDshSessionDetail } = require('./providers/dsh/sessionDetail');
 const { wslUsageHomes } = require('./wslUsage');
 
 // wslUsage.js's MARKER_CLIENTS also scans `.dsh/sessions`, so a DSH session

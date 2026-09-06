@@ -12,7 +12,7 @@ const {
   parseGoUsage,
   fetchGoApi,
   collectGoApi
-} = require('../../src/shared/opencodeGoApi');
+} = require('../../src/shared/providers/opencode/goApi');
 
 // A verbatim 200 body from https://opencode.ai/zen/go/v1/usage.
 const LIVE_PAYLOAD = {

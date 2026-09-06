@@ -4,8 +4,8 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const test = require('node:test');
 
-const antigravityOAuth = require('../../src/shared/antigravityOAuth');
-const antigravityProbe = require('../../src/shared/antigravityProbe');
+const antigravityOAuth = require('../../src/shared/providers/antigravity/oauth');
+const antigravityProbe = require('../../src/shared/providers/antigravity/probe');
 
 function response(status, body) {
   return {
