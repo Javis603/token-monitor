@@ -11,7 +11,9 @@ const cursorAuth = require('../../src/shared/providers/cursor/auth');
 const { createDeviceRuntime } = require('../../src/shared/deviceRuntime');
 const {
   repairAntigravitySyncLock,
-  removeOwnedAntigravitySyncLock,
+  removeOwnedAntigravitySyncLock
+} = require('../../src/shared/providers/antigravity/selfSync');
+const {
   startCollector,
   selfSyncThrottle
 } = require('../../src/shared/collector');
