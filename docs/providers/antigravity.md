@@ -139,10 +139,10 @@ Token/session tracking remains dependent on local source data. OAuth does not ma
 | --- | --- |
 | Usage source roots, watch mapping, and self-sync | `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/clientHealth.js`, `src/shared/usage.js` |
 | Local RPC and remote quota requests | `src/shared/providers/antigravity/probe.js`, `src/shared/providers/antigravity/oauth.js`, `src/shared/providers/antigravity/limits.js` |
-| Browser OAuth lifecycle | `src/electron/antigravityOAuthLogin.js`, `src/electron/main.js`, `src/electron/preload.js` |
+| Browser OAuth lifecycle | `src/electron/providers/antigravity/oauthLogin.js`, `src/electron/main.js`, `src/electron/preload.js` |
 | Account settings and credentials | `src/shared/credentialStore.js`, `src/electron/main.js`, renderer settings files |
 | Normalization and cross-device aggregation | `src/shared/limits.js`, generated `worker/src/shared/limits.js` |
-| Limits presentation | `src/electron/renderer/limitsPresentation.js`, `src/electron/renderer/app.js`, localized strings |
+| Limits presentation | `src/electron/renderer/limitProviderPresentation.js`, `src/electron/renderer/app.js`, localized strings |
 | Hub build identity after shared changes | `src/shared/hubBuildRegistry.json`, generated Worker registry |
 
 ## Verification checklist
