@@ -1,6 +1,6 @@
 'use strict';
 
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
 const {
   cleanSecret,
   numberOrNull,

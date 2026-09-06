@@ -4,7 +4,7 @@
 // The GitHub OAuth token from device flow is used directly here, matching the
 // CodexBar implementation this feature was based on.
 
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
 const {
   cleanSecret,
   errorWithStatus

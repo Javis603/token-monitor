@@ -1,7 +1,7 @@
 'use strict';
 
 const { createDeviceState } = require('./deviceState');
-const { createLimitsRuntime } = require('./limitsRuntime');
+const { createLimitsRuntime } = require('./limits/runtime');
 const { createUsageRuntime } = require('./usageRuntime');
 
 let nextRuntimeEpoch = 1;

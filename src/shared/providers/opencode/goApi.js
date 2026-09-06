@@ -133,7 +133,7 @@ function readGoApiKey(env = process.env) {
 // safe direction: an over-eager constant would instead merge two *different*
 // people's accounts on a shared hub and show one of them the other's quota.
 // A cookie yields the real workspace identity regardless; see
-// openCodeWebIdentity in limitCollector.js.
+// openCodeWebIdentity in ../../limits/collector.js.
 function goApiIdentity(apiKey) {
   // Full digest: truncating buys nothing here (this value is never displayed or
   // typed) and only narrows the space in which two accounts could collide.

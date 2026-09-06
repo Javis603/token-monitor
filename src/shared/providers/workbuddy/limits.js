@@ -1,7 +1,7 @@
 'use strict';
 
 const { hashKey } = require('../../hashKey');
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
 const {
   cleanSecret,
   firstSetting,

@@ -2,7 +2,7 @@
 
 const crypto = require('node:crypto');
 const { hashKey } = require('../../hashKey');
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 
 const MIMO_PLATFORM_CONSOLE_URL = 'https://platform.xiaomimimo.com/#/console/balance';

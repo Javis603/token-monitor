@@ -14,7 +14,7 @@ const {
   MINIMAX_REMAINS_URL_CN,
   MINIMAX_REMAINS_URL_EN
 } = require('../../src/shared/providers/minimax/limits');
-const { parseLimitProviders } = require('../../src/shared/limitCollector');
+const { parseLimitProviders } = require('../../src/shared/limits/collector');
 
 function okResponse(body) {
   return { ok: true, status: 200, json: async () => body };

@@ -6,7 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { applyInitialLimitProviderSeed } = require('../../src/electron/initialLimitProviderSeed');
-const { parseLimitProviders } = require('../../src/shared/limitCollector');
+const { parseLimitProviders } = require('../../src/shared/limits/collector');
 
 const ROOT = path.resolve(__dirname, '../..');
 const main = fs.readFileSync(path.join(ROOT, 'src/electron/main.js'), 'utf8');

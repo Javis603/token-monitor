@@ -2,14 +2,14 @@
 
 // DeepSeek limits provider: the API-key balance read, and the derived spend it
 // records through ./balanceHistory.js. Reached through providerFetchers() in
-// src/shared/limitCollector.js.
+// src/shared/limits/collector.js.
 
 const path = require('node:path');
 const { recordConsumption } = require('./balanceHistory');
 const { sharedDataDir } = require('../../config');
 const {
   normalizeLimitProvider
-} = require('../../limits');
+} = require('../../limits/core');
 const { hashKey } = require('../../hashKey');
 const {
   cleanSecret,

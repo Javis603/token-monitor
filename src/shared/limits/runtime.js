@@ -9,12 +9,12 @@ const {
   parseLimitProviders,
   probeLimitProvider,
   providerPhysicalBoundMs
-} = require('./limitCollector');
-const { normalizeLimitProvider, normalizeLimitsSummary } = require('./limits');
+} = require('./collector');
+const { normalizeLimitProvider, normalizeLimitsSummary } = require('./core');
 const {
   nextLimitsResetBoundary,
   pruneAttemptedResetBoundaries
-} = require('./limitResetBoundary');
+} = require('./resetBoundary');
 const {
   LIMITS_ADAPTIVE_BASE_MS,
   createLimitsBurnState,
@@ -23,14 +23,14 @@ const {
   pruneLimitsBurnState,
   recordLimitsSample,
   recordLimitsUrgencyAttempt
-} = require('./limitsBurnRate');
-const { runWithProbeDeadline } = require('./probeDeadline');
+} = require('./burnRate');
+const { runWithProbeDeadline } = require('../probeDeadline');
 const {
   DEFAULT_LIMITS_RETRY_BASE_MS,
   DEFAULT_LIMITS_RETRY_MAX_MS,
   computeRetryDelayMs,
   isRetryableLimitStatus
-} = require('./limitsRetryPolicy');
+} = require('./retryPolicy');
 
 const DEFAULT_LIMITS_MAX_CONCURRENCY = 3;
 
@@ -409,7 +409,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
   // A second data-driven timer alongside scheduleResetTimer(), active only in
   // adaptive mode. The 5-minute baseline still applies to every provider; this
   // inserts an earlier, provider-scoped probe for a quota whose burn rate says
-  // it is close to running out, never faster than the floor in limitsBurnRate.
+  // it is close to running out, never faster than the floor in burnRate.js.
   // 'burn-rate' is deliberately absent from COOLDOWN_BYPASS_REASONS, so
   // queueScope defers it whenever the lane is already backing off.
   function scheduleUrgencyTimer() {

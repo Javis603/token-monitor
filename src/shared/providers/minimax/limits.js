@@ -8,7 +8,7 @@
 // therefore read whatever percent is present, and only suppress the
 // status==3 placeholder lane that cc-switch / CodexBar both guard against.
 
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
 const { cleanSecret } = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 

@@ -2,7 +2,7 @@
 
 // Cursor limits provider: per-account billing and on-demand windows, using the
 // session/auth helpers in this folder. Reached through providerFetchers() in
-// src/shared/limitCollector.js.
+// src/shared/limits/collector.js.
 
 const cursorAuth = require('./auth');
 const cursorProbe = require('./probe');

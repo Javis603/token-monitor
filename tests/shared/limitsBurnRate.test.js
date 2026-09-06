@@ -12,7 +12,7 @@ const {
   pruneLimitsBurnState,
   recordLimitsUrgencyAttempt,
   recordLimitsSample
-} = require('../../src/shared/limitsBurnRate');
+} = require('../../src/shared/limits/burnRate');
 
 const BASE_MS = 300_000;
 

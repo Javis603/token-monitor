@@ -15,7 +15,7 @@ const {
   mapCopilotUsageToProvider,
   fetchCopilotLimits
 } = require('../../src/shared/providers/copilot/limits');
-const { parseLimitProviders } = require('../../src/shared/limitCollector');
+const { parseLimitProviders } = require('../../src/shared/limits/collector');
 
 test('parseLimitProviders includes Copilot in the default provider set', () => {
   assert.ok(parseLimitProviders().includes('copilot'));

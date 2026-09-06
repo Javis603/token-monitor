@@ -1,41 +1,41 @@
 'use strict';
 
-const { LIMIT_PROVIDER_IDS } = require('./limitProviders');
+const { LIMIT_PROVIDER_IDS } = require('../limitProviders');
 const {
   DEFAULT_LIMITS_REFRESH_MS,
   normalizeLimitProvider,
   normalizeLimitsSummary
-} = require('./limits');
-const { parseRetryAfterHeader } = require('./limitsRetryPolicy');
-const openrouterLimits = require('./providers/openrouter/limits');
-const thirdPartyLimits = require('./providers/thirdparty/limits');
-const minimaxLimits = require('./providers/minimax/limits');
+} = require('./core');
+const { parseRetryAfterHeader } = require('./retryPolicy');
+const openrouterLimits = require('../providers/openrouter/limits');
+const thirdPartyLimits = require('../providers/thirdparty/limits');
+const minimaxLimits = require('../providers/minimax/limits');
 const { minimaxToken, minimaxBaseUrl, parseMinimaxTiers, fetchMinimaxLimits } = minimaxLimits;
-const mimoLimits = require('./providers/mimo/limits');
+const mimoLimits = require('../providers/mimo/limits');
 const { fetchMimoLimits } = mimoLimits;
-const grokLimits = require('./providers/grok/limits');
-const copilotLimits = require('./providers/copilot/limits');
+const grokLimits = require('../providers/grok/limits');
+const copilotLimits = require('../providers/copilot/limits');
 const { copilotToken, fetchCopilotLimits } = copilotLimits;
-const kiroLimits = require('./providers/kiro/limits');
+const kiroLimits = require('../providers/kiro/limits');
 const { parseKiroUsage, fetchKiroLimits } = kiroLimits;
-const zaiLimits = require('./providers/zai/limits');
+const zaiLimits = require('../providers/zai/limits');
 const { zaiToken, zaiRegion, fetchZaiLimits } = zaiLimits;
-const zaiTeamLimits = require('./providers/zaiteam/limits');
+const zaiTeamLimits = require('../providers/zaiteam/limits');
 const { fetchZaiTeamLimits, zaiTeamToken } = zaiTeamLimits;
-const volcengineLimits = require('./providers/volcengine/limits');
-const alibabaLimits = require('./providers/alibaba/limits');
+const volcengineLimits = require('../providers/volcengine/limits');
+const alibabaLimits = require('../providers/alibaba/limits');
 const { volcengineCredentials, fetchVolcengineLimits } = volcengineLimits;
-const qoderLimits = require('./providers/qoder/limits');
+const qoderLimits = require('../providers/qoder/limits');
 const { qoderCookie, fetchQoderLimits } = qoderLimits;
-const commandcodeLimits = require('./providers/commandcode/limits');
+const commandcodeLimits = require('../providers/commandcode/limits');
 const { commandcodeCookie, fetchCommandcodeLimits } = commandcodeLimits;
-const ollamaLimits = require('./providers/ollama/limits');
+const ollamaLimits = require('../providers/ollama/limits');
 const { ollamaSessionCookie, fetchOllamaLimits } = ollamaLimits;
-const kimiLimits = require('./providers/kimi/limits');
+const kimiLimits = require('../providers/kimi/limits');
 const { kimiToken, kimiWebToken, fetchKimiLimits } = kimiLimits;
-const workbuddyLimits = require('./providers/workbuddy/limits');
-const traeLimits = require('./providers/trae/limits');
-const zedLimits = require('./providers/zed/limits');
+const workbuddyLimits = require('../providers/workbuddy/limits');
+const traeLimits = require('../providers/trae/limits');
+const zedLimits = require('../providers/zed/limits');
 const {
   grokCredential,
   readAuthJson,
@@ -50,9 +50,9 @@ const {
   parseBoolean,
   providerStatusFromError,
   runProcessText
-} = require('./limits/providerHelpers');
-const claudeLimits = require('./providers/claude/limits');
-const codexLimits = require('./providers/codex/limits');
+} = require('./providerHelpers');
+const claudeLimits = require('../providers/claude/limits');
+const codexLimits = require('../providers/codex/limits');
 const {
   claudeCommandCandidates,
   claudeWebCookie,
@@ -78,10 +78,10 @@ const {
   runCodexLogin
 } = codexLimits;
 
-const { fetchAntigravityLimits } = require('./providers/antigravity/limits');
-const { fetchOpenCodeLimits, fetchOpenCodeProfile } = require('./providers/opencode/limits');
-const { deepseekToken, fetchDeepSeekLimits, selectFundedRow } = require('./providers/deepseek/limits');
-const { fetchCursorLimits } = require('./providers/cursor/limits');
+const { fetchAntigravityLimits } = require('../providers/antigravity/limits');
+const { fetchOpenCodeLimits, fetchOpenCodeProfile } = require('../providers/opencode/limits');
+const { deepseekToken, fetchDeepSeekLimits, selectFundedRow } = require('../providers/deepseek/limits');
+const { fetchCursorLimits } = require('../providers/cursor/limits');
 
 const DEFAULT_PROVIDER_PHYSICAL_BOUND_MS = 120_000;
 const PROVIDER_CLEANUP_GRACE_MS = 5_000;
@@ -243,7 +243,7 @@ async function collectLimitsOnce(options = {}, deps = {}) {
 // semantics are owned by LimitsRuntime; this facade only retains the former
 // full-snapshot TTL and has no in-flight coordination of its own.
 function createLimitsCollector(options = {}, deps = {}) {
-  const { createLimitsRuntime } = require('./limitsRuntime');
+  const { createLimitsRuntime } = require('./runtime');
   const runtime = createLimitsRuntime(options, { ...deps, autoStart: false, autoRetry: false });
   const refreshMs = normalizeLimitsRefreshMs(options.limitsRefreshMs ?? options.refreshMs);
   const now = deps.now || Date.now;

@@ -1,7 +1,7 @@
 'use strict';
 
 const { MAX_JSON_BODY_BYTES } = require('./http');
-const { syncLimits } = require('./limits');
+const { syncLimits } = require('./limits/core');
 const { isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;

@@ -11,7 +11,7 @@ const {
   runKiroUsageCli,
   fetchKiroLimits
 } = require('../../src/shared/providers/kiro/limits');
-const { parseLimitProviders, fetchKiroLimits: fetchKiroLimitsViaCollector } = require('../../src/shared/limitCollector');
+const { parseLimitProviders, fetchKiroLimits: fetchKiroLimitsViaCollector } = require('../../src/shared/limits/collector');
 
 const LEGACY_BASIC = [
   '| KIRO FREE                                          |',
@@ -260,7 +260,7 @@ test('parseLimitProviders includes kiro by default and accepts it explicitly', (
   assert.deepEqual(parseLimitProviders('kiro'), ['kiro']);
 });
 
-test('limitCollector re-exports fetchKiroLimits', async () => {
+test('the limits collector re-exports fetchKiroLimits', async () => {
   const provider = await fetchKiroLimitsViaCollector({}, {
     runKiroUsageCli: async () => LEGACY_BASIC
   });

@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
 const {
   cleanSecret,
   numberOrNull

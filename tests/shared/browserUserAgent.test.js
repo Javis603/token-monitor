@@ -7,7 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { BROWSER_USER_AGENT } = require('../../src/shared/browserUserAgent');
-const { fetchClaudeLimits } = require('../../src/shared/limitCollector');
+const { fetchClaudeLimits } = require('../../src/shared/limits/collector');
 const { fetchMimoLimits } = require('../../src/shared/providers/mimo/limits');
 const { fetchOllamaLimits } = require('../../src/shared/providers/ollama/limits');
 const { fetchQoderLimits } = require('../../src/shared/providers/qoder/limits');

@@ -50,7 +50,7 @@ Token/session totals are machine-local activity. They are not deduplicated by Go
 
 ## Limits and quota
 
-Antigravity quota collection starts in `fetchAntigravityLimits()` in `src/shared/limitCollector.js`. It supports two sources:
+Antigravity quota collection starts in `fetchAntigravityLimits()` in `src/shared/limits/collector.js`. It supports two sources:
 
 1. local RPC from a running Antigravity app, CLI, or IDE process;
 2. standalone OAuth for GUI-managed Google accounts, which continues working while Antigravity is closed.
@@ -111,8 +111,8 @@ Anonymous local RPC rows are different: even if their local fallback hashes matc
 
 When changing normalized limits behavior:
 
-1. edit `src/shared/limits.js`;
-2. run `npm run sync:worker` to regenerate `worker/src/shared/limits.js`;
+1. edit `src/shared/limits/core.js`;
+2. run `npm run sync:worker` to regenerate `worker/src/shared/limits/core.js`;
 3. add coverage for same-account deduplication and anonymous cross-device separation.
 
 ## Settings and credentials
@@ -141,7 +141,7 @@ Token/session tracking remains dependent on local source data. OAuth does not ma
 | Local RPC and remote quota requests | `src/shared/providers/antigravity/probe.js`, `src/shared/providers/antigravity/oauth.js`, `src/shared/providers/antigravity/limits.js` |
 | Browser OAuth lifecycle | `src/electron/providers/antigravity/oauthLogin.js`, `src/electron/main.js`, `src/electron/preload.js` |
 | Account settings and credentials | `src/shared/credentialStore.js`, `src/electron/main.js`, renderer settings files |
-| Normalization and cross-device aggregation | `src/shared/limits.js`, generated `worker/src/shared/limits.js` |
+| Normalization and cross-device aggregation | `src/shared/limits/core.js`, generated `worker/src/shared/limits/core.js` |
 | Limits presentation | `src/electron/renderer/limitProviderPresentation.js`, `src/electron/renderer/app.js`, localized strings |
 | Hub build identity after shared changes | `src/shared/hubBuildRegistry.json`, generated Worker registry |
 

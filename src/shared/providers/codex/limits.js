@@ -3,14 +3,14 @@
 // Codex limits provider: ChatGPT/Codex backend usage, the CLI RPC fallback and
 // login flow, managed-account normalization, and the rate-limit → provider-window
 // mapping. Account identity itself lives in ./auth.js, which the widget also uses
-// directly. Reached through providerFetchers() in src/shared/limitCollector.js.
+// directly. Reached through providerFetchers() in src/shared/limits/collector.js.
 
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { appVersion } = require('../../appVersion');
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
 const { abortError } = require('../../probeDeadline');
 const {
   codexAccountKey,

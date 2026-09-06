@@ -1,13 +1,9 @@
 'use strict';
 
 // Helpers shared by more than one limits provider implementation: process and
-// JSON transport, plan-label formatting, and the small path/env/hash utilities
-// the provider modules all reach for. Provider-specific behaviour does not
-// belong here — it belongs in src/shared/providers/<id>/.
-//
-// This lives beside src/shared/limits.js while the limits infrastructure is
-// being folderized. Node resolves require('./limits') to the file, not this
-// directory, so the two do not collide.
+// JSON transport, plan-label formatting, credential cleaning, and the small
+// value/path/env utilities the provider modules all reach for. Provider-specific
+// behaviour does not belong here — it belongs in src/shared/providers/<id>/.
 
 const { spawn } = require('node:child_process');
 const path = require('node:path');

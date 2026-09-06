@@ -14,7 +14,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { normalizeLimitProvider } = require('../../limits');
+const { normalizeLimitProvider } = require('../../limits/core');
 const { errorWithStatus } = require('../../limits/providerHelpers');
 const { abortError } = require('../../probeDeadline');
 const { hashKey } = require('../../hashKey');

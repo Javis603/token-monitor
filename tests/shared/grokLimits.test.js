@@ -23,7 +23,7 @@ const {
   fetchGrokRpcBilling,
   fetchGrokLimits,
   parseLimitProviders
-} = require('../../src/shared/limitCollector');
+} = require('../../src/shared/limits/collector');
 
 function writeAuthJson(homeDir, entries) {
   const filePath = path.join(homeDir, 'auth.json');
