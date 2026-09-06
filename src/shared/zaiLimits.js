@@ -325,7 +325,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       if (quotaResult.status === 'rejected') throw quotaResult.reason;
       const usage = parseZaiUsage(quotaResult.value, subscription);
       const balanceWindow = balanceResult.status === 'fulfilled'
-        ? zaiBalanceWindow(balanceResult.value, region)
+        ? zaiCashBalanceWindow(balanceResult.value, region)
         : null;
       // The finance report exposes a cumulative spend total; the today/week/
       // month deltas come from tracking that total locally.
@@ -345,8 +345,9 @@ async function fetchZaiLimits(options = {}, deps = {}) {
           }) || { todaySpend: numberOrNull(balanceData?.todaySpendAmount), allTimeSpend: numberOrNull(balanceData?.totalSpendAmount) })
         };
       }
+      const keyWindows = balanceWindow ? [...usage.windows, balanceWindow] : usage.windows;
       return {
-        windows: balanceWindow ? [...usage.windows, balanceWindow] : usage.windows,
+        windows: keyWindows.map((window) => ({ ...window, source: 'api' })),
         plan: usage.plan,
         accountKey: hashKey('zai', key),
         balance,
@@ -361,6 +362,26 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       readFileSync: deps.readFileSync || fs.readFileSync,
       homeDir: deps.homeDir || options.homeDir || os.homedir()
     });
+    // Coding Plan quota rides the same quota endpoint the console key uses,
+    // keyed by the mirror key ZCode stores on the provider entry; without a
+    // usable key the lane stays empty rather than reporting a hard failure.
+    if (discovery.kind === 'coding-quota' && discovery.entitled) {
+      const mirrorKey = discovery.credential?.token;
+      if (!mirrorKey) return { windows: [], plan: '', accountKey: '', hasAnything: false };
+      try {
+        const quotaHost = discovery.family === 'bigmodel' ? 'https://open.bigmodel.cn' : 'https://api.z.ai';
+        const quota = await fetchJson(`${quotaHost}/api/monitor/usage/quota/limit`, mirrorKey, deps);
+        const usage = parseZaiUsage(quota, null);
+        return {
+          windows: usage.windows.map((window) => ({ ...window, source: 'local' })),
+          plan: usage.plan,
+          accountKey: hashKey('zai', mirrorKey),
+          hasAnything: usage.windows.length > 0
+        };
+      } catch (_) {
+        return { windows: [], plan: '', accountKey: '', hasAnything: false };
+      }
+    }
     if (discovery.kind !== 'start-billing' || !discovery.entitled || !discovery.credential) {
       return { windows: [], plan: '', accountKey: '', hasAnything: false };
     }
@@ -385,7 +406,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
     }, { signal: deps.signal, deadlineMs: Number(deps.zaiFetchTimeoutMs || deps.fetchTimeoutMs || ZAI_FETCH_TIMEOUT_MS) });
     const usage = parseZcodeStartPlanBalances(payload);
     return {
-      windows: usage.windows,
+      windows: usage.windows.map((window) => ({ ...window, source: 'local' })),
       plan: usage.plan,
       accountKey: hashKey('zai', discovery.credential.token),
       hasAnything: usage.windows.length > 0
@@ -396,18 +417,27 @@ async function fetchZaiLimits(options = {}, deps = {}) {
 
   if (keyResult.status === 'rejected' && planResult.status === 'rejected') {
     const error = keyResult.reason;
-    if (error?.status === 'unauthorized') return zcodeStatusProvider('notConfigured', options, deps);
-    return zcodeStatusProvider(error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable', options, deps);
+    if (error?.status === 'unauthorized') return zaiStatusProvider('notConfigured', options, deps);
+    return zaiStatusProvider(error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable', options, deps);
   }
 
   const lanes = [keyResult, planResult].filter((result) => result.status === 'fulfilled');
   const windows = lanes.flatMap((result) => result.value.windows);
-  // The console key's quota is the authoritative failure signal: when it was
-  // asked for and rejected, the whole row is that failure even if the plan
-  // lane still has buckets to show.
+  // The console key's quota is the authoritative failure signal for its own
+  // lane, but plan buckets that did load still render — an unavailable key
+  // does not erase a live Weekend bucket.
   if (key && keyResult.status === 'rejected') {
     const error = keyResult.reason;
-    return zcodeStatusProvider(error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable', options, deps);
+    return normalizeLimitProvider({
+      provider: 'zai',
+      ...(accountKey ? { accountKey } : {}),
+      ...(accountLabel ? { accountLabel } : {}),
+      source: 'api',
+      status: error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable',
+      updatedAt,
+      windows,
+      region: zaiRegion(options, env)
+    });
   }
   const accountKey = lanes.map((result) => result.value.accountKey).filter(Boolean)[0] || '';
   const accountLabel = lanes.map((result) => result.value.plan).filter(Boolean)[0] || '';
@@ -441,7 +471,7 @@ function zaiBalanceCurrency(region) {
   return zaiRegion({ zaiApiRegion: region }) === 'bigmodel-cn' ? 'CNY' : 'USD';
 }
 
-function zaiBalanceWindow(payload, region) {
+function zaiCashBalanceWindow(payload, region) {
   const data = payload?.data;
   const remaining = numberOrNull(data?.availableBalance);
   if (remaining === null) return null;
@@ -539,7 +569,7 @@ function zcodeStartPlanBalanceUrl() {
 // callers pass an entitlement_id → period map alongside the payload; daily
 // grants map to the shared daily lane, one-time grants take the billing lane
 // without windowMinutes.
-function zcodeBalanceWindow(balance, periodByEntitlement = {}) {
+function zcodePlanBucketWindow(balance, periodByEntitlement = {}) {
   const total = numberOrNull(balance?.total_units);
   const used = numberOrNull(balance?.used_units);
   const remaining = numberOrNull(balance?.remaining_units);
@@ -554,6 +584,9 @@ function zcodeBalanceWindow(balance, periodByEntitlement = {}) {
   const window = {
     kind: period === 'daily' ? 'daily' : 'billing',
     label,
+    // One-time grants never renew; the description keeps that visible on
+    // surfaces that render resets as text.
+    ...(period !== 'daily' ? { resetDescription: 'One-time' } : {}),
     limitId: String(balance?.plan_id || '').trim(),
     ...(usedPercent !== null ? { usedPercent, remainingPercent: Math.max(0, Math.min(100, 100 - usedPercent)) } : {}),
     showMeter: usedPercent !== null,
@@ -583,14 +616,14 @@ function zcodePeriodByEntitlement(payload) {
 function parseZcodeStartPlanBalances(payload) {
   const periodByEntitlement = zcodePeriodByEntitlement(payload);
   const balances = Array.isArray(payload?.data?.balances) ? payload.data.balances : [];
-  const windows = balances.map((balance) => zcodeBalanceWindow(balance, periodByEntitlement)).filter(Boolean);
+  const windows = balances.map((balance) => zcodePlanBucketWindow(balance, periodByEntitlement)).filter(Boolean);
   const plan = Array.isArray(payload?.data?.plans)
     ? payload.data.plans.find((entry) => entry?.status === 'active')
     : null;
   return { plan: String(plan?.name || '').trim(), windows };
 }
 
-function zcodeStatusProvider(status, options = {}, deps = {}, source = 'api') {
+function zaiStatusProvider(status, options = {}, deps = {}, source = 'api') {
   const now = (deps.now || Date.now)();
   return normalizeLimitProvider({
     provider: 'zai',
@@ -614,7 +647,7 @@ async function fetchZcodeStartPlanLimits(options = {}, deps = {}) {
     homeDir: deps.homeDir || options.homeDir || os.homedir()
   });
   if (discovery.kind !== 'start-billing' || !discovery.entitled || !discovery.credential) {
-    return zcodeStatusProvider('notConfigured', options, deps);
+    return zaiStatusProvider('notConfigured', options, deps);
   }
 
   try {
@@ -649,8 +682,8 @@ async function fetchZcodeStartPlanLimits(options = {}, deps = {}) {
       region: zaiRegion(options, env)
     });
   } catch (error) {
-    if (error?.status === 'unauthorized') return zcodeStatusProvider('notConfigured', options, deps);
-    return zcodeStatusProvider(error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable', options, deps);
+    if (error?.status === 'unauthorized') return zaiStatusProvider('notConfigured', options, deps);
+    return zaiStatusProvider(error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable', options, deps);
   }
 }
 

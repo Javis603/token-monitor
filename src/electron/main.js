@@ -4710,9 +4710,11 @@ function settingsForRenderer() {
       ? 'env'
       : '';
   const zcodeAutoCredential = currentZcodeAutoCredential();
-  // "A local ZCode install exists" — advertised so the renderer can show the
-  // auto-detect state instead of "disabled" when the provider is unchecked.
-  const zcodeLoginDetected = discoverZcodeConnection().kind !== 'none';
+  // "A usable local ZCode login exists" — advertised so the renderer shows
+  // the auto-detect state instead of "disabled" when the provider is
+  // unchecked. Anything else (API-only, unentitled plan) is not an auto
+  // quota source.
+  const zcodeLoginDetected = Boolean(zcodeAutoCredential);
   const zaiApiKeySource = settings?.zaiApiKey
     ? 'settings'
     : zaiToken(process.env)

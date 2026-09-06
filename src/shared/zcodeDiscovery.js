@@ -96,10 +96,11 @@ function discoverZcodeConnection(options = {}, deps = {}) {
     const entitled = entry?.status === 'available';
     const reason = entitled ? '' : String(entry?.reason || 'coding_plan_not_entitled');
     const kind = isStartPlanProviderId(providerId) ? 'start-billing' : 'coding-quota';
-    const credential = entitled && kind === 'start-billing'
-      ? billingCredential(provider)
-      : null;
-    if (kind === 'start-billing' && entitled && !credential) {
+    // credential is present whenever an entitled plan has a readable mirror
+    // key; coding-quota consumers use it against the quota endpoint the same
+    // way start-billing consumers use it against the billing endpoint.
+    const credential = entitled ? billingCredential(provider) : null;
+    if (entitled && !credential) {
       return { kind, family, providerId, entitled: false, reason: 'coding_plan_not_authenticated' };
     }
     return { kind, family, providerId, entitled, reason, ...(credential ? { credential } : {}) };

@@ -326,6 +326,43 @@ test('fetchZaiLimits merges the key and ZCode plan lanes when both exist', async
   assert.ok(kinds.includes('session') || kinds.includes('weekly'), 'subscription quota present');
 });
 
+test('fetchZaiLimits serves Coding Plan quota from the ZCode mirror key', async () => {
+  const settings = {
+    providerFamilyDomain: 'zai',
+    modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-coding-plan' }
+  };
+  const registry = {
+    provider: { 'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'coding-mirror-key', baseURL: 'https://api.z.ai/api/anthropic' } } }
+  };
+  const cache = { entryStatus: { items: { 'builtin:zai-coding-plan': { status: 'available' } } } };
+  const provider = await fetchZaiLimits({}, {
+    env: {},
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const key = String(filePath).split('/').pop();
+      const files = {
+        'setting.json': JSON.stringify(settings),
+        'config.json': JSON.stringify(registry),
+        'coding-plan-cache.json': JSON.stringify(cache)
+      };
+      if (Object.hasOwn(files, key)) return files[key];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url) => {
+      if (!String(url).includes('/quota/limit')) throw new Error('unexpected url ' + url);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }], planName: 'GLM Coding Pro' } })
+      };
+    }
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.accountLabel, 'GLM Coding Pro');
+  assert.equal(provider.windows[0].kind, 'session');
+  assert.equal(provider.windows[0].source, 'local');
+});
+
 test('fetchZaiLimits physically aborts a hung request within its configured bound', async () => {
   let signal;
   const provider = await fetchZaiLimits(

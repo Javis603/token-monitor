@@ -85,6 +85,30 @@ test('discoverZcodeConnection resolves the selected plan, or none on a broken in
   })).kind, 'none');
 });
 
+test('discoverZcodeConnection returns a coding-quota credential from the mirror key', () => {
+  const discovery = discoverZcodeConnection({}, discoveryDeps({
+    'setting.json': JSON.stringify({
+      ...SETTINGS,
+      modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-coding-plan' }
+    }),
+    'config.json': JSON.stringify({
+      provider: {
+        'builtin:zai-coding-plan': {
+          enabled: true,
+          options: { apiKey: 'coding-mirror-key', baseURL: 'https://api.z.ai/api/anthropic' }
+        }
+      }
+    }),
+    'coding-plan-cache.json': JSON.stringify({
+      entryStatus: { items: { 'builtin:zai-coding-plan': { status: 'available' } } }
+    })
+  }));
+  assert.equal(discovery.kind, 'coding-quota');
+  assert.equal(discovery.entitled, true);
+  assert.equal(discovery.credential.token, 'coding-mirror-key');
+  assert.equal(discovery.family, 'zai');
+});
+
 const BILLING_PAYLOAD = {
   code: 0,
   data: {
@@ -167,6 +191,7 @@ test('parseZcodeStartPlanBalances maps buckets to daily and billing windows', ()
   const weekend = byLabel.get('zcode-v3-start-plan-wk-0904:GLM-5.3-Flash');
   assert.equal(weekend.kind, 'billing');
   assert.equal(weekend.windowMinutes, undefined);
+  assert.equal(weekend.resetDescription, 'One-time');
   assert.equal(weekend.resetsAt, '2026-09-06T15:00:00.000Z');
   const daily = byLabel.get('zcode-v3-start-plan-0817:GLM-5.3');
   assert.equal(daily.kind, 'daily');
