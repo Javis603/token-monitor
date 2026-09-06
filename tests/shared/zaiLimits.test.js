@@ -441,14 +441,68 @@ test('fetchZaiLimits reports the ZCode lane own error when only it ran', async (
   assert.equal(unavailable.status, 'unavailable');
   assert.equal(unavailable.source, 'oauth');
 
-  // A stale mirror JWT is ZCode-managed and rotates there, so it reads as
-  // not configured rather than an auth failure the user could fix.
-  const notConfigured = await fetchZaiLimits({}, {
+  // Billing 401/403 maps to unavailable, mirroring ZCode's own
+  // classifyAvailabilityError: the mirror token is ZCode-managed and rotates
+  // there — "not configured" would contradict the detected-login pill.
+  const staleToken = await fetchZaiLimits({}, {
     ...base,
     ...zcodeLaneDeps(async () => ({ ok: false, status: 401, json: async () => ({}) }))
   });
-  assert.equal(notConfigured.status, 'notConfigured');
-  assert.equal(notConfigured.source, 'oauth');
+  assert.equal(staleToken.status, 'unavailable');
+  assert.equal(staleToken.source, 'oauth');
+});
+
+test('fetchZaiLimits treats an entitled plan with empty buckets as unavailable', async () => {
+  // ZCode reports the plan as available while grants are not yet effective
+  // (empty balances is a legal mid-state); the row must not claim
+  // notConfigured while the login is detected.
+  const provider = await fetchZaiLimits({}, {
+    env: {},
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    ...zcodeLaneDeps(async (url) => {
+      if (String(url).includes('zcode-plan/billing/balance')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ code: 0, data: { plans: [{ plan_id: 'zcode-v3-x', name: 'ZCode Start Plan', status: 'active', entitlements: [] }], balances: [] } })
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    })
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'oauth');
+  assert.deepEqual(provider.windows, []);
+});
+
+test('fetchZaiLimits treats a mirror key without a subscription as unavailable', async () => {
+  // The quota endpoint answers 200 + code 500 "当前用户不存在coding plan"
+  // for a key with no subscription — a state under that key, not a missing
+  // configuration.
+  const provider = await fetchZaiLimits({}, {
+    env: {},
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = String(filePath).split('/').pop();
+      const files = {
+        'setting.json': JSON.stringify({
+          providerFamilyDomain: 'zai',
+          modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-coding-plan' }
+        }),
+        'config.json': JSON.stringify({
+          provider: { 'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'coding-mirror-key' } } }
+        }),
+        'coding-plan-cache.json': JSON.stringify({
+          entryStatus: { items: { 'builtin:zai-coding-plan': { status: 'available' } } }
+        })
+      };
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({ code: 500, msg: '当前用户不存在coding plan' }) })
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'oauth');
 });
 
 test('fetchZaiLimits tracks cumulative spend and ignores a missing total', async () => {

@@ -365,24 +365,27 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       homeDir: deps.homeDir || options.homeDir || os.homedir()
     });
     // Coding Plan quota rides the same quota endpoint the console key uses,
-    // keyed by the mirror key ZCode stores on the provider entry; without a
-    // usable key the lane stays empty rather than reporting a hard failure.
+    // keyed by the mirror key ZCode stores on the provider entry. The lane is
+    // best-effort (failures keep it empty) but marks itself attempted: a
+    // detected ZCode login must not read as not-configured while its query
+    // fails or reports no subscription under that key.
     if (discovery.kind === 'coding-quota' && discovery.entitled) {
       const mirrorKey = discovery.credential?.token;
-      if (!mirrorKey) return { windows: [], plan: '', accountKey: '', hasAnything: false };
-      try {
-        const quotaHost = discovery.family === 'bigmodel' ? 'https://open.bigmodel.cn' : 'https://api.z.ai';
-        const quota = await fetchJson(`${quotaHost}/api/monitor/usage/quota/limit`, mirrorKey, deps);
-        const usage = parseZaiUsage(quota, null);
-        return {
-          windows: usage.windows.map((window) => ({ ...window, source: 'local' })),
-          plan: usage.plan,
-          accountKey: hashKey('zai', mirrorKey),
-          hasAnything: usage.windows.length > 0
-        };
-      } catch (_) {
-        return { windows: [], plan: '', accountKey: '', hasAnything: false };
+      if (mirrorKey) {
+        try {
+          const quotaHost = discovery.family === 'bigmodel' ? 'https://open.bigmodel.cn' : 'https://api.z.ai';
+          const quota = await fetchJson(`${quotaHost}/api/monitor/usage/quota/limit`, mirrorKey, deps);
+          const usage = parseZaiUsage(quota, null);
+          return {
+            windows: usage.windows.map((window) => ({ ...window, source: 'local' })),
+            plan: usage.plan,
+            accountKey: hashKey('zai', mirrorKey),
+            hasAnything: usage.windows.length > 0,
+            attempted: true
+          };
+        } catch (_) {}
       }
+      return { windows: [], plan: '', accountKey: '', hasAnything: false, attempted: true };
     }
     if (discovery.kind !== 'start-billing' || !discovery.entitled || !discovery.credential) {
       return { windows: [], plan: '', accountKey: '', hasAnything: false };
@@ -407,11 +410,14 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       return response.json();
     }, { signal: deps.signal, deadlineMs: Number(deps.zaiFetchTimeoutMs || deps.fetchTimeoutMs || ZAI_FETCH_TIMEOUT_MS) });
     const usage = parseZcodeStartPlanBalances(payload);
+    // Empty balances with an active plan are a legal mid-state (a grant not
+    // yet effective), so a fulfilled-but-empty lane still counts as attempted.
     return {
       windows: usage.windows.map((window) => ({ ...window, source: 'local' })),
       plan: usage.plan,
       accountKey: hashKey('zai', discovery.credential.token),
-      hasAnything: usage.windows.length > 0
+      hasAnything: usage.windows.length > 0,
+      attempted: true
     };
   })();
 
@@ -446,12 +452,16 @@ async function fetchZaiLimits(options = {}, deps = {}) {
   const hasAnything = lanes.some((result) => result.value.hasAnything);
   const balance = lanes.map((result) => result.value.balance).filter(Boolean)[0] || null;
   // The plan buckets come from the local ZCode login, not the console key, so
-  // a ZCode-only row reports oauth while a keyed row reports api. A ZCode-only
-  // billing failure reports that lane's own error instead of collapsing into
-  // notConfigured — the login is still detected, and unauthorized means ZCode
-  // will rotate the token, so it reads as not configured.
+  // a ZCode-only row reports oauth while a keyed row reports api. A lane that
+  // ran but produced nothing — an entitled plan whose grants are not yet
+  // effective, or a mirror key with no subscription under it — reports
+  // unavailable rather than notConfigured: the login is detected, so "not
+  // configured" would contradict the settings pill. Billing 401/403 also maps
+  // to unavailable, mirroring ZCode's own classifyAvailabilityError: the
+  // mirror token is ZCode-managed and rotates there, not here.
   const planError = !key && planResult.status === 'rejected' ? planResult.reason : null;
-  const source = key ? 'api' : (hasAnything || planError ? 'oauth' : '');
+  const planAttempted = !key && planResult.status === 'fulfilled' && Boolean(planResult.value.attempted);
+  const source = key ? 'api' : (hasAnything || planError || planAttempted ? 'oauth' : '');
   return normalizeLimitProvider({
     provider: 'zai',
     ...(accountKey ? { accountKey } : {}),
@@ -459,9 +469,9 @@ async function fetchZaiLimits(options = {}, deps = {}) {
     ...(balance ? { balance } : {}),
     source,
     status: hasAnything ? 'ok'
-      : key ? 'unavailable'
+      : key || planAttempted ? 'unavailable'
         : planError
-          ? (planError?.status === 'unauthorized' ? 'notConfigured' : planError?.status === 'timeout' ? 'unavailable' : planError?.status || 'unavailable')
+          ? (planError?.status === 'sourceRateLimited' ? 'sourceRateLimited' : 'unavailable')
           : 'notConfigured',
     updatedAt,
     windows,
@@ -627,17 +637,23 @@ function parseZcodeStartPlanBalances(payload) {
   const periodByEntitlement = zcodePeriodByEntitlement(payload);
   const balances = Array.isArray(payload?.data?.balances) ? payload.data.balances : [];
   const windows = balances.map((balance) => zcodePlanBucketWindow(balance, periodByEntitlement)).filter(Boolean);
+  // Mirrors ZCode's pickCurrentZaiStartPlan: the first active plan whose
+  // plan_id or name carries the start-plan identity — Weekend ids do
+  // ("zcode-v3-start-plan-wk-…"), and a non-start plan must not steal the
+  // label even if it sorts first.
+  const startIdentity = (entry) => [entry?.plan_id, entry?.name]
+    .some((value) => /start[- ]plan/.test(String(value || '').toLowerCase()));
   const plan = Array.isArray(payload?.data?.plans)
-    ? payload.data.plans.find((entry) => entry?.status === 'active')
+    ? payload.data.plans.find((entry) => entry?.status === 'active' && startIdentity(entry))
     : null;
   return { plan: String(plan?.name || '').trim(), windows };
 }
 
-function zaiStatusProvider(status, options = {}, deps = {}, source = 'api') {
+function zaiStatusProvider(status, options = {}, deps = {}) {
   const now = (deps.now || Date.now)();
   return normalizeLimitProvider({
     provider: 'zai',
-    source,
+    source: 'api',
     status,
     updatedAt: new Date(now).toISOString(),
     windows: [],
