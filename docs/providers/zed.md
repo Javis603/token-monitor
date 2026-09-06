@@ -20,7 +20,7 @@ A dashboard Cookie is not a token-history source. Likewise, finding local Zed se
 
 ## Token and session activity
 
-`src/shared/collector.js` is the only runtime that invokes `tokscale`. Zed follows the same today/month/all-time usage pipeline, watch behavior, and platform discovery rules as the other tracked clients. Its normalized client id is `zed`.
+`src/shared/collector.js` owns the `tokscale` usage scans. Zed follows the same today/month/all-time usage pipeline, watch behavior, and platform discovery rules as the other tracked clients. Its normalized client id is `zed`.
 
 This data plane reports activity found on the current machine. It does not infer the Zed account or plan that paid for a request. BYOK models and external agents remain attributable to the provider whose local records and billing relationship produced them.
 

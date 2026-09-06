@@ -20,7 +20,7 @@ An OAuth account is not a token-history source. Likewise, finding local Antigrav
 
 ## Token and session activity
 
-`src/shared/collector.js` is the only runtime that invokes `tokscale`. Antigravity follows the same today/month/all-time usage pipeline as the other tracked clients.
+`src/shared/collector.js` owns the `tokscale` usage scans. Antigravity follows the same today/month/all-time usage pipeline as the other tracked clients.
 
 ### Source roots and self-sync
 
@@ -30,7 +30,7 @@ Token Monitor recognizes these native Antigravity roots under `~/.gemini/`:
 - `antigravity-ide`
 - `antigravity-backup`
 
-When Antigravity tracking is enabled and at least one native root exists, `maybeSyncAntigravity()` runs `tokscale antigravity sync` before the relevant scan. `tokscale` writes the normalized cache under its configured `antigravity-cache` directory.
+When Antigravity tracking is enabled and at least one native root exists, `maybeSyncAntigravity()` in `src/shared/providers/antigravity/selfSync.js` runs `tokscale antigravity sync` before the relevant scan. It is built once by the collector, which injects the process-wide self-sync throttle and the tokscale command resolver rather than letting this module create either. `tokscale` writes the normalized cache under its configured `antigravity-cache` directory.
 
 The normalized client id is `antigravity`. The tokscale alias `antigravity-cli` must continue to normalize and filter back to that parent id so targeted scans do not clear one partition and write another.
 
@@ -137,7 +137,8 @@ Token/session tracking remains dependent on local source data. OAuth does not ma
 
 | Concern | Primary files |
 | --- | --- |
-| Usage source roots, watch mapping, and self-sync | `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/clientHealth.js`, `src/shared/usage.js` |
+| Usage source roots and watch mapping | `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/clientHealth.js`, `src/shared/usage.js` |
+| Self-sync and the tokscale sync lock | `src/shared/providers/antigravity/selfSync.js`, `src/shared/selfSyncThrottle.js` |
 | Local RPC and remote quota requests | `src/shared/providers/antigravity/probe.js`, `src/shared/providers/antigravity/oauth.js`, `src/shared/providers/antigravity/limits.js` |
 | Browser OAuth lifecycle | `src/electron/providers/antigravity/oauthLogin.js`, `src/electron/main.js`, `src/electron/preload.js` |
 | Account settings and credentials | `src/shared/credentialStore.js`, `src/electron/main.js`, renderer settings files |

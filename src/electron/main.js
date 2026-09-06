@@ -71,13 +71,15 @@ function electronProviderDeps(deps = {}) {
 }
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const {
-  antigravitySyncLockPath,
   clientDiagnosticRoots,
   lookupModelPricing,
   normalizeHistoryIntervalMs,
-  repairAntigravitySyncLock,
   visibleDiagnosticRoots
 } = require('../shared/collector');
+const {
+  antigravitySyncLockPath,
+  repairAntigravitySyncLock
+} = require('../shared/providers/antigravity/selfSync');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
