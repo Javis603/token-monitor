@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { discoverZcodeConnection } = require('../../src/shared/zcodeDiscovery');
-const { parseZcodeStartPlanBalances, fetchZcodeStartPlanLimits } = require('../../src/shared/zaiLimits');
+const { parseZcodeStartPlanBalances } = require('../../src/shared/zaiLimits');
 
 // Fixtures mirror the live billing/balance payload shape: plan entitlements
 // carry the grant period, balance buckets carry the usage numbers.
@@ -201,35 +201,4 @@ test('parseZcodeStartPlanBalances maps buckets to daily and billing windows', ()
   assert.equal(daily.remaining, 2578372);
   // Unknown models surface as their own windows instead of being filtered.
   assert.equal(byLabel.get('zcode-v3-future-plan:GLM-5.5').usedPercent, 0);
-});
-
-test('fetchZcodeStartPlanLimits queries billing with the mirror key and device id', async () => {
-  const requests = [];
-  const provider = await fetchZcodeStartPlanLimits({}, {
-    now: () => Date.parse('2026-09-05T12:00:00Z'),
-    readFileSync: fileSystem({
-      ...HAPPY_FILES,
-      'telemetry-state.json': JSON.stringify({ deviceMid: 'device-mid-1234' })
-    }),
-    fetch: async (url, init) => {
-      requests.push({ url: String(url), headers: init.headers });
-      return { ok: true, status: 200, json: async () => BILLING_PAYLOAD };
-    }
-  });
-  assert.equal(provider.status, 'ok');
-  assert.equal(provider.accountLabel, 'ZCode Weekend Build');
-  assert.equal(provider.windows.length, 4);
-  assert.equal(requests[0].url, 'https://zcode.z.ai/api/v1/zcode-plan/billing/balance');
-  assert.equal(requests[0].headers.Authorization, 'Bearer zcode-mirror-jwt');
-  assert.equal(requests[0].headers['X-Device-Mid'], 'device-mid-1234');
-});
-
-test('fetchZcodeStartPlanLimits degrades auth failures to notConfigured', async () => {
-  const provider = await fetchZcodeStartPlanLimits({}, {
-    now: () => Date.parse('2026-09-05T12:00:00Z'),
-    readFileSync: fileSystem(HAPPY_FILES),
-    fetch: async () => ({ ok: false, status: 401, json: async () => ({}) })
-  });
-  assert.equal(provider.status, 'notConfigured');
-  assert.deepEqual(provider.windows, []);
 });

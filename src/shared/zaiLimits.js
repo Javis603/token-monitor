@@ -328,34 +328,36 @@ async function fetchZaiLimits(options = {}, deps = {}) {
         ? zaiCashBalanceWindow(balanceResult.value, region)
         : null;
       // The finance report exposes a cumulative spend total; the today/week/
-      // month deltas come from tracking that total locally.
+      // month deltas come from tracking that total locally. A report without
+      // the total yields no spend fields — the balance row alone remains.
       let balance = null;
       if (balanceWindow) {
         const balanceData = balanceResult.status === 'fulfilled' ? balanceResult.value?.data : null;
         balance = {
           amount: balanceWindow.remaining,
           currency: balanceWindow.currency,
-          ...(zcodeRecordCumulativeSpend({
+          ...zcodeRecordCumulativeSpend({
             accountKey: hashKey('zai', key),
             totalSpent: numberOrNull(balanceData?.totalSpendAmount),
             now,
             storePath: deps.zaiBalanceStorePath || path.join(sharedDataDir({ env }), 'zai-balance.json'),
             readJson: deps.readJson,
             writeJsonAtomic: deps.writeJsonAtomic
-          }) || { todaySpend: numberOrNull(balanceData?.todaySpendAmount), allTimeSpend: numberOrNull(balanceData?.totalSpendAmount) })
+          })
         };
       }
+      // Window-level source only exists for non-console origins ('local' is
+      // the sole whitelisted value) — key-lane windows carry no source.
       const keyWindows = balanceWindow ? [...usage.windows, balanceWindow] : usage.windows;
       return {
-        windows: keyWindows.map((window) => ({ ...window, source: 'api' })),
+        windows: keyWindows,
         plan: usage.plan,
         accountKey: hashKey('zai', key),
         balance,
-        hasAnything: usage.windows.length > 0 || Boolean(balanceWindow),
-        quotaFailed: false
+        hasAnything: usage.windows.length > 0 || Boolean(balanceWindow)
       };
     })()
-    : Promise.resolve({ windows: [], plan: '', accountKey: '', hasAnything: false, quotaFailed: false });
+    : Promise.resolve({ windows: [], plan: '', accountKey: '', hasAnything: false });
 
   const planLane = (async () => {
     const discovery = discoverZcodeConnection(options, {
@@ -423,6 +425,8 @@ async function fetchZaiLimits(options = {}, deps = {}) {
 
   const lanes = [keyResult, planResult].filter((result) => result.status === 'fulfilled');
   const windows = lanes.flatMap((result) => result.value.windows);
+  const accountKey = lanes.map((result) => result.value.accountKey).filter(Boolean)[0] || '';
+  const accountLabel = lanes.map((result) => result.value.plan).filter(Boolean)[0] || '';
   // The console key's quota is the authoritative failure signal for its own
   // lane, but plan buckets that did load still render — an unavailable key
   // does not erase a live Weekend bucket.
@@ -436,23 +440,29 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       status: error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable',
       updatedAt,
       windows,
-      region: zaiRegion(options, env)
+      region
     });
   }
-  const accountKey = lanes.map((result) => result.value.accountKey).filter(Boolean)[0] || '';
-  const accountLabel = lanes.map((result) => result.value.plan).filter(Boolean)[0] || '';
   const hasAnything = lanes.some((result) => result.value.hasAnything);
   const balance = lanes.map((result) => result.value.balance).filter(Boolean)[0] || null;
   // The plan buckets come from the local ZCode login, not the console key, so
-  // a ZCode-only row reports oauth while a keyed row reports api.
-  const source = key ? 'api' : (hasAnything ? 'oauth' : '');
+  // a ZCode-only row reports oauth while a keyed row reports api. A ZCode-only
+  // billing failure reports that lane's own error instead of collapsing into
+  // notConfigured — the login is still detected, and unauthorized means ZCode
+  // will rotate the token, so it reads as not configured.
+  const planError = !key && planResult.status === 'rejected' ? planResult.reason : null;
+  const source = key ? 'api' : (hasAnything || planError ? 'oauth' : '');
   return normalizeLimitProvider({
     provider: 'zai',
     ...(accountKey ? { accountKey } : {}),
     ...(accountLabel ? { accountLabel } : {}),
     ...(balance ? { balance } : {}),
     source,
-    status: hasAnything ? 'ok' : key ? 'unavailable' : 'notConfigured',
+    status: hasAnything ? 'ok'
+      : key ? 'unavailable'
+        : planError
+          ? (planError?.status === 'unauthorized' ? 'notConfigured' : planError?.status === 'timeout' ? 'unavailable' : planError?.status || 'unavailable')
+          : 'notConfigured',
     updatedAt,
     windows,
     region
@@ -495,11 +505,14 @@ function zaiLocalDayKey(ms) {
 // the positive delta between observations. A drop (refund, plan reset) moves
 // the baseline without recording negative spend.
 function zcodeRecordCumulativeSpend({ accountKey, totalSpent, now, storePath, readJson: readOverride, writeJsonAtomic: writeOverride }) {
-  if (!accountKey || !Number.isFinite(Number(totalSpent)) || !storePath) return null;
+  // totalSpent is null when the report omits the cumulative total; Number(null)
+  // is 0, so the null check must come before the finite check or a missing
+  // field would silently rebase the tracked total to zero.
+  if (!accountKey || totalSpent === null || !Number.isFinite(totalSpent) || !storePath) return null;
   const read = readOverride || readJson;
   const write = writeOverride || writeJsonAtomic;
   const nowMs = Number(now);
-  const total = Math.max(0, Number(totalSpent));
+  const total = Math.max(0, totalSpent);
   let store;
   try {
     // config.readJson returns null on ENOENT instead of throwing, so a null
@@ -545,9 +558,6 @@ function zcodeRecordCumulativeSpend({ accountKey, totalSpent, now, storePath, re
 // the shared subscription quota above. Single origin, no region split; the
 // gateway rejects requests without the ZCode client's device id (code 3001
 // "parameter error"), so the id rides along from ZCode's own telemetry state.
-
-// The billing gateway rejects requests without the ZCode client's device id
-// (code 3001 "parameter error"), so it reads ZCode's own telemetry state.
 function zcodeDeviceMid(deps = {}) {
   const readFileSync = deps.readFileSync || fs.readFileSync;
   const homeDir = deps.homeDir || os.homedir();
@@ -635,58 +645,6 @@ function zaiStatusProvider(status, options = {}, deps = {}, source = 'api') {
   });
 }
 
-// Start/Weekend plans authorize with ZCode's own login token rather than the
-// console API key, so this lane runs only when the console key is absent and
-// discovery found an entitled local ZCode login. 401/403 fall back to the
-// not-configured state: the token is ZCode-managed and will be rotated there.
-async function fetchZcodeStartPlanLimits(options = {}, deps = {}) {
-  const env = deps.env || process.env;
-  const now = (deps.now || Date.now)();
-  const discovery = discoverZcodeConnection(options, {
-    readFileSync: deps.readFileSync || fs.readFileSync,
-    homeDir: deps.homeDir || options.homeDir || os.homedir()
-  });
-  if (discovery.kind !== 'start-billing' || !discovery.entitled || !discovery.credential) {
-    return zaiStatusProvider('notConfigured', options, deps);
-  }
-
-  try {
-    const payload = await runWithProbeDeadline(async ({ signal }) => {
-      const deviceMid = zcodeDeviceMid(deps);
-      const response = await (deps.fetch || fetch)(zcodeStartPlanBalanceUrl(), {
-        headers: {
-          Authorization: `Bearer ${discovery.credential.token}`,
-          Accept: 'application/json',
-          ...(deviceMid ? { 'X-Device-Mid': deviceMid } : {})
-        },
-        signal
-      });
-      if (!response.ok) {
-        const error = new Error(`zcode billing returned ${response.status}`);
-        error.status = response.status === 401 || response.status === 403
-          ? 'unauthorized'
-          : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
-        throw error;
-      }
-      return response.json();
-    }, { signal: deps.signal, deadlineMs: Number(deps.zaiFetchTimeoutMs || deps.fetchTimeoutMs || ZAI_FETCH_TIMEOUT_MS) });
-    const usage = parseZcodeStartPlanBalances(payload);
-    return normalizeLimitProvider({
-      provider: 'zai',
-      accountKey: hashKey('zai', discovery.credential.token),
-      accountLabel: usage.plan,
-      source: 'oauth',
-      status: usage.windows.length ? 'ok' : 'unavailable',
-      updatedAt: new Date(now).toISOString(),
-      windows: usage.windows,
-      region: zaiRegion(options, env)
-    });
-  } catch (error) {
-    if (error?.status === 'unauthorized') return zaiStatusProvider('notConfigured', options, deps);
-    return zaiStatusProvider(error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable', options, deps);
-  }
-}
-
 module.exports = {
   ZAI_FETCH_TIMEOUT_MS,
   ZAI_QUOTA_URL,
@@ -698,6 +656,5 @@ module.exports = {
   zaiDashboardUrl,
   parseZaiUsage,
   parseZcodeStartPlanBalances,
-  fetchZcodeStartPlanLimits,
   fetchZaiLimits
 };

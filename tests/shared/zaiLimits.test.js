@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -278,6 +281,7 @@ test('fetchZaiLimits merges the key and ZCode plan lanes when both exist', async
     provider: { 'builtin:zai-start-plan': { enabled: true, options: { apiKey: 'mirror-jwt' } } }
   };
   const cache = { entryStatus: { items: { 'builtin:zai-start-plan': { status: 'available' } } } };
+  let billingHeaders = null;
   const provider = await fetchZaiLimits(
     { zaiApiKey: 'zai-token' },
     {
@@ -294,7 +298,7 @@ test('fetchZaiLimits merges the key and ZCode plan lanes when both exist', async
         if (Object.hasOwn(files, key)) return files[key];
         throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
       },
-      fetch: async (url) => {
+      fetch: async (url, init) => {
         const target = String(url);
         if (target.includes('/quota/limit')) {
           return { ok: true, status: 200, json: async () => ({ data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }] } }) };
@@ -303,6 +307,7 @@ test('fetchZaiLimits merges the key and ZCode plan lanes when both exist', async
           return { ok: true, status: 200, json: async () => ({ code: 200, data: { availableBalance: '2.50' } }) };
         }
         if (target.includes('zcode-plan/billing/balance')) {
+          billingHeaders = init.headers;
           return {
             ok: true,
             status: 200,
@@ -324,6 +329,10 @@ test('fetchZaiLimits merges the key and ZCode plan lanes when both exist', async
   assert.ok(kinds.includes('credits'), 'balance window present');
   assert.ok(kinds.includes('plan-bucket'), 'ZCode plan buckets present');
   assert.ok(kinds.includes('session') || kinds.includes('weekly'), 'subscription quota present');
+  // The billing lane authenticates with the mirror key and the device id the
+  // gateway hard-requires (code 3001 without it).
+  assert.equal(billingHeaders.Authorization, 'Bearer mirror-jwt');
+  assert.equal(billingHeaders['X-Device-Mid'], 'dm');
 });
 
 test('fetchZaiLimits serves Coding Plan quota from the ZCode mirror key', async () => {
@@ -363,6 +372,126 @@ test('fetchZaiLimits serves Coding Plan quota from the ZCode mirror key', async 
   assert.equal(provider.windows[0].source, 'local');
 });
 
+// ZCode on-disk fixture for the lane tests below: an entitled start-plan
+// selection with a mirror key and a telemetry device id.
+function zcodeLaneDeps(fetchMock) {
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-start-plan' }
+    }),
+    'config.json': JSON.stringify({
+      provider: { 'builtin:zai-start-plan': { enabled: true, options: { apiKey: 'mirror-jwt' } } }
+    }),
+    'coding-plan-cache.json': JSON.stringify({
+      entryStatus: { items: { 'builtin:zai-start-plan': { status: 'available' } } }
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  return {
+    readFileSync: (filePath) => {
+      const name = String(filePath).split('/').pop();
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    ...(fetchMock ? { fetch: fetchMock } : {})
+  };
+}
+
+const BILLING_OK = {
+  ok: true,
+  status: 200,
+  json: async () => ({
+    code: 0,
+    data: {
+      plans: [{ plan_id: 'zcode-v3-x', name: 'ZCode Start Plan', status: 'active', entitlements: [{ entitlement_id: 'e1', period: 'daily' }] }],
+      balances: [{ entitlement_id: 'e1', plan_id: 'zcode-v3-x', show_name: 'GLM-5.3', total_units: 100, used_units: 10, remaining_units: 90 }]
+    }
+  })
+};
+
+test('fetchZaiLimits keeps ZCode plan windows when the console key quota fails', async () => {
+  // The lane merge used to throw a TDZ ReferenceError on this path.
+  const provider = await fetchZaiLimits(
+    { zaiApiKey: 'zai-token' },
+    {
+      env: {},
+      now: () => Date.parse('2026-09-05T12:00:00Z'),
+      ...zcodeLaneDeps(async (url) => {
+        const target = String(url);
+        if (target.includes('/quota/limit')) return { ok: false, status: 500, json: async () => ({}) };
+        if (target.includes('zcode-plan/billing/balance')) return BILLING_OK;
+        return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      })
+    }
+  );
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'api');
+  assert.ok(provider.accountKey, 'accountKey survives from the plan lane');
+  assert.equal(provider.accountLabel, 'ZCode Start Plan');
+  assert.ok(provider.windows.some((window) => window.limitId === 'zcode-v3-x'), 'plan bucket survives');
+});
+
+test('fetchZaiLimits reports the ZCode lane own error when only it ran', async () => {
+  const base = { env: {}, now: () => Date.parse('2026-09-05T12:00:00Z') };
+  const unavailable = await fetchZaiLimits({}, {
+    ...base,
+    ...zcodeLaneDeps(async () => ({ ok: false, status: 500, json: async () => ({}) }))
+  });
+  assert.equal(unavailable.status, 'unavailable');
+  assert.equal(unavailable.source, 'oauth');
+
+  // A stale mirror JWT is ZCode-managed and rotates there, so it reads as
+  // not configured rather than an auth failure the user could fix.
+  const notConfigured = await fetchZaiLimits({}, {
+    ...base,
+    ...zcodeLaneDeps(async () => ({ ok: false, status: 401, json: async () => ({}) }))
+  });
+  assert.equal(notConfigured.status, 'notConfigured');
+  assert.equal(notConfigured.source, 'oauth');
+});
+
+test('fetchZaiLimits tracks cumulative spend and ignores a missing total', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zai-spend-'));
+  const storePath = path.join(dir, 'zai-balance.json');
+  try {
+    const call = (data) => fetchZaiLimits(
+      { zaiApiKey: 'zai-token' },
+      {
+        env: {},
+        now: () => Date.parse('2026-09-05T12:00:00Z'),
+        zaiBalanceStorePath: storePath,
+        readFileSync: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
+        fetch: async (url) => {
+          if (String(url).includes('query-customer-account-report')) {
+            return { ok: true, status: 200, json: async () => ({ code: 200, data }) };
+          }
+          if (String(url).includes('/quota/limit')) {
+            return { ok: true, status: 200, json: async () => ({ data: { limits: [] } }) };
+          }
+          return { ok: true, status: 200, json: async () => ({ data: [] }) };
+        }
+      }
+    );
+
+    const first = await call({ availableBalance: '5.00', totalSpendAmount: '100' });
+    assert.equal(first.balance.todaySpend, 0);
+    assert.equal(first.balance.allTimeSpend, 0);
+
+    // A report without the cumulative total must not rebase the baseline:
+    // Number(null) is 0, so a null check — not isFinite alone — gates it.
+    // Normalization fills absent spend fields with null.
+    const missing = await call({ availableBalance: '5.00' });
+    assert.equal(missing.balance.todaySpend, null);
+
+    const second = await call({ availableBalance: '5.00', totalSpendAmount: '150' });
+    assert.equal(second.balance.todaySpend, 50);
+    assert.equal(second.balance.allTimeSpend, 50);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('fetchZaiLimits physically aborts a hung request within its configured bound', async () => {
   let signal;
   const provider = await fetchZaiLimits(
@@ -370,6 +499,7 @@ test('fetchZaiLimits physically aborts a hung request within its configured boun
     {
       env: {},
       zaiFetchTimeoutMs: 5,
+      readFileSync: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
       fetch: async (_url, init) => {
         signal = init.signal;
         return new Promise(() => {});
