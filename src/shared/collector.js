@@ -3306,6 +3306,15 @@ function collectorAnchorTrust(saved, options = {}) {
 // and picks up any changes that the delta-derivation might miss.
 const FULL_SCAN_INTERVAL_MS = 60 * 60 * 1000;
 
+// Ceiling on how long an unbroken run of watch events may keep deferring the
+// tick. Every event clears the pending debounce timer and re-arms a fresh one,
+// so a source that changes more often than once per `watchDebounceMs` starves
+// the tick indefinitely and the collector publishes nothing (issue #520). The
+// re-arm itself stays — it is what keeps a mid-tick event from coalescing — and
+// 5s is the far end of the promised 3-5s refresh, so the ceiling only ever
+// fires where the promise was already broken.
+const WATCH_MAX_WAIT_MS = 5000;
+
 // Escape hatch for filesystems that never deliver native events — network
 // mounts, some FUSE drivers, container bind mounts. chokidar has its own
 // CHOKIDAR_USEPOLLING override, but that is chokidar's surface, not ours: it
@@ -3402,6 +3411,9 @@ function startCollector(options) {
   // the interval loop into spins. Clamping here means no timer below can
   // reintroduce that by forgetting.
   const watchDebounceMs = clampTimerDelayMs(options.watchDebounceMs, 1500);
+  // Floored at the debounce: a ceiling shorter than one debounce window would
+  // pull every lone event forward and make the debounce itself unobservable.
+  const watchMaxWaitMs = Math.max(watchDebounceMs, clampTimerDelayMs(options.watchMaxWaitMs, WATCH_MAX_WAIT_MS));
   const intervalMs = clampTimerDelayMs(options.intervalMs, 5 * 60 * 1000);
   const historyRetryMs = clampTimerDelayMs(options.historyRetryMs, 60 * 1000);
   const watchUsePolling = resolveWatchUsePolling(options.watchUsePolling);
@@ -3474,6 +3486,10 @@ function startCollector(options) {
   let lastFullScanAt = 0;
   let pendingWaiters = [];
   let debounceTimer = null;
+  // Epoch ms by which the current run of watch events must have ticked, or 0
+  // when no run is pending. Set by the first scheduleTick of a run, cleared when
+  // a tick actually starts so the next quiet period begins its own run.
+  let watchDeadlineAt = 0;
   let intervalTimer = null;
   let stopped = false;
   let lastTickAttemptAt = 0;
@@ -4010,12 +4026,25 @@ function startCollector(options) {
   function scheduleTick(reason, eventClients) {
     if (stopped) return;
     recordWatchClients(eventClients);
+    // The first event of a run pins the deadline; every re-arm after it waits
+    // out whichever of the debounce and the remaining ceiling comes first, so a
+    // storm faster than the debounce still ticks instead of deferring forever.
+    // Floored at 1ms because clampTimerDelayMs' reason applies here too: a zero
+    // or negative delay is rewritten to 1ms by setTimeout, and an expired
+    // deadline must arm a real timer rather than spin.
+    const nowMs = Date.now();
+    if (watchDeadlineAt === 0) watchDeadlineAt = nowMs + watchMaxWaitMs;
+    const delayMs = Math.max(1, Math.min(watchDebounceMs, watchDeadlineAt - nowMs));
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
       // Re-arm instead of queueing onto the in-flight tick: the coalesce path
       // would re-run immediately on completion, stacking scans back-to-back.
-      if (tickInFlight) { scheduleTick(reason); return; }
+      // The deadline restarts from the re-arm rather than staying expired, which
+      // would otherwise fire this branch every millisecond for the tick's whole
+      // duration.
+      if (tickInFlight) { watchDeadlineAt = 0; scheduleTick(reason); return; }
+      watchDeadlineAt = 0;
       // A raw source event means that client's synced cache may now be stale, so
       // its sync drops to the short floor instead of waiting out the idle
       // cadence. Its cache is deliberately outside the watcher, so a sync here
@@ -4025,7 +4054,7 @@ function startCollector(options) {
         targetClients: takeWatchClients(),
         sourceSelfSync: sourceSyncQueue.takeDue()
       });
-    }, watchDebounceMs);
+    }, delayMs);
   }
 
   // chokidar's close() walks every watched entry and closes every fs.watch

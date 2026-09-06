@@ -4573,3 +4573,182 @@ test('the quit variant of stop() skips the watcher walk and leans on `stopped`',
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// A watch event clears the pending debounce timer and re-arms a fresh window, so
+// a source that changes more often than once per `watchDebounceMs` defers the
+// tick forever and the collector publishes nothing. `watchMaxWaitMs` caps the
+// total deferral: once a storm has held the tick back for that long, the tick
+// runs even though events are still arriving.
+test('a watch-event storm faster than the debounce still ticks within the max-wait ceiling', async () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => ({
+    on: (event, handler) => { if (event === 'all') watchHandler = handler; },
+    close: () => {}
+  });
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    setTimeout(() => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    }, 5);
+    return child;
+  };
+
+  let handle = null;
+  let storm = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 5000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchDebounceMs: 10,
+      // Every other case here runs a 10ms debounce, so a ceiling left at its
+      // 5000ms default would never come due inside the test's own timeout.
+      watchMaxWaitMs: 50,
+      limitsEnabled: false,
+      historyEnabled: false,
+      onUpdate: (_summary, reason) => updates.push(reason)
+    });
+
+    // The startup tick is the interval one and says so. Every assertion below
+    // counts only `watch:` reasons, so a tick from startup — or from the hourly
+    // reconciliation — cannot stand in for a ceiling that never fired.
+    await waitForCondition(() => updates.length === 1);
+    assert.deepEqual(updates, ['interval']);
+    assert.ok(watchHandler, 'watcher handler captured');
+
+    // Events every 5ms, faster than the 10ms debounce: the un-ceilinged timer
+    // is cleared and re-armed before it can ever come due.
+    storm = setInterval(() => {
+      if (watchHandler) watchHandler('change', '/fake/session.jsonl');
+    }, 5);
+
+    const watchTicks = () => updates.filter((reason) => reason.startsWith('watch:'));
+    // Wide bound on purpose: this pins that the ceiling fires at all, not when.
+    // The ceiling is 50ms and the window is 40x that, so CI scheduling noise on
+    // Node 22 or 24 cannot decide the outcome.
+    const ticked = await waitForCondition(() => watchTicks().length > 0, 2000)
+      .then(() => true, () => false);
+    clearInterval(storm);
+    storm = null;
+
+    assert.ok(
+      ticked,
+      `no watch tick in 2000ms of a 5ms event storm against a 50ms ceiling; reasons: ${updates.join(', ') || '(none)'}`
+    );
+    assert.ok(calls.length > 3, 'the ceiling tick spawned a scan');
+  } finally {
+    if (storm) clearInterval(storm);
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// The ceiling bounds a storm and must not touch the ordinary path: one event
+// with nothing behind it still waits out the whole debounce before it scans.
+test('a single watch event still waits out the debounce and does not fire early', async () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => ({
+    on: (event, handler) => { if (event === 'all') watchHandler = handler; },
+    close: () => {}
+  });
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    setTimeout(() => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    }, 5);
+    return child;
+  };
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 5000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      // A 10ms debounce leaves no honest window to observe "not yet", so this
+      // case runs a slower one. The ceiling sits above it, where a ceiling
+      // floored at the debounce has to sit.
+      watchDebounceMs: 120,
+      watchMaxWaitMs: 400,
+      limitsEnabled: false,
+      historyEnabled: false,
+      onUpdate: (_summary, reason) => updates.push(reason)
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.deepEqual(updates, ['interval']);
+    assert.ok(watchHandler, 'watcher handler captured');
+
+    const watchTicks = () => updates.filter((reason) => reason.startsWith('watch:'));
+    watchHandler('change', '/fake/session.jsonl');
+    // Well inside the 120ms debounce. Timers never fire early, so a short wait
+    // here is a real observation rather than a race.
+    await new Promise((resolve) => { setTimeout(resolve, 30); });
+    assert.equal(watchTicks().length, 0, 'a lone event scanned before its debounce elapsed');
+
+    await waitForCondition(() => watchTicks().length > 0, 2000);
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
