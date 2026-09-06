@@ -212,3 +212,28 @@ test('parseZcodeStartPlanBalances maps buckets to daily and billing windows', ()
   // Unknown models surface as their own windows instead of being filtered.
   assert.equal(byLabel.get('zcode-v3-future-plan:GLM-5.5').usedPercent, 0);
 });
+
+test('discoverZcodeConnection re-reads disk on every call — an account switch lands next round', () => {
+  // No caching is the contract: the refresh cycle is the only switch
+  // detector, so a second call with changed files must see the new state.
+  let files = { ...HAPPY_FILES };
+  const deps = { readFileSync: (filePath) => fileSystem(files)(filePath), homeDir: '/home/test' };
+  assert.equal(discoverZcodeConnection({}, deps).kind, 'start-billing');
+
+  files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'bigmodel',
+      modelProviderFamilySelectedKeys: { bigmodel: 'coding-plan:builtin:bigmodel-coding-plan' }
+    }),
+    'config.json': JSON.stringify({
+      provider: { 'builtin:bigmodel-coding-plan': { enabled: true, options: { apiKey: 'bm-mirror-key' } } }
+    }),
+    'coding-plan-cache.json': JSON.stringify({
+      entryStatus: { items: { 'builtin:bigmodel-coding-plan': { status: 'available' } } }
+    })
+  };
+  const switched = discoverZcodeConnection({}, deps);
+  assert.equal(switched.kind, 'coding-quota');
+  assert.equal(switched.family, 'bigmodel');
+  assert.equal(switched.credential.token, 'bm-mirror-key');
+});
