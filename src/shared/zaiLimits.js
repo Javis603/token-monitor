@@ -305,6 +305,15 @@ async function fetchJson(url, key, deps = {}) {
 // when it actually has something — an empty pool is absent, not zero. The
 // console key also answers quota for users without ZCode; the ZCode login
 // also answers plan buckets for users without a console key.
+// An empty lane: attempted marks a lane that ran and found nothing, so the
+// row reports unavailable rather than contradicting the detected-login pill.
+const emptyLane = (attempted = false) => ({ windows: [], plan: '', accountKey: '', hasAnything: false, attempted });
+
+// Maps a lane error onto a provider status: timeouts degrade to unavailable,
+// every other classified status (unauthorized, sourceRateLimited, …) passes
+// through so the pill can say what actually happened.
+const laneErrorStatus = (error) => (error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable');
+
 async function fetchZaiLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
@@ -357,7 +366,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
         hasAnything: usage.windows.length > 0 || Boolean(balanceWindow)
       };
     })()
-    : Promise.resolve({ windows: [], plan: '', accountKey: '', hasAnything: false });
+    : Promise.resolve(emptyLane());
 
   const planLane = (async () => {
     const discovery = discoverZcodeConnection(options, {
@@ -385,10 +394,10 @@ async function fetchZaiLimits(options = {}, deps = {}) {
           };
         } catch (_) {}
       }
-      return { windows: [], plan: '', accountKey: '', hasAnything: false, attempted: true };
+      return emptyLane(true);
     }
     if (discovery.kind !== 'start-billing' || !discovery.entitled || !discovery.credential) {
-      return { windows: [], plan: '', accountKey: '', hasAnything: false };
+      return emptyLane();
     }
     const payload = await runWithProbeDeadline(async ({ signal }) => {
       const deviceMid = zcodeDeviceMid(deps);
@@ -426,7 +435,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
   if (keyResult.status === 'rejected' && planResult.status === 'rejected') {
     const error = keyResult.reason;
     if (error?.status === 'unauthorized') return zaiStatusProvider('notConfigured', options, deps);
-    return zaiStatusProvider(error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable', options, deps);
+    return zaiStatusProvider(laneErrorStatus(error), options, deps);
   }
 
   const lanes = [keyResult, planResult].filter((result) => result.status === 'fulfilled');
@@ -443,7 +452,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       ...(accountKey ? { accountKey } : {}),
       ...(accountLabel ? { accountLabel } : {}),
       source: 'api',
-      status: error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable',
+      status: laneErrorStatus(error),
       updatedAt,
       windows,
       region
