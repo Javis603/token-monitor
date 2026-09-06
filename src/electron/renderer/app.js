@@ -5030,19 +5030,16 @@ function renderProviderWindows(provider, color) {
       windows.append(node);
     }
   } else if (provider.provider === 'zai' || provider.provider === 'zaiteam') {
-    // Subscription quota keeps the canonical 5-hour/Weekly/MCP trio; Start and
-    // Weekend plan buckets arrive per model (daily or one-time billing) and
-    // render as their own labeled rows. The subscription MCP window only owns
-    // the billing lane when no plan bucket does.
+    // Billing-kind windows are one of three things: the subscription MCP
+    // monthly bucket (no metric, no limitId), ZCode Start/Weekend plan
+    // buckets (limitId set, per-model labels), or the cash balance
+    // (metric 'credits'). Each renders in its own slot below.
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
-    const mcp = windowForKind(provider, 'billing');
+    const billingWindows = windowsForKind(provider, 'billing');
     const dailyWindows = windowsForKind(provider, 'daily');
-    const oneTimeWindows = (provider.windows || []).filter((window) => (
-      // Plan buckets carry their ZCode plan id; the subscription MCP window
-      // never does.
-      window?.kind === 'billing' && window?.limitId
-    ));
+    const planBuckets = billingWindows.filter((window) => window?.limitId);
+    const mcp = billingWindows.find((window) => !window?.metric && !window?.limitId);
     const balanceWindow = (provider.windows || []).find((window) => window?.metric === 'credits');
     const nodes = [
       session && limitWindowNode(session.label || '5-hour', session, color, 0.95),
@@ -5053,8 +5050,8 @@ function renderProviderWindows(provider, color) {
         0.78
       )),
       weekly && limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68),
-      ...oneTimeWindows.map((window) => limitWindowNode(window.label || 'Start Plan', window, color, 0.68)),
-      mcp && !oneTimeWindows.length && limitWindowNode('MCP', mcp, color, 0.68)
+      ...planBuckets.map((window) => limitWindowNode(window.label || 'Start Plan', window, color, 0.68)),
+      mcp && limitWindowNode('MCP', mcp, color, 0.68)
     ].filter(Boolean);
     if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
     windows.append(...nodes);

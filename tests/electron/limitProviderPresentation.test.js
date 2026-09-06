@@ -1105,16 +1105,14 @@ test('Z.ai renders session, daily and billing windows with their own labels', ()
   assert.match(renderProviderWindows, /provider\.provider === 'zai'/);
   assert.match(renderProviderWindows, /const session = windowForKind\(provider, 'session'\);/);
   assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
-  assert.match(renderProviderWindows, /const mcp = windowForKind\(provider, 'billing'\);/);
   assert.match(renderProviderWindows, /const dailyWindows = windowsForKind\(provider, 'daily'\);/);
-  // Start/Weekend plan buckets arrive per model with their own labels; the
-  // subscription MCP window must only render when no plan bucket claimed the
-  // billing lane.
-  assert.match(renderProviderWindows, /dailyWindows\.map\(\(window, index\)/);
-  // Plan buckets carry their ZCode plan id in limitId; the subscription MCP
-  // window never does, so the billing lane owner is decided by presence.
-  assert.match(renderProviderWindows, /window\?\.kind === 'billing' && window\?\.limitId/);
-  assert.match(renderProviderWindows, /mcp && !oneTimeWindows\.length && limitWindowNode\('MCP', mcp, color, 0\.68\)/);
+  // Billing-kind windows split three ways: ZCode plan buckets carry limitId,
+  // the cash balance carries metric credits, and the subscription MCP window
+  // carries neither — each renders in its own slot.
+  assert.match(renderProviderWindows, /const billingWindows = windowsForKind\(provider, 'billing'\);/);
+  assert.match(renderProviderWindows, /const planBuckets = billingWindows\.filter\(\(window\) => window\?\.limitId\);/);
+  assert.match(renderProviderWindows, /const mcp = billingWindows\.find\(\(window\) => !window\?\.metric && !window\?\.limitId\);/);
+  assert.match(renderProviderWindows, /const balanceWindow = \(provider\.windows \|\| \[\]\)\.find\(\(window\) => window\?\.metric === 'credits'\);/);
 });
 
 test('Copilot renders monthly Premium and Chat quotas as billing windows', () => {

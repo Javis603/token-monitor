@@ -7,8 +7,7 @@ const path = require('node:path');
 const { normalizeLimitProvider } = require('./limits');
 const { hashKey } = require('./hashKey');
 const { runWithProbeDeadline } = require('./probeDeadline');
-const { sharedDataDir } = require('./config');
-const { recordConsumption } = require('./deepseekBalanceHistory');
+const { readJson, writeJsonAtomic, sharedDataDir } = require('./config');
 const { discoverZcodeConnection } = require('./zcodeDiscovery');
 
 const ZAI_FETCH_TIMEOUT_MS = 12_000;
@@ -328,36 +327,22 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       const balanceWindow = balanceResult.status === 'fulfilled'
         ? zaiBalanceWindow(balanceResult.value, region)
         : null;
-      // Spend tracking mirrors DeepSeek: the report's cumulative total goes
-      // through the shared balance history, which derives the today/week/
-      // month deltas the finance report does not return.
+      // The finance report exposes a cumulative spend total; the today/week/
+      // month deltas come from tracking that total locally.
       let balance = null;
       if (balanceWindow) {
         const balanceData = balanceResult.status === 'fulfilled' ? balanceResult.value?.data : null;
-        const totalSpend = numberOrNull(balanceData?.totalSpendAmount);
-        let spend = null;
-        if (totalSpend !== null) {
-          try {
-            spend = recordConsumption({
-              accountKey: hashKey('zai', key),
-              currency: balanceWindow.currency,
-              paid: totalSpend,
-              now,
-              storePath: deps.zaiBalanceStorePath || path.join(sharedDataDir({ env }), 'zai-balance.json')
-            }, deps);
-          } catch (_) {}
-        }
         balance = {
           amount: balanceWindow.remaining,
           currency: balanceWindow.currency,
-          todaySpend: spend ? spend.todaySpend : numberOrNull(balanceData?.todaySpendAmount),
-          allTimeSpend: totalSpend,
-          ...(spend ? {
-            weekSpend: spend.weekSpend,
-            monthSpend: spend.monthSpend,
-            trackingSince: spend.trackingSince,
-            monthSinceTracking: spend.monthSinceTracking
-          } : {})
+          ...(zcodeRecordCumulativeSpend({
+            accountKey: hashKey('zai', key),
+            totalSpent: numberOrNull(balanceData?.totalSpendAmount),
+            now,
+            storePath: deps.zaiBalanceStorePath || path.join(sharedDataDir({ env }), 'zai-balance.json'),
+            readJson: deps.readJson,
+            writeJsonAtomic: deps.writeJsonAtomic
+          }) || { todaySpend: numberOrNull(balanceData?.todaySpendAmount), allTimeSpend: numberOrNull(balanceData?.totalSpendAmount) })
         };
       }
       return {
@@ -466,6 +451,63 @@ function zaiBalanceWindow(payload, region) {
     label: 'Balance',
     remaining: Math.max(0, remaining),
     currency: zaiBalanceCurrency(region)
+  };
+}
+
+const ZAI_SPEND_STORE_VERSION = 1;
+
+function zaiLocalDayKey(ms) {
+  const date = new Date(ms);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+// The report's spend total only ever grows in normal use, so consumption is
+// the positive delta between observations. A drop (refund, plan reset) moves
+// the baseline without recording negative spend.
+function zcodeRecordCumulativeSpend({ accountKey, totalSpent, now, storePath, readJson: readOverride, writeJsonAtomic: writeOverride }) {
+  if (!accountKey || !Number.isFinite(Number(totalSpent)) || !storePath) return null;
+  const read = readOverride || readJson;
+  const write = writeOverride || writeJsonAtomic;
+  const nowMs = Number(now);
+  const total = Math.max(0, Number(totalSpent));
+  let store;
+  try {
+    // config.readJson returns null on ENOENT instead of throwing, so a null
+    // check — not just the try/catch — is what makes a fresh store.
+    store = read(storePath, 'utf8');
+  } catch (_) {}
+  if (!store || typeof store !== 'object') {
+    store = { version: ZAI_SPEND_STORE_VERSION, accounts: {} };
+  }
+  const entry = store.accounts[accountKey] || { lastTotal: null, allTimeSpend: 0, dailySpend: {}, trackingSince: nowMs };
+  if (entry.lastTotal === null) {
+    entry.lastTotal = total;
+  } else if (entry.lastTotal !== total) {
+    const consumed = Math.max(0, total - entry.lastTotal);
+    const dayKey = zaiLocalDayKey(nowMs);
+    entry.dailySpend[dayKey] = Math.round(((entry.dailySpend[dayKey] || 0) + consumed) * 100) / 100;
+    entry.allTimeSpend = Math.round((Number(entry.allTimeSpend || 0) + consumed) * 100) / 100;
+    entry.lastTotal = total;
+  }
+  store.accounts[accountKey] = entry;
+  write(storePath, store);
+
+  const todayKey = zaiLocalDayKey(nowMs);
+  const monthKey = todayKey.slice(0, 7);
+  const todayDate = new Date(nowMs);
+  const monday = new Date(todayDate);
+  monday.setDate(todayDate.getDate() - ((todayDate.getDay() + 6) % 7));
+  const weekKey = zaiLocalDayKey(monday.getTime());
+  const sumSince = (predicate) => Object.entries(entry.dailySpend)
+    .filter(([key]) => predicate(key))
+    .reduce((sum, [, amount]) => sum + amount, 0);
+  return {
+    todaySpend: entry.dailySpend[todayKey] || 0,
+    weekSpend: Math.round(sumSince((key) => key >= weekKey) * 100) / 100,
+    monthSpend: Math.round(sumSince((key) => key.startsWith(monthKey)) * 100) / 100,
+    allTimeSpend: entry.allTimeSpend,
+    trackingSince: entry.trackingSince,
+    monthSinceTracking: monthKey === zaiLocalDayKey(entry.trackingSince)
   };
 }
 
