@@ -596,7 +596,7 @@ function existingCodexCommandCandidates(candidates, deps = {}) {
 }
 
 function codexSpawnSpec(command, platform = process.platform) {
-  const args = ['-s', 'read-only', '-a', 'untrusted', 'app-server'];
+  const args = ['-s', 'read-only', '-a', 'never', 'app-server'];
   if (platform !== 'win32' || !/\.(cmd|bat)$/i.test(command)) {
     return { command, args };
   }
