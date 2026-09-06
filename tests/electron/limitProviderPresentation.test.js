@@ -3871,6 +3871,15 @@ test('a refused write says which problem it was', () => {
   }
 });
 
+test('iCloud startup lets local subscription ownership reach the seed reconcile', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const start = main.indexOf('onSubscriptions: (document) => {');
+  assert.ok(start >= 0);
+  const body = main.slice(start, main.indexOf('\n    onError:', start));
+  assert.match(body, /localOwnedSubscriptions = !settings\.subscriptionsCacheHub/);
+  assert.match(body, /if \(localOwnedSubscriptions\) return;/);
+});
+
 test('a device with no limits of its own can still name the accounts on the hub', () => {
   const app = readRendererFile('app.js');
   const source = [

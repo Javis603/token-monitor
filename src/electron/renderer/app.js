@@ -290,7 +290,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '' };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, icloudStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '' };
 state.zedAccountExpanded = false;
 state.zedPendingCheckSince = 0;
 state.toolDetailMode = 'tokens';
@@ -360,6 +360,10 @@ Object.assign(els, {
   trayIconOptions: document.getElementById('trayIconOptions'),
   trayOptions: document.getElementById('trayOptions'),
   hubModeOptions: document.getElementById('hubModeOptions'),
+  icloudModeOption: document.querySelector('input[name="hubMode"][value="icloud"]'),
+  icloudFields: document.getElementById('icloudFields'),
+  icloudStatus: document.getElementById('icloudStatus'),
+  icloudRootStatus: document.getElementById('icloudRootStatus'),
   hubBuildStatus: document.getElementById('hubBuildStatus'),
   hubClientFields: document.getElementById('hubClientFields'),
   hubHostFields: document.getElementById('hubHostFields'),
@@ -706,6 +710,7 @@ function settingsSectionSummary(section) {
   if (section === 'sync') {
     if (state.settings.hubMode === 'host') return t('settings.sync.hostHub');
     if (state.settings.hubMode === 'client') return t('settings.sync.connectHub');
+    if (state.settings.hubMode === 'icloud') return t('settings.sync.icloud');
     return t('settings.sync.localOnly');
   }
   if (section === 'tools') {
@@ -1702,6 +1707,8 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
     toolIconsEnabled(state.settings?.showToolIcons),
     deviceDetail.emptyText,
     deviceDetail.metaParts,
+    deviceDetail.canDelete,
+    deviceDetail.deviceId,
     deviceDetail.tools.map((tool) => [
       tool.key,
       tool.value,
@@ -1772,6 +1779,29 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
     meta.className = 'device-meta';
     meta.textContent = deviceDetail.metaParts.join(' · ');
     content.append(meta);
+  }
+  if (deviceDetail.canDelete && window.tokenMonitor.deleteDevice) {
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'device-delete-button';
+    remove.textContent = t('settings.sync.icloudDelete');
+    remove.addEventListener('click', async () => {
+      if (remove.dataset.confirm !== 'true') {
+        remove.dataset.confirm = 'true';
+        remove.textContent = t('settings.sync.icloudDeleteConfirm');
+        return;
+      }
+      remove.disabled = true;
+      try {
+        await window.tokenMonitor.deleteDevice(deviceDetail.deviceId);
+        await refreshStats();
+      } catch (_) {
+        remove.disabled = false;
+        remove.dataset.confirm = '';
+        remove.textContent = t('settings.sync.icloudDelete');
+      }
+    });
+    content.append(remove);
   }
   accordionInner.replaceChildren(content);
   accordionInner.dataset.signature = signature;
@@ -2186,7 +2216,9 @@ function deviceRowsForPeriod() {
       deviceDetail: {
         ...breakdown,
         emptyText: breakdown.totalTokens > 0 ? t('devices.detailsUnavailable') : t('home.noTools'),
-        metaParts
+        metaParts,
+        deviceId: device.deviceId,
+        canDelete: state.settings?.hubMode === 'icloud' && device.deviceId !== localId
       }
     };
   }).sort((a, b) => b.value - a.value);
@@ -3278,6 +3310,9 @@ function subscriptionWriteErrorKey(error) {
   if (/hub_rejected/.test(message)) return 'settings.subscriptions.errorHubRejected';
   if (/write_failed/.test(message)) return 'settings.subscriptions.errorWriteFailed';
   if (/hub_changed/.test(message)) return 'settings.subscriptions.errorHubChanged';
+  if (/icloud_(?:unavailable|stopped)|icloud_write_failed|root-create-failed|subscription-write-failed/.test(message)) {
+    return 'settings.subscriptions.errorIcloudWrite';
+  }
   return 'settings.subscriptions.errorHubWrite';
 }
 
@@ -3309,9 +3344,11 @@ function renderSubscriptionSyncError() {
 function renderSubscriptionNote() {
   const el = els.subscriptionNote;
   if (!el) return;
-  const key = state.settings?.subscriptionsShared
-    ? 'settings.subscriptions.noteShared'
-    : 'settings.subscriptions.note';
+  const key = state.settings?.hubMode === 'icloud'
+    ? 'settings.subscriptions.noteIcloud'
+    : state.settings?.subscriptionsShared
+      ? 'settings.subscriptions.noteShared'
+      : 'settings.subscriptions.note';
   el.dataset.i18n = key;
   el.textContent = t(key);
 }
@@ -7870,6 +7907,11 @@ function streamFailureText(failure) {
 }
 
 function statusTextFor(mode, connected) {
+  if (mode === 'sync' && state.settings?.hubMode === 'icloud') {
+    return String(state.icloudStatus?.state || '').toLowerCase() === 'available'
+      ? 'iCloud'
+      : 'Waiting…';
+  }
   if (mode === 'sync') return connected ? 'Live' : 'Offline';
   if (mode === 'local') return connected ? 'Local' : 'Collecting…';
   return 'Starting…';
@@ -7877,6 +7919,12 @@ function statusTextFor(mode, connected) {
 
 function liveDotTitle(mode, connected) {
   if (mode === 'sync') {
+    if (state.settings?.hubMode === 'icloud') {
+      const status = String(state.icloudStatus?.state || 'waiting');
+      return status === 'available'
+        ? t('settings.sync.icloudAvailable')
+        : t('settings.sync.icloudWaiting');
+    }
     if (connected) return t('status.hubStreamLive');
     const reason = streamFailureText(state.streamFailure);
     return reason ? `${t('status.hubStreamOffline')}: ${reason}` : t('status.hubStreamOffline');
@@ -8942,18 +8990,55 @@ function syncHubModeUi() {
   for (const input of els.hubModeOptions.querySelectorAll('input[name="hubMode"]')) {
     input.checked = input.value === mode;
   }
+  const icloudSupported = state.appInfo?.platform === 'darwin';
+  if (els.icloudModeOption) {
+    els.icloudModeOption.disabled = !icloudSupported;
+    els.icloudModeOption.closest('.hub-mode-option')?.classList.toggle('unsupported', !icloudSupported);
+  }
   els.hubClientFields.classList.toggle('hidden', mode !== 'client');
   els.hubHostFields.classList.toggle('hidden', mode !== 'host');
+  els.icloudFields?.classList.toggle('hidden', mode !== 'icloud');
   if (mode === 'host') {
     els.hubSecretInput.value = state.settings.hubHostSecret || '';
     renderHubStatus();
+  } else {
+    renderIcloudStatus();
   }
   renderSyncClientStatus();
   renderHubBuildStatus();
   syncHubSaveButton();
 }
 
+function renderIcloudStatus() {
+  if (!els.icloudStatus || !els.icloudRootStatus) return;
+  const supported = state.appInfo?.platform === 'darwin';
+  const info = state.icloudStatus || state.hubInfo?.icloud || null;
+  if (!supported) {
+    els.icloudStatus.textContent = t('settings.sync.icloudUnsupported');
+    els.icloudStatus.className = 'hub-status';
+    els.icloudRootStatus.textContent = '';
+    return;
+  }
+  const status = String(info?.state || 'waiting');
+  const labels = {
+    available: 'settings.sync.icloudAvailable',
+    initializing: 'settings.sync.icloudInitializing',
+    starting: 'settings.sync.icloudInitializing',
+    waiting: 'settings.sync.icloudWaiting',
+    unavailable: 'settings.sync.icloudUnavailable',
+    error: 'settings.sync.icloudError',
+    stopped: 'settings.sync.icloudWaiting'
+  };
+  els.icloudStatus.textContent = t(labels[status] || 'settings.sync.icloudWaiting');
+  els.icloudStatus.className = `hub-status${status === 'available' ? ' ok' : status === 'error' ? ' error' : ''}`;
+  const root = String(info?.root || '').trim();
+  els.icloudRootStatus.textContent = root
+    ? `${t('settings.sync.icloudRoot')}: ${root}`
+    : t('settings.sync.icloudRootWaiting');
+}
+
 function renderHubStatus() {
+  renderIcloudStatus();
   if (!els.hubStatusRow || !els.hubAddressList) return;
   const info = state.hubInfo;
   const port = Number(state.settings.hubHostPort || 17321);
@@ -9062,6 +9147,7 @@ async function refreshHubInfo() {
   if (!window.tokenMonitor.getHubInfo) return;
   try {
     state.hubInfo = await window.tokenMonitor.getHubInfo();
+    if (state.hubInfo?.icloud) state.icloudStatus = state.hubInfo.icloud;
     renderHubStatus();
   } catch (_) { /* ignore */ }
 }
@@ -12139,6 +12225,10 @@ els.saveSettingsButton.addEventListener('click', async () => {
 els.hubModeOptions.addEventListener('change', async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement) || target.name !== 'hubMode') return;
+  if (target.value === 'icloud' && state.appInfo?.platform !== 'darwin') {
+    syncHubModeUi();
+    return;
+  }
   await saveSettings({ hubMode: target.value });
   await refreshHubInfo();
   void refreshHubBuildStatus();
@@ -12718,6 +12808,7 @@ window.tokenMonitor.onFloatingBubbleState?.((payload) => {
 window.tokenMonitor.onHubPush?.((payload) => {
   if (!payload?.info) return;
   state.hubInfo = payload.info;
+  if (payload.info.icloud) state.icloudStatus = payload.info.icloud;
   const settingsVisible = isSettingsSurfaceVisible();
   // The first switch to Host mode generates the shared secret asynchronously
   // after settings:update has already returned, so mirror the freshly minted
@@ -12813,6 +12904,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   if (payload.event === 'status') {
     state.streamConnected = Boolean(payload.data?.connected);
     if (payload.data?.mode) state.mode = payload.data.mode;
+    if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
     state.streamFailure = state.streamConnected ? null : (payload.data?.reason ? { reason: payload.data.reason, detail: payload.data.detail ?? null } : state.streamFailure);
   } else if (payload.data?.stats) {
     // Local collector overlays update client-mode data independently of the
@@ -12823,6 +12915,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
       state.streamFailure = null;
     }
     if (payload.data?.mode) state.mode = payload.data.mode;
+    if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
     state.stats = overlayAllTimeSessions(payload.data.stats);
     applyCodexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see

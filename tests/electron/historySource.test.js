@@ -40,6 +40,34 @@ test('resolves local and embedded host histories without a network request', asy
   assert.deepEqual(host.daily, [{ date: '2026-07-16', tokens: 7 }]);
 });
 
+test('resolves iCloud history and device histories through the in-process aggregate', async () => {
+  const devices = [
+    {
+      deviceId: 'mac-a',
+      today: { totalTokens: 11 },
+      historyAvailable: true,
+      history: { daily: [{ date: '2026-08-01', tokens: 11 }], monthly: [], summary: {} }
+    },
+    {
+      deviceId: 'mac-b',
+      today: { totalTokens: 7 },
+      historyAvailable: true,
+      history: { daily: [{ date: '2026-08-01', tokens: 7 }], monthly: [], summary: {} }
+    }
+  ];
+  const icloudSync = {
+    getHistory: async () => ({ daily: [{ date: '2026-08-01', tokens: 18 }], monthly: [], summary: {} }),
+    getDevices: async () => devices
+  };
+  const history = await resolveCompleteHistory({ hubMode: 'icloud', mode: 'sync', icloudSync });
+  assert.equal(history.daily[0].tokens, 18);
+  const fixed = await resolveCompleteHistoryWithDevices({
+    hubMode: 'icloud', mode: 'sync', icloudSync, aggregateHistory: aggregate
+  });
+  assert.deepEqual(fixed.deviceHistories.map((entry) => entry.deviceId), ['mac-a', 'mac-b']);
+  assert.equal(fixed.history.daily.length, 2);
+});
+
 test('fetches and parses the complete client history endpoint', async () => {
   let request;
   const history = { daily: [{ date: '2026-07-15', tokens: 9 }], monthly: [], summary: {} };

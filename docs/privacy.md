@@ -10,7 +10,7 @@ Token Monitor makes network requests only for documented or user-enabled feature
 - Exchange-rate and service-status views fetch their public data sources.
 - Enabled AI Tool Limits integrations contact the corresponding provider. Credentials are sent only to that provider.
 - Discord Rich Presence sends the selected activity details to Discord when explicitly enabled.
-- Multi-device sync sends data to the hub URL configured by the operator.
+- Multi-device sync sends data to the hub URL configured by the operator, or (when explicitly selected on macOS) writes sync snapshots to the user's iCloud Drive.
 
 These requests are processed under the privacy policy of the service receiving them, including the [GitHub Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement) for update checks and the [Discord Privacy Policy](https://discord.com/privacy) for Rich Presence. Review the applicable provider's privacy policy before enabling a provider-backed integration.
 
@@ -25,3 +25,9 @@ Sync also carries manually recorded subscription metadata when any exists: the p
 Sync does not send raw AI logs, prompts, source code, conversation content, OAuth credentials, access or refresh tokens, provider cookies, API keys, or raw provider responses. See the [API documentation](API.md) for the current wire format and public-endpoint redactions.
 
 Data retention and access on a synchronized deployment are controlled by the operator of that hub and its infrastructure provider.
+
+### iCloud Drive sync
+
+iCloud Drive sync is an opt-in macOS feature and does not use a Token Monitor-operated server, CloudKit, or Apple Developer service. Token Monitor writes usage summaries, limits, retained history, device metadata, and manually entered subscription metadata to `iCloud Drive/Token Monitor/sync-v1/` so other Macs using the same Apple ID can aggregate them. The files are per-device/per-writer snapshots and iCloud Drive may propagate them with a delay.
+
+Credentials are excluded: provider API keys, cookies, OAuth access or refresh tokens, authorization headers, and raw provider responses are not written to iCloud by this feature. iCloud storage, access, retention, and deletion are governed by Apple's iCloud terms and the user's Apple ID/device permissions.

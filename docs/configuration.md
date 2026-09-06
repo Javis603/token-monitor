@@ -22,7 +22,9 @@ Click the `⚙` button in the bottom-right corner of the widget to open the sett
 | **Collection** | Tracked tools (and hide / pin / drag-reorder for the main list), collection cadence, **Keep usage from deleted sessions**, custom pricing, data export, and — on Windows — the built-in WSL scan toggle. |
 | **AI Tool Limits** | Which providers to enable, their credentials and sign-in options, multiple accounts per provider (including switching the active local Codex account), session / daily / weekly / billing / credit windows, and how often to refresh. |
 | **Subscriptions** | What you actually pay for each AI account — a recurring plan, or a top-up ledger for balance-style accounts — surfaced on hover of that account's plan label. Entered by hand; nothing is fetched from any provider. With a hub configured the list is stored on the hub and shared by every connected device; otherwise it stays in this device's `settings.json`. |
-| **Multi-device Sync** | **Local only** (no hub), **Connect to a hub** (paste another machine's Hub URL + secret), or **Host hub on this device** (run a hub locally; the panel lists reachable LAN / Tailscale / ZeroTier addresses). |
+| **Multi-device Sync** | **Local only** (no hub), **Connect to a hub** (paste another machine's Hub URL + secret), **Host hub on this device** (run a hub locally; the panel lists reachable LAN / Tailscale / ZeroTier addresses), or **iCloud Drive** on macOS (opt-in, same Apple ID, no Token Monitor server). |
+
+iCloud Drive sync is available only to the macOS widget. It stores per-device usage snapshots and per-writer subscription snapshots under `iCloud Drive/Token Monitor/sync-v1/`; updates are eventually consistent. Provider credentials and raw provider responses are excluded. If iCloud Drive is not available, the widget reports that state and retains its last-good aggregate.
 
 The `⇧` button in the title bar cycles the window behavior.
 

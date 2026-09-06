@@ -219,3 +219,33 @@ test('Hub target classification handles IPv6 loopback and local ranges', () => {
   assert.equal(diagnosticHubTarget('https://fc.example.com'), 'remote');
   assert.equal(diagnosticHubTarget('https://fe8.example.com'), 'remote');
 });
+
+test('iCloud snapshots expose safe sync diagnostics without a Hub URL', () => {
+  const nowMs = Date.parse('2026-08-06T10:00:00.000Z');
+  const { builder } = createBuilder({
+    getSettings: () => ({ hubMode: 'icloud', deviceId: 'local-device', clients: 'codex', language: 'en' }),
+    getEffectiveHubConfig: () => ({ url: null }),
+    getLatestHubStatsSource: () => 'icloud',
+    getLatestHubStatsGeneration: () => 7,
+    getLatestHubStatsIdentity: () => 'icloud|none',
+    getCurrentHubStatsIdentity: () => 'icloud|none',
+    getIcloudSync: () => ({
+      state: 'available',
+      availability: 'available',
+      supported: true,
+      root: '~/Library/Mobile Documents/com~apple~CloudDocs/Token Monitor/sync-v1',
+      deviceCount: 2,
+      lastSuccessfulReconciliation: new Date(nowMs - 1000).toISOString(),
+      lastWriteAt: new Date(nowMs - 2000).toISOString(),
+      lastErrorCategory: 'none',
+      watcher: 'active',
+      reconciliation: 'idle'
+    }),
+    getNowMs: () => nowMs
+  });
+  const snapshot = builder.build(new Date(nowMs));
+  assert.equal(snapshot.hub.runtime.hubTransport, 'filesystem');
+  assert.equal(snapshot.hub.devices.summarySource, 'icloud-sync-cache');
+  assert.equal(snapshot.icloud.deviceCount, 2);
+  assert.equal(snapshot.icloud.root, '~/Library/Mobile Documents/com~apple~CloudDocs/Token Monitor/sync-v1');
+});

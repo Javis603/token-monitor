@@ -180,7 +180,7 @@ Local mode is the default: launch the app and it starts tracking this device. No
 
 ## Multi-device sync
 
-Pick ONE hub backend that all your devices (and any headless agents) connect to. On each device, open the widget and pick a mode under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget.
+Pick ONE multi-device sync backend for your devices (and any headless agents). On each device, open the widget and pick a mode under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget. iCloud Drive is a macOS-widget-only option and does not support headless agents.
 
 #### Option A — Host the hub from the widget (easiest, no CLI)
 
@@ -212,6 +212,10 @@ npx wrangler deploy
 ```
 
 Paste the deployed URL into each device's widget at Settings → Multi-device Sync. See [worker/README.md](worker/README.md) for the iOS widget recipe and endpoint reference, or [docs/API.md](docs/API.md) for the hub HTTP API.
+
+#### Option D — iCloud Drive (macOS, no Hub server)
+
+On each Mac signed into the same Apple ID, choose **iCloud Drive** in Settings → Multi-device Sync. This is an opt-in macOS-only path: Token Monitor writes one atomic snapshot per device and one subscription snapshot per writer under `iCloud Drive/Token Monitor/sync-v1/`, then each Mac aggregates the valid files locally. It uses no Token Monitor server, CloudKit, or credentials; provider API keys, cookies, and tokens stay local. iCloud Drive is eventually consistent, so another Mac may take a moment to appear or update, and a missing or malformed file never clears the last-good aggregate.
 
 ## App data
 

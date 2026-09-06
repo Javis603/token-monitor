@@ -1580,6 +1580,14 @@ span.settings-note.settings-item-desc {
 .hub-status.ok { color: var(--success); border-color: rgba(var(--success-rgb), 0.32); }
 .hub-status.warning { color: var(--orange); border-color: rgba(244, 160, 115, 0.4); }
 .hub-status.error { color: var(--red); border-color: rgba(244, 119, 136, 0.42); }
+.hub-mode-option.unsupported { opacity: 0.55; }
+.hub-mode-option.unsupported input { cursor: not-allowed; }
+.icloud-root-status {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
 .hub-build-status { line-height: 1.4; }
 .hub-address-list { display: grid; min-width: 0; gap: 5px; }
 .hub-address-header { color: var(--muted); font-size: 10px; }
@@ -5661,6 +5669,18 @@ html.is-windows .limit-live-badge {
   line-height: 1.35;
 }
 .device-breakdown-empty { color: var(--muted); font-size: 10px; }
+.device-delete-button {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 3px 7px;
+  border: 1px solid rgba(var(--red-rgb), 0.35);
+  border-radius: 5px;
+  color: var(--red);
+  background: transparent;
+  font-size: 9px;
+  cursor: pointer;
+}
+.device-delete-button:disabled { opacity: 0.55; cursor: default; }
 .accordion-pct {
   font-size: 10px;
   opacity: 0.6;

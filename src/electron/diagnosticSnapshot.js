@@ -114,6 +114,7 @@ function createDiagnosticSnapshotBuilder(options = {}) {
   const getExternalAgentActive = options.getExternalAgentActive || (() => false);
   const getDeviceRuntime = options.getDeviceRuntime || (() => null);
   const getEmbeddedHub = options.getEmbeddedHub || (() => null);
+  const getIcloudSync = options.getIcloudSync || (() => null);
   const getStreamState = options.getStreamState || (() => ({ connected: false, failure: null }));
   const getLatestHubStats = options.getLatestHubStats || (() => null);
   const getLatestHubStatsReceivedAt = options.getLatestHubStatsReceivedAt || (() => null);
@@ -144,6 +145,7 @@ function createDiagnosticSnapshotBuilder(options = {}) {
     const { url: hubUrl } = getEffectiveHubConfig() || {};
     const externalAgentActive = Boolean(getExternalAgentActive());
     const runtimeHandle = getDeviceRuntime();
+    const icloud = getIcloudSync() || null;
     const runtimeDiagnostics = runtimeHandle?.getDiagnostics?.() || {};
     const usageDiagnostics = runtimeDiagnostics.usage || null;
     const limitsDiagnostics = runtimeDiagnostics.limits || null;
@@ -170,6 +172,10 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       hubKind = 'remote-unknown';
       hubSoftwareVersion = 'unknown';
       hubSoftwareVersionSource = 'unavailable';
+    } else if (hubMode === 'icloud') {
+      hubKind = 'icloud-drive';
+      hubSoftwareVersion = 'not-applicable';
+      hubSoftwareVersionSource = 'not-applicable';
     }
     const stream = getStreamState() || {};
     const embeddedHub = getEmbeddedHub();
@@ -177,7 +183,9 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       ? 'not-applicable'
       : hubMode === 'host'
         ? embeddedHub ? 'connected' : 'disconnected'
-        : stream.connected ? 'connected' : 'disconnected';
+        : hubMode === 'icloud'
+          ? 'not-applicable'
+          : stream.connected ? 'connected' : 'disconnected';
     const lastStreamFailureCode = streamState === 'disconnected'
       ? diagnosticStreamDetailCode(stream.failure || {})
       : 'none';
@@ -185,7 +193,9 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       ? 'host'
       : hubMode === 'client'
         ? 'client'
-        : 'none';
+        : hubMode === 'icloud'
+          ? 'icloud'
+          : 'none';
     const sourceMatches = typeof getLatestHubStatsSource !== 'function'
       || String(getLatestHubStatsSource() || 'none') === expectedHubStatsSource;
     const generationMatches = typeof getLatestHubStatsGeneration !== 'function'
@@ -204,8 +214,12 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       hubKind,
       hubSoftwareVersion,
       hubSoftwareVersionSource,
-      hubTarget: hubMode === 'local' ? 'none' : diagnosticHubTarget(hubUrl),
-      hubTransport: hubMode === 'local' ? 'none' : diagnosticHubTransport(hubUrl),
+      hubTarget: hubMode === 'local'
+        ? 'none'
+        : hubMode === 'icloud' ? 'icloud-drive' : diagnosticHubTarget(hubUrl),
+      hubTransport: hubMode === 'local'
+        ? 'none'
+        : hubMode === 'icloud' ? 'filesystem' : diagnosticHubTransport(hubUrl),
       streamState,
       hubStatsCacheAgeSeconds
     };
@@ -220,6 +234,7 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       limitsCompleteness,
       hubStatsCacheMatchesMode,
       hubRuntime,
+      icloud,
       topology: {
         hubMode,
         hubTarget: hubRuntime.hubTarget,
@@ -260,6 +275,9 @@ function createDiagnosticSnapshotBuilder(options = {}) {
     } else if (settings.hubMode === 'client') {
       hubStats = runtime.hubStatsCacheMatchesMode ? getLatestHubStats() : null;
       hubSummarySource = 'cached-hub-stats';
+    } else if (settings.hubMode === 'icloud') {
+      hubStats = runtime.hubStatsCacheMatchesMode ? getLatestHubStats() : null;
+      hubSummarySource = 'icloud-sync-cache';
     }
     const hubDevices = projectHubDevices(hubStats, {
       summaryAvailable: Boolean(hubStats && Array.isArray(hubStats.devices)),
@@ -312,6 +330,15 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       hub: {
         runtime: runtime.hubRuntime,
         devices: hubDevices
+      },
+      icloud: runtime.icloud || {
+        state: platform === 'darwin' ? 'waiting' : 'unsupported',
+        availability: 'unavailable',
+        supported: platform === 'darwin',
+        root: '[redacted]/Token Monitor/sync-v1',
+        deviceCount: 0,
+        watcher: 'inactive',
+        reconciliation: 'idle'
       },
       usage: {
         usageOwner: runtime.usageOwner,
