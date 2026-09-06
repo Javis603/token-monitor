@@ -21,8 +21,8 @@ Z.ai appears in Token Monitor as one limits row fed by up to three independent a
 ## Two keys, two chains, never mixed
 
 - The **console key** (`sk-…` or `{id}.{secret}`) calls quota, subscription, and the finance report. It cannot call the ZCode billing endpoint.
-- The **ZCode JWT** calls the billing endpoint. ZCode stores its login token AES-GCM-encrypted in `~/.zcode/v2/credentials.json` (unreadable to us); the only usable copy is the plain JWT mirrored into `config.json`'s provider entry (`options.apiKey`), which ZCode rotates on each login. A stale mirror is answered by the server as an auth error and surfaces as `unavailable` until ZCode refreshes — mirroring ZCode's own `classifyAvailabilityError`, which maps billing 401/403 to unavailable, not to a user-fixable auth failure.
-- Swapping a JWT into the quota endpoint (or a console key into billing) returns 401. This is not a bug to fix; the chains are separate by design.
+- The **ZCode JWT** calls the billing endpoint — and, for a coding-plan login, the quota endpoint too, because ZCode mirrors a quota-capable key into the provider entry. A **start-plan** JWT cannot call quota (401), so the chains stay separate per plan kind, not per key format. ZCode stores its login token AES-GCM-encrypted in `~/.zcode/v2/credentials.json` (unreadable to us); the only usable copy is the plain JWT mirrored into `config.json`'s provider entry (`options.apiKey`), which ZCode rotates on each login. A stale mirror is answered by the server as an auth error and surfaces as `unavailable` until ZCode refreshes — mirroring ZCode's own `classifyAvailabilityError`, which maps billing 401/403 to unavailable, not to a user-fixable auth failure.
+- Swapping a start-plan JWT into the quota endpoint, or a console key into billing, returns 401. This is not a bug to fix; the chains are separate by design.
 
 ## ZCode billing gateway gates
 

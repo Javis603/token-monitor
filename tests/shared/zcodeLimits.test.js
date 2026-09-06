@@ -95,6 +95,42 @@ test('discoverZcodeConnection follows a redirected data base dir', () => {
   assert.equal(discoverZcodeConnection({}, windowsDeps).kind, 'start-billing');
 });
 
+test('discoverZcodeConnection reports a direct API selection as unsupported', () => {
+  // An api-key provider selection contributes no auto quota; the family is
+  // still derived from the entry's baseURL the way ZCode itself does.
+  const apiFiles = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      modelProviderFamilySelectedKeys: { zai: 'preset:builtin:zai' }
+    }),
+    'config.json': JSON.stringify({
+      provider: {
+        'builtin:zai': {
+          enabled: true,
+          options: { apiKey: 'sk-direct', baseURL: 'https://api.z.ai/api/anthropic' }
+        }
+      }
+    })
+  };
+  const discovery = discoverZcodeConnection({}, discoveryDeps(apiFiles));
+  assert.equal(discovery.kind, 'api-unsupported');
+  assert.equal(discovery.entitled, false);
+  assert.equal(discovery.reason, 'api_balance_not_supported');
+  // A BigModel-hosted baseURL derives the bigmodel family.
+  const cn = discoverZcodeConnection({}, discoveryDeps({
+    ...apiFiles,
+    'config.json': JSON.stringify({
+      provider: {
+        'builtin:zai': {
+          enabled: true,
+          options: { apiKey: 'sk-direct', baseURL: 'https://open.bigmodel.cn/api/anthropic' }
+        }
+      }
+    })
+  }));
+  assert.equal(cn.family, 'bigmodel');
+});
+
 test('discoverZcodeConnection returns a coding-quota credential from the mirror key', () => {
   const discovery = discoverZcodeConnection({}, discoveryDeps({
     'setting.json': JSON.stringify({

@@ -348,6 +348,35 @@ test('fetchZaiLimits keeps ZCode plan windows when the console key quota fails',
   assert.ok(provider.windows.some((window) => window.limitId === 'zcode-v3-x'), 'plan bucket survives');
 });
 
+test('fetchZaiLimits reports a revoked console key the same way whichever lane it ran with', async () => {
+  // 401 must read as unauthorized in both shapes: with the plan lane healthy
+  // (single rejection) and when both lanes fail. The double-failure path used
+  // to collapse 401 into notConfigured, contradicting the Configured pill.
+  const base = { env: {}, now: () => Date.parse('2026-09-05T12:00:00Z') };
+  const revokedKey = { ok: false, status: 401, json: async () => ({}) };
+  const withPlan = await fetchZaiLimits(
+    { zaiApiKey: 'zai-token' },
+    {
+      ...base,
+      ...zcodeLaneDeps(async (url) => {
+        if (String(url).includes('/quota/limit')) return revokedKey;
+        if (String(url).includes('zcode-plan/billing/balance')) return BILLING_OK;
+        return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      })
+    }
+  );
+  assert.equal(withPlan.status, 'unauthorized');
+
+  const bothFailed = await fetchZaiLimits(
+    { zaiApiKey: 'zai-token' },
+    {
+      ...base,
+      ...zcodeLaneDeps(async () => revokedKey)
+    }
+  );
+  assert.equal(bothFailed.status, 'unauthorized');
+});
+
 test('fetchZaiLimits reports the ZCode lane own error when only it ran', async () => {
   const base = { env: {}, now: () => Date.parse('2026-09-05T12:00:00Z') };
   const unavailable = await fetchZaiLimits({}, {
@@ -444,6 +473,15 @@ test('fetchZaiLimits tracks cumulative spend and ignores a missing total', async
     assert.equal(second.balance.todaySpend, 50);
     assert.equal(second.balance.allTimeSpend, 50);
 
+    // A drop (refund, plan reset) moves the baseline only — no negative
+    // spend, and the later rise records only its own delta.
+    const refunded = await call({ availableBalance: '5.00', totalSpendAmount: '120' });
+    assert.equal(refunded.balance.todaySpend, 50);
+    assert.equal(refunded.balance.allTimeSpend, 50);
+    const afterRefund = await call({ availableBalance: '5.00', totalSpendAmount: '130' });
+    assert.equal(afterRefund.balance.todaySpend, 60);
+    assert.equal(afterRefund.balance.allTimeSpend, 60);
+
     // Day buckets past the 40-day retention window are pruned while
     // allTimeSpend keeps accumulating, as on DeepSeek's balance history.
     const later = await fetchZaiLimits(
@@ -464,8 +502,8 @@ test('fetchZaiLimits tracks cumulative spend and ignores a missing total', async
         }
       }
     );
-    assert.equal(later.balance.todaySpend, 10);
-    assert.equal(later.balance.allTimeSpend, 60);
+    assert.equal(later.balance.todaySpend, 30);
+    assert.equal(later.balance.allTimeSpend, 90);
     const stored = JSON.parse(fs.readFileSync(storePath, 'utf8'));
     const dayKeys = Object.keys(Object.values(stored.accounts)[0].dailySpend);
     assert.ok(!dayKeys.includes('2026-09-05'), 'old day bucket pruned');

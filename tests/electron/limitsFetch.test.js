@@ -109,3 +109,11 @@ test('every widget provider probe takes the runtime transport', () => {
     assert.match(main, call);
   }
 });
+
+test('the auto-detect pill requires a usable ZCode credential, not any install', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  // An API-only or unentitled ZCode selection is not an auto quota source;
+  // only entitled + credential marks the login detected, so the pill never
+  // advertises auto-detect for a state the collector cannot answer.
+  assert.match(main, /return discovery\.entitled && discovery\.credential \? discovery : null;/);
+});

@@ -371,6 +371,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
   const planLane = (async () => {
     const discovery = discoverZcodeConnection(options, {
       readFileSync: deps.readFileSync || fs.readFileSync,
+      env,
       homeDir: deps.homeDir || options.homeDir || os.homedir()
     });
     // Coding Plan quota rides the same quota endpoint the console key uses,
@@ -400,7 +401,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       return emptyLane();
     }
     const payload = await runWithProbeDeadline(async ({ signal }) => {
-      const deviceMid = zcodeDeviceMid(deps);
+      const deviceMid = zcodeDeviceMid({ ...deps, env, homeDir: deps.homeDir || options.homeDir });
       const response = await (deps.fetch || fetch)(zcodeStartPlanBalanceUrl(), {
         headers: {
           Authorization: `Bearer ${discovery.credential.token}`,
@@ -432,10 +433,13 @@ async function fetchZaiLimits(options = {}, deps = {}) {
 
   const [keyResult, planResult] = await Promise.allSettled([keyLane, planLane]);
 
+  // Both lanes failed: the console key's error wins the status because it is
+  // the credential the user actually manages — but it reports through the
+  // same mapper the single-lane path uses, so a revoked key reads as
+  // unauthorized (notConfigured would contradict the Configured pill) no
+  // matter what the unrelated plan lane did.
   if (keyResult.status === 'rejected' && planResult.status === 'rejected') {
-    const error = keyResult.reason;
-    if (error?.status === 'unauthorized') return zaiStatusProvider('notConfigured', options, deps);
-    return zaiStatusProvider(laneErrorStatus(error), options, deps);
+    return zaiStatusProvider(laneErrorStatus(keyResult.reason), options, deps);
   }
 
   const lanes = [keyResult, planResult].filter((result) => result.status === 'fulfilled');
@@ -573,10 +577,12 @@ function zcodeRecordCumulativeSpend({ accountKey, totalSpent, now, storePath, re
 
   const todayKey = zaiLocalDayKey(nowMs);
   const monthKey = todayKey.slice(0, 7);
-  const todayDate = new Date(nowMs);
-  const monday = new Date(todayDate);
-  monday.setDate(todayDate.getDate() - ((todayDate.getDay() + 6) % 7));
-  const weekKey = zaiLocalDayKey(monday.getTime());
+  // Rolling 7 days, matching DeepSeek's balance history so the same wire
+  // field means the same thing across providers.
+  const weekStart = new Date(nowMs);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - 6);
+  const weekKey = zaiLocalDayKey(weekStart.getTime());
   const sumSince = (predicate) => Object.entries(entry.dailySpend)
     .filter(([key]) => predicate(key))
     .reduce((sum, [, amount]) => sum + amount, 0);
