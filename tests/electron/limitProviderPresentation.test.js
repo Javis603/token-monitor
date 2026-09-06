@@ -6,6 +6,8 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
+const limitProviderOrderApi = require('../../src/electron/renderer/limitProviderOrder');
+const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 
 const {
@@ -1883,10 +1885,120 @@ test('dynamic account summaries are never reset by the static translation pass',
 test('provider toggles converge through the limits push without a forced refresh', () => {
   const app = readRendererFile('app.js');
   const body = functionBody(app, 'onLimitProviderToggle', 'onLimitProviderMove');
+  const statsRenderStart = app.indexOf('function renderStatsUpdate()');
+  const statsRenderEnd = app.indexOf('const statsRenderScheduler =', statsRenderStart);
 
-  assert.match(body, /saveSettings\(\{ limitProviders: checked\.join\(','\), limitsEnabled: checked\.length > 0 \}\)/);
+  assert.match(body, /const patch = \{ limitProviders: checked\.join\(','\), limitsEnabled: checked\.length > 0 \};/);
+  assert.match(body, /state\.pendingLimitProviderSelection = \{ revision, \.\.\.patch \};/);
+  assert.match(body, /saveSettings\(patch\)/);
   assert.match(body, /clearDisabledLimitProviderPendingChecks\(new Set\(checked\)\)/);
+  assert.doesNotMatch(body, /state\.settings\s*=/);
   assert.doesNotMatch(body, /refreshStats\(/);
+  assert.ok(statsRenderStart >= 0 && statsRenderEnd > statsRenderStart);
+  assert.match(app.slice(statsRenderStart, statsRenderEnd), /renderLimitProviderCheckboxes\(\)/);
+});
+
+function createLimitProviderToggleHarness({
+  providerIds = ['codex'],
+  saveSettings
+} = {}) {
+  const app = readRendererFile('app.js');
+  const providerSelection = functionBody(app, 'configuredLimitProviderSelection', 'missingLimitProviderStatus');
+  const enabledProviderSelection = functionBody(app, 'enabledLimitProviderSet', 'limitProviderEnabled');
+  const toggleStart = app.indexOf('async function onLimitProviderToggle()');
+  const toggleEnd = app.indexOf('async function onLimitProviderMove(', toggleStart);
+  assert.ok(toggleStart >= 0 && toggleEnd > toggleStart);
+  const toggle = app.slice(toggleStart, toggleEnd);
+  let checkedProviders = [];
+  const context = {
+    DEFAULT_LIMIT_PROVIDER_ORDER: 'codex',
+    LIMIT_PROVIDERS: providerIds.map((id) => ({ id })),
+    limitProviderOrderApi,
+    settingsListFilterApi,
+    state: {
+      breakdown: 'tool',
+      limitProviderSelectionRevision: 0,
+      pendingLimitProviderSelection: null,
+      settings: { limitsEnabled: true, limitProviders: 'codex' }
+    },
+    els: {
+      limitProviderCheckboxes: {
+        querySelectorAll: () => providerIds.map((id) => ({
+          checked: checkedProviders.includes(id),
+          dataset: { provider: id }
+        }))
+      }
+    },
+    saveSettings,
+    renderLimitProviderCheckboxes() {},
+    clearDisabledLimitProviderPendingChecks() {},
+    setBreakdown() {}
+  };
+
+  vm.createContext(context);
+  vm.runInContext(`${providerSelection}\n${enabledProviderSelection}\n${toggle}`, context);
+  context.configuredLimitProviderSelection = vm.runInContext('configuredLimitProviderSelection', context);
+  return {
+    context,
+    selection: () => Array.from(context.configuredLimitProviderSelection()),
+    setChecked: (ids) => { checkedProviders = ids; },
+    toggle: () => vm.runInContext('onLimitProviderToggle()', context)
+  };
+}
+
+test('pending provider selection stays unchecked while the settings reply is pending', async () => {
+  let resolveUpdate;
+  const harness = createLimitProviderToggleHarness({
+    saveSettings: () => new Promise((resolve) => { resolveUpdate = resolve; })
+  });
+  harness.setChecked([]);
+
+  const pendingToggle = harness.toggle();
+  assert.deepEqual(harness.selection(), []);
+  harness.context.state.settings = { limitsEnabled: false, limitProviders: '' };
+  resolveUpdate();
+  await pendingToggle;
+
+  assert.equal(harness.context.state.pendingLimitProviderSelection, null);
+  assert.deepEqual(harness.selection(), []);
+});
+
+test('provider toggle restores the confirmed selection when persistence and recovery both fail', async () => {
+  const harness = createLimitProviderToggleHarness({
+    saveSettings: () => Promise.reject(new Error('persist failed'))
+  });
+  harness.setChecked([]);
+
+  await assert.rejects(harness.toggle(), /persist failed/);
+
+  assert.deepEqual(harness.selection(), ['codex']);
+});
+
+test('overlapping failures preserve the latest toggle, then fall back to a newer settings push', async () => {
+  const updates = [];
+  const harness = createLimitProviderToggleHarness({
+    providerIds: ['codex', 'claude', 'zed'],
+    saveSettings() {
+      let reject;
+      const promise = new Promise((_, rejectPromise) => { reject = rejectPromise; });
+      updates.push({ reject });
+      return promise;
+    }
+  });
+  harness.setChecked([]);
+  const firstToggle = harness.toggle();
+  harness.setChecked(['claude']);
+  const secondToggle = harness.toggle();
+  harness.context.state.settings = { limitsEnabled: true, limitProviders: 'zed' };
+
+  updates[0].reject(new Error('first persist failed'));
+  await assert.rejects(firstToggle, /first persist failed/);
+  assert.deepEqual(harness.selection(), ['claude']);
+
+  updates[1].reject(new Error('second persist failed'));
+  await assert.rejects(secondToggle, /second persist failed/);
+  assert.equal(harness.context.state.pendingLimitProviderSelection, null);
+  assert.deepEqual(harness.selection(), ['zed']);
 });
 
 test('empty OpenCode profiles render a localized summary before returning', () => {
