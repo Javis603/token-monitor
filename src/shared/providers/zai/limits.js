@@ -355,21 +355,23 @@ async function fetchZaiLimits(options = {}, deps = {}) {
     // best-effort (failures keep it empty) but marks itself attempted: a
     // detected ZCode login must not read as not-configured while its query
     // fails or reports no subscription under that key.
+    // The lane is best-effort on empty results, but a classified failure
+    // (429, auth) still propagates: the row merge surfaces the specific
+    // state the way the start-billing lane already does, instead of
+    // flattening every error to empty-attempted/unavailable.
     if (discovery.kind === 'coding-quota' && discovery.entitled) {
       const mirrorKey = discovery.credential?.token;
       if (mirrorKey) {
-        try {
-          const quotaHost = discovery.family === 'bigmodel' ? 'https://open.bigmodel.cn' : 'https://api.z.ai';
-          const quota = await fetchJson(`${quotaHost}/api/monitor/usage/quota/limit`, mirrorKey, deps);
-          const usage = parseZaiUsage(quota, null);
-          return {
-            windows: usage.windows.map((window) => ({ ...window, source: 'local' })),
-            plan: usage.plan,
-            accountKey: hashKey('zai', mirrorKey),
-            hasAnything: usage.windows.length > 0,
-            attempted: true
-          };
-        } catch (_) {}
+        const quotaHost = discovery.family === 'bigmodel' ? 'https://open.bigmodel.cn' : 'https://api.z.ai';
+        const quota = await fetchJson(`${quotaHost}/api/monitor/usage/quota/limit`, mirrorKey, deps);
+        const usage = parseZaiUsage(quota, null);
+        return {
+          windows: usage.windows.map((window) => ({ ...window, source: 'local' })),
+          plan: usage.plan,
+          accountKey: hashKey('zai', mirrorKey),
+          hasAnything: usage.windows.length > 0,
+          attempted: true
+        };
       }
       return emptyLane(true);
     }
@@ -528,7 +530,7 @@ function zcodeRecordCumulativeSpend({ accountKey, totalSpent, now, storePath, re
     // check — not just the try/catch — is what makes a fresh store.
     store = read(storePath, 'utf8');
   } catch (_) {}
-  if (!store || typeof store !== 'object') {
+  if (!store || typeof store !== 'object' || !store.accounts || typeof store.accounts !== 'object') {
     store = { version: ZAI_SPEND_STORE_VERSION, accounts: {} };
   }
   const entry = store.accounts[accountKey] || { lastTotal: null, allTimeSpend: 0, dailySpend: {}, trackingSince: nowMs };
@@ -556,7 +558,15 @@ function zcodeRecordCumulativeSpend({ accountKey, totalSpent, now, storePath, re
     changed = true;
   }
   store.accounts[accountKey] = entry;
-  if (changed) write(storePath, store);
+  // The spend record is best-effort: a failed write (read-only dir, disk
+  // full) must not reject the key lane and discard a successful quota and
+  // balance response — the next round re-reads the old baseline and its
+  // delta still lands.
+  if (changed) {
+    try {
+      write(storePath, store);
+    } catch (_) {}
+  }
 
   const todayKey = zaiLocalDayKey(nowMs);
   const monthKey = todayKey.slice(0, 7);
@@ -633,8 +643,10 @@ function zcodePlanBucketWindow(balance, periodByEntitlement = {}) {
     kind: period === 'daily' ? 'daily' : 'billing',
     label,
     // One-time grants never renew; the description keeps that visible on
-    // surfaces that render resets as text.
-    ...(period !== 'daily' ? { resetDescription: 'One-time' } : {}),
+    // surfaces that render resets as text. An unknown period (entitlement
+    // missing from the map, no period field) stays unlabeled rather than
+    // claiming one-time semantics.
+    ...(period === 'one_time' ? { resetDescription: 'One-time' } : {}),
     limitId: String(balance?.plan_id || '').trim(),
     ...(usedPercent !== null ? { usedPercent, remainingPercent: Math.max(0, Math.min(100, 100 - usedPercent)) } : {}),
     showMeter: usedPercent !== null,

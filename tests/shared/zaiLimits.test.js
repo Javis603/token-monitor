@@ -438,6 +438,22 @@ test('fetchZaiLimits treats a mirror key without a subscription as unavailable',
   assert.equal(provider.source, 'oauth');
 });
 
+test('fetchZaiLimits preserves a classified Coding Plan error instead of flattening it', async () => {
+  // A 429 against the quota endpoint surfaces as sourceRateLimited — the
+  // same retention the start-billing lane applies; the old catch-all
+  // reported plain unavailable.
+  const provider = await fetchZaiLimits({}, {
+    env: {},
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    ...zcodeLaneDeps(
+      async () => ({ ok: false, status: 429, json: async () => ({}) }),
+      'coding-plan'
+    )
+  });
+  assert.equal(provider.status, 'sourceRateLimited');
+  assert.equal(provider.source, 'oauth');
+});
+
 test('fetchZaiLimits tracks cumulative spend and ignores a missing total', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zai-spend-'));
   const storePath = path.join(dir, 'zai-balance.json');
@@ -515,6 +531,54 @@ test('fetchZaiLimits tracks cumulative spend and ignores a missing total', async
     const stored = JSON.parse(fs.readFileSync(storePath, 'utf8'));
     const dayKeys = Object.keys(Object.values(stored.accounts)[0].dailySpend);
     assert.ok(!dayKeys.includes('2026-09-05'), 'old day bucket pruned');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('fetchZaiLimits survives a malformed spend store and a failing write', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zai-spend-'));
+  const storePath = path.join(dir, 'zai-balance.json');
+  const respond = async (url) => {
+    if (String(url).includes('query-customer-account-report')) {
+      return { ok: true, status: 200, json: async () => ({ code: 200, data: { availableBalance: '5.00', totalSpendAmount: '100' } }) };
+    }
+    if (String(url).includes('/quota/limit')) {
+      return { ok: true, status: 200, json: async () => ({ data: { limits: [] } }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ data: [] }) };
+  };
+  try {
+    // Valid JSON without an accounts map: the store reinitializes instead of
+    // throwing and discarding an otherwise successful quota response.
+    fs.writeFileSync(storePath, '{"version": 1, "unexpected": true}', 'utf8');
+    const malformed = await fetchZaiLimits(
+      { zaiApiKey: 'zai-token' },
+      { env: {}, now: () => Date.parse('2026-09-05T12:00:00Z'), zaiBalanceStorePath: storePath, ...noZcode, fetch: respond }
+    );
+    // Quota answered (no subscription windows) but the balance window makes
+    // the row ok; the spend baseline restarts from this report.
+    assert.equal(malformed.status, 'ok');
+    assert.equal(malformed.balance.allTimeSpend, 0);
+
+    // A read-only dir / full disk fails the write only; the row and its
+    // balance still report, and the baseline is simply not persisted.
+    fs.rmSync(storePath, { force: true });
+    const failingWrite = await fetchZaiLimits(
+      { zaiApiKey: 'zai-token' },
+      {
+        env: {},
+        now: () => Date.parse('2026-09-05T12:00:00Z'),
+        zaiBalanceStorePath: storePath,
+        ...noZcode,
+        readJson: () => null,
+        writeJsonAtomic: () => { throw new Error('EACCES: read-only'); },
+        fetch: respond
+      }
+    );
+    assert.equal(failingWrite.status, 'ok');
+    assert.equal(failingWrite.balance.allTimeSpend, 0);
+    assert.equal(fs.existsSync(storePath), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

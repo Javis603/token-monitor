@@ -91,11 +91,29 @@ test('discoverZcodeConnection resolves the selected plan, or none on a broken in
 test('discoverZcodeConnection follows a redirected data base dir', () => {
   // ZCode resolves its base as ZCODE_DATA_BASE_DIR (Windows installs may
   // also set ZCODE_WINDOWS_APP_INSTALL_DIR), then HOME, then os.homedir().
+  // The fixture keys on the full joined path, so a regression that drops
+  // the env redirect (reads $HOME/.zcode/v2 instead) misses the fixture
+  // and this test fails — a basename-only fixture cannot tell them apart.
   const env = { ZCODE_DATA_BASE_DIR: '/opt/zcode-data' };
-  const deps = { readFileSync: fileSystem(HAPPY_FILES), homeDir: '/home/test', env };
+  const reads = [];
+  const track = (readFileSync) => (filePath) => {
+    reads.push(String(filePath));
+    return readFileSync(filePath);
+  };
+  const deps = { readFileSync: track(fileSystem(HAPPY_FILES)), homeDir: '/home/test', env };
   assert.equal(discoverZcodeConnection({}, deps).kind, 'start-billing');
-  const windowsDeps = { readFileSync: fileSystem(HAPPY_FILES), homeDir: 'C:\\Users\\test', env: { ZCODE_WINDOWS_APP_INSTALL_DIR: 'D:\\zcode' } };
+  assert.ok(
+    reads.some((p) => p === path.join('/opt/zcode-data', '.zcode', 'v2', 'setting.json')),
+    `expected a read under /opt/zcode-data, got ${reads.join(', ')}`
+  );
+
+  reads.length = 0;
+  const windowsDeps = { readFileSync: track(fileSystem(HAPPY_FILES)), homeDir: 'C:\\Users\\test', env: { ZCODE_WINDOWS_APP_INSTALL_DIR: 'D:\\zcode' } };
   assert.equal(discoverZcodeConnection({}, windowsDeps).kind, 'start-billing');
+  assert.ok(
+    reads.some((p) => p === path.join('D:\\zcode', '.zcode', 'v2', 'setting.json')),
+    `expected a read under D:\\zcode, got ${reads.join(', ')}`
+  );
 });
 
 test('discoverZcodeConnection reports a direct API selection as unsupported', () => {
@@ -266,6 +284,9 @@ test('parseZcodeStartPlanBalances maps buckets to daily and billing windows', ()
   const noRemaining = byLabel.get('zcode-v3-start-plan-0817:GLM-5.3-Air');
   assert.equal(noRemaining.usedPercent, 25);
   assert.equal(noRemaining.showMeter, true);
+  // Its period is unknown (no entitlement mapping, no period field), so it
+  // must not claim one-time semantics — only explicit one_time grants do.
+  assert.equal(noRemaining.resetDescription, undefined);
 });
 
 test('discoverZcodeConnection re-reads disk on every call — an account switch lands next round', () => {
