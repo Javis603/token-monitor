@@ -19,7 +19,7 @@ const {
   resolvePromaPricing,
   tokscalePricingCatalog
 } = require('../../src/shared/collector');
-const { buildPromaPeriods } = require('../../src/shared/promaUsage');
+const { buildPromaPeriods } = require('../../src/shared/providers/proma/usage');
 
 function catalogDir(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tokscale-pricing-catalog-'));

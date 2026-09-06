@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { performance } = require('node:perf_hooks');
 const test = require('node:test');
 
-const { createLimitsRuntime } = require('../../src/shared/limitsRuntime');
+const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
 
 function deferred() {
   let resolve;

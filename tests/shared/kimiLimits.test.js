@@ -14,7 +14,7 @@ const {
   parseKimiUsage,
   parseKimiMembershipStats,
   fetchKimiLimits
-} = require('../../src/shared/kimiLimits');
+} = require('../../src/shared/providers/kimi/limits');
 
 test('kimiToken reads explicit key before the CodexBar-compatible environment key', () => {
   assert.equal(

@@ -20,7 +20,7 @@ A dashboard Cookie is not a token-history source. Likewise, finding local Zed se
 
 ## Token and session activity
 
-`src/shared/collector.js` is the only runtime that invokes `tokscale`. Zed follows the same today/month/all-time usage pipeline, watch behavior, and platform discovery rules as the other tracked clients. Its normalized client id is `zed`.
+`src/shared/collector.js` owns the `tokscale` usage scans. Zed follows the same today/month/all-time usage pipeline, watch behavior, and platform discovery rules as the other tracked clients. Its normalized client id is `zed`.
 
 This data plane reports activity found on the current machine. It does not infer the Zed account or plan that paid for a request. BYOK models and external agents remain attributable to the provider whose local records and billing relationship produced them.
 
@@ -84,7 +84,7 @@ Token/session tracking still depends on local Zed data that `tokscale` supports 
 | Concern | Primary files |
 | --- | --- |
 | Token/session source discovery and collection | `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/usage.js` |
-| Dashboard Cookie parsing and billing requests | `src/shared/zedLimits.js`, `src/shared/limitCollector.js` |
+| Dashboard Cookie parsing and billing requests | `src/shared/providers/zed/limits.js` |
 | Credential persistence and runtime configuration | `src/shared/credentialStore.js`, `src/electron/runtimeConfig.js`, `src/electron/main.js` |
 | Settings flow and localized setup instructions | `src/electron/renderer/index.html`, `src/electron/renderer/app.js`, `src/electron/renderer/i18n.js` |
 | Limits presentation | `src/electron/renderer/limitProviderPresentation.js`, `src/electron/renderer/app.js`, `src/shared/macWidgetSnapshot.js` |

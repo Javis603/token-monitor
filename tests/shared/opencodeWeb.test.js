@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const web = require('../../src/shared/opencodeWeb');
+const web = require('../../src/shared/providers/opencode/web');
 
 test('sanitizeCookieHeader strips whitespace/newlines, keeps pairs', () => {
   assert.strictEqual(web.sanitizeCookieHeader('  a=1;\n b=2 '), 'a=1; b=2');

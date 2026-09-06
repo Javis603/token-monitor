@@ -7,7 +7,7 @@ const test = require('node:test');
 const {
   readCodexRpcWithCommand,
   runProcessText
-} = require('../../src/shared/limitCollector');
+} = require('../../src/shared/limits/collector');
 
 function fakeChild() {
   const child = new EventEmitter();

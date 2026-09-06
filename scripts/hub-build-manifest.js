@@ -14,12 +14,12 @@ const BUILD_ID_PATTERN = /^sha256:[a-f0-9]{64}$/;
 // generated header or line-ending change cannot create a false deployment alert.
 const WORKER_SHARED_MODULES = Object.freeze([
   'limitProviders.js',
-  'limits.js',
+  'limits/core.js',
   'usage.js',
   'history.js',
-  'reasonixPaths.js',
-  'reasonixSessionGuard.js',
-  'dshPaths.js',
+  'providers/reasonix/paths.js',
+  'providers/reasonix/sessionGuard.js',
+  'providers/dsh/paths.js',
   'projectKey.js',
   'syncUploadInterval.js',
   'subscriptionDisplay.js',

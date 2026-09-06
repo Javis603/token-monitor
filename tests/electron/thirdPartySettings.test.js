@@ -160,9 +160,9 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(app, /function renderThirdPartyAccountGroup/);
   assert.match(app, /renderNamedApiAccountGroup\('thirdparty'/);
   assert.match(presentation, /thirdparty: \['Relay', 'API'\]/);
-  assert.match(styles, /\.limit-icon-sub2api/);
+  assert.match(styles, /^\.row-icon-sub2api/m);
   assert.match(styles, /assets\/icons\/sub2api\.svg/);
-  assert.match(styles, /\.limit-icon-thirdparty[\s\S]*?assets\/icons\/thirdparty\.svg/);
+  assert.match(styles, /^\.row-icon-thirdparty[\s\S]*?assets\/icons\/thirdparty\.svg/m);
   assert.doesNotMatch(styles, /customapi\.svg/);
   assert.match(app, /custom: \{ color: '#8A96A8', markId: 'thirdparty' \}/);
   assert.doesNotMatch(app, /mark\.style\.color/);

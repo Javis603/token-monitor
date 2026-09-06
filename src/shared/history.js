@@ -2,7 +2,7 @@
 
 // Portable (Node-free) usage-history core. Mirrors usage.js conventions so the
 // Cloudflare Worker can import it. Pure functions only — no I/O.
-const { REASONIX_CLIENT } = require('./reasonixPaths');
+const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 
 const TOKSCALE_CLIENT_ALIASES = new Map([
   ['omp', 'pi']

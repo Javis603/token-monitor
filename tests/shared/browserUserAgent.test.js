@@ -7,13 +7,13 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { BROWSER_USER_AGENT } = require('../../src/shared/browserUserAgent');
-const { fetchClaudeLimits } = require('../../src/shared/limitCollector');
-const { fetchMimoLimits } = require('../../src/shared/mimoLimits');
-const { fetchOllamaLimits } = require('../../src/shared/ollamaLimits');
-const { fetchQoderLimits } = require('../../src/shared/qoderLimits');
-const { fetchCommandcodeLimits } = require('../../src/shared/commandcodeLimits');
-const cursorProbe = require('../../src/shared/cursorProbe');
-const opencodeWeb = require('../../src/shared/opencodeWeb');
+const { fetchClaudeLimits } = require('../../src/shared/limits/collector');
+const { fetchMimoLimits } = require('../../src/shared/providers/mimo/limits');
+const { fetchOllamaLimits } = require('../../src/shared/providers/ollama/limits');
+const { fetchQoderLimits } = require('../../src/shared/providers/qoder/limits');
+const { fetchCommandcodeLimits } = require('../../src/shared/providers/commandcode/limits');
+const cursorProbe = require('../../src/shared/providers/cursor/probe');
+const opencodeWeb = require('../../src/shared/providers/opencode/web');
 
 const root = path.join(__dirname, '..', '..');
 

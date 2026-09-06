@@ -7,7 +7,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 const { createHub, resolveBindHost } = require('../../src/hub/server');
-const { codexAccountKey } = require('../../src/shared/codexAuth');
+const { codexAccountKey } = require('../../src/shared/providers/codex/auth');
 
 function tempDataFile() {
   return path.join(os.tmpdir(), `tm-hub-test-${process.pid}-${Math.random().toString(16).slice(2)}.json`);

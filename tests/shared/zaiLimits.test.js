@@ -13,7 +13,7 @@ const {
   zaiSubscriptionUrl,
   parseZaiUsage,
   fetchZaiLimits
-} = require('../../src/shared/zaiLimits');
+} = require('../../src/shared/providers/zai/limits');
 
 test('zaiToken accepts Z.ai and GLM compatible API key env names', () => {
   assert.equal(zaiToken({ ZAI_API_KEY: '  "zai-key"  ' }), 'zai-key');

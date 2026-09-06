@@ -20,7 +20,7 @@ const {
   resolveQoderCnPricing,
   resetQoderCnChatSessionProbe,
   resetQoderCnPricingCache
-} = require('../../src/shared/qoderCnUsage');
+} = require('../../src/shared/providers/qodercn/usage');
 
 const { localMs } = require('../helpers/localTime');
 
@@ -458,7 +458,7 @@ test('anchored read applies a lenient window to text timestamps and filters in S
 });
 
 test('sessions reach the projects rollup with project labels end to end', async (t) => {
-  const { collectQoderCnRows, buildQoderCnPeriods } = require('../../src/shared/qoderCnUsage');
+  const { collectQoderCnRows, buildQoderCnPeriods } = require('../../src/shared/providers/qodercn/usage');
   const { extractUsageFromTokscale } = require('../../src/shared/usage');
   resetQoderCnChatSessionProbe();
   let rows;
@@ -479,7 +479,7 @@ test('sessions reach the projects rollup with project labels end to end', async 
 });
 
 test('reads survive a database without the chat_session table (fallback SQL)', async (t) => {
-  const { readQoderCnDbRows, resetQoderCnChatSessionProbe } = require('../../src/shared/qoderCnUsage');
+  const { readQoderCnDbRows, resetQoderCnChatSessionProbe } = require('../../src/shared/providers/qodercn/usage');
   const fs = require('node:fs');
   const os = require('node:os');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-no-session-'));

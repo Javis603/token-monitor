@@ -2,7 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { claudeSessionRoots } = require('./claudePaths');
+const { claudeSessionRoots } = require('./providers/claude/paths');
 
 function findSessionFiles(root, sessionIds) {
   const wanted = new Set(Array.from(sessionIds).map((id) => `${id}.jsonl`));

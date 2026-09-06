@@ -22,8 +22,8 @@ const {
   classifyClientSyncDetailCode,
   normalizeClientHealth
 } = require('../../src/shared/clientHealth');
+const { antigravitySyncLockPath } = require('../../src/shared/providers/antigravity/selfSync');
 const {
-  antigravitySyncLockPath,
   clientActivityDaysFromHistory,
   clientDiagnosticRoots,
   clientSourceChecks,

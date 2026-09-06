@@ -24,13 +24,13 @@ const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/tray
 const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
-const { createClaudeWebFetch } = require('./claudeWebFetch');
-const { runAntigravityOAuthLogin } = require('./antigravityOAuthLogin');
-const antigravityOAuth = require('../shared/antigravityOAuth');
+const { createClaudeWebFetch } = require('./providers/claude/webFetch');
+const { runAntigravityOAuthLogin } = require('./providers/antigravity/oauthLogin');
+const antigravityOAuth = require('../shared/providers/antigravity/oauth');
 const {
   createWorkbuddyLocalAuth,
   isSupportedWorkbuddyLocalAppPlatform
-} = require('./workbuddyLocalAuth');
+} = require('./providers/workbuddy/localAuth');
 const { createElectronLimitsFetch } = require('./limitsFetch');
 const {
   expandedBoundsForCollapse,
@@ -71,13 +71,15 @@ function electronProviderDeps(deps = {}) {
 }
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
 const {
-  antigravitySyncLockPath,
   clientDiagnosticRoots,
   lookupModelPricing,
   normalizeHistoryIntervalMs,
-  repairAntigravitySyncLock,
   visibleDiagnosticRoots
 } = require('../shared/collector');
+const {
+  antigravitySyncLockPath,
+  repairAntigravitySyncLock
+} = require('../shared/providers/antigravity/selfSync');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
@@ -89,10 +91,10 @@ const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
-const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie, alibabaCookie, alibabaVariant, normalizeAlibabaCookieHeader } = require('../shared/limitCollector');
-const { discoverZcodeConnection } = require('../shared/zcodeDiscovery');
-const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
-const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
+const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie, alibabaCookie, alibabaVariant, normalizeAlibabaCookieHeader } = require('../shared/limits/collector');
+const { discoverZcodeConnection } = require('../shared/providers/zai/zcodeDiscovery');
+const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/providers/ollama/limits');
+const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const {
   codexAuthIdentity,
   codexAccountKey,
@@ -101,16 +103,16 @@ const {
   hashAccountKey,
   preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity
-} = require('../shared/codexAuth');
-const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/codexLogin');
-const { listCodexWorkspaces, normalizeWorkspaceId } = require('../shared/codexWorkspaces');
+} = require('../shared/providers/codex/auth');
+const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/providers/codex/login');
+const { listCodexWorkspaces, normalizeWorkspaceId } = require('../shared/providers/codex/workspaces');
 const {
   codexAuthMaterialForWorkspace,
   codexAccountMatchesIdentity,
   liveCodexAuthPath,
   readCodexAuthMaterial,
   writeCodexAuthFile
-} = require('../shared/codexSystemSwitch');
+} = require('../shared/providers/codex/systemSwitch');
 const {
   normalizeClientDisplayOrder,
   normalizeHiddenClients,
@@ -150,11 +152,11 @@ const {
   shouldSkipAppUpdateCheck,
   updateInstallQuitPolicy
 } = require('../shared/appUpdater');
-const cursorAuth = require('../shared/cursorAuth');
-const cursorProbe = require('../shared/cursorProbe');
-const opencodeWeb = require('../shared/opencodeWeb');
-const opencodeGoApi = require('../shared/opencodeGoApi');
-const opencodeProfiles = require('../shared/opencodeProfiles');
+const cursorAuth = require('../shared/providers/cursor/auth');
+const cursorProbe = require('../shared/providers/cursor/probe');
+const opencodeWeb = require('../shared/providers/opencode/web');
+const opencodeGoApi = require('../shared/providers/opencode/goApi');
+const opencodeProfiles = require('../shared/providers/opencode/profiles');
 
 // The collector reaches the usage API behind a probe deadline; these settings
 // paths call it directly, so they need their own bound or a hung request leaves
@@ -192,8 +194,8 @@ async function probeOpenCodeApiKey(apiKey) {
     return { status: 'unavailable', windows: [] };
   }
 }
-const openrouterLimits = require('../shared/openrouterLimits');
-const thirdPartyLimits = require('../shared/thirdPartyLimits');
+const openrouterLimits = require('../shared/providers/openrouter/limits');
+const thirdPartyLimits = require('../shared/providers/thirdparty/limits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
 const { normalizeCompactTokenUnits } = require('../shared/compactTokens');
@@ -223,7 +225,7 @@ const {
   createMimoManagedAccount,
   fetchMimoLimits,
   normalizeMimoCookieHeader
-} = require('../shared/mimoLimits');
+} = require('../shared/providers/mimo/limits');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
@@ -276,7 +278,7 @@ const {
   trayToggleAction
 } = require('./trayModeSettings');
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
-const { createCodexResetForecastClient } = require('./codexResetForecast');
+const { createCodexResetForecastClient } = require('./providers/codex/resetForecast');
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
 const {

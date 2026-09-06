@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { zaiTeamToken, ZAI_TEAM_QUOTA_URL, fetchZaiTeamLimits } = require('../../src/shared/zaiTeamLimits');
+const { zaiTeamToken, ZAI_TEAM_QUOTA_URL, fetchZaiTeamLimits } = require('../../src/shared/providers/zaiteam/limits');
 const { hashKey } = require('../../src/shared/hashKey');
 
 test('zaiTeamToken accepts team-specific API key env names', () => {

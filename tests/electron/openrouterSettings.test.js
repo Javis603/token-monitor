@@ -114,7 +114,7 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   assert.match(app, /const hasMeter = quotaWindow\?\.showMeter !== false/);
   assert.match(app, /const valueOverride = hasMeter \? null : \(quotaWindow\?\.detail \|\| '—'\)/);
   assert.match(presentation, /openrouter: \['Pay-as-you-go', 'API key'\]/);
-  assert.match(styles, /\.limit-icon-openrouter/);
+  assert.match(styles, /^\.row-icon-openrouter/m);
   assert.match(styles, /\.limit-spend-summary\s*\{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
   assert.match(colors, /openrouter: '#6566F1'/);
 });

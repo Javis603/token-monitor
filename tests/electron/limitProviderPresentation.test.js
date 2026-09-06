@@ -6,7 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
-const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
+const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 
 const {
   antigravityQuotaWindow,
@@ -906,7 +906,7 @@ test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with
   );
   assert.doesNotMatch(renderProviderWindows, /settings\.subscriptions\.renewsOn|renewalDetail/);
   assert.doesNotMatch(renderProviderWindows, /zed\.billing-cycle|zed\.overdue-invoices/);
-  assert.match(css, /\.limit-icon-zed\s*\{[^}]*assets\/icons\/zed\.svg[^}]*\}/s);
+  assert.match(css, /^\.row-icon-zed\s*\{[^}]*assets\/icons\/zed\.svg[^}]*\}/m);
 });
 
 test('Zed details follow showLimitUsed: counts for Edit Predictions, money for Token Spend', () => {
@@ -1608,7 +1608,7 @@ test('Grok is automatic provider UI, while env token remains documented for head
   const i18n = readRendererFile('i18n.js');
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
-  const grokLimits = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'grokLimits.js'), 'utf8');
+  const grokLimits = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'providers', 'grok', 'limits.js'), 'utf8');
   const rendererSettings = main.slice(
     main.indexOf('function settingsForRenderer'),
     main.indexOf('function pushSettingsToRenderer')
@@ -3536,17 +3536,10 @@ test('removing a ledger entry has to be confirmed, like the rows above it', () =
 test('every provider a subscription can name has a mark to identify it by', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  const ids = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
 
-  // .row-icon paints currentColor through a mask, so an id with no mask rule
-  // behind it renders as a solid square — worse than no icon at all.
-  for (const id of ids) {
-    assert.ok(
-      new RegExp(`\\.row-icon-${id}\\b[^{]*\\{`).test(styles),
-      `.row-icon-${id} mask rule should exist for LIMIT_PROVIDERS id ${id}`
-    );
-  }
-
+  // That every catalog provider has a mask rule to paint is asserted from the
+  // catalog in limitProviderPresentationCoverage.test.js. What is subscription
+  // wiring, and lives here, is that a subscription row asks for one.
   const iconClass = functionBody(app, 'subscriptionProviderIconClass', 'isCreditsProvider');
   const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
   // Unknown ids are the case the mask list cannot cover: a record stays bound to

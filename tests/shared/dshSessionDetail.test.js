@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { readDshSessionDetail, parseDshDetailEvents } = require('../../src/shared/dshSessionDetail');
+const { readDshSessionDetail, parseDshDetailEvents } = require('../../src/shared/providers/dsh/sessionDetail');
 
 const BASE_TIME = Date.parse('2026-08-15T10:00:00Z');
 

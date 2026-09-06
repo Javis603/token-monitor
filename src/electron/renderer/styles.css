@@ -3512,6 +3512,9 @@ html.is-windows .settings-panel select option {
 .row-icon-os-apple   { -webkit-mask-image: url(../../../assets/icons/os-apple.svg);      mask-image: url(../../../assets/icons/os-apple.svg); }
 .row-icon-os-linux   { -webkit-mask-image: url(../../../assets/icons/os-linux.svg);      mask-image: url(../../../assets/icons/os-linux.svg); }
 .row-icon-os-windows { -webkit-mask-image: url(../../../assets/icons/os-windows.svg);    mask-image: url(../../../assets/icons/os-windows.svg); }
+/* The Limits list mark. Sizing only: the mask itself comes from the shared
+   .row-icon-<id> table below, which every id in limitMarksWithIcon already has
+   a rule in. */
 .limit-icon {
   display: inline-block;
   flex: 0 0 auto;
@@ -3525,110 +3528,13 @@ html.is-windows .settings-panel select option {
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
 }
-.limit-icon-claude {
-  -webkit-mask-image: url(../../../assets/icons/claude.svg);
-  mask-image: url(../../../assets/icons/claude.svg);
-}
-.limit-icon-codex {
-  -webkit-mask-image: url(../../../assets/icons/codex.svg);
-  mask-image: url(../../../assets/icons/codex.svg);
-}
-.limit-icon-cursor {
-  -webkit-mask-image: url(../../../assets/icons/cursor.svg);
-  mask-image: url(../../../assets/icons/cursor.svg);
-}
-.limit-icon-antigravity {
-  -webkit-mask-image: url(../../../assets/icons/antigravity.svg);
-  mask-image: url(../../../assets/icons/antigravity.svg);
-}
-.limit-icon-opencode {
-  -webkit-mask-image: url(../../../assets/icons/opencode.svg);
-  mask-image: url(../../../assets/icons/opencode.svg);
-}
-.limit-icon-openrouter {
-  -webkit-mask-image: url(../../../assets/icons/openrouter.svg);
-  mask-image: url(../../../assets/icons/openrouter.svg);
-}
-.limit-icon-deepseek {
-  -webkit-mask-image: url(../../../assets/icons/deepseek.svg);
-  mask-image: url(../../../assets/icons/deepseek.svg);
-}
-.limit-icon-grok {
+/* Grok is the one mark that differs between the two sizes: the tracked client
+   reuses the vendor mask (.row-icon-grok is xai.svg) while the limits provider
+   has its own. Everything else shares the .row-icon-<id> mask that
+   renderLimitProviderMark now asks for, so there is one mask table, not two. */
+.limit-icon.row-icon-grok {
   -webkit-mask-image: url(../../../assets/icons/grok.svg);
   mask-image: url(../../../assets/icons/grok.svg);
-}
-.limit-icon-minimax {
-  -webkit-mask-image: url(../../../assets/icons/minimax.svg);
-  mask-image: url(../../../assets/icons/minimax.svg);
-}
-.limit-icon-copilot {
-  -webkit-mask-image: url(../../../assets/icons/copilot.svg);
-  mask-image: url(../../../assets/icons/copilot.svg);
-}
-.limit-icon-zed {
-  -webkit-mask-image: url(../../../assets/icons/zed.svg);
-  mask-image: url(../../../assets/icons/zed.svg);
-}
-.limit-icon-kiro {
-  -webkit-mask-image: url(../../../assets/icons/kiro.svg);
-  mask-image: url(../../../assets/icons/kiro.svg);
-}
-.limit-icon-commandcode {
-  -webkit-mask-image: url(../../../assets/icons/commandcode.svg);
-  mask-image: url(../../../assets/icons/commandcode.svg);
-}
-.limit-icon-zai {
-  -webkit-mask-image: url(../../../assets/icons/zai.svg);
-  mask-image: url(../../../assets/icons/zai.svg);
-}
-.limit-icon-zaiteam {
-  -webkit-mask-image: url(../../../assets/icons/zai.svg);
-  mask-image: url(../../../assets/icons/zai.svg);
-}
-.limit-icon-volcengine {
-  -webkit-mask-image: url(../../../assets/icons/volcengine.svg);
-  mask-image: url(../../../assets/icons/volcengine.svg);
-}
-.limit-icon-alibaba {
-  -webkit-mask-image: url(../../../assets/icons/alibaba.svg);
-  mask-image: url(../../../assets/icons/alibaba.svg);
-}
-.limit-icon-qoder {
-  -webkit-mask-image: url(../../../assets/icons/qoder.svg);
-  mask-image: url(../../../assets/icons/qoder.svg);
-}
-.limit-icon-trae {
-  -webkit-mask-image: url(../../../assets/icons/trae.svg);
-  mask-image: url(../../../assets/icons/trae.svg);
-}
-.limit-icon-workbuddy {
-  -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);
-  mask-image: url(../../../assets/icons/workbuddy.svg);
-}
-
-.limit-icon-ollama {
-  -webkit-mask-image: url(../../../assets/icons/ollama.svg);
-  mask-image: url(../../../assets/icons/ollama.svg);
-}
-.limit-icon-kimi {
-  -webkit-mask-image: url(../../../assets/icons/kimi.svg);
-  mask-image: url(../../../assets/icons/kimi.svg);
-}
-.limit-icon-mimo {
-  -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);
-  mask-image: url(../../../assets/icons/xiaomi.svg);
-}
-.limit-icon-thirdparty {
-  -webkit-mask-image: url(../../../assets/icons/thirdparty.svg);
-  mask-image: url(../../../assets/icons/thirdparty.svg);
-}
-.limit-icon-newapi {
-  -webkit-mask-image: url(../../../assets/icons/newapi.svg);
-  mask-image: url(../../../assets/icons/newapi.svg);
-}
-.limit-icon-sub2api {
-  -webkit-mask-image: url(../../../assets/icons/sub2api.svg);
-  mask-image: url(../../../assets/icons/sub2api.svg);
 }
 .row-label {
   display: grid;

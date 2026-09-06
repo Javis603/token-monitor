@@ -3,8 +3,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { discoverZcodeConnection } = require('../../src/shared/zcodeDiscovery');
-const { parseZcodeStartPlanBalances } = require('../../src/shared/zaiLimits');
+const { discoverZcodeConnection } = require('../../src/shared/providers/zai/zcodeDiscovery');
+const { parseZcodeStartPlanBalances } = require('../../src/shared/providers/zai/limits');
 
 // Fixtures mirror the live billing/balance payload shape: plan entitlements
 // carry the grant period, balance buckets carry the usage numbers.
