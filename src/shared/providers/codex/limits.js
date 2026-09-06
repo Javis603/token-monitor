@@ -606,10 +606,18 @@ function codexSpawnSpec(command, platform = process.platform) {
   };
 }
 
+// Windows parses a quoted argument by the CRT rule that a run of backslashes is
+// literal unless it precedes a quote, where the run must be doubled. Escaping
+// only the quote leaves a trailing backslash escaping the closing quote, so the
+// argument bleeds into the next one. Neither call site below can reach that
+// today — their args are fixed safe words and a command that ends in .cmd/.bat
+// cannot end in a backslash — but the rule belongs in the quoter, not in an
+// assumption about who calls it.
 function quoteWindowsCmdArg(value) {
   const text = String(value);
   if (/^[A-Za-z0-9_./:=\\-]+$/.test(text)) return text;
-  return `"${text.replace(/"/g, '\\"')}"`;
+  const escaped = text.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1');
+  return `"${escaped}"`;
 }
 
 function codexLoginSpawnSpec(command, platform = process.platform) {
@@ -1425,6 +1433,7 @@ async function fetchCodexLimits(options = {}, deps = {}) {
 
 module.exports = {
   codexCommandCandidates,
+  quoteWindowsCmdArg,
   codexCommandSourceDetail,
   fetchCodexLimits,
   mapCodexRateLimitsToProvider,
