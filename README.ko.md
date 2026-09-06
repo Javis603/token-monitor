@@ -180,7 +180,7 @@ brew install --cask token-monitor
 
 ## 멀티 디바이스 동기화
 
-모든 기기(및 headless agent)가 연결할 **hub 하나**를 고릅니다. 각 기기에서 위젯을 열고 **설정 → 멀티 디바이스 동기화**에서 모드를 선택합니다. 위젯이 이 기기 사용량을 자동으로 올리며, 위젯이 없는 기기에서만 `npm run agent`를 실행하면 됩니다.
+기기(및 headless agent)에 사용할 **멀티 디바이스 동기화 방식 하나**를 고릅니다. 각 기기에서 위젯을 열고 **설정 → 멀티 디바이스 동기화**에서 모드를 선택합니다. 위젯이 이 기기 사용량을 자동으로 올리며, 위젯이 없는 기기에서만 `npm run agent`를 실행하면 됩니다. iCloud Drive는 macOS 위젯 전용이며 headless agent를 지원하지 않습니다.
 
 #### 옵션 A — 위젯에서 hub 호스트 (가장 쉬움, CLI 불필요)
 
@@ -212,6 +212,10 @@ npx wrangler deploy
 ```
 
 배포 URL을 각 기기 **설정 → 멀티 디바이스 동기화**에 붙여 넣습니다. iOS 위젯은 [worker/README.md](worker/README.md), HTTP API는 [docs/API.md](docs/API.md)를 참고하세요.
+
+#### 옵션 D — iCloud Drive (macOS, Hub 서버 불필요)
+
+같은 Apple ID로 로그인한 각 Mac에서 **설정 → 멀티 디바이스 동기화 → iCloud Drive**를 선택합니다. 선택 사항인 macOS 전용 방식으로, Token Monitor는 iCloud Drive의 `Token Monitor/sync-v1/` 아래에 기기별·작성자별 원자 스냅샷을 저장하고 각 Mac에서 유효한 파일을 집계합니다. Token Monitor 서버, CloudKit 또는 자격 증명을 사용하지 않으며 제공업체 API 키, Cookie와 token은 로컬에 남습니다. iCloud Drive는 최종 일관성이므로 다른 Mac의 업데이트가 나타나기까지 시간이 걸릴 수 있고, 손상되거나 일시적으로 사라진 파일이 마지막 정상 집계를 지우지 않습니다.
 
 ## 앱 데이터
 

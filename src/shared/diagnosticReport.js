@@ -483,7 +483,7 @@ function sanitizeHubDevices(devices = {}) {
     })
     : [];
   return {
-    summarySource: safeChoice(devices.summarySource, new Set(['cached-hub-stats', 'same-process-hub-cache', 'same-process-hub', 'not-applicable'])),
+    summarySource: safeChoice(devices.summarySource, new Set(['cached-hub-stats', 'same-process-hub-cache', 'same-process-hub', 'icloud-sync-cache', 'not-applicable'])),
     summaryAvailable: devices.summaryAvailable === true,
     notApplicable: devices.notApplicable === true || devices.summarySource === 'not-applicable',
     deviceCount: boundedCount(devices.deviceCount),
@@ -506,7 +506,7 @@ function sanitizeJournal(journal = {}) {
         ...(event?.scope ? { scope: identifier(event.scope) } : {}),
         ...(event?.client ? { client: identifier(event.client) } : {}),
         ...(event?.provider ? { provider: identifier(event.provider) } : {}),
-        ...(event?.modeAtEvent ? { modeAtEvent: safeChoice(event.modeAtEvent, new Set(['local', 'client', 'host'])) } : {}),
+        ...(event?.modeAtEvent ? { modeAtEvent: safeChoice(event.modeAtEvent, new Set(['local', 'client', 'host', 'icloud'])) } : {}),
         ...(event?.durationMs !== undefined ? { durationMs: boundedNumber(event.durationMs) } : {})
       }))
     : [];
@@ -594,6 +594,41 @@ function sanitizeStorage(storage = {}) {
       ? null
       : storage.archiveWritable === true,
     archiveStatFailureCode: storage.archiveStatFailureCode ? identifier(storage.archiveStatFailureCode) : null
+  };
+}
+
+function safeIcloudRoot(value) {
+  const raw = String(value || '').trim();
+  // Only a tilde-relative path is safe to print. Any injected absolute path
+  // (including a username-bearing /Users/... path) is replaced before the
+  // report crosses the renderer boundary.
+  if (/^~\/(?:[^\u0000-\u001f\u007f/]+\/)*Token Monitor\/sync-v1$/.test(raw)) return raw;
+  return '[redacted]/Token Monitor/sync-v1';
+}
+
+function safeIcloudRevision(value) {
+  const match = /^(\d+):/.exec(String(value || '').trim());
+  return match ? `${match[1]}:[redacted]` : null;
+}
+
+function sanitizeIcloud(value = {}) {
+  return {
+    state: safeChoice(value.state, new Set(['available', 'unavailable', 'initializing', 'waiting', 'error', 'stopped', 'unsupported', 'starting'])),
+    availability: safeChoice(value.availability, new Set(['available', 'unavailable', 'unknown'])),
+    supported: value.supported === true,
+    reason: value.reason ? identifier(value.reason) : null,
+    root: safeIcloudRoot(value.root),
+    deviceCount: boundedCount(value.deviceCount),
+    lastSuccessfulReconciliation: isoTimestamp(value.lastSuccessfulReconciliation),
+    lastWriteAt: isoTimestamp(value.lastWriteAt),
+    lastErrorCategory: value.lastErrorCategory ? identifier(value.lastErrorCategory) : null,
+    lastReconcileErrorCategory: value.lastReconcileErrorCategory ? identifier(value.lastReconcileErrorCategory) : null,
+    lastSubscriptionReconcileErrorCategory: value.lastSubscriptionReconcileErrorCategory
+      ? identifier(value.lastSubscriptionReconcileErrorCategory)
+      : null,
+    watcher: safeChoice(value.watcher, new Set(['active', 'starting', 'unavailable', 'inactive'])),
+    reconciliation: safeChoice(value.reconciliation, new Set(['idle', 'running'])),
+    subscriptionRevision: safeIcloudRevision(value.subscriptionRevision)
   };
 }
 
@@ -704,6 +739,7 @@ function sanitizeDiagnosticSnapshot(input = {}) {
       hubTarget: text(topology.hubTarget),
       hubTransport: text(topology.hubTransport),
       externalAgentAlive: topology.externalAgentAlive === true,
+      icloudWidgetProducerActive: topology.icloudWidgetProducerActive === true,
       usageOwner: text(topology.usageOwner),
       limitsOwner: text(topology.limitsOwner),
       streamState: text(topology.streamState),
@@ -727,6 +763,7 @@ function sanitizeDiagnosticSnapshot(input = {}) {
       },
       devices: sanitizeHubDevices(input.hub?.devices || {})
     },
+    icloud: sanitizeIcloud(input.icloud || {}),
     usage: {
       usageOwner: text(usage.usageOwner),
       localUsageRuntimePresent: usage.localUsageRuntimePresent === true,
@@ -891,6 +928,7 @@ function renderReport(snapshot, selected) {
 
   lines.push(section('Environment', Object.entries(snapshot.environment).map(([key, value]) => line(key, value)).join('\n').split('\n')));
   lines.push(section('Configuration', Object.entries(snapshot.configuration).map(([key, value]) => line(key, value)).join('\n').split('\n')));
+  lines.push(section('iCloud Sync', Object.entries(snapshot.icloud).map(([key, value]) => line(key, value)).join('\n').split('\n')));
   lines.push(section('Hub Runtime', Object.entries(snapshot.hub.runtime).map(([key, value]) => line(key, value)).join('\n').split('\n')));
   const hubDevices = snapshot.hub.devices;
   const hubDeviceLines = hubDevices.notApplicable
@@ -913,7 +951,10 @@ function renderReport(snapshot, selected) {
   }
   lines.push(section('Hub Devices', hubDeviceLines));
 
-  const usageLines = Object.entries(snapshot.usage).map(([key, value]) => line(key, value));
+  const usageLines = [
+    line('icloudWidgetProducerActive', snapshot.topology.icloudWidgetProducerActive),
+    ...Object.entries(snapshot.usage).map(([key, value]) => line(key, value))
+  ];
   lines.push(section('Usage and Limits Topology', usageLines));
   const collectorLines = Object.entries(snapshot.collector)
     .filter(([key]) => key !== 'wslStatus')

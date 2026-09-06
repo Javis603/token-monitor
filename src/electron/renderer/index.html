@@ -1648,6 +1648,10 @@
                 <input type="radio" name="hubMode" value="host" />
                 <div class="hub-mode-text"><strong data-i18n="settings.sync.hostHub">Host hub on this device</strong><span data-i18n="settings.sync.hostHubDesc">Open a hub here so other devices can connect.</span></div>
               </label>
+              <label class="hub-mode-option">
+                <input type="radio" name="hubMode" value="icloud" />
+                <div class="hub-mode-text"><strong data-i18n="settings.sync.icloud">iCloud Drive</strong><span data-i18n="settings.sync.icloudDesc">Sync this Mac with other Macs using iCloud Drive.</span></div>
+              </label>
             </div>
             <div id="hubClientFields" class="hub-mode-fields hidden">
               <label><span data-i18n="settings.sync.hubUrl">Hub URL</span><input id="hubUrlInput" type="text" spellcheck="false" placeholder="http://hub-host:17321" /></label>
@@ -1682,6 +1686,11 @@
               <div id="hubAddressList" class="hub-address-list"></div>
               <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. macOS / Windows may prompt to allow incoming connections the first time. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
               <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
+            </div>
+            <div id="icloudFields" class="hub-mode-fields hidden">
+              <div id="icloudStatus" class="hub-status" role="status" aria-live="polite"></div>
+              <div id="icloudRootStatus" class="icloud-root-status"></div>
+              <p class="settings-note" data-i18n="settings.sync.icloudNote">Sync usage, limits, history, devices and subscriptions across Macs signed into the same Apple ID. No Token Monitor server is used; updates may take a moment to appear.</p>
             </div>
             <label><span data-i18n="settings.sync.deviceId">Device ID</span><input id="deviceIdInput" type="text" spellcheck="false" placeholder="auto (hostname)" data-i18n-placeholder="settings.sync.deviceIdPlaceholder" /></label>
             <div class="settings-actions">
