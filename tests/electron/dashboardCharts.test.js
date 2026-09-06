@@ -9,7 +9,7 @@ const charts = require('../../src/electron/renderer/usageCharts');
 const {
   clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
   dailyBarsChart, candleChart, contribHeatmap, statsCards,
-  barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths
+  barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths, modelsForDay
 } = charts;
 
 test('usageCharts exports every symbol app.js destructures from it', () => {
@@ -148,6 +148,29 @@ test('heatmapSvg can hide entry cells in the initial SVG markup', () => {
   const model = contribHeatmap([{ date: '2026-06-01', intensity: 2 }], { cell: 10, gap: 2 });
   const svg = heatmapSvg(model, { initialHidden: true });
   assert.match(svg, /data-motion-hidden="true" opacity="0"/);
+});
+
+test('modelsForDay returns sorted model usage without inventing missing detail', () => {
+  const history = {
+    daily: [
+      { date: '2026-06-02T00:00:00.000Z', tokens: 150, cost: 1.5, perModel: {
+        small: { tokens: 50, cost: 0.5 },
+        large: { tokens: 100, cost: 1 }
+      } },
+      { date: '2026-06-03', tokens: 20, cost: 0.2 }
+    ]
+  };
+  assert.deepEqual(modelsForDay(history, '2026-06-02').map((row) => [row.model, row.tokens]), [
+    ['large', 100], ['small', 50]
+  ]);
+  assert.deepEqual(modelsForDay(history, '2026-06-03'), []);
+  assert.deepEqual(modelsForDay(history, '2026-06-04'), []);
+});
+
+test('heatmapSvg emits keyboard-accessible cells when interactive mode is enabled', () => {
+  const model = contribHeatmap([{ date: '2026-06-01', intensity: 1, tokens: 12 }], { cell: 10, gap: 2 });
+  const svg = heatmapSvg(model, { interactive: true, ariaLabelOf: (cell) => `day ${cell.date}` });
+  assert.match(svg, /class="heat lvl-1"[^>]*tabindex="0" role="button" aria-label="day 2026-06-01"/);
 });
 
 test('statsCardsHtml renders a card per descriptor with label + formatted value', () => {
