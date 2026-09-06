@@ -9,10 +9,14 @@ const { normalizePeriod } = require('./usage');
 // computed one on every restore, so one copy drifting by a timezone would make
 // archived usage disappear rather than fail loudly.
 //
-// Deliberately not in `usage.js`, even though that is where period shapes live:
-// `usage.js` is in the portable Hub core (`WORKER_SHARED_MODULES`), so growing it
-// moves the Hub build marker and asks every self-hosted hub to redeploy for a
-// change no hub runs. Neither archive is in that closure.
+// Deliberately not in `usage.js`, even though that is where period shapes live.
+// `usage.js` answers the same question in UTC — `utcDayKey`/`utcMonthKey` — because
+// the hub aggregates devices across timezones and needs a key that does not depend
+// on which one, while an archive is device-local and cuts on the user's own midnight.
+// One home for both would mean four near-identically named functions with opposite
+// timezone behaviour in one file. Its `asNumber` and `validDate` are not `numberValue`
+// and `toDate` either: one parses currency strings, and the two disagree on what an
+// unusable value becomes. Growing `usage.js` also moves the Hub build marker.
 
 function numberValue(value) {
   const parsed = Number(value || 0);
