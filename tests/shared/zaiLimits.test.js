@@ -188,7 +188,9 @@ function zcodeLaneDeps(fetchMock, selection = 'start-plan') {
   };
   return {
     readFileSync: (filePath) => {
-      const name = String(filePath).split('/').pop();
+      // path.join separators are platform-dependent; key on the bare file
+      // name so the same fixture resolves on the windows-latest CI leg.
+      const name = path.basename(String(filePath));
       if (Object.hasOwn(files, name)) return files[name];
       throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     },

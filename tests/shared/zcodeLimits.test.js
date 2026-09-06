@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
 
 const { discoverZcodeConnection } = require('../../src/shared/providers/zai/zcodeDiscovery');
@@ -46,7 +47,9 @@ const HAPPY_FILES = {
 
 function fileSystem(files) {
   return (filePath) => {
-    const key = String(filePath).split('/').pop();
+    // path.join separators are platform-dependent; key on the bare file name
+    // so the same fixture resolves on the windows-latest CI leg.
+    const key = path.basename(String(filePath));
     if (Object.hasOwn(files, key)) return files[key];
     const error = new Error(`ENOENT: ${filePath}`);
     error.code = 'ENOENT';
