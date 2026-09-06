@@ -48,7 +48,10 @@ function numberOrNull(value) {
 
 // Reset timestamps arrive as ISO strings, epoch seconds and epoch milliseconds.
 // The cutoff picks the unit: a value below 20_000_000_000 cannot be a plausible
-// millisecond timestamp (that is 1970-08-20), so it is read as seconds.
+// millisecond timestamp (that is 1970-08-20), so it is read as seconds. A
+// numeric *string* is not treated as an epoch — it goes to Date's own string
+// parsing, where '1700000000' is not a date. No provider is known to send one;
+// this matches what the per-provider copies did before they were merged.
 function toIso(value) {
   if (value === null || value === undefined || value === '') return null;
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -223,18 +226,6 @@ function statusForHttp(code) {
   return 'unavailable';
 }
 
-// Resolve a credential the GUI setting owns first and the environment second,
-// which is the precedence every provider that accepts both already follows.
-function firstSetting(options, env, settingName, envNames) {
-  const explicit = cleanSecret(options?.[settingName]);
-  if (explicit) return explicit;
-  for (const name of envNames) {
-    const value = cleanSecret(env?.[name]);
-    if (value) return value;
-  }
-  return '';
-}
-
 function providerStatusFromError(error) {
   if (['disabled', 'notConfigured', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error'].includes(error?.status)) return error.status;
   if (error?.code === 'ENOENT') return 'notConfigured';
@@ -250,7 +241,6 @@ module.exports = {
   envValue,
   errorWithStatus,
   fetchJson,
-  firstSetting,
   nowIso,
   numberOrNull,
   parseBoolean,

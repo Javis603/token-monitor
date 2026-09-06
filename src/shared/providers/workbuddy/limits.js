@@ -2,11 +2,7 @@
 
 const { hashKey } = require('../../hashKey');
 const { normalizeLimitProvider } = require('../../limits/core');
-const {
-  cleanSecret,
-  firstSetting,
-  numberOrNull
-} = require('../../limits/providerHelpers');
+const { cleanSecret, numberOrNull } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 
 const WORKBUDDY_FETCH_TIMEOUT_MS = 12_000;
@@ -14,6 +10,19 @@ const WORKBUDDY_DEFAULT_ENDPOINT = 'https://copilot.tencent.com';
 const WORKBUDDY_PERSONAL_PATH = '/v2/billing/meter/get-user-resource';
 const WORKBUDDY_ENTERPRISE_PATH = '/v2/billing/meter/get-enterprise-user-usage';
 const WORKBUDDY_PRODUCT_CODE = 'p_tcaca';
+
+// WorkBuddy is the only provider reading a credential this way: Trae needs the
+// same precedence but its own stricter cleaner, so this stays local rather than
+// becoming a shared helper with one caller.
+function firstSetting(options, env, settingName, envNames) {
+  const explicit = cleanSecret(options?.[settingName]);
+  if (explicit) return explicit;
+  for (const name of envNames) {
+    const value = cleanSecret(env?.[name]);
+    if (value) return value;
+  }
+  return '';
+}
 
 function workbuddyAccessToken(env = process.env, options = {}) {
   return firstSetting(options, env, 'workbuddyAccessToken', [

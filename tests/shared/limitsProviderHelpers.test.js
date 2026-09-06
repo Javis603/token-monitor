@@ -6,7 +6,6 @@ const test = require('node:test');
 const {
   cleanSecret,
   errorWithStatus,
-  firstSetting,
   numberOrNull,
   statusForHttp,
   toIso
@@ -82,18 +81,4 @@ test('statusForHttp separates a credential problem from an outage', () => {
   assert.equal(statusForHttp(500), 'unavailable');
   assert.equal(statusForHttp(404), 'unavailable');
   assert.equal(statusForHttp(undefined), 'unavailable');
-});
-
-test('firstSetting prefers the GUI setting over every environment name', () => {
-  const options = { apiKey: ' "from-setting" ' };
-  const env = { PROVIDER_KEY: 'from-env' };
-  assert.equal(firstSetting(options, env, 'apiKey', ['PROVIDER_KEY']), 'from-setting');
-});
-
-test('firstSetting falls through env names in order and tolerates absent sources', () => {
-  const env = { SECOND: 'second-value', THIRD: 'third-value' };
-  assert.equal(firstSetting({}, env, 'apiKey', ['FIRST', 'SECOND', 'THIRD']), 'second-value');
-  assert.equal(firstSetting({ apiKey: '   ' }, env, 'apiKey', ['SECOND']), 'second-value');
-  assert.equal(firstSetting(undefined, undefined, 'apiKey', ['FIRST']), '');
-  assert.equal(firstSetting({}, {}, 'apiKey', []), '');
 });
