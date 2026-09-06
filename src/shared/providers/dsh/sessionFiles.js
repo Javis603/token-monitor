@@ -12,13 +12,13 @@
  * transcript away. Ported from dsh's own session-persistence-jsonl backend
  * (MIT).
  *
- * Path resolution delegates to `dshPaths.js` (`DSH_HOME` env override,
+ * Path resolution delegates to `./paths.js` (`DSH_HOME` env override,
  * falling back to `~/.dsh`) — the module `src/shared/collector.js` already
  * uses to find DSH's source root for usage tracking. That module stays
  * Node-builtin-free so it can vendor into the Worker; this one is
  * Electron/agent-only (session detail is never served by the Worker), so it
  * fills in the `os.homedir()`/`process.env`/`process.platform` defaults
- * `dshPaths.js` leaves to its caller.
+ * `./paths.js` leaves to its caller.
  */
 
 const fs = require('node:fs');
@@ -55,7 +55,7 @@ const ZSTD_MAGIC = 0xFD2FB528;
 
 function resolveDshSessionsRoot(options = {}) {
   const platform = options.platform || process.platform;
-  // dshPaths.js's joiner only inserts a separator between the segments it
+  // The joiner in ./paths.js only inserts a separator between the segments it
   // joins itself; it does not normalize separators already present in an
   // input like DSH_HOME (unlike the old path.join-based implementation this
   // replaced). Normalizing the result restores that — a DSH_HOME using the
@@ -63,7 +63,7 @@ function resolveDshSessionsRoot(options = {}) {
   // path. Select path.win32/path.posix explicitly by the resolved `platform`
   // rather than using the ambient `path` module, so this stays a pure
   // function of its arguments (testable for either platform on any host),
-  // matching how dshPaths.js itself treats `platform`.
+  // matching how ./paths.js itself treats `platform`.
   const pathImpl = platform === 'win32' ? path.win32 : path.posix;
   return pathImpl.normalize(resolveDshSessionsDir({
     env: options.env || process.env,

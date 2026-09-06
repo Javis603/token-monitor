@@ -18,7 +18,8 @@ const SESSION_DETAIL_WORKER_TIMEOUT_MS = 20_000;
 function resolveSessionDetailForPlatform(args = {}, deps = {}) {
   const nativeHome = (deps.homedir || os.homedir)();
   const platform = deps.platform || process.platform;
-  // dshPaths.js's resolveDshHome checks env.DSH_HOME before the homeDir it's
+  // resolveDshHome in providers/dsh/paths.js checks env.DSH_HOME before the
+  // homeDir it's
   // given, same as tokscale's own PathRoot::EnvVar. tokscale's own scanner
   // never lets that leak into an explicit --home lookup (use_env_roots:
   // false, lib.rs) — a WSL distro's session root must not silently resolve

@@ -5,7 +5,7 @@
 // Upstream route: packages/console/app/src/routes/zen/go/v1/usage.ts
 // (repo anomalyco/opencode). The `zen/` path segment is only URL namespacing —
 // the route reads the Go ("lite") subscription table and answers 403 for a
-// workspace without one. There is no Zen balance endpoint, so `opencodeWeb.js`
+// workspace without one. There is no Zen balance endpoint, so `./web.js`
 // stays the only source for that.
 //
 // This path needs no user setup: `opencode` writes the subscription key into

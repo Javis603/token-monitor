@@ -1042,7 +1042,8 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     // persist across collectUsageOnce calls to do anything, and every
     // caller that wants test isolation already passes its own Map explicitly.
     const dshFileCache = deps.dshSessionFileCache || dshSessionFileCache;
-    // dshPaths.js checks env.DSH_HOME before the homeDir it's given, same as
+    // providers/dsh/paths.js checks env.DSH_HOME before the homeDir it's given,
+    // same as
     // tokscale's own PathRoot::EnvVar — and tokscale's own scanner never lets
     // that leak into an explicit --home lookup (use_env_roots: false, lib.rs).
     // scopedHome means `home` is a specific WSL distro, not this machine's
