@@ -18,7 +18,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { CLIENT_IDS } = require('../../src/shared/clientCatalog');
+const { CLIENT_IDS, CLIENT_LABELS } = require('../../src/shared/clientCatalog');
 const { VENDOR_ORDER, VENDOR_LABELS } = require('../../src/electron/renderer/themePresets');
 const { clientColors } = require('../../src/electron/renderer/usageCharts');
 
@@ -83,4 +83,29 @@ test('every catalog client resolves to an icon asset through its CSS rule', () =
       `.row-icon-${id} references ${url[1]}, which resolves to a missing file: ${resolved}`
     );
   }
+});
+
+test('the subscription usage comparison tests catalog membership, not label presence', () => {
+  // Same category of mistake as clientsWithIcon above, in the other direction:
+  // CLIENT_LABELS is a display lookup, not a client list. It deliberately
+  // carries ids that are not catalog clients, so a key in it answers "can we
+  // render a name for this" rather than "does this provider name a client we
+  // count tokens for". subscriptionUsageCostUsd needs the second question — it
+  // decides whether a subscription's price is compared against usage cost — and
+  // the two only agree today because the label-only ids happen not to be limits
+  // providers. Read from source for the same reason as clientsWithIcon.
+  const labelOnly = Object.keys(CLIENT_LABELS).filter((id) => !CLIENT_IDS.includes(id));
+  const source = fs.readFileSync(rendererPath, 'utf8');
+  const body = source.match(/function subscriptionUsageCostUsd\([\s\S]*?\n}/);
+  assert.ok(body, 'subscriptionUsageCostUsd should exist in app.js');
+  assert.doesNotMatch(
+    body[0],
+    /clientLabels/,
+    `subscriptionUsageCostUsd must not read clientLabels as a membership test; it carries ${labelOnly.length} non-catalog id(s) (${labelOnly.join(', ') || 'none right now'})`
+  );
+  assert.match(
+    body[0],
+    /catalogClientIds\.has\(/,
+    'subscriptionUsageCostUsd should test membership against the catalog client ids'
+  );
 });
