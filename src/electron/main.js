@@ -313,6 +313,18 @@ const {
 const { createTaskbarZOrderKeeper, taskbarZOrderEnabled } = require('./windowsTaskbarZOrder');
 const { subscribeForegroundChange } = require('./windowsForegroundHook');
 const {
+  canUseTaskbarWidget,
+  normalizeTaskbarWidgetPeriod,
+  taskbarWidgetBounds,
+  taskbarWidgetPagePath
+} = require('./taskbarWidget');
+const {
+  isForegroundFullscreen,
+  isTaskbarWidgetTopmost,
+  raiseTaskbarWidgetWindowSafe,
+  watchTaskbarWidgetZOrder
+} = require('./taskbarWidgetWin32');
+const {
   normalizeWindowToggleShortcut,
   windowToggleShortcutAction,
   windowToggleShortcutStatus
@@ -485,6 +497,8 @@ function defaultSettings() {
     showCompactTotalTokens: false,
     compactTokenUnits: 'western',
     tokenRateMode: 'speed',
+    taskbarWidgetEnabled: false,
+    taskbarWidgetPeriod: 'allTime',
     heatmapMetric: 'cost',
     modelRankingMetric: 'tokens',
     homeActiveDaysWindow: 'all',
@@ -2487,6 +2501,8 @@ function readSettings() {
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
     delete merged.workbuddyEndpoint;
     merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
+    merged.taskbarWidgetEnabled = parseBoolean(merged.taskbarWidgetEnabled, false);
+    merged.taskbarWidgetPeriod = normalizeTaskbarWidgetPeriod(merged.taskbarWidgetPeriod);
     merged.archivedClientUsage = normalizeArchivedClientUsage(merged.archivedClientUsage);
     delete merged.edgeDrawerEnabled;
     merged.floatingBubbleTrigger = merged.floatingBubbleTrigger === 'hover' ? 'hover' : 'click';
@@ -2776,6 +2792,147 @@ function applyWindowSettings() {
   if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(skipTaskbarForSettings(settings));
   if (!behavior.focusable && typeof mainWindow.blur === 'function') mainWindow.blur();
   syncTaskbarZOrder();
+}
+
+let taskbarWidgetWindow = null;
+// Detach function returned by watchTaskbarWidgetZOrder; null while unwatched.
+let taskbarWidgetZOrderWatch = null;
+
+function positionTaskbarWidget(options = {}) {
+  if (!taskbarWidgetWindow || taskbarWidgetWindow.isDestroyed()) return;
+  const primaryDisplay = screen.getPrimaryDisplay();
+  if (isForegroundFullscreen(primaryDisplay, taskbarWidgetWindow)) {
+    if (taskbarWidgetWindow.isVisible()) {
+      taskbarWidgetWindow.hide();
+    }
+    return;
+  }
+  if (!taskbarWidgetWindow.isVisible()) {
+    taskbarWidgetWindow.show();
+    raiseTaskbarWidgetWindowSafe(taskbarWidgetWindow);
+  }
+  const bounds = taskbarWidgetBounds(primaryDisplay);
+  if (!bounds) return;
+  // Only touch the bounds when they actually changed (or on display metric
+  // changes); calling setBounds with the identical rect can itself reorder the
+  // window, and — like a re-assert — a reorder between a click's mousedown and
+  // mouseup eats the click.
+  if (options.reposition || !positionTaskbarWidget.lastBounds || !rectsEqual(bounds, positionTaskbarWidget.lastBounds)) {
+    taskbarWidgetWindow.setBounds(bounds);
+    positionTaskbarWidget.lastBounds = bounds;
+  }
+  // The taskbar is an always-on-top window that may reassert itself above this
+  // overlay at any time (window re-shuffles, Explorer/DWM refreshes), silently
+  // covering the widget. Re-assert topmost only when the overlay is actually
+  // buried: while it is already the top window, raising it again would land a
+  // SetWindowPos between the click's mousedown and mouseup and swallow the
+  // click-to-cycle. Electron's setAlwaysOnTop is a no-op on an already-topmost
+  // window, and native SetWindowPos with HWND_TOPMOST always reorders, so the
+  // check is what keeps the widget on top without reordering it constantly.
+  if (!isTaskbarWidgetTopmost(taskbarWidgetWindow)) {
+    taskbarWidgetWindow.setAlwaysOnTop(true, 'screen-saver');
+    raiseTaskbarWidgetWindowSafe(taskbarWidgetWindow);
+  }
+}
+
+function rectsEqual(a, b) {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
+function destroyTaskbarWidget() {
+  if (taskbarWidgetZOrderWatch) {
+    taskbarWidgetZOrderWatch();
+    taskbarWidgetZOrderWatch = null;
+  }
+  if (taskbarWidgetWindow && !taskbarWidgetWindow.isDestroyed()) taskbarWidgetWindow.destroy();
+  taskbarWidgetWindow = null;
+}
+
+function createTaskbarWidget() {
+  if (taskbarWidgetWindow && !taskbarWidgetWindow.isDestroyed()) return;
+  const bounds = taskbarWidgetBounds(screen.getPrimaryDisplay());
+  if (!bounds) return;
+  const win = new BrowserWindow({
+    ...bounds,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    roundedCorners: false,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      // Keep the tiny overlay compositing even while DWM/Chromium would classify
+      // it as occluded under the always-on-top taskbar.
+      backgroundThrottling: false
+    }
+  });
+  taskbarWidgetWindow = win;
+  win.setAlwaysOnTop(true, 'screen-saver');
+  // Clicking any taskbar button makes Explorer re-raise the always-on-top
+  // taskbar over this overlay, and Electron's setAlwaysOnTop is a no-op on an
+  // already-topmost window, so the periodic pass alone can never win that
+  // race. Re-assert the native topmost position whenever the system z-order
+  // changes (the native safe raise reorders unlike Electron's flag check; the
+  // hook fires on foreground switches and window reorders).
+  taskbarWidgetZOrderWatch = watchTaskbarWidgetZOrder(() => {
+    if (taskbarWidgetWindow && !taskbarWidgetWindow.isDestroyed()) {
+      const primaryDisplay = screen.getPrimaryDisplay();
+      if (isForegroundFullscreen(primaryDisplay, taskbarWidgetWindow)) {
+        if (taskbarWidgetWindow.isVisible()) {
+          taskbarWidgetWindow.hide();
+        }
+        return;
+      }
+      if (!taskbarWidgetWindow.isVisible()) {
+        taskbarWidgetWindow.show();
+        raiseTaskbarWidgetWindowSafe(taskbarWidgetWindow);
+      }
+      // Same rule as the periodic pass: never re-assert while the overlay is
+      // already the top window — a reorder between mousedown and mouseup would
+      // eat the click-to-cycle.
+      if (!isTaskbarWidgetTopmost(taskbarWidgetWindow)) {
+        taskbarWidgetWindow.setAlwaysOnTop(true, 'screen-saver');
+        raiseTaskbarWidgetWindowSafe(taskbarWidgetWindow);
+      }
+    }
+  });
+  // Capture clicks so the overlay can cycle today / this month / all time.
+  win.setIgnoreMouseEvents(false);
+  win.setMenu(null);
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (event) => event.preventDefault());
+  win.once('ready-to-show', () => {
+    win.show();
+    // Raise only after the window is actually shown: the native call passes
+    // SWP_SHOWWINDOW, which would prematurely reveal the not-yet-painted
+    // overlay if applied before show().
+    raiseTaskbarWidgetWindowSafe(win);
+    // Re-assert position + topmost after first paint: forces DWM to recomposite
+    // the layered window over the taskbar instead of treating the show as a
+    // no-op under the occluded-region classification.
+    setTimeout(() => {
+      if (win.isDestroyed()) return;
+      positionTaskbarWidget({ reposition: true });
+    }, 300);
+  });
+  const loadTarget = taskbarWidgetPagePath();
+  // The app injects a strict CSP on HTTP responses; file: pages (like the main
+  // window) are not intercepted, so the widget lives as a real file renderer.
+  win.loadFile(loadTarget);
+}
+
+function syncTaskbarWidget() {
+  if (canUseTaskbarWidget(settings)) createTaskbarWidget();
+  else destroyTaskbarWidget();
 }
 
 function nativeBlurEnabled(source = settings) {
@@ -4143,6 +4300,9 @@ function sendPush(payload, options = {}) {
   } else if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('stats:push', rendererPayload); } catch (_) {}
   }
+  if (taskbarWidgetWindow && !taskbarWidgetWindow.isDestroyed()) {
+    try { taskbarWidgetWindow.webContents.send('stats:push', payload); } catch (_) {}
+  }
   if (payload?.data?.stats) {
     const nextHistoryRevision = statsHistoryRevision(payload.data.stats);
     if (nextHistoryRevision !== previousHistoryRevision && dashboardWindow && !dashboardWindow.isDestroyed()) {
@@ -4929,6 +5089,9 @@ function pushSettingsToRenderer() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('settings:push', payload); } catch (_) {}
   }
+  if (taskbarWidgetWindow && !taskbarWidgetWindow.isDestroyed()) {
+    try { taskbarWidgetWindow.webContents.send('settings:push', payload); } catch (_) {}
+  }
   // The trends dashboard is a separate renderer with its own currency module
   // instance; it must receive effective-rate updates too, otherwise an
   // already-open dashboard keeps showing the previous rate after an auto
@@ -5219,6 +5382,7 @@ function destroyTray() {
 
 function enterTrayMode() {
   applyMacActivationPolicy();
+  syncTaskbarWidget();
   ensureTray();
   updateTrayDisplay();
   applyWindowSettings();
@@ -5237,6 +5401,7 @@ function enterTrayMode() {
 
 function exitTrayMode() {
   applyMacActivationPolicy({ mainWindowVisible: true });
+  syncTaskbarWidget();
   if (mainWindow && !mainWindow.isDestroyed()) {
     // Not an unconditional false: leaving tray-only mode with hideAppIcon still
     // on keeps the widget off the taskbar. applyWindowSettings() below would
@@ -6495,6 +6660,16 @@ app.whenReady().then(() => {
   });
   applyMacActivationPolicy();
   createWindow();
+  syncTaskbarWidget();
+  screen.on('display-metrics-changed', () => {
+    positionTaskbarWidget({ reposition: true });
+  });
+  // Keep the overlay above the always-on-top taskbar; cheap no-op while the
+  // widget is disabled (positionTaskbarWidget early-returns without a window).
+  // Note: 1s, not shorter — a more aggressive re-raise lands between a click's
+  // mousedown and mouseup and breaks the click-to-cycle (the down gets
+  // captured by the taskbar, the up re-hits the overlay, no click is fired).
+  setInterval(positionTaskbarWidget, 1000);
   syncLoginItemSettingFromOs();
   configureWindowToggleShortcut();
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
@@ -6674,6 +6849,8 @@ app.whenReady().then(() => {
       ),
       tokenRateMode: normalizeTokenRateMode(patch.tokenRateMode ?? settings.tokenRateMode),
       floatingBubbleEnabled: parseBoolean(patch.floatingBubbleEnabled ?? settings.floatingBubbleEnabled, false),
+      taskbarWidgetEnabled: parseBoolean(patch.taskbarWidgetEnabled ?? settings.taskbarWidgetEnabled, false),
+      taskbarWidgetPeriod: normalizeTaskbarWidgetPeriod(patch.taskbarWidgetPeriod ?? settings.taskbarWidgetPeriod),
       discordRpcEnabled: patch.discordRpcEnabled ?? settings.discordRpcEnabled ?? false,
       limitsEnabled: parseBoolean(patch.limitsEnabled ?? settings.limitsEnabled, true),
       // Sourced from settings only, never from the patch: subscriptions:save is
@@ -6886,6 +7063,7 @@ app.whenReady().then(() => {
       // therefore may not send another frame after this local-only setting changes.
       refreshLimitStatsPresentation();
     }
+    syncTaskbarWidget();
     pushSettingsToRenderer();
     return settingsForRenderer();
   });

@@ -357,6 +357,9 @@ Object.assign(els, {
   backHomeButton: document.getElementById('backHomeButton'),
   systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
+  taskbarWidgetFeature: document.getElementById('taskbarWidgetFeature'),
+  taskbarWidgetInput: document.getElementById('taskbarWidgetInput'),
+  taskbarWidgetOptions: document.getElementById('taskbarWidgetOptions'),
   trayIconOptions: document.getElementById('trayIconOptions'),
   trayOptions: document.getElementById('trayOptions'),
   hubModeOptions: document.getElementById('hubModeOptions'),
@@ -9395,6 +9398,13 @@ function syncSettingsForm() {
   for (const input of els.floatingBubbleTriggerInputs || []) input.checked = input.value === floatingBubbleTrigger;
   if (els.floatingBubbleContentInput) els.floatingBubbleContentInput.value = normalizeTrayContentValue(state.settings.floatingBubbleContent);
   els.floatingBubbleOptions?.classList.toggle('hidden', state.settings.floatingBubbleEnabled !== true);
+  if (els.taskbarWidgetFeature) {
+    els.taskbarWidgetFeature.classList.toggle('hidden', state.appInfo?.platform !== 'win32');
+  }
+  if (els.taskbarWidgetInput) {
+    els.taskbarWidgetInput.checked = state.settings.taskbarWidgetEnabled === true;
+    els.taskbarWidgetOptions?.classList.toggle('hidden', state.settings.taskbarWidgetEnabled !== true);
+  }
   const showTrayIcon = state.settings.showTrayIcon !== false;
   if (els.showTrayIconInput) els.showTrayIconInput.checked = showTrayIcon;
   els.trayModeInput.disabled = !showTrayIcon;
@@ -12494,6 +12504,11 @@ els.floatingBubbleInput.addEventListener('change', () => {
   els.floatingBubbleOptions?.classList.toggle('hidden', !els.floatingBubbleInput.checked);
   refreshTrayComposers();
   saveSettings({ floatingBubbleEnabled: els.floatingBubbleInput.checked });
+});
+els.taskbarWidgetInput?.addEventListener('change', () => {
+  state.settings.taskbarWidgetEnabled = els.taskbarWidgetInput.checked;
+  els.taskbarWidgetOptions?.classList.toggle('hidden', !els.taskbarWidgetInput.checked);
+  saveSettings({ taskbarWidgetEnabled: els.taskbarWidgetInput.checked });
 });
 for (const input of els.floatingBubbleTriggerInputs || []) {
   input.addEventListener('change', () => {

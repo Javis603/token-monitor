@@ -17,7 +17,7 @@
         <div class="title-controls">
           <nav class="tabs" aria-label="Period tabs">
             <span class="tab-indicator" aria-hidden="true"></span>
-            <button class="tab active" data-period="today" data-period-slot="today">DAY</button>
+<button class="tab active" data-period="today" data-period-slot="today">DAY</button>
             <button id="monthPeriodTab" class="tab" data-period="month" data-period-slot="month" aria-haspopup="menu" aria-expanded="false">MONTH</button>
             <button class="tab" data-period="allTime" data-period-slot="allTime">TOTAL</button>
           </nav>
@@ -298,6 +298,12 @@
                     </select>
                   </label>
                   <div id="floatingBubbleComposer" class="tray-composer hidden" data-surface="floatingBubble"></div>
+                </div>
+              </div>
+              <div class="presence-feature hidden" id="taskbarWidgetFeature">
+                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.taskbarWidget">Taskbar widget (Windows)</span></span><input id="taskbarWidgetInput" type="checkbox" /></label>
+                <div id="taskbarWidgetOptions" class="presence-feature-body hidden">
+                  <p class="settings-note" data-i18n="settings.display.taskbarWidgetNote">Show tokens on the left edge of the Windows taskbar, like the weather widget. Click the widget to cycle today, this month, and all time.</p>
                 </div>
               </div>
               <div class="presence-feature">
@@ -1692,7 +1698,7 @@
       </section>
 
       <section class="total-panel">
-        <div class="label-row"><span>TOTAL TOKENS</span></div>
+        <div class="label-row"><span data-i18n="dashboard.stat.totalTokens">TOTAL TOKENS</span></div>
         <div class="total-number-row"><div id="totalTokens" class="total-number">0</div><div id="totalTokensCompact" class="total-compact hidden" aria-hidden="true"></div></div>
         <div id="cost" class="cost">$0.00</div>
       </section>
