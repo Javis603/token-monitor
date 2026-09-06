@@ -143,11 +143,14 @@ function repairAntigravitySyncLock({
   }
 }
 
-// The throttle and the tokscale command are the collector's, not this module's:
-// one process-wide allowance rations cursor and antigravity together, and
-// resolving the binary is the collector's job. Both are injected once, so a
-// collector rebuilt by a settings change keeps driving the allowance it
-// inherited instead of quietly starting a second one.
+// The throttle and the tokscale command are the collector's, not this module's.
+// The throttle keeps independent state per client — claim('antigravity') never
+// reads cursor's floor — so what injection preserves is the object's identity
+// and lifetime, not a budget shared between the two. One instance lives for the
+// process, and a collector rebuilt by a settings change inherits whether its
+// predecessor consumed or returned this client's allowance. A throttle
+// constructed here would outlive that rebuild, splitting the state that decides
+// a sync from the state that schedules the catch-up waiting on it.
 function createAntigravitySelfSync({ selfSyncThrottle, tokscaleCommand }) {
   async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), options = {}) {
     throwIfAborted(options.signal);

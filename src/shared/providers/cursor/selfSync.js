@@ -12,7 +12,9 @@ const { normalizeClientsCsv } = require('../../clientTracking');
 const cursorAuth = require('./auth');
 
 // See createAntigravitySelfSync for why the throttle is injected rather than
-// created here: cursor and antigravity ration one process-wide allowance.
+// created here. Both self-syncs drive the one collector-owned instance; its
+// state is per client, so this is about that object's lifetime, not a budget
+// cursor shares with antigravity.
 function createCursorSelfSync({ selfSyncThrottle }) {
   async function maybeSyncCursor(clientsCsv, logger, options = {}) {
     throwIfAborted(options.signal);
