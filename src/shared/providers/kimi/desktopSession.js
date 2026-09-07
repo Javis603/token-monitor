@@ -25,7 +25,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
-const { sharedDataDir } = require('./config');
+const { sharedDataDir } = require('../../config');
 
 const KIMI_DESKTOP_DIR_NAME = 'kimi-desktop';
 const TOKEN_STORE_RELATIVE_PATH = path.join('bridge-store', 'token-store.json');

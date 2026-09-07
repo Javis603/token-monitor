@@ -18,7 +18,7 @@ const {
   resolveKimiManualSession,
   tasklistShowsKimiDesktop,
   clearKimiDesktopSessionCaches
-} = require('../../src/shared/kimiDesktopSession');
+} = require('../../src/shared/providers/kimi/desktopSession');
 
 const NOW_MS = Date.parse('2026-08-24T00:00:00Z');
 const MASTER_KEY = Buffer.from('a'.repeat(32) + 'b'.repeat(32), 'hex');
