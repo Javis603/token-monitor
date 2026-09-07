@@ -2028,6 +2028,7 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     path.join('.omp', 'agent', 'sessions'),
     path.join('.local', 'share', 'zed', 'threads'),
     path.join('Library', 'Application Support', 'Zed', 'threads'),
+    path.join('.local', 'share', 'kilo'),
     path.join('.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'),
     path.join('.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'),
     path.join('Library', 'Application Support', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'),
@@ -2039,18 +2040,20 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     path.join('.codebuddy', 'projects'),
     path.join('.workbuddy', 'projects')
   ]);
+  fs.writeFileSync(path.join(tmp, '.local', 'share', 'kilo', 'kilo.db'), '');
   const originalHomedir = os.homedir;
   os.homedir = () => tmp;
   try {
     const { clientDataDirPresence, watchPathsForClients } = freshCollector();
-    const dirs = watchPathsForClients('pi,zed,kilocode,micode,zcode,kiro,codebuddy,workbuddy');
+    const dirs = watchPathsForClients('pi,zed,kilo,micode,zcode,kiro,codebuddy,workbuddy');
     assert.ok(dirs.includes(path.join(tmp, '.pi', 'agent', 'sessions')));
     assert.ok(dirs.includes(path.join(tmp, '.omp', 'agent', 'sessions')));
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'zed', 'threads')));
     assert.ok(dirs.includes(path.join(tmp, 'Library', 'Application Support', 'Zed', 'threads')));
+    assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'kilo')));
     assert.ok(dirs.includes(path.join(tmp, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')));
     assert.ok(dirs.includes(path.join(tmp, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')));
-    // tokscale 3.1.3 does not scan KiloCode's native macOS/Windows globalStorage,
+    // Tokscale does not scan Kilo's native macOS/Windows VS Code globalStorage,
     // so we must not watch it (would be a dead watch + a false "active" status).
     assert.ok(!dirs.includes(path.join(tmp, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')));
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'mimocode')));
@@ -2066,8 +2069,8 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     // collector code, not this cross-platform test.
     assert.ok(dirs.includes(path.join(tmp, '.codebuddy', 'projects')));
     assert.ok(dirs.includes(path.join(tmp, '.workbuddy', 'projects')));
-    assert.deepEqual(clientDataDirPresence('pi,zed,kilocode,micode,zcode,kiro,codebuddy,workbuddy'), {
-      pi: true, zed: true, kilocode: true, micode: true, zcode: true, kiro: true, codebuddy: true, workbuddy: true
+    assert.deepEqual(clientDataDirPresence('pi,zed,kilo,micode,zcode,kiro,codebuddy,workbuddy'), {
+      pi: true, zed: true, kilo: true, micode: true, zcode: true, kiro: true, codebuddy: true, workbuddy: true
     });
   } finally {
     os.homedir = originalHomedir;

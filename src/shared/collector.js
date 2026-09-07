@@ -317,7 +317,8 @@ const tokscaleCapabilityResolver = createTokscaleCapabilityResolver({
 // stripped in collectUsageOnce before the filter is built, not dropped here.
 const TOKSCALE_CLIENT_ALIASES = {
   antigravity: ['antigravity-cli'],
-  pi: ['omp']
+  pi: ['omp'],
+  kilo: ['kilocode']
 };
 
 function tokscaleClientFilter(clients) {
@@ -2040,9 +2041,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // watcher prunes the rest of this broad app data root below.
   //
   // Only the roots tokscale declares as `PathRoot::XdgData` go through this —
-  // opencode, zed and micode (clients.rs), plus the CodeBuddy extension logs it
-  // resolves via `dirs::data_local_dir()`. Kiro's CLI database is deliberately
-  // NOT one of them: tokscale spells it as a home-relative literal
+  // opencode, zed, kilo and micode (clients.rs), plus the CodeBuddy extension
+  // logs it resolves via `dirs::data_local_dir()`. Kiro's CLI database is
+  // deliberately NOT one of them: tokscale spells it as a home-relative literal
   // (`{home}/.local/share/kiro-cli/data.sqlite3`, scanner.rs), so following XDG
   // there would watch a directory it never reads. The split is upstream's, not
   // an oversight — check clients.rs before adding or removing a root here.
@@ -2117,13 +2118,14 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['zed-threads', path.join(home, 'Library', 'Application Support', 'Zed', 'threads')],
     ['zed-threads', path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Zed', 'threads')]
   );
-  // Kilo Code (VS Code ext): tokscale 3.1.3 only scans the Linux .config root and
-  // the .vscode-server (remote) root for KiloCode — unlike Cline, it does NOT scan
-  // the native macOS Application Support / Windows %APPDATA% roots. Watching those
-  // would be dead watches + a false "waiting" status, so we mirror exactly what
-  // tokscale reads. (Native mac/win support pending upstream tokscale.)
+  // Kilo is one Token Monitor client backed by two Tokscale sources. `kilo`
+  // reads the CLI's XDG-data SQLite database, while `kilocode` reads the VS Code
+  // extension's Linux/local and remote task roots. Keep the native macOS and
+  // Windows VS Code roots out until Tokscale scans them; otherwise they would be
+  // dead watches and false presence signals.
   add(
-    'kilocode',
+    'kilo',
+    ['kilo-db', path.join(xdgHome, 'kilo'), path.join(xdgHome, 'kilo', 'kilo.db')],
     ['kilocode-tasks', path.join(home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')],
     ['kilocode-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')]
   );

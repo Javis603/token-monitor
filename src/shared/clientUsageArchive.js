@@ -1,6 +1,6 @@
 'use strict';
 
-const { PERIODS, normalizePeriod } = require('./usage');
+const { PERIODS, normalizeClientName, normalizePeriod } = require('./usage');
 const {
   cloneJson,
   hasSummaryPeriod,
@@ -13,9 +13,7 @@ const {
 } = require('./archiveHelpers');
 
 function normalizeClientId(value) {
-  const raw = String(value || '').trim().toLowerCase();
-  if (!raw) return null;
-  return raw.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || null;
+  return normalizeClientName(value);
 }
 
 function clientSet(value) {

@@ -13,7 +13,7 @@ const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 // stores data there and the home is worth a tokscale scan. These mirror the roots
 // tokscale actually reads (incl. alternate roots: Claude transcripts, Kimi
 // Code, legacy OpenClaw bot dirs) so a home holding only an alternate-root client
-// is still discovered. The `.vscode-server` entries cover Cline / Kilo Code
+// is still discovered. The `.vscode-server` entries cover Cline / Kilo
 // running through the VS Code WSL remote.
 const WSL_DATA_MARKERS = [
   '.claude/projects',
@@ -36,6 +36,7 @@ const WSL_DATA_MARKERS = [
   '.pi/agent/sessions',
   '.omp/agent/sessions',
   '.local/share/zed/threads/threads.db',
+  '.local/share/kilo/kilo.db',
   '.config/Code/User/globalStorage/kilocode.kilo-code/tasks',
   '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks',
   '.commandcode/projects',
@@ -81,8 +82,9 @@ const MARKER_CLIENTS = {
   '.pi/agent/sessions': 'pi',
   '.omp/agent/sessions': 'pi',
   '.local/share/zed/threads/threads.db': 'zed',
-  '.config/Code/User/globalStorage/kilocode.kilo-code/tasks': 'kilocode',
-  '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks': 'kilocode',
+  '.local/share/kilo/kilo.db': 'kilo',
+  '.config/Code/User/globalStorage/kilocode.kilo-code/tasks': 'kilo',
+  '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks': 'kilo',
   '.commandcode/projects': 'commandcode',
   '.dsh/sessions': 'dsh',
   '.local/share/mimocode/mimocode.db': 'micode',
