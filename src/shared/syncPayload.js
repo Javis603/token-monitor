@@ -193,6 +193,7 @@ function stripClientModelTokenComponents(payload) {
     if (!periodHasClientModelTokenComponents(period)) continue;
     payload[periodName] = { ...period };
     delete payload[periodName].clientModelTokenComponents;
+    payload[periodName].clientModelTokenComponentsOmitted = true;
     omitted = true;
   }
   if (omitted) payload.clientModelTokenComponentsOmitted = true;

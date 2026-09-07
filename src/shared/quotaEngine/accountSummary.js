@@ -113,7 +113,9 @@ function dropSamplesBeforePercentRollback(rows) {
 function withinCurrentRun(estimate, boundaryAt) {
   if (!boundaryAt) return true;
   const boundaryMs = timeMs(boundaryAt);
-  if (boundaryMs === null) return true;
+  // A stated boundary that cannot be parsed cannot prove the estimate is in
+  // the current run. Only a missing boundary is allowed to skip this cut.
+  if (boundaryMs === null) return false;
   const firstObserved = timeMs(estimate?.firstObservedAt);
   const lastObserved = timeMs(estimate?.lastObservedAt);
   if (lastObserved === null || lastObserved < boundaryMs) return false;

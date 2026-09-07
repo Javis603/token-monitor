@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
+const { ownMap } = require('../helpers/ownMap');
 const {
   REASONIX_CLIENT,
   REASONIX_SOURCE_CHECK_ID,
@@ -193,8 +194,8 @@ test('Reasonix partitions merge exactly across aggregate, client, and model tota
   assert.equal(bundle.byClient.reasonix.clients.reasonix, 140);
   assert.equal(bundle.byClient.reasonix.models['deepseek-chat'], 140);
   assert.equal(bundle.byClient.reasonix.clientModels.reasonix['deepseek-chat'], 140);
-  assert.deepEqual(bundle.period.sessions, {});
-  assert.deepEqual(bundle.byClient.reasonix.sessions, {});
+  assert.deepEqual(ownMap(bundle.period.sessions), {});
+  assert.deepEqual(ownMap(bundle.byClient.reasonix.sessions), {});
 });
 
 test('history folds latest Tokscale disjoint reasoning for Reasonix and Codex', () => {

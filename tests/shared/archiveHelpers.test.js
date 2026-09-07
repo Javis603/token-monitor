@@ -14,6 +14,7 @@ const {
   targetPeriod,
   toDate
 } = require('../../src/shared/archiveHelpers');
+const { ownMap } = require('../helpers/ownMap');
 
 test('hasSummaryPeriod reads both supported summary shapes without materializing periods', () => {
   const flat = { today: {} };
@@ -84,7 +85,7 @@ test('targetPeriod normalizes in place for both summary shapes', () => {
   const flatPeriod = targetPeriod(flat, 'today');
   assert.equal(flatPeriod.totalTokens, 5);
   assert.equal(flat.today, flatPeriod);
-  assert.deepEqual(flatPeriod.clients, {});
+  assert.deepEqual(ownMap(flatPeriod.clients), {});
 
   const nested = { periods: { month: { totalTokens: 3 } } };
   const nestedPeriod = targetPeriod(nested, 'month');

@@ -227,3 +227,46 @@ test('dirty but well-shaped values still load, normalize and keep sampling', () 
     assert.ok(persisted.accountingSamples.length > 0);
   });
 });
+
+test('a directory archive path is locked and is not replaced by capture', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-quota-archive-dir-'));
+  const filePath = path.join(dir, 'not-a-file');
+  try {
+    fs.mkdirSync(filePath);
+    const store = createCodexQuotaArchiveStore(filePath);
+    store.load();
+    assert.equal(store.isLocked(), true);
+    assert.equal(store.lastLoadCode(), LOAD_UNREADABLE);
+    store.capture(deviceAt({ at: '2026-09-05T07:00:00.000Z', sessionPercent: 10, weeklyPercent: 10, tokens: 1_000_000 }), '2026-09-05T07:00:00.000Z');
+    assert.equal(fs.statSync(filePath).isDirectory(), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a symlink archive path is locked and does not follow or overwrite the target', (t) => {
+  withTempDir((filePath) => {
+    const target = `${filePath}.real`;
+    const original = JSON.stringify({
+      version: 1,
+      observations: [],
+      accountingSamples: [],
+      scopes: {},
+      windowState: {},
+      lastProfileId: ''
+    });
+    fs.writeFileSync(target, original, 'utf8');
+    try {
+      fs.symlinkSync(target, filePath);
+    } catch (error) {
+      t.skip(`symlink unavailable on this Windows host: ${error.code || error.message}`);
+      return;
+    }
+    const store = createCodexQuotaArchiveStore(filePath);
+    store.load();
+    assert.equal(store.isLocked(), true);
+    store.capture(deviceAt({ at: '2026-09-05T07:00:00.000Z', sessionPercent: 10, weeklyPercent: 10, tokens: 1_000_000 }), '2026-09-05T07:00:00.000Z');
+    assert.equal(fs.readFileSync(target, 'utf8'), original);
+    assert.equal(fs.lstatSync(filePath).isSymbolicLink(), true);
+  });
+});

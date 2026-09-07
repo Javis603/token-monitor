@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { mergePeriods, emptyPeriod, addPeriodInto } = require('../../src/shared/usage');
+const { ownMap } = require('../helpers/ownMap');
 
 test('mergePeriods sums totals and per-client/per-model maps', () => {
   const a = emptyPeriod();
@@ -19,10 +20,10 @@ test('mergePeriods sums totals and per-client/per-model maps', () => {
   const out = mergePeriods(a, b);
   assert.equal(out.totalTokens, 140);
   assert.equal(out.costUsd, 2);
-  assert.deepEqual(out.clients, { claude: 110, codex: 30 });
-  assert.deepEqual(out.clientCosts, { claude: 1.7, codex: 0.3 });
-  assert.deepEqual(out.models, { 'claude-3': 110, 'gpt-5': 30 });
-  assert.deepEqual(out.modelCosts, { 'claude-3': 1.7, 'gpt-5': 0.3 });
+  assert.deepEqual(ownMap(out.clients), { claude: 110, codex: 30 });
+  assert.deepEqual(ownMap(out.clientCosts), { claude: 1.7, codex: 0.3 });
+  assert.deepEqual(ownMap(out.models), { 'claude-3': 110, 'gpt-5': 30 });
+  assert.deepEqual(ownMap(out.modelCosts), { 'claude-3': 1.7, 'gpt-5': 0.3 });
 });
 
 test('mergePeriods ignores null/undefined args and does not mutate inputs', () => {
@@ -40,8 +41,8 @@ test('addPeriodInto accumulates clientModels nesting', () => {
   source.clientModelCosts = { claude: { 'claude-3': 0.7 } };
   addPeriodInto(target, source);
   addPeriodInto(target, source);
-  assert.deepEqual(target.clientModels, { claude: { 'claude-3': 14 } });
-  assert.deepEqual(target.clientModelCosts, { claude: { 'claude-3': 1.4 } });
+  assert.deepEqual(ownMap(target.clientModels), { claude: { 'claude-3': 14 } });
+  assert.deepEqual(ownMap(target.clientModelCosts), { claude: { 'claude-3': 1.4 } });
 });
 
 test('mergePeriods propagates token-component provenance fail closed', () => {

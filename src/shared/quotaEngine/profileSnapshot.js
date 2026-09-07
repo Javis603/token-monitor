@@ -17,10 +17,20 @@ function safeProvider(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function observationTimeMs(value) {
+  const ms = Date.parse(value || '');
+  return Number.isFinite(ms) ? ms : null;
+}
+
 function latestWindows(observations) {
   const windows = new Map();
   for (const observation of observations) {
-    windows.set(`${observation.kind || ''}|${observation.limitId || ''}`, observation);
+    const at = observationTimeMs(observation?.observedAt);
+    if (at === null) continue;
+    const key = `${observation.kind || ''}|${observation.limitId || ''}`;
+    const current = windows.get(key);
+    const currentAt = observationTimeMs(current?.observedAt);
+    if (currentAt === null || at >= currentAt) windows.set(key, observation);
   }
   return [...windows.values()];
 }

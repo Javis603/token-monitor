@@ -110,11 +110,11 @@ function normalizePricingSnapshot(input) {
   const verifiedAt = validDate(source.verifiedAt);
   const effectiveFrom = validDate(source.effectiveFrom);
   if (!snapshotId || !sourceId || !verifiedAt || !effectiveFrom) return null;
-  const models = {};
+  const models = Object.create(null);
   for (const [rawProvider, rawModels] of Object.entries(source.models || {})) {
     const provider = cleanId(rawProvider, 48);
     if (!provider || !rawModels || typeof rawModels !== 'object') continue;
-    const destination = {};
+    const destination = Object.create(null);
     for (const [rawModel, rawEntry] of Object.entries(rawModels)) {
       const model = cleanId(rawModel);
       if (!model || !rawEntry || typeof rawEntry !== 'object') continue;
@@ -160,16 +160,28 @@ function normalizePricingSnapshot(input) {
 function providerForClient(client) {
   // Only clients with a wired adapter are mapped; an unmapped client keeps
   // its own (unpriced) provider name.
-  return ({ codex: 'openai' })[cleanId(client, 48)] || '';
+  const mapped = { codex: 'openai' };
+  const id = cleanId(client, 48);
+  return Object.prototype.hasOwnProperty.call(mapped, id) ? mapped[id] : '';
+}
+
+function ownMapEntry(map, key) {
+  if (!map || typeof map !== 'object' || !key) return null;
+  if (!Object.prototype.hasOwnProperty.call(map, key)) return null;
+  const entry = map[key];
+  return entry && typeof entry === 'object' ? entry : null;
 }
 
 function resolveModel(snapshot, provider, model) {
-  const providerModels = snapshot?.models?.[provider];
+  const providerModels = ownMapEntry(snapshot?.models, provider);
   const requested = cleanId(model);
   if (!providerModels || !requested) return null;
-  if (providerModels[requested]) return { model: requested, entry: providerModels[requested] };
+  const direct = ownMapEntry(providerModels, requested);
+  if (direct) return { model: requested, entry: direct };
   for (const [canonical, entry] of Object.entries(providerModels)) {
-    if (entry.aliases.includes(requested)) return { model: canonical, entry };
+    if (Array.isArray(entry?.aliases) && entry.aliases.includes(requested)) {
+      return { model: canonical, entry };
+    }
   }
   return null;
 }

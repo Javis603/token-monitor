@@ -90,9 +90,11 @@ test('project normalization accepts reserved wire keys without prototype polluti
 
   assert.equal(Object.getPrototypeOf(period.projects), null);
   assert.equal(period.projects.__proto__.tokens, 5);
-  assert.equal(period.projects.__proto__.clients.constructor, 5);
+  assert.equal(Object.hasOwn(period.projects.__proto__.clients, 'constructor'), false);
   assert.equal(period.projects.constructor.tokens, 7);
+  assert.equal(period.projects.constructor.clients.codex, 7);
   assert.equal(period.projects.prototype.tokens, 9);
+  assert.equal(period.projects.prototype.clients.claude, 9);
   assert.equal({}.polluted, undefined);
 });
 

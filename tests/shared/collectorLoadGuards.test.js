@@ -2761,14 +2761,15 @@ test('live watch events scan only changed clients and preserve the other client 
           ? [{ client: 'claude', model: 'unexpected-model', totalTokens: 99 }]
         : selected.filter((client) => !(codexDeleted && client === 'codex')).map((client) => {
             const tokens = client === 'codex' && selected.length === 1 ? 30 : (client === 'codex' ? 20 : 10);
+            // Closed components: cacheRead equals the row total. Setting
+            // input+cacheRead+output all to `tokens` would overflow and
+            // fail-close cache onto unclassified.
             return {
               client,
               sessionId: `${client}-session`,
               model: `${client}-model`,
               totalTokens: tokens,
-              input: tokens,
               cacheRead: tokens,
-              output: tokens,
               cost: tokens / 100
             };
           });

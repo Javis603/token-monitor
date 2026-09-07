@@ -6,6 +6,7 @@ const test = require('node:test');
 const {
   deriveApiEquivalentQuota,
   estimateRateLimitCapacities,
+  sampleGroupKey,
   selectQuotaEvidenceStatus
 } = require('../../src/shared/quotaEngine');
 
@@ -387,7 +388,6 @@ test('a 0% to 100% cycle with an unobserved local-usage gap is not a clean full 
   assert.equal(quota.cycleBasis, 'partial');
   assert.equal(selectQuotaEvidenceStatus(estimate, { provider: 'other-client' }), 'unstable');
   assert.equal(selectQuotaEvidenceStatus(estimate, { provider: 'codex' }), 'unstable');
-  assert.equal(selectQuotaEvidenceStatus(estimate, { provider: 'codex' }), 'unstable');
 });
 
 test('observed cycle tokens are the segment increment, not the account cumulative', () => {
@@ -445,5 +445,39 @@ test('Profile, reset and rollback boundaries still prevent cross-segment joining
 
   assert.equal(estimates.length, 4);
   assert.equal(estimates.filter((estimate) => estimate.current).length, 2);
+});
+
+test('the same segment id with two resetsAt values does not share a fit group', () => {
+  const first = sample(10, 1000, 1, 2000, {
+    segmentId: 'shared-segment',
+    resetsAt: '2026-09-01T00:00:00.000Z'
+  });
+  const second = sample(20, 2000, 2, 4000, {
+    segmentId: 'shared-segment',
+    resetsAt: '2026-09-08T00:00:00.000Z',
+    observedAt: '2026-08-25T01:00:00.000Z'
+  });
+  assert.notEqual(sampleGroupKey(first), sampleGroupKey(second));
+  const estimates = estimateRateLimitCapacities([first, second]);
+  assert.equal(estimates.length, 2);
+});
+
+test('observedCycleTokens ignores tokens from before a percent rollback or unsettled break', () => {
+  const [rollback] = estimateRateLimitCapacities([
+    sample(10, 1000, 1, 2000, { observedAt: '2026-08-25T01:00:00.000Z' }),
+    sample(40, 4000, 4, 8000, { observedAt: '2026-08-25T02:00:00.000Z' }),
+    sample(20, 4200, 4.2, 8400, { observedAt: '2026-08-25T03:00:00.000Z' }),
+    sample(30, 5200, 5.2, 10400, { observedAt: '2026-08-25T04:00:00.000Z' })
+  ]);
+  assert.equal(rollback.observedCycleTokens, 1000);
+  assert.notEqual(rollback.observedCycleTokens, 4200);
+
+  const [unsettled] = estimateRateLimitCapacities([
+    sample(10, 1000, 1, 2000, { observedAt: '2026-08-25T01:00:00.000Z' }),
+    sample(20, 2000, 2, 4000, { observedAt: '2026-08-25T02:00:00.000Z', unsettled: true }),
+    sample(30, 3500, 3.5, 7000, { observedAt: '2026-08-25T03:00:00.000Z' })
+  ]);
+  assert.equal(unsettled.observedCycleTokens, 1500);
+  assert.notEqual(unsettled.observedCycleTokens, 2500);
 });
 

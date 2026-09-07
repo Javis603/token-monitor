@@ -542,6 +542,9 @@ test('over-budget payloads drop clientModelTokenComponents before project or ses
   assert.equal(compact.payload.clientModelTokenComponentsOmitted, true);
   assert.equal(Object.hasOwn(compact.payload.today, 'clientModelTokenComponents'), false);
   assert.equal(Object.hasOwn(compact.payload.allTime, 'clientModelTokenComponents'), false);
+  assert.equal(compact.payload.today.clientModelTokenComponentsOmitted, true);
+  assert.equal(compact.payload.allTime.clientModelTokenComponentsOmitted, true);
+  assert.equal(compact.payload.month.clientModelTokenComponentsOmitted, undefined);
   assert.equal(Object.hasOwn(compact.payload.today, 'sessions'), true);
   assert.equal(Object.hasOwn(compact.payload.allTime, 'projects'), true);
 });

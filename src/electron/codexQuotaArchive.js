@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const { writeJsonAtomic } = require('../shared/config');
+const { readRegularFileNoFollow } = require('../shared/credentialStore');
 const {
   ARCHIVE_VERSION,
   codexQuotaArchiveStructureError,
@@ -20,11 +21,28 @@ const LOAD_OK = 'archive-loaded';
 const PERSIST_FAILED = 'persist-failed';
 
 function defaultReadFile(filePath) {
-  return fs.readFileSync(filePath, 'utf8');
+  return readRegularFileNoFollow(filePath, { description: 'Codex quota archive' });
 }
 
 function defaultWriteFile(filePath, value) {
   writeJsonAtomic(filePath, value);
+}
+
+// Existing path must already be a regular file, or must not exist yet.
+// Symlinks, junctions, directories and other special files stay locked so a
+// later persist cannot atomically replace an unconfirmed target. lstat then
+// open/rename is not a single syscall: on Windows O_NOFOLLOW is often 0, so
+// credentialStore compares lstat/fstat ino+dev, and a replacement between
+// that check and rename remains a residual race.
+function archivePathUnsafeToReplace(filePath, fsApi = fs) {
+  try {
+    const stat = fsApi.lstatSync(filePath);
+    if (typeof stat.isSymbolicLink === 'function' && stat.isSymbolicLink()) return true;
+    return typeof stat.isFile !== 'function' || !stat.isFile();
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return false;
+    return true;
+  }
 }
 
 // Distinguishes "no archive yet" (safe to create) from "an archive exists but
@@ -96,6 +114,11 @@ function createCodexQuotaArchiveStore(filePath, deps = {}) {
     const next = observeCodexQuota(current, { device, observedAt, snapshot });
     if (next === current) return current;
     cached = next;
+    if (archivePathUnsafeToReplace(filePath)) {
+      locked = true;
+      log(`[codex-quota] persist failed: ${PERSIST_FAILED}`);
+      return next;
+    }
     try {
       writeFile(filePath, next);
     } catch {

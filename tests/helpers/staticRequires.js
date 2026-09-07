@@ -62,17 +62,54 @@ function extractStaticRequires(source, fileName = '<inline>') {
   return found;
 }
 
-// Resolves a relative require target the way Node would (exact, .js, then
-// /index.js), so `./quotaAdapters` (the facade) and `./quotaAdapters/index`
-// both resolve to index.js while `./quotaAdapters/accountProfile` resolves to
-// an internal file.
-function resolveRequireTarget(fromFile, target, fileExists) {
-  if (!target.startsWith('.')) return null;
-  const base = path.resolve(path.dirname(fromFile), target);
-  for (const candidate of [base, `${base}.js`, path.join(base, 'index.js')]) {
+// Node CommonJS LOAD_AS_FILE / LOAD_AS_DIRECTORY, minus .mjs (require() on
+// this project's Node 22/24 does not load ESM as a CJS target).
+function loadAsFile(base, fileExists) {
+  if (path.extname(base) === '.mjs') return null;
+  for (const candidate of [base, `${base}.js`, `${base}.json`, `${base}.node`]) {
     if (fileExists(candidate)) return candidate;
   }
   return null;
+}
+
+function loadIndex(dir, fileExists) {
+  for (const name of ['index.js', 'index.json', 'index.node']) {
+    const candidate = path.join(dir, name);
+    if (fileExists(candidate)) return candidate;
+  }
+  return null;
+}
+
+function packageMain(dir, fileExists) {
+  const pkgPath = path.join(dir, 'package.json');
+  if (!fileExists(pkgPath)) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    return typeof parsed?.main === 'string' && parsed.main.trim() ? parsed.main.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadAsDirectory(dir, fileExists, depth = 0) {
+  if (depth > 4) return null;
+  const main = packageMain(dir, fileExists);
+  if (main) {
+    const mainPath = path.resolve(dir, main);
+    const asFile = loadAsFile(mainPath, fileExists);
+    if (asFile) return asFile;
+    const nested = loadAsDirectory(mainPath, fileExists, depth + 1);
+    if (nested) return nested;
+    const indexed = loadIndex(mainPath, fileExists);
+    if (indexed) return indexed;
+  }
+  return loadIndex(dir, fileExists);
+}
+
+function resolveRequireTarget(fromFile, target, fileExists) {
+  if (typeof target !== 'string' || !target.startsWith('.')) return null;
+  const base = path.resolve(path.dirname(fromFile), target);
+  return loadAsFile(base, fileExists) || loadAsDirectory(base, fileExists);
 }
 
 function fsFileExists(candidate) {

@@ -46,13 +46,27 @@ function isSuccessorQuotaCycle(previous, next) {
   return crossed && successor;
 }
 
-// Accounting samples can carry a binding suffix on the archived segment
-// (`segment-xxx|binding-y`). Only the head describes the quota cycle.
+// Production segment IDs are `profileId|kind|resetsAt|snapshotId`. A mapped
+// profile may append `|binding-...` after that cycle identity. Only that
+// trailing binding suffix is stripped; splitting on the first `|` would drop
+// the cycle fields and compare profile IDs alone.
+const BINDING_SUFFIX = /\|binding-[^|]*$/;
+
 function cycleSegmentId(value) {
   const segment = safeText(value?.segmentId, 240);
   if (!segment) return '';
-  const cut = segment.indexOf('|');
-  return cut > 0 ? segment.slice(0, cut) : segment;
+  return segment.replace(BINDING_SUFFIX, '');
+}
+
+function resetText(value) {
+  return safeText(value, 40);
+}
+
+function resetIdentityMs(value) {
+  const text = resetText(value);
+  if (!text) return { present: false, ms: null };
+  const ms = cycleTimeMs(text);
+  return { present: true, ms };
 }
 
 // Window compatibility: same account, same window kind/limit, compatible
@@ -78,11 +92,18 @@ function sameWindow(left, right) {
 // recognise a strictly later reset.
 function sameQuotaCycle(live, candidate) {
   if (!sameWindow(live, candidate)) return false;
-  const liveReset = cycleTimeMs(live?.resetsAt);
-  const candidateReset = cycleTimeMs(candidate?.resetsAt);
-  if (liveReset !== null && candidateReset !== null) {
-    return Math.abs(liveReset - candidateReset) <= RESET_CYCLE_JITTER_MS;
+  const liveReset = resetIdentityMs(live?.resetsAt);
+  const candidateReset = resetIdentityMs(candidate?.resetsAt);
+  // A present but unparseable reset is not "missing": it cannot prove identity
+  // and must not fall through to a segment comparison.
+  if ((liveReset.present && liveReset.ms === null) || (candidateReset.present && candidateReset.ms === null)) {
+    return false;
   }
+  if (liveReset.ms !== null && candidateReset.ms !== null) {
+    return Math.abs(liveReset.ms - candidateReset.ms) <= RESET_CYCLE_JITTER_MS;
+  }
+  // Only one side has a parseable reset: evidence is incomplete.
+  if (liveReset.ms !== null || candidateReset.ms !== null) return false;
   const liveSegment = cycleSegmentId(live);
   const candidateSegment = cycleSegmentId(candidate);
   if (liveSegment && candidateSegment) return liveSegment === candidateSegment;
@@ -95,6 +116,7 @@ module.exports = {
   RESET_CYCLE_JITTER_MS,
   cycleSegmentId,
   isSuccessorQuotaCycle,
+  resetIdentityMs,
   resetTimesClose,
   sameQuotaCycle,
   sameWindow

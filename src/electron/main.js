@@ -252,7 +252,7 @@ const {
 const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServicesRecovery');
 const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
-const { attachCodexQuotaEstimates } = require('../shared/codexQuota');
+const { attachCodexQuotaEstimates, resolveCodexQuotaObservedAt } = require('../shared/codexQuota');
 const { createCodexQuotaArchiveStore } = require('./codexQuotaArchive');
 const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
@@ -2873,7 +2873,8 @@ function getCodexQuotaArchive() {
 
 function captureCodexQuotaFromDevice(device) {
   if (!device) return;
-  const observedAt = device.updatedAt || device.limits?.updatedAt || device.receivedAt;
+  const observedAt = resolveCodexQuotaObservedAt(device);
+  if (!observedAt) return;
   getCodexQuotaStore().capture(device, observedAt);
 }
 let latestHubStats = null;

@@ -17,6 +17,7 @@ const {
   emptyCodexQuotaArchive,
   normalizeCodexQuotaArchive,
   observeCodexQuota,
+  resolveCodexQuotaObservedAt,
   projectCodexQuotaForProvider,
   scopeProfileId,
   trimCodexQuotaArchiveRows,
@@ -147,6 +148,66 @@ test('exclusive Codex models recover input from the row-sum identity', () => {
     cacheWrite: 50,
     complete: true
   });
+});
+
+test('explicit component omission does not reconstruct remainder as input', () => {
+  const exclusive = {
+    clients: { codex: 1000 },
+    models: { 'gpt-6-astra': 1000 },
+    clientModels: { codex: { 'gpt-6-astra': 1000 } },
+    modelCacheReads: { 'gpt-6-astra': 100 },
+    modelCacheWrites: { 'gpt-6-astra': 50 },
+    modelOutputs: { 'gpt-6-astra': 200 },
+    capabilities: { tokenComponents: true }
+  };
+  assert.equal(deriveCodexExclusiveUsage(exclusive).tokenComponents['gpt-6-astra'].input, 650);
+  const omitted = deriveCodexExclusiveUsage({
+    ...exclusive,
+    clientModelTokenComponentsOmitted: true
+  });
+  assert.deepEqual(omitted.tokenComponents['gpt-6-astra'], {
+    unclassified: 1000,
+    complete: false
+  });
+  const missingFlag = deriveCodexExclusiveUsage(exclusive);
+  assert.equal(missingFlag.tokenComponents['gpt-6-astra'].complete, true);
+});
+
+test('limits-only capture prefers the newer limits timestamp over stale usage updatedAt', () => {
+  const usageAt = '2026-09-05T11:50:00.000Z';
+  const limitsAt = '2026-09-05T12:05:00.000Z';
+  const resetAt = '2026-09-05T12:00:00.000Z';
+  assert.equal(resolveCodexQuotaObservedAt({
+    updatedAt: usageAt,
+    receivedAt: '2026-09-05T11:49:00.000Z',
+    limits: { updatedAt: limitsAt }
+  }), new Date(limitsAt).toISOString());
+  assert.equal(resolveCodexQuotaObservedAt({
+    updatedAt: 'not-a-date',
+    limits: { updatedAt: 'also-bad' }
+  }), '');
+  assert.equal(resolveCodexQuotaObservedAt({
+    updatedAt: 'not-a-date',
+    receivedAt: usageAt,
+    limits: { updatedAt: 'also-bad' }
+  }), new Date(usageAt).toISOString());
+
+  const device = deviceAt({
+    at: usageAt,
+    sessionPercent: 10,
+    weeklyPercent: 10,
+    tokens: 1_000_000
+  });
+  device.limits.updatedAt = limitsAt;
+  device.limits.providers[0].windows[0].resetsAt = resetAt;
+  const archive = observeCodexQuota(emptyCodexQuotaArchive(), {
+    device,
+    observedAt: resolveCodexQuotaObservedAt(device)
+  });
+  assert.ok(archive.observations.length > 0);
+  assert.ok(archive.observations.every((row) => row.observedAt === new Date(limitsAt).toISOString()));
+  assert.ok(Date.parse(limitsAt) > Date.parse(resetAt));
+  assert.ok(Date.parse(usageAt) < Date.parse(resetAt));
 });
 
 test('explicit modelUnclassifiedTokens never leak into input', () => {
@@ -384,7 +445,8 @@ test('percent rollback is not spliced into the same run', () => {
   ]);
   const weekly = summary(archive, ACCOUNT_A, 'weekly');
   assert.equal(weekly.observedTokens, 200_000);
-  assert.ok(weekly.reasons.includes('cycle-percent-rollback') || weekly.confidence !== 'stable');
+  assert.ok(weekly.reasons.includes('cycle-percent-rollback'));
+  assert.notEqual(weekly.confidence, 'stable');
 });
 
 test('cumulative watermark rollback reseeds instead of reporting a negative increment', () => {
@@ -397,7 +459,8 @@ test('cumulative watermark rollback reseeds instead of reporting a negative incr
   const weekly = summary(archive, ACCOUNT_A, 'weekly');
   assert.equal(weekly.observedTokens, null);
   assert.equal(weekly.pricedUsd, null);
-  assert.ok(weekly.reasons.includes('cumulative-rollback') || weekly.confidence === 'unstable');
+  assert.ok(weekly.reasons.includes('cumulative-rollback'));
+  assert.notEqual(weekly.confidence, 'stable');
 });
 
 test('two-point growth yields a preliminary or better estimate, never a fake zero', () => {
@@ -411,7 +474,6 @@ test('two-point growth yields a preliminary or better estimate, never a fake zer
   assert.equal(weekly.pricedUsd, 50);
   assert.ok(weekly.capacityUsd === null || weekly.capacityUsd > 0);
   assert.ok(['collecting', 'preliminary', 'stable'].includes(weekly.confidence));
-  assert.notEqual(weekly.pricedUsd, 0);
 });
 
 test('a gapped fit stays unstable while the projection keeps the raw capacity for audit', () => {
@@ -432,9 +494,6 @@ test('a gapped fit stays unstable while the projection keeps the raw capacity fo
   assert.ok(weekly.capacityUsd !== null && weekly.capacityUsd > 0, 'audit contract keeps the raw fit');
   assert.ok(weekly.observedTokens > 0);
   assert.ok(weekly.pricedUsd > 0);
-  // A stable claim is exactly what this cycle must never make: the gap caps
-  // the metric status, and the two-point fit cannot outvote it via R² = 1.
-  assert.notEqual(weekly.capacityUsd, undefined);
   const session = summary(archive, ACCOUNT_A, 'session');
   assert.equal(session.confidence, 'unstable');
   assert.ok(session.capacityUsd === null || session.capacityUsd > 0);
@@ -463,7 +522,8 @@ test('unknown models stay unpriced and gpt-6-astra is an exact id', () => {
   assert.equal(weekly.observedTokens, 1_000_000);
   assert.equal(weekly.pricedUsd, null);
   assert.equal(weekly.coverage, 0);
-  assert.ok(weekly.reasons.includes('unpriced-usage') || weekly.confidence === 'unstable' || weekly.confidence === 'collecting');
+  assert.ok(weekly.reasons.includes('unpriced-usage'));
+  assert.notEqual(weekly.confidence, 'stable');
 });
 
 test('a later pricing snapshot does not rewrite earlier sample amounts', () => {

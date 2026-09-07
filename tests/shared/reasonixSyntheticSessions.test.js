@@ -17,6 +17,7 @@ const {
 const { composeLocalSyncStats } = require('../../src/electron/syncDisplayStats');
 const { mergedLocalAllTimeSessions } = require('../../src/shared/localSessions');
 const { syncPayload } = require('../../src/shared/syncPayload');
+const { ownMap } = require('../helpers/ownMap');
 const { aggregateDevices, normalizeDeviceRecord, normalizePeriod } = require('../../src/shared/usage');
 const { sessionIdLabel, sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
 
@@ -78,12 +79,12 @@ test('ingestion and hub/display merge never retain Reasonix in period.sessions',
 
   const normalized = normalizeDeviceRecord(rawRecord);
   for (const periodName of ['today', 'month', 'allTime']) {
-    assert.deepEqual(normalized.periods[periodName].sessions, {});
+    assert.deepEqual(ownMap(normalized.periods[periodName].sessions), {});
   }
 
   const aggregate = aggregateDevices([rawRecord], 0, Date.parse('2026-08-08T06:31:00.000Z'));
   for (const periodName of ['today', 'month', 'allTime']) {
-    assert.deepEqual(aggregate.periods[periodName].sessions, {});
+    assert.deepEqual(ownMap(aggregate.periods[periodName].sessions), {});
     assert.doesNotMatch(JSON.stringify(aggregate.periods[periodName]), /\/Users\/test/);
   }
 
@@ -92,7 +93,7 @@ test('ingestion and hub/display merge never retain Reasonix in period.sessions',
     nativeSessions: nativeViews()
   });
   for (const periodName of ['today', 'month', 'allTime']) {
-    assert.deepEqual(display.periods[periodName].sessions, {});
+    assert.deepEqual(ownMap(display.periods[periodName].sessions), {});
   }
   assert.ok(display.nativeSessions.today[nativeSession.sessionId]);
 
@@ -100,7 +101,7 @@ test('ingestion and hub/display merge never retain Reasonix in period.sessions',
     month: { sessions: { [syntheticKey]: syntheticSession } },
     allTime: { sessions: {} }
   }, rawRecord);
-  assert.deepEqual(allTimeView, {});
+  assert.deepEqual(ownMap(allTimeView), {});
 });
 
 test('legacy archive reads, captures, and applies without resurrecting Reasonix generic entries', () => {
@@ -122,13 +123,13 @@ test('legacy archive reads, captures, and applies without resurrecting Reasonix 
     }
   };
 
-  assert.deepEqual(normalizeSessionUsageArchive(legacyArchive).sessions, {});
-  assert.deepEqual(readSessionUsageArchive({ path: '/tmp/legacy-session-archive.json', readJson: () => legacyArchive }).sessions, {});
-  assert.deepEqual(captureSessionUsageArchive({}, {
+  assert.deepEqual(ownMap(normalizeSessionUsageArchive(legacyArchive).sessions), {});
+  assert.deepEqual(ownMap(readSessionUsageArchive({ path: '/tmp/legacy-session-archive.json', readJson: () => legacyArchive }).sessions), {});
+  assert.deepEqual(ownMap(captureSessionUsageArchive({}, {
     today: { sessions: { [syntheticKey]: syntheticSession } },
     month: { sessions: { [syntheticKey]: syntheticSession } },
     allTime: { sessions: { [syntheticKey]: syntheticSession } }
-  }, new Date('2026-08-08T06:31:00.000Z')).sessions, {});
+  }, new Date('2026-08-08T06:31:00.000Z')).sessions), {});
 
   const visible = applySessionUsageArchive({
     today: { sessions: { [syntheticKey]: syntheticSession } },
@@ -136,7 +137,7 @@ test('legacy archive reads, captures, and applies without resurrecting Reasonix 
     allTime: { sessions: { [syntheticKey]: syntheticSession } }
   }, legacyArchive, { now: new Date('2026-08-08T06:31:00.000Z') });
   for (const periodName of ['today', 'month', 'allTime']) {
-    assert.deepEqual(visible[periodName].sessions, {});
+    assert.deepEqual(ownMap(visible[periodName].sessions), {});
   }
 });
 
@@ -152,7 +153,7 @@ test('deviceState carry-forward drops old generic Reasonix sessions but keeps na
   const preview = state.updateUsage({ today: { sessions: {} } }, 'progress', { preview: true });
 
   for (const periodName of ['today', 'month', 'allTime']) {
-    assert.deepEqual(preview[periodName].sessions, {});
+    assert.deepEqual(ownMap(preview[periodName].sessions), {});
   }
   assert.ok(preview.nativeSessions.today[nativeSession.sessionId]);
   assert.equal(records.length, 2);
@@ -170,7 +171,7 @@ test('sync and renderer expose only native Reasonix and never serialize the stat
   });
   assert.doesNotMatch(JSON.stringify(payload), /\/Users\/test/);
   assert.ok(payload.today.sessions['codex:real']);
-  assert.deepEqual(payload.month.sessions, {});
+  assert.deepEqual(ownMap(payload.month.sessions), {});
 
   const rows = sessionRowsForPeriod({ sessions: { [syntheticKey]: syntheticSession } }, {
     nativeSessions: { [nativeSession.sessionId]: nativeSession },

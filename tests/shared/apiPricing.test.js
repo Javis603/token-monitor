@@ -107,6 +107,13 @@ test('GPT-6 Astra uses the official standard short-context prices without fuzzy 
   assert.match(result.assumption.summary, /≤272K/);
 });
 
+test('inherited object keys are not prices and unknown models stay unpriced', () => {
+  assert.equal(lookupPrice(DEFAULT_API_PRICING_SNAPSHOT, 'openai', 'constructor', 'input'), null);
+  assert.equal(lookupPrice(DEFAULT_API_PRICING_SNAPSHOT, 'openai', '__proto__', 'input'), null);
+  assert.equal(lookupPrice(DEFAULT_API_PRICING_SNAPSHOT, 'openai', 'toString', 'input'), null);
+  assert.equal(lookupPrice(DEFAULT_API_PRICING_SNAPSHOT, 'openai', 'prototype', 'output'), null);
+});
+
 test('malformed component rows fail closed instead of double-counting', () => {
   const result = priceTokenComponents({
     models: { 'gpt-test': 10 },

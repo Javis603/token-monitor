@@ -57,6 +57,23 @@ function isoTimestamp(value) {
   return Number.isFinite(ms) ? new Date(ms).toISOString() : '';
 }
 
+// Quota observations must be stamped with the time of this limits/usage
+// snapshot, not a stale usage `updatedAt` that limits-only ticks preserve.
+// Prefer the latest parseable of limits.updatedAt and usage updatedAt;
+// receivedAt is last-resort ingest time; nothing parseable fails closed
+// rather than minting Date.now().
+function resolveCodexQuotaObservedAt(device, fallbackObservedAt) {
+  const limitsAt = isoTimestamp(device?.limits?.updatedAt);
+  const usageAt = isoTimestamp(device?.updatedAt);
+  const times = [];
+  if (limitsAt) times.push(Date.parse(limitsAt));
+  if (usageAt) times.push(Date.parse(usageAt));
+  if (times.length) return new Date(Math.max(...times)).toISOString();
+  const receivedAt = isoTimestamp(device?.receivedAt);
+  if (receivedAt) return receivedAt;
+  return isoTimestamp(fallbackObservedAt);
+}
+
 function positiveNumber(value) {
   const number = finiteNumber(value);
   return number !== null && number > 0 ? number : null;
@@ -454,9 +471,12 @@ function deriveCodexExclusiveUsage(period) {
   // share even when another client uses the same model, and even when some
   // other client's rows left the global capability or the aggregate model
   // maps incomplete — that pollution must not make attributable Codex tokens
-  // unpriced. An absent map (old payloads, budget-omitted sync uploads)
-  // falls back to the conservative aggregate-only path below.
-  const clientComponents = period?.clientModelTokenComponents?.codex
+  // unpriced. An absent map on an old payload falls back to the conservative
+  // aggregate-only path below. An explicit budget omit is not an old payload:
+  // reconstructing remainder-as-input would treat stripped evidence as complete.
+  const componentsOmitted = period?.clientModelTokenComponentsOmitted === true;
+  const clientComponents = !componentsOmitted
+    && period?.clientModelTokenComponents?.codex
     && typeof period.clientModelTokenComponents.codex === 'object'
     ? period.clientModelTokenComponents.codex
     : {};
@@ -498,6 +518,10 @@ function deriveCodexExclusiveUsage(period) {
         ...(unclassified > 0 ? { unclassified } : {}),
         complete: accounted === tokens && unclassified === 0 && exactComponents.complete === true
       };
+      continue;
+    }
+    if (componentsOmitted) {
+      tokenComponents[model] = { unclassified: tokens, complete: false };
       continue;
     }
     const exclusive = finiteNonNegInt(globalModels[rawModel]) === tokens;
@@ -756,9 +780,7 @@ function observeCodexQuota(archive, input = {}) {
   const limitsDevice = (input.limitsDevice && typeof input.limitsDevice === 'object' ? input.limitsDevice : device);
   const provider = liveCodexProviderFrom(limitsDevice);
   const observedAt = isoTimestamp(input.observedAt)
-    || isoTimestamp(limitsDevice?.limits?.updatedAt)
-    || isoTimestamp(usageDevice?.updatedAt)
-    || isoTimestamp(limitsDevice?.updatedAt);
+    || resolveCodexQuotaObservedAt(limitsDevice || usageDevice);
   if (!provider || !observedAt) return current;
   const observedAtMs = Date.parse(observedAt);
 
@@ -1141,6 +1163,7 @@ module.exports = {
   codexQuotaArchiveStructureError,
   deriveCodexExclusiveUsage,
   emptyCodexQuotaArchive,
+  resolveCodexQuotaObservedAt,
   isLiveCodexProvider,
   isLocalDeviceProvider,
   normalizeCodexQuotaArchive,

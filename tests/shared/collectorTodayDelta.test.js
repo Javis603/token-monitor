@@ -11,6 +11,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { EventEmitter } = require('node:events');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
+const { ownMap } = require('../helpers/ownMap');
 
 installInProcessWatchHost(test);
 
@@ -265,9 +266,9 @@ test('a partial multi-target union falls back instead of trusting a polluted par
 
   assert.deepEqual(calls, ['claude,codex', 'claude,codex']);
   assert.equal(summary.today.totalTokens, 30);
-  assert.deepEqual(summary.today.clients, anchorClients);
-  assert.deepEqual(summary.month.clients, anchorClients);
-  assert.deepEqual(summary.allTime.clients, anchorClients);
+  assert.deepEqual(ownMap(summary.today.clients), anchorClients);
+  assert.deepEqual(ownMap(summary.month.clients), anchorClients);
+  assert.deepEqual(ownMap(summary.allTime.clients), anchorClients);
 });
 
 test('an empty multi-target union falls back before clearing live partitions', async () => {
@@ -301,9 +302,9 @@ test('an empty multi-target union falls back before clearing live partitions', a
 
   assert.deepEqual(calls, ['claude,codex', 'claude,codex']);
   assert.equal(summary.today.totalTokens, 30);
-  assert.deepEqual(summary.today.clients, anchorClients);
-  assert.deepEqual(summary.month.clients, anchorClients);
-  assert.deepEqual(summary.allTime.clients, anchorClients);
+  assert.deepEqual(ownMap(summary.today.clients), anchorClients);
+  assert.deepEqual(ownMap(summary.month.clients), anchorClients);
+  assert.deepEqual(ownMap(summary.allTime.clients), anchorClients);
 });
 
 test('an empty multi-target union and full snapshot clear genuinely deleted usage', async () => {
@@ -375,7 +376,7 @@ test('an unsafe unattributed union falls back without intermediate scans', async
 
   assert.deepEqual(calls, ['claude,codex', 'claude,codex']);
   assert.equal(summary.today.totalTokens, 30);
-  assert.deepEqual(summary.today.clients, anchorClients);
+  assert.deepEqual(ownMap(summary.today.clients), anchorClients);
 });
 
 test('a multi-target full fallback still clears genuinely deleted usage', async () => {

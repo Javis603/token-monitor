@@ -18,7 +18,7 @@ const RESET = '2026-09-01T00:00:00.000Z';
 function sample(percent, tokens, usd, extra = {}) {
   const { at, ...rest } = extra;
   return {
-    observedAt: at || `2026-08-25T00:${String(percent).padStart(2, '0')}:00.000Z`,
+    observedAt: at || new Date(Date.UTC(2026, 7, 25, 0, 0, Number(percent) || 0)).toISOString(),
     provider: 'codex', profileId: 'codex-default', kind: 'weekly', limitId: 'weekly',
     windowMinutes: 10080, resetsAt: RESET, segmentId: 'current',
     usedPercent: percent, observedTotalTokens: tokens, pricedTokens: tokens,
@@ -552,5 +552,59 @@ test('the sample window and the capacity candidate are cut on the same boundary'
     locallyObservedDelta(rows, rollbackWindow(35), oldFull).locallyObservedApiEquivalent,
     observed.locallyObservedApiEquivalent
   );
+});
+
+test('sample(100) is parseable and ordered after 0 and 50', () => {
+  const zero = Date.parse(sample(0, 0, 0).observedAt);
+  const mid = Date.parse(sample(50, 0, 0).observedAt);
+  const full = Date.parse(sample(100, 0, 0).observedAt);
+  assert.equal(Number.isNaN(full), false);
+  assert.ok(zero < mid);
+  assert.ok(mid < full);
+});
+
+test('withinCurrentRun fail-closes on an unparseable boundary and on invalid estimate times', () => {
+  const current = estimate(100, {
+    firstObservedAt: '2026-08-25T04:00:00.000Z',
+    lastObservedAt: '2026-08-25T05:00:00.000Z'
+  });
+  assert.equal(withinCurrentRun(current, null), true);
+  assert.equal(withinCurrentRun(current, ''), true);
+  assert.equal(withinCurrentRun(current, 'not-a-date'), false);
+  assert.equal(withinCurrentRun(current, '2026-08-25T04:30:00.000Z'), false);
+  assert.equal(withinCurrentRun(current, '2026-08-25T03:00:00.000Z'), true);
+  assert.equal(withinCurrentRun({
+    ...current,
+    firstObservedAt: 'not-a-date',
+    lastObservedAt: '2026-08-25T05:00:00.000Z'
+  }, '2026-08-25T03:00:00.000Z'), false);
+  assert.equal(withinCurrentRun({
+    ...current,
+    firstObservedAt: '2026-08-25T04:00:00.000Z',
+    lastObservedAt: 'bad'
+  }, '2026-08-25T03:00:00.000Z'), false);
+});
+
+test('production segment ids keep cycle identity and fail closed on one-sided resets', () => {
+  const first = 'sha256:abc|session|2026-09-05T12:00:00.000Z|snap-1';
+  const successor = 'sha256:abc|session|2026-09-05T17:00:00.000Z|snap-1';
+  const bound = `${first}|binding-one`;
+  const rebound = `${first}|binding-two`;
+  assert.equal(sameQuotaCycle(
+    liveWindow({ segmentId: bound, resetsAt: '' }),
+    liveWindow({ segmentId: rebound, resetsAt: '' })
+  ), true);
+  assert.equal(sameQuotaCycle(
+    liveWindow({ segmentId: first, resetsAt: '' }),
+    liveWindow({ segmentId: successor, resetsAt: '' })
+  ), false);
+  assert.equal(sameQuotaCycle(
+    liveWindow({ segmentId: first, resetsAt: RESET }),
+    liveWindow({ segmentId: first, resetsAt: '' })
+  ), false);
+  assert.equal(sameQuotaCycle(
+    liveWindow({ segmentId: first, resetsAt: 'not-a-date' }),
+    liveWindow({ segmentId: first, resetsAt: 'not-a-date' })
+  ), false);
 });
 

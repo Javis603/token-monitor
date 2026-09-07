@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
+const { ownMap } = require('../helpers/ownMap');
 const {
   isWslInstalled,
   listRunningWslDistros,
@@ -288,7 +289,7 @@ test('collectWslUsage sums two homes per period', async () => {
   assert.equal(bundle.today.totalTokens, 15);
   assert.equal(bundle.month.totalTokens, 150);
   assert.equal(bundle.allTime.totalTokens, 1500);
-  assert.deepEqual(bundle.today.clients, { claude: 15 });
+  assert.deepEqual(ownMap(bundle.today.clients), { claude: 15 });
 });
 
 test('collectWslUsage decorates each home before merging periods', async () => {

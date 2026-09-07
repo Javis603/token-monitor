@@ -1,5 +1,7 @@
 'use strict';
 
+const { sameQuotaCycle } = require('./windowIdentity');
+
 const CAPACITY_ESTIMATE_METHOD = 'observed-linear-estimate';
 const FULL_CYCLE_ESTIMATE_METHOD = 'observed-full-cycle';
 const MIN_STABLE_PERCENT_SPAN = 3;
@@ -23,13 +25,24 @@ function sampleWindowIdentity(sample) {
   return `${limitId || kind || 'window'}|${kind}|${minutes === null ? '' : minutes}`;
 }
 
+function sampleResetGroupToken(sample) {
+  const text = String(sample?.resetsAt || '').trim();
+  if (!text) return 'reset:none';
+  const ms = Date.parse(text);
+  if (!Number.isFinite(ms)) {
+    return `reset:invalid:${String(sample?.sampleId || '')}:${String(sample?.observedAt || '')}`;
+  }
+  return `reset:${ms}`;
+}
+
 function sampleGroupKey(sample) {
   return [
     String(sample?.provider || ''),
     String(sample?.profileId || ''),
     sampleWindowIdentity(sample),
     String(sample?.scopeVersion || ''),
-    String(sample?.segmentId || '')
+    String(sample?.segmentId || ''),
+    sampleResetGroupToken(sample)
   ].join('|');
 }
 
@@ -57,9 +70,7 @@ function canJoinMappedProfileCycle(previous, current) {
   if (!previous || !current) return false;
   if (!String(previous.profileId || '') || previous.profileId !== current.profileId) return false;
   if (sampleStreamKey(previous) !== sampleStreamKey(current)) return false;
-  const previousReset = String(previous.resetsAt || '');
-  const currentReset = String(current.resetsAt || '');
-  if (!previousReset || previousReset !== currentReset) return false;
+  if (!sameQuotaCycle(previous, current)) return false;
   const previousPercent = finite(previous.usedPercent);
   const currentPercent = finite(current.usedPercent);
   if (previousPercent === null || currentPercent === null || currentPercent < previousPercent) return false;
@@ -196,6 +207,7 @@ function contiguousBreakReason(previous, current, options = {}) {
   const identityOf = typeof options.identityOf === 'function' ? options.identityOf : null;
   const yOf = typeof options.yOf === 'function' ? options.yOf : () => 0;
   const extrasOf = typeof options.extrasOf === 'function' ? options.extrasOf : () => [];
+  if (options.breakOnUnsettled === true && current?.unsettled === true) return 'unsettled';
   if (identityOf && identityOf(previous) !== identityOf(current)) return 'pricing-identity-changed';
   const previousX = finite(previous.usedPercent);
   const currentX = finite(current.usedPercent);
@@ -664,7 +676,14 @@ function estimateCapacityGroup(rawSamples) {
     referenceFit.fitUsedPercentSpan,
     fitOptions
   );
-  const observed = cycleObservedTokens(samples);
+  // Observed cycle totals must describe the same contiguous run the fit kept.
+  // Pre-rollback / pre-unsettled tokens stay in the raw group for audit but
+  // are not this run's observed cycle usage.
+  const currentRun = selectLatestValidRun(samples, isLocalTokenSample, {
+    yOf: (sample) => sample.observedTotalTokens,
+    breakOnUnsettled: true
+  }).samples;
+  const observed = cycleObservedTokens(currentRun);
   return {
     method: localTokens.method === FULL_CYCLE_ESTIMATE_METHOD
       || (localTokens.available !== true && apiEquivalentUsd.method === FULL_CYCLE_ESTIMATE_METHOD)

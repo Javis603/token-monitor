@@ -330,3 +330,39 @@ test('engine snapshot drops raw identity and credentials from contract inputs', 
   assert.equal(snapshot.accountQuotaSummaries[0].officialUsedPercent, 40);
   assert.equal(snapshot.accountQuotaSummaries[0].locallyObservedApiEquivalent, 3);
 });
+
+test('latest window observation is max parseable observedAt, not array order', () => {
+  const early = observationFrom(sample('codex', 'codex-default', 10, 1000, 10, {
+    at: '2026-08-25T01:00:00.000Z'
+  }));
+  const late = observationFrom(sample('codex', 'codex-default', 40, 4000, 40, {
+    at: '2026-08-25T03:00:00.000Z'
+  }));
+  const invalid = { ...late, observedAt: 'not-a-date', usedPercent: 99 };
+  const reversed = engine.buildProfileQuotaSnapshot({
+    provider: 'codex',
+    profileId: 'codex-default',
+    observations: [late, invalid, early],
+    accountingSamples: []
+  });
+  assert.equal(reversed.accountQuotaSummaries[0].officialUsedPercent, 40);
+  const none = engine.buildProfileQuotaSnapshot({
+    provider: 'codex',
+    profileId: 'codex-default',
+    observations: [invalid, { ...early, observedAt: 'also-bad' }],
+    accountingSamples: []
+  });
+  assert.equal(none.accountQuotaSummaries.length, 0);
+});
+
+test('cycleSegmentId strips only a trailing binding suffix from production ids', () => {
+  const production = 'sha256:abcdef0123456789|session|2026-09-05T12:00:00.000Z|snap-1';
+  assert.equal(engine.cycleSegmentId({ segmentId: `${production}|binding-one` }), production);
+  assert.equal(engine.cycleSegmentId({ segmentId: production }), production);
+  assert.notEqual(
+    engine.cycleSegmentId({ segmentId: production }),
+    engine.cycleSegmentId({
+      segmentId: 'sha256:abcdef0123456789|session|2026-09-05T17:00:00.000Z|snap-1'
+    })
+  );
+});

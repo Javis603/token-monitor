@@ -21,6 +21,7 @@ module.exports = {
   RESET_CYCLE_JITTER_MS: windowIdentity.RESET_CYCLE_JITTER_MS,
   cycleSegmentId: windowIdentity.cycleSegmentId,
   isSuccessorQuotaCycle: windowIdentity.isSuccessorQuotaCycle,
+  resetIdentityMs: windowIdentity.resetIdentityMs,
   resetTimesClose: windowIdentity.resetTimesClose,
   sameQuotaCycle: windowIdentity.sameQuotaCycle,
   sameWindow: windowIdentity.sameWindow,

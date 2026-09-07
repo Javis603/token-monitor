@@ -19,6 +19,7 @@ const {
   readReasonixTelemetryUsage,
   REASONIX_TELEMETRY_TAIL_OVERHEAD_BYTES
 } = require('../../src/shared/providers/reasonix/fileIo');
+const { ownMap } = require('../helpers/ownMap');
 const { collectUsageOnce, projectIdentity, watchIgnoreMatcher, watchPathsForClients } = require('../../src/shared/collector');
 const { syncPayload } = require('../../src/shared/syncPayload');
 const { createDeviceState } = require('../../src/shared/deviceState');
@@ -769,7 +770,7 @@ test('Reasonix native view stays outside aggregate, history, archive and sync pa
   assert.equal(tokScaleCalls, 3);
   assert.equal(summary.today.costUsd, 0.25);
   assert.equal(summary.today.clients.reasonix, 140);
-  assert.deepEqual(summary.today.sessions, {});
+  assert.deepEqual(ownMap(summary.today.sessions), {});
   assert.equal(summary.nativeSessions.today[nativeSession.sessionId].totalTokens, 999);
   assert.deepEqual(capturedAnchor.nativeSessions, nativeView.sessions);
   assert.deepEqual(capturedAnchor.nativeProjects, nativeView.projects);
@@ -780,7 +781,7 @@ test('Reasonix native view stays outside aggregate, history, archive and sync pa
     month: { sessions: {} },
     allTime: { sessions: {} }
   }, new Date(summary.updatedAt));
-  assert.deepEqual(archive.sessions, {});
+  assert.deepEqual(ownMap(archive.sessions), {});
 
   const payload = syncPayload(summary);
   assert.equal(Object.hasOwn(payload, 'nativeSessions'), false);
