@@ -61,6 +61,25 @@ test('every watch ignore policy is prefix-closed', () => {
   os.homedir = () => home;
   process.env.HOME = home;
   process.env.XDG_DATA_HOME = path.join(home, '.local', 'share');
+  // Stubbing os.homedir() is not enough, and none of these are in
+  // SOURCE_ENV_KEYS. Several roots prefer an absolute env path over the home
+  // they are handed, so on a real runner they resolve into the actual profile
+  // and this test would create directories there: `tokscaleConfigDir()` takes
+  // XDG_CONFIG_HOME ahead of homeDir on Linux (that is how a leaked
+  // `<XDG_CONFIG_HOME>/tokscale/antigravity-cache` made a later
+  // `clientStatus.test.js` run see Antigravity as present), TOKSCALE_CONFIG_DIR
+  // wins outright, and %APPDATA%/%LOCALAPPDATA% carry Kiro, Cline and Zed on
+  // Windows. Redirect them all into the temp home, and refuse below to create
+  // anything outside it.
+  const REDIRECTED = {
+    APPDATA: path.join(home, 'AppData', 'Roaming'),
+    LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
+    XDG_CONFIG_HOME: path.join(home, '.config'),
+    XDG_CACHE_HOME: path.join(home, '.cache'),
+    TOKSCALE_CONFIG_DIR: path.join(home, '.config', 'tokscale')
+  };
+  const savedRedirects = new Map(Object.keys(REDIRECTED).map((key) => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(REDIRECTED)) process.env[key] = value;
   try {
     // Required after the home is redirected: the module reads os.homedir() at
     // call time, but keeping the order explicit matches the other watch tests.
@@ -70,8 +89,12 @@ test('every watch ignore policy is prefix-closed', () => {
 
     // Materialise every declared source root so watchPathsForClients() keeps
     // them, then grow a synthetic subtree under each.
+    const inside = (target) => path.resolve(target).startsWith(path.resolve(home) + path.sep);
     for (const roots of Object.values(collector.clientSourceRoots(clientsCsv))) {
       for (const root of roots) {
+        // Belt and braces on top of the env redirect above: this test must
+        // never write outside the directory it cleans up.
+        if (!inside(root.dir)) continue;
         try { fs.mkdirSync(root.dir, { recursive: true }); } catch (_) { continue; }
         if (root.sourcePath) {
           try { fs.writeFileSync(root.sourcePath, ''); } catch (_) { /* parent may be a file */ }
@@ -88,6 +111,7 @@ test('every watch ignore policy is prefix-closed', () => {
     let checked = 0;
     const violations = [];
     for (const root of watchRoots) {
+      if (!inside(root)) continue;
       for (const [parent, child] of candidatePairs(root)) {
         // A watch root is a source in its own right and `watchIgnoreMatcher`
         // never ignores it, so pairs rooted at it carry no information.
@@ -113,6 +137,9 @@ test('every watch ignore policy is prefix-closed', () => {
     os.homedir = realHomedir;
     if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome;
     if (realXdg === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = realXdg;
+    for (const [key, previous] of savedRedirects) {
+      if (previous === undefined) delete process.env[key]; else process.env[key] = previous;
+    }
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
