@@ -238,7 +238,7 @@ const BILLING_PAYLOAD = {
       {
         entitlement_id: 'ent-unknown-model',
         plan_id: 'zcode-v3-future-plan',
-        show_name: 'GLM-5.5',
+        show_name: 'Model-unseen',
         total_units: 1000000,
         used_units: 0,
         remaining_units: 1000000,
@@ -262,31 +262,67 @@ const BILLING_PAYLOAD = {
   }
 };
 
-test('parseZcodeStartPlanBalances maps buckets to daily and billing windows', () => {
+test('parseZcodeStartPlanBalances aggregates model capacity across plans with weighted usage', () => {
   const { plan, windows } = parseZcodeStartPlanBalances(BILLING_PAYLOAD);
-  assert.equal(plan, 'ZCode Weekend Build');
-  assert.equal(windows.length, 5);
-  const byLabel = new Map(windows.map((window) => [`${window.limitId}:${window.label}`, window]));
-  const weekend = byLabel.get('zcode-v3-start-plan-wk-0904:GLM-5.3-Flash');
-  assert.equal(weekend.kind, 'billing');
-  assert.equal(weekend.windowMinutes, undefined);
-  assert.equal(weekend.resetDescription, 'One-time');
-  assert.equal(weekend.resetsAt, '2026-09-06T15:00:00.000Z');
-  const daily = byLabel.get('zcode-v3-start-plan-0817:GLM-5.3');
+  assert.equal(plan, 'ZCode Start Plan');
+  assert.equal(windows.length, 4);
+  const byLabel = new Map(windows.map(window => [window.label, window]));
+  const flash = byLabel.get('GLM-5.3-Flash');
+  assert.equal(flash.limit, 305000000);
+  assert.equal(flash.used, 109149447);
+  assert.equal(flash.remaining, 195850553);
+  assert.ok(Math.abs(flash.usedPercent - 109149447 / 305000000 * 100) < 1e-10);
+  assert.equal(flash.kind, 'billing');
+  assert.equal(flash.windowMinutes, undefined);
+  // The earliest component boundary stays as resetsAt — the reset scheduler
+  // re-probes right after it and burn-rate re-baselines when it rolls.
+  // Reset-vs-expiry wording is the shared presentation layer's call.
+  assert.equal(flash.resetsAt, '2026-09-05T15:59:59.000Z');
+  const daily = byLabel.get('GLM-5.3');
   assert.equal(daily.kind, 'daily');
   assert.equal(daily.windowMinutes, 1440);
-  assert.equal(daily.used, 421628);
-  assert.equal(daily.limit, 3000000);
   assert.equal(daily.remaining, 2578372);
-  // Unknown models surface as their own windows instead of being filtered.
-  assert.equal(byLabel.get('zcode-v3-future-plan:GLM-5.5').usedPercent, 0);
-  // A bucket without remaining_units still meters from used/total.
-  const noRemaining = byLabel.get('zcode-v3-start-plan-0817:GLM-5.3-Air');
-  assert.equal(noRemaining.usedPercent, 25);
-  assert.equal(noRemaining.showMeter, true);
-  // Its period is unknown (no entitlement mapping, no period field), so it
-  // must not claim one-time semantics — only explicit one_time grants do.
-  assert.equal(noRemaining.resetDescription, undefined);
+  assert.equal(byLabel.get('Model-unseen').usedPercent, 0);
+  assert.equal(byLabel.get('GLM-5.3-Air').remaining, 1500000);
+  const reversed = structuredClone(BILLING_PAYLOAD);
+  reversed.data.plans.reverse();
+  reversed.data.balances.reverse();
+  assert.deepEqual(parseZcodeStartPlanBalances(reversed), { plan, windows });
+});
+
+test('model aggregation follows returned names, regardless of capability ids or model versions', () => {
+  const names = ['model-alpha', 'model-beta'];
+  const bucket = (show_name, total, remaining, extra = {}) => ({
+    show_name, total_units: total, remaining_units: remaining,
+    meter: 'tokens', period: 'daily', ...extra
+  });
+  for (const name of names) {
+    const { windows } = parseZcodeStartPlanBalances({ data: { balances: [
+      bucket(name, 100, 20, { plan_id: 'start', capabilities: ['model:old-internal-id'] }),
+      bucket(name, 900, 900, { plan_id: 'weekend', capabilities: ['model:new-internal-id'], period: 'one_time' }),
+      bucket(`${name}-other`, 200, 100),
+      bucket(name, 10, 5, { meter: 'requests' })
+    ] } });
+    assert.equal(windows.length, 3);
+    const model = windows.find(w => w.label === name && w.limit === 1000);
+    assert.equal(model.remaining, 920);
+    assert.equal(model.used, 80);
+    assert.equal(model.usedPercent, 8);
+    assert.equal(windows.find(w => w.label === `${name}-other`).limit, 200);
+    assert.equal(windows.reduce((sum, w) => sum + w.limit, 0), 1210);
+    assert.ok(windows.every(w => w.limitId), 'missing plan ids still carry bucket identity');
+  }
+});
+
+test('incomplete quantities and anonymous buckets stay separate instead of diluting the aggregate', () => {
+  const { windows } = parseZcodeStartPlanBalances({ data: { balances: [
+    { show_name: 'Model-unseen', total_units: 100, remaining_units: 90 },
+    { show_name: 'Model-unseen', remaining_units: 20 },
+    { total_units: 30, remaining_units: 10 },
+    { total_units: 40, remaining_units: 20 }
+  ] } });
+  assert.equal(windows.length, 4);
+  assert.ok(windows.every(w => w.limitId));
 });
 
 test('discoverZcodeConnection re-reads disk on every call — an account switch lands next round', () => {

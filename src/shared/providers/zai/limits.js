@@ -416,22 +416,12 @@ async function fetchZaiLimits(options = {}, deps = {}) {
 
   const [keyResult, planResult] = await Promise.allSettled([keyLane, planLane]);
 
-  // Both lanes failed: the console key's error wins the status because it is
-  // the credential the user actually manages — but it reports through the
-  // same mapper the single-lane path uses, so a revoked key reads as
-  // unauthorized (notConfigured would contradict the Configured pill) no
-  // matter what the unrelated plan lane did.
-  if (keyResult.status === 'rejected' && planResult.status === 'rejected') {
-    return zaiStatusProvider(laneErrorStatus(keyResult.reason), options, deps);
-  }
-
   const lanes = [keyResult, planResult].filter((result) => result.status === 'fulfilled');
   const windows = lanes.flatMap((result) => result.value.windows);
   const accountKey = lanes.map((result) => result.value.accountKey).filter(Boolean)[0] || '';
   const accountLabel = lanes.map((result) => result.value.plan).filter(Boolean)[0] || '';
-  // The console key's quota is the authoritative failure signal for its own
-  // lane, but plan buckets that did load still render — an unavailable key
-  // does not erase a live Weekend bucket.
+  // Errors affect status, never the data from a healthy request. The user's
+  // console-key quota error takes precedence over a ZCode-managed failure.
   const keyError = keyResult.status === 'rejected' ? keyResult.reason : keyResult.value.error;
   const hasAnything = lanes.some((result) => result.value.hasAnything);
   const balance = lanes.map((result) => result.value.balance).filter(Boolean)[0] || null;
@@ -622,10 +612,12 @@ function zcodeStartPlanBalanceUrl() {
 // callers pass an entitlement_id → period map alongside the payload; daily
 // grants map to the shared daily lane, one-time grants take the billing lane
 // without windowMinutes.
-function zcodePlanBucketWindow(balance, periodByEntitlement = {}) {
+function zcodePlanBucketWindow(balance, periodByEntitlement = new Map()) {
   const total = numberOrNull(balance?.total_units);
-  const used = numberOrNull(balance?.used_units);
-  const remaining = numberOrNull(balance?.remaining_units);
+  let used = numberOrNull(balance?.used_units);
+  let remaining = numberOrNull(balance?.remaining_units);
+  if (used === null && total !== null && remaining !== null) used = Math.max(0, total - remaining);
+  if (remaining === null && total !== null && used !== null) remaining = Math.max(0, total - used);
   if (total === null && used === null && remaining === null) return null;
   // Derive from whichever pair the bucket reports: remaining wins (the
   // same rule as the quota windows), used alone still yields a meter, and
@@ -638,16 +630,11 @@ function zcodePlanBucketWindow(balance, periodByEntitlement = {}) {
   if (usedPercent === null) usedPercent = clampPercent(balance?.percentage);
   const label = String(balance?.show_name || '').trim() || 'Start Plan';
   const resetsAt = toIso(balance?.expires_at ?? balance?.period_end);
-  const period = periodByEntitlement[String(balance?.entitlement_id || '').trim()]
+  const period = periodByEntitlement.get(JSON.stringify([balance?.plan_id || '', balance?.entitlement_id || '']))
     || String(balance?.period || '');
   const window = {
     kind: period === 'daily' ? 'daily' : 'billing',
     label,
-    // One-time grants never renew; the description keeps that visible on
-    // surfaces that render resets as text. An unknown period (entitlement
-    // missing from the map, no period field) stays unlabeled rather than
-    // claiming one-time semantics.
-    ...(period === 'one_time' ? { resetDescription: 'One-time' } : {}),
     limitId: String(balance?.plan_id || '').trim(),
     ...(usedPercent !== null ? { usedPercent, remainingPercent: Math.max(0, Math.min(100, 100 - usedPercent)) } : {}),
     showMeter: usedPercent !== null,
@@ -661,14 +648,14 @@ function zcodePlanBucketWindow(balance, periodByEntitlement = {}) {
 }
 
 function zcodePeriodByEntitlement(payload) {
-  const periodByEntitlement = {};
+  const periodByEntitlement = new Map();
   const plans = Array.isArray(payload?.data?.plans) ? payload.data.plans : [];
   for (const plan of plans) {
     const entitlements = Array.isArray(plan?.entitlements) ? plan.entitlements : [];
     for (const entitlement of entitlements) {
       const id = String(entitlement?.entitlement_id || '').trim();
       const period = String(entitlement?.period || '').trim();
-      if (id && period) periodByEntitlement[id] = period;
+      if (id && period) periodByEntitlement.set(JSON.stringify([plan?.plan_id || '', id]), period);
     }
   }
   return periodByEntitlement;
@@ -677,29 +664,64 @@ function zcodePeriodByEntitlement(payload) {
 function parseZcodeStartPlanBalances(payload) {
   const periodByEntitlement = zcodePeriodByEntitlement(payload);
   const balances = Array.isArray(payload?.data?.balances) ? payload.data.balances : [];
-  const windows = balances.map((balance) => zcodePlanBucketWindow(balance, periodByEntitlement)).filter(Boolean);
-  // Mirrors ZCode's pickCurrentZaiStartPlan: the first active plan whose
-  // plan_id or name carries the start-plan identity — Weekend ids do
-  // ("zcode-v3-start-plan-wk-…"), and a non-start plan must not steal the
-  // label even if it sorts first.
-  const startIdentity = (entry) => [entry?.plan_id, entry?.name]
-    .some((value) => /start[- ]plan/.test(String(value || '').toLowerCase()));
-  const plan = Array.isArray(payload?.data?.plans)
-    ? payload.data.plans.find((entry) => entry?.status === 'active' && startIdentity(entry))
-    : null;
-  return { plan: String(plan?.name || '').trim(), windows };
-}
-
-function zaiStatusProvider(status, options = {}, deps = {}) {
-  const now = (deps.now || Date.now)();
-  return normalizeLimitProvider({
-    provider: 'zai',
-    source: 'api',
-    status,
-    updatedAt: new Date(now).toISOString(),
-    windows: [],
-    region: zaiRegion(options, deps.env || process.env)
-  });
+  const groups = new Map();
+  for (const [index, balance] of balances.entries()) {
+    const window = zcodePlanBucketWindow(balance, periodByEntitlement);
+    if (!window) continue;
+    // The API model name is the aggregation grain, independent of the
+    // Start/Weekend grant and of any present or future model version.
+    const identity = String(balance.show_name || '').trim().toLowerCase();
+    const period = periodByEntitlement.get(JSON.stringify([balance.plan_id || '', balance.entitlement_id || '']))
+      || String(balance.period || '');
+    const complete = Number.isFinite(window.limit) && window.limit > 0 && Number.isFinite(window.remaining);
+    const key = JSON.stringify([identity, balance.meter || '', balance.unit_type || '',
+      // Unknown identity or incomplete numbers cannot safely be added.
+      identity.length && complete ? '' : index]);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ window, period });
+  }
+  const windows = [...groups.entries()].map(([key, entries]) => {
+    // Sort before picking the representative so payload order changes no UI.
+    entries.sort((a, b) => a.window.label.localeCompare(b.window.label)
+      || a.window.limitId.localeCompare(b.window.limitId));
+    const window = { ...entries[0].window };
+    if (entries.length > 1) {
+      window.limit = entries.reduce((sum, entry) => sum + entry.window.limit, 0);
+      window.remaining = entries.reduce((sum, entry) => sum + entry.window.remaining, 0);
+      window.used = entries.reduce((sum, entry) => sum + entry.window.used, 0);
+      window.usedPercent = clampPercent(window.used / window.limit * 100);
+      window.remainingPercent = 100 - window.usedPercent;
+      window.limitId = `zcode-model:${hashKey(key)}`;
+    } else if (!window.limitId) {
+      window.limitId = `zcode-bucket:${hashKey(key)}`;
+    }
+    const periods = [...new Set(entries.map(entry => entry.period))].sort();
+    const boundaries = [...new Set(entries.map(entry => entry.window.resetsAt || ''))].filter(Boolean).sort();
+    const uniformDaily = periods.length === 1 && periods[0] === 'daily' && boundaries.length === 1;
+    if (!uniformDaily) {
+      window.kind = 'billing';
+      delete window.windowMinutes;
+      // Keep the earliest component boundary as resetsAt: the reset
+      // scheduler arranges a re-probe right after it (the pool's
+      // composition changes there), and burn-rate re-baselines when it
+      // rolls. Reset-vs-expiry wording is deliberately left to the shared
+      // presentation layer — the renderer already renders every resetsAt
+      // as a reset countdown, and that shared behaviour is being typed
+      // upstream rather than worked around per provider.
+      const next = boundaries[0] || null;
+      if (next) window.resetsAt = next;
+    }
+    return window;
+  }).sort((a, b) => a.label.localeCompare(b.label) || a.limitId.localeCompare(b.limitId));
+  // Prefer renewing daily entitlements, then a stable identity as a tie-break.
+  // Weekend ids also contain start-plan, so matching that substring is not
+  // enough to choose the account header.
+  const plans = (Array.isArray(payload?.data?.plans) ? payload.data.plans : [])
+    .filter(entry => entry?.status === 'active')
+    .sort((a, b) => Number(Array.isArray(b.entitlements) && b.entitlements.some(entry => entry?.period === 'daily'))
+      - Number(Array.isArray(a.entitlements) && a.entitlements.some(entry => entry?.period === 'daily'))
+      || String(a.plan_id || a.name || '').localeCompare(String(b.plan_id || b.name || '')));
+  return { plan: String(plans[0]?.name || '').trim(), windows };
 }
 
 module.exports = {

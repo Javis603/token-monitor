@@ -4891,3 +4891,20 @@ test('GLM Home daily windows retain returned model names instead of the generic 
   assert.equal(limitProviderCompactWindowPeriodLabel('zai', window), '');
   assert.equal(limitProviderCompactWindowLabel('zaiteam', window), '');
 });
+
+test('Z.ai token-pool windows print an absolute token pair through the detail slot', () => {
+  const app = readRendererFile('app.js');
+  const body = functionBody(app, 'formatZcodeTokensDetail', 'formatTokenUnits') + functionBody(app, 'formatTokenUnits', 'trimTokenDecimal') + functionBody(app, 'trimTokenDecimal', 'formatKiroOverageValue');
+  const detail = (window, showLimitUsed) => vm.runInNewContext(
+    `${body}\nformatZcodeTokensDetail(window)`,
+    { window, optionalFiniteNumber: (value) => { const n = Number(value); return Number.isFinite(n) ? n : null; }, state: { settings: { showLimitUsed } } }
+  );
+  const pool = { limit: 305_000_000, remaining: 195_850_553 };
+  assert.equal(detail(pool, false), '195.9M / 305M');
+  assert.equal(detail(pool, true), '109.1M / 305M');
+  // Buckets without absolute units keep their percentage-only look.
+  assert.equal(detail({ usedPercent: 42 }, false), '');
+  assert.equal(detail({ limit: 0, remaining: 5 }, false), '');
+  // Compact magnitudes round without trailing zeros.
+  assert.equal(detail({ limit: 3_000_000, remaining: 2_578_372 }, false), '2.6M / 3M');
+});

@@ -3969,6 +3969,32 @@ function formatCommandcodeCreditsDetail(window) {
   return `${formatMoney(value, window?.currency)} / ${formatMoney(limit, window?.currency)}`;
 }
 
+// ZCode plan buckets are token pools, so their detail counts tokens: "124M /
+// 305M" (remaining mode) or "181M / 305M" (used mode), from the same values
+// the meter derives from. Nothing when either side is missing — a bucket
+// without absolute units keeps its percentage-only look.
+function formatZcodeTokensDetail(window) {
+  const remaining = optionalFiniteNumber(window?.remaining);
+  const limit = optionalFiniteNumber(window?.limit);
+  if (remaining === null || limit === null || limit <= 0) return '';
+  const showUsed = Boolean(state.settings?.showLimitUsed);
+  const value = showUsed ? Math.max(0, limit - remaining) : remaining;
+  return `${formatTokenUnits(value)} / ${formatTokenUnits(limit)}`;
+}
+
+function formatTokenUnits(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '';
+  if (number >= 1_000_000_000) return `${trimTokenDecimal(number / 1_000_000_000)}B`;
+  if (number >= 1_000_000) return `${trimTokenDecimal(number / 1_000_000)}M`;
+  if (number >= 1_000) return `${trimTokenDecimal(number / 1_000)}K`;
+  return `${Math.round(number)}`;
+}
+
+function trimTokenDecimal(value) {
+  return Math.round(value) === value ? String(Math.round(value)) : value.toFixed(1);
+}
+
 // One-line Overage value: "12.5 credits · $3.20" (credits used, then est. cost).
 // Either piece may be absent; the row only renders when at least one is present.
 function formatKiroOverageValue(window) {
@@ -5076,10 +5102,17 @@ function renderProviderWindows(provider, color) {
         color,
         0.78,
         null,
-        window.detail || ''
+        window.detail || formatZcodeTokensDetail(window)
       )),
       weekly && limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68),
-      ...planBuckets.map((window) => limitWindowNode(window.label || 'Start Plan', window, color, 0.68, null, window.detail || ''))
+      ...planBuckets.map((window) => limitWindowNode(
+        window.label || 'Start Plan',
+        window,
+        color,
+        0.68,
+        null,
+        window.detail || formatZcodeTokensDetail(window)
+      ))
     ].filter(Boolean);
     if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
     windows.append(...nodes);

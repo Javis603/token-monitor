@@ -16,7 +16,7 @@ Z.ai appears in Token Monitor as one limits row fed by up to three independent a
 | --- | --- | --- | --- |
 | Subscription quota | Console API key (manual / env) | `{z.ai\|bigmodel}/api/monitor/usage/quota/limit` | `session`/`weekly`, MCP `billing` |
 | Cash balance | Console API key | `{host}/api/biz/account/query-customer-account-report` | `credits` |
-| ZCode Start/Weekend plans | ZCode on-disk mirror JWT | `zcode.z.ai/api/v1/zcode-plan/billing/balance` | per-model `daily`/`billing` with `limitId` |
+| ZCode Start/Weekend plans | ZCode on-disk mirror JWT | `zcode.z.ai/api/v1/zcode-plan/billing/balance` | model-aggregated `daily`/`billing` with `limitId` |
 
 ## Two keys, two chains, never mixed
 
@@ -35,6 +35,18 @@ Z.ai appears in Token Monitor as one limits row fed by up to three independent a
 - A successful no-plan response (`code:500`, no quota windows) with a valid cash balance is `ok`; without usable data an attempted lane is `unavailable`. An entitled but empty ZCode balance response likewise yields `unavailable` when it is the only source.
 - The same console key and ZCode coding-plan key at the same regional endpoint query and render quota once. Different credentials are not assumed to be the same account. A manual key controls the console lane; an independent Start/Weekend billing lane can still contribute.
 - All quota/billing windows are live HTTPS responses. They omit component `source: local`; only the credential was found on disk. Provider-level source remains `api` with a console key and `oauth` for discovery alone.
+
+## Model aggregation
+
+Start Plan and Weekend grants with the same returned model name (`show_name`, trimmed and case folded) are summed when meter and unit type match. There is no model-version table, model-name whitelist, or separate rule for future versions. `capabilities` is not the grouping key: internal capability ids can differ while the returned model name is the same. Different model names or units stay separate. Missing names or incomplete quantities stay separate; unknown models with valid names and quantities are accepted automatically.
+
+Totals and remaining units are summed, with missing used/remaining derived from the available pair. The aggregate's used percentage is `sum(used) / sum(total)`, not the mean of percentages. For example, a 300M Weekend Flash bucket plus a 5M daily Flash bucket yields one 305M pool. This is currently granted capacity, not a daily allowance or an inference-token count; the quota endpoint's subscription windows are not added to it.
+
+The account header prefers an active plan with daily entitlements and uses plan identity as a deterministic tie-breaker. The model pool can span plans regardless of that header.
+
+Only daily pools with one common boundary carry `windowMinutes: 1440`. Every pool carries `resetsAt` — the earliest component boundary — so the reset scheduler re-probes right after it and burn-rate re-baselines when it rolls. Reset-vs-expiry wording is the shared presentation layer's call, not a provider-side one. Refresh recomputes the available pool after a component expires or renews. This compact representation exposes the earliest known change, not a full component schedule.
+
+Plan and daily windows print their absolute token pair (`124M / 305M`, remaining or used per the shared setting) through the existing detail slot — the same rule Command Code credits follow. Single buckets retain their plan id in `limitId`; combined models use a deterministic `zcode-model:` hash of the model-name/unit identity, and missing plan ids receive a `zcode-bucket:` fallback. All remain ordinary existing wire fields. The full Limits page pairs quota/model windows, widens an odd final quota, then appends every MCP/legacy unmarked billing window full width, followed by Balance and Spend. Home keeps model names for daily windows; Home/widget surfaces retain their existing window caps. The native widget snapshot still omits model labels and custom reset descriptions, and the tray still selects a quota according to its existing mode; neither surface is a full per-model list.
 
 ## Spend store
 
