@@ -325,7 +325,7 @@ test('fetchZaiLimits serves Coding Plan quota from the ZCode mirror key', async 
   assert.equal(provider.status, 'ok');
   assert.equal(provider.accountLabel, 'GLM Coding Pro');
   assert.equal(provider.windows[0].kind, 'session');
-  assert.equal(provider.windows[0].source, 'local');
+  assert.equal(provider.windows[0].source, undefined);
 });
 
 test('fetchZaiLimits keeps ZCode plan windows when the console key quota fails', async () => {
@@ -658,4 +658,17 @@ test('a failed ZCode billing request preserves console data and surfaces the man
   assert.equal(provider.balance.amount, 7);
   assert.equal(provider.accountLabel, 'Pro');
   assert.ok(provider.windows.some(w => w.kind === 'session'));
+});
+
+test('the same console and ZCode coding key queries and renders quota once', async () => {
+  let quotaCalls = 0;
+  const provider = await fetchZaiLimits({ zaiApiKey: 'mirror-jwt' }, {
+    env: {}, ...zcodeLaneDeps(async url => {
+      if (String(url).includes('/quota/limit')) quotaCalls++;
+      return keyLaneResponses({ balance: 7, subscription: 'Pro' })(url);
+    }, 'coding-plan')
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(quotaCalls, 1);
+  assert.equal(provider.windows.filter(w => w.kind === 'session').length, 1);
 });

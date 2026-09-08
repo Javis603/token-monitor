@@ -10,7 +10,7 @@ read_when:
 
 # Z.ai (GLM) provider
 
-Z.ai appears in Token Monitor as one limits row fed by up to three independent account pools. The pools have separate credentials, separate endpoints, and separate failure modes; they merge only at the row.
+Z.ai appears in Token Monitor as one limits row fed by up to three independent account pools. Quota and cash balance share a console key; ZCode plan grants use the locally discovered credential. Their responses are combined at the row, with usable data retained when another request fails.
 
 | Pool | Credential | Endpoint | Windows |
 | --- | --- | --- | --- |
@@ -21,8 +21,8 @@ Z.ai appears in Token Monitor as one limits row fed by up to three independent a
 ## Two keys, two chains, never mixed
 
 - The **console key** (`sk-…` or `{id}.{secret}`) calls quota, subscription, and the finance report. It cannot call the ZCode billing endpoint.
-- The **ZCode JWT** calls the billing endpoint — and, for a coding-plan login, the quota endpoint too, because ZCode mirrors a quota-capable key into the provider entry. A **start-plan** JWT cannot call quota (401), so the chains stay separate per plan kind, not per key format. ZCode stores its login token AES-GCM-encrypted in `~/.zcode/v2/credentials.json` (unreadable to us); the only usable copy is the plain JWT mirrored into `config.json`'s provider entry (`options.apiKey`), which ZCode rotates on each login. A stale mirror is answered by the server as an auth error and surfaces as `unavailable` until ZCode refreshes — mirroring ZCode's own `classifyAvailabilityError`, which maps billing 401/403 to unavailable, not to a user-fixable auth failure.
-- Swapping a start-plan JWT into the quota endpoint, or a console key into billing, returns 401. This is not a bug to fix; the chains are separate by design.
+- A **start-plan mirror JWT** calls billing. A **coding-plan mirror key** calls quota. These are different selections and credentials, not one JWT that is assumed to work on both endpoints. Discovery reads the selected provider's `options.apiKey` in `config.json`; it never decrypts `credentials.json` or reads the OS keychain. The mirror remains in memory and never enters Token Monitor's credential store or renderer.
+- Billing auth failures surface as `unavailable` until ZCode refreshes its managed credential. A console quota 401/403 surfaces as `unauthorized`. Do not infer endpoint compatibility from a key's format.
 
 ## ZCode billing gateway gates
 
@@ -30,12 +30,14 @@ Z.ai appears in Token Monitor as one limits row fed by up to three independent a
 
 ## Pool semantics
 
-- An empty pool is absent, not zero: a pool only contributes windows when it actually has something.
-- A quota answer of `200 + code:500 "当前用户不存在coding plan"` means "no subscription under that key" — the row reads `unavailable`, not `notConfigured`.
-- An entitled plan with empty `balances` is a legal mid-state (grant not yet effective): the lane still counts as attempted, so the row reads `unavailable` rather than contradicting the detected-login pill with "not configured".
-- ZCode reuses the start-plan slot for Weekend Build (`plan_id` like `zcode-v3-start-plan-wk-0906` — it contains "start-plan"). Do not branch on plan kind; map whatever buckets billing returns. `one_time` grants carry `resetDescription: "One-time"` and never renew.
-- The current-plan label mirrors ZCode's `pickCurrentZaiStartPlan`: the first `status:"active"` plan whose `plan_id` or `name` carries the start-plan identity. Neither side sorts by `plan_priority`; payload order is server-controlled.
+- Quota and finance run concurrently. Subscription lookup enriches only a quota response with usable windows; failed or empty quota never starts that extra request. A successful finance response still contributes Balance and Spend when quota fails.
+- Console quota transport failures retain their classified status (`unauthorized`, `sourceRateLimited`, or `unavailable`), even when other data survives. A failed ZCode request also degrades status while preserving console data; console quota errors take precedence. Finance and subscription enrichment remain best-effort and do not erase usable quota.
+- A successful no-plan response (`code:500`, no quota windows) with a valid cash balance is `ok`; without usable data an attempted lane is `unavailable`. An entitled but empty ZCode balance response likewise yields `unavailable` when it is the only source.
+- The same console key and ZCode coding-plan key at the same regional endpoint query and render quota once. Different credentials are not assumed to be the same account. A manual key controls the console lane; an independent Start/Weekend billing lane can still contribute.
+- All quota/billing windows are live HTTPS responses. They omit component `source: local`; only the credential was found on disk. Provider-level source remains `api` with a console key and `oauth` for discovery alone.
 
 ## Spend store
 
 The spend store is `zai-balance.json` under the app-data directory that `sharedDataDir()` resolves (`~/Library/Application Support/Token Monitor` on macOS, `%APPDATA%\Token Monitor` on Windows, `$XDG_CONFIG_HOME/Token Monitor` elsewhere). It tracks the finance report's cumulative `totalSpendAmount`. Consumption is the positive delta between observations; a drop (refund, plan reset) moves the baseline only. Day keys are local-time. Two non-throwing traps live here: `config.readJson` returns `null` on ENOENT (a null check, not just try/catch, makes a fresh store), and `Number(null) === 0` is finite — the missing-total guard must check for `null` before `isFinite` or a single report without the field rebases the tracked total to zero.
+
+Loaded spend entries normalize a missing, null, array or primitive `dailySpend` to an object and persist the repair even if the cumulative total has not changed. Invalid store/account container shapes reinitialize safely. A failed write is best-effort. The store remains a device-local read-modify-write file: concurrent writers can lose history; it is not an atomic transaction or guaranteed self-healing after races.

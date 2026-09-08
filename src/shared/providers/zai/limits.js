@@ -366,11 +366,12 @@ async function fetchZaiLimits(options = {}, deps = {}) {
     if (discovery.kind === 'coding-quota' && discovery.entitled) {
       const mirrorKey = discovery.credential?.token;
       if (mirrorKey) {
-        const quotaHost = discovery.family === 'bigmodel' ? 'https://open.bigmodel.cn' : 'https://api.z.ai';
-        const quota = await fetchJson(`${quotaHost}/api/monitor/usage/quota/limit`, mirrorKey, deps);
+        const mirrorRegion = discovery.family === 'bigmodel' ? 'bigmodel-cn' : 'global';
+        if (mirrorKey === key && mirrorRegion === region) return emptyLane();
+        const quota = await fetchJson(zaiQuotaUrl(mirrorRegion), mirrorKey, deps);
         const usage = parseZaiUsage(quota, null);
         return {
-          windows: usage.windows.map((window) => ({ ...window, source: 'local' })),
+          windows: usage.windows,
           plan: usage.plan,
           accountKey: hashKey('zai', mirrorKey),
           hasAnything: usage.windows.length > 0,
@@ -405,7 +406,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
     // Empty balances with an active plan are a legal mid-state (a grant not
     // yet effective), so a fulfilled-but-empty lane still counts as attempted.
     return {
-      windows: usage.windows.map((window) => ({ ...window, source: 'local' })),
+      windows: usage.windows,
       plan: usage.plan,
       accountKey: hashKey('zai', discovery.credential.token),
       hasAnything: usage.windows.length > 0,
