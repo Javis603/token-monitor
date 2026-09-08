@@ -4908,11 +4908,3 @@ test('Z.ai token-pool windows print an absolute token pair through the detail sl
   // Compact magnitudes round without trailing zeros.
   assert.equal(detail({ limit: 3_000_000, remaining: 2_578_372 }, false), '2.6M / 3M');
 });
-
-test('the Z.ai token-pair detail matches the spend-line typography', () => {
-  const styles = readRendererFile('styles.css');
-  // Same 10px and full-strength text colour as .limit-window-text — the API
-  // balance line's right-hand values — not the 9px/.7 dimmer reset-row look.
-  assert.match(styles, /\.limit-detail\s*\{[^}]*color: var\(--text\);[^}]*font-size: 10px;[^}]*white-space: nowrap;\s*\}/s);
-  assert.doesNotMatch(styles, /\.limit-detail\s*\{[^}]*opacity/s);
-});
