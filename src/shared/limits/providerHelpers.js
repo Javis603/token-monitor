@@ -174,6 +174,7 @@ function runProcessText(command, args = [], options = {}) {
       if (code === 0 && stdout.trim()) finish(resolve, stdout);
       else finish(reject, errorWithStatus('unavailable', stderr.trim() || `${command} exited ${code}`));
     });
+    if (options.closeStdin) child.stdin?.end();
     signal?.addEventListener?.('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
   });

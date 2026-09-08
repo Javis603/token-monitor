@@ -56,7 +56,6 @@ const codexLimits = require('../providers/codex/limits');
 const {
   claudeCommandCandidates,
   claudeWebCookie,
-  delegatedClaudeRefresh,
   fetchClaudeLimits,
   mapClaudeCliUsageToProvider,
   mapClaudeUsageToProvider,
@@ -65,7 +64,6 @@ const {
   rankClaudeCredentialFiles,
   refreshClaudeAccessToken,
   refreshClaudeCredentials,
-  touchClaudeAuthPath,
   wslClaudeCredentialPaths
 } = claudeLimits;
 const {
@@ -353,8 +351,6 @@ module.exports = {
   normalizeLimitsRefreshMs,
   refreshClaudeAccessToken,
   refreshClaudeCredentials,
-  delegatedClaudeRefresh,
-  touchClaudeAuthPath,
   rankClaudeCredentialFiles,
   wslClaudeCredentialPaths
 };
