@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
+const compactTokenApi = require('../../src/shared/compactTokens');
 const limitProviderOrderApi = require('../../src/electron/renderer/limitProviderOrder');
 const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
@@ -2473,8 +2474,9 @@ test('copilot setup status asks for sign-in instead of an API key', () => {
   );
 });
 
-test('Z.ai, Volcengine, Qoder, Trae, WorkBuddy, and Ollama source labels and setup statuses', () => {
-  assert.deepEqual(presentation.limitProviderCapabilityTags('zai'), ['Coding Plan', 'API key']);
+test('Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama source labels and setup statuses', () => {
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zai'), ['Auto', 'Coding Plan', 'API key']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zaiteam'), ['Team Plan', 'API key']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Coding/Agent Plan', 'API key']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ['Manual login', 'Web']);
@@ -4901,17 +4903,24 @@ test('GLM Home daily windows retain returned model names instead of the generic 
 
 test('Z.ai token-pool windows print an absolute token pair through the detail slot', () => {
   const app = readRendererFile('app.js');
-  const body = functionBody(app, 'formatZcodeTokensDetail', 'formatTokenUnits') + functionBody(app, 'formatTokenUnits', 'trimTokenDecimal') + functionBody(app, 'trimTokenDecimal', 'formatKiroOverageValue');
-  const detail = (window, showLimitUsed) => vm.runInNewContext(
+  const body = functionBody(app, 'formatZcodeTokensDetail', 'formatKiroOverageValue');
+  const detail = (window, showLimitUsed, unitSystem = 'western', locale = 'en') => vm.runInNewContext(
     `${body}\nformatZcodeTokensDetail(window)`,
-    { window, optionalFiniteNumber: (value) => { const n = Number(value); return Number.isFinite(n) ? n : null; }, state: { settings: { showLimitUsed } } }
+    {
+      window,
+      optionalFiniteNumber: (value) => { const n = Number(value); return Number.isFinite(n) ? n : null; },
+      formatCompact: (value) => compactTokenApi.formatCompactTokens(value, unitSystem, locale),
+      state: { settings: { showLimitUsed } }
+    }
   );
   const pool = { limit: 305_000_000, remaining: 195_850_553 };
   assert.equal(detail(pool, false), '195.9M / 305M');
   assert.equal(detail(pool, true), '109.1M / 305M');
+  assert.equal(detail(pool, false, 'localized', 'zh-TW'), '1.96億 / 3.05億');
   // Buckets without absolute units keep their percentage-only look.
   assert.equal(detail({ usedPercent: 42 }, false), '');
   assert.equal(detail({ limit: 0, remaining: 5 }, false), '');
-  // Compact magnitudes round without trailing zeros.
+  // Shared compact formatting keeps its normal rounding and promotion rules.
   assert.equal(detail({ limit: 3_000_000, remaining: 2_578_372 }, false), '2.6M / 3M');
+  assert.equal(detail({ limit: 999_950, remaining: 999_950 }, false), '1M / 1M');
 });

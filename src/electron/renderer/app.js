@@ -3979,20 +3979,7 @@ function formatZcodeTokensDetail(window) {
   if (remaining === null || limit === null || limit <= 0) return '';
   const showUsed = Boolean(state.settings?.showLimitUsed);
   const value = showUsed ? Math.max(0, limit - remaining) : remaining;
-  return `${formatTokenUnits(value)} / ${formatTokenUnits(limit)}`;
-}
-
-function formatTokenUnits(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return '';
-  if (number >= 1_000_000_000) return `${trimTokenDecimal(number / 1_000_000_000)}B`;
-  if (number >= 1_000_000) return `${trimTokenDecimal(number / 1_000_000)}M`;
-  if (number >= 1_000) return `${trimTokenDecimal(number / 1_000)}K`;
-  return `${Math.round(number)}`;
-}
-
-function trimTokenDecimal(value) {
-  return Math.round(value) === value ? String(Math.round(value)) : value.toFixed(1);
+  return `${formatCompact(value)} / ${formatCompact(limit)}`;
 }
 
 // One-line Overage value: "12.5 credits · $3.20" (credits used, then est. cost).

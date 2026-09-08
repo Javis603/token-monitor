@@ -4195,7 +4195,7 @@ html.is-windows .limit-live-badge {
 }
 .limit-detail {
   color: var(--text);
-  font-size: 10px;
+  opacity: 0.7;
   white-space: nowrap;
 }
 .limit-window-note {

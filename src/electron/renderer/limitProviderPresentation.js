@@ -65,7 +65,7 @@
     copilot: ['Manual login', 'API'],
     zed: ['Manual login', 'Web'],
     kiro: ['Auto', 'CLI'],
-    zai: ['Coding Plan', 'API key'],
+    zai: ['Auto', 'Coding Plan', 'API key'],
     zaiteam: ['Team Plan', 'API key'],
     volcengine: ['Coding/Agent Plan', 'API key'],
     qoder: ['Manual login', 'Web'],
