@@ -223,7 +223,7 @@ test('fetchZaiLimits returns notConfigured without an API key or local ZCode log
   assert.equal(provider.status, 'notConfigured');
 });
 
-test('fetchZaiLimits queries quota, subscription and balance in parallel', async () => {
+test('fetchZaiLimits queries quota and balance, then enriches usable quota', async () => {
   const urls = [];
   const auth = [];
   const provider = await fetchZaiLimits(
@@ -601,4 +601,61 @@ test('fetchZaiLimits physically aborts a hung request within its configured boun
 
   assert.equal(provider.status, 'unavailable');
   assert.equal(signal.aborted, true);
+});
+
+for (const badDailySpend of [undefined, null, [], 'broken']) {
+  test(`fetchZaiLimits repairs dailySpend ${JSON.stringify(badDailySpend)} and persists subsequent deltas`, async () => {
+    let stored = null;
+    let total = 100;
+    const call = () => fetchZaiLimits({ zaiApiKey: 'repair-key' }, {
+      env: {}, ...noZcode, now: () => Date.parse('2026-09-05T12:00:00Z'),
+      readJson: () => structuredClone(stored),
+      writeJsonAtomic: (_path, value) => { stored = JSON.parse(JSON.stringify(value)); },
+      fetch: async (url) => ({ ok: true, json: async () => String(url).includes('query-customer-account-report')
+        ? { data: { availableBalance: 5, totalSpendAmount: total } }
+        : { data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }] } } })
+    });
+    await call();
+    Object.values(stored.accounts)[0].dailySpend = badDailySpend;
+    const repaired = await call();
+    assert.equal(repaired.status, 'ok');
+    assert.deepEqual(Object.values(stored.accounts)[0].dailySpend, {});
+    total = 110;
+    const advanced = await call();
+    assert.equal(advanced.balance.todaySpend, 10);
+    assert.equal((await call()).balance.todaySpend, 10);
+    assert.equal(advanced.windows.length, 2);
+  });
+}
+
+for (const status of [401, 429, 500]) {
+  test(`fetchZaiLimits preserves balance on quota ${status} without subscription enrichment`, async () => {
+    const urls = [];
+    const provider = await fetchZaiLimits({ zaiApiKey: 'quota-failure' }, {
+      env: {}, ...noZcode,
+      fetch: async (url) => {
+        urls.push(String(url));
+        return String(url).includes('/quota/limit')
+          ? { ok: false, status }
+          : { ok: true, json: async () => ({ data: { availableBalance: 7 } }) };
+      }
+    });
+    assert.equal(provider.status, status === 401 ? 'unauthorized' : status === 429 ? 'sourceRateLimited' : 'unavailable');
+    assert.equal(provider.balance?.amount, 7);
+    assert.equal(provider.windows.find(w => w.metric === 'credits')?.remaining, 7);
+    assert.equal(urls.length, 2);
+  });
+}
+
+test('a failed ZCode billing request preserves console data and surfaces the managed-token failure', async () => {
+  const provider = await fetchZaiLimits({ zaiApiKey: 'console' }, {
+    env: {}, ...zcodeLaneDeps(async url => {
+      if (String(url).includes('zcode-plan/billing/balance')) return { ok: false, status: 401 };
+      return keyLaneResponses({ balance: 7, subscription: 'Pro' })(url);
+    })
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.balance.amount, 7);
+  assert.equal(provider.accountLabel, 'Pro');
+  assert.ok(provider.windows.some(w => w.kind === 'session'));
 });

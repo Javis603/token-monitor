@@ -303,12 +303,17 @@ async function fetchZaiLimits(options = {}, deps = {}) {
         fetchJson(zaiQuotaUrl(region), key, deps),
         fetchJson(zaiBalanceUrl(region), key, deps)
       ]);
-      let subscription = null;
-      try {
-        subscription = await fetchJson(zaiSubscriptionUrl(region), key, deps);
-      } catch (_) {}
-      if (quotaResult.status === 'rejected') throw quotaResult.reason;
-      const usage = parseZaiUsage(quotaResult.value, subscription);
+      let usage = quotaResult.status === 'fulfilled'
+        ? parseZaiUsage(quotaResult.value)
+        : { plan: '', windows: [] };
+      // Subscription only enriches usable quota; a revoked key or no-plan
+      // response must not start another request (and another deadline).
+      if (usage.windows.length) {
+        try {
+          const subscription = await fetchJson(zaiSubscriptionUrl(region), key, deps);
+          usage = parseZaiUsage(quotaResult.value, subscription);
+        } catch (_) {}
+      }
       const balanceWindow = balanceResult.status === 'fulfilled'
         ? zaiCashBalanceWindow(balanceResult.value, region)
         : null;
@@ -331,14 +336,13 @@ async function fetchZaiLimits(options = {}, deps = {}) {
           })
         };
       }
-      // Window-level source only exists for non-console origins ('local' is
-      // the sole whitelisted value) — key-lane windows carry no source.
       const keyWindows = balanceWindow ? [...usage.windows, balanceWindow] : usage.windows;
       return {
         windows: keyWindows,
         plan: usage.plan,
         accountKey: hashKey('zai', key),
         balance,
+        error: quotaResult.status === 'rejected' ? quotaResult.reason : null,
         hasAnything: usage.windows.length > 0 || Boolean(balanceWindow)
       };
     })()
@@ -427,19 +431,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
   // The console key's quota is the authoritative failure signal for its own
   // lane, but plan buckets that did load still render — an unavailable key
   // does not erase a live Weekend bucket.
-  if (key && keyResult.status === 'rejected') {
-    const error = keyResult.reason;
-    return normalizeLimitProvider({
-      provider: 'zai',
-      ...(accountKey ? { accountKey } : {}),
-      ...(accountLabel ? { accountLabel } : {}),
-      source: 'api',
-      status: laneErrorStatus(error),
-      updatedAt,
-      windows,
-      region
-    });
-  }
+  const keyError = keyResult.status === 'rejected' ? keyResult.reason : keyResult.value.error;
   const hasAnything = lanes.some((result) => result.value.hasAnything);
   const balance = lanes.map((result) => result.value.balance).filter(Boolean)[0] || null;
   // The plan buckets come from the local ZCode login, not the console key, so
@@ -450,7 +442,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
   // configured" would contradict the settings pill. Billing 401/403 also maps
   // to unavailable, mirroring ZCode's own classifyAvailabilityError: the
   // mirror token is ZCode-managed and rotates there, not here.
-  const planError = !key && planResult.status === 'rejected' ? planResult.reason : null;
+  const planError = planResult.status === 'rejected' ? planResult.reason : null;
   const planAttempted = !key && planResult.status === 'fulfilled' && Boolean(planResult.value.attempted);
   const source = key ? 'api' : (hasAnything || planError || planAttempted ? 'oauth' : '');
   return normalizeLimitProvider({
@@ -459,11 +451,10 @@ async function fetchZaiLimits(options = {}, deps = {}) {
     ...(accountLabel ? { accountLabel } : {}),
     ...(balance ? { balance } : {}),
     source,
-    status: hasAnything ? 'ok'
-      : key || planAttempted ? 'unavailable'
-        : planError
-          ? (planError?.status === 'sourceRateLimited' ? 'sourceRateLimited' : 'unavailable')
-          : 'notConfigured',
+    status: keyError ? laneErrorStatus(keyError)
+      : planError ? (planError.status === 'sourceRateLimited' ? 'sourceRateLimited' : 'unavailable')
+        : hasAnything ? 'ok'
+          : key || planAttempted ? 'unavailable' : 'notConfigured',
     updatedAt,
     windows,
     region
@@ -530,11 +521,20 @@ function zcodeRecordCumulativeSpend({ accountKey, totalSpent, now, storePath, re
     // check — not just the try/catch — is what makes a fresh store.
     store = read(storePath, 'utf8');
   } catch (_) {}
-  if (!store || typeof store !== 'object' || !store.accounts || typeof store.accounts !== 'object') {
+  if (!store || typeof store !== 'object' || Array.isArray(store)
+    || !store.accounts || typeof store.accounts !== 'object' || Array.isArray(store.accounts)) {
     store = { version: ZAI_SPEND_STORE_VERSION, accounts: {} };
   }
-  const entry = store.accounts[accountKey] || { lastTotal: null, allTimeSpend: 0, dailySpend: {}, trackingSince: nowMs };
+  let entry = store.accounts[accountKey];
   let changed = false;
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    entry = { lastTotal: null, allTimeSpend: 0, dailySpend: {}, trackingSince: nowMs };
+    changed = true;
+  }
+  if (!entry.dailySpend || typeof entry.dailySpend !== 'object' || Array.isArray(entry.dailySpend)) {
+    entry.dailySpend = {};
+    changed = true;
+  }
   if (entry.lastTotal === null) {
     entry.lastTotal = total;
     changed = true;
