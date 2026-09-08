@@ -5065,8 +5065,8 @@ function renderProviderWindows(provider, color) {
     const weekly = windowForKind(provider, 'weekly');
     const billingWindows = windowsForKind(provider, 'billing');
     const dailyWindows = windowsForKind(provider, 'daily');
-    const planBuckets = billingWindows.filter((window) => window?.limitId);
-    const mcp = billingWindows.find((window) => !window?.metric && !window?.limitId);
+    const planBuckets = billingWindows.filter((window) => window?.limitId && !window?.metric);
+    const monthlyWindows = billingWindows.filter((window) => !window?.metric && !window?.limitId);
     const balanceWindow = (provider.windows || []).find((window) => window?.metric === 'credits');
     const nodes = [
       session && limitWindowNode(session.label || '5-hour', session, color, 0.95),
@@ -5074,14 +5074,22 @@ function renderProviderWindows(provider, color) {
         window.label || (dailyWindows.length > 1 ? `Daily ${index + 1}` : 'Daily'),
         window,
         color,
-        0.78
+        0.78,
+        null,
+        window.detail || ''
       )),
       weekly && limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68),
-      ...planBuckets.map((window) => limitWindowNode(window.label || 'Start Plan', window, color, 0.68)),
-      mcp && limitWindowNode('MCP', mcp, color, 0.68)
+      ...planBuckets.map((window) => limitWindowNode(window.label || 'Start Plan', window, color, 0.68, null, window.detail || ''))
     ].filter(Boolean);
     if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
     windows.append(...nodes);
+    // Monthly subscription buckets stay full width, independent of the
+    // paired quota count. Preserve all legacy billing windows without ids.
+    for (const monthly of monthlyWindows) {
+      const node = limitWindowNode(monthly.label || 'MCP', monthly, color, 0.68, null, monthly.detail || '');
+      node.classList.add('limit-window-wide');
+      windows.append(node);
+    }
     // Balance sits at the bottom on its own full-width row: coding-plan quota
     // is consumed before the cash pool, so the money line reads as the last
     // resort.

@@ -1100,28 +1100,41 @@ test('Volcengine renders quota windows as paired rows with an odd final window f
   assert.match(renderProviderWindows, /windows\.append\(\.\.\.nodes\)/);
 });
 
-test('Z.ai renders session, daily and billing windows with their own labels', () => {
+test('Z.ai and Team keep all billing windows and render MCP full width after paired quotas', () => {
   const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
-
-  assert.match(renderProviderWindows, /provider\.provider === 'zai'/);
-  assert.match(renderProviderWindows, /const session = windowForKind\(provider, 'session'\);/);
-  assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
-  assert.match(renderProviderWindows, /const dailyWindows = windowsForKind\(provider, 'daily'\);/);
-  // Billing-kind windows split three ways: ZCode plan buckets carry limitId,
-  // the cash balance carries metric credits, and the subscription MCP window
-  // carries neither — each renders in its own slot.
-  assert.match(renderProviderWindows, /const billingWindows = windowsForKind\(provider, 'billing'\);/);
-  assert.match(renderProviderWindows, /const planBuckets = billingWindows\.filter\(\(window\) => window\?\.limitId\);/);
-  assert.match(renderProviderWindows, /const mcp = billingWindows\.find\(\(window\) => !window\?\.metric && !window\?\.limitId\);/);
-  assert.match(renderProviderWindows, /const balanceWindow = \(provider\.windows \|\| \[\]\)\.find\(\(window\) => window\?\.metric === 'credits'\);/);
-  // The declared splits must actually render: every slot appends through
-  // the shared nodes list, an odd count widens the final row, and the
-  // balance sits alone on a full-width no-reset row with its spend line.
-  assert.match(renderProviderWindows, /windows\.append\(\.\.\.nodes\);/);
-  assert.match(renderProviderWindows, /if \(nodes\.length % 2 === 1\) nodes\.at\(-1\)\.classList\.add\('limit-window-wide'\);/);
-  assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide', 'limit-window-no-reset'\);/);
-  assert.match(renderProviderWindows, /provider\.balance && providerSpendNode\(provider\.balance\)/);
+  const render = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const node = () => ({ children: [], classes: new Set(),
+    classList: { add(...values) { values.forEach(value => this.owner.classes.add(value)); } },
+    append(...children) { this.children.push(...children); } });
+  const makeNode = () => { const result = node(); result.classList.owner = result; return result; };
+  for (const provider of ['zai', 'zaiteam']) {
+    const context = {
+      document: { createElement: makeNode },
+      windowForKind: (p, kind) => p.windows.find(w => w.kind === kind),
+      windowsForKind: (p, kind) => p.windows.filter(w => w.kind === kind),
+      limitWindowNode: (label, window, _color, _tone, _value, detail) => Object.assign(makeNode(), { label, window, detail }),
+      provider: { provider, windows: [
+        { kind: 'weekly', label: 'Weekly' },
+        { kind: 'billing', label: 'MCP' },
+        { kind: 'billing', label: 'Legacy bucket', detail: 'Missing plan id' }
+      ] }
+    };
+    const rendered = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+    assert.deepEqual(Array.from(rendered.children, n => n.label), ['Weekly', 'MCP', 'Legacy bucket']);
+    assert.ok(rendered.children.every(n => n.classes.has('limit-window-wide')));
+    assert.equal(rendered.children[2].detail, 'Missing plan id');
+    context.provider.windows = [
+      { kind: 'daily', label: 'GLM-5.4', detail: 'Daily' },
+      { kind: 'billing', limitId: 'model-5.5', label: 'GLM-5.5', detail: 'Daily + one-time' },
+      { kind: 'billing', label: 'MCP' }
+    ];
+    const paired = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+    assert.equal(paired.children[0].detail, 'Daily');
+    assert.equal(paired.children[1].detail, 'Daily + one-time');
+    assert.equal(paired.children[0].classes.has('limit-window-wide'), false);
+    assert.equal(paired.children[1].classes.has('limit-window-wide'), false);
+    assert.equal(paired.children[2].classes.has('limit-window-wide'), true);
+  }
 });
 
 test('Copilot renders monthly Premium and Chat quotas as billing windows', () => {
@@ -4870,4 +4883,11 @@ test('switching hubs does not wait out the old hub request before starting', () 
   // Nothing awaits it any more, so it has to keep its own failures rather than
   // surface them as an unhandled rejection.
   assert.match(functionBody(main, 'reconcileSharedSubscriptions', 'restartDeviceRuntimeForMode'), /\} catch \(error\) \{/);
+});
+
+test('GLM Home daily windows retain returned model names instead of the generic daily label', () => {
+  const window = { kind: 'daily', label: 'arbitrary-model-name' };
+  assert.equal(limitProviderCompactWindowLabel('zai', window), window.label);
+  assert.equal(limitProviderCompactWindowPeriodLabel('zai', window), '');
+  assert.equal(limitProviderCompactWindowLabel('zaiteam', window), '');
 });

@@ -227,6 +227,9 @@
   }
 
   function limitProviderCompactWindowLabel(providerOrId, window, visibleWindows = []) {
+    if (providerId(providerOrId) === 'zai' && normalizeId(window?.kind) === 'daily') {
+      return String(window?.label || '').trim();
+    }
     if (providerId(providerOrId) !== 'antigravity') return '';
     const labels = (visibleWindows || []).map((candidate) => antigravityQuotaWindow(candidate)?.groupLabel || '');
     const currentLabel = antigravityQuotaWindow(window)?.groupLabel || '';
