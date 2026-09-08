@@ -194,6 +194,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'grok-unified-log',
   'hermes-home',
   'hermes-profile',
+  'kilo-db',
   'kilocode-tasks',
   'kimi-code-sessions',
   'kimi-sessions',

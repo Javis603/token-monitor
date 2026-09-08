@@ -440,6 +440,13 @@ test('clientSourceChecks collapses same-kind roots into one entry', () => {
   }
 });
 
+test('Kilo source health covers its CLI database and extension tasks', () => {
+  assert.deepEqual(
+    clientSourceChecks('kilo').kilo.map((check) => check.id),
+    ['kilo-db', 'kilocode-tasks']
+  );
+});
+
 test('Qoder CN source health requires local.db, not only its watch parent', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-qodercn-health-'));
   const dbPath = path.join(tempRoot, 'cache', 'db', 'local.db');

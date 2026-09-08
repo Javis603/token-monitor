@@ -11,6 +11,7 @@ try {
 const {
   applyArchivedClientUsage,
   captureArchivedClientUsage,
+  normalizeArchivedClientUsage,
   pruneArchivedClientUsage
 } = archiveApi;
 
@@ -268,6 +269,29 @@ test('archived client usage is ignored and pruned once the client is tracked aga
 
   const pruned = pruneArchivedClientUsage(archive, 'codex,hermes');
   assert.deepEqual(pruned.clients, {});
+});
+
+test('archived Kilo Code usage migrates to the canonical Kilo client id', () => {
+  const capturedAt = new Date('2026-05-30T12:00:00.000Z');
+  const archive = captureArchivedClientUsage({}, deviceRecord(), ['hermes'], capturedAt);
+  archive.clients.kilocode = {
+    ...archive.clients.hermes,
+    client: 'kilocode'
+  };
+  delete archive.clients.hermes;
+
+  const normalized = normalizeArchivedClientUsage(archive);
+  assert.equal(normalized.clients.kilo.client, 'kilo');
+  assert.equal(normalized.clients.kilocode, undefined);
+
+  const summary = applyArchivedClientUsage(liveSummaryWithoutHermes(), archive, {
+    activeClients: 'codex',
+    now: new Date('2026-05-30T13:00:00.000Z')
+  });
+  assert.equal(summary.allTime.clients.kilo, 900);
+  assert.equal(summary.allTime.clients.kilocode, undefined);
+
+  assert.deepEqual(pruneArchivedClientUsage(archive, 'codex,kilo').clients, {});
 });
 
 // A progressive preview carries only the periods it has finished scanning, and

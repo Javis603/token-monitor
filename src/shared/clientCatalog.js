@@ -54,7 +54,7 @@
     { id: 'copilot', label: 'GitHub Copilot' },
     { id: 'pi', label: 'Pi' },
     { id: 'zed', label: 'Zed' },
-    { id: 'kilocode', label: 'Kilo Code' },
+    { id: 'kilo', label: 'Kilo' },
     { id: 'commandcode', label: 'Command Code' },
     { id: 'micode', label: 'MiMo Code', defaultTracked: false },
     { id: 'zcode', label: 'ZCode' },

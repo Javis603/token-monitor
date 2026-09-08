@@ -317,7 +317,8 @@ const tokscaleCapabilityResolver = createTokscaleCapabilityResolver({
 // stripped in collectUsageOnce before the filter is built, not dropped here.
 const TOKSCALE_CLIENT_ALIASES = {
   antigravity: ['antigravity-cli'],
-  pi: ['omp']
+  pi: ['omp'],
+  kilo: ['kilocode']
 };
 
 function tokscaleClientFilter(clients) {
@@ -2040,9 +2041,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // watcher prunes the rest of this broad app data root below.
   //
   // Only the roots tokscale declares as `PathRoot::XdgData` go through this —
-  // opencode, zed and micode (clients.rs), plus the CodeBuddy extension logs it
-  // resolves via `dirs::data_local_dir()`. Kiro's CLI database is deliberately
-  // NOT one of them: tokscale spells it as a home-relative literal
+  // opencode, zed, kilo and micode (clients.rs), plus the CodeBuddy extension
+  // logs it resolves via `dirs::data_local_dir()`. Kiro's CLI database is
+  // deliberately NOT one of them: tokscale spells it as a home-relative literal
   // (`{home}/.local/share/kiro-cli/data.sqlite3`, scanner.rs), so following XDG
   // there would watch a directory it never reads. The split is upstream's, not
   // an oversight — check clients.rs before adding or removing a root here.
@@ -2117,13 +2118,14 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['zed-threads', path.join(home, 'Library', 'Application Support', 'Zed', 'threads')],
     ['zed-threads', path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Zed', 'threads')]
   );
-  // Kilo Code (VS Code ext): tokscale 3.1.3 only scans the Linux .config root and
-  // the .vscode-server (remote) root for KiloCode — unlike Cline, it does NOT scan
-  // the native macOS Application Support / Windows %APPDATA% roots. Watching those
-  // would be dead watches + a false "waiting" status, so we mirror exactly what
-  // tokscale reads. (Native mac/win support pending upstream tokscale.)
+  // Kilo is one Token Monitor client backed by two Tokscale sources. `kilo`
+  // reads the CLI's XDG-data SQLite database, while `kilocode` reads the VS Code
+  // extension's Linux/local and remote task roots. Keep the native macOS and
+  // Windows VS Code roots out until Tokscale scans them; otherwise they would be
+  // dead watches and false presence signals.
   add(
-    'kilocode',
+    'kilo',
+    ['kilo-db', path.join(xdgHome, 'kilo'), path.join(xdgHome, 'kilo', 'kilo.db')],
     ['kilocode-tasks', path.join(home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')],
     ['kilocode-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')]
   );
@@ -2417,6 +2419,17 @@ function clientsForWatchPath(filePath, rootsByClient) {
 // never recurses into an ignored dir (so the runaway poll is gone), yet a
 // newly created state.db-wal is still seen on the next top-level readdir.
 const HERMES_DB_FILES = new Set(['state.db', 'state.db-wal', 'state.db-shm']);
+// OpenClaw keeps each agent's usage sources in a small set of lanes under
+// ~/.openclaw/agents/<agentId>: legacy/published JSONL under sessions/, doctor
+// migration archives beside it, the current per-agent SQLite store, and Codex
+// app-server rollouts under agent/codex-home. The rest of an agent directory is
+// runtime/workspace state and can contain dependency trees large enough to make
+// chokidar allocate thousands of directory watches. Keep the official source
+// lanes live; Tokscale's periodic full scan remains the fallback for a
+// non-standard JSONL placed elsewhere under agents/.
+const OPENCLAW_TRANSCRIPT_DIRS = new Set(['sessions', 'session-sqlite-import-archive']);
+const OPENCLAW_AGENT_DB_WATCH_PATTERN = /^openclaw-agent\.sqlite(?:-(?:wal|shm))?$/;
+const OPENCLAW_CODEX_HOME_DIRS = new Set(['sessions', 'archived_sessions']);
 // OpenCode discovers only direct opencode.db / opencode-<channel>.db files.
 // WAL/SHM are not database inputs to tokscale, but they are the live-write
 // signals that must remain watched so a transaction committed before a
@@ -2528,6 +2541,23 @@ function watchPolicyEntries(clientsCsv) {
   // watch root — the home AND every profile dir under it — is kept by the
   // matcher itself, so a profile's own database still reports.
   bound('hermes', candidates.hermes || [], (parts) => !HERMES_DB_FILES.has(parts[parts.length - 1]));
+
+  bound('openclaw', candidates.openclaw || [], (parts) => {
+    // The first level is the dynamic agent id. Keep it so newly created agents
+    // can expose one of the bounded source lanes below.
+    if (parts.length === 1) return false;
+    if (OPENCLAW_TRANSCRIPT_DIRS.has(parts[1])) return false;
+    if (parts[1] !== 'agent') return true;
+
+    // Keep the parent so a fresh SQLite store or codex-home can appear after
+    // startup, then limit its contents to those two sources.
+    if (parts.length === 2) return false;
+    if (parts.length === 3) {
+      return parts[2] !== 'codex-home' && !OPENCLAW_AGENT_DB_WATCH_PATTERN.test(parts[2]);
+    }
+    if (parts[2] !== 'codex-home') return true;
+    return !OPENCLAW_CODEX_HOME_DIRS.has(parts[3]);
+  });
 
   bound('copilot', withBasename('copilot', '.copilot'), (parts) => {
     if (parts[0] === 'otel') return false;
