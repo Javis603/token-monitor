@@ -564,7 +564,7 @@ test('fetchZaiLimits survives a malformed spend store and a failing write', asyn
     const store = JSON.parse(fs.readFileSync(storePath, 'utf8'));
     Object.assign(Object.values(store.accounts)[0], {
       lastTotal: true, allTimeSpend: '   ', trackingSince: false,
-      dailySpend: { '2026-09-04': '2.5', '2026-09-05': [], '2026-09-06': 4, 'NaN-NaN-NaN': 3 }
+      dailySpend: { '2026-09-04': '2.5', '2026-09-05': [], '2026-09-07': 4, 'NaN-NaN-NaN': 3 }
     });
     fs.writeFileSync(storePath, JSON.stringify(store), 'utf8');
     const repaired = await fetchZaiLimits(
