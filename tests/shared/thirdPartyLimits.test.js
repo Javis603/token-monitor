@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createLimitsRuntime } = require('../../src/shared/limitsRuntime');
+const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
 
 const {
   DEFAULT_QUOTA_PER_UNIT,
@@ -39,7 +39,7 @@ const {
   quotaPerUnit,
   readCustomJsonPath,
   thirdPartyProfileName
-} = require('../../src/shared/thirdPartyLimits');
+} = require('../../src/shared/providers/thirdparty/limits');
 
 function response(status, body) {
   return {

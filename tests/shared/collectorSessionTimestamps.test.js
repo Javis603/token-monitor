@@ -7,7 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { applySessionTimestamps } = require('../../src/shared/collector');
-const { indexDshSessionHeaders } = require('../../src/shared/dshSessionFiles');
+const { indexDshSessionHeaders } = require('../../src/shared/providers/dsh/sessionFiles');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
 
 installInProcessWatchHost(test);

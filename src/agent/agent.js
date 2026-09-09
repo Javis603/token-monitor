@@ -11,7 +11,7 @@ const {
   normalizeLimitsRefreshMs,
   parseBoolean,
   parseLimitProviders
-} = require('../shared/limitCollector');
+} = require('../shared/limits/collector');
 const { postSyncPayload } = require('../shared/syncPayload');
 const { applyProjectRollups } = require('../shared/usage');
 const { runAgent, runAgentOnce } = require('./runtime');

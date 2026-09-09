@@ -1,22 +1,20 @@
 'use strict';
 
-// Consistency checks over the *existing* per-client wiring — no registry, no
-// codegen, no file moves. Per the maintainer's scoping on the proposal issue
-// (#496): "Please keep the PR scoped to consistency checks over the existing
-// wiring: orphan or missing client metadata, source check ids and WSL markers
-// that do not resolve back to a known client, and the other duplicated
-// client ids that are expected to agree today."
+// Consistency checks over the per-client wiring that is still maintained
+// independently of the tracked-client catalog. Client identity itself now comes
+// from CLIENT_CATALOG (src/shared/clientCatalog.js), but Discord's asset/label
+// maps and the WSL marker tables are separate sources that must still agree with
+// it by hand — those are what this file guards.
 //
-// Each check here tests an *invariant* between two independently-maintained
-// lists, not a pinned snapshot of either list's contents — so a check keeps
-// protecting the eventual registry migration even after the lists' contents
-// change, per the same guidance ("testing invariants rather than pinning the
-// current file layout").
+// Each check tests an *invariant* between two independently-maintained lists
+// rather than a pinned snapshot of either one's contents, so it keeps protecting
+// the remaining #550 steps even after those lists change.
 //
-// clientTracking.test.js already covers: DEFAULT_CLIENTS/KNOWN_CLIENTS shape,
-// and the renderer/README/KNOWN_CLIENTS shared display-order agreement.
-// clientHealth.test.js already covers: CLIENT_SOURCE_CHECK_IDS vs. the ids
-// clientSourceRoots() actually emits. Neither is duplicated here.
+// clientTracking.test.js already covers: DEFAULT_CLIENTS/KNOWN_CLIENTS shape and
+// the defaults/README display-order agreement. clientCatalog.test.js covers the
+// catalog's own invariants and the renderer's use of it. clientHealth.test.js
+// covers CLIENT_SOURCE_CHECK_IDS vs. the ids clientSourceRoots() actually emits.
+// None of those are duplicated here.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

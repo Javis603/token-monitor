@@ -8,7 +8,7 @@ const {
   parseLimitProviders,
   probeLimitProvider,
   providerPhysicalBoundMs
-} = require('../../src/shared/limitCollector');
+} = require('../../src/shared/limits/collector');
 
 test('every supported limits provider declares a finite physical whole-dispatch bound', () => {
   for (const provider of parseLimitProviders()) {

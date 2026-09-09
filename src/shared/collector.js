@@ -11,9 +11,7 @@ const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv, PARSE_LOCAL_CLIENTS } = require('./clientTracking');
 const {
   CLIENT_HEALTH_VERSION,
-  MAX_SYNC_DETAIL_INPUT_LENGTH,
   MAX_DIAGNOSTICS_PER_CLIENT,
-  classifyClientSyncDetailCode,
   deriveClientOverall
 } = require('./clientHealth');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
@@ -29,7 +27,7 @@ const {
   UNATTRIBUTED_USAGE_CLIENT
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
-const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles');
+const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { createWatcherHost } = require('./watcherHost');
 const { localDayKey, mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
@@ -37,29 +35,34 @@ const {
   createSubprocessTermination,
   terminationUnconfirmedError
 } = require('./subprocessTermination');
-const cursorAuth = require('./cursorAuth');
-const { withCursorLifecycle } = require('./cursorLifecycle');
-const { claudeSessionRoots } = require('./claudePaths');
+const {
+  antigravityDataPresent,
+  antigravityDataRoots,
+  createAntigravitySelfSync
+} = require('./providers/antigravity/selfSync');
+const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
+const { createCursorSelfSync } = require('./providers/cursor/selfSync');
+const { claudeSessionRoots } = require('./providers/claude/paths');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
-const opencodeSession = require('./opencodeSession');
-const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const opencodeSession = require('./providers/opencode/session');
+const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
 const {
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
   collectQoderCnRows,
   qoderCnDataPaths,
   resolveQoderCnPricing
-} = require('./qoderCnUsage');
-const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
-const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./dshPaths');
-const { indexDshSessionHeaders, readDshSessionHeader, resolveDshSessionsRoot } = require('./dshSessionFiles');
+} = require('./providers/qodercn/usage');
+const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
+const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
+const { indexDshSessionHeaders, readDshSessionHeader, resolveDshSessionsRoot } = require('./providers/dsh/sessionFiles');
 const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
   isReasonixNativeSessionSidecar,
   reasonixNativeSessionWatchRoots,
   emptyNativeView
-} = require('./reasonixSessions');
+} = require('./providers/reasonix/sessions');
 const { hashKey } = require('./hashKey');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
 const {
@@ -73,7 +76,7 @@ const {
   LIMITS_RESET_BOUNDARY_MAX_TIMER_MS,
   nextLimitsResetBoundary,
   pruneAttemptedResetBoundaries
-} = require('./limitResetBoundary');
+} = require('./limits/resetBoundary');
 
 function toUnpackedPath(p) {
   // electron-builder asarUnpack stores real files at .../app.asar.unpacked/...
@@ -314,7 +317,8 @@ const tokscaleCapabilityResolver = createTokscaleCapabilityResolver({
 // stripped in collectUsageOnce before the filter is built, not dropped here.
 const TOKSCALE_CLIENT_ALIASES = {
   antigravity: ['antigravity-cli'],
-  pi: ['omp']
+  pi: ['omp'],
+  kilo: ['kilocode']
 };
 
 function tokscaleClientFilter(clients) {
@@ -1042,7 +1046,8 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     // persist across collectUsageOnce calls to do anything, and every
     // caller that wants test isolation already passes its own Map explicitly.
     const dshFileCache = deps.dshSessionFileCache || dshSessionFileCache;
-    // dshPaths.js checks env.DSH_HOME before the homeDir it's given, same as
+    // providers/dsh/paths.js checks env.DSH_HOME before the homeDir it's given,
+    // same as
     // tokscale's own PathRoot::EnvVar — and tokscale's own scanner never lets
     // that leak into an explicit --home lookup (use_env_roots: false, lib.rs).
     // scopedHome means `home` is a specific WSL distro, not this machine's
@@ -1162,299 +1167,8 @@ function applySessionTimestamps(periods, home, deps = {}) {
 // back in here.
 const selfSyncThrottle = createSelfSyncThrottle();
 
-async function maybeSyncCursor(clientsCsv, logger, options = {}) {
-  throwIfAborted(options.signal);
-  const enabled = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
-  if (!enabled.has('cursor')) return;
-  if (!selfSyncThrottle.claim('cursor', options.minIntervalMs)) return;
-  const attempt = selfSyncThrottle.beginAttempt('cursor');
-  const cancelAttempt = () => selfSyncThrottle.cancelAttempt('cursor', attempt);
-  options.signal?.addEventListener('abort', cancelAttempt, { once: true });
-  if (options.signal?.aborted) cancelAttempt();
-  try {
-    await cursorAuth.runCursorSync({
-      signal: options.signal,
-      timeoutMs: options.timeoutMs,
-      terminationOptions: options.terminationOptions,
-      onTerminationUnconfirmed: options.onTerminationUnconfirmed
-    });
-    selfSyncThrottle.completeAttempt('cursor', attempt, false);
-  } catch (err) {
-    if (options.signal?.aborted) {
-      cancelAttempt();
-      throw abortReason(options.signal);
-    }
-    if (typeof logger === 'function') logger(`cursor sync failed: ${err.message}`);
-    selfSyncThrottle.completeAttempt('cursor', attempt, true, '', {
-      failureStage: err?.syncFailureStage,
-      detailCode: err?.syncDetailCode || classifyClientSyncDetailCode({ client: 'cursor', text: err?.message }),
-      exitCode: err?.syncExitCode
-    });
-    options.onFailure?.('cursor');
-  } finally {
-    options.signal?.removeEventListener('abort', cancelAttempt);
-  }
-}
-
-// tokscale's antigravity sync reads the IDE's native session roots under
-// ~/.gemini/; when none exist there is nothing to sync, so don't spawn at all.
-const ANTIGRAVITY_DATA_ROOTS = ['antigravity', 'antigravity-ide', 'antigravity-backup'];
-const ANTIGRAVITY_SYNC_LOCK_MAX_BYTES = 128;
-
-function antigravityDataRoots(home = os.homedir()) {
-  return ANTIGRAVITY_DATA_ROOTS.map((name) => path.join(home, '.gemini', name));
-}
-
-function antigravityDataPresent(home) {
-  return antigravityDataRoots(home).some(dirExists);
-}
-
-function antigravitySyncLockPath(home, env = process.env, platform = process.platform) {
-  return path.join(
-    tokscaleConfigDir({ env, platform, homeDir: home }),
-    'antigravity-cache',
-    'sync.lock'
-  );
-}
-
-// Tokscale deliberately preserves an unknown sync.lock after a crash: an older
-// binary may still own it during a rolling upgrade, so reclaiming arbitrary
-// dead-PID records here would undo that safety boundary. We can make one much
-// narrower claim after a child we terminated has emitted close: a regular file
-// naming that exact child, created during this spawn, is our orphan. Recheck the
-// inode and contents immediately before unlinking so a successor or user edit
-// is preserved instead of mistaken for the record we observed.
-function removeOwnedAntigravitySyncLock({
-  lockPath,
-  childPid,
-  childStartedAt,
-  fsApi = fs,
-  now = Date.now
-} = {}) {
-  if (!lockPath || !Number.isSafeInteger(childPid) || childPid <= 0) return false;
-  if (!Number.isFinite(childStartedAt)) return false;
-  try {
-    const firstStat = fsApi.lstatSync(lockPath);
-    if (!firstStat.isFile() || firstStat.isSymbolicLink() || firstStat.size > ANTIGRAVITY_SYNC_LOCK_MAX_BYTES) {
-      return false;
-    }
-    const record = fsApi.readFileSync(lockPath, 'utf8');
-    const match = record.match(/^(\d+)\s+(\d+)\s*$/);
-    if (!match || Number(match[1]) !== childPid) return false;
-    const recordedAt = Number(match[2]);
-    const earliest = Math.floor(childStartedAt / 1000) - 1;
-    const latest = Math.floor(now() / 1000) + 1;
-    if (!Number.isSafeInteger(recordedAt) || recordedAt < earliest || recordedAt > latest) return false;
-
-    const finalStat = fsApi.lstatSync(lockPath);
-    if (firstStat.dev !== finalStat.dev || firstStat.ino !== finalStat.ino) return false;
-    if (fsApi.readFileSync(lockPath, 'utf8') !== record) return false;
-    fsApi.unlinkSync(lockPath);
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-function processIdIsAlive(pid, kill = process.kill.bind(process)) {
-  try {
-    kill(pid, 0);
-    return true;
-  } catch (error) {
-    // A permission error still proves that the process exists. Every other
-    // normal failure means there is no process for this user to signal.
-    return error?.code === 'EPERM' || error?.code === 'EACCES';
-  }
-}
-
-// This is deliberately user-mediated rather than startup cleanup. Tokscale's
-// visible lock remains compatible with older binaries that do not participate
-// in sync.os.lock, so absence of a new-format OS owner is not enough evidence
-// to reclaim it in the background. Once the user confirms that no sync is
-// running, accept only the exact legacy record shape, refuse a live pid, and
-// repeat the inode/content checks immediately before removing the one path.
-function repairAntigravitySyncLock({
-  lockPath,
-  fsApi = fs,
-  pidIsAlive = processIdIsAlive
-} = {}) {
-  if (!lockPath) return { ok: false, code: 'unsafe-lock' };
-  try {
-    const firstStat = fsApi.lstatSync(lockPath);
-    if (!firstStat.isFile() || firstStat.isSymbolicLink() || firstStat.size > ANTIGRAVITY_SYNC_LOCK_MAX_BYTES) {
-      return { ok: false, code: 'unsafe-lock' };
-    }
-    const record = fsApi.readFileSync(lockPath, 'utf8');
-    const match = record.match(/^(\d+)\s+(\d+)\s*$/);
-    const pid = Number(match?.[1]);
-    const recordedAt = Number(match?.[2]);
-    if (
-      !match
-      || !Number.isSafeInteger(pid)
-      || pid <= 0
-      || !Number.isSafeInteger(recordedAt)
-      || recordedAt <= 0
-    ) {
-      return { ok: false, code: 'unsafe-lock' };
-    }
-    if (pidIsAlive(pid)) return { ok: false, code: 'owner-active' };
-
-    const finalStat = fsApi.lstatSync(lockPath);
-    if (firstStat.dev !== finalStat.dev || firstStat.ino !== finalStat.ino) {
-      return { ok: false, code: 'unsafe-lock' };
-    }
-    if (fsApi.readFileSync(lockPath, 'utf8') !== record) {
-      return { ok: false, code: 'unsafe-lock' };
-    }
-    fsApi.unlinkSync(lockPath);
-    return { ok: true, code: 'repaired' };
-  } catch (error) {
-    if (error?.code === 'ENOENT') return { ok: true, code: 'not-found' };
-    return { ok: false, code: 'repair-failed' };
-  }
-}
-
-async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), options = {}) {
-  throwIfAborted(options.signal);
-  const enabled = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
-  if (!enabled.has('antigravity')) return;
-  if (!antigravityDataPresent(home)) return;
-  if (!selfSyncThrottle.claim('antigravity', options.minIntervalMs)) return;
-  const attempt = selfSyncThrottle.beginAttempt('antigravity');
-  if (typeof options.run === 'function') {
-    const cancelAttempt = () => selfSyncThrottle.cancelAttempt('antigravity', attempt);
-    options.signal?.addEventListener('abort', cancelAttempt, { once: true });
-    if (options.signal?.aborted) cancelAttempt();
-    try {
-      await options.run({ signal: options.signal });
-      selfSyncThrottle.completeAttempt('antigravity', attempt, false);
-    } catch (err) {
-      if (options.signal?.aborted) {
-        cancelAttempt();
-        throw abortReason(options.signal);
-      }
-      if (typeof logger === 'function') logger(`antigravity sync failed: ${err.message}`);
-      selfSyncThrottle.completeAttempt('antigravity', attempt, true, '', {
-        failureStage: err?.syncFailureStage,
-        detailCode: err?.syncDetailCode || classifyClientSyncDetailCode({ client: 'antigravity', text: err?.message }),
-        exitCode: err?.syncExitCode
-      });
-      options.onFailure?.('antigravity');
-    } finally {
-      options.signal?.removeEventListener('abort', cancelAttempt);
-    }
-    return;
-  }
-  const { bin, prefixArgs, env } = tokscaleCommand();
-  const syncLockPath = options.syncLockPath || antigravitySyncLockPath(home, env);
-  // Every outcome resolves — a stuck sync must not hold the tick open — so a
-  // failure is only visible through onFailure. The caller needs it: the tick has
-  // already consumed the source event that asked for this sync, and silently
-  // scanning the unchanged cache would put the refresh back on the fallback
-  // interval, which is the latency this whole path exists to remove.
-  await new Promise((resolve) => {
-    const childStartedAt = Date.now();
-    const child = spawn(bin, [...prefixArgs, 'antigravity', 'sync'], { env, windowsHide: true });
-    const termination = createSubprocessTermination(child, {
-      ...(options.terminationOptions || {}),
-      onUnconfirmed() {
-        const error = terminationUnconfirmedError(null, 'tokscale antigravity sync');
-        try { options.onTerminationUnconfirmed?.(error); } catch (_) {}
-        if (terminalOutcome?.cancelled) return settle(false, '', {}, false, true);
-        settle(
-          true,
-          terminalOutcome?.code || 'sync-failed',
-          terminalOutcome?.details || { failureStage: 'process-exit' }
-        );
-      }
-    });
-    let stderr = '';
-    // One outcome per spawn. A child reports more than once — a SIGTERM'd
-    // timeout still emits close afterwards, and error is usually followed by
-    // close — which was harmless while every path only resolved a promise, but
-    // onFailure has a side effect: re-arming the catch-up. A late duplicate could
-    // land after a subsequent catch-up already succeeded and put the same source
-    // event back into a set that no longer has anything to collect.
-    let settled = false;
-    let timer = null;
-    let terminalOutcome = null;
-    // The failure code reaches the health record; stderr only ever reaches the
-    // local log, since it is neither translatable nor reliably free of the
-    // user's paths.
-    const settle = (failed, code = '', details = {}, notifyFailure = true, cancelled = false) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      options.signal?.removeEventListener('abort', onAbort);
-      if (cancelled) selfSyncThrottle.cancelAttempt('antigravity', attempt);
-      else selfSyncThrottle.completeAttempt('antigravity', attempt, failed, code, details);
-      if (failed && notifyFailure) options.onFailure?.('antigravity');
-      resolve();
-    };
-    const onAbort = () => {
-      if (terminalOutcome) return;
-      terminalOutcome = { cancelled: true };
-      if (timer) clearTimeout(timer);
-      timer = null;
-      termination.request();
-    };
-    timer = setTimeout(() => {
-      if (terminalOutcome) return;
-      terminalOutcome = {
-        failed: true,
-        code: 'sync-timeout',
-        details: { failureStage: 'timeout' }
-      };
-      timer = null;
-      termination.request();
-    }, options.timeoutMs ?? 30000);
-    child.stderr.on('data', (chunk) => {
-      if (terminalOutcome || stderr.length >= MAX_SYNC_DETAIL_INPUT_LENGTH) return;
-      const remaining = MAX_SYNC_DETAIL_INPUT_LENGTH - stderr.length;
-      stderr += chunk.toString().slice(0, remaining);
-    });
-    child.on('error', (err) => {
-      if (terminalOutcome) return;
-      settle(true, 'sync-spawn-failed', {
-        failureStage: 'spawn',
-        detailCode: classifyClientSyncDetailCode({ client: 'antigravity', text: err?.message })
-      });
-    });
-    child.on('close', (code) => {
-      termination.confirmClosed();
-      if (terminalOutcome) {
-        removeOwnedAntigravitySyncLock({
-          lockPath: syncLockPath,
-          childPid: child.pid,
-          childStartedAt
-        });
-      }
-      if (settled) return;
-      if (terminalOutcome?.cancelled) return settle(false, '', {}, false, true);
-      if (terminalOutcome) {
-        return settle(
-          terminalOutcome.failed,
-          terminalOutcome.code,
-          terminalOutcome.details
-        );
-      }
-      if (code !== 0 && !settled && typeof logger === 'function') {
-        logger(`antigravity sync exited ${code}: ${stderr.trim().slice(0, 200)}`);
-      }
-      settle(code !== 0, 'sync-exit-error', {
-        failureStage: code !== 0 ? 'process-exit' : null,
-        detailCode: code !== 0
-          ? classifyClientSyncDetailCode({ client: 'antigravity', text: stderr })
-          : null,
-        exitCode: code
-      });
-    });
-    options.signal?.addEventListener('abort', onAbort, { once: true });
-    if (options.signal?.aborted) onAbort();
-    child.stdin?.end();
-  });
-  throwIfAborted(options.signal);
-}
+const { maybeSyncCursor } = createCursorSelfSync({ selfSyncThrottle });
+const { maybeSyncAntigravity } = createAntigravitySelfSync({ selfSyncThrottle, tokscaleCommand });
 
 const HISTORY_CAP_DAYS = 370;
 const HISTORY_TIMEOUT_MS = 60000;
@@ -2327,9 +2041,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // watcher prunes the rest of this broad app data root below.
   //
   // Only the roots tokscale declares as `PathRoot::XdgData` go through this —
-  // opencode, zed and micode (clients.rs), plus the CodeBuddy extension logs it
-  // resolves via `dirs::data_local_dir()`. Kiro's CLI database is deliberately
-  // NOT one of them: tokscale spells it as a home-relative literal
+  // opencode, zed, kilo and micode (clients.rs), plus the CodeBuddy extension
+  // logs it resolves via `dirs::data_local_dir()`. Kiro's CLI database is
+  // deliberately NOT one of them: tokscale spells it as a home-relative literal
   // (`{home}/.local/share/kiro-cli/data.sqlite3`, scanner.rs), so following XDG
   // there would watch a directory it never reads. The split is upstream's, not
   // an oversight — check clients.rs before adding or removing a root here.
@@ -2404,13 +2118,14 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['zed-threads', path.join(home, 'Library', 'Application Support', 'Zed', 'threads')],
     ['zed-threads', path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Zed', 'threads')]
   );
-  // Kilo Code (VS Code ext): tokscale 3.1.3 only scans the Linux .config root and
-  // the .vscode-server (remote) root for KiloCode — unlike Cline, it does NOT scan
-  // the native macOS Application Support / Windows %APPDATA% roots. Watching those
-  // would be dead watches + a false "waiting" status, so we mirror exactly what
-  // tokscale reads. (Native mac/win support pending upstream tokscale.)
+  // Kilo is one Token Monitor client backed by two Tokscale sources. `kilo`
+  // reads the CLI's XDG-data SQLite database, while `kilocode` reads the VS Code
+  // extension's Linux/local and remote task roots. Keep the native macOS and
+  // Windows VS Code roots out until Tokscale scans them; otherwise they would be
+  // dead watches and false presence signals.
   add(
-    'kilocode',
+    'kilo',
+    ['kilo-db', path.join(xdgHome, 'kilo'), path.join(xdgHome, 'kilo', 'kilo.db')],
     ['kilocode-tasks', path.join(home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')],
     ['kilocode-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')]
   );
@@ -2704,6 +2419,17 @@ function clientsForWatchPath(filePath, rootsByClient) {
 // never recurses into an ignored dir (so the runaway poll is gone), yet a
 // newly created state.db-wal is still seen on the next top-level readdir.
 const HERMES_DB_FILES = new Set(['state.db', 'state.db-wal', 'state.db-shm']);
+// OpenClaw keeps each agent's usage sources in a small set of lanes under
+// ~/.openclaw/agents/<agentId>: legacy/published JSONL under sessions/, doctor
+// migration archives beside it, the current per-agent SQLite store, and Codex
+// app-server rollouts under agent/codex-home. The rest of an agent directory is
+// runtime/workspace state and can contain dependency trees large enough to make
+// chokidar allocate thousands of directory watches. Keep the official source
+// lanes live; Tokscale's periodic full scan remains the fallback for a
+// non-standard JSONL placed elsewhere under agents/.
+const OPENCLAW_TRANSCRIPT_DIRS = new Set(['sessions', 'session-sqlite-import-archive']);
+const OPENCLAW_AGENT_DB_WATCH_PATTERN = /^openclaw-agent\.sqlite(?:-(?:wal|shm))?$/;
+const OPENCLAW_CODEX_HOME_DIRS = new Set(['sessions', 'archived_sessions']);
 // OpenCode discovers only direct opencode.db / opencode-<channel>.db files.
 // WAL/SHM are not database inputs to tokscale, but they are the live-write
 // signals that must remain watched so a transaction committed before a
@@ -2815,6 +2541,23 @@ function watchPolicyEntries(clientsCsv) {
   // watch root — the home AND every profile dir under it — is kept by the
   // matcher itself, so a profile's own database still reports.
   bound('hermes', candidates.hermes || [], (parts) => !HERMES_DB_FILES.has(parts[parts.length - 1]));
+
+  bound('openclaw', candidates.openclaw || [], (parts) => {
+    // The first level is the dynamic agent id. Keep it so newly created agents
+    // can expose one of the bounded source lanes below.
+    if (parts.length === 1) return false;
+    if (OPENCLAW_TRANSCRIPT_DIRS.has(parts[1])) return false;
+    if (parts[1] !== 'agent') return true;
+
+    // Keep the parent so a fresh SQLite store or codex-home can appear after
+    // startup, then limit its contents to those two sources.
+    if (parts.length === 2) return false;
+    if (parts.length === 3) {
+      return parts[2] !== 'codex-home' && !OPENCLAW_AGENT_DB_WATCH_PATTERN.test(parts[2]);
+    }
+    if (parts[2] !== 'codex-home') return true;
+    return !OPENCLAW_CODEX_HOME_DIRS.has(parts[3]);
+  });
 
   bound('copilot', withBasename('copilot', '.copilot'), (parts) => {
     if (parts[0] === 'otel') return false;
@@ -4331,9 +4074,6 @@ module.exports = {
   localTodayKey,
   nextLimitsResetBoundary,
   normalizeHistoryIntervalMs,
-  antigravitySyncLockPath,
-  repairAntigravitySyncLock,
-  removeOwnedAntigravitySyncLock,
   sessionTimestampMap,
   locateBundledBinary,
   lookupModelPricing,

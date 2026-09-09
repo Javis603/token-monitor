@@ -25,8 +25,8 @@
 // Node-builtin-free: this module is vendored into worker/src/shared/ by
 // `npm run sync:worker`.
 
-const { REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
-const { DSH_SOURCE_CHECK_ID } = require('./dshPaths');
+const { REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
+const { DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 
 const CLIENT_HEALTH_VERSION = 1;
 
@@ -191,6 +191,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'grok-unified-log',
   'hermes-home',
   'hermes-profile',
+  'kilo-db',
   'kilocode-tasks',
   'kimi-code-sessions',
   'kimi-sessions',

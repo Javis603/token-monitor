@@ -9,7 +9,7 @@ const {
   rememberOllamaValidation,
   parseOllamaUsageHtml,
   fetchOllamaLimits
-} = require('../../src/shared/ollamaLimits');
+} = require('../../src/shared/providers/ollama/limits');
 const { hashKey } = require('../../src/shared/hashKey');
 
 const SETTINGS_HTML = `

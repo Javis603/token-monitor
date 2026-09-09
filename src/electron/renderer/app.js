@@ -1,6 +1,12 @@
 'use strict';
 
-const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes Agent', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', dsh: 'DeepSeek Harness', cherrystudio: 'Cherry Studio', lmstudio: 'LM Studio', unsloth: 'Unsloth' };
+// Client identity — ids, labels and display order — comes from the shared
+// catalog (loaded as a script before this file). Destructured to the bare
+// names the call sites below already use.
+const { CLIENT_IDS, CLIENT_LABELS: clientLabels, KNOWN_CLIENT_LIST: KNOWN_CLIENTS } = window.TokenMonitorClientCatalog;
+// Limits provider identity comes from its own shared catalog, bound here rather
+// than at its first use below because the icon tables are derived from it.
+const { LIMIT_PROVIDER_CATALOG: LIMIT_PROVIDERS, LIMIT_PROVIDER_IDS } = window.TokenMonitorLimitProviders;
 const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
@@ -13,10 +19,17 @@ const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
+  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
   'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
-const limitMarksWithIcon = new Set([...clientsWithIcon, 'newapi', 'sub2api', 'alibaba']);
+// Limits rows mark more ids than there are tracked clients: every provider, plus
+// relay ids that only ever appear as a limits row and have no catalog entry.
+// Derived rather than listed, because a provider whose id is missing here is
+// drawn as a bare dot — a defect nothing about adding a provider points at. The
+// mask rule behind each id is asserted from the same catalog in
+// limitProviderPresentationCoverage.test.js, which is what makes deriving safe:
+// an id in this set with no rule paints a solid square instead.
+const limitMarksWithIcon = new Set([...clientsWithIcon, ...LIMIT_PROVIDER_IDS, 'newapi', 'sub2api']);
 
 function osIconFor(platform) {
   const prefix = String(platform || '').toLowerCase().split('-')[0];
@@ -50,62 +63,6 @@ function iconKindFor(rowData, breakdown) {
     : { kind: 'dot' };
 }
 
-const KNOWN_CLIENTS = [
-  { id: 'claude', label: 'Claude Code' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'opencode', label: 'OpenCode' },
-  { id: 'hermes', label: 'Hermes Agent' },
-  { id: 'openclaw', label: 'OpenClaw' },
-  { id: 'cursor', label: 'Cursor' },
-  { id: 'antigravity', label: 'Antigravity' },
-  { id: 'cline', label: 'Cline' },
-  { id: 'kimi', label: 'Kimi' },
-  { id: 'qwen', label: 'Qwen' },
-  { id: 'grok', label: 'Grok Build' },
-  { id: 'copilot', label: 'GitHub Copilot' },
-  { id: 'pi', label: 'Pi' },
-  { id: 'zed', label: 'Zed' },
-  { id: 'kilocode', label: 'Kilo Code' },
-  { id: 'commandcode', label: 'Command Code' },
-  { id: 'micode', label: 'MiMo Code' },
-  { id: 'zcode', label: 'ZCode' },
-  { id: 'kiro', label: 'Kiro' },
-  { id: 'codebuddy', label: 'CodeBuddy' },
-  { id: 'workbuddy', label: 'WorkBuddy' },
-  { id: 'proma', label: 'Proma' },
-  { id: 'qodercn', label: 'Qoder CN' },
-  { id: 'reasonix', label: 'Reasonix' },
-  { id: 'dsh', label: 'DeepSeek Harness' },
-  { id: 'cherrystudio', label: 'Cherry Studio' },
-  { id: 'lmstudio', label: 'LM Studio' },
-  { id: 'unsloth', label: 'Unsloth' }
-];
-const LIMIT_PROVIDERS = [
-  { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'opencode', label: 'OpenCode' },
-  { id: 'cursor', label: 'Cursor' },
-  { id: 'antigravity', label: 'Antigravity' },
-  { id: 'kimi', label: 'Kimi' },
-  { id: 'grok', label: 'Grok' },
-  { id: 'copilot', label: 'GitHub Copilot' },
-  { id: 'zed', label: 'Zed' },
-  { id: 'commandcode', label: 'Command Code' },
-  { id: 'mimo', label: 'MiMo' },
-  { id: 'zai', label: 'GLM' },
-  { id: 'zaiteam', label: 'GLM Team' },
-  { id: 'kiro', label: 'Kiro' },
-  { id: 'workbuddy', label: 'WorkBuddy' },
-  { id: 'qoder', label: 'Qoder' },
-  { id: 'deepseek', label: 'DeepSeek' },
-  { id: 'openrouter', label: 'OpenRouter' },
-  { id: 'minimax', label: 'Minimax' },
-  { id: 'volcengine', label: 'Volcengine' },
-  { id: 'ollama', label: 'Ollama' },
-  { id: 'trae', label: 'Trae CN' },
-  { id: 'alibaba', label: 'Alibaba Cloud' },
-  { id: 'thirdparty', label: 'Third-party APIs' }
-];
 const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   claude: 'claudeAccountGroup',
   codex: 'codexAccountGroup',
@@ -162,8 +119,13 @@ const TRAY_ICON_VARIANTS = [
   { id: 'claude-brand', label: 'Claude', after: 'claude' },
   { id: 'chatgpt', label: 'ChatGPT', after: 'codex' }
 ];
+// The ids the tray has artwork for. Providers are derived for the same reason as
+// above and had drifted from it: Alibaba Cloud was added to the mark set but not
+// here, so the picker previewed its logo from the svg while the tray itself,
+// which draws only what deliverTrayProviderIcons rasterized, fell back to "A".
 const trayIconProviderIds = new Set([
   ...clientsWithIcon,
+  ...LIMIT_PROVIDER_IDS,
   ...TRAY_ICON_VARIANTS.map((provider) => provider.id)
 ]);
 const TRAY_ICON_PROVIDERS = [
@@ -347,6 +309,8 @@ state.toolPreferenceSourceSignature = '';
 state.limitProviderRenderSignature = '';
 state.limitPanelRenderSignature = '';
 state.settingsPushRevision = 0;
+state.limitProviderSelectionRevision = 0;
+state.pendingLimitProviderSelection = null;
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.homeReturnVisible = false;
@@ -2558,8 +2522,16 @@ function subscriptionLocalDate(dateString) {
 // (openrouter, deepseek, thirdparty, zai…) simply produce nothing, which is the
 // correct answer: their spend is either pay-as-you-go or spread across clients
 // with no way to attribute it.
+//
+// Membership comes from the catalog rather than from clientLabels. That map is a
+// display lookup and deliberately carries ids that are not tracked clients, so
+// keying off it would let "we can render a name for this" stand in for "this
+// provider names a client we count tokens for". The two happen to agree today
+// only because the one label-only id is not a limits provider.
+const catalogClientIds = new Set(CLIENT_IDS);
+
 function subscriptionUsageCostUsd(providerId) {
-  if (!Object.prototype.hasOwnProperty.call(clientLabels, providerId)) return null;
+  if (!catalogClientIds.has(providerId)) return null;
   const month = state.stats?.periods?.month;
   const cost = Number(month?.clientCosts?.[providerId] || 0);
   return cost > 0 ? cost : null;
@@ -3842,13 +3814,14 @@ function configuredLimitProviderOrder() {
 }
 
 function configuredLimitProviderSelection() {
-  const raw = state.settings?.limitProviders;
+  const raw = state.pendingLimitProviderSelection?.limitProviders ?? state.settings?.limitProviders;
   const source = raw === undefined || raw === null ? DEFAULT_LIMIT_PROVIDER_ORDER : raw;
   return limitProviderOrderApi.normalizeLimitProviderSelection(source, LIMIT_PROVIDERS);
 }
 
 function enabledLimitProviderSet() {
-  if (state.settings?.limitsEnabled === false) return new Set();
+  const limitsEnabled = state.pendingLimitProviderSelection?.limitsEnabled ?? state.settings?.limitsEnabled;
+  if (limitsEnabled === false) return new Set();
   return new Set(configuredLimitProviderSelection());
 }
 
@@ -4499,7 +4472,9 @@ function providersByLimitProviderId(providers) {
 function renderLimitProviderMark(id, color) {
   const mark = document.createElement('span');
   if (limitMarksWithIcon.has(id)) {
-    mark.className = `limit-icon limit-icon-${id}`;
+    // .limit-icon sizes the mark, .row-icon-<id> supplies the mask: one table,
+    // shared with the breakdown rows, instead of a second copy per provider.
+    mark.className = `limit-icon row-icon-${id}`;
   } else {
     mark.className = 'dot';
     mark.style.background = color;
@@ -11618,13 +11593,27 @@ async function onLimitProviderToggle() {
   if (checked.length === 0 && state.breakdown === 'limits') {
     setBreakdown('tool');
   }
-  await saveSettings({ limitProviders: checked.join(','), limitsEnabled: checked.length > 0 });
-  clearDisabledLimitProviderPendingChecks(new Set(checked));
-  // settings:update reconfigures LimitsRuntime immediately. Its existing
-  // snapshot and the newly enabled provider's eventual result arrive through
-  // the normal stats push, so a forced usage + all-provider refresh here only
-  // replaces stable account summaries with an interim snapshot and duplicates
-  // collection work.
+  const patch = { limitProviders: checked.join(','), limitsEnabled: checked.length > 0 };
+  // LimitsRuntime publishes its reconfigured snapshot synchronously before the
+  // main process can send settings:push. Keep the renderer on the user's new
+  // selection so that intervening stats frames cannot rebuild this checkbox
+  // from the previous settings and visibly re-check it.
+  const revision = ++state.limitProviderSelectionRevision;
+  state.pendingLimitProviderSelection = { revision, ...patch };
+  try {
+    await saveSettings(patch);
+    clearDisabledLimitProviderPendingChecks(new Set(checked));
+    // settings:update reconfigures LimitsRuntime immediately. Its existing
+    // snapshot and the newly enabled provider's eventual result arrive through
+    // the normal stats push, so a forced usage + all-provider refresh here only
+    // replaces stable account summaries with an interim snapshot and duplicates
+    // collection work.
+  } finally {
+    if (state.pendingLimitProviderSelection?.revision === revision) {
+      state.pendingLimitProviderSelection = null;
+      renderLimitProviderCheckboxes();
+    }
+  }
 }
 
 async function onLimitProviderMove(providerId, direction) {

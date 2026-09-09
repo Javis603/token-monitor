@@ -34,7 +34,7 @@ function fakeTokscaleSpawn() {
 
 async function withQoderCollectorMock(mocks, callback) {
   const collectorPath = require.resolve('../../src/shared/collector');
-  const qoderCnUsage = require('../../src/shared/qoderCnUsage');
+  const qoderCnUsage = require('../../src/shared/providers/qodercn/usage');
   const originals = Object.fromEntries(Object.keys(mocks).map((key) => [key, qoderCnUsage[key]]));
   Object.assign(qoderCnUsage, mocks);
   delete require.cache[collectorPath];
@@ -134,7 +134,7 @@ test('collectUsageOnce returns empty usage without spawning tokscale when client
 });
 
 test('collectUsageOnce handles proma-only tracking without spawning tokscale', async () => {
-  const promaPath = require.resolve('../../src/shared/promaUsage');
+  const promaPath = require.resolve('../../src/shared/providers/proma/usage');
   const collectorPath = require.resolve('../../src/shared/collector');
   const promaUsage = require(promaPath);
   const originalBuildPromaPeriods = promaUsage.buildPromaPeriods;
@@ -206,7 +206,7 @@ test('collectUsageOnce handles qodercn-only tracking without spawning tokscale',
 });
 
 test('anchored Proma refresh derives broader windows from the combined fresh today period', async () => {
-  const promaPath = require.resolve('../../src/shared/promaUsage');
+  const promaPath = require.resolve('../../src/shared/providers/proma/usage');
   const collectorPath = require.resolve('../../src/shared/collector');
   const promaUsage = require(promaPath);
   const originalBuildPromaPeriods = promaUsage.buildPromaPeriods;

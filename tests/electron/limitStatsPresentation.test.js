@@ -10,8 +10,8 @@ const {
   projectLimitStatsForDisplay
 } = require('../../src/electron/limitStatsPresentation');
 const { homeLimitAccountsForProviders } = require('../../src/electron/renderer/homeOverview');
-const { collectLimitsOnce: collectLimitsOnceRaw } = require('../../src/shared/limitCollector');
-const { aggregateLimits } = require('../../src/shared/limits');
+const { collectLimitsOnce: collectLimitsOnceRaw } = require('../../src/shared/limits/collector');
+const { aggregateLimits } = require('../../src/shared/limits/core');
 const { buildMacWidgetSnapshot } = require('../../src/shared/macWidgetSnapshot');
 const { formatTrayText } = require('../../src/shared/trayText');
 

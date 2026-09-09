@@ -22,8 +22,8 @@ const {
   classifyClientSyncDetailCode,
   normalizeClientHealth
 } = require('../../src/shared/clientHealth');
+const { antigravitySyncLockPath } = require('../../src/shared/providers/antigravity/selfSync');
 const {
-  antigravitySyncLockPath,
   clientActivityDaysFromHistory,
   clientDiagnosticRoots,
   clientSourceChecks,
@@ -438,6 +438,13 @@ test('clientSourceChecks collapses same-kind roots into one entry', () => {
   for (const list of Object.values(checks)) {
     for (const check of list) assert.equal(typeof check.exists, 'boolean');
   }
+});
+
+test('Kilo source health covers its CLI database and extension tasks', () => {
+  assert.deepEqual(
+    clientSourceChecks('kilo').kilo.map((check) => check.id),
+    ['kilo-db', 'kilocode-tasks']
+  );
 });
 
 test('Qoder CN source health requires local.db, not only its watch parent', () => {

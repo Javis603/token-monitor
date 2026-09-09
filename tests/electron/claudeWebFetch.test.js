@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
-const { createClaudeWebFetch } = require('../../src/electron/claudeWebFetch');
+const { createClaudeWebFetch } = require('../../src/electron/providers/claude/webFetch');
 
 function fakeNet(responseFactory) {
   return {

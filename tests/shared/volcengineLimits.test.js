@@ -9,7 +9,7 @@ const {
   parseVolcengineAgentPlanUsage,
   signVolcengineRequest,
   fetchVolcengineLimits
-} = require('../../src/shared/volcengineLimits');
+} = require('../../src/shared/providers/volcengine/limits');
 
 test('volcengineCredentials accepts Volcengine Ark Coding Plan credentials', () => {
   assert.deepEqual(

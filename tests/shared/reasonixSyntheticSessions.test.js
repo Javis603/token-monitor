@@ -6,7 +6,7 @@ const test = require('node:test');
 const {
   filterReasonixSyntheticSessions,
   isReasonixSyntheticSession
-} = require('../../src/shared/reasonixSessionGuard');
+} = require('../../src/shared/providers/reasonix/sessionGuard');
 const { createDeviceState } = require('../../src/shared/deviceState');
 const {
   applySessionUsageArchive,

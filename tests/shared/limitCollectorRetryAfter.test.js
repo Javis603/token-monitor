@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { probeLimitProvider } = require('../../src/shared/limitCollector');
+const { probeLimitProvider } = require('../../src/shared/limits/collector');
 
 test('probeLimitProvider reports Retry-After and links the parent signal into adapter fetches', async () => {
   const parent = new AbortController();

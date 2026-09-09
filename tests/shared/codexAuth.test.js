@@ -14,7 +14,7 @@ const {
   hashAccountKey,
   preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity
-} = require('../../src/shared/codexAuth');
+} = require('../../src/shared/providers/codex/auth');
 
 function jwt(payload) {
   const seg = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');

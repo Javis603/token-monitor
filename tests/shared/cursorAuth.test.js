@@ -18,7 +18,7 @@ const {
   runCursorLogin,
   runCursorLogout,
   runCursorSync
-} = require('../../src/shared/cursorAuth');
+} = require('../../src/shared/providers/cursor/auth');
 
 async function waitFor(predicate, timeoutMs = 2000) {
   const startedAt = Date.now();

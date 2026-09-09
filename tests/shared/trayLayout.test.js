@@ -173,6 +173,19 @@ test('tray layout normalization preserves the Daily window selector', () => {
   assert.equal(normalized.items[0].source.window, 'daily');
 });
 
+test('tray layout normalization migrates the legacy Kilo Code client id', () => {
+  const normalized = normalizeTrayLayout({
+    items: [{
+      id: 'legacy-kilo',
+      type: 'text',
+      metric: 'tokens',
+      source: { provider: 'kilocode' }
+    }]
+  });
+
+  assert.equal(normalized.items[0].source.provider, 'kilo');
+});
+
 test('tray layouts support optional shared icons, stacked values and configurable spacers', () => {
   const normalized = normalizeTrayLayout({
     version: 1,

@@ -2,7 +2,7 @@
 
 const { collectorAnchorTrust, computePeriodWindows, qoderCnDbPathForClients } = require('./collector');
 const { mergePeriods } = require('./usage');
-const { filterReasonixSyntheticSessions } = require('./reasonixSessionGuard');
+const { filterReasonixSyntheticSessions } = require('./providers/reasonix/sessionGuard');
 
 // The collector persists every full scan to collector-anchor.json so it can
 // derive month/allTime from a `--today` scan after a restart. A widget cold

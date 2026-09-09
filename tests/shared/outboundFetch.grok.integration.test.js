@@ -11,7 +11,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { resolveProxyUrl } = require('../../src/shared/outboundFetch');
-const { fetchGrokLimits, grokCredential, resolveGrokHome } = require('../../src/shared/grokLimits');
+const { fetchGrokLimits, grokCredential, resolveGrokHome } = require('../../src/shared/providers/grok/limits');
 
 function hasLiveGrokAuth() {
   try {

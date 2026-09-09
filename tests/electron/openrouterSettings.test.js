@@ -8,6 +8,7 @@ const vm = require('node:vm');
 
 const root = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
+const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 
 function functionBody(source, name, nextName) {
   const start = source.indexOf(`function ${name}(`);
@@ -86,7 +87,7 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   const styles = read('src/electron/renderer/styles.css');
   const colors = read('src/electron/renderer/usageCharts.js');
 
-  assert.match(app, /\{ id: 'openrouter', label: 'OpenRouter' \}/);
+  assert.equal(LIMIT_PROVIDER_LABELS.openrouter, 'OpenRouter');
   assert.match(app, /provider\.provider === 'openrouter'/);
   assert.match(app, /function renderOpenRouterAccountGroup/);
   assert.match(
@@ -113,7 +114,7 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   assert.match(app, /const hasMeter = quotaWindow\?\.showMeter !== false/);
   assert.match(app, /const valueOverride = hasMeter \? null : \(quotaWindow\?\.detail \|\| '—'\)/);
   assert.match(presentation, /openrouter: \['Pay-as-you-go', 'API key'\]/);
-  assert.match(styles, /\.limit-icon-openrouter/);
+  assert.match(styles, /^\.row-icon-openrouter/m);
   assert.match(styles, /\.limit-spend-summary\s*\{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
   assert.match(colors, /openrouter: '#6566F1'/);
 });

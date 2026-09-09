@@ -9,6 +9,7 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..', '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 const { VENDOR_LABELS, VENDOR_ORDER } = require('../../src/electron/renderer/themePresets');
+const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 
 test('third-party settings separate presets, scope, and safe custom mappings', () => {
   const html = read('src/electron/renderer/index.html');
@@ -121,7 +122,7 @@ test('third-party Limits presentation uses compact scope labels and a details to
   const styles = read('src/electron/renderer/styles.css');
   const colors = read('src/electron/renderer/usageCharts.js');
 
-  assert.match(app, /\{ id: 'thirdparty', label: 'Third-party APIs' \}/);
+  assert.equal(LIMIT_PROVIDER_LABELS.thirdparty, 'Third-party APIs');
   assert.match(app, /provider\.provider === 'thirdparty'/);
   assert.match(app, /function thirdPartyQuotaWindow/);
   assert.match(app, /quotaWindow\?\.label \|\| 'Balance'/);
@@ -159,9 +160,9 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(app, /function renderThirdPartyAccountGroup/);
   assert.match(app, /renderNamedApiAccountGroup\('thirdparty'/);
   assert.match(presentation, /thirdparty: \['Relay', 'API'\]/);
-  assert.match(styles, /\.limit-icon-sub2api/);
+  assert.match(styles, /^\.row-icon-sub2api/m);
   assert.match(styles, /assets\/icons\/sub2api\.svg/);
-  assert.match(styles, /\.limit-icon-thirdparty[\s\S]*?assets\/icons\/thirdparty\.svg/);
+  assert.match(styles, /^\.row-icon-thirdparty[\s\S]*?assets\/icons\/thirdparty\.svg/m);
   assert.doesNotMatch(styles, /customapi\.svg/);
   assert.match(app, /custom: \{ color: '#8A96A8', markId: 'thirdparty' \}/);
   assert.doesNotMatch(app, /mark\.style\.color/);
@@ -295,11 +296,8 @@ test('third-party fallback stays last after named providers across product surfa
   assert.ok(html.indexOf('id="thirdpartyAccountGroup"') > html.indexOf('id="copilotAccountGroup"'));
 
   const app = read('src/electron/renderer/app.js');
-  const providerOrder = app.slice(
-    app.indexOf('const LIMIT_PROVIDERS = ['),
-    app.indexOf('const DEFAULT_LIMIT_PROVIDER_ORDER')
-  );
-  assert.ok(providerOrder.indexOf("{ id: 'thirdparty'") > providerOrder.indexOf("{ id: 'ollama'"));
+  const providerOrder = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
+  assert.ok(providerOrder.indexOf('thirdparty') > providerOrder.indexOf('ollama'));
   const iconProviders = app.slice(
     app.indexOf('const clientsWithIcon = new Set(['),
     app.indexOf('function osIconFor')
