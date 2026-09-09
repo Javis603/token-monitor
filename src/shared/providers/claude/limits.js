@@ -1181,7 +1181,7 @@ function cleanClaudeResetLine(line) {
   if (!match) return '';
   return match[0]
     .replace(/\([^)]*\)?/g, '')
-    .replace(/^reset(?:s(?=\S)|(?!s)(?=\S))/i, '$& ')
+    .replace(/^reset(?:s(?=[^\s:])|(?!s)(?=[^\s:]))/i, '$& ')
     .replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)(\d{1,2})/ig, '$1 $2')
     .replace(/(\d{1,2})(at)(\d{1,2})/ig, '$1 $2 $3')
     .replace(/([a-z])(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/ig, '$1 $2$3$4')

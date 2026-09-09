@@ -1120,6 +1120,27 @@ test('Claude CLI usage parses compact PTY reset lines', () => {
   assert.equal(typeof weekly.resetsAt, 'string');
 });
 
+test('Claude CLI usage preserves colon-delimited reset lines', () => {
+  const provider = mapClaudeCliUsageToProvider([
+    'Current session',
+    '95% left',
+    'Resets:4pm',
+    'Current week',
+    '80% left',
+    'Resets:Jun 19'
+  ].join('\n'), {
+    now: new Date('2026-06-13T07:00:00Z'),
+    updatedAt: '2026-06-13T07:00:00Z'
+  });
+
+  const session = provider.windows.find((window) => window.kind === 'session');
+  const weekly = provider.windows.find((window) => window.kind === 'weekly');
+  assert.equal(session.resetDescription, 'Resets:4pm');
+  assert.equal(weekly.resetDescription, 'Resets:Jun 19');
+  assert.equal(typeof session.resetsAt, 'string');
+  assert.equal(typeof weekly.resetsAt, 'string');
+});
+
 test('Claude CLI usage preserves a spaced time reset', () => {
   const provider = mapClaudeCliUsageToProvider([
     'Current session',
