@@ -1461,13 +1461,19 @@ function parseClaudeCliUsageText(text, now = new Date()) {
   const lines = clean.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const sessionPercentLeft = extractClaudePercent(lines, 'session');
   const weeklyPercentLeft = extractClaudePercent(lines, 'weekly');
-  const resetLines = allClaudeResetLines(lines);
   let primaryResetDescription = extractClaudeReset(lines, 'session');
   let secondaryResetDescription = extractClaudeReset(lines, 'weekly');
-  const sessionReset = resetLines.find((line) => claudeResetShape(line) === 'time') || '';
-  const weeklyReset = resetLines.find((line) => claudeResetShape(line) === 'date') || '';
-  if (claudeResetShape(primaryResetDescription) !== 'time') primaryResetDescription = sessionReset;
-  if (claudeResetShape(secondaryResetDescription) !== 'date') secondaryResetDescription = weeklyReset;
+  // PTY redraws can emit both reset rows after the weekly heading. Recover only
+  // when a distinct date-shaped reset proves reordering; weekly resets may also
+  // legitimately be time-only, so their section ownership otherwise wins.
+  if (!primaryResetDescription && claudeResetShape(secondaryResetDescription) === 'time') {
+    const resetLines = allClaudeResetLines(lines);
+    const weeklyDateReset = resetLines.find((line) => claudeResetShape(line) === 'date') || '';
+    if (weeklyDateReset) {
+      primaryResetDescription = secondaryResetDescription;
+      secondaryResetDescription = weeklyDateReset;
+    }
+  }
   const accountEmail = (clean.match(/(?:Account|Email):\s*([^\s@]+@[^\s@]+)/i) || [])[1] || '';
   const accountOrganization = ((clean.match(/(?:Org|Organization):\s*(.+)/i) || [])[1] || '').trim();
   const accountLabel = planLabelFromParts((clean.match(/(?:Plan|Subscription):\s*([A-Za-z][A-Za-z0-9 _-]{0,30})/i) || [])[1] || '');

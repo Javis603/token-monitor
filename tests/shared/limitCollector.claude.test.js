@@ -2,6 +2,9 @@
 
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider, normalizeClaudeWebCookieInput } = require('../../src/shared/limits/collector');
@@ -694,6 +697,49 @@ test('Claude auth status uses cmd.exe without shell mode on Windows', async () =
   assert.equal(stdinEnded, true);
 });
 
+test('Claude CLI commands execute from a Windows path containing spaces', {
+  skip: process.platform !== 'win32'
+}, async (t) => {
+  const fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'token monitor claude '));
+  const command = path.join(fixtureDir, 'claude.cmd');
+  t.after(() => fs.rm(fixtureDir, { recursive: true, force: true }));
+  await fs.writeFile(command, [
+    '@echo off',
+    'if /I "%~1"=="auth" goto auth',
+    'if /I "%~1"=="/usage" goto usage',
+    'exit /b 1',
+    ':auth',
+    'echo {"loggedIn":true}',
+    'exit /b 0',
+    ':usage',
+    'echo Current session',
+    'echo 95%% left',
+    'echo Resets 6pm',
+    'echo Current week ^(all models^)',
+    'echo 80%% left',
+    'echo Resets Jun 19',
+    'exit /b 0'
+  ].join('\r\n'));
+
+  const deps = {
+    platform: 'win32',
+    env: { ...process.env, TOKEN_MONITOR_CLAUDE_COMMAND: command },
+    now: () => Date.parse('2026-06-13T07:00:00Z'),
+    claudeCredentialPath: path.join(fixtureDir, 'missing-credentials.json'),
+    stat: async () => {
+      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    },
+    readdirSync: () => [],
+    readWindowsCredentialSecret: async () => ''
+  };
+
+  assert.deepEqual(JSON.parse(await runClaudeAuthStatus(deps)), { loggedIn: true });
+  const provider = await fetchClaudeLimits({}, deps);
+  assert.equal(provider.source, 'cli');
+  assert.equal(provider.windows.find((window) => window.kind === 'session')?.remainingPercent, 95);
+  assert.equal(provider.windows.find((window) => window.kind === 'weekly')?.remainingPercent, 80);
+});
+
 test('Claude limits read Windows Credential Manager credentials when credential files are absent', async () => {
   const provider = await fetchClaudeLimits({}, {
     platform: 'win32',
@@ -1118,13 +1164,14 @@ test('Claude CLI usage preserves a spaced time reset', () => {
   assert.equal(typeof session.resetsAt, 'string');
 });
 
-test('Claude CLI usage does not assign a session reset to the weekly window', () => {
+test('Claude CLI usage preserves time-only resets in their own quota sections', () => {
   const provider = mapClaudeCliUsageToProvider([
     'Current session',
-    '95% left',
-    'Current week',
-    '80% left',
-    'Resets6pm'
+    '69% used',
+    'Resets 5am (Europe/Saratov)',
+    'Current week (all models)',
+    '87% used',
+    'Resets 6pm (Europe/Saratov)'
   ].join('\n'), {
     now: new Date('2026-07-15T00:00:00Z'),
     updatedAt: '2026-07-15T00:00:00Z'
@@ -1132,10 +1179,10 @@ test('Claude CLI usage does not assign a session reset to the weekly window', ()
 
   const session = provider.windows.find((window) => window.kind === 'session');
   const weekly = provider.windows.find((window) => window.kind === 'weekly');
-  assert.equal(session.resetDescription, 'Resets 6pm');
+  assert.equal(session.resetDescription, 'Resets 5am');
   assert.equal(typeof session.resetsAt, 'string');
-  assert.equal(weekly.resetDescription, '');
-  assert.equal(weekly.resetsAt, null);
+  assert.equal(weekly.resetDescription, 'Resets 6pm');
+  assert.equal(typeof weekly.resetsAt, 'string');
 });
 
 test('Claude CLI usage never borrows the weekly percentage for a missing session', () => {
