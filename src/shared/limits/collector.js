@@ -62,8 +62,6 @@ const {
   normalizeClaudeWebCookieInput,
   parseClaudeCliUsageText,
   rankClaudeCredentialFiles,
-  refreshClaudeAccessToken,
-  refreshClaudeCredentials,
   wslClaudeCredentialPaths
 } = claudeLimits;
 const {
@@ -349,8 +347,6 @@ module.exports = {
   parseLimitProviders,
   normalizeLimitsRefreshMode,
   normalizeLimitsRefreshMs,
-  refreshClaudeAccessToken,
-  refreshClaudeCredentials,
   rankClaudeCredentialFiles,
   wslClaudeCredentialPaths
 };

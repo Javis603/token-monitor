@@ -1,8 +1,8 @@
 'use strict';
 
-// Claude limits provider: file-based or explicit OAuth and Web session
-// credentials, the guarded CLI fallback, identity/prepaid caches, and usage →
-// provider-window mapping. Reached
+// Claude limits provider: read-only file-based or explicit OAuth and Web
+// session credentials, the guarded CLI fallback, identity/prepaid caches, and
+// usage → provider-window mapping. Reached
 // through providerFetchers() in src/shared/limits/collector.js, which re-exports
 // the handful of names the widget and the tests use.
 
@@ -31,9 +31,6 @@ const {
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile';
 const CLAUDE_WEB_BASE_URL = 'https://claude.ai';
-const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
-const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
-const CLAUDE_REFRESH_LEEWAY_MS = 5 * 60 * 1000;
 const CLAUDE_IDENTITY_CACHE_TTL_MS = 60 * 60 * 1000;
 const CLAUDE_IDENTITY_CACHE_MAX_ENTRIES = 16;
 const CLAUDE_IDENTITY_CACHE_STATE_KEY = 'claude.identity-cache';
@@ -45,8 +42,12 @@ const CLAUDE_PREPAID_IDLE_TTL_FACTOR = 6;
 const CLAUDE_PREPAID_CACHE_STATE_KEY = 'claude.prepaid-cache';
 const CLAUDE_SESSION_WINDOW_MINUTES = 5 * 60;
 const CLAUDE_WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
-function shouldTryClaudeCliFallback(error) {
-  return ['notConfigured', 'sourceRateLimited', 'unavailable', 'error'].includes(error?.status);
+function shouldTryClaudeCliFallback(error, credentials) {
+  if (['notConfigured', 'sourceRateLimited', 'unavailable', 'error'].includes(error?.status)) return true;
+  // An explicit token identifies the source the user chose, so a rejected one
+  // must not silently switch to a potentially different local CLI account.
+  // File credentials belong to Claude Code; let that owner service the fallback.
+  return error?.status === 'unauthorized' && credentials?.source === 'file';
 }
 
 function normalizeClaudeWebCookie(value) {
@@ -138,14 +139,12 @@ async function rankClaudeCredentialFiles(deps = {}) {
   const candidates = [];
   const nativePath = deps.claudeCredentialPath || claudeCredentialPath(env);
   candidates.push({
-    path: nativePath,
-    identityLabel: env.CLAUDE_CONFIG_DIR ? 'CLAUDE_CONFIG_DIR/.credentials.json' : '~/.claude/.credentials.json'
+    path: nativePath
   });
   if (platform === 'win32' && !env.CLAUDE_CONFIG_DIR) {
     for (const wslPath of wslClaudeCredentialPaths(deps)) {
       candidates.push({
-        path: wslPath,
-        identityLabel: `wsl:${wslPath.slice(7).replace(/\\\.claude\\\.credentials\.json$/, '')}`
+        path: wslPath
       });
     }
   }
@@ -184,12 +183,8 @@ function claudeCredentialsFromOauth(oauth, meta = {}) {
   if (!oauth?.accessToken) return null;
   return {
     source: meta.source || '',
-    filePath: meta.filePath,
-    fileShape: meta.fileShape,
     accessToken: String(oauth.accessToken),
-    refreshToken: oauth.refreshToken ? String(oauth.refreshToken) : null,
     expiresAt: normalizeExpiresAt(oauth.expiresAt),
-    identity: meta.identity || `${meta.source || 'claude'}:${oauth.subscriptionType || ''}:${oauth.rateLimitTier || ''}`,
     accountLabel: claudePlanLabelFromParts(oauth.subscriptionType, oauth.rateLimitTier)
   };
 }
@@ -201,9 +196,7 @@ async function readClaudeCredentials(deps = {}) {
     return {
       source: 'env',
       accessToken,
-      refreshToken: null,
       expiresAt: null,
-      identity: 'env:CLAUDE_CODE_OAUTH_TOKEN',
       accountLabel: ''
     };
   }
@@ -211,13 +204,9 @@ async function readClaudeCredentials(deps = {}) {
   for (const candidate of await rankClaudeCredentialFiles(deps)) {
     try {
       const raw = await readJsonFile(candidate.path, deps);
-      const fileShape = raw && typeof raw === 'object' && raw.claudeAiOauth ? 'claudeAiOauth' : 'root';
       const oauth = extractClaudeOauth(raw);
       const credentials = claudeCredentialsFromOauth(oauth, {
-        source: 'file',
-        filePath: candidate.path,
-        fileShape,
-        identity: `path:${candidate.identityLabel}:${oauth?.subscriptionType || ''}:${oauth?.rateLimitTier || ''}`
+        source: 'file'
       });
       if (credentials) return credentials;
     } catch (error) {
@@ -377,80 +366,6 @@ function mapClaudeUsageToProvider(usage, meta = {}) {
     updatedAt: meta.updatedAt,
     windows
   });
-}
-
-async function refreshClaudeAccessToken(refreshToken, deps = {}) {
-  if (!refreshToken) throw errorWithStatus('unauthorized', 'No refresh token available');
-  const fetchFn = deps.fetch || fetch;
-  const url = deps.claudeTokenUrl || CLAUDE_OAUTH_TOKEN_URL;
-  const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
-  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
-  const body = new URLSearchParams({
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    client_id: CLAUDE_OAUTH_CLIENT_ID
-  });
-  try {
-    const response = await fetchFn(url, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/x-www-form-urlencoded',
-        accept: 'application/json',
-        'user-agent': TOKEN_MONITOR_USER_AGENT
-      },
-      body: body.toString(),
-      ...(controller ? { signal: controller.signal } : {})
-    });
-    if (!response.ok) {
-      const status = response.status === 400 || response.status === 401 ? 'unauthorized'
-        : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
-      throw errorWithStatus(status, `oauth/token returned ${response.status}`);
-    }
-    const json = await response.json();
-    const nowMs = (deps.now || Date.now)();
-    const lifetimeSec = Math.max(60, Number(json.expires_in) || 3600);
-    return {
-      accessToken: String(json.access_token),
-      refreshToken: json.refresh_token ? String(json.refresh_token) : refreshToken,
-      expiresAt: nowMs + lifetimeSec * 1000
-    };
-  } catch (error) {
-    if (error?.name === 'AbortError') throw errorWithStatus('unavailable', 'oauth/token timed out');
-    throw error;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-async function writeClaudeCredentials(filePath, fileShape, updated, deps = {}) {
-  const readFile = deps.readFile || fs.promises.readFile;
-  const writeFile = deps.writeFile || fs.promises.writeFile;
-  const rename = deps.rename || fs.promises.rename;
-  let existing;
-  try {
-    existing = JSON.parse(await readFile(filePath, 'utf8'));
-  } catch (_) { return false; }
-  if (!existing || typeof existing !== 'object') return false;
-  if (fileShape === 'claudeAiOauth') {
-    existing.claudeAiOauth = { ...(existing.claudeAiOauth || {}), ...updated };
-  } else {
-    Object.assign(existing, updated);
-  }
-  const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    await writeFile(tmpPath, `${JSON.stringify(existing, null, 2)}\n`, { mode: 0o600 });
-    await rename(tmpPath, filePath);
-    return true;
-  } catch (_) {
-    try { await (deps.unlink || fs.promises.unlink)(tmpPath); } catch (__) {}
-    return false;
-  }
-}
-
-async function persistClaudeRefresh(credentials, refreshed, deps = {}) {
-  if (credentials.source !== 'file' || !credentials.filePath) return;
-  await writeClaudeCredentials(credentials.filePath, credentials.fileShape, refreshed, deps).catch(() => {});
 }
 
 function callClaudeUsage(accessToken, deps = {}) {
@@ -716,18 +631,10 @@ function createClaudeWebSession(cookie) {
 }
 
 function claudeOauthIdentityFingerprint(credentials) {
-  const secret = credentials?.refreshToken || credentials?.accessToken;
+  const secret = credentials?.accessToken;
   return secret
     ? hashKey('claude-oauth-identity-cache', credentials?.source || '', secret)
     : '';
-}
-
-function carryClaudeCachedIdentity(previousCredentials, nextCredentials, deps = {}) {
-  const previousFingerprint = claudeOauthIdentityFingerprint(previousCredentials);
-  const nextFingerprint = claudeOauthIdentityFingerprint(nextCredentials);
-  if (!previousFingerprint || !nextFingerprint || previousFingerprint === nextFingerprint) return;
-  const cached = claudeCachedIdentity(previousFingerprint, deps, { allowStale: true });
-  if (cached) cacheClaudeIdentity(nextFingerprint, cached, deps);
 }
 
 // claude.ai's prepaid credit pool. Web-session only: the same path under an
@@ -1056,57 +963,30 @@ async function resolveClaudeOauthIdentity(credentials, deps = {}) {
   }
 }
 
-async function refreshClaudeCredentials(currentCredentials, deps = {}) {
-  if (!currentCredentials.refreshToken) {
-    throw errorWithStatus('unauthorized', 'No refresh token available');
-  }
-  const refreshed = await refreshClaudeAccessToken(currentCredentials.refreshToken, deps);
-  await persistClaudeRefresh(currentCredentials, refreshed, deps);
-  return { ...currentCredentials, ...refreshed };
-}
-
 async function fetchClaudeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const webCookie = claudeWebCookie(deps.env || process.env, options);
   if (webCookie) return fetchClaudeWebLimits(webCookie, deps, options);
+  let credentials = null;
   let oauthIdentity = null;
   try {
-    let credentials = await readClaudeCredentials(deps);
+    credentials = await readClaudeCredentials(deps);
     oauthIdentity = claudeCachedIdentity(
       claudeOauthIdentityFingerprint(credentials),
       deps,
       { allowStale: true }
     )?.identity || null;
 
-    if (credentials.refreshToken && credentials.expiresAt
-      && credentials.expiresAt - nowMs < CLAUDE_REFRESH_LEEWAY_MS) {
-      try {
-        const previousCredentials = credentials;
-        credentials = await refreshClaudeCredentials(credentials, deps);
-        carryClaudeCachedIdentity(previousCredentials, credentials, deps);
-      } catch (_) { /* fall through; reactive retry below may still succeed */ }
+    if (credentials.source === 'file'
+      && credentials.expiresAt !== null
+      && credentials.expiresAt <= nowMs) {
+      // Never consume or rewrite Claude Code's rotating refresh token. A guarded
+      // CLI fallback below keeps quota available while Claude Code owns recovery.
+      throw errorWithStatus('unauthorized', 'Claude Code OAuth credential has expired');
     }
 
-    let usage;
-    try {
-      usage = await callClaudeUsage(credentials.accessToken, deps);
-    } catch (error) {
-      if (error?.status !== 'unauthorized') throw error;
-      const previousCredentials = credentials;
-      credentials = await refreshClaudeCredentials(credentials, deps);
-      carryClaudeCachedIdentity(previousCredentials, credentials, deps);
-      usage = await callClaudeUsage(credentials.accessToken, deps);
-    }
-
-    try {
-      oauthIdentity = await resolveClaudeOauthIdentity(credentials, deps);
-    } catch (error) {
-      if (error?.cause?.status !== 'unauthorized') throw error;
-      const previousCredentials = credentials;
-      credentials = await refreshClaudeCredentials(credentials, deps);
-      carryClaudeCachedIdentity(previousCredentials, credentials, deps);
-      oauthIdentity = await resolveClaudeOauthIdentity(credentials, deps);
-    }
+    const usage = await callClaudeUsage(credentials.accessToken, deps);
+    oauthIdentity = await resolveClaudeOauthIdentity(credentials, deps);
     const provider = mapClaudeUsageToProvider(usage, {
       ...oauthIdentity,
       accountLabel: credentials.accountLabel,
@@ -1119,7 +999,7 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
     // create a new row keyed by credential storage location or a different
     // fallback source. Let LimitsRuntime retain the previous account row.
     if (error?.code === 'CLAUDE_IDENTITY_UNAVAILABLE') throw error;
-    if (!shouldTryClaudeCliFallback(error)) throw error;
+    if (!shouldTryClaudeCliFallback(error, credentials)) throw error;
     try {
       if (!await isClaudeCliAuthenticated(deps)) throw error;
       const text = await runClaudeUsageCli(deps);
@@ -1127,12 +1007,13 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
         updatedAt: nowIso(nowMs),
         now: new Date(nowMs)
       });
-      if (!oauthIdentity) return provider;
+      const fallbackIdentity = error?.status === 'unauthorized' ? null : oauthIdentity;
+      if (!fallbackIdentity) return provider;
       return {
         ...provider,
-        accountKey: oauthIdentity.accountKey,
-        accountEmail: oauthIdentity.accountEmail,
-        accountName: oauthIdentity.accountName
+        accountKey: fallbackIdentity.accountKey,
+        accountEmail: fallbackIdentity.accountEmail,
+        accountName: fallbackIdentity.accountName
       };
     } catch (_) {
       throw error;
@@ -1575,8 +1456,6 @@ module.exports = {
   normalizeClaudeWebCookieInput,
   parseClaudeCliUsageText,
   rankClaudeCredentialFiles,
-  refreshClaudeAccessToken,
-  refreshClaudeCredentials,
   runClaudeAuthStatus,
   wslClaudeCredentialPaths
 };
