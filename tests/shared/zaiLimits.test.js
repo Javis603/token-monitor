@@ -561,6 +561,23 @@ test('fetchZaiLimits survives a malformed spend store and a failing write', asyn
     assert.equal(malformed.status, 'ok');
     assert.equal(malformed.balance.allTimeSpend, 0);
 
+    const store = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+    Object.assign(Object.values(store.accounts)[0], {
+      lastTotal: true, allTimeSpend: '   ', trackingSince: false,
+      dailySpend: { '2026-09-04': '2.5', '2026-09-05': [], '2026-09-06': 4, 'NaN-NaN-NaN': 3 }
+    });
+    fs.writeFileSync(storePath, JSON.stringify(store), 'utf8');
+    const repaired = await fetchZaiLimits(
+      { zaiApiKey: 'zai-token' },
+      { env: {}, now: () => Date.parse('2026-09-05T12:00:00Z'), zaiBalanceStorePath: storePath, ...noZcode, fetch: respond }
+    );
+    assert.equal(repaired.balance.weekSpend, 2.5);
+    assert.equal(repaired.balance.allTimeSpend, 2.5);
+    assert.deepEqual(Object.values(JSON.parse(fs.readFileSync(storePath, 'utf8')).accounts)[0], {
+      lastTotal: 100, allTimeSpend: 2.5,
+      trackingSince: Date.parse('2026-09-04T00:00:00'), dailySpend: { '2026-09-04': 2.5 }
+    });
+
     // A read-only dir / full disk fails the write only; the row and its
     // balance still report, and the baseline is simply not persisted.
     fs.rmSync(storePath, { force: true });

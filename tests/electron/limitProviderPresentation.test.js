@@ -1124,13 +1124,13 @@ test('Z.ai and Team keep all billing windows and render MCP full width after pai
     assert.ok(rendered.children.every(n => n.classes.has('limit-window-wide')));
     assert.equal(rendered.children[2].detail, 'Missing plan id');
     context.provider.windows = [
-      { kind: 'daily', label: 'GLM-5.4', detail: 'Daily' },
-      { kind: 'billing', limitId: 'model-5.5', label: 'GLM-5.5', detail: 'Daily + one-time' },
+      { kind: 'daily', label: 'model-alpha', detail: 'Daily' },
+      { kind: 'billing', limitId: 'model-beta', label: 'model-beta', detail: 'Combined grant' },
       { kind: 'billing', label: 'MCP' }
     ];
     const paired = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
     assert.equal(paired.children[0].detail, 'Daily');
-    assert.equal(paired.children[1].detail, 'Daily + one-time');
+    assert.equal(paired.children[1].detail, 'Combined grant');
     assert.equal(paired.children[0].classes.has('limit-window-wide'), false);
     assert.equal(paired.children[1].classes.has('limit-window-wide'), false);
     assert.equal(paired.children[2].classes.has('limit-window-wide'), true);
