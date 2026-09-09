@@ -73,29 +73,6 @@
     return Object.values(counters).every((value) => value !== null) ? counters : null;
   }
 
-  function selectLiveTokenRatePeriod(stats, deviceId, hubMode = 'local') {
-    const normalizedDeviceId = String(deviceId || '').trim();
-    const syncMode = hubMode === 'client' || hubMode === 'host';
-    const localDevice = normalizedDeviceId && Array.isArray(stats?.devices)
-      ? stats.devices.find((device) => String(device?.deviceId || '') === normalizedDeviceId)
-      : null;
-    const localPeriod = localDevice?.periods?.today;
-    if (localPeriod && typeof localPeriod === 'object') {
-      return { period: localPeriod, source: `device:${normalizedDeviceId}` };
-    }
-    if (syncMode) {
-      return { period: null, source: `device:${normalizedDeviceId || 'unavailable'}` };
-    }
-    if (Array.isArray(stats?.devices) && stats.devices.length === 0) {
-      return { period: null, source: `device:${normalizedDeviceId || 'unavailable'}` };
-    }
-    const aggregatePeriod = stats?.periods?.today;
-    return {
-      period: aggregatePeriod && typeof aggregatePeriod === 'object' ? aggregatePeriod : null,
-      source: 'aggregate'
-    };
-  }
-
   // A period is cumulative, so its ratio is necessarily an average. Live rate is the ratio
   // of the counters added by one successful snapshot: the duration comes from the same
   // tokscale performance entries as both token numerators, never from watcher or wall time.
@@ -158,6 +135,132 @@
     }
 
     return { getSample, observe, reset, value };
+  }
+
+  // Hub devices publish independently. Taking one delta from the aggregate would make the
+  // headline jump between whichever device happened to upload last, and dividing summed
+  // tokens by summed model-busy time would be an average rather than fleet throughput. Keep
+  // one matched-counter tracker per device, then add only samples that are still live.
+  function createLiveTokenRateGroupTracker({ now = defaultNow, activeMs = 8000 } = {}) {
+    if (typeof now !== 'function') throw new TypeError('now must be a function');
+    const lifetime = positiveNumber(activeMs);
+    if (!lifetime) throw new TypeError('activeMs must be a positive number');
+    const trackers = new Map();
+    let revision = 0;
+
+    function normalizedEntries(entries) {
+      const result = [];
+      const seen = new Set();
+      for (const entry of Array.isArray(entries) ? entries : []) {
+        const id = String(entry?.id || '').trim();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        result.push({ id, period: entry?.period });
+      }
+      return result;
+    }
+
+    function reset(entries = []) {
+      trackers.clear();
+      for (const entry of normalizedEntries(entries)) {
+        const tracker = createLiveTokenRateTracker({ now });
+        tracker.reset(entry.period);
+        trackers.set(entry.id, tracker);
+      }
+    }
+
+    function observe(entries = []) {
+      const nextEntries = normalizedEntries(entries);
+      const present = new Set(nextEntries.map((entry) => entry.id));
+      let changed = false;
+      let fresh = false;
+
+      for (const [id, tracker] of trackers) {
+        if (present.has(id)) continue;
+        if (tracker.getSample()) changed = true;
+        trackers.delete(id);
+      }
+
+      for (const entry of nextEntries) {
+        let tracker = trackers.get(entry.id);
+        if (!tracker) {
+          tracker = createLiveTokenRateTracker({ now });
+          tracker.reset(entry.period);
+          trackers.set(entry.id, tracker);
+          continue;
+        }
+        const previous = tracker.getSample();
+        const sample = tracker.observe(entry.period);
+        if (sample === previous) continue;
+        changed = true;
+        if (sample) fresh = true;
+      }
+
+      if (fresh) revision += 1;
+      return { changed, sample: getSample() };
+    }
+
+    function activeSamples() {
+      const timestamp = Number(now()) || 0;
+      return [...trackers.values()]
+        .map((tracker) => tracker.getSample())
+        .filter((sample) => sample && timestamp < sample.sampledAt + lifetime);
+    }
+
+    function getSample() {
+      const samples = activeSamples();
+      if (!samples.length) return null;
+      return {
+        speed: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.speed, 0)),
+        burn: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.burn, 0)),
+        sampledAt: Math.max(...samples.map((sample) => sample.sampledAt)),
+        expiresAt: Math.min(...samples.map((sample) => sample.sampledAt + lifetime)),
+        deviceCount: samples.length,
+        revision
+      };
+    }
+
+    function nextExpiryAt() {
+      return getSample()?.expiresAt || null;
+    }
+
+    return { getSample, nextExpiryAt, observe, reset };
+  }
+
+  function selectLiveTokenRatePeriods(stats, deviceId, hubMode = 'local', scope = 'all') {
+    const normalizedDeviceId = String(deviceId || '').trim();
+    const syncMode = hubMode === 'client' || hubMode === 'host';
+    const devices = Array.isArray(stats?.devices) ? stats.devices : [];
+
+    if (syncMode && scope !== 'device') {
+      return {
+        entries: devices
+          .filter((device) => device?.stale !== true && device?.periods?.today && typeof device.periods.today === 'object')
+          .map((device) => ({ id: `device:${String(device.deviceId || 'unknown')}`, period: device.periods.today })),
+        source: 'devices:all'
+      };
+    }
+
+    const localDevice = normalizedDeviceId
+      ? devices.find((device) => String(device?.deviceId || '') === normalizedDeviceId)
+      : null;
+    const localPeriod = localDevice?.periods?.today;
+    if (localPeriod && typeof localPeriod === 'object') {
+      return {
+        entries: [{ id: `device:${normalizedDeviceId}`, period: localPeriod }],
+        source: `device:${normalizedDeviceId}`
+      };
+    }
+    if (syncMode || devices.length === 0) {
+      return { entries: [], source: `device:${normalizedDeviceId || 'unavailable'}` };
+    }
+    const aggregatePeriod = stats?.periods?.today;
+    return {
+      entries: aggregatePeriod && typeof aggregatePeriod === 'object'
+        ? [{ id: 'aggregate', period: aggregatePeriod }]
+        : [],
+      source: 'aggregate'
+    };
   }
 
   function defaultNow() {
@@ -373,10 +476,11 @@
     TOKEN_RATE_MAX_DISPLAY_RATE,
     TOKEN_RATE_SETTLE_MS,
     cappedTokenRate,
+    createLiveTokenRateGroupTracker,
     createLiveTokenRateTracker,
     createTokenRateBoostController,
     positiveNumber,
-    selectLiveTokenRatePeriod,
+    selectLiveTokenRatePeriods,
     tokenBurnPerMinute,
     tokenRateBoostValue,
     tokenRatePerSecond,

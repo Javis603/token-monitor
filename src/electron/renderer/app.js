@@ -335,7 +335,7 @@ let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, compactTokenUnits: 'western', settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
 let preferenceDrag = null;
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
@@ -434,6 +434,8 @@ Object.assign(els, {
   titleIconInput: document.getElementById('titleIconInput'),
   showCompactTotalTokensInput: document.getElementById('showCompactTotalTokensInput'),
   showLiveTokenRateInput: document.getElementById('showLiveTokenRateInput'),
+  liveTokenRateScopeRow: document.getElementById('liveTokenRateScopeRow'),
+  liveTokenRateScopeInput: document.getElementById('liveTokenRateScopeInput'),
   compactTokenUnitsRow: document.getElementById('compactTokenUnitsRow'),
   compactTokenUnitsInput: document.getElementById('compactTokenUnitsInput'),
   swapSettingsRefreshInput: document.getElementById('swapSettingsRefreshInput'),
@@ -815,7 +817,10 @@ const tokenRateBoost = tokenRateApi.createTokenRateBoostController({
   prefersReducedMotion,
   onChange: () => renderTokenRate()
 });
-const liveTokenRateTracker = tokenRateApi.createLiveTokenRateTracker({ now: () => Date.now() });
+const liveTokenRateTracker = tokenRateApi.createLiveTokenRateGroupTracker({
+  now: () => Date.now(),
+  activeMs: LIVE_TOKEN_RATE_ACTIVE_MS
+});
 let liveTokenRateContext = '';
 let liveTokenRateIdleTimer = null;
 let liveTokenRateAnimationTimer = null;
@@ -828,8 +833,15 @@ function liveTokenRateSourceKey(periodSource) {
     state.settings?.hubUrl || '',
     state.settings?.deviceId || '',
     state.settings?.clients || '',
+    effectiveLiveTokenRateScope(),
     periodSource
   ].join('|');
+}
+
+function effectiveLiveTokenRateScope() {
+  const hubMode = state.settings?.hubMode;
+  const syncMode = hubMode === 'client' || hubMode === 'host';
+  return syncMode && state.settings?.liveTokenRateScope !== 'device' ? 'all' : 'device';
 }
 
 function clearLiveTokenRateTimers() {
@@ -846,35 +858,37 @@ function resetLiveTokenRateTracking() {
   clearLiveTokenRateTimers();
 }
 
-function observeLiveTokenRate(stats) {
-  if (state.settings?.showLiveTokenRate !== true) return;
-  const selection = tokenRateApi.selectLiveTokenRatePeriod(
-    stats,
-    state.settings?.deviceId,
-    state.settings?.hubMode
-  );
-  const today = selection.period;
-  const sourceKey = liveTokenRateSourceKey(selection.source);
-  const previousSample = liveTokenRateTracker.getSample();
-  if (sourceKey !== liveTokenRateContext) {
-    liveTokenRateContext = sourceKey;
-    liveTokenRateTracker.reset(today);
-    clearLiveTokenRateTimers();
-    renderLiveTokenRate();
-    return;
-  }
-  const sample = liveTokenRateTracker.observe(today);
-  if (sample === previousSample) return;
-  if (!sample) {
-    clearLiveTokenRateTimers();
-    renderLiveTokenRate();
-    return;
-  }
+function scheduleLiveTokenRateExpiry() {
   if (liveTokenRateIdleTimer) clearTimeout(liveTokenRateIdleTimer);
+  liveTokenRateIdleTimer = null;
+  const expiresAt = liveTokenRateTracker.nextExpiryAt();
+  if (!expiresAt) return;
   liveTokenRateIdleTimer = setTimeout(() => {
     liveTokenRateIdleTimer = null;
     renderLiveTokenRate();
-  }, LIVE_TOKEN_RATE_ACTIVE_MS);
+    scheduleLiveTokenRateExpiry();
+  }, Math.max(0, expiresAt - Date.now()) + 10);
+}
+
+function observeLiveTokenRate(stats) {
+  if (state.settings?.showLiveTokenRate !== true) return;
+  const selection = tokenRateApi.selectLiveTokenRatePeriods(
+    stats,
+    state.settings?.deviceId,
+    state.settings?.hubMode,
+    effectiveLiveTokenRateScope()
+  );
+  const sourceKey = liveTokenRateSourceKey(selection.source);
+  if (sourceKey !== liveTokenRateContext) {
+    liveTokenRateContext = sourceKey;
+    liveTokenRateTracker.reset(selection.entries);
+    clearLiveTokenRateTimers();
+    renderLiveTokenRate();
+    return;
+  }
+  const result = liveTokenRateTracker.observe(selection.entries);
+  if (!result.changed) return;
+  scheduleLiveTokenRateExpiry();
   renderLiveTokenRate();
 }
 
@@ -901,12 +915,15 @@ function renderLiveTokenRate() {
   const rate = sample ? (burn ? sample.burn : sample.speed) : null;
   const value = rate === null ? '—' : formatLiveTokenRate(rate);
   const text = `${value} ${unit}`;
-  const idle = !sample || Date.now() - sample.sampledAt >= LIVE_TOKEN_RATE_ACTIVE_MS;
+  const idle = !sample;
   els.liveTokenRateValue.textContent = text;
   els.liveTokenRate.dataset.mode = burn ? 'burn' : 'speed';
   els.liveTokenRate.classList.toggle('is-idle', idle);
   if (idle) els.liveTokenRate.classList.remove('is-fresh');
-  const label = t(burn ? 'home.liveTokenRate.burnTitle' : 'home.liveTokenRate.speedTitle', { value: text });
+  const scope = t(effectiveLiveTokenRateScope() === 'all'
+    ? 'settings.appearance.liveTokenRateScopeAll'
+    : 'settings.appearance.liveTokenRateScopeDevice');
+  const label = t(burn ? 'home.liveTokenRate.burnTitle' : 'home.liveTokenRate.speedTitle', { value: text, scope });
   els.liveTokenRate.title = label;
   els.liveTokenRate.setAttribute('aria-label', label);
 
@@ -9010,6 +9027,7 @@ function appearancePatchFromControls() {
     titleIconOnly: Boolean(els.titleIconInput.checked),
     showCompactTotalTokens: Boolean(els.showCompactTotalTokensInput.checked),
     showLiveTokenRate: Boolean(els.showLiveTokenRateInput.checked),
+    liveTokenRateScope: els.liveTokenRateScopeInput?.value === 'device' ? 'device' : 'all',
     compactTokenUnits: els.compactTokenUnitsInput?.value === 'localized' ? 'localized' : 'western',
     settingsInTitlebar: Boolean(els.swapSettingsRefreshInput.checked),
     glassOpacity: Number(els.glassInput.value === '' ? defaultAppearance.glassOpacity : els.glassInput.value),
@@ -9573,6 +9591,12 @@ function syncSettingsForm() {
   els.titleIconInput.checked = state.settings.titleIconOnly === true;
   els.showCompactTotalTokensInput.checked = state.settings.showCompactTotalTokens === true;
   els.showLiveTokenRateInput.checked = state.settings.showLiveTokenRate === true;
+  if (els.liveTokenRateScopeInput) {
+    els.liveTokenRateScopeInput.value = state.settings.liveTokenRateScope === 'device' ? 'device' : 'all';
+  }
+  const liveRateHasScope = state.settings.showLiveTokenRate === true
+    && (state.settings.hubMode === 'client' || state.settings.hubMode === 'host');
+  els.liveTokenRateScopeRow?.classList.toggle('hidden', !liveRateHasScope);
   if (els.compactTokenUnitsInput) {
     els.compactTokenUnitsInput.value = state.settings.compactTokenUnits === 'localized' ? 'localized' : 'western';
   }
@@ -12685,11 +12709,21 @@ els.showCompactTotalTokensInput.addEventListener('change', async () => {
 });
 els.showLiveTokenRateInput.addEventListener('change', async () => {
   state.settings.showLiveTokenRate = els.showLiveTokenRateInput.checked;
+  const liveRateHasScope = state.settings.showLiveTokenRate
+    && (state.settings.hubMode === 'client' || state.settings.hubMode === 'host');
+  els.liveTokenRateScopeRow?.classList.toggle('hidden', !liveRateHasScope);
   if (state.settings.showLiveTokenRate) observeLiveTokenRate(state.stats);
   renderLiveTokenRate();
   await saveAppearanceFromControls();
   if (state.settings.showLiveTokenRate) observeLiveTokenRate(state.stats);
   renderLiveTokenRate();
+});
+els.liveTokenRateScopeInput?.addEventListener('change', async () => {
+  state.settings.liveTokenRateScope = els.liveTokenRateScopeInput.value === 'device' ? 'device' : 'all';
+  resetLiveTokenRateTracking();
+  observeLiveTokenRate(state.stats);
+  renderLiveTokenRate();
+  await saveAppearanceFromControls();
 });
 els.compactTokenUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();

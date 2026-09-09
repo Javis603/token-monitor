@@ -188,35 +188,151 @@ test('live rate ignores untimed changes but keeps the baseline current', () => {
   assert.equal(sample.burn, 12000);
 });
 
-test('live rate selects only this device in sync mode and uses aggregate locally', () => {
+test('live rate sums still-active device samples without mixing their baselines', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now, activeMs: 8000 });
+  const baseA = { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 100 };
+  const baseB = { timedTokens: 200, timedOutputTokens: 20, timedDurationMs: 1000 };
+  tracker.reset([
+    { id: 'device:a', period: baseA },
+    { id: 'device:b', period: baseB }
+  ]);
+  assert.equal(tracker.getSample(), null);
+
+  now = 100;
+  const first = tracker.observe([
+    { id: 'device:a', period: { timedTokens: 160, timedOutputTokens: 22, timedDurationMs: 700 } },
+    { id: 'device:b', period: baseB }
+  ]);
+  assert.equal(first.changed, true);
+  assert.deepEqual(first.sample, {
+    speed: 20,
+    burn: 6000,
+    sampledAt: 100,
+    expiresAt: 8100,
+    deviceCount: 1,
+    revision: 1
+  });
+
+  now = 200;
+  const second = tracker.observe([
+    { id: 'device:a', period: { timedTokens: 160, timedOutputTokens: 22, timedDurationMs: 700 } },
+    { id: 'device:b', period: { timedTokens: 320, timedOutputTokens: 50, timedDurationMs: 2000 } }
+  ]);
+  assert.equal(second.changed, true);
+  assert.deepEqual(second.sample, {
+    speed: 50,
+    burn: 13200,
+    sampledAt: 200,
+    expiresAt: 8100,
+    deviceCount: 2,
+    revision: 2
+  });
+  assert.equal(tracker.nextExpiryAt(), 8100);
+
+  now = 8100;
+  assert.deepEqual(tracker.getSample(), {
+    speed: 30,
+    burn: 7200,
+    sampledAt: 200,
+    expiresAt: 8200,
+    deviceCount: 1,
+    revision: 2
+  });
+  now = 8200;
+  assert.equal(tracker.getSample(), null);
+  assert.equal(tracker.nextExpiryAt(), null);
+});
+
+test('live rate removes a missing device sample while retaining the other device', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now, activeMs: 8000 });
+  tracker.reset([
+    { id: 'device:a', period: { timedTokens: 10, timedOutputTokens: 2, timedDurationMs: 100 } },
+    { id: 'device:b', period: { timedTokens: 20, timedOutputTokens: 4, timedDurationMs: 200 } }
+  ]);
+  now = 100;
+  tracker.observe([
+    { id: 'device:a', period: { timedTokens: 70, timedOutputTokens: 14, timedDurationMs: 700 } },
+    { id: 'device:b', period: { timedTokens: 80, timedOutputTokens: 16, timedDurationMs: 800 } }
+  ]);
+
+  now = 200;
+  const result = tracker.observe([
+    { id: 'device:b', period: { timedTokens: 80, timedOutputTokens: 16, timedDurationMs: 800 } }
+  ]);
+  assert.equal(result.changed, true);
+  assert.equal(result.sample.deviceCount, 1);
+  assert.equal(result.sample.speed, 20);
+  assert.equal(result.sample.burn, 6000);
+});
+
+test('live rate group revisions stay monotonic across scope resets', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now, activeMs: 8000 });
+  tracker.reset([
+    { id: 'device:a', period: { timedTokens: 10, timedOutputTokens: 2, timedDurationMs: 100 } }
+  ]);
+  now = 100;
+  assert.equal(tracker.observe([
+    { id: 'device:a', period: { timedTokens: 70, timedOutputTokens: 14, timedDurationMs: 700 } }
+  ]).sample.revision, 1);
+
+  tracker.reset([
+    { id: 'device:b', period: { timedTokens: 20, timedOutputTokens: 4, timedDurationMs: 200 } }
+  ]);
+  now = 200;
+  assert.equal(tracker.observe([
+    { id: 'device:b', period: { timedTokens: 80, timedOutputTokens: 16, timedDurationMs: 800 } }
+  ]).sample.revision, 2);
+});
+
+test('live rate selects every active hub device or only this device by scope', () => {
   const aggregate = { timedTokens: 9000, timedOutputTokens: 900, timedDurationMs: 9000 };
   const local = { timedTokens: 120, timedOutputTokens: 24, timedDurationMs: 600 };
+  const other = { timedTokens: 300, timedOutputTokens: 60, timedDurationMs: 1500 };
+  const stale = { timedTokens: 600, timedOutputTokens: 120, timedDurationMs: 3000 };
   const stats = {
     periods: { today: aggregate },
     devices: [
-      { deviceId: 'other', periods: { today: aggregate } },
-      { deviceId: 'this-device', periods: { today: local } }
+      { deviceId: 'other', periods: { today: other } },
+      { deviceId: 'this-device', periods: { today: local } },
+      { deviceId: 'stale', stale: true, periods: { today: stale } }
     ]
   };
 
-  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriod(stats, 'this-device', 'client'), {
-    period: local,
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'client'), {
+    entries: [
+      { id: 'device:other', period: other },
+      { id: 'device:this-device', period: local }
+    ],
+    source: 'devices:all'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'host', 'all'), {
+    entries: [
+      { id: 'device:other', period: other },
+      { id: 'device:this-device', period: local }
+    ],
+    source: 'devices:all'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'client', 'device'), {
+    entries: [{ id: 'device:this-device', period: local }],
     source: 'device:this-device'
   });
-  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriod(stats, 'missing', 'client'), {
-    period: null,
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'missing', 'client', 'device'), {
+    entries: [],
     source: 'device:missing'
   });
-  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriod(stats, 'this-device', 'host'), {
-    period: local,
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'local'), {
+    entries: [{ id: 'device:this-device', period: local }],
     source: 'device:this-device'
   });
-  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriod(stats, 'missing', 'local'), {
-    period: aggregate,
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'missing', 'local'), {
+    entries: [{ id: 'aggregate', period: aggregate }],
     source: 'aggregate'
   });
-  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriod({ periods: { today: aggregate }, devices: [] }, 'this-device', 'local'), {
-    period: null,
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods({ periods: { today: aggregate }, devices: [] }, 'this-device', 'local'), {
+    entries: [],
     source: 'device:this-device'
   });
 });
@@ -414,23 +530,35 @@ test('the reveal mode is a persisted setting that defaults to speed', () => {
 
 test('the live footer rate is opt-in, accessible, and shares the persisted mode', () => {
   assert.match(main, /showLiveTokenRate: false,/);
+  assert.match(main, /liveTokenRateScope: 'all',/);
   assert.match(main, /merged\.showLiveTokenRate = parseBoolean\(merged\.showLiveTokenRate, false\)/);
+  assert.match(main, /merged\.liveTokenRateScope = normalizeLiveTokenRateScope\(merged\.liveTokenRateScope\)/);
   assert.match(main, /showLiveTokenRate: parseBoolean\(patch\.showLiveTokenRate \?\? settings\.showLiveTokenRate, false\)/);
+  assert.match(main, /liveTokenRateScope: normalizeLiveTokenRateScope\(patch\.liveTokenRateScope \?\? settings\.liveTokenRateScope\)/);
   assert.match(html, /id="showLiveTokenRateInput" type="checkbox"/);
+  assert.match(html, /id="liveTokenRateScopeRow" class="settings-item hidden"/);
+  assert.match(html, /id="liveTokenRateScopeInput"/);
+  assert.match(html, /<option value="all"[^>]*>All devices<\/option><option value="device"[^>]*>This device<\/option>/);
   assert.match(html, /<button id="liveTokenRate" class="live-token-rate hidden is-idle" type="button"[^>]*aria-label=/);
   assert.match(app, /showLiveTokenRateInput: document\.getElementById\('showLiveTokenRateInput'\)/);
+  assert.match(app, /liveTokenRateScopeInput: document\.getElementById\('liveTokenRateScopeInput'\)/);
   assert.match(app, /showLiveTokenRate: Boolean\(els\.showLiveTokenRateInput\.checked\)/);
+  assert.match(app, /liveTokenRateScope: els\.liveTokenRateScopeInput\?\.value === 'device' \? 'device' : 'all'/);
   assert.match(app, /els\.showLiveTokenRateInput\.checked = state\.settings\.showLiveTokenRate === true/);
+  assert.match(app, /els\.liveTokenRateScopeInput\.value = state\.settings\.liveTokenRateScope === 'device' \? 'device' : 'all'/);
   assert.match(app, /els\.liveTokenRate\?\.addEventListener\('click', toggleTokenRateMode\)/);
   assert.match(app, /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);\s*observeLiveTokenRate\(state\.stats\);/);
   assert.match(app, /observeLiveTokenRate\(nextStats\);\s*state\.stats = nextStats;/);
-  assert.match(app, /selectLiveTokenRatePeriod\([\s\S]*stats,[\s\S]*state\.settings\?\.deviceId,[\s\S]*state\.settings\?\.hubMode[\s\S]*\)/);
+  assert.match(app, /createLiveTokenRateGroupTracker\([\s\S]*activeMs: LIVE_TOKEN_RATE_ACTIVE_MS[\s\S]*\)/);
+  assert.match(app, /selectLiveTokenRatePeriods\([\s\S]*stats,[\s\S]*state\.settings\?\.deviceId,[\s\S]*state\.settings\?\.hubMode,[\s\S]*effectiveLiveTokenRateScope\(\)[\s\S]*\)/);
+  assert.match(app, /return syncMode && state\.settings\?\.liveTokenRateScope !== 'device' \? 'all' : 'device';/);
   assert.match(app, /function observeLiveTokenRate\(stats\) \{\s*if \(state\.settings\?\.showLiveTokenRate !== true\) return;/);
-  assert.match(app, /if \(sample === previousSample\) return;\s*if \(!sample\) \{\s*clearLiveTokenRateTimers\(\);\s*renderLiveTokenRate\(\);/);
+  assert.match(app, /const result = liveTokenRateTracker\.observe\(selection\.entries\);\s*if \(!result\.changed\) return;\s*scheduleLiveTokenRateExpiry\(\);/);
   assert.match(app, /els\.liveTokenRate\.tabIndex = enabled && !obscured \? 0 : -1;/);
   assert.match(app, /els\.liveTokenRate\.setAttribute\('aria-hidden', String\(!enabled \|\| obscured\)\);/);
   assert.match(app, /if \(!enabled\) resetLiveTokenRateTracking\(\);/);
   assert.match(app, /if \(state\.settings\.showLiveTokenRate\) observeLiveTokenRate\(state\.stats\);/);
+  assert.match(app, /els\.liveTokenRateScopeInput\?\.addEventListener\('change'/);
   assert.match(css, /\.live-token-rate-icon[\s\S]*icons\/actions\/zap\.svg/);
   assert.match(css, /--view-switcher-max-width: min\(112px, max\(0px, calc\(50% - 66px\)\)\)/);
   assert.match(css, /\.footer\.live-token-rate-obscured \.live-token-rate,[\s\S]*visibility: hidden;/);
