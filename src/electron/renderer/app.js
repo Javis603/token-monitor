@@ -1617,14 +1617,13 @@ function animateBarBetween(
   rowBarAnimations.set(fill, motion);
 }
 
-function animateLimitResetPercent(el, from, to, duration) {
+function animateLimitResetPercent(el, from, to, duration, startedAt = performance.now()) {
   if (!el) return;
   const suffix = el.dataset.limitMotionSuffix || '';
   if (prefersReducedMotion() || !Number.isFinite(from) || !Number.isFinite(to) || from === to) {
     el.textContent = `${formatPercent(to)} ${suffix}`;
     return;
   }
-  const startedAt = performance.now();
   const delta = to - from;
   const motion = { handle: 0, target: to, suffix };
   el.textContent = `${formatPercent(from)} ${suffix}`;
@@ -4487,14 +4486,16 @@ function limitWindowNode(label, window, color, tone = 1, valueOverride = null, d
   // on "remaining" so bar and label stay consistent; only percent-labelled
   // windows honour the used-mode flip.
   const showUsed = Boolean(state.settings?.showLimitUsed) && valueOverride == null;
-  const fillPercent = limitFillPercent(remaining, used, showUsed);
+  const fillPercent = limitResetMotionApi.displayPercent(
+    limitFillPercent(remaining, used, showUsed)
+  );
   const item = document.createElement('div');
   item.className = 'limit-window';
   item.dataset.limitMotionKey = limitResetMotionApi.windowKey(label, window);
   item.dataset.limitRemainingPercent = hasPercent && motionRemaining !== null
     ? String(Math.max(0, Math.min(100, motionRemaining)))
     : '';
-  item.dataset.limitDisplayPercent = hasPercent ? String(fillPercent) : '';
+  item.dataset.limitDisplayPercent = hasPercent && fillPercent !== null ? String(fillPercent) : '';
   item.dataset.limitResetAt = window?.resetsAt || '';
   const text = document.createElement('div');
   text.className = 'limit-window-text';
@@ -4502,7 +4503,7 @@ function limitWindowNode(label, window, color, tone = 1, valueOverride = null, d
   name.textContent = window?.label || label;
   const value = document.createElement('span');
   value.textContent = valueOverride != null ? valueOverride : formatLimitWindowValue(window, fillPercent, hasPercent, showUsed);
-  if (valueOverride == null && hasPercent) {
+  if (valueOverride == null && hasPercent && fillPercent !== null) {
     value.dataset.limitMotionValue = String(fillPercent);
     value.dataset.limitMotionSuffix = limitModeSuffix(showUsed);
   }
@@ -5955,6 +5956,7 @@ function captureLimitResetMotion() {
 
 function animateLimitResets(snapshot) {
   if (!snapshot?.size || prefersReducedMotion()) return;
+  const motions = [];
   for (const row of els.limitsPanel?.querySelectorAll('.limit-row[data-limit-motion-key]') || []) {
     for (const item of row.querySelectorAll('.limit-window[data-limit-motion-key]')) {
       const key = `${row.dataset.limitMotionKey}\0${item.dataset.limitMotionKey}`;
@@ -5976,6 +5978,23 @@ function animateLimitResets(snapshot) {
         || !fill
       ) continue;
       const duration = limitResetMotionApi.durationMs(from, to);
+      motions.push({
+        fill,
+        from,
+        item,
+        to,
+        duration
+      });
+    }
+  }
+  if (!motions.length) return;
+  // Start only after the replacement DOM is paintable. The rest of the refresh render
+  // can delay this first frame; excluding that delay prevents the motion from visibly
+  // catching up by skipping its opening values.
+  requestAnimationFrame((startedAt) => {
+    if (prefersReducedMotion()) return;
+    for (const { fill, from, item, to, duration } of motions) {
+      if (!fill.isConnected || !item.isConnected) continue;
       animateBarBetween(
         fill,
         from / 100,
@@ -5989,10 +6008,11 @@ function animateLimitResets(snapshot) {
         item.querySelector('[data-limit-motion-value]'),
         from,
         to,
-        duration
+        duration,
+        startedAt
       );
     }
-  }
+  });
 }
 
 function renderLimits() {

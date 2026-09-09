@@ -69,6 +69,10 @@
     return used === null ? null : 100 - used;
   }
 
+  function displayPercent(value) {
+    return finitePercent(value);
+  }
+
   function durationMs(fromPercent, toPercent = 100) {
     const from = finitePercent(fromPercent);
     const to = finitePercent(toPercent);
@@ -90,6 +94,7 @@
   }
 
   return {
+    displayPercent,
     durationMs,
     providerKey,
     remainingPercent,

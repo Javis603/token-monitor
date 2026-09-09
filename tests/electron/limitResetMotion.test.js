@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  displayPercent,
   durationMs,
   providerKey,
   remainingPercent,
@@ -40,6 +41,13 @@ test('remaining percentage preserves missing values and derives used-only window
   assert.equal(remainingPercent({ usedPercent: 100 }), 0);
   assert.equal(remainingPercent({ usedPercent: 31 }), 69);
   assert.equal(remainingPercent({ remainingPercent: 42, usedPercent: 58 }), 42);
+});
+
+test('display percentage clamps provider overrun values to the meter range', () => {
+  assert.equal(displayPercent(-1), 0);
+  assert.equal(displayPercent(101), 100);
+  assert.equal(displayPercent(42.5), 42.5);
+  assert.equal(displayPercent(null), null);
 });
 
 test('refill duration follows the distance while preserving the approved short refill pace', () => {
@@ -96,6 +104,9 @@ test('renderer wires reset motion before app boot and respects reduced motion', 
   assert.match(app, /LIMIT_RESET_MOTION_EASING/);
   assert.match(app, /const duration = limitResetMotionApi\.durationMs\(from, to\);/);
   assert.match(app, /animateLimitResetCompletion\(fill, duration\);/);
+  assert.match(app, /const fillPercent = limitResetMotionApi\.displayPercent\([\s\S]*limitFillPercent\(remaining, used, showUsed\)[\s\S]*\);/);
+  assert.match(app, /requestAnimationFrame\(\(startedAt\) => \{/);
+  assert.match(app, /duration,\s*startedAt\s*\);/);
   assert.match(app, /delay: Math\.max\(0, duration - LIMIT_RESET_GLOW_LEAD_MS\)/);
   assert.doesNotMatch(css, /limit-window-resetting|limit-reset-shine|limit-reset-brighten|limit-reset-glow/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.limit-meter-fill/);
