@@ -8,7 +8,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider, normalizeClaudeWebCookieInput } = require('../../src/shared/limits/collector');
-const { runClaudeAuthStatus } = require('../../src/shared/providers/claude/limits');
+const { runClaudeAuthStatus, touchClaudeAuthPath } = require('../../src/shared/providers/claude/limits');
 
 function fakeSpawnForClaudeUsage(expectedCommand = 'cmd.exe') {
   return (command, args, options) => {
@@ -695,6 +695,44 @@ test('Claude auth status uses cmd.exe without shell mode on Windows', async () =
 
   assert.deepEqual(JSON.parse(output), { loggedIn: true });
   assert.equal(stdinEnded, true);
+});
+
+test('Claude PTY probing preserves the first executable Python failure', async (t) => {
+  const probeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'token-monitor-claude-python-'));
+  t.after(() => fs.rm(probeDir, { recursive: true, force: true }));
+  const calls = [];
+
+  await assert.rejects(
+    touchClaudeAuthPath({
+      platform: 'darwin',
+      env: { TERM: 'dumb' },
+      claudeProbeDir: probeDir,
+      existsSync: () => false,
+      spawn: (command, args, options) => {
+        calls.push(command);
+        assert.equal(options.env.TERM, 'xterm-256color');
+        const script = args[1];
+        assert.match(script, /matched_at = None/);
+        assert.match(script, /matched_at is not None and now - matched_at >= 2/);
+        assert.doesNotMatch(script, /time\.sleep\(2\)/);
+        assert.match(script, /TIOCSWINSZ/);
+        assert.match(script, /handled_prompts/);
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = () => {};
+        process.nextTick(() => {
+          child.stderr.emit('data', 'original Python failure');
+          child.emit('close', 1);
+        });
+        return child;
+      }
+    }),
+    (error) => error?.status === 'unavailable'
+      && error?.message === 'original Python failure'
+  );
+
+  assert.deepEqual(calls, ['python3']);
 });
 
 test('Claude CLI commands execute from a Windows path containing spaces', {

@@ -1595,7 +1595,7 @@ function withClaudePathHints(env = process.env, platform = process.platform) {
 
 function claudePtyPythonScript() {
   return `
-import fcntl, os, pty, re, select, signal, subprocess, sys, time
+import fcntl, os, pty, re, select, signal, struct, subprocess, sys, termios, time
 cmd = os.environ.get("TOKEN_MONITOR_CLAUDE_COMMAND_PATH", "claude")
 cwd = os.environ.get("TOKEN_MONITOR_CLAUDE_PROBE_DIR") or os.getcwd()
 timeout = float(os.environ.get("TOKEN_MONITOR_CLAUDE_CLI_TIMEOUT", "35"))
@@ -1607,6 +1607,7 @@ settings_path = os.path.join(cwd, ".claude", "settings.local.json")
 if not os.path.exists(settings_path):
     open(settings_path, "w").write('{"disableDeepLinkRegistration":"disable"}\\n')
 master, slave = pty.openpty()
+fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 160, 0, 0))
 proc = subprocess.Popen([cmd, "--allowed-tools", ""], stdin=slave, stdout=slave, stderr=slave, cwd=cwd, close_fds=True, start_new_session=True)
 os.close(slave)
 fcntl.fcntl(master, fcntl.F_SETFL, os.O_NONBLOCK)
@@ -1614,44 +1615,66 @@ ansi = re.compile(rb"\\x1b\\[[0-9;?]*[ -/]*[@-~]|\\x1b[()][A-Za-z0-9]|\\x1b[78=>
 def compact(data):
     text = ansi.sub(b"", data).decode("utf-8", "ignore").lower()
     return re.sub(r"[^a-z0-9%]+", "", text)
+def write_master(data):
+    try:
+        os.write(master, data)
+        return True
+    except OSError:
+        return False
 buf = b""
 start = time.time()
 last_enter = 0
 sent_cmd = False
+matched_at = None
+handled_prompts = set()
+prompt_tokens = [
+    "quicksafetycheck", "yesitrustthisfolder", "pressentertocontinue",
+    "readytocodehere", "showplanusage", "showplan"
+]
 slash_bytes = (slash_command + "\\r").encode("utf-8")
 try:
     while time.time() - start < timeout:
+        io_closed = False
         readable, _, _ = select.select([master], [], [], 0.08)
         if readable:
             try:
                 chunk = os.read(master, 8192)
                 if chunk:
                     buf += chunk
+                    if b"\\x1b[6n" in buf[-32:] and not write_master(b"\\x1b[1;1R"):
+                        io_closed = True
             except BlockingIOError:
                 pass
+            except OSError:
+                break
+        if io_closed:
+            break
         scan = compact(buf[-20000:])
         now = time.time()
-        if now - last_enter > 0.8 and any(token in scan for token in [
-            "quicksafetycheck", "yesitrustthisfolder", "pressentertocontinue",
-            "readytocodehere", "showplanusage", "showplan"
-        ]):
-            os.write(master, b"\\r")
-            last_enter = now
+        for token in prompt_tokens:
+            if token in scan and token not in handled_prompts:
+                if not write_master(b"\\r"):
+                    io_closed = True
+                    break
+                handled_prompts.add(token)
+                last_enter = now
+        if io_closed:
+            break
         if not sent_cmd and now - start > 5:
-            os.write(master, slash_bytes)
+            if not write_master(slash_bytes):
+                break
             sent_cmd = True
         if sent_cmd and now - last_enter > 0.8:
-            os.write(master, b"\\r")
+            if not write_master(b"\\r"):
+                break
             last_enter = now
-        if sent_cmd and exit_pattern is not None and exit_pattern.search(scan):
-            time.sleep(2)
+        if sent_cmd and exit_pattern is not None and exit_pattern.search(scan) and matched_at is None:
+            matched_at = now
+        if matched_at is not None and now - matched_at >= 2:
             break
     sys.stdout.buffer.write(buf)
 finally:
-    try:
-        os.write(master, b"/exit\\r")
-    except Exception:
-        pass
+    write_master(b"/exit\\r")
     try:
         os.killpg(proc.pid, signal.SIGTERM)
     except Exception:
@@ -1671,6 +1694,8 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
   fs.mkdirSync(probeDir, { recursive: true });
   const runEnv = {
     ...env,
+    TERM: env.TERM && env.TERM !== 'dumb' ? env.TERM : 'xterm-256color',
+    COLORTERM: env.COLORTERM || 'truecolor',
     TOKEN_MONITOR_CLAUDE_COMMAND_PATH: command,
     TOKEN_MONITOR_CLAUDE_PROBE_DIR: probeDir,
     TOKEN_MONITOR_CLAUDE_CLI_TIMEOUT: String(deps.claudeCliTimeoutSeconds || 35),
@@ -1689,7 +1714,7 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
       });
     } catch (error) {
       lastError = error;
-      if (error.code && error.code !== 'ENOENT') break;
+      if (error.code !== 'ENOENT') break;
     }
   }
   throw lastError || errorWithStatus('unavailable', 'Python PTY runner unavailable');
