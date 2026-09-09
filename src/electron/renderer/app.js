@@ -142,6 +142,7 @@ const TRAY_ICON_PROVIDERS = [
 const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.id).join(',');
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
 const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentation;
+const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
 const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
@@ -281,6 +282,9 @@ const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProv
 const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'sync'];
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
 const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;
+const LIMIT_RESET_MOTION_EASING = 'cubic-bezier(0.333, 0.667, 0.667, 1)';
+const LIMIT_RESET_GLOW_MS = 700;
+const LIMIT_RESET_GLOW_LEAD_MS = 252;
 const initialFloatingBubble = window.__TOKEN_MONITOR_INITIAL_FLOATING_BUBBLE__ || { collapsed: false, side: null };
 const initialViewState = window.__TOKEN_MONITOR_INITIAL_VIEW_STATE__ || {};
 let initialBreakdownPreferenceApplied = typeof initialViewState.breakdown === 'string';
@@ -1402,6 +1406,7 @@ function animateTotalNumber(el, from, to, duration) {
 
 const rowNumberAnimations = new Map();
 const rowBarAnimations = new Map();
+const limitResetNumberAnimations = new Map();
 const rowRenderFingerprints = new WeakMap();
 const toolDetailData = new WeakMap();
 const largeSessionContainmentScheduler = createAfterLayoutScheduler(
@@ -1449,6 +1454,11 @@ function settleMotionAnimations() {
     delete el.dataset.motionTarget;
   }
   rowNumberAnimations.clear();
+  for (const [el, motion] of limitResetNumberAnimations) {
+    cancelAnimationFrame(motion.handle);
+    el.textContent = `${formatPercent(motion.target)} ${motion.suffix}`;
+  }
+  limitResetNumberAnimations.clear();
   for (const animation of document.getAnimations?.() || []) {
     try { animation.finish(); } catch (_) { animation.cancel(); }
   }
@@ -1574,7 +1584,14 @@ function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
   }
 }
 
-function animateBarBetween(fill, fromScale, toScale, delay = 0, duration = 420) {
+function animateBarBetween(
+  fill,
+  fromScale,
+  toScale,
+  delay = 0,
+  duration = 420,
+  easing = 'cubic-bezier(0.22, 1, 0.36, 1)'
+) {
   if (!fill?.animate) return;
   const previous = rowBarAnimations.get(fill);
   const previousIsActive = previous?.animation.pending || previous?.animation.playState === 'running';
@@ -1588,7 +1605,7 @@ function animateBarBetween(fill, fromScale, toScale, delay = 0, duration = 420) 
   ], {
     duration,
     delay,
-    easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    easing,
     fill: 'backwards'
   });
   const motion = { animation, target: toScale };
@@ -1598,6 +1615,55 @@ function animateBarBetween(fill, fromScale, toScale, delay = 0, duration = 420) 
   animation.onfinish = forget;
   animation.oncancel = forget;
   rowBarAnimations.set(fill, motion);
+}
+
+function animateLimitResetPercent(el, from, to, duration) {
+  if (!el) return;
+  const suffix = el.dataset.limitMotionSuffix || '';
+  if (prefersReducedMotion() || !Number.isFinite(from) || !Number.isFinite(to) || from === to) {
+    el.textContent = `${formatPercent(to)} ${suffix}`;
+    return;
+  }
+  const startedAt = performance.now();
+  const delta = to - from;
+  const motion = { handle: 0, target: to, suffix };
+  el.textContent = `${formatPercent(from)} ${suffix}`;
+  function frame(now) {
+    if (prefersReducedMotion()) {
+      el.textContent = `${formatPercent(to)} ${suffix}`;
+      if (limitResetNumberAnimations.get(el) === motion) limitResetNumberAnimations.delete(el);
+      return;
+    }
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const eased = 1 - ((1 - progress) * (1 - progress));
+    el.textContent = `${formatPercent(from + delta * eased)} ${suffix}`;
+    if (progress < 1) {
+      motion.handle = requestAnimationFrame(frame);
+    } else if (limitResetNumberAnimations.get(el) === motion) {
+      limitResetNumberAnimations.delete(el);
+    }
+  }
+  motion.handle = requestAnimationFrame(frame);
+  limitResetNumberAnimations.set(el, motion);
+}
+
+function animateLimitResetCompletion(fill, duration) {
+  if (!fill?.animate || prefersReducedMotion()) return;
+  const restingOpacity = Number(fill.style.opacity);
+  const baseOpacity = Number.isFinite(restingOpacity) ? restingOpacity : 1;
+  fill.animate([
+    { filter: 'brightness(1) saturate(1)', opacity: baseOpacity },
+    {
+      offset: LIMIT_RESET_GLOW_LEAD_MS / LIMIT_RESET_GLOW_MS,
+      filter: 'brightness(1.48) saturate(0.88)',
+      opacity: Math.min(1, baseOpacity + 0.22)
+    },
+    { filter: 'brightness(1) saturate(1)', opacity: baseOpacity }
+  ], {
+    duration: LIMIT_RESET_GLOW_MS,
+    delay: Math.max(0, duration - LIMIT_RESET_GLOW_LEAD_MS),
+    easing: 'linear'
+  });
 }
 
 function captureTrendBarMotion() {
@@ -4414,6 +4480,7 @@ function limitMeterNode(color, percent, tone = 1) {
 function limitWindowNode(label, window, color, tone = 1, valueOverride = null, detailText = '') {
   const remaining = Number(window?.remainingPercent);
   const used = Number(window?.usedPercent);
+  const motionRemaining = limitResetMotionApi.remainingPercent(window);
   const showMeter = window?.showMeter !== false;
   const hasPercent = showMeter && (Number.isFinite(remaining) || Number.isFinite(used));
   // valueOverride windows carry a fixed (money/amount) label — keep their meter
@@ -4423,12 +4490,22 @@ function limitWindowNode(label, window, color, tone = 1, valueOverride = null, d
   const fillPercent = limitFillPercent(remaining, used, showUsed);
   const item = document.createElement('div');
   item.className = 'limit-window';
+  item.dataset.limitMotionKey = limitResetMotionApi.windowKey(label, window);
+  item.dataset.limitRemainingPercent = hasPercent && motionRemaining !== null
+    ? String(Math.max(0, Math.min(100, motionRemaining)))
+    : '';
+  item.dataset.limitDisplayPercent = hasPercent ? String(fillPercent) : '';
+  item.dataset.limitResetAt = window?.resetsAt || '';
   const text = document.createElement('div');
   text.className = 'limit-window-text';
   const name = document.createElement('span');
   name.textContent = window?.label || label;
   const value = document.createElement('span');
   value.textContent = valueOverride != null ? valueOverride : formatLimitWindowValue(window, fillPercent, hasPercent, showUsed);
+  if (valueOverride == null && hasPercent) {
+    value.dataset.limitMotionValue = String(fillPercent);
+    value.dataset.limitMotionSuffix = limitModeSuffix(showUsed);
+  }
   text.append(name, value);
   const meter = limitMeterNode(color, fillPercent, tone);
   const reset = document.createElement('div');
@@ -5544,6 +5621,7 @@ function renderLimitProviderRow(id, label, provider, color, options = {}) {
   if (options.accountRow) classes.push('limit-account-row');
   if (provider.stale) classes.push('stale');
   row.className = classes.join(' ');
+  row.dataset.limitMotionKey = limitResetMotionApi.providerKey(provider);
   row.append(
     renderLimitProviderHead(id, label, provider, color, options),
     renderProviderWindows(provider, color)
@@ -5858,6 +5936,65 @@ function renderVolcengineAccountGroup(label, providers, color) {
   });
 }
 
+function captureLimitResetMotion() {
+  const snapshot = new Map();
+  for (const row of els.limitsPanel?.querySelectorAll('.limit-row[data-limit-motion-key]') || []) {
+    for (const item of row.querySelectorAll('.limit-window[data-limit-motion-key]')) {
+      const key = `${row.dataset.limitMotionKey}\0${item.dataset.limitMotionKey}`;
+      const entry = {
+        remainingPercent: item.dataset.limitRemainingPercent,
+        displayPercent: item.dataset.limitDisplayPercent,
+        resetsAt: item.dataset.limitResetAt
+      };
+      // Ambiguous identities are safer left static than animated on the wrong row.
+      snapshot.set(key, snapshot.has(key) ? null : entry);
+    }
+  }
+  return snapshot;
+}
+
+function animateLimitResets(snapshot) {
+  if (!snapshot?.size || prefersReducedMotion()) return;
+  for (const row of els.limitsPanel?.querySelectorAll('.limit-row[data-limit-motion-key]') || []) {
+    for (const item of row.querySelectorAll('.limit-window[data-limit-motion-key]')) {
+      const key = `${row.dataset.limitMotionKey}\0${item.dataset.limitMotionKey}`;
+      const previous = snapshot.get(key);
+      const current = {
+        remainingPercent: item.dataset.limitRemainingPercent,
+        displayPercent: item.dataset.limitDisplayPercent,
+        resetsAt: item.dataset.limitResetAt
+      };
+      if (!previous || !limitResetMotionApi.shouldAnimateReset(previous, current)) continue;
+      const from = Number(previous.displayPercent);
+      const to = Number(current.displayPercent);
+      const fill = item.querySelector('.limit-meter-fill');
+      if (
+        previous.displayPercent === ''
+        || current.displayPercent === ''
+        || !Number.isFinite(from)
+        || !Number.isFinite(to)
+        || !fill
+      ) continue;
+      const duration = limitResetMotionApi.durationMs(from, to);
+      animateBarBetween(
+        fill,
+        from / 100,
+        to / 100,
+        0,
+        duration,
+        LIMIT_RESET_MOTION_EASING
+      );
+      animateLimitResetCompletion(fill, duration);
+      animateLimitResetPercent(
+        item.querySelector('[data-limit-motion-value]'),
+        from,
+        to,
+        duration
+      );
+    }
+  }
+}
+
 function renderLimits() {
   if (!els.limitsPanel) return;
   const holdLimitDetailTooltipRender = limitDetailTooltipShouldHoldRender();
@@ -5915,6 +6052,7 @@ function renderLimits() {
   ) {
     return;
   }
+  const resetMotionSnapshot = captureLimitResetMotion();
   state.limitPanelRenderSignature = renderSignature;
   const nodes = [];
   const rows = orderedProviders;
@@ -5974,6 +6112,7 @@ function renderLimits() {
     nodes.push(renderLimitProviderRow(id, label, provider, thirdPartyVisual?.color || color, rowOptions));
   }
   els.limitsPanel.replaceChildren(...nodes);
+  animateLimitResets(resetMotionSnapshot);
 }
 
 function serviceStatusLabel(status) {
