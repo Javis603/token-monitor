@@ -240,7 +240,7 @@ iOS 小部件没有省电的推送通道，所以运行时会自行每隔几分�
 | GET    | `/api/health`              | 无     | 存活探针 + 设备数                          |
 | GET    | `/api/public/stats`        | 无     | `PUBLIC_STATS_ENABLED=1` 时提供不含 devices/账号 id 的公开聚合统计 |
 | GET    | `/api/stats`               | 密钥   | 聚合统计（today / month / allTime）        |
-| GET    | `/api/stats/stream`        | 密钥   | SSE 流，每次 ingest 都推送                 |
+| GET    | `/api/stats/stream`        | 密钥   | SSE 快照与合并后的实时变更                 |
 | GET    | `/api/devices`             | 密钥   | 原始的每设备记录                          |
 | POST   | `/api/ingest`              | 密钥   | 更新某个设备的用量摘要                    |
 | DELETE | `/api/devices/{deviceId}`  | 密钥   | 删除一条设备记录                          |
