@@ -4862,11 +4862,16 @@ html.is-windows .limit-live-badge {
   100% { filter: drop-shadow(0 0 0 rgba(var(--accent-rgb), 0)); transform: scale(1); }
 }
 .footer.live-token-rate-enabled {
-  --view-switcher-max-width: min(112px, 40%);
+  --view-switcher-max-width: min(112px, max(0px, calc(50% - 66px)));
 }
-.footer.live-token-rate-obscured .live-token-rate {
+.footer.live-token-rate-obscured .live-token-rate,
+.footer:has(.utility-actions:hover) .live-token-rate,
+.footer:has(.utility-actions :focus-visible) .live-token-rate,
+.footer:has(.refresh-button:is(.is-refreshing, .is-refreshed, .is-refresh-error)) .live-token-rate,
+.shell.settings-open .footer .live-token-rate {
   opacity: 0;
   pointer-events: none;
+  visibility: hidden;
 }
 .view-switcher {
   position: relative;

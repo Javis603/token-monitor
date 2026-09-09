@@ -59,25 +59,35 @@
   }
 
   function usageCounters(period) {
+    if (period?.capabilities?.throughput === false) return null;
     const counter = (value) => {
+      if (value === null || value === undefined || value === '') return null;
       const parsed = Number(value);
-      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
     };
-    return {
+    const counters = {
       timedTokens: counter(period?.timedTokens),
       timedOutputTokens: counter(period?.timedOutputTokens),
       timedDurationMs: counter(period?.timedDurationMs)
     };
+    return Object.values(counters).every((value) => value !== null) ? counters : null;
   }
 
-  function selectLiveTokenRatePeriod(stats, deviceId) {
+  function selectLiveTokenRatePeriod(stats, deviceId, hubMode = 'local') {
     const normalizedDeviceId = String(deviceId || '').trim();
+    const syncMode = hubMode === 'client' || hubMode === 'host';
     const localDevice = normalizedDeviceId && Array.isArray(stats?.devices)
       ? stats.devices.find((device) => String(device?.deviceId || '') === normalizedDeviceId)
       : null;
     const localPeriod = localDevice?.periods?.today;
     if (localPeriod && typeof localPeriod === 'object') {
       return { period: localPeriod, source: `device:${normalizedDeviceId}` };
+    }
+    if (syncMode) {
+      return { period: null, source: `device:${normalizedDeviceId || 'unavailable'}` };
+    }
+    if (Array.isArray(stats?.devices) && stats.devices.length === 0) {
+      return { period: null, source: `device:${normalizedDeviceId || 'unavailable'}` };
     }
     const aggregatePeriod = stats?.periods?.today;
     return {
@@ -104,6 +114,11 @@
 
     function observe(period) {
       const current = usageCounters(period);
+      if (!current) {
+        baseline = null;
+        sample = null;
+        return null;
+      }
       if (!baseline) {
         baseline = current;
         return null;

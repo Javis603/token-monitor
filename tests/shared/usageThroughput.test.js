@@ -132,7 +132,7 @@ test('a partly timed entry contributes its whole output and stays an integer', (
   assert.equal(result.timedTokens, 92_650);
 });
 
-test('normalizePeriod accepts both spellings and defaults an older payload to zero', () => {
+test('normalizePeriod accepts both spellings and marks older payload throughput unavailable', () => {
   assert.equal(normalizePeriod({ timedTokens: 900, timedDurationMs: 1000 }).timedDurationMs, 1000);
   assert.equal(normalizePeriod({ timed_tokens: 900, timed_duration_ms: 1000 }).timedTokens, 900);
   // outputTokens rides along in any real payload, and the cap below needs it present.
@@ -142,6 +142,7 @@ test('normalizePeriod accepts both spellings and defaults an older payload to ze
   assert.equal(legacy.timedTokens, 0);
   assert.equal(legacy.timedOutputTokens, 0);
   assert.equal(legacy.timedDurationMs, 0);
+  assert.equal(legacy.capabilities.throughput, false);
   assert.equal(legacy.capabilities.tokenComponents, false);
   assert.equal(legacy.unclassifiedTokens, 5);
   assert.equal(normalizePeriod({
@@ -150,6 +151,19 @@ test('normalizePeriod accepts both spellings and defaults an older payload to ze
     cacheWriteTokens: 0,
     outputTokens: 0
   }).capabilities.tokenComponents, true);
+  assert.equal(normalizePeriod({
+    outputTokens: 50,
+    timedTokens: 900,
+    timedOutputTokens: 42,
+    timedDurationMs: 1000
+  }).capabilities.throughput, true);
+  assert.equal(normalizePeriod({
+    outputTokens: 50,
+    timedTokens: 900,
+    timedOutputTokens: 42,
+    timedDurationMs: 1000,
+    capabilities: { throughput: false }
+  }).capabilities.throughput, false);
 });
 
 test('normalizePeriod preserves known native components beside an explicit unknown remainder', () => {
@@ -301,7 +315,9 @@ test('an unattributed fallback period reads as no throughput data, never NaN', (
     assert.ok(Number.isFinite(merged[field]), `${field} must stay finite, got ${merged[field]}`);
   }
   assert.equal(merged.timedOutputTokens, timed.timedOutputTokens, 'the fallback adds no phantom throughput');
+  assert.equal(merged.capabilities.throughput, false, 'mixed provenance stays unavailable');
   assert.equal(normalizePeriod(fallback).timedOutputTokens, 0);
+  assert.equal(normalizePeriod(fallback).capabilities.throughput, false);
 });
 
 test('aggregate fallback component provenance survives normalization and warm deltas', () => {
@@ -310,9 +326,14 @@ test('aggregate fallback component provenance survives normalization and warm de
   const aggregateFallback = extractUsageFromTokscale({ totalTokens: 200, totalCost: 2 });
 
   assert.equal(normalizePeriod(aggregateFallback).capabilities.tokenComponents, false);
+  assert.equal(normalizePeriod(aggregateFallback).capabilities.throughput, false);
   assert.equal(normalizePeriod(aggregateFallback).unclassifiedTokens, 200);
   assert.equal(
     applyPeriodDelta(exactBase, aggregateFallback, exactAnchor).capabilities.tokenComponents,
+    false
+  );
+  assert.equal(
+    applyPeriodDelta(exactBase, aggregateFallback, exactAnchor).capabilities.throughput,
     false
   );
 });

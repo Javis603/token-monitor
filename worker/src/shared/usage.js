@@ -123,7 +123,7 @@ function normalizeIsoTimestamp(value) {
 
 function emptyPeriod() {
   return {
-    capabilities: { tokenComponents: true },
+    capabilities: { tokenComponents: true, throughput: true },
     totalTokens: 0,
     costUsd: 0,
     cacheReadTokens: 0,
@@ -594,6 +594,16 @@ function normalizePeriod(input, options = {}) {
       ?? (period.capabilities.tokenComponents ? 0 : period.totalTokens - knownComponentTokens)
     )))
   );
+  const throughputCapability = input.capabilities?.throughput;
+  const hasThroughputShape = [
+    ['timedTokens', 'timed_tokens'],
+    ['timedOutputTokens', 'timed_output_tokens'],
+    ['timedDurationMs', 'timed_duration_ms']
+  ].every((keys) => keys.some((key) => hasOwn(input, key)));
+  // Older producers did not carry these counters. Preserve that provenance instead of
+  // turning their normalized zero defaults into a baseline for a later all-day delta.
+  period.capabilities.throughput = throughputCapability === true
+    || (throughputCapability !== false && hasThroughputShape);
   period.timedTokens = Math.max(0, Math.round(asNumber(input.timedTokens ?? input.timed_tokens ?? 0)));
   // Capped at outputTokens because the gate makes that a physical bound: output is counted
   // whole or not at all, so a period cannot have timed more output than it produced. The
@@ -775,6 +785,7 @@ function fallbackUsagePeriod(json) {
   // across cache read/write and output. Preserve that distinction through the
   // hub instead of letting normalizePeriod's zero defaults imply a cache miss.
   period.capabilities.tokenComponents = period.totalTokens === 0;
+  period.capabilities.throughput = period.totalTokens === 0;
   period.unclassifiedTokens = period.totalTokens;
   return period;
 }
@@ -1225,6 +1236,8 @@ function aggregateHistory(devices, options = {}) {
 function addPeriodInto(target, source) {
   target.capabilities.tokenComponents = target.capabilities.tokenComponents === true
     && source.capabilities?.tokenComponents === true;
+  target.capabilities.throughput = target.capabilities.throughput === true
+    && source.capabilities?.throughput === true;
   target.totalTokens += source.totalTokens;
   target.costUsd += source.costUsd;
   target.cacheReadTokens += source.cacheReadTokens;
@@ -1406,7 +1419,7 @@ function applyPeriodDelta(base, freshToday, anchorToday) {
 }
 
 function deltaValue(base, fresh, anchor, key) {
-  if (key === 'tokenComponents') {
+  if (key === 'tokenComponents' || key === 'throughput') {
     // A warm tick may introduce aggregate-only fallback data. Boolean
     // provenance is not arithmetically subtractable, so retain exactness only
     // while both the durable base and the fresh replacement prove it.

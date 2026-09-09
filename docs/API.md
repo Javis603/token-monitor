@@ -68,7 +68,8 @@ Example payload:
   "trackedClients": ["codex"],
   "today": {
     "capabilities": {
-      "tokenComponents": true
+      "tokenComponents": true,
+      "throughput": true
     },
     "totalTokens": 1234,
     "costUsd": 0.01,
@@ -212,7 +213,7 @@ Authenticated stats expose `projectsIncomplete: true` when a device omitted its 
 
 tokscale also reports a per-entry `tokenCoverage`, and this deliberately does not scale by it. Doing so would assume output is spread evenly across an entry's tokens; in practice output is ~0.3–3% of an entry's tokens while the untimed remainder measures several times an entry's entire output, so that remainder is cache and input rather than generation, and scaling would discount output that was almost certainly timed. Ignoring it also keeps the field a plain integer counter that merges and deltas like every other token count.
 
-All three are reported as raw sums rather than a pre-divided rate because a ratio cannot be summed: consumers add each field across devices and periods and divide only at the point of display, which makes a fleet-wide rate duration-weighted. Payloads without these fields are accepted and normalize to `0`, which consumers must read as "no throughput data" rather than "zero throughput".
+All three are reported as raw sums rather than a pre-divided rate because a ratio cannot be summed: consumers add each field across devices and periods and divide only at the point of display, which makes a fleet-wide rate duration-weighted. Current producers also set `capabilities.throughput` to `true`. Payloads without these fields are accepted and normalize to `0` with that capability set to `false`, so a later complete snapshot cannot turn the synthetic zeroes into an all-day live-rate delta.
 
 Because the gate is all-or-nothing per entry, `timedOutputTokens ≤ outputTokens` is a physical bound: a period cannot have timed more output than it produced. The two are equal when every entry in the period reported durations. A partly timed entry — 1230 of 1234 tokens in the example above — still contributes all of its output, since the untimed remainder is cache and input rather than generation.
 

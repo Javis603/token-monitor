@@ -848,7 +848,11 @@ function resetLiveTokenRateTracking() {
 
 function observeLiveTokenRate(stats) {
   if (state.settings?.showLiveTokenRate !== true) return;
-  const selection = tokenRateApi.selectLiveTokenRatePeriod(stats, state.settings?.deviceId);
+  const selection = tokenRateApi.selectLiveTokenRatePeriod(
+    stats,
+    state.settings?.deviceId,
+    state.settings?.hubMode
+  );
   const today = selection.period;
   const sourceKey = liveTokenRateSourceKey(selection.source);
   const previousSample = liveTokenRateTracker.getSample();
@@ -859,9 +863,13 @@ function observeLiveTokenRate(stats) {
     renderLiveTokenRate();
     return;
   }
-  if (!today) return;
   const sample = liveTokenRateTracker.observe(today);
-  if (!sample || sample.revision === previousSample?.revision) return;
+  if (sample === previousSample) return;
+  if (!sample) {
+    clearLiveTokenRateTimers();
+    renderLiveTokenRate();
+    return;
+  }
   if (liveTokenRateIdleTimer) clearTimeout(liveTokenRateIdleTimer);
   liveTokenRateIdleTimer = setTimeout(() => {
     liveTokenRateIdleTimer = null;
@@ -923,6 +931,8 @@ function syncLiveTokenRateFooterState() {
     || !els.appUpdatePill?.classList.contains('hidden');
   footer.classList.toggle('live-token-rate-enabled', enabled);
   footer.classList.toggle('live-token-rate-obscured', enabled && obscured);
+  els.liveTokenRate.tabIndex = enabled && !obscured ? 0 : -1;
+  els.liveTokenRate.setAttribute('aria-hidden', String(!enabled || obscured));
 }
 
 function tokenRateText(rate, burn) {
