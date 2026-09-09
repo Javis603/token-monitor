@@ -290,26 +290,31 @@ test('parseZcodeStartPlanBalances aggregates model capacity across plans with we
   assert.deepEqual(parseZcodeStartPlanBalances(reversed), { plan, windows });
 });
 
-test('model aggregation follows returned names, regardless of capability ids or model versions', () => {
+test('model aggregation follows returned names regardless of capability ids, optional metadata, or model versions', () => {
   const names = ['model-alpha', 'model-beta'];
   const bucket = (show_name, total, remaining, extra = {}) => ({
     show_name, total_units: total, remaining_units: remaining,
-    meter: 'tokens', period: 'daily', ...extra
+    period: 'daily', ...extra
   });
   for (const name of names) {
     const { windows } = parseZcodeStartPlanBalances({ data: { balances: [
       bucket(name, 100, 20, { plan_id: 'start', capabilities: ['model:old-internal-id'] }),
-      bucket(name, 900, 900, { plan_id: 'weekend', capabilities: ['model:new-internal-id'], period: 'one_time' }),
-      bucket(`${name}-other`, 200, 100),
-      bucket(name, 10, 5, { meter: 'requests' })
+      bucket(name, 900, 900, {
+        plan_id: 'weekend',
+        capabilities: ['model:new-internal-id'],
+        meter: 'tokens',
+        unit_type: 'token',
+        period: 'one_time'
+      }),
+      bucket(`${name}-other`, 200, 100)
     ] } });
-    assert.equal(windows.length, 3);
+    assert.equal(windows.length, 2);
     const model = windows.find(w => w.label === name && w.limit === 1000);
     assert.equal(model.remaining, 920);
     assert.equal(model.used, 80);
     assert.equal(model.usedPercent, 8);
     assert.equal(windows.find(w => w.label === `${name}-other`).limit, 200);
-    assert.equal(windows.reduce((sum, w) => sum + w.limit, 0), 1210);
+    assert.equal(windows.reduce((sum, w) => sum + w.limit, 0), 1200);
     assert.ok(windows.every(w => w.limitId), 'missing plan ids still carry bucket identity');
   }
 });

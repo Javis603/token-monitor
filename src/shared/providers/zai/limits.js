@@ -674,7 +674,7 @@ function parseZcodeStartPlanBalances(payload) {
     const period = periodByEntitlement.get(JSON.stringify([balance.plan_id || '', balance.entitlement_id || '']))
       || String(balance.period || '');
     const complete = Number.isFinite(window.limit) && window.limit > 0 && Number.isFinite(window.remaining);
-    const key = JSON.stringify([identity, balance.meter || '', balance.unit_type || '',
+    const key = JSON.stringify([identity,
       // Unknown identity or incomplete numbers cannot safely be added.
       identity.length && complete ? '' : index]);
     if (!groups.has(key)) groups.set(key, []);
