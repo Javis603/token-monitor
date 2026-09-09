@@ -188,9 +188,9 @@ test('live rate ignores untimed changes but keeps the baseline current', () => {
   assert.equal(sample.burn, 12000);
 });
 
-test('live rate sums still-active device samples without mixing their baselines', () => {
+test('live rate sums active device samples, then retains the last value dimmed for three minutes', () => {
   let now = 0;
-  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now, activeMs: 8000 });
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now, activeMs: 8000, clearMs: 180000 });
   const baseA = { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 100 };
   const baseB = { timedTokens: 200, timedOutputTokens: 20, timedDurationMs: 1000 };
   tracker.reset([
@@ -211,7 +211,8 @@ test('live rate sums still-active device samples without mixing their baselines'
     sampledAt: 100,
     expiresAt: 8100,
     deviceCount: 1,
-    revision: 1
+    revision: 1,
+    idle: false
   });
 
   now = 200;
@@ -226,7 +227,8 @@ test('live rate sums still-active device samples without mixing their baselines'
     sampledAt: 200,
     expiresAt: 8100,
     deviceCount: 2,
-    revision: 2
+    revision: 2,
+    idle: false
   });
   assert.equal(tracker.nextExpiryAt(), 8100);
 
@@ -237,9 +239,21 @@ test('live rate sums still-active device samples without mixing their baselines'
     sampledAt: 200,
     expiresAt: 8200,
     deviceCount: 1,
-    revision: 2
+    revision: 2,
+    idle: false
   });
   now = 8200;
+  assert.deepEqual(tracker.getSample(), {
+    speed: 30,
+    burn: 7200,
+    sampledAt: 200,
+    expiresAt: 180200,
+    deviceCount: 1,
+    revision: 2,
+    idle: true
+  });
+  assert.equal(tracker.nextExpiryAt(), 180200);
+  now = 180200;
   assert.equal(tracker.getSample(), null);
   assert.equal(tracker.nextExpiryAt(), null);
 });
@@ -281,6 +295,7 @@ test('live rate group revisions stay monotonic across scope resets', () => {
   tracker.reset([
     { id: 'device:b', period: { timedTokens: 20, timedOutputTokens: 4, timedDurationMs: 200 } }
   ]);
+  assert.equal(tracker.getSample(), null);
   now = 200;
   assert.equal(tracker.observe([
     { id: 'device:b', period: { timedTokens: 80, timedOutputTokens: 16, timedDurationMs: 800 } }
@@ -550,10 +565,14 @@ test('the live footer rate is opt-in, accessible, and shares the persisted mode'
   assert.match(app, /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);\s*observeLiveTokenRate\(state\.stats\);/);
   assert.match(app, /observeLiveTokenRate\(nextStats\);\s*state\.stats = nextStats;/);
   assert.match(app, /createLiveTokenRateGroupTracker\([\s\S]*activeMs: LIVE_TOKEN_RATE_ACTIVE_MS[\s\S]*\)/);
+  assert.match(app, /const LIVE_TOKEN_RATE_CLEAR_MS = 3 \* 60 \* 1000;/);
+  assert.match(app, /clearMs: LIVE_TOKEN_RATE_CLEAR_MS/);
   assert.match(app, /selectLiveTokenRatePeriods\([\s\S]*stats,[\s\S]*state\.settings\?\.deviceId,[\s\S]*state\.settings\?\.hubMode,[\s\S]*effectiveLiveTokenRateScope\(\)[\s\S]*\)/);
   assert.match(app, /return syncMode && state\.settings\?\.liveTokenRateScope !== 'device' \? 'all' : 'device';/);
   assert.match(app, /function observeLiveTokenRate\(stats\) \{\s*if \(state\.settings\?\.showLiveTokenRate !== true\) return;/);
   assert.match(app, /const result = liveTokenRateTracker\.observe\(selection\.entries\);\s*if \(!result\.changed\) return;\s*scheduleLiveTokenRateExpiry\(\);/);
+  assert.match(app, /const idle = !sample \|\| sample\.idle === true;/);
+  assert.match(app, /idle && sample[\s\S]*home\.liveTokenRate\.burnIdleTitle[\s\S]*home\.liveTokenRate\.speedIdleTitle/);
   assert.match(app, /els\.liveTokenRate\.tabIndex = enabled && !obscured \? 0 : -1;/);
   assert.match(app, /els\.liveTokenRate\.setAttribute\('aria-hidden', String\(!enabled \|\| obscured\)\);/);
   assert.match(app, /if \(!enabled\) resetLiveTokenRateTracking\(\);/);

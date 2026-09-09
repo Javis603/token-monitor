@@ -141,12 +141,15 @@
   // headline jump between whichever device happened to upload last, and dividing summed
   // tokens by summed model-busy time would be an average rather than fleet throughput. Keep
   // one matched-counter tracker per device, then add only samples that are still live.
-  function createLiveTokenRateGroupTracker({ now = defaultNow, activeMs = 8000 } = {}) {
+  function createLiveTokenRateGroupTracker({ now = defaultNow, activeMs = 8000, clearMs = 180000 } = {}) {
     if (typeof now !== 'function') throw new TypeError('now must be a function');
     const lifetime = positiveNumber(activeMs);
     if (!lifetime) throw new TypeError('activeMs must be a positive number');
+    const clearAfter = positiveNumber(clearMs);
+    if (!clearAfter || clearAfter <= lifetime) throw new TypeError('clearMs must be greater than activeMs');
     const trackers = new Map();
     let revision = 0;
+    let lastDisplaySample = null;
 
     function normalizedEntries(entries) {
       const result = [];
@@ -162,6 +165,7 @@
 
     function reset(entries = []) {
       trackers.clear();
+      lastDisplaySample = null;
       for (const entry of normalizedEntries(entries)) {
         const tracker = createLiveTokenRateTracker({ now });
         tracker.reset(entry.period);
@@ -174,10 +178,14 @@
       const present = new Set(nextEntries.map((entry) => entry.id));
       let changed = false;
       let fresh = false;
+      let invalidated = false;
 
       for (const [id, tracker] of trackers) {
         if (present.has(id)) continue;
-        if (tracker.getSample()) changed = true;
+        if (tracker.getSample()) {
+          changed = true;
+          invalidated = true;
+        }
         trackers.delete(id);
       }
 
@@ -194,8 +202,10 @@
         if (sample === previous) continue;
         changed = true;
         if (sample) fresh = true;
+        else if (previous) invalidated = true;
       }
 
+      if (invalidated) lastDisplaySample = null;
       if (fresh) revision += 1;
       return { changed, sample: getSample() };
     }
@@ -209,15 +219,28 @@
 
     function getSample() {
       const samples = activeSamples();
-      if (!samples.length) return null;
-      return {
-        speed: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.speed, 0)),
-        burn: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.burn, 0)),
-        sampledAt: Math.max(...samples.map((sample) => sample.sampledAt)),
-        expiresAt: Math.min(...samples.map((sample) => sample.sampledAt + lifetime)),
-        deviceCount: samples.length,
-        revision
-      };
+      if (samples.length) {
+        lastDisplaySample = {
+          speed: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.speed, 0)),
+          burn: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.burn, 0)),
+          sampledAt: Math.max(...samples.map((sample) => sample.sampledAt)),
+          deviceCount: samples.length,
+          revision
+        };
+        return {
+          ...lastDisplaySample,
+          expiresAt: Math.min(...samples.map((sample) => sample.sampledAt + lifetime)),
+          idle: false
+        };
+      }
+
+      // The retained aggregate is presentation-only: expired device samples no longer
+      // contribute to live throughput, but the last useful reading stays visible in the
+      // dimmed state until it is old enough to be genuinely unavailable.
+      const timestamp = Number(now()) || 0;
+      const expiresAt = lastDisplaySample?.sampledAt + clearAfter;
+      if (!lastDisplaySample || timestamp >= expiresAt) return null;
+      return { ...lastDisplaySample, expiresAt, idle: true };
     }
 
     function nextExpiryAt() {

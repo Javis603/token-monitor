@@ -281,6 +281,7 @@ const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProv
 const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'sync'];
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
 const LIVE_TOKEN_RATE_ACTIVE_MS = 8000;
+const LIVE_TOKEN_RATE_CLEAR_MS = 3 * 60 * 1000;
 const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;
 const initialFloatingBubble = window.__TOKEN_MONITOR_INITIAL_FLOATING_BUBBLE__ || { collapsed: false, side: null };
 const initialViewState = window.__TOKEN_MONITOR_INITIAL_VIEW_STATE__ || {};
@@ -819,7 +820,8 @@ const tokenRateBoost = tokenRateApi.createTokenRateBoostController({
 });
 const liveTokenRateTracker = tokenRateApi.createLiveTokenRateGroupTracker({
   now: () => Date.now(),
-  activeMs: LIVE_TOKEN_RATE_ACTIVE_MS
+  activeMs: LIVE_TOKEN_RATE_ACTIVE_MS,
+  clearMs: LIVE_TOKEN_RATE_CLEAR_MS
 });
 let liveTokenRateContext = '';
 let liveTokenRateIdleTimer = null;
@@ -915,7 +917,7 @@ function renderLiveTokenRate() {
   const rate = sample ? (burn ? sample.burn : sample.speed) : null;
   const value = rate === null ? '—' : formatLiveTokenRate(rate);
   const text = `${value} ${unit}`;
-  const idle = !sample;
+  const idle = !sample || sample.idle === true;
   els.liveTokenRateValue.textContent = text;
   els.liveTokenRate.dataset.mode = burn ? 'burn' : 'speed';
   els.liveTokenRate.classList.toggle('is-idle', idle);
@@ -923,7 +925,10 @@ function renderLiveTokenRate() {
   const scope = t(effectiveLiveTokenRateScope() === 'all'
     ? 'settings.appearance.liveTokenRateScopeAll'
     : 'settings.appearance.liveTokenRateScopeDevice');
-  const label = t(burn ? 'home.liveTokenRate.burnTitle' : 'home.liveTokenRate.speedTitle', { value: text, scope });
+  const labelKey = idle && sample
+    ? (burn ? 'home.liveTokenRate.burnIdleTitle' : 'home.liveTokenRate.speedIdleTitle')
+    : (burn ? 'home.liveTokenRate.burnTitle' : 'home.liveTokenRate.speedTitle');
+  const label = t(labelKey, { value: text, scope });
   els.liveTokenRate.title = label;
   els.liveTokenRate.setAttribute('aria-label', label);
 
