@@ -13,6 +13,28 @@ const {
 const { collectLimitsOnce } = require('../../src/shared/limits/collector');
 
 const NOW = Date.parse('2026-08-09T10:00:00Z');
+const PERSONAL_REQUEST_NOW = new Date(2026, 7, 9, 10, 11, 12).getTime();
+const PERSONAL_RANGE_MS = 101 * 365 * 24 * 60 * 60 * 1000;
+
+function formatLocalDateTime(value) {
+  const date = new Date(value);
+  const pad = (part) => String(part).padStart(2, '0');
+  return [
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  ].join(' ');
+}
+
+function expectedPersonalRequestBody(now) {
+  return {
+    PageNumber: 1,
+    PageSize: 100,
+    ProductCode: 'p_tcaca',
+    Status: [0, 3],
+    PackageEndTimeRangeBegin: formatLocalDateTime(now),
+    PackageEndTimeRangeEnd: formatLocalDateTime(now + PERSONAL_RANGE_MS)
+  };
+}
 
 function response(body, status = 200) {
   return {
@@ -63,7 +85,7 @@ test('parsePersonalUsage aggregates valid WorkBuddy resource packages', () => {
   assert.equal(usage.window.usedPercent, 40);
 });
 
-test('parsePersonalUsage prefers the reported used amount and excludes non-active packages', () => {
+test('parsePersonalUsage prefers reported usage and excludes requested Status 3 history packages', () => {
   const usage = parsePersonalUsage({
     data: { Response: { Data: { Accounts: [
       {
@@ -153,7 +175,7 @@ test('fetchWorkbuddyLimits sends the private personal billing request without ex
     },
     {
       env: {},
-      now: () => NOW,
+      now: () => PERSONAL_REQUEST_NOW,
       fetch: async (url, init) => {
         requests.push({ url: String(url), init });
         return response({
@@ -182,13 +204,7 @@ test('fetchWorkbuddyLimits sends the private personal billing request without ex
   assert.equal(requests[0].init.headers['X-Domain'], 'copilot.tencent.com');
   assert.equal(requests[0].init.headers['X-Department-Info'], 'Engineering');
   assert.equal(requests[0].init.headers['Accept-Language'], 'en');
-  assert.deepEqual(JSON.parse(requests[0].init.body), {
-    PageNumber: 1,
-    PageSize: 100,
-    ProductCode: 'p_tcaca',
-    Status: [0],
-    OnlyValidPeriod: true
-  });
+  assert.deepEqual(JSON.parse(requests[0].init.body), expectedPersonalRequestBody(PERSONAL_REQUEST_NOW));
   assert.equal(provider.provider, 'workbuddy');
   assert.equal(provider.status, 'ok');
   assert.equal(provider.source, 'api');
@@ -247,6 +263,7 @@ test('fetchWorkbuddyLimits uses the WorkBuddy app session without asking users f
   assert.equal(requests[0].init.headers.Authorization, undefined);
   assert.equal(requests[0].init.headers.Cookie, undefined);
   assert.equal(requests[0].init.headers['X-User-Id'], undefined);
+  assert.deepEqual(JSON.parse(requests[0].init.body), expectedPersonalRequestBody(NOW));
   assert.equal(provider.status, 'ok');
   assert.equal(provider.source, 'local');
   assert.equal(provider.sourceDetail, 'app');
