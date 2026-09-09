@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
 const {
   appSignOptions,
@@ -42,8 +43,24 @@ test('disables timestamp and hardened runtime only for local development signing
   assert.equal(localOptions.hardenedRuntime, false);
   assert.equal(localOptions.timestamp, 'none');
   assert.equal(localOptions.ignore.length, 1);
-  assert.equal(localOptions.ignore[0]('/tmp/Electron Framework.framework/Versions/Current/Resources/locale.pak'), true);
-  assert.equal(localOptions.ignore[0]('/tmp/Electron Framework.framework/Versions/A/Resources/locale.pak'), false);
+  assert.equal(localOptions.ignore[0](path.join(
+    path.sep,
+    'tmp',
+    'Electron Framework.framework',
+    'Versions',
+    'Current',
+    'Resources',
+    'locale.pak'
+  )), true);
+  assert.equal(localOptions.ignore[0](path.join(
+    path.sep,
+    'tmp',
+    'Electron Framework.framework',
+    'Versions',
+    'A',
+    'Resources',
+    'locale.pak'
+  )), false);
   assert.deepEqual(await localOptions.optionsForFile('/tmp/example'), {
     entitlements: '/tmp/inherit.entitlements',
     hardenedRuntime: false,
@@ -62,10 +79,10 @@ test('disables timestamp and hardened runtime only for local development signing
 });
 
 test('local ad-hoc signing explicitly signs every Electron helper with preview entitlements', () => {
-  const app = '/tmp/Token Monitor.app';
+  const app = path.join(path.sep, 'tmp', 'Token Monitor.app');
   const helpers = localElectronHelperPaths(app);
 
-  assert.deepEqual(helpers.map((helper) => helper.slice(helper.lastIndexOf('/') + 1)), [
+  assert.deepEqual(helpers.map((helper) => path.basename(helper)), [
     'Token Monitor Helper.app',
     'Token Monitor Helper (GPU).app',
     'Token Monitor Helper (Plugin).app',
