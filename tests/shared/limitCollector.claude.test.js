@@ -547,7 +547,6 @@ test('Claude Web authentication failure does not silently fall back to another l
 test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is unavailable', async () => {
   const provider = await fetchClaudeLimits({}, {
     platform: 'win32',
-    env: { ComSpec: 'cmd.exe', PATH: '' },
     now: () => Date.parse('2026-06-11T00:00:00Z'),
     claudeCredentialPath: 'C:\\Users\\Javis\\.claude\\.credentials.json',
     stat: async () => ({ mtimeMs: 1 }),
@@ -587,6 +586,7 @@ test('Claude limits fall back to CLI usage when OAuth credentials are not discov
       error.code = 'ENOENT';
       throw error;
     },
+    readMacKeychain: false,
     isClaudeCliAuthenticated: async () => true,
     runClaudeUsageCli: async () => {
       cliCalls += 1;
@@ -619,6 +619,7 @@ test('Claude CLI fallback requires a positive non-interactive auth status', asyn
     stat: async () => {
       throw Object.assign(new Error('missing'), { code: 'ENOENT' });
     },
+    readMacKeychain: false,
     runClaudeAuthStatus: async () => [
       'Claude Code 2.1.0',
       JSON.stringify({ loggedIn: true, authMethod: 'oauth' })
@@ -651,6 +652,7 @@ test('Claude CLI fallback preserves the original error when auth is not positive
         stat: async () => {
           throw Object.assign(new Error('missing'), { code: 'ENOENT' });
         },
+        readMacKeychain: false,
         runClaudeAuthStatus: async () => authOutput,
         runClaudeUsageCli: async () => {
           usageCalls += 1;
@@ -691,136 +693,50 @@ test('Claude auth status uses cmd.exe without shell mode on Windows', async () =
   assert.equal(stdinEnded, true);
 });
 
-test('Claude limits read credential files but never macOS Keychain or Windows Credential Manager', async () => {
-  for (const platform of ['darwin', 'win32']) {
-    let fileChecks = 0;
-    let osVaultReads = 0;
-    await assert.rejects(
-      fetchClaudeLimits({}, {
-        platform,
-        env: {},
-        claudeCredentialPath: '/tmp/missing-claude-credentials.json',
-        stat: async () => {
-          fileChecks += 1;
-          throw Object.assign(new Error('missing'), { code: 'ENOENT' });
-        },
-        readdirSync: () => [],
-        readWindowsCredentialSecret: async () => { osVaultReads += 1; return '{}'; },
-        spawn: () => { osVaultReads += 1; throw new Error('unexpected OS credential access'); },
-        isClaudeCliAuthenticated: async () => false
-      }),
-      (error) => error?.status === 'notConfigured'
-    );
-    assert.equal(fileChecks, 1);
-    assert.equal(osVaultReads, 0);
-  }
-});
-
-test('Claude treats an expired credential file as read-only and falls back to an authenticated CLI', async () => {
-  const nowMs = Date.parse('2026-07-25T00:00:00Z');
-  const credentialPath = '/Users/test/.claude/.credentials.json';
-  const stored = {
-    claudeAiOauth: {
-      accessToken: 'expired-access-token',
-      refreshToken: 'file-refresh-token',
-      expiresAt: nowMs - 1,
-      subscriptionType: 'max',
-      rateLimitTier: 'default_claude_max_5x'
+test('Claude limits read Windows Credential Manager credentials when credential files are absent', async () => {
+  const provider = await fetchClaudeLimits({}, {
+    platform: 'win32',
+    now: () => Date.parse('2026-06-11T00:00:00Z'),
+    claudeCredentialPath: 'C:\\Users\\Javis\\.claude\\.credentials.json',
+    stat: async () => {
+      const error = new Error('missing');
+      error.code = 'ENOENT';
+      throw error;
+    },
+    readWindowsCredentialSecret: async (service, targets) => {
+      assert.equal(service, 'Claude Code-credentials');
+      assert.equal(targets.includes('Claude Code-credentials'), true);
+      return JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'credential-manager-token',
+          refreshToken: 'credential-manager-refresh',
+          expiresAt: Date.parse('2026-06-12T00:00:00Z'),
+          subscriptionType: 'max',
+          rateLimitTier: 'default_claude_max_5x'
+        }
+      });
+    },
+    fetch: async (url, options) => {
+      assert.equal(options.headers.authorization, 'Bearer credential-manager-token');
+      return {
+        ok: true,
+        json: async () => url.endsWith('/api/oauth/profile')
+          ? DEFAULT_CLAUDE_PROFILE
+          : {
+              five_hour: {
+                utilization: 12,
+                resets_at: '2026-06-11T05:00:00Z'
+              }
+            }
+      };
     }
-  };
-  let fetchCalls = 0;
-  let mutationCalls = 0;
-  const provider = await fetchClaudeLimits({}, {
-    platform: 'darwin',
-    env: {},
-    now: () => nowMs,
-    claudeCredentialPath: credentialPath,
-    stat: async () => ({ mtimeMs: 1 }),
-    readFile: async () => JSON.stringify(stored),
-    writeFile: async () => { mutationCalls += 1; },
-    rename: async () => { mutationCalls += 1; },
-    unlink: async () => { mutationCalls += 1; },
-    fetch: async () => {
-      fetchCalls += 1;
-      throw new Error('an expired foreign credential must not be used or refreshed');
-    },
-    isClaudeCliAuthenticated: async () => true,
-    runClaudeUsageCli: async () => [
-      'Current session',
-      '95% left',
-      'Resets 4pm',
-      'Current week',
-      '80% left',
-      'Resets Jul 30'
-    ].join('\n')
   });
 
-  assert.equal(provider.source, 'cli');
-  assert.equal(fetchCalls, 0);
-  assert.equal(mutationCalls, 0);
-});
-
-test('Claude falls back from a rejected credential file without refreshing or rewriting it', async () => {
-  const nowMs = Date.parse('2026-07-25T00:00:00Z');
-  const requests = [];
-  let mutationCalls = 0;
-  const provider = await fetchClaudeLimits({}, {
-    platform: 'linux',
-    env: {},
-    now: () => nowMs,
-    claudeCredentialPath: '/home/test/.claude/.credentials.json',
-    stat: async () => ({ mtimeMs: 1 }),
-    readFile: async () => JSON.stringify({
-      claudeAiOauth: {
-        accessToken: 'rejected-access-token',
-        refreshToken: 'foreign-refresh-token',
-        expiresAt: nowMs + 60 * 60 * 1000
-      }
-    }),
-    writeFile: async () => { mutationCalls += 1; },
-    rename: async () => { mutationCalls += 1; },
-    unlink: async () => { mutationCalls += 1; },
-    fetch: async (url) => {
-      requests.push(url);
-      return { ok: false, status: 401 };
-    },
-    isClaudeCliAuthenticated: async () => true,
-    runClaudeUsageCli: async () => [
-      'Current session',
-      '95% left',
-      'Resets 4pm',
-      'Current week',
-      '80% left',
-      'Resets Jul 30'
-    ].join('\n')
-  });
-
-  assert.equal(provider.source, 'cli');
-  assert.deepEqual(requests, ['https://api.anthropic.com/api/oauth/usage']);
-  assert.equal(mutationCalls, 0);
-});
-
-test('Claude preserves an explicit OAuth token error instead of switching to the local CLI account', async () => {
-  let authCalls = 0;
-  let usageCalls = 0;
-  await assert.rejects(
-    fetchClaudeLimits({}, {
-      env: { CLAUDE_CODE_OAUTH_TOKEN: 'explicit-access-token' },
-      fetch: async () => ({ ok: false, status: 401 }),
-      isClaudeCliAuthenticated: async () => {
-        authCalls += 1;
-        return true;
-      },
-      runClaudeUsageCli: async () => {
-        usageCalls += 1;
-        return '';
-      }
-    }),
-    (error) => error?.status === 'unauthorized'
-  );
-
-  assert.equal(authCalls, 0);
-  assert.equal(usageCalls, 0);
+  assert.equal(provider.provider, 'claude');
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'oauth');
+  assert.equal(provider.accountLabel, 'Max 5x');
+  assert.equal(provider.windows[0].usedPercent, 12);
 });
 
 test('Claude OAuth profile provides stable cross-device account identity and metadata', async () => {
@@ -1167,7 +1083,7 @@ test('Claude CLI usage preserves colon-delimited reset lines', () => {
     'Current session',
     '95% left',
     'Resets:4pm',
-    'Current week',
+    'Current week (all models)',
     '80% left',
     'Resets:Jun 19'
   ].join('\n'), {

@@ -1,16 +1,17 @@
 'use strict';
 
-// Claude limits provider: read-only file-based or explicit OAuth and Web
-// session credentials, the guarded CLI fallback, identity/prepaid caches, and
-// usage → provider-window mapping. Reached
+// Claude limits provider: OAuth and Web session credentials, the CLI fallback,
+// identity/prepaid caches, and the usage → provider-window mapping. Reached
 // through providerFetchers() in src/shared/limits/collector.js, which re-exports
 // the handful of names the widget and the tests use.
 
+const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { normalizeLimitProvider } = require('../../limits/core');
+const { abortError } = require('../../probeDeadline');
 const { hashKey } = require('../../hashKey');
 const {
   PLAN_LABEL_ALIASES,
@@ -31,6 +32,9 @@ const {
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile';
 const CLAUDE_WEB_BASE_URL = 'https://claude.ai';
+const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
+const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+const CLAUDE_REFRESH_LEEWAY_MS = 5 * 60 * 1000;
 const CLAUDE_IDENTITY_CACHE_TTL_MS = 60 * 60 * 1000;
 const CLAUDE_IDENTITY_CACHE_MAX_ENTRIES = 16;
 const CLAUDE_IDENTITY_CACHE_STATE_KEY = 'claude.identity-cache';
@@ -42,12 +46,8 @@ const CLAUDE_PREPAID_IDLE_TTL_FACTOR = 6;
 const CLAUDE_PREPAID_CACHE_STATE_KEY = 'claude.prepaid-cache';
 const CLAUDE_SESSION_WINDOW_MINUTES = 5 * 60;
 const CLAUDE_WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
-function shouldTryClaudeCliFallback(error, credentials) {
-  if (['notConfigured', 'sourceRateLimited', 'unavailable', 'error'].includes(error?.status)) return true;
-  // An explicit token identifies the source the user chose, so a rejected one
-  // must not silently switch to a potentially different local CLI account.
-  // File credentials belong to Claude Code; let that owner service the fallback.
-  return error?.status === 'unauthorized' && credentials?.source === 'file';
+function shouldTryClaudeCliFallback(error) {
+  return ['notConfigured', 'sourceRateLimited', 'unavailable', 'error'].includes(error?.status);
 }
 
 function normalizeClaudeWebCookie(value) {
@@ -139,12 +139,14 @@ async function rankClaudeCredentialFiles(deps = {}) {
   const candidates = [];
   const nativePath = deps.claudeCredentialPath || claudeCredentialPath(env);
   candidates.push({
-    path: nativePath
+    path: nativePath,
+    identityLabel: env.CLAUDE_CONFIG_DIR ? 'CLAUDE_CONFIG_DIR/.credentials.json' : '~/.claude/.credentials.json'
   });
   if (platform === 'win32' && !env.CLAUDE_CONFIG_DIR) {
     for (const wslPath of wslClaudeCredentialPaths(deps)) {
       candidates.push({
-        path: wslPath
+        path: wslPath,
+        identityLabel: `wsl:${wslPath.slice(7).replace(/\\\.claude\\\.credentials\.json$/, '')}`
       });
     }
   }
@@ -183,20 +185,25 @@ function claudeCredentialsFromOauth(oauth, meta = {}) {
   if (!oauth?.accessToken) return null;
   return {
     source: meta.source || '',
+    filePath: meta.filePath,
+    fileShape: meta.fileShape,
     accessToken: String(oauth.accessToken),
+    refreshToken: oauth.refreshToken ? String(oauth.refreshToken) : null,
     expiresAt: normalizeExpiresAt(oauth.expiresAt),
+    identity: meta.identity || `${meta.source || 'claude'}:${oauth.subscriptionType || ''}:${oauth.rateLimitTier || ''}`,
     accountLabel: claudePlanLabelFromParts(oauth.subscriptionType, oauth.rateLimitTier)
   };
 }
 
 async function readClaudeCredentials(deps = {}) {
   const env = deps.env || process.env;
-  const accessToken = envValue(env, 'CLAUDE_CODE_OAUTH_TOKEN');
-  if (accessToken) {
+  if (env.CLAUDE_CODE_OAUTH_TOKEN) {
     return {
       source: 'env',
-      accessToken,
+      accessToken: String(env.CLAUDE_CODE_OAUTH_TOKEN),
+      refreshToken: null,
       expiresAt: null,
+      identity: 'env:CLAUDE_CODE_OAUTH_TOKEN',
       accountLabel: ''
     };
   }
@@ -204,9 +211,13 @@ async function readClaudeCredentials(deps = {}) {
   for (const candidate of await rankClaudeCredentialFiles(deps)) {
     try {
       const raw = await readJsonFile(candidate.path, deps);
+      const fileShape = raw && typeof raw === 'object' && raw.claudeAiOauth ? 'claudeAiOauth' : 'root';
       const oauth = extractClaudeOauth(raw);
       const credentials = claudeCredentialsFromOauth(oauth, {
-        source: 'file'
+        source: 'file',
+        filePath: candidate.path,
+        fileShape,
+        identity: `path:${candidate.identityLabel}:${oauth?.subscriptionType || ''}:${oauth?.rateLimitTier || ''}`
       });
       if (credentials) return credentials;
     } catch (error) {
@@ -214,7 +225,162 @@ async function readClaudeCredentials(deps = {}) {
     }
   }
 
+  if ((deps.platform || process.platform) === 'win32' && deps.readWindowsCredential !== false) {
+    const text = await readWindowsClaudeCredentials(deps).catch(() => '');
+    if (text) {
+      try {
+        const oauth = extractClaudeOauth(JSON.parse(text));
+        const credentials = claudeCredentialsFromOauth(oauth, {
+          source: 'wincred',
+          identity: `wincred:Claude Code-credentials:${oauth?.subscriptionType || ''}:${oauth?.rateLimitTier || ''}`
+        });
+        if (credentials) return credentials;
+      } catch (_) {}
+    }
+  }
+
+  if ((deps.platform || process.platform) === 'darwin' && deps.readMacKeychain !== false) {
+    const text = await readMacKeychainSecret('Claude Code-credentials', deps).catch(() => '');
+    if (text) {
+      const oauth = extractClaudeOauth(JSON.parse(text));
+      const credentials = claudeCredentialsFromOauth(oauth, {
+        source: 'keychain',
+        identity: `keychain:Claude Code-credentials:${oauth?.subscriptionType || ''}:${oauth?.rateLimitTier || ''}`
+      });
+      if (credentials) return credentials;
+    }
+  }
+
   throw errorWithStatus('notConfigured', 'Claude credentials not found');
+}
+
+function windowsCredentialTargetCandidates(service, env = process.env) {
+  const candidates = [service];
+  for (const key of ['USER', 'USERNAME']) {
+    const value = envValue(env, key);
+    if (!value) continue;
+    candidates.push(`${service}:${value}`, `${service}/${value}`);
+  }
+  return uniqueStrings(candidates);
+}
+
+async function readWindowsClaudeCredentials(deps = {}) {
+  const service = 'Claude Code-credentials';
+  const targets = windowsCredentialTargetCandidates(service, deps.env || process.env);
+  if (deps.readWindowsCredentialSecret) return deps.readWindowsCredentialSecret(service, targets);
+  return readWindowsCredentialSecret(service, targets, deps);
+}
+
+let winCredApi = null;
+
+function loadWinCredApi(deps = {}) {
+  if (deps.winCredApi) return deps.winCredApi;
+  if (winCredApi !== null) return winCredApi;
+  try {
+    const koffi = deps.koffi || require('koffi');
+    const advapi32 = koffi.load('advapi32.dll');
+    const FILETIME = koffi.struct('FILETIME', {
+      dwLowDateTime: 'uint32_t',
+      dwHighDateTime: 'uint32_t'
+    });
+    const CREDENTIALW = koffi.struct('CREDENTIALW', {
+      Flags: 'uint32_t',
+      Type: 'uint32_t',
+      TargetName: 'str16',
+      Comment: 'str16',
+      LastWritten: FILETIME,
+      CredentialBlobSize: 'uint32_t',
+      CredentialBlob: 'void *',
+      Persist: 'uint32_t',
+      AttributeCount: 'uint32_t',
+      Attributes: 'void *',
+      TargetAlias: 'str16',
+      UserName: 'str16'
+    });
+    winCredApi = {
+      koffi,
+      CREDENTIALW,
+      CredReadW: advapi32.func('bool CredReadW(const char16_t *TargetName, uint32_t Type, uint32_t Flags, _Out_ CREDENTIALW **Credential)'),
+      CredFree: advapi32.func('void CredFree(void *Buffer)')
+    };
+  } catch (_) {
+    winCredApi = false;
+  }
+  return winCredApi;
+}
+
+function decodeWindowsCredentialBlob(api, pointer, size) {
+  if (!pointer || !size) return '';
+  let buffer;
+  try {
+    buffer = Buffer.from(new Uint8Array(api.koffi.view(pointer, size)));
+  } catch (_) {
+    buffer = Buffer.from(api.koffi.decode(pointer, 'uint8_t', size));
+  }
+  const utf8 = buffer.toString('utf8').replace(/\0+$/g, '').trim();
+  const utf16 = size % 2 === 0 ? buffer.toString('utf16le').replace(/\0+$/g, '').trim() : '';
+  if (/^\s*[{[]/.test(utf8) || utf8.includes('accessToken')) return utf8;
+  if (/^\s*[{[]/.test(utf16) || utf16.includes('accessToken')) return utf16;
+  return utf8 || utf16;
+}
+
+function readWindowsCredentialSecret(_service, targets, deps = {}) {
+  if ((deps.platform || process.platform) !== 'win32') return '';
+  const api = loadWinCredApi(deps);
+  if (!api) return '';
+  const CRED_TYPE_GENERIC = 1;
+  for (const target of targets) {
+    const out = [null];
+    try {
+      if (!api.CredReadW(target, CRED_TYPE_GENERIC, 0, out) || !out[0]) continue;
+      const credential = api.koffi.decode(out[0], api.CREDENTIALW);
+      const text = decodeWindowsCredentialBlob(api, credential.CredentialBlob, credential.CredentialBlobSize);
+      if (text) return text;
+    } catch (_) {
+      // Try the next target name; WinCred is a best-effort source.
+    } finally {
+      if (out[0]) {
+        try { api.CredFree(out[0]); } catch (_) {}
+      }
+    }
+  }
+  return '';
+}
+
+function readMacKeychainSecret(service, deps = {}) {
+  const spawnFn = deps.spawn || spawn;
+  const signal = deps.signal;
+  if (signal?.aborted) return Promise.reject(abortError(signal));
+  return new Promise((resolve, reject) => {
+    const child = spawnFn('security', ['find-generic-password', '-s', service, '-w'], { windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener?.('abort', onAbort);
+      callback(value);
+    };
+    const onAbort = () => {
+      try { child.kill('SIGTERM'); } catch (_) {}
+      finish(reject, abortError(signal));
+    };
+    const timer = setTimeout(() => {
+      try { child.kill('SIGTERM'); } catch (_) {}
+      finish(reject, new Error('macOS keychain lookup timed out'));
+    }, 5000);
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('error', (error) => finish(reject, error));
+    child.on('close', (code) => {
+      if (code !== 0) finish(reject, new Error(stderr.trim() || `security exited ${code}`));
+      else finish(resolve, stdout.trim());
+    });
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
 }
 
 function fetchClaudeWebJson(url, headers, deps = {}, options = {}) {
@@ -366,6 +532,80 @@ function mapClaudeUsageToProvider(usage, meta = {}) {
     updatedAt: meta.updatedAt,
     windows
   });
+}
+
+async function refreshClaudeAccessToken(refreshToken, deps = {}) {
+  if (!refreshToken) throw errorWithStatus('unauthorized', 'No refresh token available');
+  const fetchFn = deps.fetch || fetch;
+  const url = deps.claudeTokenUrl || CLAUDE_OAUTH_TOKEN_URL;
+  const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id: CLAUDE_OAUTH_CLIENT_ID
+  });
+  try {
+    const response = await fetchFn(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        accept: 'application/json',
+        'user-agent': TOKEN_MONITOR_USER_AGENT
+      },
+      body: body.toString(),
+      ...(controller ? { signal: controller.signal } : {})
+    });
+    if (!response.ok) {
+      const status = response.status === 400 || response.status === 401 ? 'unauthorized'
+        : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
+      throw errorWithStatus(status, `oauth/token returned ${response.status}`);
+    }
+    const json = await response.json();
+    const nowMs = (deps.now || Date.now)();
+    const lifetimeSec = Math.max(60, Number(json.expires_in) || 3600);
+    return {
+      accessToken: String(json.access_token),
+      refreshToken: json.refresh_token ? String(json.refresh_token) : refreshToken,
+      expiresAt: nowMs + lifetimeSec * 1000
+    };
+  } catch (error) {
+    if (error?.name === 'AbortError') throw errorWithStatus('unavailable', 'oauth/token timed out');
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function writeClaudeCredentials(filePath, fileShape, updated, deps = {}) {
+  const readFile = deps.readFile || fs.promises.readFile;
+  const writeFile = deps.writeFile || fs.promises.writeFile;
+  const rename = deps.rename || fs.promises.rename;
+  let existing;
+  try {
+    existing = JSON.parse(await readFile(filePath, 'utf8'));
+  } catch (_) { return false; }
+  if (!existing || typeof existing !== 'object') return false;
+  if (fileShape === 'claudeAiOauth') {
+    existing.claudeAiOauth = { ...(existing.claudeAiOauth || {}), ...updated };
+  } else {
+    Object.assign(existing, updated);
+  }
+  const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    await writeFile(tmpPath, `${JSON.stringify(existing, null, 2)}\n`, { mode: 0o600 });
+    await rename(tmpPath, filePath);
+    return true;
+  } catch (_) {
+    try { await (deps.unlink || fs.promises.unlink)(tmpPath); } catch (__) {}
+    return false;
+  }
+}
+
+async function persistClaudeRefresh(credentials, refreshed, deps = {}) {
+  if (credentials.source !== 'file' || !credentials.filePath) return;
+  await writeClaudeCredentials(credentials.filePath, credentials.fileShape, refreshed, deps).catch(() => {});
 }
 
 function callClaudeUsage(accessToken, deps = {}) {
@@ -631,10 +871,18 @@ function createClaudeWebSession(cookie) {
 }
 
 function claudeOauthIdentityFingerprint(credentials) {
-  const secret = credentials?.accessToken;
+  const secret = credentials?.refreshToken || credentials?.accessToken;
   return secret
     ? hashKey('claude-oauth-identity-cache', credentials?.source || '', secret)
     : '';
+}
+
+function carryClaudeCachedIdentity(previousCredentials, nextCredentials, deps = {}) {
+  const previousFingerprint = claudeOauthIdentityFingerprint(previousCredentials);
+  const nextFingerprint = claudeOauthIdentityFingerprint(nextCredentials);
+  if (!previousFingerprint || !nextFingerprint || previousFingerprint === nextFingerprint) return;
+  const cached = claudeCachedIdentity(previousFingerprint, deps, { allowStale: true });
+  if (cached) cacheClaudeIdentity(nextFingerprint, cached, deps);
 }
 
 // claude.ai's prepaid credit pool. Web-session only: the same path under an
@@ -963,30 +1211,75 @@ async function resolveClaudeOauthIdentity(credentials, deps = {}) {
   }
 }
 
+async function delegatedClaudeRefresh(currentCredentials, deps = {}) {
+  // Spawn `claude /status` in a PTY and let Claude Code itself refresh the token.
+  // Matches CodexBar's strategy — Claude Code is a native Anthropic application,
+  // so OAuth credential use stays within sanctioned channels. Best-effort: if the
+  // probe fails we still re-read in case Claude Code touched the credentials.
+  await touchClaudeAuthPath(deps).catch(() => null);
+  const fresh = await readClaudeCredentials(deps);
+  if (!fresh.accessToken || fresh.accessToken === currentCredentials.accessToken) {
+    throw errorWithStatus('unauthorized', 'Claude Code did not refresh the OAuth token');
+  }
+  return fresh;
+}
+
+async function refreshClaudeCredentials(currentCredentials, deps = {}) {
+  const platform = deps.platform || process.platform;
+  if (platform === 'darwin') return delegatedClaudeRefresh(currentCredentials, deps);
+  if (!currentCredentials.refreshToken) {
+    throw errorWithStatus('unauthorized', 'No refresh token available');
+  }
+  const refreshed = await refreshClaudeAccessToken(currentCredentials.refreshToken, deps);
+  await persistClaudeRefresh(currentCredentials, refreshed, deps);
+  return { ...currentCredentials, ...refreshed };
+}
+
 async function fetchClaudeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
+  const platform = deps.platform || process.platform;
   const webCookie = claudeWebCookie(deps.env || process.env, options);
   if (webCookie) return fetchClaudeWebLimits(webCookie, deps, options);
-  let credentials = null;
   let oauthIdentity = null;
   try {
-    credentials = await readClaudeCredentials(deps);
+    let credentials = await readClaudeCredentials(deps);
     oauthIdentity = claudeCachedIdentity(
       claudeOauthIdentityFingerprint(credentials),
       deps,
       { allowStale: true }
     )?.identity || null;
 
-    if (credentials.source === 'file'
-      && credentials.expiresAt !== null
-      && credentials.expiresAt <= nowMs) {
-      // Never consume or rewrite Claude Code's rotating refresh token. A guarded
-      // CLI fallback below keeps quota available while Claude Code owns recovery.
-      throw errorWithStatus('unauthorized', 'Claude Code OAuth credential has expired');
+    // Proactive refresh only on non-darwin: mac uses delegated (spawning Claude Code)
+    // which is expensive; CodexBar's design likewise refreshes reactively, not on expiry.
+    if (platform !== 'darwin' && credentials.refreshToken && credentials.expiresAt
+      && credentials.expiresAt - nowMs < CLAUDE_REFRESH_LEEWAY_MS) {
+      try {
+        const previousCredentials = credentials;
+        credentials = await refreshClaudeCredentials(credentials, deps);
+        carryClaudeCachedIdentity(previousCredentials, credentials, deps);
+      } catch (_) { /* fall through; reactive retry below may still succeed */ }
     }
 
-    const usage = await callClaudeUsage(credentials.accessToken, deps);
-    oauthIdentity = await resolveClaudeOauthIdentity(credentials, deps);
+    let usage;
+    try {
+      usage = await callClaudeUsage(credentials.accessToken, deps);
+    } catch (error) {
+      if (error?.status !== 'unauthorized') throw error;
+      const previousCredentials = credentials;
+      credentials = await refreshClaudeCredentials(credentials, deps);
+      carryClaudeCachedIdentity(previousCredentials, credentials, deps);
+      usage = await callClaudeUsage(credentials.accessToken, deps);
+    }
+
+    try {
+      oauthIdentity = await resolveClaudeOauthIdentity(credentials, deps);
+    } catch (error) {
+      if (error?.cause?.status !== 'unauthorized') throw error;
+      const previousCredentials = credentials;
+      credentials = await refreshClaudeCredentials(credentials, deps);
+      carryClaudeCachedIdentity(previousCredentials, credentials, deps);
+      oauthIdentity = await resolveClaudeOauthIdentity(credentials, deps);
+    }
     const provider = mapClaudeUsageToProvider(usage, {
       ...oauthIdentity,
       accountLabel: credentials.accountLabel,
@@ -999,7 +1292,7 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
     // create a new row keyed by credential storage location or a different
     // fallback source. Let LimitsRuntime retain the previous account row.
     if (error?.code === 'CLAUDE_IDENTITY_UNAVAILABLE') throw error;
-    if (!shouldTryClaudeCliFallback(error, credentials)) throw error;
+    if (!shouldTryClaudeCliFallback(error)) throw error;
     try {
       if (!await isClaudeCliAuthenticated(deps)) throw error;
       const text = await runClaudeUsageCli(deps);
@@ -1007,13 +1300,12 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
         updatedAt: nowIso(nowMs),
         now: new Date(nowMs)
       });
-      const fallbackIdentity = error?.status === 'unauthorized' ? null : oauthIdentity;
-      if (!fallbackIdentity) return provider;
+      if (!oauthIdentity) return provider;
       return {
         ...provider,
-        accountKey: fallbackIdentity.accountKey,
-        accountEmail: fallbackIdentity.accountEmail,
-        accountName: fallbackIdentity.accountName
+        accountKey: oauthIdentity.accountKey,
+        accountEmail: oauthIdentity.accountEmail,
+        accountName: oauthIdentity.accountName
       };
     } catch (_) {
       throw error;
@@ -1446,9 +1738,23 @@ function runClaudeDirectUsageCli(deps = {}) {
   );
 }
 
+async function touchClaudeAuthPath(deps = {}) {
+  if (deps.touchClaudeAuthPath) return deps.touchClaudeAuthPath();
+  // Spawn `claude /status` in PTY to let Claude Code itself perform an auth check
+  // and refresh the OAuth token if needed. We don't parse output — the side-effect
+  // (mutated credentials file / Keychain entry) is the signal. Permissive exit
+  // marker matches common /status output tokens so we exit promptly on success.
+  return runClaudePtyProbe('/status', '(?:loggedin|subscription|account|model|version|email|organization)', {
+    ...deps,
+    claudeCliTimeoutSeconds: deps.claudeStatusTimeoutSeconds || 20,
+    claudeCliTimeoutMs: deps.claudeStatusTimeoutMs || 25000
+  });
+}
+
 module.exports = {
   claudeCommandCandidates,
   claudeWebCookie,
+  delegatedClaudeRefresh,
   fetchClaudeLimits,
   isClaudeCliAuthenticated,
   mapClaudeCliUsageToProvider,
@@ -1456,6 +1762,9 @@ module.exports = {
   normalizeClaudeWebCookieInput,
   parseClaudeCliUsageText,
   rankClaudeCredentialFiles,
+  refreshClaudeAccessToken,
+  refreshClaudeCredentials,
   runClaudeAuthStatus,
+  touchClaudeAuthPath,
   wslClaudeCredentialPaths
 };
