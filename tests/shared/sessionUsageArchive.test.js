@@ -10,6 +10,7 @@ try {
   archiveApi = require('../../src/shared/sessionUsageArchive');
 } catch (_) {}
 
+const { ownMap } = require('../helpers/ownMap');
 const {
   applySessionUsageArchive,
   captureSessionUsageArchive,
@@ -338,7 +339,7 @@ test('capture does not churn timestamps when session data is unchanged', () => {
   const second = captureSessionUsageArchive(first, liveSummary(), new Date('2026-07-09T08:30:00.000Z'));
 
   assert.equal(second.sessions['opencode:o1'].capturedAt, '2026-07-09T08:15:00.000Z');
-  assert.deepEqual(second, first);
+  assert.deepEqual(ownMap(second), ownMap(first));
 });
 
 test('persists archive data outside settings via injectable storage helpers', () => {
@@ -396,10 +397,10 @@ test('multi-model archived sessions keep model components Unclassified instead o
   assert.equal(visible.allTime.cacheWriteTokens, 10);
   assert.equal(visible.allTime.outputTokens, 20);
   assert.equal(visible.allTime.clientCacheReads.opencode, 60);
-  assert.deepEqual(visible.allTime.modelCacheReads, {});
-  assert.deepEqual(visible.allTime.modelCacheWrites, {});
-  assert.deepEqual(visible.allTime.modelOutputs, {});
-  assert.deepEqual(visible.allTime.modelUnclassifiedTokens, { alpha: 34, beta: 33, gamma: 33 });
+  assert.deepEqual(ownMap(visible.allTime.modelCacheReads), {});
+  assert.deepEqual(ownMap(visible.allTime.modelCacheWrites), {});
+  assert.deepEqual(ownMap(visible.allTime.modelOutputs), {});
+  assert.deepEqual(ownMap(visible.allTime.modelUnclassifiedTokens), { alpha: 34, beta: 33, gamma: 33 });
   assert.equal(visible.allTime.capabilities.tokenComponents, false);
 });
 

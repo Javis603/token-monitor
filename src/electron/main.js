@@ -252,6 +252,8 @@ const {
 const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServicesRecovery');
 const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
+const { attachCodexQuotaEstimates, resolveCodexQuotaObservedAt } = require('../shared/codexQuota');
+const { createCodexQuotaArchiveStore } = require('./codexQuotaArchive');
 const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
 const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidgetDemand');
@@ -2850,6 +2852,31 @@ let sseRetryTimer = null;
 let streamConnected = false;
 let streamFailure = null;
 let lastCollectedDevice = null;
+let codexQuotaStore = null;
+
+function codexQuotaArchivePath() {
+  return path.join(app.getPath('userData'), 'codex-quota-archive.json');
+}
+
+// Load/lock/capture/persist live in src/electron/codexQuotaArchive.js so the
+// damaged-archive fail-closed rule (an unreadable, corrupt or wrong-version
+// file is never overwritten by this process) is unit-testable without
+// launching Electron.
+function getCodexQuotaStore() {
+  if (!codexQuotaStore) codexQuotaStore = createCodexQuotaArchiveStore(codexQuotaArchivePath());
+  return codexQuotaStore;
+}
+
+function getCodexQuotaArchive() {
+  return getCodexQuotaStore().load();
+}
+
+function captureCodexQuotaFromDevice(device) {
+  if (!device) return;
+  const observedAt = resolveCodexQuotaObservedAt(device);
+  if (!observedAt) return;
+  getCodexQuotaStore().capture(device, observedAt);
+}
 let latestHubStats = null;
 let latestHubStatsReceivedAt = null;
 let latestHubStatsSource = 'none';
@@ -2867,10 +2894,14 @@ let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
 
 function electronPresentationStats(stats) {
-  return projectLimitStatsForDisplay(stats, {
+  const projected = projectLimitStatsForDisplay(stats, {
     localDeviceId: settings?.deviceId,
     syncActive: mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim()),
     opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
+  });
+  return attachCodexQuotaEstimates(projected, getCodexQuotaArchive(), {
+    localDeviceId: settings?.deviceId,
+    syncActive: mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim())
   });
 }
 let trayCodexPendingSince = 0;
@@ -3773,6 +3804,7 @@ function startSyncCollector() {
         syncUploadIntervalMs: syncUploadIntervalMs()
       };
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
+      captureCodexQuotaFromDevice(lastCollectedDevice);
       const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
       if (displayStats) {
         updateDiscordRpcDisplay(displayStats);
@@ -3811,6 +3843,7 @@ function startHostCollector() {
       if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
       const visibleSummary = summary;
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
+      captureCodexQuotaFromDevice(lastCollectedDevice);
       if (!embeddedHub) return;
       try {
         const stale = settings.lastPostedDeviceId;
@@ -4375,6 +4408,7 @@ function startLocalCollector() {
       const visibleSummary = summary;
       localDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       lastCollectedDevice = localDevice;
+      captureCodexQuotaFromDevice(lastCollectedDevice);
       localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
       attachLocalNativeViews(localStats, localDevice);
       updateDiscordRpcDisplay(localStats);

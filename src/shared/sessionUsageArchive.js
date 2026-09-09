@@ -33,7 +33,7 @@ function sessionKey(client, sessionId) {
 }
 
 function sameJson(left, right) {
-  return isDeepStrictEqual(left || null, right || null);
+  return isDeepStrictEqual(cloneJson(left), cloneJson(right));
 }
 
 function normalizedSessionFrom(value, fallbackKey) {

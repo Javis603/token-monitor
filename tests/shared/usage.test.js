@@ -5,11 +5,16 @@ const test = require('node:test');
 
 const {
   aggregateDevices,
+  aggregateHistory,
+  applyPeriodDelta,
+  carryDeviceHistory,
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,
   mergeDeviceRecord,
   mergePeriods,
   normalizeClientName,
+  normalizeDeviceRecord,
+  normalizePeriod,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('../../src/shared/usage');
 
@@ -841,6 +846,12 @@ test('normalizeClientName keeps Qoder CN distinct from international Qoder', () 
   assert.equal(normalizeClientName('Qoder'), 'qoder');
 });
 
+test('normalizeClientName trims long uncontrolled separator runs in linear time', () => {
+  const separators = '-'.repeat(100_000);
+  assert.equal(normalizeClientName(`${separators}custom-client${separators}`), 'custom-client');
+  assert.equal(normalizeClientName(separators), null);
+});
+
 test('extractUsageFromTokscale keeps model usage grouped by client', () => {
   const period = extractUsageFromTokscale([
     { client: 'Hermes', model: 'claude-3-5-sonnet', totalTokens: 100, costUsd: 1.25 },
@@ -1026,8 +1037,6 @@ test('aggregateDevices keeps a zero-usage live session unarchived in either merg
   assert.equal(aggregateDevices([live, archived], 0).periods.allTime.sessions['codex:s1'].archived, undefined);
   assert.equal(aggregateDevices([archived, live], 0).periods.allTime.sessions['codex:s1'].archived, undefined);
 });
-
-const { normalizeDeviceRecord, aggregateHistory, carryDeviceHistory } = require('../../src/shared/usage');
 
 test('normalizeDeviceRecord carries a history field when present', () => {
   const rec = normalizeDeviceRecord({
@@ -1234,4 +1243,289 @@ test('aggregateDevices falls back to UTC-day compare for old agents without peri
     today: { totalTokens: 7 }
   }], 10 * 60 * 1000, Date.parse('2026-06-26T06:00:00.000Z'));
   assert.equal(kept.periods.today.totalTokens, 7);
+});
+
+test('extractUsageFromTokscale keeps row-local component closure per client and model', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 100, inputTokens: 60, outputTokens: 10, cacheReadTokens: 20, cacheWriteTokens: 10 },
+    { client: 'Cursor', model: 'gpt-5', totalTokens: 40, cacheReadTokens: 40 }
+  ]);
+  assert.deepEqual(period.clientModelTokenComponents.codex['gpt-5'], {
+    input: 60, output: 10, cacheRead: 20, cacheWrite: 10, unclassified: 0, complete: true
+  });
+  assert.deepEqual(period.clientModelTokenComponents.cursor['gpt-5'], {
+    input: 0, output: 0, cacheRead: 40, cacheWrite: 0, unclassified: 0, complete: true
+  });
+});
+
+test('extractUsageFromTokscale fails closed when cache and output exceed the row total', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 10, outputTokens: 8, cacheReadTokens: 5, cacheWriteTokens: 5 }
+  ]);
+  assert.deepEqual(period.clientModelTokenComponents.codex['gpt-5'], {
+    input: 0, output: 0, cacheRead: 0, cacheWrite: 0, unclassified: 10, complete: false
+  });
+  const accounted = ['input', 'output', 'cacheRead', 'cacheWrite', 'unclassified']
+    .reduce((sum, key) => sum + period.clientModelTokenComponents.codex['gpt-5'][key], 0);
+  assert.equal(accounted, period.clientModels.codex['gpt-5']);
+  assert.equal(period.totalTokens, 10);
+  assert.equal(period.cacheReadTokens, 0);
+  assert.equal(period.cacheWriteTokens, 0);
+  assert.equal(period.outputTokens, 0);
+  assert.equal(period.unclassifiedTokens, 10);
+  assert.equal(period.capabilities.tokenComponents, false);
+  assert.equal(period.clientUnclassifiedTokens.codex, 10);
+  assert.equal(period.modelUnclassifiedTokens['gpt-5'], 10);
+});
+
+test('normalizePeriod fails closed when remote component claims exceed the client model total', () => {
+  const period = normalizePeriod({
+    clients: { codex: 100 },
+    clientModels: { codex: { 'gpt-5': 100 } },
+    clientModelTokenComponents: { codex: { 'gpt-5': { input: 150, complete: true } } }
+  });
+  assert.deepEqual(period.clientModelTokenComponents.codex['gpt-5'], { unclassified: 100, complete: false });
+
+  const claimed = normalizePeriod({
+    clients: { codex: 100 },
+    clientModels: { codex: { 'gpt-5': 100 } },
+    clientModelTokenComponents: { codex: { 'gpt-5': { input: 60, output: 10, complete: true } } }
+  });
+  // Under-closing categories keep their own row evidence (and its claimed
+  // complete bit, which describes the source row, not the trusted model
+  // total). Closing over the trusted total is re-validated by the consumer
+  // (deriveCodexExclusiveUsage); normalization only force-fails claims that
+  // EXCEED the trusted total.
+  assert.equal(claimed.clientModelTokenComponents.codex['gpt-5'].complete, true);
+  assert.equal(claimed.clientModelTokenComponents.codex['gpt-5'].input, 60);
+});
+
+test('normalizePeriod does not fabricate client model components for older payloads', () => {
+  const period = normalizePeriod({
+    clients: { codex: 100 },
+    clientModels: { codex: { 'gpt-5': 100 } },
+    modelCacheReads: { 'gpt-5': 20 },
+    capabilities: { tokenComponents: true }
+  });
+  assert.equal(Object.keys(period.clientModelTokenComponents).length, 0);
+});
+
+test('mergePeriods sums client model components and propagates fail-closed rows', () => {
+  const left = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 100, inputTokens: 60, outputTokens: 10, cacheReadTokens: 20, cacheWriteTokens: 10 }
+  ]);
+  const right = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 50, inputTokens: 30, outputTokens: 5, cacheReadTokens: 10, cacheWriteTokens: 5 }
+  ]);
+  const merged = mergePeriods(left, right);
+  assert.deepEqual(merged.clientModelTokenComponents.codex['gpt-5'], {
+    input: 90, output: 15, cacheRead: 30, cacheWrite: 15, unclassified: 0, complete: true
+  });
+
+  const withUnpriced = mergePeriods(merged, extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 50, cacheReadTokens: 90, cacheWriteTokens: 90, outputTokens: 90 }
+  ]));
+  const components = withUnpriced.clientModelTokenComponents.codex['gpt-5'];
+  assert.equal(components.complete, false);
+  assert.equal(components.unclassified, 50);
+  const accounted = ['input', 'output', 'cacheRead', 'cacheWrite', 'unclassified']
+    .reduce((sum, key) => sum + components[key], 0);
+  assert.equal(accounted, withUnpriced.clientModels.codex['gpt-5']);
+});
+
+test('applyPeriodDelta carries client model components exactly across a watch tick', () => {
+  const anchorToday = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 100, inputTokens: 60, outputTokens: 10, cacheReadTokens: 20, cacheWriteTokens: 10 }
+  ]);
+  const freshToday = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 150, inputTokens: 90, outputTokens: 15, cacheReadTokens: 30, cacheWriteTokens: 15 }
+  ]);
+  const baseAllTime = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 500, inputTokens: 300, outputTokens: 50, cacheReadTokens: 100, cacheWriteTokens: 50 }
+  ]);
+  const result = applyPeriodDelta(baseAllTime, freshToday, anchorToday);
+  assert.deepEqual(result.clientModelTokenComponents.codex['gpt-5'], {
+    input: 330, output: 55, cacheRead: 110, cacheWrite: 55, unclassified: 0, complete: true
+  });
+  assert.equal(result.clientModels.codex['gpt-5'], 550);
+});
+
+test('mergeDeviceRecord preserves retained client model components for untracked clients', () => {
+  const existing = {
+    deviceId: 'macbook',
+    hostname: 'macbook.local',
+    platform: 'darwin',
+    updatedAt: '2026-05-27T00:00:00.000Z',
+    receivedAt: '2026-05-27T00:00:00.000Z',
+    today: extractUsageFromTokscale([
+      { client: 'Codex', model: 'gpt-5', totalTokens: 100, inputTokens: 60, outputTokens: 10, cacheReadTokens: 20, cacheWriteTokens: 10 }
+    ]),
+    month: extractUsageFromTokscale([
+      { client: 'Codex', model: 'gpt-5', totalTokens: 200, inputTokens: 120, outputTokens: 20, cacheReadTokens: 40, cacheWriteTokens: 20 }
+    ]),
+    allTime: extractUsageFromTokscale([
+      { client: 'Codex', model: 'gpt-5', totalTokens: 300, inputTokens: 180, outputTokens: 30, cacheReadTokens: 60, cacheWriteTokens: 30 }
+    ]),
+    trackedClients: ['codex']
+  };
+  const incoming = {
+    deviceId: 'macbook',
+    hostname: 'macbook.local',
+    platform: 'darwin',
+    updatedAt: '2026-05-27T00:01:00.000Z',
+    receivedAt: '2026-05-27T00:01:00.000Z',
+    today: extractUsageFromTokscale([
+      { client: 'Cursor', model: 'x', totalTokens: 7 }
+    ]),
+    month: extractUsageFromTokscale([
+      { client: 'Cursor', model: 'x', totalTokens: 7 }
+    ]),
+    allTime: extractUsageFromTokscale([
+      { client: 'Cursor', model: 'x', totalTokens: 7 }
+    ]),
+    trackedClients: ['cursor']
+  };
+  const merged = mergeDeviceRecord(existing, incoming);
+  const today = merged.periods.today;
+  assert.equal(today.clientModels.codex['gpt-5'], 100);
+  assert.equal(today.clientModelTokenComponents.codex['gpt-5'].input, 60);
+  assert.equal(today.clientModelTokenComponents.codex['gpt-5'].complete, true);
+  assert.equal(today.clientModels.cursor.x, 7);
+});
+
+test('an overflow row degrades only that row while keeping unrelated client×model evidence', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'Codex', model: 'gpt-5', totalTokens: 100, inputTokens: 60, outputTokens: 10, cacheReadTokens: 20, cacheWriteTokens: 10 },
+    { client: 'Cursor', model: 'x', totalTokens: 10, outputTokens: 8, cacheReadTokens: 5 }
+  ]);
+  assert.deepEqual(period.clientModelTokenComponents.codex['gpt-5'], {
+    input: 60, output: 10, cacheRead: 20, cacheWrite: 10, unclassified: 0, complete: true
+  });
+  assert.equal(period.clientModelTokenComponents.cursor.x.complete, false);
+  assert.equal(period.clientModelTokenComponents.cursor.x.unclassified, 10);
+  assert.equal(period.cacheReadTokens, 20);
+  assert.equal(period.outputTokens, 10);
+  assert.equal(period.unclassifiedTokens, 10);
+  assert.equal(period.capabilities.tokenComponents, false);
+});
+
+test('unsafe client and model keys do not pollute usage maps or Object.prototype', () => {
+  const beforeProtoX = Object.prototype.x;
+  const period = extractUsageFromTokscale([
+    { client: '__proto__', model: 'gpt-5', totalTokens: 10 },
+    { client: 'constructor', model: 'gpt-5', totalTokens: 10 },
+    { client: 'prototype', model: 'gpt-5', totalTokens: 10 },
+    { client: 'Codex', model: '__proto__', totalTokens: 10 },
+    { client: 'Codex', model: 'constructor', totalTokens: 10 },
+    { client: 'Codex', model: 'prototype', totalTokens: 10 },
+    { client: 'Codex', model: 'gpt-5', totalTokens: 7 }
+  ]);
+  assert.equal(period.clients.codex, 37);
+  assert.equal(period.models['gpt-5'], 37);
+  assert.equal(Object.getPrototypeOf(period.clients), null);
+  assert.equal(Object.getPrototypeOf(period.models), null);
+  assert.equal(Object.hasOwn(period.clients, '__proto__'), false);
+  assert.equal(Object.hasOwn(period.clients, 'constructor'), false);
+  assert.equal(Object.hasOwn(period.clients, 'prototype'), false);
+  assert.equal(Object.hasOwn(period.models, '__proto__'), false);
+  assert.equal(Object.hasOwn(period.models, 'constructor'), false);
+  assert.equal(Object.hasOwn(period.models, 'prototype'), false);
+  assert.equal(Object.prototype.x, beforeProtoX);
+  assert.equal(Object.hasOwn(Object.prototype, 'x'), false);
+
+  const remote = JSON.parse('{"clients":{"__proto__":9,"constructor":9,"prototype":9,"codex":7},"models":{"__proto__":9,"constructor":9,"gpt-5":7},"totalTokens":7}');
+  const normalized = normalizePeriod(remote);
+  assert.equal(normalized.clients.codex, 7);
+  assert.equal(normalized.clients.constructor, undefined);
+  assert.equal(normalized.models['gpt-5'], 7);
+  assert.equal(Object.getPrototypeOf(normalized.clients), null);
+});
+
+test('unsafe session provider keys do not pollute session maps or Object.prototype', () => {
+  const beforeProtoX = Object.prototype.x;
+  const period = extractUsageFromTokscale([
+    { client: 'Codex', sessionId: 'rollout-1', model: 'gpt-5', provider: '__proto__', totalTokens: 10 },
+    { client: 'Codex', sessionId: 'rollout-1', model: 'gpt-5', provider: 'constructor', totalTokens: 10 },
+    { client: 'Codex', sessionId: 'rollout-1', model: 'gpt-5', provider: 'prototype', totalTokens: 10 },
+    { client: 'Codex', sessionId: 'rollout-1', model: 'gpt-5', provider: 'openai', totalTokens: 7 },
+    { client: 'Codex', sessionId: 'rollout-1', model: 'gpt-5', provider: 'OpenAI', totalTokens: 3 }
+  ]);
+  const session = period.sessions['codex:rollout-1'];
+  assert.equal(session.totalTokens, 40);
+  assert.equal(session.providers.openai, 10);
+  assert.equal(typeof session.providers.constructor, 'undefined');
+  assert.equal(Object.getPrototypeOf(session.models), null);
+  assert.equal(Object.getPrototypeOf(session.modelCosts), null);
+  assert.equal(Object.getPrototypeOf(session.providers), null);
+  assert.equal(Object.hasOwn(session.providers, '__proto__'), false);
+  assert.equal(Object.hasOwn(session.providers, 'constructor'), false);
+  assert.equal(Object.hasOwn(session.providers, 'prototype'), false);
+  assert.equal(Object.prototype.x, beforeProtoX);
+  assert.equal(Object.hasOwn(Object.prototype, 'x'), false);
+
+  const remote = JSON.parse('{"sessions":{"codex:rollout-1":{"client":"codex","sessionId":"rollout-1","totalTokens":10,"models":{"gpt-5":10},"modelCosts":{"gpt-5":0.1},"providers":{"__proto__":9,"constructor":9,"prototype":9,"openai":7}}}}');
+  const normalized = normalizePeriod(remote);
+  const normalizedSession = normalized.sessions['codex:rollout-1'];
+  assert.equal(normalizedSession.providers.openai, 7);
+  assert.equal(normalizedSession.providers.constructor, undefined);
+  assert.equal(Object.hasOwn(normalizedSession.providers, '__proto__'), false);
+  assert.equal(Object.hasOwn(normalizedSession.providers, 'constructor'), false);
+  assert.equal(Object.hasOwn(normalizedSession.providers, 'prototype'), false);
+  assert.equal(Object.getPrototypeOf(normalizedSession.models), null);
+  assert.equal(Object.getPrototypeOf(normalizedSession.modelCosts), null);
+  assert.equal(Object.getPrototypeOf(normalizedSession.providers), null);
+  assert.equal(Object.prototype.x, beforeProtoX);
+  assert.equal(Object.hasOwn(Object.prototype, 'x'), false);
+});
+
+test('per-period component omission survives normalize and Hub aggregation without poisoning other periods', () => {
+  const record = {
+    deviceId: 'dev-a',
+    updatedAt: '2026-09-05T12:00:00.000Z',
+    receivedAt: '2026-09-05T12:00:00.000Z',
+    clientModelTokenComponentsOmitted: true,
+    today: {
+      totalTokens: 100,
+      clients: { codex: 100 },
+      clientModels: { codex: { 'gpt-5': 100 } },
+      clientModelTokenComponentsOmitted: true
+    },
+    month: {
+      totalTokens: 200,
+      clients: { codex: 200 },
+      clientModels: { codex: { 'gpt-5': 200 } },
+      clientModelTokenComponents: { codex: { 'gpt-5': { input: 120, output: 80, complete: true } } }
+    },
+    allTime: {
+      totalTokens: 300,
+      clients: { codex: 300 },
+      clientModels: { codex: { 'gpt-5': 300 } },
+      clientModelTokenComponents: { codex: { 'gpt-5': { input: 180, output: 120, complete: true } } }
+    }
+  };
+  const normalized = normalizeDeviceRecord(record);
+  assert.equal(normalized.clientModelTokenComponentsOmitted, true);
+  assert.equal(normalized.periods.today.clientModelTokenComponentsOmitted, true);
+  assert.equal(normalized.periods.month.clientModelTokenComponentsOmitted, undefined);
+  assert.equal(normalized.periods.allTime.clientModelTokenComponentsOmitted, undefined);
+  assert.equal(normalized.periods.month.clientModelTokenComponents.codex['gpt-5'].input, 120);
+
+  const aggregate = aggregateDevices([record], 10 * 60 * 1000, Date.parse('2026-09-05T12:00:00.000Z'));
+  assert.equal(aggregate.devices[0].clientModelTokenComponentsOmitted, true);
+  assert.equal(aggregate.periods.today.clientModelTokenComponentsOmitted, true);
+  assert.equal(aggregate.periods.allTime.clientModelTokenComponentsOmitted, undefined);
+  assert.equal(aggregate.periods.allTime.clientModelTokenComponents.codex['gpt-5'].input, 180);
+});
+
+test('legacy device-level component omission stamps empty periods only', () => {
+  const normalized = normalizeDeviceRecord({
+    deviceId: 'legacy',
+    updatedAt: '2026-09-05T12:00:00.000Z',
+    receivedAt: '2026-09-05T12:00:00.000Z',
+    clientModelTokenComponentsOmitted: true,
+    today: { totalTokens: 10, clients: { codex: 10 }, clientModels: { codex: { 'gpt-5': 10 } } },
+    allTime: { totalTokens: 10, clients: { codex: 10 }, clientModels: { codex: { 'gpt-5': 10 } } }
+  });
+  assert.equal(normalized.periods.today.clientModelTokenComponentsOmitted, true);
+  assert.equal(normalized.periods.allTime.clientModelTokenComponentsOmitted, true);
 });

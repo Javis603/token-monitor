@@ -508,3 +508,43 @@ test('postSyncPayload reports omitted session detail without changing period tot
   assert.ok(payload.sessionDetailsOmitted.month > 0);
   assert.match(logs.at(-1), /^session detail omitted for sync \(month: \d+\)/);
 });
+
+test('over-budget payloads drop clientModelTokenComponents before project or session detail', () => {
+  const fat = Object.fromEntries(Array.from({ length: 400 }, (_unused, index) => [
+    `model-${index}`,
+    { input: 1000, output: 100, cacheRead: 200, cacheWrite: 50, unclassified: 0, complete: true }
+  ]));
+  const summary = {
+    deviceId: 'dev-a',
+    today: {
+      totalTokens: 10,
+      clientModelTokenComponents: { codex: fat },
+      sessions: { today: { totalTokens: 10, client: 'codex' } },
+      projects: { today: { tokens: 10 } }
+    },
+    month: { totalTokens: 20, sessions: { month: { totalTokens: 20 } } },
+    allTime: {
+      totalTokens: 30,
+      clientModelTokenComponents: { codex: fat },
+      projects: { total: { label: 'Total', tokens: 30, clients: { codex: 30 } } }
+    }
+  };
+  const full = serializeSyncPayload(summary, { maxBytes: Number.MAX_SAFE_INTEGER });
+  assert.equal(Object.hasOwn(full.payload.today, 'clientModelTokenComponents'), true);
+  const withoutComponents = serializeSyncPayload(summary, {
+    maxBytes: Number.MAX_SAFE_INTEGER,
+    omitClientModelTokenComponents: true
+  });
+  const maxBytes = withoutComponents.bytes + 32;
+  assert.ok(full.bytes > maxBytes);
+  const compact = serializeSyncPayload(summary, { maxBytes });
+  assert.ok(compact.bytes <= maxBytes);
+  assert.equal(compact.payload.clientModelTokenComponentsOmitted, true);
+  assert.equal(Object.hasOwn(compact.payload.today, 'clientModelTokenComponents'), false);
+  assert.equal(Object.hasOwn(compact.payload.allTime, 'clientModelTokenComponents'), false);
+  assert.equal(compact.payload.today.clientModelTokenComponentsOmitted, true);
+  assert.equal(compact.payload.allTime.clientModelTokenComponentsOmitted, true);
+  assert.equal(compact.payload.month.clientModelTokenComponentsOmitted, undefined);
+  assert.equal(Object.hasOwn(compact.payload.today, 'sessions'), true);
+  assert.equal(Object.hasOwn(compact.payload.allTime, 'projects'), true);
+});

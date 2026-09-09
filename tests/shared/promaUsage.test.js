@@ -8,6 +8,7 @@ const test = require('node:test');
 
 const { buildPromaHistoryGraph, buildTokscaleJson, buildPromaPeriods, PROMA_ROOT } = require('../../src/shared/providers/proma/usage');
 const { extractUsageFromTokscale, mergePeriods } = require('../../src/shared/usage');
+const { ownMap } = require('../helpers/ownMap');
 const { localIso } = require('../helpers/localTime');
 
 function writeJsonl(filePath, rows) {
@@ -143,7 +144,7 @@ test('Proma periods preserve JSONL session attribution across models', () => {
   const usage = extractUsageFromTokscale(periods.today);
   assert.equal(usage.sessions[`proma:${alphaId}`].totalTokens, 14);
   assert.equal(usage.sessions[`proma:${alphaId}`].messageCount, 2);
-  assert.deepEqual(usage.sessions[`proma:${alphaId}`].models, { 'claude-sonnet': 10, 'gpt-5': 4 });
+  assert.deepEqual(ownMap(usage.sessions[`proma:${alphaId}`].models), { 'claude-sonnet': 10, 'gpt-5': 4 });
   assert.equal(usage.sessions[`proma:${alphaId}`].startedAt, alphaStartedAt);
   assert.equal(usage.sessions[`proma:${alphaId}`].lastUsedAt, alphaLastUsedAt);
   assert.equal(usage.sessions[`proma:${betaId}`].totalTokens, 20);

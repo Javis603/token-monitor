@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
 const { emptyPeriod } = require('../../src/shared/usage');
+const { ownMap } = require('../helpers/ownMap');
 
 function bundleWith(clientTokens) {
   const mk = () => { const p = emptyPeriod(); p.totalTokens = clientTokens; p.clients = { gemini: clientTokens }; return p; };
@@ -30,7 +31,7 @@ test('full tick merges WSL bundle and marks WSL-only client active', async () =>
   });
   // merged totals: windows 20 + wsl 9
   assert.equal(summary.today.totalTokens, 29);
-  assert.deepEqual(summary.today.clients, { claude: 20, gemini: 9 });
+  assert.deepEqual(ownMap(summary.today.clients), { claude: 20, gemini: 9 });
   // gemini has no Windows data dir but has WSL usage -> active
   assert.equal(summary.clientStatus.gemini, 'active');
   // anchor basis is Windows-only
@@ -143,7 +144,7 @@ test('wslScanEnabled:false skips the WSL scan entirely', async () => {
   });
   assert.equal(wslCalls, 0); // WSL scan never invoked
   assert.equal(summary.today.totalTokens, 20); // windows-only, no WSL contribution
-  assert.deepEqual(summary.today.clients, { claude: 20 }); // gemini (WSL-only) absent
+  assert.deepEqual(ownMap(summary.today.clients), { claude: 20 }); // gemini (WSL-only) absent
   assert.notEqual(summary.clientStatus.gemini, 'active'); // not active without WSL usage
 });
 

@@ -4783,14 +4783,21 @@ function renderProviderWindows(provider, color) {
     const additionalWindows = state.settings?.showCodexAdditionalLimits === false
       ? []
       : (provider.windows || []).filter((window) => window?.additional === true);
+    if (session && weekly) windows.classList.add('limit-windows-codex-pair');
     if (session) {
-      const sessionNode = limitWindowNode(session.label || 'Session', session, color, 0.95);
+      // The two canonical windows are titled by kind, not by whatever label
+      // the wire happened to carry: "5-hour quota" and "Weekly quota" must stay
+      // readable side by side in every locale, so the localized title wins.
+      const sessionNode = limitWindowNode(t('limits.codex.quota.sessionTitle'), { ...session, label: '' }, color, 0.95);
       if (!weekly && !monthly) sessionNode.classList.add('limit-window-wide');
+      appendCodexQuotaEstimate(sessionNode, session);
       windows.append(sessionNode);
     }
+    if (session && weekly) windows.append(codexWindowDividerNode());
     if (weekly) {
-      const weeklyNode = limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68);
+      const weeklyNode = limitWindowNode(t('limits.codex.quota.weeklyTitle'), { ...weekly, label: '' }, color, 0.68);
       if (!session && !monthly) weeklyNode.classList.add('limit-window-wide');
+      appendCodexQuotaEstimate(weeklyNode, weekly);
       windows.append(weeklyNode);
     }
     if (monthly) {
@@ -5550,6 +5557,84 @@ function renderLimitProviderRow(id, label, provider, color, options = {}) {
   );
   if (id === 'codex' && !options.accountRow) appendCodexResetForecast(row);
   return row;
+}
+
+function codexWindowDividerNode() {
+  const divider = document.createElement('div');
+  divider.className = 'codex-window-divider';
+  divider.setAttribute('aria-hidden', 'true');
+  return divider;
+}
+
+// Capacity wording is gated by evidence confidence: only a stable fit earns
+// "estimated full quota" with a number, a preliminary one shows a clearly
+// hedged amount, and unstable/collecting show a status without the volatile
+// dollar figure — the raw fit stays in the internal quota contract, and the
+// unstable diagnostics ride the tooltip. Local observations are real
+// measurements, so they are never hidden by the estimate gating.
+function appendCodexQuotaEstimate(node, window) {
+  const estimate = window?.quotaEstimate;
+  if (!node || !estimate) return;
+  const extra = document.createElement('div');
+  extra.className = 'codex-quota-estimate';
+  extra.setAttribute('data-confidence', estimate.confidence || 'collecting');
+  const confidence = estimate.confidence;
+  const capacityMoney = (confidence === 'stable' || confidence === 'preliminary') && estimate.capacityUsd != null
+    ? formatCompactMoney(estimate.capacityUsd, 'USD')
+    : null;
+
+  const observedParts = [];
+  if (estimate.pricedUsd != null) {
+    observedParts.push(t('limits.codex.quota.priced', { amount: formatCompactMoney(estimate.pricedUsd, 'USD') }));
+  }
+  if (estimate.observedTokens != null) {
+    observedParts.push(formatCompact(estimate.observedTokens));
+  }
+  const rows = [];
+  if (observedParts.length) {
+    rows.push({ key: t('limits.codex.quota.observedLabel'), value: observedParts.join(' · ') });
+  }
+  if (estimate.coverage != null && estimate.coverage < 1) {
+    rows.push({ key: t('limits.codex.quota.coverageLabel'), value: `${Math.round(estimate.coverage * 100)}%` });
+  }
+  if (capacityMoney) {
+    rows.push({
+      key: t(confidence === 'stable' ? 'limits.codex.quota.capacityLabel' : 'limits.codex.quota.preliminaryLabel'),
+      value: capacityMoney
+    });
+  } else if (confidence === 'unstable') {
+    rows.push({ key: t('limits.codex.quota.unstable'), value: '' });
+  } else if (confidence === 'collecting') {
+    rows.push({ key: t('limits.codex.quota.collecting'), value: '' });
+  } else {
+    rows.push({ key: t('limits.codex.quota.unavailable'), value: '' });
+  }
+
+  for (const row of rows) {
+    const rowNode = document.createElement('div');
+    rowNode.className = 'codex-quota-row';
+    const keyNode = document.createElement('span');
+    keyNode.className = 'codex-quota-key';
+    keyNode.textContent = row.key;
+    rowNode.append(keyNode);
+    if (row.value) {
+      const valueNode = document.createElement('span');
+      valueNode.className = 'codex-quota-value';
+      valueNode.textContent = row.value;
+      rowNode.append(valueNode);
+    }
+    extra.append(rowNode);
+  }
+
+  const titleParts = [];
+  if (confidence === 'unstable' && Array.isArray(estimate.reasons) && estimate.reasons.length) {
+    titleParts.push(estimate.reasons.slice(0, 4).join(', '));
+  }
+  if (estimate.pricedUsd != null || capacityMoney) {
+    titleParts.push(t('limits.codex.quota.disclaimer'));
+  }
+  if (titleParts.length) extra.title = titleParts.join(' · ');
+  node.append(extra);
 }
 
 // Every limits surface (the limits panel and the Home cards) resolves account

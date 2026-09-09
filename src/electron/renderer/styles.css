@@ -4201,6 +4201,58 @@ html.is-windows .limit-live-badge {
 .limit-window-note {
   gap: 3px;
 }
+/* Codex quota estimates: compact key/value rows inside each window block.
+   Labels stay muted on the left, amounts sit right-aligned so a growing
+   number extends leftward and never pushes the window layout around. */
+.codex-quota-estimate {
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+  white-space: normal;
+}
+.codex-quota-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.codex-quota-key {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codex-quota-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  opacity: 0.78;
+}
+.codex-quota-estimate[data-confidence="stable"] .codex-quota-value {
+  opacity: 0.9;
+}
+/* The 5-hour and weekly quotas sit in a fixed three-column grid with a
+   hairline divider between them, so the two windows read as separate blocks
+   instead of two halves of one number line. */
+.limit-windows-codex-pair {
+  grid-template-columns: 1fr 1px 1fr;
+}
+.codex-window-divider {
+  width: 1px;
+  background: rgba(var(--line-rgb), 0.18);
+}
+/* A narrow window stacks the two quota blocks instead of squeezing them
+   into unreadable columns. Width alone triggers this; height stays out of it
+   because a narrow-but-tall window is a valid sidebar layout. */
+@media (max-width: 300px) {
+  .limit-windows-codex-pair { grid-template-columns: 1fr; }
+  .codex-window-divider { display: none; }
+}
 .limit-spend-line {
   min-width: 0;
 }

@@ -148,28 +148,41 @@ function emptyPeriod() {
     timedTokens: 0,
     timedOutputTokens: 0,
     timedDurationMs: 0,
-    clients: {},
-    clientCosts: {},
-    clientCacheReads: {},
-    clientCacheWrites: {},
-    clientOutputs: {},
-    clientUnclassifiedTokens: {},
-    models: {},
-    modelCosts: {},
-    modelCacheReads: {},
-    modelCacheWrites: {},
-    modelOutputs: {},
-    modelUnclassifiedTokens: {},
-    clientModels: {},
-    clientModelCosts: {},
+    clients: emptyUsageMap(),
+    clientCosts: emptyUsageMap(),
+    clientCacheReads: emptyUsageMap(),
+    clientCacheWrites: emptyUsageMap(),
+    clientOutputs: emptyUsageMap(),
+    clientUnclassifiedTokens: emptyUsageMap(),
+    models: emptyUsageMap(),
+    modelCosts: emptyUsageMap(),
+    modelCacheReads: emptyUsageMap(),
+    modelCacheWrites: emptyUsageMap(),
+    modelOutputs: emptyUsageMap(),
+    modelUnclassifiedTokens: emptyUsageMap(),
+    clientModels: emptyUsageMap(),
+    clientModelCosts: emptyUsageMap(),
+    // Exact row-level provenance for pricing.  The older per-model maps above
+    // are deliberately not used to reconstruct this cross-product: doing so
+    // would guess a category split when a model appears under more than one
+    // client.
+    clientModelTokenComponents: emptyUsageMap(),
     projects: Object.create(null),
-    sessions: {}
+    sessions: emptyUsageMap()
   };
+}
+
+function trimEdgeHyphens(value) {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) === 45) start += 1;
+  while (end > start && value.charCodeAt(end - 1) === 45) end -= 1;
+  return value.slice(start, end);
 }
 
 function normalizeClientName(value) {
   const raw = normalizeTokscaleClientName(value);
-  if (!raw) return null;
+  if (!raw || isUnsafeUsageKey(raw)) return null;
   if (raw.includes('claude')) return 'claude';
   if (raw.includes('codex')) return 'codex';
   if (raw.includes('hermes')) return 'hermes';
@@ -198,7 +211,8 @@ function normalizeClientName(value) {
   if (raw.includes('dsh')) return 'dsh';
   if (raw.includes('opencode')) return 'opencode';
   if (raw.includes('openclaw') || raw.includes('clawd') || raw.includes('moltbot') || raw.includes('moldbot')) return 'openclaw';
-  return raw.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || null;
+  const normalized = trimEdgeHyphens(raw.replace(/[^a-z0-9_-]+/g, '-')) || null;
+  return isUnsafeUsageKey(normalized) ? null : normalized;
 }
 
 function detectClient(obj) {
@@ -208,7 +222,8 @@ function detectClient(obj) {
 
 function normalizeModelName(value) {
   const raw = String(value || '').trim().toLowerCase();
-  return raw || null;
+  if (!raw || isUnsafeUsageKey(raw)) return null;
+  return raw;
 }
 
 function normalizeModelNameForClient(value, client) {
@@ -220,16 +235,53 @@ function normalizeModelNameForClient(value, client) {
 
 function normalizeSessionId(value) {
   const raw = String(value || '').trim();
-  return raw || null;
+  if (!raw || isUnsafeUsageKey(raw)) return null;
+  return raw;
 }
 
 function normalizeProviderName(value) {
   const raw = String(value || '').trim().toLowerCase();
-  return raw.replace(/[^a-z0-9_-]+/g, '-') || null;
+  if (!raw || isUnsafeUsageKey(raw)) return null;
+  const normalized = raw.replace(/[^a-z0-9_-]+/g, '-') || null;
+  return isUnsafeUsageKey(normalized) ? null : normalized;
 }
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+const PROTOTYPE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function isUnsafeUsageKey(key) {
+  return typeof key !== 'string' || !key || PROTOTYPE_KEYS.has(key);
+}
+
+function emptyUsageMap() {
+  return Object.create(null);
+}
+
+function usageMapEnsure(parent, key) {
+  if (!hasOwn(parent, key) || !parent[key] || typeof parent[key] !== 'object') parent[key] = emptyUsageMap();
+  return parent[key];
+}
+
+function periodHasClientModelTokenComponentsMap(period) {
+  return Boolean(
+    period
+    && typeof period === 'object'
+    && period.clientModelTokenComponents
+    && typeof period.clientModelTokenComponents === 'object'
+    && Object.keys(period.clientModelTokenComponents).length > 0
+  );
+}
+
+// Explicit omit is per-period. A missing flag is not an omit. A legacy
+// device-level flag (no per-period flags on the record) is the old all-or-
+// nothing strip and only applies to periods whose row-level map is gone.
+function isPeriodTokenComponentsOmitted(period, { deviceOmitted = false, legacyDeviceOmit = false } = {}) {
+  if (period?.clientModelTokenComponentsOmitted === true) return true;
+  if (!legacyDeviceOmit || deviceOmitted !== true) return false;
+  return !periodHasClientModelTokenComponentsMap(period);
 }
 
 function emptyProject(label = '') {
@@ -432,9 +484,9 @@ function emptySession(client, id) {
     lastUsedAt: '',
     projectId: '',
     projectLabel: '',
-    models: {},
-    modelCosts: {},
-    providers: {}
+    models: emptyUsageMap(),
+    modelCosts: emptyUsageMap(),
+    providers: emptyUsageMap()
   };
 }
 
@@ -464,15 +516,23 @@ function mergeSession(target, source) {
   }
   for (const [model, tokens] of Object.entries(source.models || {})) {
     const key = normalizeModelNameForClient(model, target.client);
-    if (key) target.models[key] = (target.models[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
+    if (key) {
+      target.models[key] = (hasOwn(target.models, key) ? target.models[key] : 0)
+        + Math.max(0, Math.round(asNumber(tokens)));
+    }
   }
   for (const [model, cost] of Object.entries(source.modelCosts || {})) {
     const key = normalizeModelNameForClient(model, target.client);
-    if (key) target.modelCosts[key] = (target.modelCosts[key] || 0) + asNumber(cost);
+    if (key) {
+      target.modelCosts[key] = (hasOwn(target.modelCosts, key) ? target.modelCosts[key] : 0) + asNumber(cost);
+    }
   }
   for (const [provider, tokens] of Object.entries(source.providers || {})) {
     const key = normalizeProviderName(provider);
-    if (key) target.providers[key] = (target.providers[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
+    if (key) {
+      target.providers[key] = (hasOwn(target.providers, key) ? target.providers[key] : 0)
+        + Math.max(0, Math.round(asNumber(tokens)));
+    }
   }
   const sourceArchived = source.archived === true || source.deleted === true || source.sourceDeleted === true;
   if (!sourceArchived) {
@@ -509,10 +569,17 @@ function sessionFromRow(row) {
   session.projectLabel = String(row.projectLabel || row.project_label || '').trim();
   let model = detectModel(row, client);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
-  if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
-  if (model && session.costUsd > 0) session.modelCosts[model] = (session.modelCosts[model] || 0) + session.costUsd;
+  if (model && session.totalTokens > 0) {
+    session.models[model] = (hasOwn(session.models, model) ? session.models[model] : 0) + session.totalTokens;
+  }
+  if (model && session.costUsd > 0) {
+    session.modelCosts[model] = (hasOwn(session.modelCosts, model) ? session.modelCosts[model] : 0) + session.costUsd;
+  }
   const provider = normalizeProviderName(row.provider);
-  if (provider && session.totalTokens > 0) session.providers[provider] = (session.providers[provider] || 0) + session.totalTokens;
+  if (provider && session.totalTokens > 0) {
+    session.providers[provider] = (hasOwn(session.providers, provider) ? session.providers[provider] : 0)
+      + session.totalTokens;
+  }
   return session;
 }
 
@@ -536,19 +603,27 @@ function normalizeSession(input, fallbackKey) {
   if (input.models && typeof input.models === 'object') {
     for (const [model, value] of Object.entries(input.models)) {
       const key = normalizeModelNameForClient(model, client);
-      if (key) session.models[key] = (session.models[key] || 0) + Math.max(0, Math.round(asNumber(value)));
+      if (key) {
+        session.models[key] = (hasOwn(session.models, key) ? session.models[key] : 0)
+          + Math.max(0, Math.round(asNumber(value)));
+      }
     }
   }
   if (input.modelCosts && typeof input.modelCosts === 'object') {
     for (const [model, value] of Object.entries(input.modelCosts)) {
       const key = normalizeModelNameForClient(model, client);
-      if (key) session.modelCosts[key] = (session.modelCosts[key] || 0) + asNumber(value);
+      if (key) {
+        session.modelCosts[key] = (hasOwn(session.modelCosts, key) ? session.modelCosts[key] : 0) + asNumber(value);
+      }
     }
   }
   if (input.providers && typeof input.providers === 'object') {
     for (const [provider, value] of Object.entries(input.providers)) {
       const key = normalizeProviderName(provider);
-      if (key) session.providers[key] = (session.providers[key] || 0) + Math.max(0, Math.round(asNumber(value)));
+      if (key) {
+        session.providers[key] = (hasOwn(session.providers, key) ? session.providers[key] : 0)
+          + Math.max(0, Math.round(asNumber(value)));
+      }
     }
   }
   if (input.archived === true || input.deleted === true || input.sourceDeleted === true) session.archived = true;
@@ -670,8 +745,8 @@ function normalizePeriod(input, options = {}) {
       for (const [model, value] of Object.entries(models)) {
         const modelKey = normalizeModelNameForClient(model, clientKey);
         if (!modelKey) continue;
-        if (!period.clientModels[clientKey]) period.clientModels[clientKey] = {};
-        period.clientModels[clientKey][modelKey] = (period.clientModels[clientKey][modelKey] || 0) + Math.max(0, Math.round(asNumber(value)));
+        const clientModels = usageMapEnsure(period.clientModels, clientKey);
+        clientModels[modelKey] = (clientModels[modelKey] || 0) + Math.max(0, Math.round(asNumber(value)));
       }
     }
   }
@@ -682,8 +757,57 @@ function normalizePeriod(input, options = {}) {
       for (const [model, value] of Object.entries(models)) {
         const modelKey = normalizeModelNameForClient(model, clientKey);
         if (!modelKey) continue;
-        if (!period.clientModelCosts[clientKey]) period.clientModelCosts[clientKey] = {};
-        period.clientModelCosts[clientKey][modelKey] = (period.clientModelCosts[clientKey][modelKey] || 0) + asNumber(value);
+        const clientCosts = usageMapEnsure(period.clientModelCosts, clientKey);
+        clientCosts[modelKey] = (clientCosts[modelKey] || 0) + asNumber(value);
+      }
+    }
+  }
+  if (input.clientModelTokenComponents && typeof input.clientModelTokenComponents === 'object') {
+    for (const [client, models] of Object.entries(input.clientModelTokenComponents)) {
+      const clientKey = normalizeClientName(client);
+      if (!clientKey || !models || typeof models !== 'object') continue;
+      for (const [model, raw] of Object.entries(models)) {
+        const modelKey = normalizeModelNameForClient(model, clientKey);
+        if (!modelKey || !raw || typeof raw !== 'object') continue;
+        const component = {};
+        let total = 0;
+        for (const key of ['input', 'output', 'cacheRead', 'cacheWrite', 'unclassified']) {
+          const value = Math.max(0, Math.round(asNumber(raw[key])));
+          if (value > 0) component[key] = value;
+          total += value;
+        }
+        // Do not preserve a claimed "complete" bit unless its categories close
+        // over the row total.  This makes malformed remote records fail closed.
+        if (total === 0 && raw.complete !== true) continue;
+        component.complete = raw.complete === true && !component.unclassified;
+        const clientComponents = usageMapEnsure(period.clientModelTokenComponents, clientKey);
+        const modelTotal = Math.max(0, Math.round(asNumber(period.clientModels?.[clientKey]?.[modelKey])));
+        if (modelTotal > 0 && total > modelTotal) {
+          clientComponents[modelKey] = {
+            unclassified: modelTotal,
+            complete: false
+          };
+          period.capabilities.tokenComponents = false;
+          continue;
+        }
+        const previous = clientComponents[modelKey];
+        if (!previous) clientComponents[modelKey] = component;
+        else {
+          for (const key of ['input', 'output', 'cacheRead', 'cacheWrite', 'unclassified']) {
+            const next = (previous[key] || 0) + (component[key] || 0);
+            if (next > 0) previous[key] = next;
+          }
+          previous.complete = previous.complete === true && component.complete === true;
+          const mergedTotal = ['input', 'output', 'cacheRead', 'cacheWrite', 'unclassified']
+            .reduce((sum, key) => sum + (previous[key] || 0), 0);
+          if (modelTotal > 0 && mergedTotal > modelTotal) {
+            clientComponents[modelKey] = {
+              unclassified: modelTotal,
+              complete: false
+            };
+            period.capabilities.tokenComponents = false;
+          }
+        }
       }
     }
   }
@@ -708,6 +832,9 @@ function normalizePeriod(input, options = {}) {
   ) {
     period.capabilities.tokenComponents = false;
   }
+  if (input.clientModelTokenComponentsOmitted === true) {
+    period.clientModelTokenComponentsOmitted = true;
+  }
   return period;
 }
 
@@ -730,35 +857,72 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const timedOutputTokens = timedDurationMs > 0 ? output : 0;
   let model = detectModel(row, client);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
-  period.totalTokens += Math.max(0, Math.round(tokens));
+  const total = Math.max(0, Math.round(tokens));
+  const known = cacheRead + cacheWrite + output;
+  const overflow = known > total;
+  period.totalTokens += total;
   period.costUsd += cost;
-  period.cacheReadTokens += cacheRead;
-  period.cacheWriteTokens += cacheWrite;
-  period.outputTokens += output;
   period.timedTokens += timedTokens;
-  period.timedOutputTokens += timedOutputTokens;
   period.timedDurationMs += timedDurationMs;
-  if (client && tokens > 0) {
-    period.clients[client] = (period.clients[client] || 0) + Math.round(tokens);
-    if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
-    if (cacheWrite > 0) period.clientCacheWrites[client] = (period.clientCacheWrites[client] || 0) + cacheWrite;
-    if (output > 0) period.clientOutputs[client] = (period.clientOutputs[client] || 0) + output;
+  if (overflow) {
+    // Known categories cannot close over the row total, so none of them are
+    // kept on this row's derived maps. The tokens still count, but only as
+    // unclassified; otherwise cache/output would look complete while the
+    // client×model row is already fail-closed.
+    period.unclassifiedTokens += total;
+    period.capabilities.tokenComponents = false;
+  } else {
+    period.cacheReadTokens += cacheRead;
+    period.cacheWriteTokens += cacheWrite;
+    period.outputTokens += output;
+    period.timedOutputTokens += timedOutputTokens;
+  }
+  if (client && total > 0) {
+    period.clients[client] = (period.clients[client] || 0) + total;
+    if (overflow) {
+      period.clientUnclassifiedTokens[client] = (period.clientUnclassifiedTokens[client] || 0) + total;
+    } else {
+      if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
+      if (cacheWrite > 0) period.clientCacheWrites[client] = (period.clientCacheWrites[client] || 0) + cacheWrite;
+      if (output > 0) period.clientOutputs[client] = (period.clientOutputs[client] || 0) + output;
+    }
   }
   if (client && cost > 0) period.clientCosts[client] = (period.clientCosts[client] || 0) + cost;
-  if (model && tokens > 0) {
-    period.models[model] = (period.models[model] || 0) + Math.round(tokens);
-    if (cacheRead > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cacheRead;
-    if (cacheWrite > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cacheWrite;
-    if (output > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + output;
+  if (model && total > 0) {
+    period.models[model] = (period.models[model] || 0) + total;
+    if (overflow) {
+      period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + total;
+    } else {
+      if (cacheRead > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cacheRead;
+      if (cacheWrite > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cacheWrite;
+      if (output > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + output;
+    }
   }
   if (model && cost > 0) period.modelCosts[model] = (period.modelCosts[model] || 0) + cost;
-  if (client && model && tokens > 0) {
-    if (!period.clientModels[client]) period.clientModels[client] = {};
-    period.clientModels[client][model] = (period.clientModels[client][model] || 0) + Math.round(tokens);
+  if (client && model && total > 0) {
+    const clientModels = usageMapEnsure(period.clientModels, client);
+    clientModels[model] = (clientModels[model] || 0) + total;
+    // A row tells us its own total and component fields.  Only this row-local
+    // closure permits the remainder to be called ordinary input; aggregate
+    // counters and old payloads remain explicitly unclassified.
+    const clientComponents = usageMapEnsure(period.clientModelTokenComponents, client);
+    const components = clientComponents[model]
+      || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, unclassified: 0, complete: true };
+    if (overflow) {
+      components.unclassified += total;
+      components.complete = false;
+    } else {
+      components.input += total - known;
+      components.output += output;
+      components.cacheRead += cacheRead;
+      components.cacheWrite += cacheWrite;
+      components.complete = components.complete === true;
+    }
+    clientComponents[model] = components;
   }
   if (client && model && cost > 0) {
-    if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
-    period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + cost;
+    const costs = usageMapEnsure(period.clientModelCosts, client);
+    costs[model] = (costs[model] || 0) + cost;
   }
   const session = sessionFromRow(row);
   if (session) addSession(period, session);
@@ -857,6 +1021,12 @@ function normalizeDeviceRecord(record) {
   if (hasOwn(record, 'projectsEnabled')) normalized.projectsEnabled = record.projectsEnabled !== false;
   if (hasOwn(record, 'allTimeProjectsOmitted')) normalized.allTimeProjectsOmitted = record.allTimeProjectsOmitted === true;
   if (hasOwn(record, 'allTimeProjectsIncomplete')) normalized.allTimeProjectsIncomplete = record.allTimeProjectsIncomplete === true;
+  const deviceTokenComponentsOmitted = record.clientModelTokenComponentsOmitted === true;
+  if (deviceTokenComponentsOmitted) normalized.clientModelTokenComponentsOmitted = true;
+  const legacyDeviceOmit = deviceTokenComponentsOmitted && !PERIODS.some((periodName) => {
+    const inputPeriod = record[periodName] || record.periods?.[periodName];
+    return inputPeriod?.clientModelTokenComponentsOmitted === true;
+  });
   if (hasOwn(record, 'sessionDetailsOmitted')) {
     const omitted = normalizePeriodOmissionCounts(record.sessionDetailsOmitted);
     if (omitted) normalized.sessionDetailsOmitted = omitted;
@@ -878,9 +1048,14 @@ function normalizeDeviceRecord(record) {
     if (windows) normalized.periodWindows = windows;
   }
   for (const periodName of PERIODS) {
-    normalized.periods[periodName] = normalizePeriod(record[periodName] || record.periods?.[periodName], {
+    const inputPeriod = record[periodName] || record.periods?.[periodName];
+    const period = normalizePeriod(inputPeriod, {
       projectsEnabled: normalized.projectsEnabled !== false
     });
+    if (isPeriodTokenComponentsOmitted(inputPeriod, { deviceOmitted: deviceTokenComponentsOmitted, legacyDeviceOmit })) {
+      period.clientModelTokenComponentsOmitted = true;
+    }
+    normalized.periods[periodName] = period;
   }
   return normalized;
 }
@@ -890,8 +1065,8 @@ function addClientModelUsage(target, source, client) {
   const costs = source.clientModelCosts?.[client];
   for (const [model, tokens] of Object.entries(models || {})) {
     target.models[model] = (target.models[model] || 0) + tokens;
-    if (!target.clientModels[client]) target.clientModels[client] = {};
-    target.clientModels[client][model] = (target.clientModels[client][model] || 0) + tokens;
+    const clientModels = usageMapEnsure(target.clientModels, client);
+    clientModels[model] = (clientModels[model] || 0) + tokens;
 
     // Model component maps are not client×model maps. They can be carried only
     // when this preserved client owns the whole source model bucket; otherwise
@@ -916,8 +1091,18 @@ function addClientModelUsage(target, source, client) {
   }
   for (const [model, cost] of Object.entries(costs || {})) {
     target.modelCosts[model] = (target.modelCosts[model] || 0) + cost;
-    if (!target.clientModelCosts[client]) target.clientModelCosts[client] = {};
-    target.clientModelCosts[client][model] = (target.clientModelCosts[client][model] || 0) + cost;
+    const clientCosts = usageMapEnsure(target.clientModelCosts, client);
+    clientCosts[model] = (clientCosts[model] || 0) + cost;
+  }
+  for (const [model, sourceComponent] of Object.entries(source.clientModelTokenComponents?.[client] || {})) {
+    const clientComponents = usageMapEnsure(target.clientModelTokenComponents, client);
+    const component = clientComponents[model]
+      || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, unclassified: 0, complete: true };
+    for (const key of ['input', 'output', 'cacheRead', 'cacheWrite', 'unclassified']) {
+      component[key] += Math.max(0, Math.round(asNumber(sourceComponent?.[key])));
+    }
+    component.complete = component.complete === true && sourceComponent?.complete === true;
+    clientComponents[model] = component;
   }
 }
 
@@ -1222,6 +1407,9 @@ function aggregateHistory(devices, options = {}) {
 function addPeriodInto(target, source) {
   target.capabilities.tokenComponents = target.capabilities.tokenComponents === true
     && source.capabilities?.tokenComponents === true;
+  if (source.clientModelTokenComponentsOmitted === true) {
+    target.clientModelTokenComponentsOmitted = true;
+  }
   target.totalTokens += source.totalTokens;
   target.costUsd += source.costUsd;
   target.cacheReadTokens += source.cacheReadTokens;
@@ -1248,15 +1436,27 @@ function addPeriodInto(target, source) {
   }
   for (const [model, cost] of Object.entries(source.modelCosts)) target.modelCosts[model] = (target.modelCosts[model] || 0) + cost;
   for (const [client, models] of Object.entries(source.clientModels)) {
-    if (!target.clientModels[client]) target.clientModels[client] = {};
+    const clientModels = usageMapEnsure(target.clientModels, client);
     for (const [model, tokens] of Object.entries(models)) {
-      target.clientModels[client][model] = (target.clientModels[client][model] || 0) + tokens;
+      clientModels[model] = (clientModels[model] || 0) + tokens;
     }
   }
   for (const [client, models] of Object.entries(source.clientModelCosts)) {
-    if (!target.clientModelCosts[client]) target.clientModelCosts[client] = {};
+    const clientCosts = usageMapEnsure(target.clientModelCosts, client);
     for (const [model, cost] of Object.entries(models)) {
-      target.clientModelCosts[client][model] = (target.clientModelCosts[client][model] || 0) + cost;
+      clientCosts[model] = (clientCosts[model] || 0) + cost;
+    }
+  }
+  for (const [client, models] of Object.entries(source.clientModelTokenComponents || {})) {
+    const clientComponents = usageMapEnsure(target.clientModelTokenComponents, client);
+    for (const [model, sourceComponent] of Object.entries(models || {})) {
+      const component = clientComponents[model]
+        || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, unclassified: 0, complete: true };
+      for (const key of ['input', 'output', 'cacheRead', 'cacheWrite', 'unclassified']) {
+        component[key] += Math.max(0, Math.round(asNumber(sourceComponent?.[key])));
+      }
+      component.complete = component.complete === true && sourceComponent?.complete === true;
+      clientComponents[model] = component;
     }
   }
   for (const [key, project] of Object.entries(source.projects || {})) addProjectInto(target.projects, key, project);
@@ -1328,6 +1528,7 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
       ...(hasOwn(normalized, 'projectsEnabled') ? { projectsEnabled: normalized.projectsEnabled } : {}),
       ...(hasOwn(normalized, 'allTimeProjectsOmitted') ? { allTimeProjectsOmitted: normalized.allTimeProjectsOmitted } : {}),
       ...(hasOwn(normalized, 'allTimeProjectsIncomplete') ? { allTimeProjectsIncomplete: normalized.allTimeProjectsIncomplete } : {}),
+      ...(hasOwn(normalized, 'clientModelTokenComponentsOmitted') ? { clientModelTokenComponentsOmitted: normalized.clientModelTokenComponentsOmitted } : {}),
       ...(hasOwn(normalized, 'sessionDetailsOmitted') ? { sessionDetailsOmitted: normalized.sessionDetailsOmitted } : {}),
       ...(hasOwn(normalized, 'periodProjectsOmitted') ? { periodProjectsOmitted: normalized.periodProjectsOmitted } : {}),
       ...(hasOwn(normalized, 'syncUploadIntervalMs') ? { syncUploadIntervalMs: normalized.syncUploadIntervalMs } : {}),
@@ -1408,6 +1609,9 @@ function deltaValue(base, fresh, anchor, key) {
     // provenance is not arithmetically subtractable, so retain exactness only
     // while both the durable base and the fresh replacement prove it.
     return base === true && fresh === true;
+  }
+  if (key === 'clientModelTokenComponentsOmitted') {
+    return base === true || fresh === true;
   }
   if (key === 'startedAt') {
     const baseMs = timestampMs(base);
