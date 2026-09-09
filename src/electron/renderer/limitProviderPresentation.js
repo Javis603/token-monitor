@@ -133,6 +133,14 @@
 
   function limitProviderPlanDisplayLabel(providerOrId, value) {
     const label = limitProviderDisplayLabel(value);
+    if (providerId(providerOrId) === 'zai') {
+      // Subscription names arrive as "GLM Coding Lite/Pro/Max" (ZCode's own
+      // formatPlanName concatenates exactly this). The provider heading
+      // already supplies "GLM", so only the tier remains. Z.ai-prefixed
+      // names and the ZCode plan names pass through untouched — the prefix
+      // is only stripped when it repeats the heading.
+      return label.replace(/^GLM\s+Coding\s+/iu, '').trim() || label;
+    }
     if (providerId(providerOrId) !== 'zed') return label;
     // Zed's API returns canonical names such as "Zed Student" and "Zed Pro".
     // The provider heading already supplies "Zed", so keep only the meaningful

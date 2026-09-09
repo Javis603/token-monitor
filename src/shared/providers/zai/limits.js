@@ -348,46 +348,15 @@ async function fetchZaiLimits(options = {}, deps = {}) {
     })()
     : Promise.resolve(emptyLane());
 
-  const planLane = (async () => {
-    const discovery = discoverZcodeConnection(options, {
-      readFileSync: deps.readFileSync || fs.readFileSync,
-      env,
-      homeDir: deps.homeDir || options.homeDir || os.homedir()
-    });
-    // Coding Plan quota rides the same quota endpoint the console key uses,
-    // keyed by the mirror key ZCode stores on the provider entry. The lane is
-    // best-effort (failures keep it empty) but marks itself attempted: a
-    // detected ZCode login must not read as not-configured while its query
-    // fails or reports no subscription under that key.
-    // The lane is best-effort on empty results, but a classified failure
-    // (429, auth) still propagates: the row merge surfaces the specific
-    // state the way the start-billing lane already does, instead of
-    // flattening every error to empty-attempted/unavailable.
-    if (discovery.kind === 'coding-quota' && discovery.entitled) {
-      const mirrorKey = discovery.credential?.token;
-      if (mirrorKey) {
-        const mirrorRegion = discovery.family === 'bigmodel' ? 'bigmodel-cn' : 'global';
-        if (mirrorKey === key && mirrorRegion === region) return emptyLane();
-        const quota = await fetchJson(zaiQuotaUrl(mirrorRegion), mirrorKey, deps);
-        const usage = parseZaiUsage(quota, null);
-        return {
-          windows: usage.windows,
-          plan: usage.plan,
-          accountKey: hashKey('zai', mirrorKey),
-          hasAnything: usage.windows.length > 0,
-          attempted: true
-        };
-      }
-      return emptyLane(true);
-    }
-    if (discovery.kind !== 'start-billing' || !discovery.entitled || !discovery.credential) {
-      return emptyLane();
-    }
+  // The billing query shared by both discovery shapes: an account-level
+  // endpoint answering with every plan's buckets regardless of which
+  // provider is selected in ZCode.
+  const fetchZcodeBilling = async (token) => {
     const payload = await runWithProbeDeadline(async ({ signal }) => {
       const deviceMid = zcodeDeviceMid({ ...deps, env, homeDir: deps.homeDir || options.homeDir });
       const response = await (deps.fetch || fetch)(zcodeStartPlanBalanceUrl(), {
         headers: {
-          Authorization: `Bearer ${discovery.credential.token}`,
+          Authorization: `Bearer ${token}`,
           Accept: 'application/json',
           ...(deviceMid ? { 'X-Device-Mid': deviceMid } : {})
         },
@@ -404,14 +373,72 @@ async function fetchZaiLimits(options = {}, deps = {}) {
     }, { signal: deps.signal, deadlineMs: Number(deps.zaiFetchTimeoutMs || deps.fetchTimeoutMs || ZAI_FETCH_TIMEOUT_MS) });
     const usage = parseZcodeStartPlanBalances(payload);
     // Empty balances with an active plan are a legal mid-state (a grant not
-    // yet effective), so a fulfilled-but-empty lane still counts as attempted.
+    // yet effective), so a fulfilled-but-empty query still counts as attempted.
     return {
       windows: usage.windows,
       plan: usage.plan,
-      accountKey: hashKey('zai', discovery.credential.token),
+      accountKey: hashKey('zai', token),
       hasAnything: usage.windows.length > 0,
       attempted: true
     };
+  };
+
+  const planLane = (async () => {
+    const discovery = discoverZcodeConnection(options, {
+      readFileSync: deps.readFileSync || fs.readFileSync,
+      env,
+      homeDir: deps.homeDir || options.homeDir || os.homedir()
+    });
+    // Coding Plan quota rides the same quota endpoint the console key uses,
+    // keyed by the mirror key ZCode stores on the provider entry. The lane is
+    // best-effort (failures keep it empty) but marks itself attempted: a
+    // detected ZCode login must not read as not-configured while its query
+    // fails or reports no subscription under that key.
+    // A classified failure (429, auth) still propagates: the row merge
+    // surfaces the specific state instead of flattening it to unavailable.
+    if (discovery.kind === 'coding-quota' && discovery.entitled) {
+      const mirrorKey = discovery.credential?.token;
+      if (mirrorKey) {
+        const mirrorRegion = discovery.family === 'bigmodel' ? 'bigmodel-cn' : 'global';
+        // Billing runs alongside the subscription quota: the account's
+        // Weekend/Start grants exist whether or not coding-plan is the mode
+        // being consumed, and the buckets render in the same row. Best-effort
+        // — a failed billing query never blocks the quota answer. The
+        // duplicate-quota guard skips only the quota fetch: a console key
+        // equal to the mirror still gets its billing buckets.
+        // Subscription/list enriches the quota the same way the console-key
+        // lane does: the plan name and the MCP fallback reset time, which a
+        // TIME_LIMIT entry may omit (nextResetTime is optional in ZCode's
+        // own normalizeLimits). Kimi/Kiro/Grok month buckets read their
+        // renewal time as resetsAt — this keeps the same rule on this lane.
+        const [quotaResult, billingResult, subscriptionResult] = await Promise.allSettled([
+          mirrorKey === key && mirrorRegion === region
+            ? Promise.resolve(null)
+            : fetchJson(zaiQuotaUrl(mirrorRegion), mirrorKey, deps),
+          discovery.billing ? fetchZcodeBilling(discovery.billing.credential.token) : Promise.resolve(null),
+          mirrorKey === key && mirrorRegion === region
+            ? Promise.resolve(null)
+            : fetchJson(zaiSubscriptionUrl(mirrorRegion), mirrorKey, deps).catch(() => null)
+        ]);
+        if (quotaResult.status === 'rejected') throw quotaResult.reason;
+        const usage = quotaResult.value !== null
+          ? parseZaiUsage(quotaResult.value, subscriptionResult.status === 'fulfilled' ? subscriptionResult.value : null)
+          : { plan: '', windows: [] };
+        const billing = billingResult.status === 'fulfilled' ? billingResult.value : null;
+        return {
+          windows: [...usage.windows, ...(billing ? billing.windows : [])],
+          plan: usage.plan || (billing ? billing.plan : ''),
+          accountKey: mirrorKey === key && mirrorRegion === region ? '' : hashKey('zai', mirrorKey),
+          hasAnything: usage.windows.length > 0 || Boolean(billing?.hasAnything),
+          attempted: true
+        };
+      }
+      return emptyLane(true);
+    }
+    if (discovery.kind !== 'start-billing' || !discovery.entitled || !discovery.credential) {
+      return emptyLane();
+    }
+    return fetchZcodeBilling(discovery.credential.token);
   })();
 
   const [keyResult, planResult] = await Promise.allSettled([keyLane, planLane]);

@@ -354,3 +354,40 @@ test('discoverZcodeConnection re-reads disk on every call — an account switch 
   assert.equal(switched.family, 'bigmodel');
   assert.equal(switched.credential.token, 'bm-mirror-key');
 });
+
+test('a coding-quota selection also surfaces the start-plan billing credential', () => {
+  // ZCode queries billing with the start-plan entry even while coding-plan is
+  // selected (validateZaiCodingPlanPairAvailability); the unselected entry
+  // keeps enabled:false and still carries its mirror key.
+  const files = {
+    'setting.json': JSON.stringify({ providerFamilyDomain: 'zai', modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-coding-plan' } }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'coding-mirror' } },
+      'builtin:zai-start-plan': { enabled: false, options: { apiKey: 'start-jwt' } }
+    } }),
+    'coding-plan-cache.json': JSON.stringify({ entryStatus: { items: {
+      'builtin:zai-coding-plan': { status: 'available' },
+      'builtin:zai-start-plan': { status: 'available' }
+    } } })
+  };
+  const deps = { readFileSync: (filePath) => {
+    const name = path.basename(String(filePath));
+    if (Object.hasOwn(files, name)) return files[name];
+    throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+  }, homeDir: '/home/test' };
+  const discovery = discoverZcodeConnection({}, deps);
+  assert.equal(discovery.kind, 'coding-quota');
+  assert.equal(discovery.credential.token, 'coding-mirror');
+  assert.equal(discovery.billing.credential.token, 'start-jwt');
+
+  // No billing when the start-plan entry is not entitled.
+  const unentitled = JSON.parse(files['coding-plan-cache.json']);
+  unentitled.entryStatus.items['builtin:zai-start-plan'] = { status: 'unavailable', reason: 'coding_plan_not_entitled' };
+  const noBilling = discoverZcodeConnection({}, { ...deps, readFileSync: (filePath) => {
+    const name = path.basename(String(filePath));
+    if (name === 'coding-plan-cache.json') return JSON.stringify(unentitled);
+    if (Object.hasOwn(files, name)) return files[name];
+    throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+  } });
+  assert.equal(noBilling.billing, undefined);
+});

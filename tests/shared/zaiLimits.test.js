@@ -672,3 +672,88 @@ test('the same console and ZCode coding key queries and renders quota once', asy
   assert.equal(quotaCalls, 1);
   assert.equal(provider.windows.filter(w => w.kind === 'session').length, 1);
 });
+
+test('fetchZaiLimits shows Start/Weekend buckets alongside Coding Plan quota', async () => {
+  // Billing is account-level: a coding-plan selection still surfaces the
+  // account's Start/Weekend grants in the same row, fetched in parallel —
+  // a failed billing query never blocks the quota answer.
+  const files = {
+    'setting.json': JSON.stringify({ providerFamilyDomain: 'zai', modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-coding-plan' } }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'coding-mirror' } },
+      'builtin:zai-start-plan': { enabled: false, options: { apiKey: 'start-jwt' } }
+    } }),
+    'coding-plan-cache.json': JSON.stringify({ entryStatus: { items: {
+      'builtin:zai-coding-plan': { status: 'available' },
+      'builtin:zai-start-plan': { status: 'available' }
+    } } }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  const deps = {
+    env: {}, now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url) => {
+      const target = String(url);
+      if (target.includes('/quota/limit')) {
+        return { ok: true, status: 200, json: async () => ({ data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 40 }], planName: 'GLM Coding Pro' } }) };
+      }
+      if (target.includes('zcode-plan/billing/balance')) {
+        return { ok: true, status: 200, json: async () => ({ code: 0, data: {
+          plans: [{ plan_id: 'zcode-v3-start-plan-wk-0904', name: 'ZCode Weekend Build', status: 'active', entitlements: [{ entitlement_id: 'e1', period: 'one_time' }] }],
+          balances: [{ entitlement_id: 'e1', plan_id: 'zcode-v3-start-plan-wk-0904', show_name: 'GLM-5.3-Flash', total_units: 305000000, used_units: 109149447, remaining_units: 195850553 }]
+        } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+  };
+  const provider = await fetchZaiLimits({}, deps);
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'oauth');
+  // Header carries the consumed mode; the Weekend bucket rides the same row.
+  assert.equal(provider.accountLabel, 'GLM Coding Pro');
+  assert.ok(provider.windows.some((window) => window.kind === 'session'), 'subscription quota present');
+  const weekend = provider.windows.find((window) => window.limitId);
+  assert.ok(weekend, 'Weekend bucket present');
+  assert.equal(weekend.limit, 305000000);
+  // A console key equal to the mirror key still gets its billing buckets:
+  // the duplicate-quota guard skips only the quota fetch, not the lane.
+  let quotaCalls = 0;
+  const sameKey = await fetchZaiLimits(
+    { zaiApiKey: 'coding-mirror' },
+    { ...deps, fetch: async (url) => { if (String(url).includes('/quota/limit')) quotaCalls++; return deps.fetch(url); } }
+  );
+  assert.equal(quotaCalls, 1, 'quota queried once');
+  assert.ok(sameKey.windows.some((window) => window.limitId), 'Weekend bucket survives the dedupe guard');
+
+  // The MCP month bucket falls back to the subscription renewal time when the
+  // TIME_LIMIT entry omits nextResetTime — the same fallback the console-key
+  // lane applies, aligned with the Kimi/Kiro/Grok month-bucket precedent.
+  const noMcpReset = { ...deps, fetch: async (url) => {
+    const target = String(url);
+    if (target.includes('/quota/limit')) {
+      return { ok: true, status: 200, json: async () => ({ data: { planName: 'GLM Coding Pro', limits: [
+        { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 40, nextResetTime: 1788600000 },
+        { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: 67 }
+      ] } }) };
+    }
+    if (target.includes('subscription/list')) {
+      return { ok: true, status: 200, json: async () => ({ data: [{ product_name: 'GLM Coding Pro', next_renew_time: 1789000000 }] }) };
+    }
+    return deps.fetch(url);
+  } };
+  const mcpFallback = await fetchZaiLimits({}, noMcpReset);
+  const mcp = mcpFallback.windows.find((window) => window.label === 'MCP');
+  assert.equal(mcp.resetsAt, '2026-09-10T00:26:40.000Z');
+  assert.equal(mcpFallback.accountLabel, 'GLM Coding Pro');
+
+  // Billing failure must not block the quota answer.
+  const billingFails = { ...deps, fetch: async (url) => String(url).includes('zcode-plan') ? { ok: false, status: 500, json: async () => ({}) } : deps.fetch(url) };
+  const degraded = await fetchZaiLimits({}, billingFails);
+  assert.equal(degraded.status, 'ok');
+  assert.ok(degraded.windows.some((window) => window.kind === 'session'), 'quota survives billing failure');
+  assert.ok(!degraded.windows.some((window) => window.limitId), 'no bucket when billing failed');
+});

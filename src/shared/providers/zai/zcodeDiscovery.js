@@ -103,7 +103,8 @@ function discoverZcodeConnection(options = {}, deps = {}) {
   if (!provider || provider.enabled === false) return { kind: 'none' };
 
   if (isStartPlanProviderId(providerId) || isCodingPlanProviderId(providerId)) {
-    const entry = entryStatusFor(readJson(path.join(base, 'coding-plan-cache.json'), readFileSync), providerId);
+    const cache = readJson(path.join(base, 'coding-plan-cache.json'), readFileSync);
+    const entry = entryStatusFor(cache, providerId);
     const entitled = entry?.status === 'available';
     const reason = entitled ? '' : String(entry?.reason || 'coding_plan_not_entitled');
     const kind = isStartPlanProviderId(providerId) ? 'start-billing' : 'coding-quota';
@@ -114,7 +115,29 @@ function discoverZcodeConnection(options = {}, deps = {}) {
     if (entitled && !credential) {
       return { kind, family, providerId, entitled: false, reason: 'coding_plan_not_authenticated' };
     }
-    return { kind, family, providerId, entitled, reason, ...(credential ? { credential } : {}) };
+    // Billing is an account-level endpoint, and ZCode itself queries it with
+    // the start-plan provider entry even while coding-plan is the selected
+    // provider (validateZaiCodingPlanPairAvailability → validateStartPlan-
+    // Availability → resolveStartPlanAuthorization, whose mirror-key path is
+    // this same on-disk options.apiKey). So a coding-quota selection also
+    // surfaces the start-plan mirror when that entry reads entitled, letting
+    // the row show the Weekend/Start grants the account owns regardless of
+    // which plan is currently being consumed. The enabled flag is not gated
+    // here: it is the two-write family-switch guard for the *selected*
+    // provider above; an unselected entry keeps enabled:false and still
+    // carries its mirror (an unselected coding-plan entry reads the same way
+    // on a start-plan machine).
+    let billing;
+    if (kind === 'coding-quota') {
+      const startProviderId = ZCODE_PROVIDER_IDS.startPlan[family];
+      const startEntry = entryStatusFor(cache, startProviderId);
+      const startProvider = registry.provider?.[startProviderId] || null;
+      const startCredential = startEntry?.status === 'available' && startProvider
+        ? billingCredential(startProvider)
+        : null;
+      if (startCredential) billing = { credential: startCredential };
+    }
+    return { kind, family, providerId, entitled, reason, ...(credential ? { credential } : {}), ...(billing ? { billing } : {}) };
   }
 
   const baseUrl = String(provider?.options?.baseURL || '').trim();
