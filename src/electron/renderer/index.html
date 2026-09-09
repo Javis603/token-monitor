@@ -349,6 +349,7 @@
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.toolIcons">Tool Icons</span></span><input id="toolIconsInput" type="checkbox" /></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.titleIcon">Use Title Icon</span></span><input id="titleIconInput" type="checkbox" /></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTotalTokens">Show compact token total</span></span><input id="showCompactTotalTokensInput" type="checkbox" /></label>
+              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveTokenRate">Show live token rate</span></span><input id="showLiveTokenRateInput" type="checkbox" aria-describedby="showLiveTokenRateNote" /><span id="showLiveTokenRateNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.liveTokenRateNote">Show the latest generation speed in the footer. Click it to switch between tok/s and TPM.</span></label>
               <label id="compactTokenUnitsRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTokenUnits">Compact token units</span></span><select id="compactTokenUnitsInput"><option value="western" data-i18n="settings.appearance.compactTokenUnitsWestern">International (K/M/B)</option><option value="localized" data-i18n="settings.appearance.compactTokenUnitsLocalized">East Asian (萬/億)</option></select></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.swapSettingsRefresh">Swap Settings and Refresh buttons</span></span><input id="swapSettingsRefreshInput" type="checkbox" /></label>
               <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="glassSliderLabel" class="settings-item-title" data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" title="Reset glass" data-i18n-title="settings.appearance.resetGlass">↺</button></span></span><input id="glassInput" type="range" min="0" max="100" step="1" aria-labelledby="glassSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
@@ -1719,6 +1720,10 @@
           <button id="toolDetailFooterTokens" class="tool-detail-footer-option" type="button">Tokens</button>
           <button id="toolDetailFooterModels" class="tool-detail-footer-option" type="button">Models</button>
         </div>
+        <button id="liveTokenRate" class="live-token-rate hidden is-idle" type="button" title="Live token rate" aria-label="Live token rate">
+          <span class="live-token-rate-icon" aria-hidden="true"></span>
+          <span id="liveTokenRateValue" class="live-token-rate-value">— tok/s</span>
+        </button>
         <div id="appUpdatePill" class="update-pill hidden" title="">
           <button id="appUpdatePillAction" type="button" class="update-pill-action">
             <span id="appUpdatePillLabel" class="update-pill-label"></span>

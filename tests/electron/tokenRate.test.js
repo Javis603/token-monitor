@@ -11,6 +11,7 @@ const tokenRatePresentation = fs.readFileSync(path.join(rendererDir, 'tokenRateP
 const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
 const tokenRateApi = require(path.join(rendererDir, 'tokenRatePresentation.js'));
+const notices = fs.readFileSync(path.join(rendererDir, 'icons', 'THIRD_PARTY_NOTICES.md'), 'utf8');
 
 const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
 
@@ -102,6 +103,80 @@ test('the burn reading reads zero without throughput data', () => {
   assert.equal(tokenBurnPerMinute({ totalTokens: 9000 }), 0);
   assert.equal(tokenBurnPerMinute({ timedTokens: 4500, timedDurationMs: 0 }), 0);
   assert.equal(tokenBurnPerMinute(undefined), 0);
+});
+
+test('live rate is derived from one successful snapshot delta', () => {
+  let now = 1000;
+  const tracker = tokenRateApi.createLiveTokenRateTracker({ now: () => now });
+  assert.equal(tracker.observe({ timedTokens: 1000, timedOutputTokens: 100, timedDurationMs: 2000 }), null);
+
+  now = 2500;
+  const sample = tracker.observe({ timedTokens: 1600, timedOutputTokens: 148, timedDurationMs: 3200 });
+  assert.equal(sample.speed, 40);
+  assert.equal(sample.burn, 30000);
+  assert.equal(sample.sampledAt, 2500);
+  assert.equal(sample.timedTokens, 600);
+  assert.equal(sample.timedOutputTokens, 48);
+  assert.equal(sample.timedDurationMs, 1200);
+  assert.equal(tracker.value('speed'), 40);
+  assert.equal(tracker.value('burn'), 30000);
+});
+
+test('duplicate live snapshots retain the last sample without making it look fresh', () => {
+  let now = 100;
+  const tracker = tokenRateApi.createLiveTokenRateTracker({ now: () => now });
+  tracker.observe({ timedTokens: 10, timedOutputTokens: 2, timedDurationMs: 100 });
+  now = 200;
+  const first = tracker.observe({ timedTokens: 30, timedOutputTokens: 10, timedDurationMs: 500 });
+  now = 5000;
+  const duplicate = tracker.observe({ timedTokens: 30, timedOutputTokens: 10, timedDurationMs: 500 });
+  assert.equal(duplicate, first);
+  assert.equal(duplicate.sampledAt, 200);
+  assert.equal(duplicate.revision, 1);
+});
+
+test('live rate resets on counter regression and waits for a fresh delta', () => {
+  const tracker = tokenRateApi.createLiveTokenRateTracker({ now: () => 100 });
+  tracker.observe({ timedTokens: 100, timedOutputTokens: 20, timedDurationMs: 1000 });
+  assert.ok(tracker.observe({ timedTokens: 200, timedOutputTokens: 40, timedDurationMs: 1500 }));
+
+  assert.equal(tracker.observe({ timedTokens: 5, timedOutputTokens: 1, timedDurationMs: 20 }), null);
+  assert.equal(tracker.getSample(), null);
+  assert.equal(tracker.observe({ timedTokens: 5, timedOutputTokens: 1, timedDurationMs: 20 }), null);
+  const recovered = tracker.observe({ timedTokens: 65, timedOutputTokens: 13, timedDurationMs: 620 });
+  assert.equal(recovered.speed, 20);
+  assert.equal(recovered.burn, 6000);
+});
+
+test('live rate ignores untimed changes but keeps the baseline current', () => {
+  const tracker = tokenRateApi.createLiveTokenRateTracker();
+  tracker.observe({ timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 });
+  assert.equal(tracker.observe({ timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 }), null);
+  assert.equal(tracker.getSample(), null);
+  const sample = tracker.observe({ timedTokens: 120, timedOutputTokens: 24, timedDurationMs: 600 });
+  assert.equal(sample.speed, 40);
+  assert.equal(sample.burn, 12000);
+});
+
+test('live rate selects this device in sync stats and identifies source changes', () => {
+  const aggregate = { timedTokens: 9000, timedOutputTokens: 900, timedDurationMs: 9000 };
+  const local = { timedTokens: 120, timedOutputTokens: 24, timedDurationMs: 600 };
+  const stats = {
+    periods: { today: aggregate },
+    devices: [
+      { deviceId: 'other', periods: { today: aggregate } },
+      { deviceId: 'this-device', periods: { today: local } }
+    ]
+  };
+
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriod(stats, 'this-device'), {
+    period: local,
+    source: 'device:this-device'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriod(stats, 'missing'), {
+    period: aggregate,
+    source: 'aggregate'
+  });
 });
 
 test('holding the title mark accelerates from the real rate and keeps rising', () => {
@@ -293,6 +368,36 @@ test('the reveal mode is a persisted setting that defaults to speed', () => {
   const appIndex = html.indexOf('<script src="app.js"></script>');
   assert.notEqual(presentationIndex, -1);
   assert.ok(presentationIndex < appIndex);
+});
+
+test('the live footer rate is opt-in, accessible, and shares the persisted mode', () => {
+  assert.match(main, /showLiveTokenRate: false,/);
+  assert.match(main, /merged\.showLiveTokenRate = parseBoolean\(merged\.showLiveTokenRate, false\)/);
+  assert.match(main, /showLiveTokenRate: parseBoolean\(patch\.showLiveTokenRate \?\? settings\.showLiveTokenRate, false\)/);
+  assert.match(html, /id="showLiveTokenRateInput" type="checkbox"/);
+  assert.match(html, /<button id="liveTokenRate" class="live-token-rate hidden is-idle" type="button"[^>]*aria-label=/);
+  assert.match(app, /showLiveTokenRateInput: document\.getElementById\('showLiveTokenRateInput'\)/);
+  assert.match(app, /showLiveTokenRate: Boolean\(els\.showLiveTokenRateInput\.checked\)/);
+  assert.match(app, /els\.showLiveTokenRateInput\.checked = state\.settings\.showLiveTokenRate === true/);
+  assert.match(app, /els\.liveTokenRate\?\.addEventListener\('click', toggleTokenRateMode\)/);
+  assert.match(app, /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);\s*observeLiveTokenRate\(state\.stats\);/);
+  assert.match(app, /observeLiveTokenRate\(nextStats\);\s*state\.stats = nextStats;/);
+  assert.match(app, /selectLiveTokenRatePeriod\(stats, state\.settings\?\.deviceId\)/);
+  assert.match(app, /function observeLiveTokenRate\(stats\) \{\s*if \(state\.settings\?\.showLiveTokenRate !== true\) return;/);
+  assert.match(app, /if \(!enabled\) resetLiveTokenRateTracking\(\);/);
+  assert.match(app, /if \(state\.settings\.showLiveTokenRate\) observeLiveTokenRate\(state\.stats\);/);
+  assert.match(css, /\.live-token-rate-icon[\s\S]*icons\/actions\/zap\.svg/);
+  assert.match(notices, /actions\/zap\.svg: zap/);
+});
+
+test('the live footer rate uses matched timed deltas rather than scan wall time', () => {
+  const source = tokenRateSource().replace(/^\s*\/\/.*$/gm, '');
+  const trackerBody = source.slice(source.indexOf('function createLiveTokenRateTracker('));
+  assert.match(trackerBody, /timedOutputTokens: current\.timedOutputTokens - baseline\.timedOutputTokens/);
+  assert.match(trackerBody, /timedDurationMs: current\.timedDurationMs - baseline\.timedDurationMs/);
+  assert.match(trackerBody, /speed: tokenRatePerSecond\(delta\)/);
+  assert.match(trackerBody, /burn: tokenBurnPerMinute\(delta\)/);
+  assert.doesNotMatch(trackerBody, /setInterval/);
 });
 
 test('every element that reveals on hover is also clickable and shows a pointer', () => {

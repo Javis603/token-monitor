@@ -58,6 +58,93 @@
     return cappedTokenRate(timed * 60000 / durationMs);
   }
 
+  function usageCounters(period) {
+    const counter = (value) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    };
+    return {
+      timedTokens: counter(period?.timedTokens),
+      timedOutputTokens: counter(period?.timedOutputTokens),
+      timedDurationMs: counter(period?.timedDurationMs)
+    };
+  }
+
+  function selectLiveTokenRatePeriod(stats, deviceId) {
+    const normalizedDeviceId = String(deviceId || '').trim();
+    const localDevice = normalizedDeviceId && Array.isArray(stats?.devices)
+      ? stats.devices.find((device) => String(device?.deviceId || '') === normalizedDeviceId)
+      : null;
+    const localPeriod = localDevice?.periods?.today;
+    if (localPeriod && typeof localPeriod === 'object') {
+      return { period: localPeriod, source: `device:${normalizedDeviceId}` };
+    }
+    const aggregatePeriod = stats?.periods?.today;
+    return {
+      period: aggregatePeriod && typeof aggregatePeriod === 'object' ? aggregatePeriod : null,
+      source: 'aggregate'
+    };
+  }
+
+  // A period is cumulative, so its ratio is necessarily an average. Live rate is the ratio
+  // of the counters added by one successful snapshot: the duration comes from the same
+  // tokscale performance entries as both token numerators, never from watcher or wall time.
+  // Equal snapshots keep the last sample (limits-only and final-after-preview pushes are
+  // common); any regression is a new baseline boundary such as midnight or reconfiguration.
+  function createLiveTokenRateTracker({ now = defaultNow } = {}) {
+    if (typeof now !== 'function') throw new TypeError('now must be a function');
+    let baseline = null;
+    let sample = null;
+    let revision = 0;
+
+    function reset(period) {
+      baseline = period ? usageCounters(period) : null;
+      sample = null;
+    }
+
+    function observe(period) {
+      const current = usageCounters(period);
+      if (!baseline) {
+        baseline = current;
+        return null;
+      }
+
+      const delta = {
+        timedTokens: current.timedTokens - baseline.timedTokens,
+        timedOutputTokens: current.timedOutputTokens - baseline.timedOutputTokens,
+        timedDurationMs: current.timedDurationMs - baseline.timedDurationMs
+      };
+      baseline = current;
+
+      if (Object.values(delta).some((value) => value < 0)) {
+        sample = null;
+        return null;
+      }
+      if (!(delta.timedDurationMs > 0)) return sample;
+
+      revision += 1;
+      sample = {
+        speed: tokenRatePerSecond(delta),
+        burn: tokenBurnPerMinute(delta),
+        sampledAt: Number(now()) || 0,
+        revision,
+        ...delta
+      };
+      return sample;
+    }
+
+    function getSample() {
+      return sample;
+    }
+
+    function value(mode) {
+      if (!sample) return null;
+      return mode === 'burn' ? sample.burn : sample.speed;
+    }
+
+    return { getSample, observe, reset, value };
+  }
+
   function defaultNow() {
     return typeof performance !== 'undefined' && typeof performance.now === 'function'
       ? performance.now()
@@ -271,8 +358,10 @@
     TOKEN_RATE_MAX_DISPLAY_RATE,
     TOKEN_RATE_SETTLE_MS,
     cappedTokenRate,
+    createLiveTokenRateTracker,
     createTokenRateBoostController,
     positiveNumber,
+    selectLiveTokenRatePeriod,
     tokenBurnPerMinute,
     tokenRateBoostValue,
     tokenRatePerSecond,

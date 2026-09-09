@@ -280,6 +280,7 @@ const TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/blob
 const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProviderPreferences;
 const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'sync'];
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
+const LIVE_TOKEN_RATE_ACTIVE_MS = 8000;
 const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;
 const initialFloatingBubble = window.__TOKEN_MONITOR_INITIAL_FLOATING_BUBBLE__ || { collapsed: false, side: null };
 const initialViewState = window.__TOKEN_MONITOR_INITIAL_VIEW_STATE__ || {};
@@ -334,13 +335,13 @@ let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, compactTokenUnits: 'western', settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, compactTokenUnits: 'western', settingsInTitlebar: false };
 let preferenceDrag = null;
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), liveTokenRate: document.getElementById('liveTokenRate'), liveTokenRateValue: document.getElementById('liveTokenRateValue'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
@@ -432,6 +433,7 @@ Object.assign(els, {
   appUpdateMessage: document.getElementById('appUpdateMessage'),
   titleIconInput: document.getElementById('titleIconInput'),
   showCompactTotalTokensInput: document.getElementById('showCompactTotalTokensInput'),
+  showLiveTokenRateInput: document.getElementById('showLiveTokenRateInput'),
   compactTokenUnitsRow: document.getElementById('compactTokenUnitsRow'),
   compactTokenUnitsInput: document.getElementById('compactTokenUnitsInput'),
   swapSettingsRefreshInput: document.getElementById('swapSettingsRefreshInput'),
@@ -813,6 +815,116 @@ const tokenRateBoost = tokenRateApi.createTokenRateBoostController({
   prefersReducedMotion,
   onChange: () => renderTokenRate()
 });
+const liveTokenRateTracker = tokenRateApi.createLiveTokenRateTracker({ now: () => Date.now() });
+let liveTokenRateContext = '';
+let liveTokenRateIdleTimer = null;
+let liveTokenRateAnimationTimer = null;
+let liveTokenRateRenderedRevision = 0;
+
+function liveTokenRateSourceKey(periodSource) {
+  return [
+    state.mode,
+    state.settings?.hubMode || '',
+    state.settings?.hubUrl || '',
+    state.settings?.deviceId || '',
+    state.settings?.clients || '',
+    periodSource
+  ].join('|');
+}
+
+function clearLiveTokenRateTimers() {
+  if (liveTokenRateIdleTimer) clearTimeout(liveTokenRateIdleTimer);
+  if (liveTokenRateAnimationTimer) clearTimeout(liveTokenRateAnimationTimer);
+  liveTokenRateIdleTimer = null;
+  liveTokenRateAnimationTimer = null;
+}
+
+function resetLiveTokenRateTracking() {
+  liveTokenRateContext = '';
+  liveTokenRateRenderedRevision = 0;
+  liveTokenRateTracker.reset();
+  clearLiveTokenRateTimers();
+}
+
+function observeLiveTokenRate(stats) {
+  if (state.settings?.showLiveTokenRate !== true) return;
+  const selection = tokenRateApi.selectLiveTokenRatePeriod(stats, state.settings?.deviceId);
+  const today = selection.period;
+  const sourceKey = liveTokenRateSourceKey(selection.source);
+  const previousSample = liveTokenRateTracker.getSample();
+  if (sourceKey !== liveTokenRateContext) {
+    liveTokenRateContext = sourceKey;
+    liveTokenRateTracker.reset(today);
+    clearLiveTokenRateTimers();
+    renderLiveTokenRate();
+    return;
+  }
+  if (!today) return;
+  const sample = liveTokenRateTracker.observe(today);
+  if (!sample || sample.revision === previousSample?.revision) return;
+  if (liveTokenRateIdleTimer) clearTimeout(liveTokenRateIdleTimer);
+  liveTokenRateIdleTimer = setTimeout(() => {
+    liveTokenRateIdleTimer = null;
+    renderLiveTokenRate();
+  }, LIVE_TOKEN_RATE_ACTIVE_MS);
+  renderLiveTokenRate();
+}
+
+function formatLiveTokenRate(value) {
+  const rate = Math.max(0, Number(value) || 0);
+  if (rate > 0 && rate < 0.1) return '<0.1';
+  if (rate > 0 && rate < 1) {
+    return rate.toLocaleString(currentLocale(), { maximumFractionDigits: 1 });
+  }
+  return formatCompact(rate, effectiveCompactTokenUnits(), currentLocale());
+}
+
+function renderLiveTokenRate() {
+  if (!els.liveTokenRate || !els.liveTokenRateValue) return;
+  const enabled = state.settings?.showLiveTokenRate === true;
+  if (!enabled) resetLiveTokenRateTracking();
+  els.liveTokenRate.classList.toggle('hidden', !enabled);
+  syncLiveTokenRateFooterState();
+  if (!enabled) return;
+
+  const burn = state.settings?.tokenRateMode === 'burn';
+  const sample = liveTokenRateTracker.getSample();
+  const unit = burn ? 'TPM' : 'tok/s';
+  const rate = sample ? (burn ? sample.burn : sample.speed) : null;
+  const value = rate === null ? '—' : formatLiveTokenRate(rate);
+  const text = `${value} ${unit}`;
+  const idle = !sample || Date.now() - sample.sampledAt >= LIVE_TOKEN_RATE_ACTIVE_MS;
+  els.liveTokenRateValue.textContent = text;
+  els.liveTokenRate.dataset.mode = burn ? 'burn' : 'speed';
+  els.liveTokenRate.classList.toggle('is-idle', idle);
+  if (idle) els.liveTokenRate.classList.remove('is-fresh');
+  const label = t(burn ? 'home.liveTokenRate.burnTitle' : 'home.liveTokenRate.speedTitle', { value: text });
+  els.liveTokenRate.title = label;
+  els.liveTokenRate.setAttribute('aria-label', label);
+
+  if (!idle && sample.revision !== liveTokenRateRenderedRevision) {
+    liveTokenRateRenderedRevision = sample.revision;
+    els.liveTokenRate.classList.remove('is-fresh');
+    void els.liveTokenRate.offsetWidth;
+    els.liveTokenRate.classList.add('is-fresh');
+    if (liveTokenRateAnimationTimer) clearTimeout(liveTokenRateAnimationTimer);
+    liveTokenRateAnimationTimer = setTimeout(() => {
+      liveTokenRateAnimationTimer = null;
+      els.liveTokenRate?.classList.remove('is-fresh');
+    }, 650);
+  }
+}
+
+function syncLiveTokenRateFooterState() {
+  const footer = els.liveTokenRate?.closest('.footer');
+  if (!footer) return;
+  const enabled = state.settings?.showLiveTokenRate === true;
+  const obscured = !els.toolDetailFooter?.classList.contains('hidden')
+    || !els.appUpdatePill?.classList.contains('hidden');
+  footer.classList.toggle('live-token-rate-enabled', enabled);
+  footer.classList.toggle('live-token-rate-obscured', enabled && obscured);
+}
+
 function tokenRateText(rate, burn) {
   // formatCompact rounds, so a sub-0.5 rate would render as a bare "0". Treat that as no
   // data and stay hidden rather than claim a zero pace.
@@ -823,16 +935,18 @@ function tokenRateText(rate, burn) {
     : '';
 }
 function renderTokenRate() {
-  if (!els.tokenRateReveal) return;
-  tokenRateBoost.refresh();
-  const { burn, rate } = currentTokenRateValue();
-  const boost = tokenRateBoost.getSnapshot();
-  const displayRate = boost ? boost.displayRate : rate;
-  const text = tokenRateText(displayRate, boost ? boost.mode === 'burn' : burn);
-  els.tokenRateReveal.textContent = text;
-  els.tokenRateReveal.classList.toggle('has-value', Boolean(text));
-  els.tokenRateReveal.classList.toggle('boosting', boost?.phase === 'boosting');
-  els.tokenRateReveal.classList.toggle('settling', boost?.phase === 'settling');
+  if (els.tokenRateReveal) {
+    tokenRateBoost.refresh();
+    const { burn, rate } = currentTokenRateValue();
+    const boost = tokenRateBoost.getSnapshot();
+    const displayRate = boost ? boost.displayRate : rate;
+    const text = tokenRateText(displayRate, boost ? boost.mode === 'burn' : burn);
+    els.tokenRateReveal.textContent = text;
+    els.tokenRateReveal.classList.toggle('has-value', Boolean(text));
+    els.tokenRateReveal.classList.toggle('boosting', boost?.phase === 'boosting');
+    els.tokenRateReveal.classList.toggle('settling', boost?.phase === 'settling');
+  }
+  renderLiveTokenRate();
 }
 function startTokenRateBoost(event) {
   if (!tokenRateBoost.start(event)) return;
@@ -851,7 +965,9 @@ function suppressTokenRateClickAfterHold(event) {
 // The title mark is the only pixel of the reveal that can take a click: a drag region does
 // not deliver mouse events, so this control and its hover target are the same no-drag island.
 //
-// Deliberately pointer-only, and the mark stays a non-focusable aria-hidden span. A focusable
+// The title affordance is deliberately pointer-only, and the mark stays a non-focusable
+// aria-hidden span. The persistent footer reading is the separate keyboard-accessible path.
+// A focusable
 // control here is worse than no keyboard path: the window assigns focus to a control when it
 // is shown, and Chromium then derives :focus-visible from that activation rather than from
 // any click, so the reveal reopens with a focus ring on a window the user just summoned with
@@ -1014,6 +1130,7 @@ function renderAppUpdatePill() {
     els.appUpdatePillRestart.removeAttribute('title');
     els.appUpdatePillRestart.removeAttribute('aria-label');
     setAppUpdatePillDisclosure(false);
+    syncLiveTokenRateFooterState();
     return;
   }
   const hasReleaseNotes = releaseNoteGroupsForCurrentLocale(s.latest).length > 0;
@@ -1042,6 +1159,7 @@ function renderAppUpdatePill() {
       ? `v${version}`
       : `↑ v${version}`;
   }
+  syncLiveTokenRateFooterState();
 }
 function releaseNoteGroupsForCurrentLocale(latest) {
   return appUpdatePresentationApi.releaseNoteGroupsForLocale(latest?.releaseNotes, currentLocale());
@@ -1877,6 +1995,7 @@ function renderActiveToolDetail() {
 function renderToolDetailFooter() {
   const active = activeToolDetail();
   els.toolDetailFooter.classList.toggle('hidden', !active);
+  syncLiveTokenRateFooterState();
   if (!active) return;
   const mode = state.toolDetailMode;
   els.toolDetailFooter.setAttribute('aria-label', active.detail.name);
@@ -7760,6 +7879,7 @@ function render() {
   }
   if (!state.stats) return;
   els.toolDetailFooter.classList.add('hidden');
+  syncLiveTokenRateFooterState();
   renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
   renderViewSwitcher();
@@ -8028,7 +8148,9 @@ async function refreshStats(options = {}) {
     setRefreshButtonState('refreshing');
   }
   try {
-    state.stats = overlayAllTimeSessions(await window.tokenMonitor.getStats(options));
+    const nextStats = overlayAllTimeSessions(await window.tokenMonitor.getStats(options));
+    observeLiveTokenRate(nextStats);
+    state.stats = nextStats;
     if (options.forceHistory === true) {
       // A manual history rescan is an explicit retry boundary. Let Home request the
       // corresponding full payload even when its revision is unchanged, and restore
@@ -8206,6 +8328,7 @@ function applyAppearanceSettings(settings) {
   // omit it, so we must not wipe theme overrides mid-slider-drag.
   if (settings && 'themeColors' in settings) applyThemeColors(settings.themeColors);
   els.liveDot.style.display = (settings?.showLiveDot !== false) ? '' : 'none';
+  renderLiveTokenRate();
   els.shell.classList.toggle('desktop-mode', settings?.windowBehavior === 'desktop');
   els.shell.classList.toggle('title-icon-only', settings?.titleIconOnly === true);
   const trayMode = settings && 'trayMode' in settings
@@ -8876,6 +8999,7 @@ function appearancePatchFromControls() {
     showToolIcons: Boolean(els.toolIconsInput.checked),
     titleIconOnly: Boolean(els.titleIconInput.checked),
     showCompactTotalTokens: Boolean(els.showCompactTotalTokensInput.checked),
+    showLiveTokenRate: Boolean(els.showLiveTokenRateInput.checked),
     compactTokenUnits: els.compactTokenUnitsInput?.value === 'localized' ? 'localized' : 'western',
     settingsInTitlebar: Boolean(els.swapSettingsRefreshInput.checked),
     glassOpacity: Number(els.glassInput.value === '' ? defaultAppearance.glassOpacity : els.glassInput.value),
@@ -9438,6 +9562,7 @@ function syncSettingsForm() {
   els.toolIconsInput.checked = state.settings.showToolIcons !== false;
   els.titleIconInput.checked = state.settings.titleIconOnly === true;
   els.showCompactTotalTokensInput.checked = state.settings.showCompactTotalTokens === true;
+  els.showLiveTokenRateInput.checked = state.settings.showLiveTokenRate === true;
   if (els.compactTokenUnitsInput) {
     els.compactTokenUnitsInput.value = state.settings.compactTokenUnits === 'localized' ? 'localized' : 'western';
   }
@@ -12236,6 +12361,7 @@ els.appTitleMark?.addEventListener('click', suppressTokenRateClickAfterHold);
 els.liveDot?.addEventListener('click', suppressTokenRateClickAfterHold);
 els.appTitleMark?.addEventListener('click', toggleTokenRateMode);
 els.liveDot?.addEventListener('click', toggleTokenRateMode);
+els.liveTokenRate?.addEventListener('click', toggleTokenRateMode);
 
 els.languageInput?.addEventListener('change', async () => {
   await saveSettings({ language: els.languageInput.value });
@@ -12546,6 +12672,14 @@ els.toolIconsInput.addEventListener('change', async () => {
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
 els.showCompactTotalTokensInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();
+});
+els.showLiveTokenRateInput.addEventListener('change', async () => {
+  state.settings.showLiveTokenRate = els.showLiveTokenRateInput.checked;
+  if (state.settings.showLiveTokenRate) observeLiveTokenRate(state.stats);
+  renderLiveTokenRate();
+  await saveAppearanceFromControls();
+  if (state.settings.showLiveTokenRate) observeLiveTokenRate(state.stats);
+  renderLiveTokenRate();
 });
 els.compactTokenUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();
@@ -12896,6 +13030,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     }
     if (payload.data?.mode) state.mode = payload.data.mode;
     state.stats = overlayAllTimeSessions(payload.data.stats);
+    observeLiveTokenRate(state.stats);
     applyCodexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see
     // AGENTS.md collector notes), so only the final push can retire the

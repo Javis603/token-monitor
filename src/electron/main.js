@@ -489,6 +489,7 @@ function defaultSettings() {
     showToolIcons: true,
     titleIconOnly: true,
     showCompactTotalTokens: false,
+    showLiveTokenRate: false,
     compactTokenUnits: 'western',
     tokenRateMode: 'speed',
     heatmapMetric: 'cost',
@@ -2480,6 +2481,7 @@ function readSettings() {
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
+    merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
     merged.interfaceFontFamily = fontSettingsApi.normalizeFontFamily(merged.interfaceFontFamily);
     merged.displayFontFamily = fontSettingsApi.normalizeFontFamily(merged.displayFontFamily);
@@ -6704,6 +6706,7 @@ app.whenReady().then(() => {
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
       showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, false),
+      showLiveTokenRate: parseBoolean(patch.showLiveTokenRate ?? settings.showLiveTokenRate, false),
       compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
       interfaceFontFamily: fontSettingsApi.normalizeFontFamily(
         patch.interfaceFontFamily ?? settings.interfaceFontFamily
