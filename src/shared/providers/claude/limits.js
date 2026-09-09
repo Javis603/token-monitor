@@ -1652,12 +1652,21 @@ try:
             break
         scan = compact(buf[-20000:])
         now = time.time()
-        for token in prompt_tokens:
-            if token in scan and token not in handled_prompts:
-                if not write_master(b"\\r"):
-                    io_closed = True
-                    break
-                handled_prompts.add(token)
+        prompt_token = next(
+            (
+                token for token in sorted(prompt_tokens, key=len, reverse=True)
+                if token in scan and token not in handled_prompts
+            ),
+            None
+        )
+        if prompt_token is not None:
+            if not write_master(b"\\r"):
+                io_closed = True
+            else:
+                handled_prompts.update(
+                    token for token in prompt_tokens
+                    if prompt_token.startswith(token)
+                )
                 last_enter = now
         if io_closed:
             break

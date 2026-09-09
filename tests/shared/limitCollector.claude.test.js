@@ -740,6 +740,40 @@ test('Claude PTY probing preserves the first executable Python failure', async (
   assert.deepEqual(calls, ['python3']);
 });
 
+test('Claude PTY prompt matching handles overlapping tokens with one carriage return', async (t) => {
+  const probeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'token-monitor-claude-prompt-'));
+  t.after(() => fs.rm(probeDir, { recursive: true, force: true }));
+  let script = '';
+
+  await assert.rejects(
+    touchClaudeAuthPath({
+      platform: 'darwin',
+      env: {},
+      claudeProbeDir: probeDir,
+      existsSync: () => false,
+      spawn: (_command, args) => {
+        script = args[1];
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = () => {};
+        process.nextTick(() => child.emit('close', 1));
+        return child;
+      }
+    }),
+    (error) => error?.status === 'unavailable'
+  );
+
+  assert.match(script, /sorted\(prompt_tokens, key=len, reverse=True\)/);
+  assert.match(script, /prompt_token\.startswith\(token\)/);
+  assert.doesNotMatch(script, /for token in prompt_tokens:\s*\n\s*if token in scan/);
+  const promptStart = script.indexOf('        prompt_token = next(');
+  const promptEnd = script.indexOf('        if io_closed:', promptStart);
+  assert.ok(promptStart >= 0 && promptEnd > promptStart);
+  const promptBlock = script.slice(promptStart, promptEnd);
+  assert.equal(promptBlock.match(/write_master\(b"\\r"\)/g)?.length, 1);
+});
+
 test('Claude CLI commands execute from a Windows path containing spaces', {
   skip: process.platform !== 'win32'
 }, async (t) => {
