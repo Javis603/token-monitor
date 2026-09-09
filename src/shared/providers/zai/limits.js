@@ -389,28 +389,15 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       env,
       homeDir: deps.homeDir || options.homeDir || os.homedir()
     });
-    // Coding Plan quota rides the same quota endpoint the console key uses,
-    // keyed by the mirror key ZCode stores on the provider entry. The lane is
-    // best-effort (failures keep it empty) but marks itself attempted: a
-    // detected ZCode login must not read as not-configured while its query
-    // fails or reports no subscription under that key.
-    // A classified failure (429, auth) still propagates: the row merge
-    // surfaces the specific state instead of flattening it to unavailable.
+    // Mirror-key quota on the console-key endpoint; classified errors (429,
+    // auth) propagate, empty results keep the lane attempted, not unconfigured.
     if (discovery.kind === 'coding-quota' && discovery.entitled) {
       const mirrorKey = discovery.credential?.token;
       if (mirrorKey) {
         const mirrorRegion = discovery.family === 'bigmodel' ? 'bigmodel-cn' : 'global';
-        // Billing runs alongside the subscription quota: the account's
-        // Weekend/Start grants exist whether or not coding-plan is the mode
-        // being consumed, and the buckets render in the same row. Best-effort
-        // — a failed billing query never blocks the quota answer. The
-        // duplicate-quota guard skips only the quota fetch: a console key
-        // equal to the mirror still gets its billing buckets.
-        // Subscription/list enriches the quota the same way the console-key
-        // lane does: the plan name and the MCP fallback reset time, which a
-        // TIME_LIMIT entry may omit (nextResetTime is optional in ZCode's
-        // own normalizeLimits). Kimi/Kiro/Grok month buckets read their
-        // renewal time as resetsAt — this keeps the same rule on this lane.
+        // Billing is account-level, so it runs alongside quota; failures never
+        // block the quota answer. Subscription enriches plan name and MCP reset
+        // the same way other lanes do.
         const [quotaResult, billingResult, subscriptionResult] = await Promise.allSettled([
           mirrorKey === key && mirrorRegion === region
             ? Promise.resolve(null)
@@ -604,8 +591,7 @@ function zcodeRecordCumulativeSpend({ accountKey, totalSpent, now, storePath, re
     allTimeSpend: entry.allTimeSpend,
     trackingSince: entry.trackingSince,
     // Same rule as DeepSeek's balance history: true while tracking began
-    // within the current local month (monthKey alone is YYYY-MM, so an
-    // equality against a YYYY-MM-DD day key never matched).
+    // within the current local month.
     monthSinceTracking: Number(entry.trackingSince) > startOfLocalMonth(nowMs)
   };
 }
@@ -646,9 +632,6 @@ function zcodePlanBucketWindow(balance, periodByEntitlement = new Map()) {
   if (used === null && total !== null && remaining !== null) used = Math.max(0, total - remaining);
   if (remaining === null && total !== null && used !== null) remaining = Math.max(0, total - used);
   if (total === null && used === null && remaining === null) return null;
-  // Derive from whichever pair the bucket reports: remaining wins (the
-  // same rule as the quota windows), used alone still yields a meter, and
-  // a percentage field is the last resort.
   let usedPercent = null;
   if (total !== null && total > 0) {
     if (remaining !== null) usedPercent = clampPercent(100 - (remaining / total) * 100);
@@ -728,13 +711,8 @@ function parseZcodeStartPlanBalances(payload) {
     if (!uniformDaily) {
       window.kind = 'billing';
       delete window.windowMinutes;
-      // Keep the earliest component boundary as resetsAt: the reset
-      // scheduler arranges a re-probe right after it (the pool's
-      // composition changes there), and burn-rate re-baselines when it
-      // rolls. Reset-vs-expiry wording is deliberately left to the shared
-      // presentation layer — the renderer already renders every resetsAt
-      // as a reset countdown, and that shared behaviour is being typed
-      // upstream rather than worked around per provider.
+      // resetsAt is the earliest component boundary, so reset scheduling
+      // keeps working; wording is the shared presentation layer's call.
       const next = boundaries[0] || null;
       if (next) window.resetsAt = next;
     }

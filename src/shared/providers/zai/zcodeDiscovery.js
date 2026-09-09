@@ -4,9 +4,7 @@
 // state. ZCode persists its provider registry and current selection under
 // ~/.zcode/v2/ as plain JSON; this module reads those files on every call (no
 // caching — the on-disk state is the source of truth for account switches,
-// mirroring how codexAuth re-reads auth.json each refresh) and derives which
-// GLM quota lane applies: the Coding Plan subscription quota endpoint, the
-// ZCode Start/Weekend plan billing endpoint, or neither.
+// mirroring how codexAuth re-reads auth.json each refresh).
 //
 // Missing files are normal (ZCode not installed) and resolve to kind 'none';
 // malformed JSON is treated the same way rather than surfacing as an error.
@@ -109,24 +107,17 @@ function discoverZcodeConnection(options = {}, deps = {}) {
     const reason = entitled ? '' : String(entry?.reason || 'coding_plan_not_entitled');
     const kind = isStartPlanProviderId(providerId) ? 'start-billing' : 'coding-quota';
     // credential is present whenever an entitled plan has a readable mirror
-    // key; coding-quota consumers use it against the quota endpoint the same
-    // way start-billing consumers use it against the billing endpoint.
+    // key — quota consumers use it against quota, billing consumers against
+    // billing (see below).
     const credential = entitled ? billingCredential(provider) : null;
     if (entitled && !credential) {
       return { kind, family, providerId, entitled: false, reason: 'coding_plan_not_authenticated' };
     }
-    // Billing is an account-level endpoint, and ZCode itself queries it with
-    // the start-plan provider entry even while coding-plan is the selected
-    // provider (validateZaiCodingPlanPairAvailability → validateStartPlan-
-    // Availability → resolveStartPlanAuthorization, whose mirror-key path is
-    // this same on-disk options.apiKey). So a coding-quota selection also
-    // surfaces the start-plan mirror when that entry reads entitled, letting
-    // the row show the Weekend/Start grants the account owns regardless of
-    // which plan is currently being consumed. The enabled flag is not gated
-    // here: it is the two-write family-switch guard for the *selected*
-    // provider above; an unselected entry keeps enabled:false and still
-    // carries its mirror (an unselected coding-plan entry reads the same way
-    // on a start-plan machine).
+    // Billing is an account-level endpoint: ZCode queries it with the
+    // start-plan entry even while coding-plan is selected
+    // (validateZaiCodingPlanPairAvailability → resolveStartPlan-
+    // Authorization). The enabled flag guards only the *selected*
+    // provider above; an unselected entry still carries its mirror key.
     let billing;
     if (kind === 'coding-quota') {
       const startProviderId = ZCODE_PROVIDER_IDS.startPlan[family];
