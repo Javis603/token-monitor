@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
 const {
@@ -18,6 +19,20 @@ const LEGACY_BASIC = [
   '████████████████████████████████████████████████████ 25%',
   '(12.50 of 50 covered in plan), resets on 01/15'
 ].join('\n');
+
+const V2_USAGE_SUMMARY = 'Plan: KIRO POWER | 1 usage breakdowns';
+
+function completedKiroProcess(output) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {};
+  process.nextTick(() => {
+    child.stdout.emit('data', output);
+    child.emit('close', 0);
+  });
+  return child;
+}
 
 const LEGACY_BONUS = [
   '| KIRO PRO                                           |',
@@ -269,7 +284,6 @@ test('the limits collector re-exports fetchKiroLimits', async () => {
 });
 
 test('runKiroUsageCli terminates immediately when the parent probe is aborted', async () => {
-  const { EventEmitter } = require('node:events');
   const controller = new AbortController();
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
@@ -286,4 +300,33 @@ test('runKiroUsageCli terminates immediately when the parent probe is aborted', 
 
   await assert.rejects(pending, /runtime stopped/);
   assert.equal(kills, 1);
+});
+
+test('runKiroUsageCli retries a v2 plan summary through the legacy v1 UI', async () => {
+  const calls = [];
+  const output = await runKiroUsageCli({
+    spawn: (_command, args) => {
+      calls.push(args);
+      return completedKiroProcess(calls.length === 1 ? V2_USAGE_SUMMARY : LEGACY_BASIC);
+    }
+  });
+
+  assert.equal(output, LEGACY_BASIC);
+  assert.deepEqual(calls, [
+    ['chat', '--no-interactive', '/usage'],
+    ['chat', '--no-interactive', '--agent-engine=v1', '--legacy-ui', '/usage']
+  ]);
+});
+
+test('runKiroUsageCli keeps a complete default-engine report without retrying', async () => {
+  const calls = [];
+  const output = await runKiroUsageCli({
+    spawn: (_command, args) => {
+      calls.push(args);
+      return completedKiroProcess(LEGACY_BASIC);
+    }
+  });
+
+  assert.equal(output, LEGACY_BASIC);
+  assert.deepEqual(calls, [['chat', '--no-interactive', '/usage']]);
 });
