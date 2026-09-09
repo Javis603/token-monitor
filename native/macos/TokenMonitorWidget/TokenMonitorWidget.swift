@@ -3,6 +3,15 @@ import WidgetKit
 
 enum TokenMonitorWidgetConfiguration {
     static let kind = Bundle.main.object(forInfoDictionaryKey: "TMWidgetKind") as? String ?? "com.tokenmonitor.dashboard"
+    static let summaryKind = "\(kind).summary"
+    static let activityKind = "\(kind).activity"
+    static let breakdownKind = "\(kind).breakdown"
+    // The original quota kind can remain registered with a nil App Intent after
+    // changing its configuration shape. A new kind gives WidgetKit a clean
+    // configuration record while the legacy kind remains reloadable for cleanup.
+    static let legacyQuotaKind = "\(kind).quota"
+    static let quotaKind = "\(kind).quota.v2"
+    static let allKinds = [kind, summaryKind, activityKind, breakdownKind, legacyQuotaKind, quotaKind]
     static let appGroup = Bundle.main.object(forInfoDictionaryKey: "TokenMonitorAppGroup") as? String ?? ""
     static let urlScheme: String = {
         let raw = (Bundle.main.object(forInfoDictionaryKey: "TokenMonitorURLScheme") as? String ?? "token-monitor").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -23,16 +32,73 @@ struct TokenMonitorWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(
             kind: kind,
-            intent: TokenMonitorWidgetConfigurationIntent.self,
-            provider: TokenMonitorTimelineProvider()
+            intent: DashboardWidgetIntent.self,
+            provider: DashboardWidgetTimelineProvider()
         ) { entry in
             TokenMonitorWidgetView(entry: entry)
                 .widgetURL(TokenMonitorWidgetConfiguration.url(for: entry.page))
                 .containerBackground(for: .widget) { WidgetBackground() }
+                .environment(\.colorScheme, .dark)
         }
-        .configurationDisplayName("Token Monitor")
-        .description("Choose Overview, Quota, Models, Activity, or Trend for each widget.")
-        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+        .configurationDisplayName("Token Monitor Dashboard")
+        .description("Usage, quota, breakdown, and activity in one dashboard.")
+        .supportedFamilies([.systemLarge])
+    }
+}
+
+struct TokenMonitorSummaryWidget: Widget {
+    var body: some WidgetConfiguration {
+        AppIntentConfiguration(kind: TokenMonitorWidgetConfiguration.summaryKind, intent: UsageSummaryWidgetIntent.self, provider: SummaryWidgetTimelineProvider()) { entry in
+            TokenMonitorWidgetView(entry: entry)
+                .widgetURL(TokenMonitorWidgetConfiguration.url(for: .overview))
+                .containerBackground(for: .widget) { WidgetBackground() }
+                .environment(\.colorScheme, .dark)
+        }
+        .configurationDisplayName("Token Monitor Summary")
+        .description("Tokens, cost, and a compact trend.")
+        .supportedFamilies([.systemSmall])
+    }
+}
+
+struct TokenMonitorActivityWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: TokenMonitorWidgetConfiguration.activityKind, provider: FixedWidgetTimelineProvider(page: .activity)) { entry in
+            TokenMonitorWidgetView(entry: entry)
+                .widgetURL(TokenMonitorWidgetConfiguration.url(for: .activity))
+                .containerBackground(for: .widget) { WidgetBackground() }
+                .environment(\.colorScheme, .dark)
+        }
+        .configurationDisplayName("Token Monitor Activity")
+        .description("Your recent activity heatmap.")
+        .supportedFamilies([.systemMedium])
+    }
+}
+
+struct TokenMonitorBreakdownWidget: Widget {
+    var body: some WidgetConfiguration {
+        AppIntentConfiguration(kind: TokenMonitorWidgetConfiguration.breakdownKind, intent: BreakdownWidgetIntent.self, provider: BreakdownWidgetTimelineProvider()) { entry in
+            TokenMonitorWidgetView(entry: entry)
+                .widgetURL(TokenMonitorWidgetConfiguration.url(for: entry.page))
+                .containerBackground(for: .widget) { WidgetBackground() }
+                .environment(\.colorScheme, .dark)
+        }
+        .configurationDisplayName("Token Monitor Breakdown")
+        .description("Compare tools or models for one period.")
+        .supportedFamilies([.systemMedium])
+    }
+}
+
+struct TokenMonitorQuotaWidget: Widget {
+    var body: some WidgetConfiguration {
+        AppIntentConfiguration(kind: TokenMonitorWidgetConfiguration.quotaKind, intent: QuotaWidgetIntent.self, provider: QuotaWidgetTimelineProvider()) { entry in
+            TokenMonitorWidgetView(entry: entry)
+                .widgetURL(TokenMonitorWidgetConfiguration.url(for: .quota))
+                .containerBackground(for: .widget) { WidgetBackground() }
+                .environment(\.colorScheme, .dark)
+        }
+        .configurationDisplayName("Token Monitor Quota")
+        .description("Subscription windows and reset times.")
+        .supportedFamilies([.systemMedium])
     }
 }
 
@@ -41,14 +107,14 @@ struct WidgetBackground: View {
 
     var body: some View {
         ZStack {
-            Color(nsColor: .windowBackgroundColor)
+            Color(red: 0.035, green: 0.043, blue: 0.055)
             LinearGradient(
                 colors: [
-                    Color.primary.opacity(colorScheme == .dark ? 0.07 : 0.035),
-                    WidgetDesignTokens.accent.opacity(colorScheme == .dark ? 0.08 : 0.045)
+                    Color.white.opacity(colorScheme == .dark ? 0.025 : 0.02),
+                    WidgetDesignTokens.accent.opacity(colorScheme == .dark ? 0.13 : 0.1)
                 ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                startPoint: .topTrailing,
+                endPoint: .bottomLeading
             )
         }
     }
@@ -57,7 +123,6 @@ struct WidgetBackground: View {
 private enum WidgetLayoutRegion: String {
     case header
     case content
-    case footer
 }
 
 #if DEBUG
@@ -120,8 +185,8 @@ struct TokenMonitorWidgetView: View {
 
     @ViewBuilder
     private func content(_ snapshot: WidgetSnapshot) -> some View {
-        if snapshot.isStale(at: entry.date) {
-            let updatedAt = WidgetStalePresentation.trustedUpdatedAt(for: snapshot)
+        if isStale(snapshot) {
+            let updatedAt = staleUpdatedAt(snapshot)
             statusState(
                 title: WidgetL10n.text("Data may be stale"),
                 detail: updatedAt.map { WidgetL10n.format("Updated %@", $0.formatted(.relative(presentation: .named))) }
@@ -135,37 +200,52 @@ struct TokenMonitorWidgetView: View {
         }
     }
 
-    private func small(_ snapshot: WidgetSnapshot) -> some View {
-        scaffold(
-            header: header(page: entry.page),
-            content: pageBody(snapshot: snapshot, page: entry.page, layout: .small),
-            footer: footer(page: entry.page, familyScope: familyScope),
-            metrics: metrics
+    private func isStale(_ snapshot: WidgetSnapshot) -> Bool {
+        guard entry.page == .quota else { return snapshot.isStale(at: entry.date) }
+        return WidgetQuotaFreshness.isStale(
+            snapshot: snapshot,
+            selectedIDs: entry.selectedQuotaProviderIDs,
+            at: entry.date
         )
     }
 
+    private func staleUpdatedAt(_ snapshot: WidgetSnapshot) -> Date? {
+        guard entry.page == .quota else { return WidgetStalePresentation.trustedUpdatedAt(for: snapshot) }
+        return WidgetQuotaFreshness.newestUpdatedAt(
+            in: snapshot,
+            selectedIDs: entry.selectedQuotaProviderIDs
+        ) ?? WidgetStalePresentation.trustedUpdatedAt(for: snapshot)
+    }
+
+    private func small(_ snapshot: WidgetSnapshot) -> some View {
+        SmallUsageWidgetView(snapshot: snapshot, period: entry.period)
+    }
+
     private func medium(_ snapshot: WidgetSnapshot) -> some View {
-        scaffold(
-            header: mediumHeader(page: entry.page),
-            content: pageBody(snapshot: snapshot, page: entry.page, layout: .medium),
-            footer: footer(page: entry.page, familyScope: familyScope),
-            metrics: metrics
+        MediumUsageWidgetView(
+            snapshot: snapshot,
+            period: entry.period,
+            page: entry.page,
+            referenceDate: entry.date,
+            selectedActivityDate: entry.selectedActivityDate,
+            selectedQuotaProviderIDs: entry.selectedQuotaProviderIDs
         )
     }
 
     private func large(_ snapshot: WidgetSnapshot) -> some View {
-        scaffold(
-            header: mediumHeader(page: entry.page),
-            content: pageBody(snapshot: snapshot, page: entry.page, layout: .large),
-            footer: footer(page: entry.page, familyScope: familyScope),
-            metrics: metrics
+        LargeDashboardWidgetView(
+            snapshot: snapshot,
+            period: entry.period,
+            page: entry.page,
+            referenceDate: entry.date,
+            selectedActivityDate: entry.selectedActivityDate,
+            selectedQuotaProviderIDs: entry.selectedQuotaProviderIDs
         )
     }
 
-    private func scaffold<Header: View, Content: View, Footer: View>(
+    private func scaffold<Header: View, Content: View>(
         header: Header,
         content: Content,
-        footer: Footer,
         metrics: WidgetLayoutMetrics
     ) -> some View {
         VStack(spacing: metrics.contentGap) {
@@ -177,11 +257,6 @@ struct TokenMonitorWidgetView: View {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .measureWidgetLayoutRegion(.content)
-
-            footer
-                .frame(height: metrics.footerHeight)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .measureWidgetLayoutRegion(.footer)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(metrics.outerInsets)
@@ -191,37 +266,20 @@ struct TokenMonitorWidgetView: View {
         WidgetFamilyScope(widgetFamily: family)
     }
 
-    private func header(page: WidgetPage) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            brand
-            Spacer(minLength: 4)
-            if WidgetPeriodPolicy.isSelectable(on: page) {
-                WidgetPeriodControl(selection: entry.period, style: .compact)
-            }
-        }
-        .frame(height: metrics.headerHeight, alignment: .center)
-    }
-
-    private func mediumHeader(page: WidgetPage) -> some View {
-        HStack(spacing: 12) {
-            brand
+    private func header(page: WidgetPage, period: WidgetPeriod) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(page.title)
+                .font(.system(size: WidgetDesignTokens.secondarySize, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             Spacer(minLength: 6)
             if WidgetPeriodPolicy.isSelectable(on: page) {
-                WidgetPeriodControl(selection: entry.period, style: .segmented)
+                Text(period.title)
+                    .font(.system(size: WidgetDesignTokens.microSize, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(WidgetDesignTokens.accent)
             }
         }
         .frame(height: metrics.headerHeight, alignment: .center)
-    }
-
-    private var brand: some View {
-        HStack(spacing: 2) {
-            Text("Σ")
-                .font(.system(size: WidgetDesignTokens.titleSize, weight: .bold, design: .monospaced))
-            Circle()
-                .fill(WidgetDesignTokens.accent)
-                .frame(width: 4, height: 4)
-        }
-        .accessibilityLabel("Token Monitor")
     }
 
     @ViewBuilder
@@ -232,6 +290,7 @@ struct TokenMonitorWidgetView: View {
                 switch page {
                 case .overview: overview(snapshot, context: context)
                 case .quota: quota(snapshot, context: context)
+                case .tools: tools(snapshot)
                 case .models: models(snapshot, context: context)
                 case .activity: activity(snapshot, context: context)
                 case .trend: trend(snapshot, context: context)
@@ -260,23 +319,23 @@ struct TokenMonitorWidgetView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     primary(model.primaryValue, size: WidgetDesignTokens.smallPrimarySize)
                     secondary(model.secondaryValue)
+                    Divider().opacity(WidgetDesignTokens.dividerOpacity)
                     summaryRow(WidgetL10n.text("Quota"), quotaSummary(snapshot))
                     Text(snapshot.overview.updatedAt, style: .time)
                         .font(.system(size: WidgetDesignTokens.microSize, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
             } else {
-                HStack(alignment: .top, spacing: WidgetDesignTokens.mediumGap) {
+                HStack(alignment: .center, spacing: WidgetDesignTokens.mediumGap) {
                     Link(destination: TokenMonitorWidgetConfiguration.url(for: .overview)) {
-                        panel {
-                            VStack(alignment: .leading, spacing: 4) {
-                                sectionLabel(WidgetL10n.text("TOTAL TOKENS"))
-                                primary(model.primaryValue, size: WidgetDesignTokens.mediumPrimarySize)
-                                secondary(model.secondaryValue)
-                            }
+                        VStack(alignment: .leading, spacing: 4) {
+                            primary(model.primaryValue, size: WidgetDesignTokens.mediumPrimarySize)
+                            secondary(model.secondaryValue)
                         }
                     }
                     .buttonStyle(.plain)
+                    Divider()
+                        .opacity(WidgetDesignTokens.dividerOpacity)
                     VStack(spacing: 6) {
                         summaryLinkRow(title: WidgetL10n.text("Quota"), value: quotaSummary(snapshot), page: .quota)
                         summaryLinkRow(title: WidgetL10n.text("Top model"), value: snapshot.models.first?.displayName ?? "—", page: .models)
@@ -297,15 +356,14 @@ struct TokenMonitorWidgetView: View {
             } else {
                 HStack(alignment: .top, spacing: 8) {
                     Link(destination: TokenMonitorWidgetConfiguration.url(for: .overview)) {
-                        panel {
-                            VStack(alignment: .leading, spacing: 3) {
-                                sectionLabel(WidgetL10n.text("TOTAL TOKENS"))
-                                primary(model.primaryValue, size: WidgetDesignTokens.mediumPrimarySize)
-                                secondary(model.secondaryValue)
-                            }
+                        VStack(alignment: .leading, spacing: 3) {
+                            primary(model.primaryValue, size: WidgetDesignTokens.mediumPrimarySize)
+                            secondary(model.secondaryValue)
                         }
                     }
                     .buttonStyle(.plain)
+                    Divider()
+                        .opacity(WidgetDesignTokens.dividerOpacity)
                     VStack(spacing: 6) {
                         summaryLinkRow(title: WidgetL10n.text("Quota"), value: quotaSummary(snapshot), page: .quota)
                         summaryLinkRow(title: WidgetL10n.text("Top model"), value: snapshot.models.first?.displayName ?? "—", page: .models)
@@ -350,6 +408,28 @@ struct TokenMonitorWidgetView: View {
         }
     }
 
+    private func tools(_ snapshot: WidgetSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            if snapshot.tools.isEmpty {
+                emptyMessage(WidgetL10n.text("No data"))
+            } else {
+                ForEach(Array(snapshot.tools.prefix(3))) { tool in
+                    HStack(spacing: 6) {
+                        Text(WidgetFormat.provider(tool.id))
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1)
+                        Spacer(minLength: 3)
+                        Text(WidgetFormat.tokens(tool.totalTokens, style: "compact", presentation: snapshot.presentation))
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    modelBar(tool.sharePercent)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
     private func activity(_ snapshot: WidgetSnapshot, context: WidgetContentContext) -> some View {
         adaptiveContent {
             activityView(snapshot, context: context, density: .regular)
@@ -370,30 +450,9 @@ struct TokenMonitorWidgetView: View {
         }
     }
 
-    private func footer(page: WidgetPage, familyScope: WidgetFamilyScope?) -> some View {
-        HStack(spacing: 6) {
-            if let familyScope {
-                WidgetPageControl(page: page, family: familyScope)
-                    .frame(width: metrics.pageControlWidth, height: WidgetDesignTokens.pageControlHeight, alignment: .leading)
-            } else {
-                pageLabel(page: page)
-                    .frame(width: metrics.pageControlWidth, height: WidgetDesignTokens.pageControlHeight, alignment: .leading)
-            }
-            Spacer(minLength: 4)
-            Link(destination: TokenMonitorWidgetConfiguration.url(for: page)) {
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: WidgetDesignTokens.secondarySize, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: WidgetDesignTokens.openButtonSize, height: WidgetDesignTokens.openButtonSize)
-            }
-            .buttonStyle(.plain)
-        }
-        .frame(height: metrics.footerHeight)
-    }
-
     private func statusState(title: String, detail: String?) -> some View {
         scaffold(
-            header: brand,
+            header: header(page: entry.page, period: entry.period),
             content: VStack(alignment: .leading, spacing: 6) {
                 Spacer(minLength: 0)
                 Text(title).font(.system(size: 13, weight: .semibold))
@@ -405,42 +464,8 @@ struct TokenMonitorWidgetView: View {
                 }
                 Spacer(minLength: 0)
             },
-            footer: footer(page: entry.page, familyScope: familyScope),
             metrics: metrics
         )
-    }
-
-    private func pageLabel(page: WidgetPage, showsNextIndicator: Bool = false) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: page.systemImage)
-            Text(page.title)
-                .lineLimit(1)
-            if showsNextIndicator {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: WidgetDesignTokens.microSize - 1, weight: .semibold))
-            }
-        }
-        .font(.system(size: WidgetDesignTokens.microSize, weight: .medium))
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .frame(height: WidgetDesignTokens.pageControlHeight, alignment: .center)
-        .background(.primary.opacity(WidgetDesignTokens.panelOpacity), in: Capsule())
-        .overlay(Capsule().stroke(.primary.opacity(WidgetDesignTokens.dividerOpacity), lineWidth: 0.6))
-    }
-
-    private func panel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(WidgetDesignTokens.sectionPadding)
-            .background(.primary.opacity(WidgetDesignTokens.panelOpacity), in: RoundedRectangle(cornerRadius: WidgetDesignTokens.cornerRadius))
-    }
-
-    private func compactPanel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, WidgetDesignTokens.sectionPadding)
-            .padding(.vertical, 6)
-            .background(.primary.opacity(WidgetDesignTokens.panelOpacity), in: RoundedRectangle(cornerRadius: WidgetDesignTokens.cornerRadius))
     }
 
     private func summaryRow(_ label: String, _ value: String) -> some View {
@@ -452,26 +477,7 @@ struct TokenMonitorWidgetView: View {
                 .minimumScaleFactor(0.7)
         }
         .font(.system(size: WidgetDesignTokens.secondarySize, weight: .medium))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(.primary.opacity(WidgetDesignTokens.panelOpacity), in: RoundedRectangle(cornerRadius: 7))
-    }
-
-    private func largeSummarySection(title: String, rows: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            sectionLabel(title)
-            if rows.isEmpty {
-                emptyMessage(WidgetL10n.text("No data"))
-            } else {
-                ForEach(Array(rows.prefix(5).enumerated()), id: \.offset) { _, row in
-                    Text(row)
-                        .font(.system(size: 12, weight: .medium))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                        .truncationMode(.tail)
-                }
-            }
-        }
+        .padding(.vertical, 2)
     }
 
     private func sectionLabel(_ text: String) -> some View {
@@ -480,7 +486,9 @@ struct TokenMonitorWidgetView: View {
 
     private func primary(_ text: String, size: CGFloat) -> some View {
         Text(text)
-            .font(.system(size: size, weight: .semibold, design: .monospaced))
+            .font(.system(size: size, weight: .medium))
+            .monospacedDigit()
+            .foregroundStyle(WidgetDesignTokens.number)
             .lineLimit(1)
             .minimumScaleFactor(0.62)
             .contentTransition(.numericText())
@@ -489,7 +497,7 @@ struct TokenMonitorWidgetView: View {
     private func secondary(_ text: String) -> some View {
         Text(text)
             .font(.system(size: WidgetDesignTokens.secondarySize, design: .monospaced))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(WidgetDesignTokens.muted)
             .lineLimit(1)
             .minimumScaleFactor(0.7)
     }
@@ -527,20 +535,22 @@ struct TokenMonitorWidgetView: View {
         modelLimit: Int,
         showsMoreRows: Bool
     ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 10) {
             Link(destination: TokenMonitorWidgetConfiguration.url(for: .overview)) {
-                compactPanel {
-                    VStack(alignment: .leading, spacing: 3) {
-                        sectionLabel(WidgetL10n.text("TOTAL TOKENS"))
-                        primary(snapshot.overview.totalTokens.formatted(.number.grouping(.automatic)), size: WidgetDesignTokens.largePrimarySize)
-                        secondary(model.secondaryValue)
-                    }
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    primary(snapshot.overview.totalTokens.formatted(.number.grouping(.automatic)), size: WidgetDesignTokens.largePrimarySize)
+                    Spacer(minLength: 8)
+                    secondary(model.secondaryValue)
                 }
             }
             .buttonStyle(.plain)
-            largeQuotaPreview(snapshot, limit: quotaLimit, showsMoreRows: showsMoreRows)
-            Link(destination: TokenMonitorWidgetConfiguration.url(for: .models)) {
-                compactPanel {
+
+            Divider().opacity(WidgetDesignTokens.dividerOpacity)
+
+            HStack(alignment: .top, spacing: 12) {
+                largeQuotaPreview(snapshot, limit: quotaLimit, showsMoreRows: showsMoreRows)
+                Divider().opacity(WidgetDesignTokens.dividerOpacity)
+                Link(destination: TokenMonitorWidgetConfiguration.url(for: .models)) {
                     VStack(alignment: .leading, spacing: 1) {
                         sectionLabel(WidgetL10n.text("Models"))
                         let rows = modelOverviewRows(snapshot, limit: modelLimit, showsMoreRows: showsMoreRows)
@@ -553,10 +563,24 @@ struct TokenMonitorWidgetView: View {
                         }
                     }
                 }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+
+            if !snapshot.trend.points.isEmpty {
+                Divider().opacity(WidgetDesignTokens.dividerOpacity)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        sectionLabel(WidgetL10n.text("Trend"))
+                        Spacer(minLength: 8)
+                        secondary(trendDeltaText(snapshot.trend, presentation: snapshot.presentation))
+                    }
+                    sparkline(snapshot.trend.points)
+                        .frame(maxHeight: .infinity)
+                }
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func quotaSummary(_ snapshot: WidgetSnapshot) -> String {
@@ -567,22 +591,20 @@ struct TokenMonitorWidgetView: View {
 
     private func largeQuotaPreview(_ snapshot: WidgetSnapshot, limit: Int, showsMoreRows: Bool) -> some View {
         Link(destination: TokenMonitorWidgetConfiguration.url(for: .quota)) {
-            compactPanel {
-                VStack(alignment: .leading, spacing: 1) {
-                    sectionLabel(WidgetL10n.text("Quota"))
-                    if snapshot.quota.isEmpty {
-                        emptyMessage(WidgetL10n.text("No quota provider configured"))
-                    } else {
-                        ForEach(Array(sortedQuotaProviders(snapshot).prefix(max(0, limit)))) { provider in
-                            LargeOverviewListRow(
-                                label: providerDisplayName(provider),
-                                value: WidgetFormat.quotaValue(provider),
-                                style: provider.status == "ok" ? .primary : .secondary
-                            )
-                        }
-                        if showsMoreRows, snapshot.quota.count > limit {
-                            LargeOverviewListRow(label: WidgetL10n.format("%lld more", snapshot.quota.count - limit), value: "", style: .more)
-                        }
+            VStack(alignment: .leading, spacing: 1) {
+                sectionLabel(WidgetL10n.text("Quota"))
+                if snapshot.quota.isEmpty {
+                    emptyMessage(WidgetL10n.text("No quota provider configured"))
+                } else {
+                    ForEach(Array(sortedQuotaProviders(snapshot).prefix(max(0, limit)))) { provider in
+                        LargeOverviewListRow(
+                            label: providerDisplayName(provider),
+                            value: WidgetFormat.quotaValue(provider),
+                            style: provider.status == "ok" ? .primary : .secondary
+                        )
+                    }
+                    if showsMoreRows, snapshot.quota.count > limit {
+                        LargeOverviewListRow(label: WidgetL10n.format("%lld more", snapshot.quota.count - limit), value: "", style: .more)
                     }
                 }
             }
@@ -619,28 +641,6 @@ struct TokenMonitorWidgetView: View {
     private func summaryLinkRow(title: String, value: String, page: WidgetPage) -> some View {
         Link(destination: TokenMonitorWidgetConfiguration.url(for: page)) {
             summaryRow(title, value)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func summaryLinkSection(title: String, rows: [String], page: WidgetPage) -> some View {
-        Link(destination: TokenMonitorWidgetConfiguration.url(for: page)) {
-            panel {
-                VStack(alignment: .leading, spacing: 5) {
-                    sectionLabel(title)
-                    if rows.isEmpty {
-                        emptyMessage(WidgetL10n.text("No data"))
-                    } else {
-                        ForEach(Array(rows.prefix(3).enumerated()), id: \.offset) { _, row in
-                            Text(row)
-                                .font(.system(size: 11, weight: .medium))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.72)
-                                .truncationMode(.tail)
-                        }
-                    }
-                }
-            }
         }
         .buttonStyle(.plain)
     }
@@ -1093,7 +1093,7 @@ struct TokenMonitorWidgetView: View {
     private func quotaBar(_ remaining: Double) -> some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
-                Capsule().fill(.primary.opacity(0.08))
+                Capsule().fill(.white.opacity(0.09))
                 Capsule().fill(WidgetDesignTokens.accent.opacity(0.7)).frame(width: proxy.size.width * max(0, min(1, remaining / 100)))
             }
         }
@@ -1103,27 +1103,15 @@ struct TokenMonitorWidgetView: View {
     private func modelBar(_ share: Double) -> some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
-                Capsule().fill(.primary.opacity(0.07))
-                Capsule().fill(.primary.opacity(0.34)).frame(width: proxy.size.width * max(0, min(1, share / 100)))
+                Capsule().fill(.white.opacity(0.08))
+                Capsule().fill(WidgetDesignTokens.accent.opacity(0.48)).frame(width: proxy.size.width * max(0, min(1, share / 100)))
             }
         }
         .frame(height: 3)
     }
 
     private func sparkline(_ points: [WidgetTrendPoint]) -> some View {
-        GeometryReader { proxy in
-            let values = points.map { Double($0.totalTokens) }
-            let peak = max(values.max() ?? 1, 1)
-            Path { path in
-                for (index, value) in values.enumerated() {
-                    let x = values.count <= 1 ? 0 : proxy.size.width * CGFloat(index) / CGFloat(values.count - 1)
-                    let y = proxy.size.height * (1 - CGFloat(value / peak))
-                    if index == 0 { path.move(to: CGPoint(x: x, y: y)) }
-                    else { path.addLine(to: CGPoint(x: x, y: y)) }
-                }
-            }
-            .stroke(WidgetDesignTokens.accent, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
-        }
+        SmoothTrendChart(points: points)
     }
 
 }
@@ -1230,7 +1218,13 @@ struct ActivityHeatmap: View {
     }
 
     private func activityColor(_ intensity: Int) -> Color {
-        intensity <= 0 ? .primary.opacity(0.06) : WidgetDesignTokens.accent.opacity(0.18 + Double(min(4, intensity)) * 0.17)
+        switch max(0, min(4, intensity)) {
+        case 0: .white.opacity(0.03)
+        case 1: Color(red: 90 / 255, green: 170 / 255, blue: 1).opacity(0.18)
+        case 2: Color(red: 120 / 255, green: 190 / 255, blue: 1).opacity(0.45)
+        case 3: Color(red: 150 / 255, green: 210 / 255, blue: 1).opacity(0.8)
+        default: Color(red: 180 / 255, green: 230 / 255, blue: 1)
+        }
     }
 }
 
@@ -1242,7 +1236,7 @@ private struct ActivityHeatmapCell: View {
     let isSelected: Bool
 
     private var cornerRadius: CGFloat {
-        min(2, min(width, height) / 3)
+        min(1.5, min(width, height) / 3)
     }
 
     var body: some View {
@@ -1255,79 +1249,5 @@ private struct ActivityHeatmapCell: View {
                         .strokeBorder(.primary, lineWidth: 2)
                 }
             }
-    }
-}
-
-enum WidgetPeriodControlStyle {
-    case compact
-    case segmented
-}
-
-struct WidgetPeriodControl: View {
-    let selection: WidgetPeriod
-    let style: WidgetPeriodControlStyle
-
-    var body: some View {
-        switch style {
-        case .compact:
-            Button(intent: CycleWidgetPeriodIntent()) {
-                periodLabel(selection, selected: true)
-            }
-            .buttonStyle(.plain)
-            .frame(height: WidgetDesignTokens.periodControlHeight, alignment: .center)
-            .accessibilityLabel(WidgetL10n.format("%@, selected", selection.accessibilityName))
-            .accessibilityHint(WidgetL10n.format("Switch to %@", selection.next.accessibilityName))
-        case .segmented:
-            HStack(spacing: 5) {
-                ForEach(WidgetPeriod.allCases, id: \.self) { period in
-                    Button(intent: SetWidgetPeriodIntent(period: period)) {
-                        periodLabel(period, selected: period == selection)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(period == selection
-                        ? WidgetL10n.format("%@, selected", period.accessibilityName)
-                        : WidgetL10n.format("Switch to %@", period.accessibilityName))
-                }
-            }
-            .frame(height: WidgetDesignTokens.periodControlHeight, alignment: .center)
-        }
-    }
-
-    private func periodLabel(_ period: WidgetPeriod, selected: Bool) -> some View {
-        Text(period.title)
-            .font(.system(size: WidgetDesignTokens.microSize, weight: selected ? .bold : .medium, design: .monospaced))
-            .foregroundStyle(selected ? .primary : .tertiary)
-            .padding(.horizontal, selected ? 6 : 3)
-            .padding(.vertical, 3)
-            .frame(height: WidgetDesignTokens.periodControlHeight, alignment: .center)
-            .background(Color.primary.opacity(selected ? WidgetDesignTokens.panelOpacity * 1.8 : 0), in: Capsule())
-            .overlay(Capsule().stroke(.primary.opacity(selected ? WidgetDesignTokens.dividerOpacity : 0), lineWidth: 0.6))
-            .lineLimit(1)
-    }
-}
-
-struct WidgetPageControl: View {
-    let page: WidgetPage
-    let family: WidgetFamilyScope
-
-    var body: some View {
-        Button(intent: CycleWidgetPageIntent(family: family, currentPage: page)) {
-            HStack(spacing: 4) {
-                Image(systemName: page.systemImage)
-                Text(page.title)
-                    .lineLimit(1)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: WidgetDesignTokens.microSize - 1, weight: .semibold))
-            }
-            .font(.system(size: WidgetDesignTokens.microSize, weight: .medium))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .frame(height: WidgetDesignTokens.pageControlHeight, alignment: .center)
-            .background(.primary.opacity(WidgetDesignTokens.panelOpacity), in: Capsule())
-            .overlay(Capsule().stroke(.primary.opacity(WidgetDesignTokens.dividerOpacity), lineWidth: 0.6))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(WidgetL10n.format("Current page: %@", page.title))
-        .accessibilityHint(WidgetL10n.format("Switch to %@", page.next.title))
     }
 }

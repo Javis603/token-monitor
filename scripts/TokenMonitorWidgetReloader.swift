@@ -28,7 +28,10 @@ if Array(CommandLine.arguments.dropFirst()) == ["--mode", "register-host"] {
 }
 
 let kind = CommandLine.arguments.dropFirst().first ?? "com.tokenmonitor.dashboard"
+let kinds = [kind, "\(kind).summary", "\(kind).activity", "\(kind).breakdown", "\(kind).quota", "\(kind).quota.v2"]
 
 if #available(macOS 14.0, *) {
-    WidgetCenter.shared.reloadTimelines(ofKind: kind)
+    for kind in kinds {
+        WidgetCenter.shared.reloadTimelines(ofKind: kind)
+    }
 }

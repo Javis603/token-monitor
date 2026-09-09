@@ -53,6 +53,50 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertNil(snapshot.quota[1].windows.first?.metric)
     }
 
+    func testWidgetToolLabelsMatchTheDesktopCatalogForMiMoCode() {
+        XCTAssertEqual(WidgetFormat.provider("micode"), "MiMo Code")
+        XCTAssertEqual(WidgetFormat.provider("hermes"), "Hermes Agent")
+        XCTAssertEqual(WidgetFormat.provider("lmstudio"), "LM Studio")
+    }
+
+    func testQuotaSelectionUsesConfiguredAccountsInsteadOfIncidentalSortOrder() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":7,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"antigravity","status":"ok","windows":[]},{"provider":"claude","status":"ok","windows":[]},{"provider":"codex","status":"ok","windows":[]}],"status":{"noData":true}}
+        """)
+
+        XCTAssertEqual(
+            WidgetQuotaSelectionResolver.providers(in: snapshot, selectedIDs: ["codex-single", "antigravity-single"], limit: 2).map(\.provider),
+            ["codex", "antigravity"]
+        )
+        XCTAssertEqual(
+            WidgetQuotaSelectionResolver.providers(in: snapshot, selectedIDs: [], limit: 2).map(\.provider),
+            ["antigravity", "claude"]
+        )
+    }
+
+    func testQuotaFreshnessUsesSelectedProviderTimestampInsteadOfSnapshotWriteTime() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":7,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"antigravity","status":"ok","updatedAt":"2026-07-17T09:29:00.000Z","windows":[]},{"provider":"claude","status":"ok","updatedAt":"2026-07-17T08:00:00.000Z","windows":[]}],"status":{"isStale":false,"sourceUpdatedAt":"2026-07-17T09:00:00.000Z","noData":true}}
+        """)
+        let renderedAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T09:30:00Z"))
+
+        XCTAssertTrue(snapshot.isStale(at: renderedAt))
+        XCTAssertFalse(
+            WidgetQuotaFreshness.isStale(
+                snapshot: snapshot,
+                selectedIDs: ["antigravity-single"],
+                at: renderedAt
+            )
+        )
+        XCTAssertTrue(
+            WidgetQuotaFreshness.isStale(
+                snapshot: snapshot,
+                selectedIDs: ["claude-single"],
+                at: renderedAt
+            )
+        )
+    }
+
     func testWorkBuddyCreditsAndUnlimitedKeepNativeDisplaySemantics() throws {
         let snapshot = try decode("""
         {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"workbuddy","status":"ok","balance":{"amount":63,"currency":"CREDITS"},"windows":[{"kind":"billing","metric":"credits","remaining":63,"currency":"CREDITS","showMeter":false}]},{"provider":"workbuddy","status":"ok","instanceId":"workbuddy-unlimited","windows":[{"kind":"billing","metric":"credits","detail":"unlimited","showMeter":false}]}],"status":{"noData":false}}
@@ -73,6 +117,15 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertEqual(Set(snapshot.quota.map(\.id)).count, 3)
         XCTAssertTrue(snapshot.status.noData)
         XCTAssertFalse(snapshot.quota.isEmpty)
+    }
+
+    func testSchemaV8DecodesMaskedAccountLabelsSeparatelyFromProviderNames() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":8,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"codex","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","instanceId":"codex-a1b2c3d4","displayName":"Codex","accountLabel":"a***e@example.com","windows":[{"kind":"weekly","remainingPercent":80}]}],"status":{"noData":true}}
+        """)
+
+        XCTAssertEqual(snapshot.quota.first?.displayName, "Codex")
+        XCTAssertEqual(snapshot.quota.first?.accountLabel, "a***e@example.com")
     }
 
     func testLegacyQuotaRowsGetDistinctStableFallbackIDsAndBadRowsDoNotBlankSnapshot() throws {
@@ -164,7 +217,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     }
 
     func testPeriodPolicyLimitsGlobalSelectionToOverviewAndModels() {
-        for page in [WidgetPage.overview, .models] {
+        for page in [WidgetPage.overview, .tools, .models] {
             XCTAssertTrue(WidgetPeriodPolicy.isSelectable(on: page))
             XCTAssertEqual(WidgetPeriodPolicy.effectivePeriod(for: page, selectedPeriod: .month), .month)
             XCTAssertEqual(WidgetPeriodPolicy.effectivePeriod(for: page, selectedPeriod: .total), .total)
@@ -338,7 +391,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     }
 
     func testAllFiveIntentPagesAreIndependentValues() {
-        XCTAssertEqual(WidgetPage.allCases.map(\.rawValue), ["overview", "quota", "models", "activity", "trend"])
+        XCTAssertEqual(WidgetPage.allCases.map(\.rawValue), ["overview", "quota", "tools", "models", "activity", "trend"])
         var first = TokenMonitorWidgetConfigurationIntent()
         var second = TokenMonitorWidgetConfigurationIntent()
         first.page = .overview
@@ -361,14 +414,6 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
 
     func testWidgetPageDisplayNamesAreLocalized() {
         XCTAssertEqual(WidgetPage.quota.title, "Quota")
-    }
-
-    func testWidgetPageCycleOrderIsStable() {
-        XCTAssertEqual(WidgetPage.overview.next, .quota)
-        XCTAssertEqual(WidgetPage.quota.next, .models)
-        XCTAssertEqual(WidgetPage.models.next, .activity)
-        XCTAssertEqual(WidgetPage.activity.next, .trend)
-        XCTAssertEqual(WidgetPage.trend.next, .overview)
     }
 
     func testWidgetPeriodStateDefaultsPersistsAndNormalizes() {
@@ -475,19 +520,6 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertEqual(reloadedKinds, ["test.widget.kind", "test.widget.kind"])
     }
 
-    func testPageCycleClearsOnlyThatFamilyActivitySelection() {
-        let suite = "token-monitor-widget-clear-activity-day-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = WidgetPresentationStateStore(defaults: defaults)
-
-        store.setSelectedActivityDay("2026-07-16", for: .medium)
-        store.setSelectedActivityDay("2026-07-17", for: .large)
-        WidgetIntentActions.cyclePage(family: .medium, currentPage: .activity, store: store, widgetKind: "kind", reload: { _ in })
-        XCTAssertNil(store.selectedActivityDay(for: .medium))
-        XCTAssertEqual(store.selectedActivityDay(for: .large), "2026-07-17")
-    }
-
     func testPeriodActionsPreserveActivitySelections() {
         let suite = "token-monitor-widget-preserve-activity-day-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -566,8 +598,6 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertEqual(store.selectedPage(for: .medium), .models)
         XCTAssertNil(store.selectedActivityDay(for: .medium))
 
-        let pageIntent = CycleWidgetPageIntent(family: .medium, currentPage: store.selectedPage(for: .medium) ?? .overview)
-        XCTAssertEqual(pageIntent.currentPage.next, .activity)
         XCTAssertEqual(store.selectedPeriod(), .day)
     }
 
@@ -640,7 +670,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         )
     }
 
-    func testWidgetLayoutMetricsStabilizeHeaderFooterAndPageControl() {
+    func testWidgetLayoutMetricsStabilizeTitleAndContent() {
         let small = WidgetLayoutMetrics.metrics(for: .systemSmall)
         let medium = WidgetLayoutMetrics.metrics(for: .systemMedium)
         let large = WidgetLayoutMetrics.metrics(for: .systemLarge)
@@ -652,12 +682,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             XCTAssertEqual(metrics.outerInsets.leading, 0)
             XCTAssertEqual(metrics.outerInsets.trailing, 0)
         }
-        XCTAssertEqual([small.headerHeight, medium.headerHeight, large.headerHeight], [20, 22, 24])
-        XCTAssertEqual([small.footerHeight, medium.footerHeight, large.footerHeight], [25, 26, 28])
-        XCTAssertEqual(small.pageControlWidth, 108)
-        XCTAssertEqual(medium.pageControlWidth, 112)
-        XCTAssertEqual(large.pageControlWidth, 112)
-        XCTAssertEqual(WidgetLayoutMetrics.metrics(for: .systemSmall).pageControlWidth, small.pageControlWidth)
+        XCTAssertEqual([small.headerHeight, medium.headerHeight, large.headerHeight], [18, 18, 18])
     }
 
     func testWidgetScaffoldGeometryIsFamilyOnlyAndReservesContentRect() {
@@ -668,9 +693,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         for metrics in families {
             let geometry = metrics.scaffoldGeometry
             XCTAssertEqual(geometry.headerHeight, metrics.headerHeight)
-            XCTAssertEqual(geometry.footerHeight, metrics.footerHeight)
             XCTAssertEqual(geometry.contentTopReserved, metrics.headerHeight + metrics.contentGap)
-            XCTAssertEqual(geometry.contentBottomReserved, metrics.footerHeight + metrics.contentGap)
+            XCTAssertEqual(geometry.contentBottomReserved, 0)
             XCTAssertGreaterThan(geometry.contentHeight(for: 160), 0)
             XCTAssertLessThan(geometry.contentTopReserved + geometry.contentBottomReserved, 160)
 
@@ -678,8 +702,6 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             XCTAssertEqual(expectedFrames.header.minY, 0)
             XCTAssertEqual(expectedFrames.header.height, metrics.headerHeight)
             XCTAssertEqual(expectedFrames.content.minY, geometry.contentTopReserved)
-            XCTAssertEqual(expectedFrames.footer.maxY, 160)
-            XCTAssertEqual(expectedFrames.footer.height, metrics.footerHeight)
 
             for _ in pages {
                 for _ in periods {
@@ -841,12 +863,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertEqual(WidgetPeriod.total.next, .day)
         XCTAssertFalse(SetWidgetPeriodIntent.openAppWhenRun)
         XCTAssertFalse(CycleWidgetPeriodIntent.openAppWhenRun)
-        XCTAssertFalse(CycleWidgetPageIntent.openAppWhenRun)
         XCTAssertFalse(SelectActivityDayIntent.openAppWhenRun)
 
-        let pageIntent = CycleWidgetPageIntent(family: .large, currentPage: .trend)
-        XCTAssertEqual(pageIntent.family, .large)
-        XCTAssertEqual(pageIntent.currentPage, .trend)
         let dayIntent = SelectActivityDayIntent(family: .large, date: "2026-07-16")
         XCTAssertEqual(dayIntent.family, .large)
         XCTAssertEqual(dayIntent.date, "2026-07-16")
@@ -1043,17 +1061,14 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertEqual(sorted.last?.provider, "antigravity")
     }
 
-    func testHeaderFooterGeometryUnchanged() {
+    func testTitleContentGeometry() {
         let small = WidgetLayoutMetrics.metrics(for: .systemSmall)
         let medium = WidgetLayoutMetrics.metrics(for: .systemMedium)
         let large = WidgetLayoutMetrics.metrics(for: .systemLarge)
 
-        XCTAssertEqual(small.headerHeight, 20)
-        XCTAssertEqual(medium.headerHeight, 22)
-        XCTAssertEqual(large.headerHeight, 24)
-        XCTAssertEqual(small.footerHeight, 25)
-        XCTAssertEqual(medium.footerHeight, 26)
-        XCTAssertEqual(large.footerHeight, 28)
+        XCTAssertEqual(small.headerHeight, 18)
+        XCTAssertEqual(medium.headerHeight, 18)
+        XCTAssertEqual(large.headerHeight, 18)
         XCTAssertEqual(small.contentGap, 5)
         XCTAssertEqual(medium.contentGap, 10)
         XCTAssertEqual(large.contentGap, 8)

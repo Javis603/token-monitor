@@ -96,6 +96,23 @@ function verifyCodesign(filePath, execFileSyncImpl = execFileSync) {
   }
 }
 
+function localElectronHelperPaths(appPath) {
+  const appName = path.basename(appPath, '.app');
+  const frameworks = path.join(appPath, 'Contents', 'Frameworks');
+  return ['', ' (GPU)', ' (Plugin)', ' (Renderer)']
+    .map((suffix) => path.join(frameworks, `${appName} Helper${suffix}.app`));
+}
+
+function verifyLocalElectronHelpers(appPath, spawnSyncImpl = spawnSync) {
+  for (const helperPath of localElectronHelperPaths(appPath)) {
+    if (!fs.existsSync(helperPath)) fail(`local preview Electron helper is missing: ${path.basename(helperPath)}`);
+    const entitlements = codesignOutput(helperPath, spawnSyncImpl);
+    if (!hasEntitlement(entitlements, 'com.apple.security.cs.disable-library-validation')) {
+      fail(`${path.basename(helperPath)} cannot load the ad-hoc-signed Electron Framework`);
+    }
+  }
+}
+
 function hasEntitlement(xml, key, value) {
   const keyPattern = new RegExp(`<key>${key.replaceAll('.', '\\.')}</key>[\\s\\S]{0,240}?`);
   if (!keyPattern.test(xml)) return false;
@@ -216,11 +233,13 @@ function verifyMacWidgetApp({
   if (!schemes.includes(config.urlScheme)) fail('packaged app is missing the Widget URL scheme');
   if (!/^\d+\.\d+(?:\.\d+)?$/.test(String(config.marketingVersion || ''))) fail('invalid marketing version');
   if (!/^\d+(?:\.\d+){0,2}$/.test(String(config.bundleVersion || ''))) fail('invalid bundle version');
+  const widgetBundleVersion = String(config.widgetBundleVersion || config.bundleVersion || '');
+  if (!/^\d+(?:\.\d+){0,2}$/.test(widgetBundleVersion)) fail('invalid Widget bundle version');
   if (
     appInfo.CFBundleShortVersionString !== config.marketingVersion
     || appInfo.CFBundleVersion !== config.bundleVersion
     || extensionInfo.CFBundleShortVersionString !== config.marketingVersion
-    || extensionInfo.CFBundleVersion !== config.bundleVersion
+    || extensionInfo.CFBundleVersion !== widgetBundleVersion
   ) {
     fail('app or Widget extension version fields differ from widget config');
   }
@@ -257,6 +276,7 @@ function verifyMacWidgetApp({
         fail('formal distribution app failed spctl assessment');
       }
     }
+    if (localDevelopmentSigning) verifyLocalElectronHelpers(resolvedApp, spawnSyncImpl);
   }
 
   if (profileIsRequired({ distributionBuild, localDevelopmentSigning, appGroup })) {
@@ -313,6 +333,7 @@ module.exports = {
   entitlementValues,
   hasEntitlement,
   readCodesignMetadata,
+  verifyLocalElectronHelpers,
   verifyAppGroupSources,
   verifyFormalCodeSignature,
   verifyMacWidgetApp,

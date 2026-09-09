@@ -25,8 +25,8 @@ const DEFAULT_APP_GROUP = 'group.com.example.tokenmonitor';
 const DEFAULT_WIDGET_BUNDLE_ID = `${DEFAULT_APP_ID}.widget`;
 const DEFAULT_URL_SCHEME = 'token-monitor';
 const DEFAULT_WIDGET_KIND = 'com.tokenmonitor.dashboard';
-const WIDGET_UI_VERSION = 19;
-const WIDGET_SCHEMA_VERSION = 6;
+const WIDGET_UI_VERSION = 32;
+const WIDGET_SCHEMA_VERSION = 8;
 const WIDGET_ARCHITECTURES = Object.freeze({
   arm64: Object.freeze({ name: 'arm64', xcodeArch: 'arm64', swiftArch: 'arm64' }),
   x64: Object.freeze({ name: 'x64', xcodeArch: 'x86_64', swiftArch: 'x86_64' })
@@ -49,6 +49,10 @@ function widgetVersions(version = packageVersion()) {
     marketingVersion: match[1],
     bundleVersion: match[1]
   };
+}
+
+function widgetBundleVersion({ distributionBuild, releaseBundleVersion, uiVersion = WIDGET_UI_VERSION }) {
+  return distributionBuild ? releaseBundleVersion : String(uiVersion);
 }
 
 function configuredIdentifier(name, fallback) {
@@ -189,6 +193,10 @@ function main() {
   const versions = widgetVersions();
   const appId = DEFAULT_APP_ID;
   const distributionBuild = process.env.TOKEN_MONITOR_WIDGET_DISTRIBUTION === '1';
+  const localWidgetBundleVersion = widgetBundleVersion({
+    distributionBuild,
+    releaseBundleVersion: versions.bundleVersion
+  });
   const localDevelopmentSigning = process.env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING === '1';
   const developmentTeam = String(process.env.DEVELOPMENT_TEAM || '').trim();
   validateDistributionIdentifiers({ appGroup, bundleId, appId, distributionBuild, developmentTeam });
@@ -215,15 +223,16 @@ function main() {
   fs.mkdirSync(OUTPUT, { recursive: true });
   const xcconfigPath = path.join(OUTPUT, 'local-widget-build.xcconfig');
   fs.writeFileSync(xcconfigPath, `${[
-    xcconfigLine('CURRENT_PROJECT_VERSION', versions.bundleVersion),
+    xcconfigLine('CURRENT_PROJECT_VERSION', localWidgetBundleVersion),
     xcconfigLine('MARKETING_VERSION', versions.marketingVersion),
-    xcconfigLine('TOKEN_MONITOR_BUNDLE_VERSION', versions.bundleVersion),
+    xcconfigLine('TOKEN_MONITOR_BUNDLE_VERSION', localWidgetBundleVersion),
     xcconfigLine('TOKEN_MONITOR_MARKETING_VERSION', versions.marketingVersion),
     xcconfigLine('TOKEN_MONITOR_PACKAGE_VERSION', versions.packageVersion),
     xcconfigLine('TOKEN_MONITOR_APP_GROUP', appGroup),
     xcconfigLine('TOKEN_MONITOR_WIDGET_BUNDLE_ID', bundleId),
     xcconfigLine('TOKEN_MONITOR_WIDGET_URL_SCHEME', urlScheme),
     xcconfigLine('TOKEN_MONITOR_WIDGET_KIND', widgetKind),
+    xcconfigLine('TOKEN_MONITOR_WIDGET_UI_VERSION', WIDGET_UI_VERSION),
     xcconfigLine('TOKEN_MONITOR_WIDGET_ARCH', architecture.name),
     xcconfigLine('TOKEN_MONITOR_WIDGET_GIT_REVISION', revision),
     xcconfigLine('TOKEN_MONITOR_WIDGET_BUILD_TIMESTAMP', timestamp),
@@ -291,6 +300,7 @@ function main() {
     packageVersion: versions.packageVersion,
     marketingVersion: versions.marketingVersion,
     bundleVersion: versions.bundleVersion,
+    widgetBundleVersion: localWidgetBundleVersion,
     snapshotFileName: 'snapshot.json'
   }, null, 2)}\n`);
   console.log(`[mac-widget] staged ${path.relative(ROOT, stagedExtension)} and ${path.relative(ROOT, helperBinary)} (${widgetKind}, ${revision}, ${timestamp})`);
@@ -301,9 +311,13 @@ if (require.main === module) main();
 module.exports = {
   DEFAULT_APP_GROUP,
   DEFAULT_WIDGET_BUNDLE_ID,
+  DEFAULT_WIDGET_KIND,
+  DEFAULT_URL_SCHEME,
+  WIDGET_UI_VERSION,
   WIDGET_ARCHITECTURES,
   assertWidgetArchitecture,
   packageVersion,
+  widgetBundleVersion,
   widgetVersions,
   resolveWidgetArchitecture,
   validateDistributionIdentifiers

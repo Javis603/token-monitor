@@ -6,6 +6,9 @@ const {
   appSignOptions,
   extensionSignArgs,
   localCodesignWrapperScript,
+  localElectronHelperEntitlements,
+  localElectronHelperPaths,
+  localElectronHelperSignArgs,
   localMainAppSignArgs,
   widgetURLScheme
 } = require('../../scripts/sign-macos-with-widget');
@@ -38,6 +41,9 @@ test('disables timestamp and hardened runtime only for local development signing
   assert.equal(localOptions.identity, options.identity);
   assert.equal(localOptions.hardenedRuntime, false);
   assert.equal(localOptions.timestamp, 'none');
+  assert.equal(localOptions.ignore.length, 1);
+  assert.equal(localOptions.ignore[0]('/tmp/Electron Framework.framework/Versions/Current/Resources/locale.pak'), true);
+  assert.equal(localOptions.ignore[0]('/tmp/Electron Framework.framework/Versions/A/Resources/locale.pak'), false);
   assert.deepEqual(await localOptions.optionsForFile('/tmp/example'), {
     entitlements: '/tmp/inherit.entitlements',
     hardenedRuntime: false,
@@ -55,10 +61,38 @@ test('disables timestamp and hardened runtime only for local development signing
   assert.equal(options.timestamp, undefined);
 });
 
-test('local codesign wrapper removes timestamp arguments without changing release signing', () => {
+test('local ad-hoc signing explicitly signs every Electron helper with preview entitlements', () => {
+  const app = '/tmp/Token Monitor.app';
+  const helpers = localElectronHelperPaths(app);
+
+  assert.deepEqual(helpers.map((helper) => helper.slice(helper.lastIndexOf('/') + 1)), [
+    'Token Monitor Helper.app',
+    'Token Monitor Helper (GPU).app',
+    'Token Monitor Helper (Plugin).app',
+    'Token Monitor Helper (Renderer).app'
+  ]);
+  assert.deepEqual(localElectronHelperSignArgs({
+    identity: '-',
+    entitlements: '/tmp/local-helper.entitlements',
+    helper: helpers[0]
+  }), [
+    '--force', '--sign', '-',
+    '--entitlements', '/tmp/local-helper.entitlements',
+    helpers[0]
+  ]);
+  const entitlements = localElectronHelperEntitlements();
+  assert.match(entitlements, /com\.apple\.security\.cs\.allow-jit/);
+  assert.match(entitlements, /com\.apple\.security\.cs\.allow-unsigned-executable-memory/);
+  assert.match(entitlements, /com\.apple\.security\.cs\.disable-library-validation/);
+});
+
+test('local codesign wrapper disables timestamp and hardened runtime without changing release signing', () => {
   const wrapper = localCodesignWrapperScript();
 
   assert.match(wrapper, /--timestamp\|--timestamp=\*/);
+  assert.match(wrapper, /filtered\+=\("--timestamp=none"\)/);
+  assert.match(wrapper, /--options\) skip_runtime=true/);
+  assert.match(wrapper, /--options=runtime\) continue/);
   assert.match(wrapper, /exec \/usr\/bin\/codesign/);
 });
 

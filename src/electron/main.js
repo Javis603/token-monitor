@@ -3996,6 +3996,15 @@ function macWidgetPresentation() {
   });
 }
 
+function macWidgetActiveCodexAccount() {
+  const provider = localLiveCodexProvider(latestStats, settings?.deviceId || '');
+  if (!provider) return null;
+  return Object.freeze({
+    accountKey: String(provider.accountKey || '').trim(),
+    accountEmail: String(provider.accountEmail || '').trim()
+  });
+}
+
 function ensureMacWidgetDemand() {
   if (process.platform !== 'darwin') return null;
   if (macWidgetDemand) return macWidgetDemand;
@@ -4042,6 +4051,7 @@ function captureMacWidgetWork({ stats, owner }) {
     historyCachePath: completeHistorySource(resolverConfig) === 'remote'
       ? macWidgetHistoryCachePath(app.getPath('userData'), sourceKey)
       : null,
+    activeCodexAccount: macWidgetActiveCodexAccount(),
     presentation: macWidgetPresentation(),
     snapshotPath: widget.snapshotPath,
     widgetKind: widget.widgetKind
@@ -4078,6 +4088,7 @@ function ensureMacWidgetSnapshotController() {
     prepareSnapshot: (work, history) => prepareMacWidgetSnapshotUpdate(work.stats, {
       snapshotPath: work.snapshotPath,
       snapshotOptions: {
+        activeCodexAccount: work.activeCodexAccount,
         presentation: work.presentation,
         history
       },

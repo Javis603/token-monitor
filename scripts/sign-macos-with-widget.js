@@ -16,6 +16,51 @@ const { copyProvisioningProfiles, profileIsRequired } = require('./macos-provisi
 
 const execFileAsync = promisify(execFile);
 
+const LOCAL_ELECTRON_HELPER_ENTITLEMENTS = Object.freeze([
+  'com.apple.security.cs.allow-jit',
+  'com.apple.security.cs.allow-unsigned-executable-memory',
+  'com.apple.security.cs.disable-library-validation'
+]);
+
+function localElectronHelperEntitlements() {
+  const keys = LOCAL_ELECTRON_HELPER_ENTITLEMENTS
+    .map((key) => `  <key>${key}</key>\n  <true/>`)
+    .join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+${keys}
+</dict>
+</plist>
+`;
+}
+
+function localElectronHelperPaths(app) {
+  const appName = path.basename(app, '.app');
+  const frameworks = path.join(app, 'Contents', 'Frameworks');
+  return ['', ' (GPU)', ' (Plugin)', ' (Renderer)']
+    .map((suffix) => path.join(frameworks, `${appName} Helper${suffix}.app`));
+}
+
+function localElectronHelperSignArgs({ identity, entitlements, keychain, helper }) {
+  const args = ['--force', '--sign', identity, '--entitlements', entitlements];
+  if (keychain) args.push('--keychain', keychain);
+  args.push(helper);
+  return args;
+}
+
+async function signLocalElectronHelpers(options, entitlements) {
+  for (const helper of localElectronHelperPaths(options.app)) {
+    await execFileAsync('codesign', localElectronHelperSignArgs({
+      identity: options.identity,
+      entitlements,
+      keychain: options.keychain,
+      helper
+    }));
+  }
+}
+
 function reloaderEntitlementsPath() {
   return path.resolve(
     __dirname,
@@ -24,6 +69,20 @@ function reloaderEntitlementsPath() {
     'macos-widget',
     'TokenMonitorWidgetReloader.entitlements'
   );
+}
+
+function widgetEntitlementsPath() {
+  return path.resolve(
+    __dirname,
+    '..',
+    'build',
+    'macos-widget',
+    'TokenMonitorWidget.entitlements'
+  );
+}
+
+function widgetExtensionPath(app) {
+  return path.join(app, 'Contents', 'PlugIns', 'TokenMonitorWidget.appex');
 }
 
 function reloaderSigningOptions(options) {
@@ -55,11 +114,22 @@ function extensionSignArgs({ identity, entitlementsPath, keychain, localDevelopm
 function appSignOptions(options, localDevelopmentSigning) {
   if (!localDevelopmentSigning) return options;
   const originalOptionsForFile = options.optionsForFile;
+  const originalIgnore = Array.isArray(options.ignore) ? options.ignore : [];
   let loggedLocalOptions = false;
   return {
     ...options,
     hardenedRuntime: false,
     timestamp: 'none',
+    // @electron/osx-sign follows the Electron framework's Versions/Current
+    // symlink as if it were another directory. That makes the ad-hoc preview
+    // sign the same physical resources once through Versions/A and again
+    // through Versions/Current, which intermittently fails with EPERM. The
+    // canonical version tree is already signed, so skip only the alias path.
+    ignore: [
+      ...originalIgnore,
+      (filePath) => String(filePath).split(path.sep).includes('Current')
+        && String(filePath).includes(`${path.sep}Versions${path.sep}Current${path.sep}`)
+    ],
     async optionsForFile(filePath) {
       const fileOptions = originalOptionsForFile
         ? await originalOptionsForFile(filePath)
@@ -81,9 +151,16 @@ function localCodesignWrapperScript() {
   return `#!/bin/bash
 set -euo pipefail
 filtered=()
+skip_runtime=false
 for argument in "$@"; do
+  if [[ "$skip_runtime" == true ]]; then
+    skip_runtime=false
+    [[ "$argument" == "runtime" ]] && continue
+  fi
   case "$argument" in
-    --timestamp|--timestamp=*) continue ;;
+    --timestamp|--timestamp=*) filtered+=("--timestamp=none"); continue ;;
+    --options) skip_runtime=true; continue ;;
+    --options=runtime) continue ;;
     *) filtered+=("$argument") ;;
   esac
 done
@@ -120,6 +197,15 @@ async function signReloaderAndContainer(options, localDevelopmentSigning) {
   if (!mainFileOptions.entitlements) {
     throw new Error('macOS main app entitlements are unavailable after Widget signing');
   }
+  await execFileAsync('codesign', [
+    ...extensionSignArgs({
+      identity: options.identity,
+      entitlementsPath: widgetEntitlementsPath(),
+      keychain: options.keychain,
+      localDevelopmentSigning
+    }),
+    widgetExtensionPath(options.app)
+  ]);
   await execFileAsync('codesign', reloaderSignArgs({
     identity: options.identity,
     entitlements: reloaderEntitlementsPath(),
@@ -145,11 +231,14 @@ async function signAppForMode(options, localDevelopmentSigning) {
 
   const wrapperDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'token-monitor-codesign-'));
   const wrapperPath = path.join(wrapperDirectory, 'codesign');
+  const localHelperEntitlementsPath = path.join(wrapperDirectory, 'local-electron-helper.entitlements.plist');
   const originalPath = process.env.PATH;
   try {
     await fs.writeFile(wrapperPath, localCodesignWrapperScript(), { mode: 0o700 });
+    await fs.writeFile(localHelperEntitlementsPath, localElectronHelperEntitlements(), { mode: 0o600 });
     process.env.PATH = `${wrapperDirectory}${path.delimiter}${originalPath || ''}`;
     await signApp(signingOptions);
+    await signLocalElectronHelpers(signingOptions, localHelperEntitlementsPath);
     await signReloaderAndContainer(signingOptions, true);
   } finally {
     process.env.PATH = originalPath;
@@ -164,19 +253,8 @@ function widgetURLScheme() {
 }
 
 module.exports = async function signMacAppWithWidget(options) {
-  const extensionPath = path.join(
-    options.app,
-    'Contents',
-    'PlugIns',
-    'TokenMonitorWidget.appex'
-  );
-  const entitlementsPath = path.resolve(
-    __dirname,
-    '..',
-    'build',
-    'macos-widget',
-    'TokenMonitorWidget.entitlements'
-  );
+  const extensionPath = widgetExtensionPath(options.app);
+  const entitlementsPath = widgetEntitlementsPath();
   const identity = String(options.identity || '').trim();
   if (!identity) throw new Error('macOS signing identity is unavailable for Widget extension');
   const localDevelopmentSigning = process.env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING === '1';
@@ -224,5 +302,8 @@ module.exports.appSignOptions = appSignOptions;
 module.exports.localCodesignWrapperScript = localCodesignWrapperScript;
 module.exports.localMainAppSignArgs = localMainAppSignArgs;
 module.exports.formalMainAppSignArgs = formalMainAppSignArgs;
+module.exports.localElectronHelperEntitlements = localElectronHelperEntitlements;
+module.exports.localElectronHelperPaths = localElectronHelperPaths;
+module.exports.localElectronHelperSignArgs = localElectronHelperSignArgs;
 module.exports.reloaderSignArgs = reloaderSignArgs;
 module.exports.widgetURLScheme = widgetURLScheme;

@@ -45,9 +45,12 @@ function makeBundle({ appGroup, configAppGroup = appGroup, widgetInfoAppGroup = 
   const extensionExecutable = path.join(extensionContents, 'MacOS', 'TokenMonitorWidget');
   const reloader = path.join(contents, 'Resources', 'TokenMonitorWidgetReloader');
   const configPath = path.join(contents, 'Resources', 'token-monitor-widget.json');
+  const helpers = ['', ' (GPU)', ' (Plugin)', ' (Renderer)']
+    .map((suffix) => path.join(contents, 'Frameworks', `Token Monitor Helper${suffix}.app`));
   fs.mkdirSync(path.join(contents, 'MacOS'), { recursive: true });
   fs.mkdirSync(path.dirname(extensionExecutable), { recursive: true });
   fs.mkdirSync(path.dirname(reloader), { recursive: true });
+  for (const helper of helpers) fs.mkdirSync(helper, { recursive: true });
   fs.writeFileSync(path.join(contents, 'Info.plist'), 'fixture');
   fs.writeFileSync(path.join(extensionContents, 'Info.plist'), 'fixture');
   fs.writeFileSync(path.join(contents, 'MacOS', 'Token Monitor'), 'fixture');
@@ -64,7 +67,9 @@ function makeBundle({ appGroup, configAppGroup = appGroup, widgetInfoAppGroup = 
     root,
     appPath,
     extension,
+    helpers,
     reloader,
+    configPath,
     appInfo: plistForApp(),
     extensionInfo: plistForWidget(widgetInfoAppGroup)
   };
@@ -86,6 +91,13 @@ function signatureText(teamIdentifier, authority = true, includeTeamIdentifier =
   ].filter(Boolean).join('\n');
 }
 
+function helperEntitlementXml(includeLibraryValidation = true) {
+  return `<plist><dict>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  ${includeLibraryValidation ? '<key>com.apple.security.cs.disable-library-validation</key><true/>' : ''}
+</dict></plist>`;
+}
+
 function verifyFixture(bundle, {
   appGroup,
   distributionBuild = false,
@@ -95,6 +107,7 @@ function verifyFixture(bundle, {
   widgetTeam = appTeam,
   appEntitlementGroup = appGroup,
   widgetEntitlementGroup = appGroup,
+  helperLibraryValidation = true,
   authority = true,
   includeTeamIdentifier = true
 } = {}) {
@@ -125,6 +138,9 @@ function verifyFixture(bundle, {
       }
       if (filePath === bundle.appPath) {
         return { status: 0, stdout: '', stderr: entitlementXml(appEntitlementGroup, { app: true }) };
+      }
+      if (bundle.helpers.includes(filePath)) {
+        return { status: 0, stdout: '', stderr: helperEntitlementXml(helperLibraryValidation) };
       }
       return { status: 0, stdout: '', stderr: entitlementXml(appGroup, { app: false, includeGroup: false }) };
     }
@@ -169,6 +185,29 @@ test('local ad-hoc verification does not require a TeamIdentifier', (t) => {
   const bundle = makeBundle({ appGroup });
   t.after(() => fs.rmSync(bundle.root, { recursive: true, force: true }));
   assert.doesNotThrow(() => verifyFixture(bundle, { appGroup, includeTeamIdentifier: false }));
+});
+
+test('local verification permits a Widget-only build revision for descriptor reindexing', (t) => {
+  const appGroup = 'group.com.example.tokenmonitor';
+  const bundle = makeBundle({ appGroup });
+  t.after(() => fs.rmSync(bundle.root, { recursive: true, force: true }));
+  bundle.extensionInfo.CFBundleVersion = '29';
+  const config = JSON.parse(fs.readFileSync(bundle.configPath, 'utf8'));
+  config.widgetBundleVersion = '29';
+  fs.writeFileSync(bundle.configPath, `${JSON.stringify(config)}\n`);
+
+  assert.doesNotThrow(() => verifyFixture(bundle, { appGroup }));
+});
+
+test('local ad-hoc verification requires every Electron helper to load the Electron Framework', (t) => {
+  const appGroup = 'group.com.example.tokenmonitor';
+  const bundle = makeBundle({ appGroup });
+  t.after(() => fs.rmSync(bundle.root, { recursive: true, force: true }));
+
+  assert.throws(() => verifyFixture(bundle, {
+    appGroup,
+    helperLibraryValidation: false
+  }), /cannot load the ad-hoc-signed Electron Framework/);
 });
 
 test('cross-checks the expected App Group across config, Info.plist, and signed entitlements', (t) => {
