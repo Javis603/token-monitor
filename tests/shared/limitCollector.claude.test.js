@@ -1154,6 +1154,44 @@ test('Claude CLI usage never borrows the weekly percentage for a missing session
   );
 });
 
+test('Claude CLI usage never borrows Sonnet-only data for a missing all-model weekly window', () => {
+  const provider = mapClaudeCliUsageToProvider([
+    'Current session',
+    '95% left',
+    'Resets 6pm',
+    'Current week (all models)',
+    'Current week (Sonnet only)',
+    '80% left',
+    'Resets Jun 19'
+  ].join('\n'), {
+    now: new Date('2026-06-13T07:00:00Z'),
+    updatedAt: '2026-06-13T07:00:00Z'
+  });
+
+  assert.equal(provider.windows.find((window) => window.kind === 'weekly'), undefined);
+});
+
+test('Claude CLI usage never borrows a Sonnet-only reset for the all-model weekly window', () => {
+  const provider = mapClaudeCliUsageToProvider([
+    'Current session',
+    '95% left',
+    'Resets 6pm',
+    'Current week (all models)',
+    '40% left',
+    'Current week (Sonnet only)',
+    '80% left',
+    'Resets Jun 19'
+  ].join('\n'), {
+    now: new Date('2026-06-13T07:00:00Z'),
+    updatedAt: '2026-06-13T07:00:00Z'
+  });
+
+  const weekly = provider.windows.find((window) => window.kind === 'weekly');
+  assert.equal(weekly.remainingPercent, 40);
+  assert.equal(weekly.resetDescription, '');
+  assert.equal(weekly.resetsAt, null);
+});
+
 test('Claude CLI usage carries account email and organization into the provider identity', () => {
   const provider = mapClaudeCliUsageToProvider([
     'Current session',

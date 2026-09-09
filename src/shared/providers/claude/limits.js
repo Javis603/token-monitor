@@ -1324,6 +1324,15 @@ function normalizeForLabelSearch(text) {
   return String(text || '').toLowerCase().replace(/[^a-z0-9%]+/g, '');
 }
 
+function claudeQuotaSection(line) {
+  const normalized = normalizeForLabelSearch(line);
+  if (normalized.startsWith('currentsession')) return 'session';
+  if (!normalized.startsWith('currentweek')) return '';
+  const suffix = normalized.slice('currentweek'.length);
+  if (!suffix || suffix.startsWith('allmodels') || /^[0-9]/.test(suffix)) return 'weekly';
+  return 'other-weekly';
+}
+
 function linePercentLeft(line) {
   const match = String(line || '').match(/([0-9]{1,3}(?:\.[0-9]+)?)\s*%/i);
   if (!match) return null;
@@ -1334,14 +1343,11 @@ function linePercentLeft(line) {
   return null;
 }
 
-function extractClaudePercent(lines, label) {
-  const normalizedLabel = normalizeForLabelSearch(label);
-  const normalizedLines = lines.map(normalizeForLabelSearch);
-  for (let i = 0; i < normalizedLines.length; i += 1) {
-    if (!normalizedLines[i].includes(normalizedLabel)) continue;
-    for (const line of lines.slice(i, i + 12)) {
-      const normalized = normalizeForLabelSearch(line);
-      if (normalized.startsWith('current') && !normalized.includes(normalizedLabel)) break;
+function extractClaudePercent(lines, section) {
+  for (let i = 0; i < lines.length; i += 1) {
+    if (claudeQuotaSection(lines[i]) !== section) continue;
+    for (const [offset, line] of lines.slice(i, i + 12).entries()) {
+      if (offset > 0 && claudeQuotaSection(line)) break;
       const percentLeft = linePercentLeft(line);
       if (percentLeft !== null && Number.isFinite(percentLeft)) return Math.round(percentLeft);
     }
@@ -1363,14 +1369,11 @@ function cleanClaudeResetLine(line) {
     .trim();
 }
 
-function extractClaudeReset(lines, label) {
-  const normalizedLabel = normalizeForLabelSearch(label);
-  const normalizedLines = lines.map(normalizeForLabelSearch);
-  for (let i = 0; i < normalizedLines.length; i += 1) {
-    if (!normalizedLines[i].includes(normalizedLabel)) continue;
-    for (const line of lines.slice(i, i + 14)) {
-      const normalized = normalizeForLabelSearch(line);
-      if (normalized.startsWith('current') && !normalized.includes(normalizedLabel)) break;
+function extractClaudeReset(lines, section) {
+  for (let i = 0; i < lines.length; i += 1) {
+    if (claudeQuotaSection(lines[i]) !== section) continue;
+    for (const [offset, line] of lines.slice(i, i + 14).entries()) {
+      if (offset > 0 && claudeQuotaSection(line)) break;
       const reset = cleanClaudeResetLine(line);
       if (reset) return reset;
     }
@@ -1379,7 +1382,15 @@ function extractClaudeReset(lines, label) {
 }
 
 function allClaudeResetLines(lines) {
-  return uniqueStrings(lines.map(cleanClaudeResetLine).filter(Boolean));
+  let section = '';
+  const resets = [];
+  for (const line of lines) {
+    section = claudeQuotaSection(line) || section;
+    if (section !== 'session' && section !== 'weekly') continue;
+    const reset = cleanClaudeResetLine(line);
+    if (reset) resets.push(reset);
+  }
+  return uniqueStrings(resets);
 }
 
 const MONTHS = {
@@ -1448,11 +1459,11 @@ function parseClaudeResetDate(text, now = new Date()) {
 function parseClaudeCliUsageText(text, now = new Date()) {
   const clean = stripAnsiCodes(text);
   const lines = clean.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const sessionPercentLeft = extractClaudePercent(lines, 'Current session');
-  const weeklyPercentLeft = extractClaudePercent(lines, 'Current week');
+  const sessionPercentLeft = extractClaudePercent(lines, 'session');
+  const weeklyPercentLeft = extractClaudePercent(lines, 'weekly');
   const resetLines = allClaudeResetLines(lines);
-  let primaryResetDescription = extractClaudeReset(lines, 'Current session');
-  let secondaryResetDescription = extractClaudeReset(lines, 'Current week');
+  let primaryResetDescription = extractClaudeReset(lines, 'session');
+  let secondaryResetDescription = extractClaudeReset(lines, 'weekly');
   const sessionReset = resetLines.find((line) => claudeResetShape(line) === 'time') || '';
   const weeklyReset = resetLines.find((line) => claudeResetShape(line) === 'date') || '';
   if (claudeResetShape(primaryResetDescription) !== 'time') primaryResetDescription = sessionReset;
