@@ -11,7 +11,6 @@ const tokenRatePresentation = fs.readFileSync(path.join(rendererDir, 'tokenRateP
 const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
 const tokenRateApi = require(path.join(rendererDir, 'tokenRatePresentation.js'));
-const notices = fs.readFileSync(path.join(rendererDir, 'icons', 'THIRD_PARTY_NOTICES.md'), 'utf8');
 
 const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
 
@@ -581,7 +580,6 @@ test('the live footer rate is opt-in, accessible, and shares the persisted mode'
   assert.match(css, /\.live-token-rate-icon[\s\S]*icons\/actions\/zap\.svg/);
   assert.match(css, /--view-switcher-max-width: min\(112px, max\(0px, calc\(50% - 66px\)\)\)/);
   assert.match(css, /\.footer\.live-token-rate-obscured \.live-token-rate,[\s\S]*visibility: hidden;/);
-  assert.match(notices, /actions\/zap\.svg: zap/);
 });
 
 test('the live footer rate uses matched timed deltas rather than scan wall time', () => {

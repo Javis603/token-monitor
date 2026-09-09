@@ -4,13 +4,15 @@ Sources:
 - Lucide Icons: https://github.com/lucide-icons/lucide
   - actions/arrow-left.svg: arrow-left
   - actions/settings.svg: settings
-  - actions/zap.svg: zap
   - settings/general.svg: sliders-horizontal
   - settings/main.svg: panels-top-left
   - settings/collection.svg: database
   - settings/sync.svg: cloud-sync
   - settings/appearance.svg: palette
   - views/home.svg: house
+- Basil Icons by Craftwork: https://www.figma.com/community/file/931906394678748246
+  - actions/zap.svg: lightning-alt-outline
+    (modified with a subtle outline for small-size legibility)
 - Tabler Icons: https://github.com/tabler/tabler-icons
   - settings/window.svg: app-window
 
@@ -55,6 +57,16 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Basil Icons license:
+
+Copyright Craftwork.
+
+Licensed under the Creative Commons Attribution 4.0 International license:
+https://creativecommons.org/licenses/by/4.0/
+
+The lightning-alt-outline icon was modified with a subtle outline for
+small-size legibility.
 
 Tabler Icons license:
 
