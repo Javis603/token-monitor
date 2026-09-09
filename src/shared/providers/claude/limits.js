@@ -1724,7 +1724,7 @@ function claudeDirectInvocation(command, args, platform, env) {
   if (platform !== 'win32' || /\.exe$/i.test(command)) return { command, args };
   const commandShell = envValue(env, 'ComSpec') || 'cmd.exe';
   const quotedCommand = `"${String(command).replace(/"/g, '""')}"`;
-  const commandLine = `"${[quotedCommand, ...args].join(' ')}"`;
+  const commandLine = ['call', quotedCommand, ...args].join(' ');
   return { command: commandShell, args: ['/d', '/s', '/c', commandLine] };
 }
 
