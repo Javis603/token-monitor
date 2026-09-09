@@ -13,8 +13,10 @@ const { runClaudeAuthStatus, touchClaudeAuthPath } = require('../../src/shared/p
 function fakeSpawnForClaudeUsage(expectedCommand = 'cmd.exe') {
   return (command, args, options) => {
     assert.equal(command, expectedCommand);
-    assert.deepEqual(args, ['/d', '/s', '/c', 'call "claude.cmd" /usage']);
+    assert.deepEqual(args, ['/d', '/s', '/c', '""claude.cmd" /usage"']);
     assert.equal(options.shell, false);
+    assert.equal(options.windowsVerbatimArguments, true);
+    assert.equal(options.env.DISABLE_AUTOUPDATER, '1');
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -678,8 +680,10 @@ test('Claude auth status uses cmd.exe without shell mode on Windows', async () =
     existsSync: () => false,
     spawn: (command, args, options) => {
       assert.equal(command, 'cmd.exe');
-      assert.deepEqual(args, ['/d', '/s', '/c', 'call "claude.cmd" auth status --json']);
+      assert.deepEqual(args, ['/d', '/s', '/c', '""claude.cmd" auth status --json"']);
       assert.equal(options.shell, false);
+      assert.equal(options.windowsVerbatimArguments, true);
+      assert.equal(options.env.DISABLE_AUTOUPDATER, '1');
       const child = new EventEmitter();
       child.stdout = new EventEmitter();
       child.stderr = new EventEmitter();
@@ -711,6 +715,7 @@ test('Claude PTY probing preserves the first executable Python failure', async (
       spawn: (command, args, options) => {
         calls.push(command);
         assert.equal(options.env.TERM, 'xterm-256color');
+        assert.equal(options.env.DISABLE_AUTOUPDATER, '1');
         const script = args[1];
         assert.match(script, /matched_at = None/);
         assert.match(script, /matched_at is not None and now - matched_at >= 2/);

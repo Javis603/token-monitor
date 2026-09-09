@@ -1589,7 +1589,8 @@ function withClaudePathHints(env = process.env, platform = process.platform) {
   }
   return {
     ...env,
-    [pathKey]: uniqueStrings([...hints, ...currentPath.split(delimiter)]).join(delimiter)
+    [pathKey]: uniqueStrings([...hints, ...currentPath.split(delimiter)]).join(delimiter),
+    DISABLE_AUTOUPDATER: '1'
   };
 }
 
@@ -1694,6 +1695,7 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
   fs.mkdirSync(probeDir, { recursive: true });
   const runEnv = {
     ...env,
+    DISABLE_AUTOUPDATER: '1',
     TERM: env.TERM && env.TERM !== 'dumb' ? env.TERM : 'xterm-256color',
     COLORTERM: env.COLORTERM || 'truecolor',
     TOKEN_MONITOR_CLAUDE_COMMAND_PATH: command,
@@ -1724,8 +1726,12 @@ function claudeDirectInvocation(command, args, platform, env) {
   if (platform !== 'win32' || /\.exe$/i.test(command)) return { command, args };
   const commandShell = envValue(env, 'ComSpec') || 'cmd.exe';
   const quotedCommand = `"${String(command).replace(/"/g, '""')}"`;
-  const commandLine = ['call', quotedCommand, ...args].join(' ');
-  return { command: commandShell, args: ['/d', '/s', '/c', commandLine] };
+  const commandLine = `"${[quotedCommand, ...args].join(' ')}"`;
+  return {
+    command: commandShell,
+    args: ['/d', '/s', '/c', commandLine],
+    windowsVerbatimArguments: true
+  };
 }
 
 function runClaudeDirectCommand(args, deps = {}, timeoutMs = 12000) {
@@ -1738,6 +1744,7 @@ function runClaudeDirectCommand(args, deps = {}, timeoutMs = 12000) {
     ...deps,
     env: withClaudePathHints(env, platform),
     closeStdin: true,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     timeoutMs
   });
 }

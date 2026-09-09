@@ -144,7 +144,8 @@ function runProcessText(command, args = [], options = {}) {
       cwd: options.cwd,
       env: options.env,
       shell: Boolean(options.shell),
-      windowsHide: true
+      windowsHide: true,
+      ...(options.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {})
     });
     let stdout = '';
     let stderr = '';
