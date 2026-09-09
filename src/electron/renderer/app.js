@@ -1900,6 +1900,17 @@ function applyBarScale(fill, scale) {
   animateBarBetween(fill, 0, safeScale, 0, 420);
 }
 
+function animateCachedLimitBarsFromZero() {
+  if (!state.animateBarsFromZero || prefersReducedMotion()) return;
+  for (const fill of els.limitsPanel?.querySelectorAll('.limit-meter-fill') || []) {
+    const targetScale = Math.max(
+      0,
+      Math.min(1, Number(fill.style.getPropertyValue('--bar-scale')) || 0)
+    );
+    animateBarBetween(fill, 0, targetScale, 0, 420);
+  }
+}
+
 function rowTemplate(rowData) {
   const { key, name, platform, client, subtitle, detail, kind } = rowData;
   const row = document.createElement('div');
@@ -6276,6 +6287,9 @@ function renderLimits() {
     state.limitPanelRenderSignature === renderSignature
     && els.limitsPanel.children.length === orderedProviders.length
   ) {
+    // View changes intentionally reuse the rendered Limits DOM. Replaying the
+    // entrance motion here keeps that cache from swallowing the normal bar fill.
+    animateCachedLimitBarsFromZero();
     return;
   }
   const resetMotionSnapshot = captureLimitResetMotion();

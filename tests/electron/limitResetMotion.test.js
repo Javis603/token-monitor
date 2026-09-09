@@ -37,6 +37,7 @@ test('quota refill motion requires an existing non-full value reaching full', ()
 });
 
 test('remaining percentage preserves missing values and derives used-only windows', () => {
+  assert.equal(remainingPercent(null), null);
   assert.equal(remainingPercent({ remainingPercent: null }), null);
   assert.equal(remainingPercent({ usedPercent: 100 }), 0);
   assert.equal(remainingPercent({ usedPercent: 31 }), 69);
@@ -81,6 +82,8 @@ test('used-only snapshots can still identify a refill without changing display m
 });
 
 test('motion keys preserve account and window identity without exposing labels', () => {
+  assert.equal(providerKey(null), providerKey());
+  assert.equal(windowKey('Weekly', null), windowKey('Weekly'));
   const firstAccount = providerKey({ provider: 'codex', accountEmail: 'first@example.com' });
   const secondAccount = providerKey({ provider: 'codex', accountEmail: 'second@example.com' });
   assert.notEqual(firstAccount, secondAccount);
