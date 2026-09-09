@@ -13,6 +13,7 @@ const {
   parseLimitProviders
 } = require('../shared/limits/collector');
 const { postSyncPayload } = require('../shared/syncPayload');
+const { HUB_RESPONSE_HEADER, HUB_RESPONSE_MINIMAL } = require('../shared/hubProtocol');
 const { applyProjectRollups } = require('../shared/usage');
 const { runAgent, runAgentOnce } = require('./runtime');
 const {
@@ -119,7 +120,11 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
 
 async function postUsage(summary) {
   const { response } = await postSyncPayload(fetch, `${hubUrl}/api/ingest`, {
-    headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      [HUB_RESPONSE_HEADER]: HUB_RESPONSE_MINIMAL,
+      ...(secret ? { authorization: `Bearer ${secret}` } : {})
+    },
     summary,
     logger: (message) => console.warn(`[sync] ${message}`)
   });

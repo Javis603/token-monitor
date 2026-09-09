@@ -29,6 +29,7 @@
     "dist:win:prepackaged": "electron-builder --prepackaged dist/win-unpacked --win nsis portable --x64 --publish never",
     "dist:linux": "npm run ensure:tokscale -- --platform=linux-x64 && electron-builder --config scripts/electron-builder.config.js --linux --x64 --publish never",
     "verify:release-artifact-names": "node scripts/verify-updater-artifact-names.js dist",
+    "benchmark:hub-bandwidth": "node scripts/benchmark-hub-bandwidth.js",
     "lint": "eslint .",
     "verify": "npm run lint && npm test"
   },
