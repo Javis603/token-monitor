@@ -171,7 +171,7 @@ function keyLaneResponses({ balance, subscription }) {
 // ZCode on-disk fixture for the plan-lane tests: an entitled provider
 // selection ('start-plan' or 'coding-plan') with a mirror key and a
 // telemetry device id.
-function zcodeLaneDeps(fetchMock, selection = 'start-plan') {
+function zcodeLaneDeps(fetchMock, selection = 'start-plan', { includeStartPlan = false } = {}) {
   const providerId = `builtin:zai-${selection}`;
   const files = {
     'setting.json': JSON.stringify({
@@ -179,10 +179,16 @@ function zcodeLaneDeps(fetchMock, selection = 'start-plan') {
       modelProviderFamilySelectedKeys: { zai: `coding-plan:${providerId}` }
     }),
     'config.json': JSON.stringify({
-      provider: { [providerId]: { enabled: true, options: { apiKey: 'mirror-jwt' } } }
+      provider: {
+        [providerId]: { enabled: true, options: { apiKey: 'mirror-jwt' } },
+        ...(includeStartPlan ? { 'builtin:zai-start-plan': { enabled: false, options: { apiKey: 'start-jwt' } } } : {})
+      }
     }),
     'coding-plan-cache.json': JSON.stringify({
-      entryStatus: { items: { [providerId]: { status: 'available' } } }
+      entryStatus: { items: {
+        [providerId]: { status: 'available' },
+        ...(includeStartPlan ? { 'builtin:zai-start-plan': { status: 'available' } } : {})
+      } }
     }),
     'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
   };
@@ -689,6 +695,7 @@ test('fetchZaiLimits shows Start/Weekend buckets alongside Coding Plan quota', a
     } } }),
     'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
   };
+  let subscriptionCalls = 0;
   const deps = {
     env: {}, now: () => Date.parse('2026-09-05T12:00:00Z'),
     readFileSync: (filePath) => {
@@ -707,6 +714,10 @@ test('fetchZaiLimits shows Start/Weekend buckets alongside Coding Plan quota', a
           balances: [{ entitlement_id: 'e1', plan_id: 'zcode-v3-start-plan-wk-0904', show_name: 'GLM-5.3-Flash', total_units: 305000000, used_units: 109149447, remaining_units: 195850553 }]
         } }) };
       }
+      if (target.includes('subscription/list')) {
+        subscriptionCalls += 1;
+        return { ok: true, status: 200, json: async () => ({ data: [{ product_name: 'GLM Coding Pro' }] }) };
+      }
       return { ok: true, status: 200, json: async () => ({ data: [] }) };
     }
   };
@@ -715,6 +726,7 @@ test('fetchZaiLimits shows Start/Weekend buckets alongside Coding Plan quota', a
   assert.equal(provider.source, 'oauth');
   // Header carries the consumed mode; the Weekend bucket rides the same row.
   assert.equal(provider.accountLabel, 'GLM Coding Pro');
+  assert.equal(subscriptionCalls, 1, 'subscription enriches usable quota once');
   assert.ok(provider.windows.some((window) => window.kind === 'session'), 'subscription quota present');
   const weekend = provider.windows.find((window) => window.limitId);
   assert.ok(weekend, 'Weekend bucket present');
@@ -757,3 +769,35 @@ test('fetchZaiLimits shows Start/Weekend buckets alongside Coding Plan quota', a
   assert.ok(degraded.windows.some((window) => window.kind === 'session'), 'quota survives billing failure');
   assert.ok(!degraded.windows.some((window) => window.limitId), 'no bucket when billing failed');
 });
+
+for (const scenario of [
+  {
+    name: 'fails',
+    quotaResponse: { ok: false, status: 429, json: async () => ({}) },
+    status: 'sourceRateLimited'
+  },
+  {
+    name: 'is empty',
+    quotaResponse: { ok: true, status: 200, json: async () => ({ data: { limits: [] } }) },
+    status: 'ok'
+  }
+]) {
+  test(`fetchZaiLimits preserves billing when combined Coding Plan quota ${scenario.name}`, async () => {
+    let subscriptionCalls = 0;
+    const provider = await fetchZaiLimits({}, {
+      env: {},
+      now: () => Date.parse('2026-09-05T12:00:00Z'),
+      ...zcodeLaneDeps(async (url) => {
+        const target = String(url);
+        if (target.includes('/quota/limit')) return scenario.quotaResponse;
+        if (target.includes('zcode-plan/billing/balance')) return BILLING_OK;
+        if (target.includes('subscription/list')) subscriptionCalls += 1;
+        return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      }, 'coding-plan', { includeStartPlan: true })
+    });
+
+    assert.equal(provider.status, scenario.status);
+    assert.ok(provider.windows.some((window) => window.limitId), 'billing survives quota result');
+    assert.equal(subscriptionCalls, 0, 'subscription is skipped without usable quota');
+  });
+}

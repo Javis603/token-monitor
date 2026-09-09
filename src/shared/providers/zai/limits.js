@@ -396,28 +396,31 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       if (mirrorKey) {
         const mirrorRegion = discovery.family === 'bigmodel' ? 'bigmodel-cn' : 'global';
         // Billing is account-level, so it runs alongside quota; failures never
-        // block the quota answer. Subscription enriches plan name and MCP reset
-        // the same way other lanes do.
-        const [quotaResult, billingResult, subscriptionResult] = await Promise.allSettled([
+        // block the quota answer. Subscription only enriches usable quota.
+        const [quotaResult, billingResult] = await Promise.allSettled([
           mirrorKey === key && mirrorRegion === region
             ? Promise.resolve(null)
             : fetchJson(zaiQuotaUrl(mirrorRegion), mirrorKey, deps),
           discovery.billing ? fetchZcodeBilling(discovery.billing.credential.token) : Promise.resolve(null),
-          mirrorKey === key && mirrorRegion === region
-            ? Promise.resolve(null)
-            : fetchJson(zaiSubscriptionUrl(mirrorRegion), mirrorKey, deps).catch(() => null)
         ]);
-        if (quotaResult.status === 'rejected') throw quotaResult.reason;
-        const usage = quotaResult.value !== null
-          ? parseZaiUsage(quotaResult.value, subscriptionResult.status === 'fulfilled' ? subscriptionResult.value : null)
-          : { plan: '', windows: [] };
+        let usage = { plan: '', windows: [] };
+        if (quotaResult.status === 'fulfilled' && quotaResult.value !== null) {
+          usage = parseZaiUsage(quotaResult.value);
+          if (usage.windows.length) {
+            try {
+              const subscription = await fetchJson(zaiSubscriptionUrl(mirrorRegion), mirrorKey, deps);
+              usage = parseZaiUsage(quotaResult.value, subscription);
+            } catch (_) {}
+          }
+        }
         const billing = billingResult.status === 'fulfilled' ? billingResult.value : null;
         return {
           windows: [...usage.windows, ...(billing ? billing.windows : [])],
           plan: usage.plan || (billing ? billing.plan : ''),
           accountKey: mirrorKey === key && mirrorRegion === region ? '' : hashKey('zai', mirrorKey),
           hasAnything: usage.windows.length > 0 || Boolean(billing?.hasAnything),
-          attempted: true
+          attempted: true,
+          error: quotaResult.status === 'rejected' ? quotaResult.reason : null
         };
       }
       return emptyLane(true);
@@ -447,7 +450,9 @@ async function fetchZaiLimits(options = {}, deps = {}) {
   // configured" would contradict the settings pill. Billing 401/403 also maps
   // to unavailable, mirroring ZCode's own classifyAvailabilityError: the
   // mirror token is ZCode-managed and rotates there, not here.
-  const planError = planResult.status === 'rejected' ? planResult.reason : null;
+  const planError = planResult.status === 'rejected'
+    ? planResult.reason
+    : planResult.value?.error || null;
   const planAttempted = !key && planResult.status === 'fulfilled' && Boolean(planResult.value.attempted);
   const source = key ? 'api' : (hasAnything || planError || planAttempted ? 'oauth' : '');
   return normalizeLimitProvider({
