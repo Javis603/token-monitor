@@ -560,7 +560,13 @@ function normalizeSession(input, fallbackKey) {
 
 function normalizePeriod(input, options = {}) {
   const period = emptyPeriod();
-  if (!input || typeof input !== 'object') return period;
+  if (!input || typeof input !== 'object') {
+    // `emptyPeriod()` is also the exact neutral value used by current producers and
+    // merge targets, so it is throughput-capable by construction. Missing wire input
+    // is different: its zero counters are synthetic and must never seed a live delta.
+    period.capabilities.throughput = false;
+    return period;
+  }
   const projectsEnabled = options.projectsEnabled !== false;
   period.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? 0)));
   const componentCapability = input.capabilities?.tokenComponents;
@@ -1419,11 +1425,17 @@ function applyPeriodDelta(base, freshToday, anchorToday) {
 }
 
 function deltaValue(base, fresh, anchor, key) {
-  if (key === 'tokenComponents' || key === 'throughput') {
+  if (key === 'tokenComponents') {
     // A warm tick may introduce aggregate-only fallback data. Boolean
     // provenance is not arithmetically subtractable, so retain exactness only
     // while both the durable base and the fresh replacement prove it.
     return base === true && fresh === true;
+  }
+  if (key === 'throughput') {
+    // Throughput drives a live delta, so the value being subtracted must also
+    // prove its provenance. Otherwise an unavailable anchor's zero defaults
+    // make the whole fresh Today snapshot look like one new delta.
+    return base === true && fresh === true && anchor === true;
   }
   if (key === 'startedAt') {
     const baseMs = timestampMs(base);

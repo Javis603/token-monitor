@@ -184,7 +184,6 @@
         if (present.has(id)) continue;
         if (tracker.getSample()) {
           changed = true;
-          invalidated = true;
         }
         trackers.delete(id);
       }
@@ -274,16 +273,7 @@
         source: `device:${normalizedDeviceId}`
       };
     }
-    if (syncMode || devices.length === 0) {
-      return { entries: [], source: `device:${normalizedDeviceId || 'unavailable'}` };
-    }
-    const aggregatePeriod = stats?.periods?.today;
-    return {
-      entries: aggregatePeriod && typeof aggregatePeriod === 'object'
-        ? [{ id: 'aggregate', period: aggregatePeriod }]
-        : [],
-      source: 'aggregate'
-    };
+    return { entries: [], source: `device:${normalizedDeviceId || 'unavailable'}` };
   }
 
   function defaultNow() {

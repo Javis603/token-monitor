@@ -280,6 +280,34 @@ test('live rate removes a missing device sample while retaining the other device
   assert.equal(result.sample.burn, 6000);
 });
 
+test('live rate retains the last aggregate when its only device becomes stale', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now, activeMs: 8000, clearMs: 180000 });
+  tracker.reset([
+    { id: 'device:a', period: { timedTokens: 10, timedOutputTokens: 2, timedDurationMs: 100 } }
+  ]);
+  now = 100;
+  tracker.observe([
+    { id: 'device:a', period: { timedTokens: 70, timedOutputTokens: 14, timedDurationMs: 700 } }
+  ]);
+
+  now = 200;
+  assert.deepEqual(tracker.observe([]), {
+    changed: true,
+    sample: {
+      speed: 20,
+      burn: 6000,
+      sampledAt: 100,
+      expiresAt: 180100,
+      deviceCount: 1,
+      revision: 1,
+      idle: true
+    }
+  });
+  now = 180100;
+  assert.equal(tracker.getSample(), null);
+});
+
 test('live rate group revisions stay monotonic across scope resets', () => {
   let now = 0;
   const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now, activeMs: 8000 });
@@ -342,8 +370,8 @@ test('live rate selects every active hub device or only this device by scope', (
     source: 'device:this-device'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'missing', 'local'), {
-    entries: [{ id: 'aggregate', period: aggregate }],
-    source: 'aggregate'
+    entries: [],
+    source: 'device:missing'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods({ periods: { today: aggregate }, devices: [] }, 'this-device', 'local'), {
     entries: [],
@@ -564,6 +592,7 @@ test('the live footer rate is opt-in, accessible, and shares the persisted mode'
   assert.match(app, /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);\s*observeLiveTokenRate\(state\.stats\);/);
   assert.match(app, /observeLiveTokenRate\(nextStats\);\s*state\.stats = nextStats;/);
   assert.match(app, /createLiveTokenRateGroupTracker\([\s\S]*activeMs: LIVE_TOKEN_RATE_ACTIVE_MS[\s\S]*\)/);
+  assert.match(app, /const LIVE_TOKEN_RATE_ACTIVE_MS = 8000;/);
   assert.match(app, /const LIVE_TOKEN_RATE_CLEAR_MS = 3 \* 60 \* 1000;/);
   assert.match(app, /clearMs: LIVE_TOKEN_RATE_CLEAR_MS/);
   assert.match(app, /selectLiveTokenRatePeriods\([\s\S]*stats,[\s\S]*state\.settings\?\.deviceId,[\s\S]*state\.settings\?\.hubMode,[\s\S]*effectiveLiveTokenRateScope\(\)[\s\S]*\)/);
