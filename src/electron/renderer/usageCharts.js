@@ -392,7 +392,7 @@
     if (/mimo|xiaomi/.test(name)) return 'xiaomi';
     if (/minimax|\babab/.test(name)) return 'minimax';
     if (/doubao|\bseed(?:-|$)/.test(name)) return 'doubao';
-    if (/hy3|hunyuan/.test(name)) return 'hunyuan';
+    if (/hy\d|hunyuan/.test(name)) return 'hunyuan';
     if (/^big-pickle$/.test(name)) return 'opencode'; // OpenCode Zen stealth model — no vendor hint in the name
     return null;
   }
