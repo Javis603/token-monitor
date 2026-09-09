@@ -526,28 +526,6 @@ function zcodeRecordCumulativeSpend({ accountKey, totalSpent, now, storePath, re
     entry.dailySpend = {};
     changed = true;
   }
-  const storedNumber = (value) => typeof value === 'number' || (typeof value === 'string' && value.trim()) ? Number(value) : NaN;
-  const beforeRepair = JSON.stringify(entry);
-  for (const [key, rawAmount] of Object.entries(entry.dailySpend)) {
-    const amount = storedNumber(rawAmount);
-    const day = new Date(`${key}T00:00:00`).getTime();
-    if (!Number.isFinite(day) || zaiLocalDayKey(day) !== key || day > nowMs || !Number.isFinite(amount) || amount < 0) {
-      delete entry.dailySpend[key];
-    } else {
-      entry.dailySpend[key] = amount;
-    }
-  }
-  entry.lastTotal = storedNumber(entry.lastTotal);
-  if (!Number.isFinite(entry.lastTotal) || entry.lastTotal < 0) entry.lastTotal = null;
-  entry.allTimeSpend = storedNumber(entry.allTimeSpend);
-  if (!Number.isFinite(entry.allTimeSpend) || entry.allTimeSpend < 0) {
-    entry.allTimeSpend = Object.values(entry.dailySpend).reduce((sum, amount) => sum + amount, 0);
-    const firstDay = Object.keys(entry.dailySpend).sort()[0];
-    entry.trackingSince = firstDay ? new Date(`${firstDay}T00:00:00`).getTime() : nowMs;
-  }
-  entry.trackingSince = storedNumber(entry.trackingSince);
-  if (!Number.isFinite(entry.trackingSince) || entry.trackingSince <= 0 || entry.trackingSince > nowMs) entry.trackingSince = nowMs;
-  if (JSON.stringify(entry) !== beforeRepair) changed = true;
   if (entry.lastTotal === null) {
     entry.lastTotal = total;
     changed = true;
