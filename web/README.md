@@ -52,6 +52,10 @@ Set `WEB_AUTH_MODE=trusted-proxy`. `WEB_TRUSTED_PROXY_PEERS` is a comma-separate
 
 `WEB_AUTH_MODE=proxy` and legacy `TRUST_OIDC_PROXY=1` remain aliases for trusted-proxy header mode when the new configuration is absent.
 
+For both proxy modes, configure `WEB_PUBLIC_ORIGIN=https://monitor.example.com` with the browser-facing origin: scheme, hostname and optional non-default port, without a path or trailing slash. This enables exact Origin validation, including the scheme, and Host validation. Do not use the proxy-to-Web HTTP listener address or derive this value from forwarded headers.
+
+Header mode (including the legacy aliases) still starts without this setting for compatibility, but emits a migration warning: its host-only Origin fallback cannot distinguish HTTP from HTTPS on the same host. Add the setting to the existing server environment and restart the Web service; proxy identity headers, peer restrictions and authentication mode remain unchanged. There is no automatic switch to external mode and no removal deadline in this release. Basic, OIDC and external proxy modes already require this setting.
+
 ### Sessions and logout
 
 All authenticated browser modes use an opaque `tm_web_session` cookie, `Path=/; HttpOnly; SameSite=Lax; Secure` on HTTPS. Sessions are server-owned, expire after eight hours, and are revoked immediately by `POST /auth/logout` (same-origin required). Existing SSE connections bound to that session are disconnected on expiry/logout. Restarting the server revokes all sessions; multi-replica session sharing is not implemented. `GATEWAY_SESSION_SECRET` is a legacy setting and is no longer used to sign browser cookies.
@@ -67,7 +71,7 @@ The server forwards only GET/HEAD on health, stats, devices, history and subscri
 - Language defaults to the browser (English or Simplified Chinese); theme follows the OS. Language, theme and data mode persist in localStorage. Explicit choices override system changes.
 - Unconfigured/disabled quota providers are hidden, Spark is collapsed, and missing values are not shown as zero. Provider names come from the main repository's shared catalog at build time.
 - Balance is not a quota progress percentage. OpenRouter management-key spending is not account spending; DeepSeek observed spending is labeled as an estimate.
-- Offline snapshots deliberately persist a whitelisted subset of usage/limits in browser Cache Storage. They remain accessible offline on that browser, including after upstream logout; the Web Sign out action clears its offline caches, or clear site data manually to remove them. Credentials and account identifiers are not saved in the snapshot. Cache cleanup touches only this application's namespaced caches.
+- Offline snapshots deliberately persist a whitelisted subset of usage/limits in browser Cache Storage. They remain accessible offline on that browser, including after upstream logout; the Web Sign out action clears its offline caches, or clear site data manually to remove them. Credentials and account identifiers are not saved in the snapshot. Cache cleanup touches only this application's namespaced caches. Provider free-text window fields (`detail` and `resetDescription`) are intentionally omitted: online descriptions may be absent offline. Numeric usage, limits, remaining percentages and reset timestamps are retained; adding an explanation to the online view does not implicitly authorize persisting it. Necessary additional offline semantics should use explicitly reviewed structured fields rather than caching arbitrary provider text.
 
 ## Development and verification
 

@@ -16,6 +16,9 @@ gateway.listen(config.port, config.host, () => {
   console.log(`Read-only Web authentication mode: ${config.authMode}`);
   if (config.trustOidcProxy) {
     console.warn('Trusted-proxy mode: keep the listener restricted to configured proxy peers and enforce the documented upstream authentication contract.');
+    if (!config.publicOrigin) {
+      console.warn('Legacy proxy configuration: set WEB_PUBLIC_ORIGIN to the full external HTTPS origin (scheme, host and optional port, without a trailing slash). Without it, Origin validation compares only the host and cannot reject same-host cross-scheme requests.');
+    }
   }
 });
 

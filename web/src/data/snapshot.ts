@@ -82,6 +82,7 @@ export function sanitizeStatsForOffline(stats: HubStats): HubStats {
           availableCount: provider.resetCredits.availableCount,
           nextExpiresAt: provider.resetCredits.nextExpiresAt
         } : undefined,
+        // Keep structured quota data; provider detail/resetDescription remain online-only.
         windows: (provider.windows ?? []).map((window) => ({
           kind: window.kind,
           label: window.label,
