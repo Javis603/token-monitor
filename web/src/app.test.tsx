@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { Dashboard } from './app';
 import { statsFixture } from './test/fixtures';
 
@@ -33,10 +33,7 @@ describe('Overview dashboard', () => {
 });
 
 it('does not show deployment accounting tips below token usage', () => {
-  vi.stubEnv('VITE_USAGE_OBSERVATIONS_SINCE', '2026-09-10T12:11:12+08:00');
-  try {
-    render(<Dashboard stats={statsFixture} connection="live" source="network" savedAt="2026-09-10T04:11:12Z" />);
-    expect(screen.queryByText('部分数据')).toBeNull();
-    expect(screen.queryByText('统计口径')).toBeNull();
-  } finally { vi.unstubAllEnvs(); }
+  render(<Dashboard stats={statsFixture} connection="live" source="network" savedAt="2026-09-10T04:11:12Z" />);
+  expect(screen.queryByText('部分数据')).toBeNull();
+  expect(screen.queryByText('统计口径')).toBeNull();
 });

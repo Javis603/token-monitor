@@ -113,3 +113,15 @@ describe('live stats lifecycle', () => {
     controller.stop();
   });
 });
+
+it('ignores a pending fetch from an earlier start, including its cleanup', async () => {
+  const resolvers: Array<(value: typeof statsFixture) => void> = [];
+  const onSnapshot = vi.fn(); const openEventSource = vi.fn(() => new FakeSource());
+  const controller = createLiveStats({ visibility: new FakeVisibility(), fetchStats: () => new Promise(resolve => resolvers.push(resolve)), openEventSource, onSnapshot });
+  const first = controller.start(); controller.stop(); const second = controller.start();
+  resolvers[0]({ ...statsFixture, marker: 'stale' }); await first;
+  expect(onSnapshot).not.toHaveBeenCalled(); expect(openEventSource).not.toHaveBeenCalled();
+  resolvers[1](statsFixture); await second;
+  expect(onSnapshot).toHaveBeenCalledExactlyOnceWith(statsFixture, 'fetch'); expect(openEventSource).toHaveBeenCalledOnce();
+  controller.stop();
+});

@@ -1,10 +1,11 @@
 import { EventEmitter, once } from 'node:events';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, mkdir, symlink } from 'node:fs/promises';
 import { createServer, get, type IncomingMessage, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createGateway, waitForDrainOrClose } from './app.js';
+import { closeGateway } from './shutdown.js';
 import type { GatewayConfig } from './config.js';
 
 async function listen(server: Server): Promise<number> {
@@ -168,7 +169,7 @@ describe('gateway', () => {
     expect(await response.text()).toContain('event: snapshot');
   });
 
-  it('cancels the upstream SSE request when the browser disconnects', async () => {
+  it.each(['browser disconnect', 'server shutdown'])('cancels the upstream SSE request on %s', async (reason) => {
     await close(upstream);
     let resolveClosed: (() => void) | undefined;
     const upstreamClosed = new Promise<void>((resolve) => { resolveClosed = resolve; });
@@ -197,7 +198,8 @@ describe('gateway', () => {
     });
     const reader = response.body?.getReader();
     await reader?.read();
-    await reader?.cancel();
+    if (reason === 'server shutdown') await closeGateway(gateway);
+    else await reader?.cancel();
 
     await expect(Promise.race([
       upstreamClosed,
@@ -287,14 +289,15 @@ describe('gateway', () => {
   });
 
   it('rejects tampered and pre-restart session cookies', async () => {
-    const page = await fetch(`${baseUrl}/`);
+    await restartGateway({authMode:'proxy',trustOidcProxy:true});
+    const page = await fetch(`${baseUrl}/`, { headers: { 'x-forwarded-user': 'test-user' } });
     const cookie = (page.headers.get('set-cookie') ?? '').split(';')[0];
     const [name, value] = cookie.split('=');
-    await restartGateway({authMode:'proxy',trustOidcProxy:true});
+    expect((await fetch(`${baseUrl}/api/stats`, { headers: { cookie } })).status).toBe(200);
     const tampered = `${name}=${value.slice(0, -1)}${value.endsWith('A') ? 'B' : 'A'}`;
     expect((await fetch(`${baseUrl}/api/stats`, { headers: { cookie: tampered } })).status).toBe(401);
 
-    await restartGateway({ sessionSecret: 'rotated-session-secret' });
+    await restartGateway();
     expect((await fetch(`${baseUrl}/api/stats`, { headers: { cookie } })).status).toBe(401);
   });
 
@@ -361,6 +364,40 @@ describe('gateway', () => {
     expect((await fetch(baseUrl+'/api/stats',{headers:{origin:'https://attacker.example'}})).status).toBe(403);
     expect((await fetch(baseUrl+'/api/stats',{headers:{'sec-fetch-site':'cross-site'}})).status).toBe(403);
     expect((await fetch(baseUrl+'/api/stats')).status).toBe(200);
+  });
+
+  it('rejects static symlinks escaping the asset root', async () => {
+    await symlink(join(root, '..'), join(root, 'outside'), process.platform === 'win32' ? 'junction' : 'dir');
+    const response = await fetch(`${baseUrl}/outside/${root.split(/[\\/]/).pop()}/index.html`);
+    // The target resolves back into root and is safe.
+    expect(response.status).toBe(200);
+    await writeFile(join(root, '..', `${root.split(/[\\/]/).pop()}.txt`), 'synthetic outside file');
+    try {
+      const outside = await fetch(`${baseUrl}/outside/${root.split(/[\\/]/).pop()}.txt`);
+      expect(outside.status).toBe(404);
+      expect(await outside.text()).not.toContain('synthetic outside file');
+    } finally { await rm(join(root, '..', `${root.split(/[\\/]/).pop()}.txt`)); }
+  });
+
+  it('checks the full configured origin, including scheme', async () => {
+    config.publicOrigin = baseUrl;
+    expect((await fetch(`${baseUrl}/api/stats`, { headers: { origin: baseUrl } })).status).toBe(200);
+    expect((await fetch(`${baseUrl}/api/stats`, { headers: { origin: baseUrl.replace('http:', 'https:') } })).status).toBe(403);
+  });
+
+  it('closes an unread upstream body after a HEAD response', async () => {
+    await close(upstream);
+    let markClosed: () => void = () => {};
+    const closed = new Promise<void>(resolve => { markClosed = resolve; });
+    upstream = createServer((_request, response) => {
+      response.once('close', markClosed);
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.write('{');
+    });
+    config.hubUrl = `http://127.0.0.1:${await listen(upstream)}`;
+    const response = await fetch(`${baseUrl}/api/stats`, { method: 'HEAD' });
+    expect(response.status).toBe(200);
+    await expect(Promise.race([closed, new Promise((_, reject) => setTimeout(() => reject(new Error('upstream remained open')), 500))])).resolves.toBeUndefined();
   });
 
   it('serves static assets and falls back to the SPA without caching index', async () => {

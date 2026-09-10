@@ -1,4 +1,4 @@
-import { isHubStats } from './stats';
+import { isHubStats, recentSessions } from './stats';
 import type { HubStats, StoredSnapshot, UsagePeriod } from './types';
 
 interface WorkerTarget {
@@ -21,9 +21,7 @@ function numericMap(value: Record<string, number> | undefined): Record<string, n
 
 function sanitizePeriod(period: UsagePeriod | undefined): UsagePeriod {
   const source = period ?? {};
-  const sessions = Object.entries(source.sessions ?? {})
-    .sort(([, a], [, b]) => Date.parse(b.lastUsedAt ?? '') - Date.parse(a.lastUsedAt ?? ''))
-    .slice(0, 8);
+  const sessions = recentSessions(source).map(({ id, ...session }) => [id, session] as const);
   return {
     capabilities: { tokenComponents: source.capabilities?.tokenComponents === true },
     totalTokens: source.totalTokens,

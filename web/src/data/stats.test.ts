@@ -48,12 +48,12 @@ describe('stats view model', () => {
       expect.objectContaining({ id: 'laptop', stale: true, totalTokens: 530 })
     ]);
   });
-});
-it('orders recent activity ahead of undated high-volume sessions deterministically', () => {
-  const rows = recentSessions({ sessions: {
-    unknown: { client: 'hermes', totalTokens: 999999 },
-    old: { client: 'hermes', lastUsedAt: '2026-09-10T01:00:00Z', totalTokens: 300 },
-    live: { client: 'openclaw', lastUsedAt: '2026-09-10T04:30:00Z', totalTokens: 100 }
-  } });
-  expect(rows.map(r => r.id)).toEqual(['live', 'old', 'unknown']);
+  it('orders recent activity ahead of undated high-volume sessions deterministically', () => {
+    const rows = recentSessions({ sessions: {
+      unknown: { client: 'hermes', totalTokens: 999999 },
+      old: { client: 'hermes', lastUsedAt: '2026-09-10T01:00:00Z', totalTokens: 300 },
+      live: { client: 'openclaw', lastUsedAt: '2026-09-10T04:30:00Z', totalTokens: 100 }
+    } });
+    expect(rows.map(r => r.id)).toEqual(['live', 'old', 'unknown']);
+  });
 });

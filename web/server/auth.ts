@@ -19,6 +19,16 @@ export function localRequest(request:IncomingMessage) {
   if (!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(request.socket.remoteAddress || '')) return false;
   try {return ['localhost','127.0.0.1','[::1]'].includes(new URL('http://'+request.headers.host).hostname);}catch{return false;}
 }
+export function sameOrigin(request: IncomingMessage, config: GatewayConfig): boolean {
+  try {
+    const origin = new URL(request.headers.origin || '');
+    if (config.publicOrigin) return origin.origin === config.publicOrigin;
+    if (!config.authMode || config.authMode === 'local') return origin.origin === `http://${request.headers.host}`;
+    // Legacy header-proxy installs did not require a public origin. Preserve
+    // that contract; configured deployments always compare the complete origin.
+    return ['http:', 'https:'].includes(origin.protocol) && origin.host === request.headers.host;
+  } catch { return false; }
+}
 export function createAuth(config:GatewayConfig, discover=()=>oidc.discovery(new URL(config.oidcIssuer!),config.oidcClientId!,config.oidcClientSecret,config.oidcClientSecret ? oidc.ClientSecretPost(config.oidcClientSecret) : oidc.None(),{timeout:10})) {
   const mode=config.authMode === 'proxy' ? 'trusted-proxy' : config.authMode || 'local';
   const sessions=new Map<string,number>();
@@ -108,7 +118,7 @@ export function createAuth(config:GatewayConfig, discover=()=>oidc.discovery(new
     }
     if(url.pathname==='/auth/logout') {
       if(request.method!=='POST'){json(response,405,{error:'method_not_allowed'});return true;}
-      if(!request.headers.origin || new URL(request.headers.origin).host!==request.headers.host){json(response,403,{error:'cross_site_request'});return true;}
+      if(!sameOrigin(request, config)){json(response,403,{error:'cross_site_request'});return true;}
       revoke(cookie(request,COOKIE)||'');flows.delete(cookie(request,FLOW_COOKIE)||'');
       setCookie(response,COOKIE,'',0);setCookie(response,FLOW_COOKIE,'',0);json(response,200,{ok:true});return true;
     }

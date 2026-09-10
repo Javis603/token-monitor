@@ -56,7 +56,7 @@ export function Dashboard({ stats, connection, source, savedAt }: DashboardProps
           <h1>Token Monitor</h1>
         </div>
         <div class={`connection connection--${connection}`}>
-          {connection==='offline' || connection==='error' ? <a href="/auth/login">{t('重新登录')}</a> : null}
+          {connection==='offline' || connection==='error' || connection==='retrying' || connection==='connecting' ? <a href="/auth/login">{t('重新登录')}</a> : null}
           <i />{t(source === 'cache' ? '离线快照' : mode === 'snapshot' && connection === 'live' ? '快照' : CONNECTION_LABEL[connection])}
         </div>
       </header>
@@ -173,7 +173,7 @@ export function App() {
         <div class="loading-mark"><span /><span /><span /></div>
         <h1>Token Monitor</h1>
         <ViewControls />
-        {connection==='offline' && <a href="/auth/login">{t('重新登录')}</a>}
+        {connection!=='live' && <a href="/auth/login">{t('重新登录')}</a>}
         <p>{t(connection === 'offline' ? '暂时无法连接 Hub，也没有可用的离线快照。' : '正在连接本地 gateway…')}</p>
       </main>
     );

@@ -16,7 +16,7 @@ beforeEach(()=>{
   vi.mocked(createLiveStats).mockImplementation(options=>({start:async()=>{options.onSnapshot(statsFixture,'fetch');options.onStatus?.('live');},stop}));
   vi.mocked(defaultFetchStats).mockResolvedValue(statsFixture);
 });
-afterEach(()=>vi.unstubAllGlobals());
+afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();});
 it('switches language and theme, preserving choices after remount', async()=>{
   const user=userEvent.setup();
   const mount=()=>render(<PreferencesProvider><Dashboard stats={statsFixture} connection="live" source="network" savedAt="2026-09-10T07:00:00Z" /></PreferencesProvider>);
@@ -81,5 +81,12 @@ it('defaults to browser language and system theme, tracking changes until explic
   await act(async()=>listener());
   await waitFor(()=>expect(document.documentElement.dataset.theme).toBe('dark'));
   expect(JSON.parse(window.localStorage.getItem('token-monitor-preferences')!)).toEqual({language:'system',theme:'dark',mode:'live'});
-  vi.restoreAllMocks();
+});
+
+it('offers login recovery while retrying without a cached snapshot', async () => {
+  vi.mocked(createLiveStats).mockImplementation(options => ({
+    start: async () => { options.onStatus?.('retrying'); }, stop
+  }));
+  render(<PreferencesProvider><App /></PreferencesProvider>);
+  expect((await screen.findByRole('link', {name:'重新登录'})).getAttribute('href')).toBe('/auth/login');
 });

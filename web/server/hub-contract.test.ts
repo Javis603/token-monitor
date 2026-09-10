@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
-import { isHubStats, periodFor, usageRows } from '../src/data/stats';
+import { isHubStats, periodFor, usageRows } from '../src/data/stats.js';
 const require=createRequire(import.meta.url);
 const {createHub}=require('../../src/hub/server.js');
 it('reads real upstream Hub aggregation without local extensions',async()=>{

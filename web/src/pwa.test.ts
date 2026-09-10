@@ -75,6 +75,8 @@ describe('PWA assets', () => {
     const html = await readFile('index.html', 'utf8');
     expect(html).toContain('/icons/icon-192.svg');
     expect(html).toContain('crossorigin="use-credentials"');
+    expect(html).toContain('rel="apple-touch-icon" href="/icons/apple-touch-icon.png"');
+    expect((await readFile('public/icons/apple-touch-icon.png')).subarray(1, 4).toString()).toBe('PNG');
   });
 
   it('discovers and precaches Vite hashed assets during install', async () => {
@@ -82,7 +84,7 @@ describe('PWA assets', () => {
     let pending: Promise<unknown> | undefined;
     harness.listeners.install({ waitUntil(value: Promise<unknown>) { pending = value; } });
     await pending;
-    const staticCache = harness.stores.get('token-monitor-static-v19');
+    const staticCache = harness.stores.get('token-monitor-static-v20');
     expect(staticCache?.addAll).toHaveBeenCalledWith(['/assets/index-def456.css', '/assets/index-abc123.js']);
     expect(staticCache?.put).toHaveBeenCalledWith('/index.html', expect.any(Response));
   });
@@ -127,4 +129,14 @@ describe('PWA assets', () => {
     expect(harness.stores.has('token-monitor-snapshot-v2')).toBe(true);
     expect(harness.stores.has('unrelated-site-assets')).toBe(true);
   });
+});
+
+it.each(['match', 'open', 'put'])('serves a successful static response when cache %s fails', async failure => {
+  const harness = await serviceWorkerHarness();
+  if (failure === 'match') harness.caches.match.mockRejectedValue(new Error('unavailable'));
+  if (failure === 'open') harness.caches.open.mockRejectedValue(new Error('unavailable'));
+  if (failure === 'put') (await harness.caches.open('token-monitor-static-v20')).put.mockRejectedValue(new Error('full'));
+  let pending: Promise<Response> | undefined;
+  harness.listeners.fetch({ request: new Request('https://tm-web.example.test/assets/new.js'), respondWith(value: Promise<Response>) { pending = value; } });
+  expect((await pending)?.status).toBe(200);
 });

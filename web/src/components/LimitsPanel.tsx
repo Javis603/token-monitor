@@ -15,6 +15,10 @@ const WINDOW_LABELS: Record<string, string> = {
   'Monthly limit': '每月限额', 'API key limit': 'API Key 限额'
 };
 
+function ownLabel(labels: Record<string, string>, key: string): string | undefined {
+  return Object.hasOwn(labels, key) ? labels[key] : undefined;
+}
+
 function known(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
@@ -59,10 +63,10 @@ function BalanceDetails({ balance, row }: { balance: LimitBalance; row: LimitRow
 type WindowRow = LimitRow['windows'][number];
 
 function windowLabel(window: WindowRow, provider: string) {
-  let label = WINDOW_LABELS[window.label || ''] || window.label || WINDOW_LABELS[window.kind || ''] || '额度';
-  if (provider === 'Codex' && window.label && !WINDOW_LABELS[window.label] && !Object.values(WINDOW_LABELS).includes(window.label)) {
+  let label = ownLabel(WINDOW_LABELS, window.label || '') || window.label || ownLabel(WINDOW_LABELS, window.kind || '') || '额度';
+  if (provider === 'Codex' && window.label && !ownLabel(WINDOW_LABELS, window.label) && !Object.values(WINDOW_LABELS).includes(window.label)) {
     const title = window.label === 'GPT-5.3-Codex-Spark' ? 'Spark' : window.label === 'gpt-reserve' ? 'Luna Reserve' : label;
-    const period = window.kind === 'weekly' ? '每周' : window.windowMinutes === 300 ? '5 小时' : WINDOW_LABELS[window.kind || ''];
+    const period = window.kind === 'weekly' ? '每周' : window.windowMinutes === 300 ? '5 小时' : ownLabel(WINDOW_LABELS, window.kind || '');
     label = period ? `${title} · ${period}` : title;
   }
   return label;
@@ -98,7 +102,7 @@ function QuotaWindow({ window, provider, currency, compact = false }: { window: 
 
 function ProviderCard({ row }: { row: LimitRow }) {
   const {t} = usePreferences();
-  const name = PROVIDER_NAMES[row.provider] || row.provider.replace(/[-_]/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const name = ownLabel(PROVIDER_NAMES, row.provider) || row.provider.replace(/[-_]/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
   // Older payloads may carry only a credits window, without a balance object.
   const creditWindow = row.windows.find((window) => window.metric === 'credits'
     || (row.provider === 'openrouter' && !window.metric && window.label === 'Credits'));
@@ -116,7 +120,7 @@ function ProviderCard({ row }: { row: LimitRow }) {
   const count = row.resetCredits?.availableCount;
   const status = row.status !== 'ok' && row.status !== 'stale' ? row.status : row.stale || row.status === 'stale' ? 'stale' : 'ok';
   const plan = ['Management', 'Pay-as-you-go'].includes(row.planLabel || '') ? null : row.planLabel;
-  return <article class={`limit-card${row.stale ? ' limit-card--stale' : ''}`}>
+  return <article class="limit-card">
     <div class="limit-card__header">
       <div class="limit-card__identity"><strong>{t(name)}</strong>
         <span class="muted">{[['environment', 'Pay-as-you-go'].includes(row.accountLabel || '') ? null : row.accountLabel,
@@ -124,7 +128,7 @@ function ProviderCard({ row }: { row: LimitRow }) {
       </div>
       <div class="limit-card__state">
         <span class={`status-label status-label--${row.status === 'ok' && !row.stale ? 'ok' : 'warn'}`}>
-          {t(STATUS_LABELS[status] ?? '未知状态')}
+          {t(ownLabel(STATUS_LABELS, status) ?? '未知状态')}
         </span>
         <Timestamp label="更新" value={row.updatedAt} />
       </div>

@@ -27,7 +27,7 @@ const dictionary: Record<string, string> = {
 };
 export function translate(text: string, language: Language): string {
   if (language === 'zh') return text;
-  if (dictionary[text]) return dictionary[text];
+  if (Object.hasOwn(dictionary, text)) return dictionary[text];
   const time = text.match(/^(\d+) (分钟|小时|天)前$/);
   if (time) return `${time[1]} ${({ '分钟':'min', '小时':'hr', '天':'d' } as Record<string,string>)[time[2]]} ago`;
   // Compose short UI labels (e.g. Spark · 每周), never run on account/model data.
@@ -80,13 +80,26 @@ export function ViewControls() {
   const [logoutError,setLogoutError]=useState(false);
   async function signOut() {
     setLogoutError(false);
-    try {
-      const response=await fetch('/auth/logout',{method:'POST'});
-      if(!response.ok)throw new Error();
-      if('caches' in window)for(const name of await caches.keys())if(/^token-monitor-(static|snapshot)-/.test(name))await caches.delete(name);
-      if('serviceWorker' in navigator){const registration=await navigator.serviceWorker.getRegistration('/');await registration?.unregister();}
-      window.location.assign('/auth/signed-out');
-    }catch{setLogoutError(true);}
+    // Attempt every local cleanup even if the network or another cleanup fails.
+    const results = await Promise.allSettled([
+      (async () => {
+        const response = await fetch('/auth/logout', { method: 'POST' });
+        if (!response.ok) throw new Error('logout failed');
+      })(),
+      (async () => {
+        if (!('caches' in window)) return;
+        const names = (await caches.keys()).filter(name => /^token-monitor-(static|snapshot)-/.test(name));
+        const removed = await Promise.allSettled(names.map(name => caches.delete(name)));
+        if (removed.some(result => result.status === 'rejected')) throw new Error('cache cleanup failed');
+      })(),
+      (async () => {
+        if (!('serviceWorker' in navigator)) return;
+        const registration = await navigator.serviceWorker.getRegistration('/');
+        await registration?.unregister();
+      })()
+    ]);
+    if (results.some(result => result.status === 'rejected')) setLogoutError(true);
+    else window.location.assign('/auth/signed-out');
   }
   useEffect(()=>{
     const closeOutside=(event:PointerEvent)=>{

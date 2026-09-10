@@ -4,23 +4,46 @@ import { once } from 'node:events';
 import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import * as oidc from 'openid-client';
-import { createAuth } from './auth';
-import { loadConfig, type GatewayConfig } from './config';
-const servers:Server[]=[];
-afterEach(async()=>{vi.restoreAllMocks();for(const server of servers.splice(0)){server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}});
-async function listen(server:Server){servers.push(server);server.listen(0,'127.0.0.1');await once(server,'listening');return `http://127.0.0.1:${(server.address() as {port:number}).port}`;}
-const baseConfig=():GatewayConfig=>({hubUrl:'http://127.0.0.1:1',host:'127.0.0.1',port:0,secret:'synthetic-hub',sessionSecret:'',trustOidcProxy:false,publicOrigin:'http://127.0.0.1:1'});
-async function harness(config:GatewayConfig,discover?:()=>Promise<oidc.Configuration>){
- const auth=createAuth(config,discover);
- const base=await listen(createServer((req,res)=>{void(async()=>{
-  const url=new URL(req.url!,config.publicOrigin);
-  if(await auth.handle(req,res,url))return;
-  const shell=!url.pathname.startsWith('/api/');
-  if(!auth.authorized(req,shell)){auth.deny(req,res,shell);return;}
-  if(shell)auth.issue(req,res);
-  res.end('ok');
- })().catch(()=>{res.statusCode=500;res.end('error');});}));
- config.publicOrigin=base;return base;
+import { createAuth } from './auth.js';
+import { loadConfig, type GatewayConfig } from './config.js';
+const servers: Server[] = [];
+afterEach(async () => {
+  vi.restoreAllMocks();
+  for (const server of servers.splice(0)) {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+async function listen(server: Server) {
+  servers.push(server);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  return `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+}
+function baseConfig(): GatewayConfig {
+  return {
+    hubUrl: 'http://127.0.0.1:1', host: '127.0.0.1', port: 0,
+    secret: 'synthetic-hub', sessionSecret: '', trustOidcProxy: false,
+    publicOrigin: 'http://127.0.0.1:1'
+  };
+}
+async function harness(config: GatewayConfig, discover?: () => Promise<oidc.Configuration>) {
+  const auth = createAuth(config, discover);
+  const base = await listen(createServer((req, res) => {
+    void (async () => {
+      const url = new URL(req.url!, config.publicOrigin);
+      if (await auth.handle(req, res, url)) return;
+      const shell = !url.pathname.startsWith('/api/');
+      if (!auth.authorized(req, shell)) {
+        auth.deny(req, res, shell);
+        return;
+      }
+      if (shell) auth.issue(req, res);
+      res.end('ok');
+    })().catch(() => { res.statusCode = 500; res.end('error'); });
+  }));
+  config.publicOrigin = base;
+  return base;
 }
 const cookieOf=(r:Response)=>r.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');
 it('Basic authenticates independently of Hub bearer, rate limits failures and revokes logout sessions',async()=>{
@@ -105,4 +128,13 @@ for(const variant of ['state','nonce','issuer','audience','expired','signature']
  const flow=await oidcHarness(variant);const callback=variant==='state'?flow.callback+'wrong':flow.callback;
  const result=await fetch(callback,{headers:{cookie:flow.cookie},redirect:'manual'});
  expect(result.status).toBe(401);expect(result.headers.getSetCookie().some(x=>x.startsWith('tm_web_session='))).toBe(false);
+});
+
+it('rejects malformed and cross-scheme logout origins without revoking the session', async () => {
+  const base = await harness({...baseConfig(), authMode:'trusted-proxy', proxyMode:'external'});
+  const cookie = cookieOf(await fetch(base));
+  for (const origin of ['invalid', base.replace('http:', 'https:')]) {
+    expect((await fetch(base+'/auth/logout', {method:'POST', headers:{cookie, origin}})).status).toBe(403);
+    expect((await fetch(base+'/api/stats', {headers:{cookie}})).status).toBe(200);
+  }
 });

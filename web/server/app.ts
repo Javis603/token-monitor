@@ -1,5 +1,5 @@
-import { createAuth, localRequest } from './auth.js';
-import { readFile, stat } from 'node:fs/promises';
+import { createAuth, localRequest, sameOrigin } from './auth.js';
+import { readFile, stat, realpath } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { extname, resolve, sep } from 'node:path';
 import type { GatewayConfig } from './config.js';
@@ -48,7 +48,10 @@ const SECURITY_HEADERS: Record<string, string> = {
   'x-frame-options': 'DENY'
 };
 
-export function waitForDrainOrClose(response: Pick<ServerResponse, 'once' | 'off'>): Promise<void> {
+export function waitForDrainOrClose(response: {
+  once(event: 'drain' | 'close', listener: () => void): unknown;
+  off(event: 'drain' | 'close', listener: () => void): unknown;
+}): Promise<void> {
   return new Promise((resolveWait) => {
     function settle() {
       response.off('drain', settle);
@@ -215,7 +218,15 @@ async function serveStatic(request: IncomingMessage, response: ServerResponse, u
     return;
   }
 
-  const body = await readFile(filePath);
+  // Check canonical paths after the SPA fallback, including symlinked roots.
+  const canonicalRoot = await realpath(root);
+  const canonicalFile = await realpath(filePath);
+  if (!canonicalFile.startsWith(`${canonicalRoot}${sep}`)) {
+    sendJson(request, response, 404, { error: 'not_found' });
+    return;
+  }
+
+  const body = await readFile(canonicalFile);
   const isIndex = filePath === resolve(root, 'index.html');
   if(isIndex && request.method==='GET')onIndex();
   setSecurityHeaders(response);
@@ -242,7 +253,7 @@ export function createGateway({ config, distDir, logger = console }: GatewayOpti
 
     // Reject cross-site browser reads before cookies can authorize a request.
     const origin=request.headers.origin;
-    if ((url.pathname.startsWith('/api/') || url.pathname==='/auth/logout') && ((origin && (()=>{try{return new URL(origin).host !== request.headers.host;}catch{return true;}})())
+    if ((url.pathname.startsWith('/api/') || url.pathname==='/auth/logout') && ((origin && !sameOrigin(request, config))
       || request.headers['sec-fetch-site'] === 'cross-site')) {
       sendJson(request,response,403,{error:'cross_site_request'}); return;
     }

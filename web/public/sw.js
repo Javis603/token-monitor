@@ -1,7 +1,7 @@
-const STATIC_CACHE = 'token-monitor-static-v19';
+const STATIC_CACHE = 'token-monitor-static-v20';
 const SNAPSHOT_CACHE = 'token-monitor-snapshot-v2';
 const SNAPSHOT_URL = '/__offline__/stats.json';
-const APP_SHELL = ['/manifest.webmanifest', '/icons/icon-192.svg', '/icons/icon-512.svg'];
+const APP_SHELL = ['/manifest.webmanifest', '/icons/icon-192.svg', '/icons/icon-512.svg', '/icons/apple-touch-icon.png'];
 
 async function cacheAppShell() {
   const cache = await caches.open(STATIC_CACHE);
@@ -64,12 +64,14 @@ self.addEventListener('fetch', (event) => {
     )));
     return;
   }
-  event.respondWith(caches.match(request).then(async (cached) => {
+  event.respondWith(caches.match(request).catch(() => undefined).then(async (cached) => {
     if (cached) return cached;
     const response = await fetch(request);
     if (response.ok) {
-      const cache = await caches.open(STATIC_CACHE);
-      await cache.put(request, response.clone());
+      try {
+        const cache = await caches.open(STATIC_CACHE);
+        await cache.put(request, response.clone());
+      } catch { /* Static caching is optional; preserve the network response. */ }
     }
     return response;
   }));

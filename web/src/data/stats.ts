@@ -5,7 +5,7 @@ import type {
   PeriodKey,
   UsagePeriod,
   UsageSession
-} from './types';
+} from './types.js';
 
 const EMPTY_PERIOD: UsagePeriod = {};
 
@@ -138,8 +138,41 @@ export function deviceRows(stats: HubStats, key: PeriodKey): DeviceRow[] {
     .sort((a, b) => Number(a.stale) - Number(b.stale) || b.totalTokens - a.totalTokens || a.id.localeCompare(b.id));
 }
 
+type JsonObject = Record<string, unknown>;
+function record(value: unknown): value is JsonObject {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function fields(value: JsonObject, names: string[], type: 'string' | 'number' | 'boolean'): boolean {
+  return names.every(name => value[name] == null || (typeof value[name] === type && (type !== 'number' || Number.isFinite(value[name]))));
+}
+function validPeriod(value: unknown): boolean {
+  if (!record(value)) return false;
+  if (!fields(value, ['totalTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'unclassifiedTokens', 'reasoningTokens'], 'number')) return false;
+  if (value.capabilities != null && (!record(value.capabilities) || !fields(value.capabilities, ['tokenComponents'], 'boolean'))) return false;
+  for (const name of ['clients', 'clientOutputs', 'clientCacheReads', 'clientCacheWrites', 'clientUnclassifiedTokens', 'models', 'modelOutputs', 'modelCacheReads', 'modelCacheWrites', 'modelUnclassifiedTokens']) {
+    const map = value[name];
+    if (map != null && (!record(map) || !Object.values(map).every(item => typeof item === 'number' && Number.isFinite(item)))) return false;
+  }
+  return value.sessions == null || (record(value.sessions) && Object.values(value.sessions).every(session =>
+    record(session) && fields(session, ['client', 'sessionId', 'projectLabel', 'lastUsedAt', 'startedAt'], 'string')
+      && fields(session, ['totalTokens', 'inputTokens', 'outputTokens'], 'number')));
+}
+function validPeriods(value: unknown): boolean {
+  return record(value) && ['today', 'month', 'allTime'].every(key => value[key] == null || validPeriod(value[key]));
+}
+function validProvider(value: unknown): boolean {
+  if (!record(value) || !fields(value, ['provider', 'accountLabel', 'planLabel', 'status', 'updatedAt'], 'string') || !fields(value, ['stale'], 'boolean')) return false;
+  if (value.balance != null && (!record(value.balance) || !fields(value.balance, ['amount', 'todaySpend', 'weekSpend', 'monthSpend', 'allTimeSpend'], 'number') || !fields(value.balance, ['currency', 'trackingSince'], 'string') || !fields(value.balance, ['monthSinceTracking'], 'boolean'))) return false;
+  if (value.resetCredits != null && (!record(value.resetCredits) || !fields(value.resetCredits, ['availableCount'], 'number') || !fields(value.resetCredits, ['nextExpiresAt'], 'string'))) return false;
+  return value.windows == null || (Array.isArray(value.windows) && value.windows.every(window =>
+    record(window) && fields(window, ['kind', 'label', 'resetsAt', 'metric', 'currency', 'detail', 'resetDescription'], 'string')
+      && fields(window, ['windowMinutes', 'usedPercent', 'remainingPercent', 'used', 'limit', 'remaining'], 'number') && fields(window, ['showMeter'], 'boolean')));
+}
 export function isHubStats(value: unknown): value is HubStats {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const candidate = value as HubStats;
-  return Boolean(candidate.periods && typeof candidate.periods === 'object' && Array.isArray(candidate.devices));
+  if (!record(value) || !validPeriods(value.periods) || !Array.isArray(value.devices)) return false;
+  if (!value.devices.every(device => record(device)
+    && fields(device, ['deviceId', 'hostname', 'platform', 'osName', 'osVersion', 'agentRuntime', 'receivedAt'], 'string')
+    && fields(device, ['stale'], 'boolean') && (device.periods == null || validPeriods(device.periods)))) return false;
+  return value.limits == null || (record(value.limits) && (value.limits.providers == null
+    || (Array.isArray(value.limits.providers) && value.limits.providers.every(validProvider))));
 }

@@ -48,6 +48,7 @@ export function createLiveStats(options: LiveStatsOptions) {
   const cancel = options.cancel ?? ((handle) => window.clearTimeout(handle));
   const random = options.random ?? Math.random;
   let started = false;
+  let generation = 0;
   let source: EventSourceLike | null = null;
   let timer: number | null = null;
   let attempt = 0;
@@ -122,24 +123,26 @@ export function createLiveStats(options: LiveStatsOptions) {
     async start() {
       if (started) return;
       started = true;
+      const currentGeneration = ++generation;
       visibility.addEventListener('visibilitychange', onVisibilityChange);
       options.onStatus?.('connecting');
       initialFetchPending = true;
       try {
         const stats = await fetchStats();
-        if (!started) return;
+        if (!started || generation !== currentGeneration) return;
         options.onSnapshot(stats, 'fetch');
       } catch {
-        if (!started) return;
+        if (!started || generation !== currentGeneration) return;
         options.onStatus?.('offline');
       } finally {
-        initialFetchPending = false;
+        if (generation === currentGeneration) initialFetchPending = false;
       }
       connect();
     },
     stop() {
       if (!started) return;
       started = false;
+      generation += 1;
       visibility.removeEventListener('visibilitychange', onVisibilityChange);
       clearRetry();
       closeSource();
