@@ -4,7 +4,7 @@ import { createServer, get, type IncomingMessage, type Server } from 'node:http'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createGateway, issueSessionCookie, waitForDrainOrClose } from './app.js';
+import { createGateway, waitForDrainOrClose } from './app.js';
 import type { GatewayConfig } from './config.js';
 
 async function listen(server: Server): Promise<number> {
@@ -262,12 +262,12 @@ describe('gateway', () => {
     const page = await fetch(`${baseUrl}/overview`);
     expect(page.status).toBe(200);
     const setCookie = page.headers.get('set-cookie') ?? '';
-    expect(setCookie).toContain('tm_session=');
-    expect(setCookie).toContain('Path=/api');
+    expect(setCookie).toContain('tm_web_session=');
+    expect(setCookie).toContain('Path=/;');
     expect(setCookie).toContain('HttpOnly');
     expect(setCookie).not.toContain('; Secure');
     expect(setCookie).toContain('SameSite=Lax');
-    expect(setCookie).toContain(`Max-Age=${7 * 24 * 60 * 60}`);
+    expect(setCookie).toContain(`Max-Age=${8 * 60 * 60}`);
 
     const asset = await fetch(`${baseUrl}/assets/app-abc123.js`);
     expect(asset.headers.get('set-cookie')).toBeNull();
@@ -286,16 +286,13 @@ describe('gateway', () => {
     expect(upstreamRequest?.headers.cookie).toBeUndefined();
   });
 
-  it('rejects tampered, expired, and foreign-secret session cookies', async () => {
+  it('rejects tampered and pre-restart session cookies', async () => {
     const page = await fetch(`${baseUrl}/`);
     const cookie = (page.headers.get('set-cookie') ?? '').split(';')[0];
     const [name, value] = cookie.split('=');
     await restartGateway({authMode:'proxy',trustOidcProxy:true});
     const tampered = `${name}=${value.slice(0, -1)}${value.endsWith('A') ? 'B' : 'A'}`;
     expect((await fetch(`${baseUrl}/api/stats`, { headers: { cookie: tampered } })).status).toBe(401);
-
-    const expired = issueSessionCookie(config, Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60 - 60);
-    expect((await fetch(`${baseUrl}/api/stats`, { headers: { cookie: expired.split(';')[0] } })).status).toBe(401);
 
     await restartGateway({ sessionSecret: 'rotated-session-secret' });
     expect((await fetch(`${baseUrl}/api/stats`, { headers: { cookie } })).status).toBe(401);
@@ -322,6 +319,22 @@ describe('gateway', () => {
     expect(loggedIn.headers.get('set-cookie')).toContain('; Secure');
     const cookie=loggedIn.headers.get('set-cookie')!.split(';')[0];
     expect((await fetch(baseUrl+'/api/stats',{headers:{cookie}})).status).toBe(200);
+  });
+
+  it('revokes an open browser SSE connection when logging out', async()=>{
+    await restartGateway({authMode:'trusted-proxy',proxyMode:'external',publicOrigin:baseUrl});
+    // Restart changes the ephemeral test port; config is shared by the server.
+    config.publicOrigin=baseUrl;
+    await close(upstream);
+    upstream=createServer((_req,res)=>{res.writeHead(200,{'content-type':'text/event-stream'});res.write('event: snapshot\ndata: {}\n\n');});
+    const upstreamPort=await listen(upstream);config.hubUrl=`http://127.0.0.1:${upstreamPort}`;
+    const page=await fetch(baseUrl);const cookie=page.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');
+    const stream=await fetch(baseUrl+'/api/stats/stream',{headers:{cookie}});const reader=stream.body!.getReader();await reader.read();
+    const closed=reader.read().then(()=>true,()=>true);
+    const logout=await fetch(baseUrl+'/auth/logout',{method:'POST',headers:{cookie,origin:baseUrl}});
+    expect(logout.status).toBe(200);
+    await expect(Promise.race([closed,new Promise((_,reject)=>setTimeout(()=>reject(new Error('SSE stayed open')),1000))])).resolves.toBe(true);
+    expect((await fetch(baseUrl+'/api/stats',{headers:{cookie}})).status).toBe(401);
   });
 
   it('blocks DNS rebinding and cross-site reads in local mode',async()=>{

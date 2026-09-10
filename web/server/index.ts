@@ -13,7 +13,7 @@ gateway.listen(config.port, config.host, () => {
   console.log(`Token Monitor Web listening on http://${config.host}:${config.port}`);
   console.log(`Read-only Web authentication mode: ${config.authMode}`);
   if (config.trustOidcProxy) {
-    console.warn('Trusting x-forwarded-user and tm_session cookies for API requests; restrict this listener to the authentication proxy proxy.');
+    console.warn('Trusted-proxy mode: keep the listener restricted to configured proxy peers and enforce the documented upstream authentication contract.');
   }
 });
 

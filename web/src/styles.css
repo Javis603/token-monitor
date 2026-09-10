@@ -295,3 +295,5 @@ button { font: inherit; }
 }
 
 .demo-banner { text-align: center; padding: 8px; font-size: .75rem; color: var(--muted); border-bottom: 1px solid var(--line); }
+
+.sign-out { margin-top: 16px; padding: 9px; width: 100%; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--panel); cursor: pointer; font: inherit; font-size: .8rem; }

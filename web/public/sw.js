@@ -1,4 +1,4 @@
-const STATIC_CACHE = 'token-monitor-static-v18';
+const STATIC_CACHE = 'token-monitor-static-v19';
 const SNAPSHOT_CACHE = 'token-monitor-snapshot-v2';
 const SNAPSHOT_URL = '/__offline__/stats.json';
 const APP_SHELL = ['/manifest.webmanifest', '/icons/icon-192.svg', '/icons/icon-512.svg'];
@@ -47,7 +47,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin) return;
 
-  if (url.pathname.startsWith('/api/')) {
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/')) {
     // Authenticated JSON and the SSE stream always go directly to the network.
     event.respondWith(fetch(request));
     return;

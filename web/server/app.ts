@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createAuth, localRequest } from './auth.js';
 import { readFile, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { extname, resolve, sep } from 'node:path';
@@ -48,50 +48,6 @@ const SECURITY_HEADERS: Record<string, string> = {
   'x-frame-options': 'DENY'
 };
 
-// Sessions are issued only after local-origin or trusted-proxy authentication.
-// The Hub bearer never reaches browser JavaScript or browser storage.
-const SESSION_COOKIE_NAME = 'tm_session';
-const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
-
-function signSessionPayload(payload: string, secret: string): string {
-  return createHmac('sha256', secret).update(payload).digest('base64url');
-}
-
-// Exported for tests: builds a complete Set-Cookie value for a session issued
-// at `nowSeconds` (defaults to the current time).
-export function issueSessionCookie(config: GatewayConfig, nowSeconds = Math.floor(Date.now() / 1000)): string {
-  const payload = `v1.${nowSeconds + SESSION_TTL_SECONDS}.${randomBytes(16).toString('hex')}`;
-  const signature = signSessionPayload(payload, config.sessionSecret);
-  return `${SESSION_COOKIE_NAME}=${payload}.${signature}; Path=/api; HttpOnly;${config.authMode === 'local' ? '' : ' Secure;'} SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`;
-}
-
-function readSessionCookie(request: IncomingMessage): string | null {
-  const cookie = request.headers.cookie;
-  if (!cookie) return null;
-  for (const part of cookie.split(';')) {
-    const separator = part.indexOf('=');
-    if (separator === -1) continue;
-    if (part.slice(0, separator).trim() === SESSION_COOKIE_NAME) {
-      return part.slice(separator + 1).trim();
-    }
-  }
-  return null;
-}
-
-function sessionCookieIsValid(request: IncomingMessage, config: GatewayConfig): boolean {
-  if (config.sessionSecret === '') return false;
-  const value = readSessionCookie(request);
-  if (!value) return false;
-  const separator = value.lastIndexOf('.');
-  if (separator <= 0) return false;
-  const payload = value.slice(0, separator);
-  const supplied = Buffer.from(value.slice(separator + 1));
-  const expected = Buffer.from(signSessionPayload(payload, config.sessionSecret));
-  if (supplied.byteLength !== expected.byteLength || !timingSafeEqual(supplied, expected)) return false;
-  const expiry = Number(payload.split('.')[1]);
-  return Number.isFinite(expiry) && expiry > Math.floor(Date.now() / 1000);
-}
-
 export function waitForDrainOrClose(response: Pick<ServerResponse, 'once' | 'off'>): Promise<void> {
   return new Promise((resolveWait) => {
     function settle() {
@@ -124,32 +80,6 @@ function safeRequestPath(rawUrl: string | undefined): URL | null {
   } catch {
     return null;
   }
-}
-
-function matchesSecret(token: string, secret: string): boolean {
-  const supplied = Buffer.from(token);
-  const expected = Buffer.from(secret);
-  return supplied.byteLength === expected.byteLength && timingSafeEqual(supplied, expected);
-}
-
-function isApiAuthorized(request: IncomingMessage, config: GatewayConfig): boolean {
-  const authorization = request.headers.authorization;
-  if (authorization !== undefined) {
-    if (typeof authorization !== 'string') return false;
-    const bearer = /^Bearer (.+)$/i.exec(authorization);
-    return bearer !== null && matchesSecret(bearer[1], config.secret);
-  }
-
-  if (config.authMode === 'local') return isLocalRequest(request);
-
-  // Headless/browser sessions minted by this gateway on the OIDC-protected SPA
-  // shell (reverse proxy passes /api/* through without validating its own OIDC cookie).
-  if (sessionCookieIsValid(request, config)) return true;
-
-  const forwardedUser = request.headers['x-forwarded-user'];
-  return config.trustOidcProxy
-    && typeof forwardedUser === 'string'
-    && forwardedUser.trim().length > 0;
 }
 
 function copyUpstreamHeaders(upstream: Response, response: ServerResponse, sse: boolean) {
@@ -236,7 +166,7 @@ function cacheHeader(pathname: string): string {
   return pathname === '/' || pathname.endsWith('.html') ? 'no-cache' : 'public, max-age=3600';
 }
 
-async function serveStatic(request: IncomingMessage, response: ServerResponse, url: URL, distDir: string, config: GatewayConfig) {
+async function serveStatic(request: IncomingMessage, response: ServerResponse, url: URL, distDir: string, onIndex: () => void) {
   if (!['GET', 'HEAD'].includes(request.method ?? '')) {
     sendJson(request, response, 405, { error: 'method_not_allowed' }, { allow: 'GET, HEAD' });
     return;
@@ -287,10 +217,9 @@ async function serveStatic(request: IncomingMessage, response: ServerResponse, u
 
   const body = await readFile(filePath);
   const isIndex = filePath === resolve(root, 'index.html');
+  if(isIndex && request.method==='GET')onIndex();
   setSecurityHeaders(response);
-  if (isIndex && config.sessionSecret !== '') {
-    response.setHeader('set-cookie', issueSessionCookie(config));
-  }
+
   response.writeHead(200, {
     'content-type': MIME_TYPES[extname(filePath).toLowerCase()] ?? 'application/octet-stream',
     'content-length': String(body.byteLength),
@@ -299,58 +228,42 @@ async function serveStatic(request: IncomingMessage, response: ServerResponse, u
   response.end(request.method === 'HEAD' ? undefined : body);
 }
 
-function isLocalRequest(request: IncomingMessage): boolean {
-  const peer=request.socket.remoteAddress || '';
-  if (!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(peer)) return false;
-  try {
-    const host=new URL(`http://${request.headers.host}`).hostname;
-    return ['localhost','127.0.0.1','[::1]'].includes(host);
-  } catch { return false; }
-}
-
-function isShellAuthorized(request: IncomingMessage, config: GatewayConfig): boolean {
-  if (config.authMode === 'local') return isLocalRequest(request);
-  const user=request.headers['x-forwarded-user'];
-  return config.trustOidcProxy && typeof user === 'string' && user.trim().length > 0;
-}
-
 export function createGateway({ config, distDir, logger = console }: GatewayOptions) {
+  const auth=createAuth(config);
   return createServer((request, response) => {
+    setSecurityHeaders(response);
     const url = safeRequestPath(request.url);
     if (!url) {
       sendJson(request, response, 400, { error: 'bad_request' });
       return;
     }
 
+    if(config.publicOrigin && request.headers.host!==new URL(config.publicOrigin).host){sendJson(request,response,403,{error:'invalid_host'});return;}
+
     // Reject cross-site browser reads before cookies can authorize a request.
     const origin=request.headers.origin;
-    if ((origin && (()=>{try{return new URL(origin).host !== request.headers.host;}catch{return true;}})())
-      || request.headers['sec-fetch-site'] === 'cross-site') {
+    if ((url.pathname.startsWith('/api/') || url.pathname==='/auth/logout') && ((origin && (()=>{try{return new URL(origin).host !== request.headers.host;}catch{return true;}})())
+      || request.headers['sec-fetch-site'] === 'cross-site')) {
       sendJson(request,response,403,{error:'cross_site_request'}); return;
     }
-    if (config.authMode === 'local' && !isLocalRequest(request)) {
+    if (config.authMode === 'local' && !localRequest(request)) {
       sendJson(request,response,403,{error:'local_only'}); return;
     }
-    const allowed = API_METHODS.get(url.pathname);
-    let operation: Promise<void>;
-    if (url.pathname.startsWith('/api/')) {
-      if (!isApiAuthorized(request, config)) {
-        sendJson(request, response, 401, { error: 'unauthorized' });
-        return;
+    const operation=(async()=>{
+      if(await auth.handle(request,response,url))return;
+      if(url.pathname.startsWith('/auth/')){sendJson(request,response,404,{error:'not_found'});return;}
+      const shell=!url.pathname.startsWith('/api/');
+      if(!auth.authorized(request,shell)){auth.deny(request,response,shell);return;}
+      if(!shell) {
+        const allowed=API_METHODS.get(url.pathname);
+        if(!allowed){sendJson(request,response,404,{error:'not_found'});return;}
+        if(!allowed.has(request.method || '')){sendJson(request,response,405,{error:'method_not_allowed'},{allow:[...allowed].join(', ')});return;}
+        if(url.pathname==='/api/stats/stream')auth.bindStream(request,response);
+        await proxyApi(request,response,url,config);
+      } else {
+        await serveStatic(request,response,url,distDir,()=>auth.issue(request,response));
       }
-      if (!allowed) {
-        sendJson(request, response, 404, { error: 'not_found' });
-        return;
-      }
-      if (!allowed.has(request.method ?? '')) {
-        sendJson(request, response, 405, { error: 'method_not_allowed' }, { allow: [...allowed].join(', ') });
-        return;
-      }
-      operation = proxyApi(request, response, url, config);
-    } else {
-      if (!isShellAuthorized(request,config)) {sendJson(request,response,401,{error:'unauthorized'});return;}
-      operation = serveStatic(request, response, url, distDir, config);
-    }
+    })();
 
     operation.catch((error: unknown) => {
       logger.error('gateway request failed');

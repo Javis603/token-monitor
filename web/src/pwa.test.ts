@@ -82,7 +82,7 @@ describe('PWA assets', () => {
     let pending: Promise<unknown> | undefined;
     harness.listeners.install({ waitUntil(value: Promise<unknown>) { pending = value; } });
     await pending;
-    const staticCache = harness.stores.get('token-monitor-static-v18');
+    const staticCache = harness.stores.get('token-monitor-static-v19');
     expect(staticCache?.addAll).toHaveBeenCalledWith(['/assets/index-def456.css', '/assets/index-abc123.js']);
     expect(staticCache?.put).toHaveBeenCalledWith('/index.html', expect.any(Response));
   });

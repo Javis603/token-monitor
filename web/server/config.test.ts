@@ -26,7 +26,7 @@ describe('loadConfig', () => {
 
 it('requires explicit proxy mode and rejects remote binds in local mode',()=>{
   expect(()=>loadConfig({TOKEN_MONITOR_SECRET:'test',GATEWAY_HOST:'0.0.0.0'})).toThrow(/loopback/);
-  expect(()=>loadConfig({TOKEN_MONITOR_SECRET:'test',WEB_AUTH_MODE:'proxy'})).toThrow(/GATEWAY_SESSION_SECRET/);
+  expect(loadConfig({TOKEN_MONITOR_SECRET:'test',WEB_AUTH_MODE:'proxy'}).authMode).toBe('proxy');
   expect(()=>loadConfig({TOKEN_MONITOR_SECRET:'test',WEB_AUTH_MODE:'unknown'})).toThrow(/WEB_AUTH_MODE/);
   expect(loadConfig({TOKEN_MONITOR_SECRET:'test',WEB_AUTH_MODE:'proxy',GATEWAY_SESSION_SECRET:'test-signing-secret'})).toMatchObject({authMode:'proxy',trustOidcProxy:true});
 });

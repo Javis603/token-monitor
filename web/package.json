@@ -21,6 +21,7 @@
     "demo": "vite --mode demo --host 127.0.0.1"
   },
   "dependencies": {
+    "openid-client": "6.8.8",
     "preact": "10.29.8"
   },
   "devDependencies": {

@@ -22,7 +22,7 @@ const dictionary: Record<string, string> = {
   'Spark 额度':'Spark quotas','可用重置':'Available resets','额度':'Quota','5 小时':'5 hours',
   '更新时间未知':'Update time unknown','时间未知':'Time unknown','刚刚':'Just now','在线':'Online',
   '上一页':'Previous','下一页':'Next','列表':' list','分页':' pages',
-  '语言':'Language','主题':'Theme','明亮':'Light','深色':'Dark','数据模式':'Data mode','显示设置':'Display settings','跟随系统':'System',
+  '语言':'Language','主题':'Theme','明亮':'Light','深色':'Dark','数据模式':'Data mode','显示设置':'Display settings','退出登录':'Sign out','重新登录':'Sign in again','退出失败，请重试':'Sign-out failed. Try again.','跟随系统':'System',
   '正在连接本地 gateway…':'Connecting…','暂时无法连接 Hub，也没有可用的离线快照。':'Cannot connect to the Hub. No offline snapshot is available.'
 };
 export function translate(text: string, language: Language): string {
@@ -77,6 +77,17 @@ export function usePreferences() {
 }
 export function ViewControls() {
   const settings = useRef<HTMLDetailsElement>(null);
+  const [logoutError,setLogoutError]=useState(false);
+  async function signOut() {
+    setLogoutError(false);
+    try {
+      const response=await fetch('/auth/logout',{method:'POST'});
+      if(!response.ok)throw new Error();
+      if('caches' in window)for(const name of await caches.keys())if(/^token-monitor-(static|snapshot)-/.test(name))await caches.delete(name);
+      if('serviceWorker' in navigator){const registration=await navigator.serviceWorker.getRegistration('/');await registration?.unregister();}
+      window.location.assign('/auth/signed-out');
+    }catch{setLogoutError(true);}
+  }
   useEffect(()=>{
     const closeOutside=(event:PointerEvent)=>{
       if(settings.current && !settings.current.contains(event.target as Node)) settings.current.open=false;
@@ -95,6 +106,8 @@ export function ViewControls() {
       <div class="settings-popover">
         <label><span>{t('语言')}</span><select aria-label={t('语言')} value={languageChoice} onChange={e=>setLanguage(e.currentTarget.value as Language | 'system')}><option value="system">{t('跟随系统')}</option><option value="zh">中文</option><option value="en">English</option></select></label>
         <label><span>{t('主题')}</span><select aria-label={t('主题')} value={themeChoice} onChange={e=>setTheme(e.currentTarget.value as Theme | 'system')}><option value="system">{t('跟随系统')}</option><option value="dark">{t('深色')}</option><option value="light">{t('明亮')}</option></select></label>
+        <button type="button" class="sign-out" onClick={signOut}>{t('退出登录')}</button>
+        {logoutError && <p role="alert">{t('退出失败，请重试')}</p>}
       </div>
     </details>
   </div>;
