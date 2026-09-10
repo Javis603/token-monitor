@@ -118,7 +118,9 @@ function parseArkcliPlan(body, updatedAt) {
   for (const [label, [kind, title, windowMinutes]] of Object.entries(WINDOWS)) {
     const period = item.periods.find((entry) => entry?.label === label);
     if (!period) continue;
-    const { used, total } = period;
+    const { total } = period;
+    // arkcli omits used after a window resets; only explicit 0% proves zero.
+    const used = period.used === undefined && period.percent === 0 ? 0 : period.used;
     if (typeof total !== 'number' || !Number.isFinite(total) || total < 0) throw probeError();
     if (total === 0) continue;
     if (typeof used !== 'number' || !Number.isFinite(used) || used < 0) throw probeError();

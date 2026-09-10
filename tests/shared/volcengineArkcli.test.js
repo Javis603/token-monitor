@@ -70,6 +70,74 @@ test('no subscription is hidden, while errors and malformed quota are unavailabl
     assert.ok(!JSON.stringify(rows).includes('sensitive'));
   }
 });
+// Match the CLI's actual post-reset JSON: zero usage and reset_at are omitted.
+function resetResponse() {
+  const body = response();
+  body.items[0].periods[0] = { label: '5h', total: 100, percent: 0 };
+  return body;
+}
+test('omitted zero usage is accepted for every recognized window', () => {
+  for (const label of ['5h', 'daily', 'weekly', 'monthly']) {
+    const body = resetResponse();
+    body.items[0].periods = [{ label, total: 100, percent: 0 }];
+    const row = parseArkcliPlan(body, now);
+    assert.equal(row.status, 'ok');
+    assert.equal(row.updatedAt, new Date(now).toISOString());
+    assert.equal(row.windows[0].used, 0);
+    assert.equal(row.windows[0].remaining, 100);
+    assert.equal(row.windows[0].usedPercent, 0);
+    assert.equal(row.windows[0].resetsAt, null);
+  }
+});
+test('zero percent does not turn unknown or invalid amounts into zero usage', () => {
+  const invalidPeriods = [
+    { total: 100 },
+    ...[null, '0', 1, -1].map(percent => ({ total: 100, percent })),
+    ...[null, '0', -1, NaN, Infinity].map(used => ({ total: 100, percent: 0, used })),
+    ...[undefined, null, '100', -1, NaN, Infinity, 0].map(total => ({ total, percent: 0 }))
+  ];
+  for (const period of invalidPeriods) {
+    const body = resetResponse();
+    body.items[0].periods = [{ label: '5h', ...period }];
+    assert.throws(() => parseArkcliPlan(body, now), /arkcli quota probe failed/);
+  }
+});
+test('a CLI zero-usage refresh replaces retained stale quota after a failure', async (t) => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  let body = response();
+  let time = Date.parse(now);
+  const runtime = createLimitsRuntime({ limitProviders: ['volcengine'] }, {
+    autoStart: false,
+    now: () => time,
+    probeProvider: () => fetchVolcengineLimits({}, {
+      env: {}, now: () => time,
+      runArkcli: async args => args[0] === 'auth' ? auth : body
+    })
+  });
+  t.after(() => runtime.stop());
+  await runtime.refresh({}, 'manual');
+  const first = runtime.getSnapshot().providers[0];
+  assert.equal(first.status, 'ok');
+  body = resetResponse();
+  body.items[0].periods[0].used = null;
+  time += 300_000;
+  await runtime.refresh({}, 'manual');
+  const failed = runtime.getSnapshot().providers[0];
+  assert.equal(failed.status, 'unavailable');
+  assert.equal(failed.updatedAt, first.updatedAt);
+  assert.deepEqual(failed.windows, first.windows);
+  body = resetResponse();
+  time += 300_000;
+  await runtime.refresh({}, 'manual');
+  const recovered = runtime.getSnapshot().providers[0];
+  assert.equal(recovered.status, 'ok');
+  assert.equal(recovered.accountKey, first.accountKey);
+  assert.equal(recovered.updatedAt, new Date(time).toISOString());
+  assert.equal(recovered.windows[0].used, 0);
+  assert.equal(recovered.windows[0].remaining, 100);
+  assert.equal(recovered.windows[0].resetsAt, null);
+  assert.deepEqual(recovered.windows.slice(1), first.windows.slice(1));
+});
 test('CLI identities remain distinct between users and stable across plan upgrades', () => {
   const first = parseArkcliPlan(response(), now);
   const other = response(); other.viewer.user_id = 'different';

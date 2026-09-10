@@ -18,7 +18,10 @@ The existing limits runtime retains last-good quota on transient failures.
 The fallback currently queries the **personal Agent Plan** only, not team seats
 or Coding Plan. It maps recognized 5h/daily/weekly/monthly periods returned by
 the CLI; it cannot display a daily period omitted by arkcli. Positive quota is
-required to display a window. Unknown/malformed amounts are not treated as zero.
+required to display a window. arkcli can omit `used` and `reset_at` after a
+window resets. A missing `used` is zero only when `percent` is the number `0`;
+an absent reset time stays unknown. Other unknown/malformed amounts, including
+explicit `null` usage, are not treated as zero.
 Account identity hashes the CLI viewer's account/user/region, not profile name
 or tier. The CLI and explicit credential paths are exclusive so two accounts
 are never silently combined; even incomplete explicit credentials block fallback.
