@@ -1,6 +1,7 @@
 import { BlockList, isIP } from 'node:net';
 export interface GatewayConfig {
   hubUrl: string;
+  allowHubClients?: boolean;
   host: string;
   port: number;
   secret: string;
@@ -79,6 +80,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
   try {for(const entry of trustedProxyPeers){const [address,prefix,...extra]=entry.split('/');if(extra.length || !isIP(address))throw new Error();const type=isIP(address)===4?'ipv4':'ipv6';if(prefix!==undefined){if(!/^\d+$/.test(prefix))throw new Error();check.addSubnet(address,Number(prefix),type);}else check.addAddress(address,type);}} catch {throw new Error('WEB_TRUSTED_PROXY_PEERS requires IP addresses or CIDR ranges');}
   return {
     hubUrl: validHubUrl(env.HUB_URL),
+    allowHubClients: /^(1|true)$/i.test(String(env.WEB_ALLOW_HUB_CLIENTS ?? '0').trim()),
     host,
     port: validPort(env.GATEWAY_PORT),
     secret: requiredSecret(env.TOKEN_MONITOR_SECRET),

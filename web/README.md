@@ -21,7 +21,35 @@ Open `http://127.0.0.1:4174`. The default `WEB_AUTH_MODE=local` only binds to lo
 
 ## Configurable authentication
 
-The Node server hosts static assets and proxies the read-only Hub API. `WEB_AUTH_MODE` selects exactly one browser authentication mode. The Hub bearer remains a separate server-to-server credential; it is never the Basic password or an OIDC credential. API clients may still use their existing Hub bearer.
+The Node server hosts static assets and proxies the read-only Hub API. `WEB_AUTH_MODE` selects exactly one browser authentication mode. The Hub bearer remains a separate server-to-server credential; it is never the Basic password or an OIDC credential. API clients can use their existing Hub bearer for the read-only routes. Enable the separate client channel below for Desktop/agent uploads.
+
+### Sharing the URL with Desktop and agents
+
+Set `WEB_ALLOW_HUB_CLIENTS=1` to let Desktop/agents use the same base URL as the
+browser, for example `https://monitor.example.com`. The default is off, preserving
+the read-only proxy behavior of existing deployments. Keep the existing Hub token
+in the client's protected settings; do not put it in a URL or browser storage.
+
+For `/api/` requests, an explicit `Authorization: Bearer ...` selects the client
+channel before browser authentication. It is forwarded unchanged to the configured
+Hub, which validates it. An invalid Bearer never falls back to an OIDC/Basic/proxy
+session or the Web server's stored Hub credential. Cookies and proxy identity
+headers are not forwarded. Client requests do not create Web sessions; browser
+logout does not revoke a separate Hub token or its SSE connection.
+
+The client allowlist includes the existing read routes, `POST /api/ingest`,
+`PUT /api/subscriptions`, and `DELETE /api/devices/:id`. Request bodies stream to
+the Hub; its payload limits and validation still apply. Hub tokens retain their
+existing permissions (including device deletion and subscription writes), not
+per-device write-only scopes. The proxy does not redirect requests to another
+upstream or expose arbitrary paths. Client SSE uses the same cancellation and
+backpressure handling as browser SSE.
+
+Without an explicit Bearer, the selected browser authentication mode and read-only
+allowlist remain unchanged. Cross-site request and local-mode restrictions still
+apply to both channels. An upstream browser-only login wall must not intercept the
+client API before it reaches Web; application-owned OIDC needs no separate domain.
+
 
 Use a **dedicated origin**: assets, authentication endpoints and PWA scope are root-relative. A path-prefix deployment is not supported. For public HTTPS deployments, preserve the original Host header and disable buffering on `/api/stats/stream`.
 

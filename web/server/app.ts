@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { createAuth, localRequest, sameOrigin } from './auth.js';
 import { readFile, stat, realpath } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -16,8 +17,8 @@ interface GatewayOptions {
 
 // Read-only allowlist mirroring every public GET route on the Hub
 // (src/hub/server.js). Write routes (ingest, subscriptions PUT/DELETE,
-// device DELETE) are intentionally NOT proxied: browsers must never mutate
-// production data, and headless agents post directly to the loopback Hub.
+// device DELETE) are never proxied with browser credentials. The optional
+// client channel below uses only the caller's explicit Hub Bearer.
 const API_METHODS = new Map([
   ['/api/health', new Set(['GET', 'HEAD'])],
   ['/api/stats', new Set(['GET', 'HEAD'])],
@@ -26,6 +27,15 @@ const API_METHODS = new Map([
   ['/api/subscriptions', new Set(['GET', 'HEAD'])],
   ['/api/stats/stream', new Set(['GET'])]
 ]);
+
+// Exact Hub operations, not an unrestricted reverse proxy. Hub owns token
+// validation, payload limits, subscription conflicts and device mutations.
+function clientMethods(pathname: string): Set<string> | undefined {
+  if (pathname === '/api/ingest') return new Set(['POST']);
+  if (pathname === '/api/subscriptions') return new Set(['GET', 'HEAD', 'PUT']);
+  if (/^\/api\/devices\/[^/]+$/.test(pathname)) return new Set(['DELETE']);
+  return API_METHODS.get(pathname);
+}
 
 const MIME_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
@@ -87,6 +97,7 @@ function safeRequestPath(rawUrl: string | undefined): URL | null {
 
 function copyUpstreamHeaders(upstream: Response, response: ServerResponse, sse: boolean) {
   const omitted = new Set([
+    'set-cookie',
     'access-control-allow-origin',
     'connection',
     'content-encoding',
@@ -106,7 +117,8 @@ async function proxyApi(
   request: IncomingMessage,
   response: ServerResponse,
   url: URL,
-  config: GatewayConfig
+  config: GatewayConfig,
+  clientAuthorization?: string
 ) {
   const abort = new AbortController();
   request.once('aborted', () => abort.abort());
@@ -116,7 +128,13 @@ async function proxyApi(
     const value = request.headers[name];
     if (typeof value === 'string') headers.set(name, value);
   }
-  headers.set('authorization', `Bearer ${config.secret}`);
+  headers.set('authorization', clientAuthorization ?? `Bearer ${config.secret}`);
+  if (clientAuthorization) {
+    for (const name of ['content-type', 'content-encoding']) {
+      const value = request.headers[name];
+      if (typeof value === 'string') headers.set(name, value);
+    }
+  }
 
   let upstream: Response;
   try {
@@ -124,7 +142,10 @@ async function proxyApi(
       method: request.method === 'HEAD' ? 'GET' : request.method,
       headers,
       redirect: 'manual',
-      signal: abort.signal
+      signal: abort.signal,
+      ...(clientAuthorization && ['POST', 'PUT'].includes(request.method || '')
+        ? { body: Readable.toWeb(request) as ReadableStream<Uint8Array>, duplex: 'half' }
+        : {})
     });
   } catch (error) {
     if (!response.headersSent && !response.destroyed) sendJson(request, response, 502, { error: 'hub_unavailable' });
@@ -261,6 +282,22 @@ export function createGateway({ config, distDir, logger = console }: GatewayOpti
       sendJson(request,response,403,{error:'local_only'}); return;
     }
     const operation=(async()=>{
+      const authorization = request.headers.authorization;
+      if (config.allowHubClients && url.pathname.startsWith('/api/')
+        && authorization && /^Bearer(?:\s|$)/i.test(authorization)) {
+        // An explicit client credential never falls back to a browser session
+        // or the Web server's more privileged upstream credential.
+        if (!/^Bearer [^\s]+$/i.test(authorization)) {
+          sendJson(request,response,401,{error:'unauthorized'}); return;
+        }
+        const allowed = clientMethods(url.pathname);
+        if (!allowed) { sendJson(request,response,404,{error:'not_found'}); return; }
+        if (!allowed.has(request.method || '')) {
+          sendJson(request,response,405,{error:'method_not_allowed'},{allow:[...allowed].join(', ')}); return;
+        }
+        await proxyApi(request,response,url,config,authorization);
+        return;
+      }
       if(await auth.handle(request,response,url))return;
       if(url.pathname.startsWith('/auth/')){sendJson(request,response,404,{error:'not_found'});return;}
       const shell=!url.pathname.startsWith('/api/');
