@@ -2422,13 +2422,17 @@ const HERMES_DB_FILES = new Set(['state.db', 'state.db-wal', 'state.db-shm']);
 // OpenClaw keeps each agent's usage sources in a small set of lanes under
 // ~/.openclaw/agents/<agentId>: legacy/published JSONL under sessions/, doctor
 // migration archives beside it, the current per-agent SQLite store, and Codex
-// app-server rollouts under agent/codex-home. The rest of an agent directory is
+// app-server rollouts under agent/codex-home and the legacy per-profile CLI
+// homes at agent/cli-auth/codex/<profile>. The rest of an agent directory is
 // runtime/workspace state and can contain dependency trees large enough to make
 // chokidar allocate thousands of directory watches. Keep the official source
 // lanes live; Tokscale's periodic full scan remains the fallback for a
 // non-standard JSONL placed elsewhere under agents/.
 const OPENCLAW_TRANSCRIPT_DIRS = new Set(['sessions', 'session-sqlite-import-archive']);
 const OPENCLAW_AGENT_DB_WATCH_PATTERN = /^openclaw-agent\.sqlite(?:-(?:wal|shm))?$/;
+// Both Codex homes an agent can own — `agent/codex-home` and the legacy
+// `agent/cli-auth/codex/<profile>` — expose their rollouts under the same two
+// directory names, so one set covers both.
 const OPENCLAW_CODEX_HOME_DIRS = new Set(['sessions', 'archived_sessions']);
 // OpenCode discovers only direct opencode.db / opencode-<channel>.db files.
 // WAL/SHM are not database inputs to tokscale, but they are the live-write
@@ -2549,14 +2553,23 @@ function watchPolicyEntries(clientsCsv) {
     if (OPENCLAW_TRANSCRIPT_DIRS.has(parts[1])) return false;
     if (parts[1] !== 'agent') return true;
 
-    // Keep the parent so a fresh SQLite store or codex-home can appear after
-    // startup, then limit its contents to those two sources.
+    // Keep the parent so a fresh SQLite store, codex-home or cli-auth home can
+    // appear after startup, then limit its contents to those sources.
     if (parts.length === 2) return false;
     if (parts.length === 3) {
-      return parts[2] !== 'codex-home' && !OPENCLAW_AGENT_DB_WATCH_PATTERN.test(parts[2]);
+      return parts[2] !== 'codex-home'
+        && parts[2] !== 'cli-auth'
+        && !OPENCLAW_AGENT_DB_WATCH_PATTERN.test(parts[2]);
     }
-    if (parts[2] !== 'codex-home') return true;
-    return !OPENCLAW_CODEX_HOME_DIRS.has(parts[3]);
+    if (parts[2] === 'codex-home') return !OPENCLAW_CODEX_HOME_DIRS.has(parts[3]);
+    if (parts[2] !== 'cli-auth') return true;
+    // Only `cli-auth/codex/<profile>` is a Codex home; `cli-auth/<other>` is an
+    // authentication profile Tokscale never reads. The profile level is kept so
+    // a login added after startup still reports, and `history.jsonl` beside its
+    // session dirs is pruned the same way it is under codex-home.
+    if (parts[3] !== 'codex') return true;
+    if (parts.length <= 5) return false;
+    return !OPENCLAW_CODEX_HOME_DIRS.has(parts[5]);
   });
 
   bound('copilot', withBasename('copilot', '.copilot'), (parts) => {
