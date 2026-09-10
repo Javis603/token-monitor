@@ -337,12 +337,14 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         )
     }
 
-    func testQuotaWindowDecodesTypedLifecycleBoundary() throws {
+    func testQuotaWindowDecodesTypedLifecycleBoundaries() throws {
         let snapshot = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"kiro","status":"ok","windows":[{"kind":"billing","remainingPercent":50,"resetsAt":"2026-07-24T09:00:00.000Z","boundaryKind":"expiry"}]}],"status":{"noData":false}}
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"kiro","status":"ok","windows":[{"kind":"billing","remainingPercent":50,"resetsAt":"2026-07-24T09:00:00.000Z","boundaryKind":"expiry"},{"kind":"billing","remainingPercent":40,"resetsAt":"2026-07-24T09:00:00.000Z","boundaryKind":"mixed"}]}],"status":{"noData":false}}
         """)
-        XCTAssertEqual(snapshot.quota.first?.windows.first?.boundaryKind, "expiry")
-        XCTAssertTrue(WidgetFormat.boundary(try XCTUnwrap(snapshot.quota.first?.windows.first)).hasPrefix("Expires"))
+        let windows = try XCTUnwrap(snapshot.quota.first?.windows)
+        XCTAssertEqual(windows.map(\.boundaryKind), ["expiry", "mixed"])
+        XCTAssertTrue(WidgetFormat.boundary(windows[0]).hasPrefix("Expires"))
+        XCTAssertTrue(WidgetFormat.boundary(windows[1]).hasPrefix("Changes"))
     }
 
     func testAllFiveIntentPagesAreIndependentValues() {

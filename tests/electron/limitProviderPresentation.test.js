@@ -320,10 +320,11 @@ test('Limits and Home distinguish resets, expiries, and simultaneous boundaries'
       + `formatLimitBoundary({ resetsAt: 'future' }),\n`
       + `formatLimitBoundary({ resetsAt: 'future', boundaryKind: 'expiry' }),\n`
       + `formatLimitBoundary({ resetsAt: 'future', boundaryKind: 'mixed' }),\n`
-      + `formatLimitBoundary({ resetsAt: 'now', boundaryKind: 'expiry' })\n]`,
+      + `formatLimitBoundary({ resetsAt: 'now', boundaryKind: 'expiry' }),\n`
+      + `formatLimitBoundary({ resetsAt: 'now', boundaryKind: 'mixed' })\n]`,
     { limitProviderPresentationApi: { limitResetRemainingMs: (value) => value === 'now' ? 0 : 60 * 60 * 1000 } }
   );
-  assert.deepEqual(Array.from(labels), ['Reset 1h 0m', 'Expires 1h 0m', 'Reset + expiry 1h 0m', 'Expires now']);
+  assert.deepEqual(Array.from(labels), ['Reset 1h 0m', 'Expires 1h 0m', 'Changes in 1h 0m', 'Expires now', 'Changes now']);
   assert.match(limitWindow, /window\?\.resetsAt\s*\? formatLimitBoundary\(window\)/);
   assert.match(homeLimits, /window\.resetsAt\s*\?\s*formatLimitBoundary\(window\)/);
   assert.doesNotMatch(app, /noActiveLimitWindow|formatResetDuration/);

@@ -1099,12 +1099,13 @@ function formatPercent(value) { return Number.isFinite(Number(value)) ? `${Math.
 function formatLimitBoundary(window) {
   const diffMs = limitProviderPresentationApi.limitResetRemainingMs(window?.resetsAt);
   if (diffMs === null) return '';
+  const mixed = window?.boundaryKind === 'mixed';
   const prefix = window?.boundaryKind === 'expiry'
     ? 'Expires'
-    : window?.boundaryKind === 'mixed'
-      ? 'Reset + expiry'
+    : mixed
+      ? 'Changes in'
       : 'Reset';
-  if (diffMs === 0) return `${prefix} now`;
+  if (diffMs === 0) return mixed ? 'Changes now' : `${prefix} now`;
   return `${prefix} ${formatDuration(diffMs)}`;
 }
 function formatDuration(ms) {

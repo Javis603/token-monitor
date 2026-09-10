@@ -791,7 +791,8 @@ enum WidgetFormat {
     }
 
     private static func boundary(_ date: Date, kind: String) -> String {
-        let seconds = max(0, date.timeIntervalSinceNow)
+        let interval = date.timeIntervalSinceNow
+        let seconds = max(0, interval)
         let days = Int(seconds / 86_400)
         let hours = Int(seconds.truncatingRemainder(dividingBy: 86_400) / 3_600)
         if kind == "expiry" {
@@ -800,9 +801,10 @@ enum WidgetFormat {
                 : WidgetL10n.format("Expires in %lldh", hours)
         }
         if kind == "mixed" {
+            if interval <= 0 { return WidgetL10n.text("Changes now") }
             return days > 0
-                ? WidgetL10n.format("Reset + expiry in %lldd %lldh", days, hours)
-                : WidgetL10n.format("Reset + expiry in %lldh", hours)
+                ? WidgetL10n.format("Changes in %lldd %lldh", days, hours)
+                : WidgetL10n.format("Changes in %lldh", hours)
         }
         return days > 0
             ? WidgetL10n.format("Reset in %lldd %lldh", days, hours)
