@@ -233,8 +233,8 @@
           latestTime: compactSessionTime(sortTime, options.now || new Date()),
           latestValue: finiteNumber(latest?.value)
         })
-        : countLabel,
-      detail: '',
+        : '',
+      detail: countLabel,
       value,
       cost,
       barValue: value,

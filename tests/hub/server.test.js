@@ -74,6 +74,30 @@ test('ingest inserts a device and is visible in getStats', () => {
   }
 });
 
+test('ingest never persists conversation text from an untrusted sender', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', dataFile, logger: { error() {} } });
+  try {
+    hub.ingest({
+      deviceId: 'dev-private',
+      today: { totalTokens: 5, sessions: {
+        'codex:review': {
+          client: 'codex', sessionId: 'review', totalTokens: 5,
+          title: 'Private title', preview: 'Private preview', first_user_message: 'Private prompt',
+          sessionKind: 'background-review'
+        }
+      } }
+    });
+
+    const session = hub.getDevices()[0].periods.today.sessions['codex:review'];
+    assert.equal(session.sessionKind, 'background-review');
+    assert.equal(session.title, '');
+    assert.doesNotMatch(fs.readFileSync(dataFile, 'utf8'), /Private title|Private preview|Private prompt/);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
 test('getStats exposes the effective staleness threshold', () => {
   const dataFile = tempDataFile();
   const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', staleAfterMs: 123456, dataFile, logger: { error() {} } });

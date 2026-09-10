@@ -8,7 +8,7 @@ const test = require('node:test');
 
 const {
   TITLE_MAX_CODE_POINTS,
-  TITLE_SCAN_BYTES,
+  TITLE_READ_CHUNK_BYTES,
   cleanTitle,
   readSessionTitle
 } = require('../../src/shared/providers/claude/sessionMetadata');
@@ -60,24 +60,53 @@ test('Claude session metadata invalidates a cached miss when the transcript grow
   assert.equal(readSessionTitle(file, { cache }), 'Arrived later');
 });
 
-test('Claude session metadata reads a title from the bounded tail window', (t) => {
-  const prefix = `${JSON.stringify({ type: 'user', padding: 'x'.repeat(TITLE_SCAN_BYTES * 2) })}\n`;
+test('Claude session metadata finds a custom title anywhere in a long transcript', (t) => {
+  const padding = `${JSON.stringify({ type: 'user', padding: 'x'.repeat(TITLE_READ_CHUNK_BYTES * 2) })}\n`;
   const { dir, file } = fixture([]);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-  fs.writeFileSync(file, `${prefix}${JSON.stringify({ type: 'ai-title', aiTitle: 'Tail title' })}\n`);
-  assert.equal(readSessionTitle(file, { cache: new Map() }), 'Tail title');
+  fs.writeFileSync(file, `${padding}${JSON.stringify({ type: 'custom-title', customTitle: 'Middle title' })}\n${padding}`);
+  assert.equal(readSessionTitle(file, { cache: new Map() }), 'Middle title');
 });
 
-test('Claude session metadata caps both title length and total bytes read', (t) => {
+test('Claude session metadata keeps a discovered custom title and reads only appended bytes', (t) => {
   const longTitle = 'x'.repeat(TITLE_MAX_CODE_POINTS + 20);
-  const padding = `${JSON.stringify({ type: 'user', padding: 'x'.repeat(TITLE_SCAN_BYTES) })}\n`;
+  const padding = `${JSON.stringify({ type: 'user', padding: 'x'.repeat(TITLE_READ_CHUNK_BYTES * 2) })}\n`;
   const { dir, file } = fixture([
-    JSON.stringify({ type: 'ai-title', aiTitle: longTitle })
+    JSON.stringify({ type: 'custom-title', customTitle: longTitle })
   ]);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cache = new Map();
+  let bytesRead = 0;
+  const measuredFs = {
+    ...fs,
+    readSync(...args) {
+      const count = fs.readSync(...args);
+      bytesRead += count;
+      return count;
+    }
+  };
 
   assert.equal(Array.from(cleanTitle(longTitle)).length, TITLE_MAX_CODE_POINTS);
-  fs.writeFileSync(file, `${padding}${JSON.stringify({ type: 'ai-title', aiTitle: 'Outside both windows' })}\n${padding}${padding}`);
-  assert.equal(readSessionTitle(file, { cache: new Map() }), '');
+  assert.equal(readSessionTitle(file, { cache, fs: measuredFs }), cleanTitle(longTitle));
+
+  fs.appendFileSync(file, padding);
+  const appendedBytes = Buffer.byteLength(padding);
+  bytesRead = 0;
+  assert.equal(readSessionTitle(file, { cache, fs: measuredFs }), cleanTitle(longTitle));
+  assert.equal(bytesRead, appendedBytes);
+});
+
+test('Claude session metadata indexes title records appended before a large write', (t) => {
+  const { dir, file } = fixture([JSON.stringify({ type: 'ai-title', aiTitle: 'Generated title' })]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cache = new Map();
+
+  assert.equal(readSessionTitle(file, { cache }), 'Generated title');
+  fs.appendFileSync(file, [
+    JSON.stringify({ type: 'custom-title', customTitle: 'Renamed title' }),
+    JSON.stringify({ type: 'user', padding: 'x'.repeat(TITLE_READ_CHUNK_BYTES * 2) })
+  ].join('\n') + '\n');
+
+  assert.equal(readSessionTitle(file, { cache }), 'Renamed title');
 });

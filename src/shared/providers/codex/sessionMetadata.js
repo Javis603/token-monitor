@@ -80,7 +80,10 @@ function isBackgroundReview(row) {
 }
 
 function titleForRow(row) {
-  for (const field of ['name', 'preview', 'first_user_message', 'title']) {
+  // `preview` and `first_user_message` are conversation content, not persisted
+  // title metadata. Keep prompt-derived labels as a separate, explicit product
+  // choice instead of silently treating private text as a title here.
+  for (const field of ['name', 'title']) {
     const title = cleanSessionTitle(row[field]);
     if (title) return title;
   }
@@ -114,7 +117,7 @@ function readSessionMeta(sessionIds, deps = {}) {
       db = openDb(dbPath, sqliteMod);
       const columns = new Set(db.prepare('PRAGMA table_info(threads)').all().map((column) => String(column.name)));
       if (!columns.has('id')) continue;
-      const fields = ['name', 'preview', 'first_user_message', 'title', 'model', 'thread_source', 'source'];
+      const fields = ['name', 'title', 'model', 'thread_source', 'source'];
       for (let offset = 0; offset < candidateIds.length; offset += QUERY_CHUNK_SIZE) {
         const chunk = candidateIds.slice(offset, offset + QUERY_CHUNK_SIZE).filter((id) => !metaByThreadId.has(id));
         if (chunk.length === 0) continue;

@@ -3,7 +3,8 @@
 const fs = require('node:fs');
 
 const TITLE_MAX_CODE_POINTS = 96;
-const TITLE_SCAN_BYTES = 256 * 1024;
+const TITLE_READ_CHUNK_BYTES = 256 * 1024;
+const MAX_METADATA_LINE_BYTES = 64 * 1024;
 const titleCache = new Map();
 
 function cleanTitle(value) {
@@ -14,28 +15,80 @@ function cleanTitle(value) {
     : `${chars.slice(0, TITLE_MAX_CODE_POINTS - 1).join('')}…`;
 }
 
-function titleFromChunks(chunks) {
-  let aiTitle = '';
-  let customTitle = '';
-  for (const chunk of chunks) {
-    const lines = chunk.text.split(/\r?\n/);
-    if (chunk.dropFirstPartial) lines.shift();
-    if (chunk.dropLastPartial) lines.pop();
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const entry = JSON.parse(line);
-        if (entry?.type === 'custom-title') {
-          const candidate = cleanTitle(entry.customTitle);
-          if (candidate) customTitle = candidate;
-        } else if (entry?.type === 'ai-title') {
-          const candidate = cleanTitle(entry.aiTitle);
-          if (candidate) aiTitle = candidate;
-        }
-      } catch (_) { /* skip partial or unrelated lines */ }
+function applyMetadataLine(state, line) {
+  if (!line.length) return;
+  try {
+    const entry = JSON.parse(line.toString('utf8'));
+    if (entry?.type === 'custom-title') {
+      const candidate = cleanTitle(entry.customTitle);
+      if (candidate) state.customTitle = candidate;
+    } else if (entry?.type === 'ai-title') {
+      const candidate = cleanTitle(entry.aiTitle);
+      if (candidate) state.aiTitle = candidate;
     }
+  } catch (_) { /* skip partial or unrelated lines */ }
+}
+
+function consumeMetadataBytes(state, chunk) {
+  const bytes = state.trailing.length > 0
+    ? Buffer.concat([state.trailing, chunk])
+    : chunk;
+  let lineStart = 0;
+  for (let index = 0; index < bytes.length; index += 1) {
+    if (bytes[index] !== 0x0a) continue;
+    if (state.droppingLongLine) {
+      state.droppingLongLine = false;
+    } else {
+      let lineEnd = index;
+      if (lineEnd > lineStart && bytes[lineEnd - 1] === 0x0d) lineEnd -= 1;
+      applyMetadataLine(state, bytes.subarray(lineStart, lineEnd));
+    }
+    lineStart = index + 1;
   }
-  return customTitle || aiTitle;
+
+  const remainder = bytes.subarray(lineStart);
+  if (state.droppingLongLine) {
+    state.trailing = Buffer.alloc(0);
+  } else if (remainder.length > MAX_METADATA_LINE_BYTES) {
+    // Transcript messages can be arbitrarily large. Title records are tiny, so
+    // bound retained partial-line memory and resume after the next newline.
+    state.trailing = Buffer.alloc(0);
+    state.droppingLongLine = true;
+  } else {
+    state.trailing = Buffer.from(remainder);
+  }
+}
+
+function scanRange(fd, start, length, state, fsApi) {
+  let position = start;
+  let remaining = length;
+  while (remaining > 0) {
+    const buffer = Buffer.alloc(Math.min(TITLE_READ_CHUNK_BYTES, remaining));
+    const bytesRead = fsApi.readSync(fd, buffer, 0, buffer.length, position);
+    if (bytesRead <= 0) break;
+    consumeMetadataBytes(state, buffer.subarray(0, bytesRead));
+    position += bytesRead;
+    remaining -= bytesRead;
+  }
+  // A complete final JSONL record is valid even when the writer omitted its
+  // newline. Keep the bytes as trailing state too, so a partial concurrent
+  // write can still be completed on the next append-only scan.
+  if (!state.droppingLongLine && state.trailing.length > 0) {
+    applyMetadataLine(state, state.trailing);
+  }
+}
+
+function statIdentity(stat) {
+  return `${String(stat.dev ?? '')}:${String(stat.ino ?? '')}`;
+}
+
+function emptyIndex() {
+  return {
+    customTitle: '',
+    aiTitle: '',
+    trailing: Buffer.alloc(0),
+    droppingLongLine: false
+  };
 }
 
 function readSessionTitle(filePath, deps = {}) {
@@ -43,32 +96,45 @@ function readSessionTitle(filePath, deps = {}) {
   if (!file) return '';
   const cache = deps.cache || titleCache;
   const fsApi = deps.fs || fs;
+  const cached = cache.get(file);
   let fd;
   try {
     const stat = fsApi.statSync(file);
-    const fingerprint = `${stat.size}:${stat.mtimeMs}`;
-    const cached = cache.get(file);
-    if (cached?.fingerprint === fingerprint) return cached.title;
+    const identity = statIdentity(stat);
+    if (
+      cached
+      && cached.identity === identity
+      && cached.size === stat.size
+      && cached.mtimeMs === stat.mtimeMs
+    ) return cached.title;
+
+    const appendOnly = cached
+      && cached.identity === identity
+      && Number.isFinite(cached.size)
+      && stat.size > cached.size;
+    const index = appendOnly
+      ? {
+        customTitle: cached.customTitle || '',
+        aiTitle: cached.aiTitle || '',
+        trailing: Buffer.isBuffer(cached.trailing) ? Buffer.from(cached.trailing) : Buffer.alloc(0),
+        droppingLongLine: cached.droppingLongLine === true
+      }
+      : emptyIndex();
+    const start = appendOnly ? cached.size : 0;
 
     fd = fsApi.openSync(file, 'r');
-    const chunks = [];
-    if (stat.size <= TITLE_SCAN_BYTES * 2) {
-      const buffer = Buffer.alloc(stat.size);
-      fsApi.readSync(fd, buffer, 0, stat.size, 0);
-      chunks.push({ text: buffer.toString('utf8'), dropFirstPartial: false, dropLastPartial: false });
-    } else {
-      const head = Buffer.alloc(TITLE_SCAN_BYTES);
-      const tail = Buffer.alloc(TITLE_SCAN_BYTES);
-      fsApi.readSync(fd, head, 0, TITLE_SCAN_BYTES, 0);
-      fsApi.readSync(fd, tail, 0, TITLE_SCAN_BYTES, stat.size - TITLE_SCAN_BYTES);
-      chunks.push({ text: head.toString('utf8'), dropFirstPartial: false, dropLastPartial: true });
-      chunks.push({ text: tail.toString('utf8'), dropFirstPartial: true, dropLastPartial: false });
-    }
-    const title = titleFromChunks(chunks);
-    cache.set(file, { fingerprint, title });
+    scanRange(fd, start, stat.size - start, index, fsApi);
+    const title = index.customTitle || index.aiTitle;
+    cache.set(file, {
+      ...index,
+      identity,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      title
+    });
     return title;
   } catch (_) {
-    return '';
+    return cached?.title || '';
   } finally {
     if (fd !== undefined) {
       try { fsApi.closeSync(fd); } catch (_) {}
@@ -78,7 +144,7 @@ function readSessionTitle(filePath, deps = {}) {
 
 module.exports = {
   TITLE_MAX_CODE_POINTS,
-  TITLE_SCAN_BYTES,
+  TITLE_READ_CHUNK_BYTES,
   cleanTitle,
   readSessionTitle
 };

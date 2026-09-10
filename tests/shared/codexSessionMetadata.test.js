@@ -38,7 +38,7 @@ function makeDb(rows, schema = 'full') {
   return file;
 }
 
-maybe('reads bounded display titles and classifies guardian reviews without exposing their prompts', () => {
+maybe('reads persisted display titles and classifies guardian reviews without exposing their prompts', () => {
   const file = makeDb([
     { id: 'named', name: '繼續目前工作', preview: 'ignored preview' },
     {
@@ -55,7 +55,7 @@ maybe('reads bounded display titles and classifies guardian reviews without expo
   });
 
   assert.deepEqual(result.get('named'), { title: '繼續目前工作' });
-  assert.deepEqual(result.get('fallback'), { title: 'Fix the compact session list' });
+  assert.equal(result.has('fallback'), false);
   assert.deepEqual(result.get('review-model'), { sessionKind: 'background-review' });
   assert.deepEqual(result.get('review-source'), { sessionKind: 'background-review' });
 });

@@ -2577,10 +2577,9 @@ function sessionRowsForPeriod(period) {
     return sessionRowsApi.groupBackgroundReviewRows(rows, {
       label: t('sessions.backgroundReviews'),
       countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
-      summaryLabel: ({ countLabel, latestTime, latestValue }) => [
+      summaryLabel: ({ latestTime, latestValue }) => [
         latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
-        latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : '',
-        countLabel
+        latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
       ].filter(Boolean).join(' · ')
     });
   }

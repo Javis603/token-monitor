@@ -143,7 +143,7 @@ test('background review sessions collapse into one interactive aggregate row wit
   const collapsed = groupBackgroundReviewRows(rows, {
     label: 'Background reviews',
     countLabel: (count) => `Sessions: ${count}`,
-    summaryLabel: ({ latestTime, latestValue, countLabel }) => `${latestTime} · ${latestValue} · ${countLabel}`,
+    summaryLabel: ({ latestTime, latestValue }) => `${latestTime} · ${latestValue}`,
     now: new Date(2026, 4, 30, 12, 30)
   });
   assert.deepEqual(collapsed.map((row) => row.key), [
@@ -154,7 +154,8 @@ test('background review sessions collapse into one interactive aggregate row wit
   assert.equal(collapsed[1].kind, 'summary');
   assert.ok(Math.abs(collapsed[1].cost - 0.3) < 1e-9);
   assert.equal(collapsed[1].barValue, 50);
-  assert.equal(collapsed[1].subtitle, '12:20 · 20 · Sessions: 2');
+  assert.equal(collapsed[1].subtitle, '12:20 · 20');
+  assert.equal(collapsed[1].detail, 'Sessions: 2');
   assert.equal(collapsed[1].reviewGroup, true);
   assert.deepEqual(collapsed[1].backgroundReviewRows.map((row) => row.key), [
     'session:codex:review-a',
