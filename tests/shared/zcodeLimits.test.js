@@ -274,20 +274,40 @@ test('parseZcodeStartPlanBalances aggregates model capacity across plans with we
   assert.ok(Math.abs(flash.usedPercent - 109149447 / 305000000 * 100) < 1e-10);
   assert.equal(flash.kind, 'billing');
   assert.equal(flash.windowMinutes, undefined);
-  // The earliest component boundary stays as resetsAt — the reset scheduler
-  // re-probes right after it and burn-rate re-baselines when it rolls.
-  // Reset-vs-expiry wording is the shared presentation layer's call.
+  // The earliest component boundary stays as resetsAt for compatibility and
+  // scheduling, while boundaryKind tells presentation what happens there.
   assert.equal(flash.resetsAt, '2026-09-05T15:59:59.000Z');
+  assert.equal(flash.boundaryKind, 'reset');
   const daily = byLabel.get('GLM-5.3');
   assert.equal(daily.kind, 'daily');
   assert.equal(daily.windowMinutes, 1440);
   assert.equal(daily.remaining, 2578372);
+  assert.equal(daily.boundaryKind, 'reset');
   assert.equal(byLabel.get('Model-unseen').usedPercent, 0);
+  assert.equal(byLabel.get('Model-unseen').boundaryKind, 'expiry');
   assert.equal(byLabel.get('GLM-5.3-Air').remaining, 1500000);
   const reversed = structuredClone(BILLING_PAYLOAD);
   reversed.data.plans.reverse();
   reversed.data.balances.reverse();
   assert.deepEqual(parseZcodeStartPlanBalances(reversed), { plan, windows });
+});
+
+test('model aggregation types its earliest lifecycle boundary, including simultaneous changes', () => {
+  const payload = (dailyEnd, expiryEnd) => ({ data: {
+    plans: [
+      { plan_id: 'daily', status: 'active', entitlements: [{ entitlement_id: 'daily-model', period: 'daily' }] },
+      { plan_id: 'promo', status: 'active', entitlements: [{ entitlement_id: 'promo-model', period: 'one_time' }] }
+    ],
+    balances: [
+      { plan_id: 'daily', entitlement_id: 'daily-model', show_name: 'GLM-5.3-Flash', total_units: 5, remaining_units: 5, expires_at: dailyEnd },
+      { plan_id: 'promo', entitlement_id: 'promo-model', show_name: 'GLM-5.3-Flash', total_units: 300, remaining_units: 300, expires_at: expiryEnd }
+    ]
+  } });
+  const boundary = (dailyEnd, expiryEnd) => parseZcodeStartPlanBalances(payload(dailyEnd, expiryEnd)).windows[0];
+
+  assert.equal(boundary(200, 100).boundaryKind, 'expiry');
+  assert.equal(boundary(100, 200).boundaryKind, 'reset');
+  assert.equal(boundary(100, 100).boundaryKind, 'mixed');
 });
 
 test('model aggregation follows returned names regardless of capability ids, optional metadata, or model versions', () => {

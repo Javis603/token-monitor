@@ -337,6 +337,14 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         )
     }
 
+    func testQuotaWindowDecodesTypedLifecycleBoundary() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"kiro","status":"ok","windows":[{"kind":"billing","remainingPercent":50,"resetsAt":"2026-07-24T09:00:00.000Z","boundaryKind":"expiry"}]}],"status":{"noData":false}}
+        """)
+        XCTAssertEqual(snapshot.quota.first?.windows.first?.boundaryKind, "expiry")
+        XCTAssertFalse(WidgetFormat.boundary(try XCTUnwrap(snapshot.quota.first?.windows.first)).isEmpty)
+    }
+
     func testAllFiveIntentPagesAreIndependentValues() {
         XCTAssertEqual(WidgetPage.allCases.map(\.rawValue), ["overview", "quota", "models", "activity", "trend"])
         var first = TokenMonitorWidgetConfigurationIntent()

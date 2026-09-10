@@ -127,6 +127,17 @@ test('builds schema v6 overview, quota, models, activity, trend and presentation
   assert.equal(snapshot.status.isStale, false);
 });
 
+test('widget snapshot preserves a typed quota boundary and drops unknown kinds', () => {
+  const expiryStats = sampleStats();
+  expiryStats.limits.providers[0].windows[0].boundaryKind = 'expiry';
+  const expiry = buildSnapshot(expiryStats, { now: NOW });
+  assert.equal(expiry.quota[0].windows[0].boundaryKind, 'expiry');
+
+  expiryStats.limits.providers[0].windows[0].boundaryKind = 'renewal';
+  const unknown = buildSnapshot(expiryStats, { now: NOW });
+  assert.equal('boundaryKind' in unknown.quota[0].windows[0], false);
+});
+
 test('allowlists MiMo and DeepSeek balances and ranks numeric quota ahead of status-only rows', () => {
   const snapshot = buildSnapshot({
     limits: { providers: [

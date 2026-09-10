@@ -264,6 +264,7 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
     let usedPercent: Double?
     let remainingPercent: Double?
     let resetsAt: Date?
+    let boundaryKind: String?
     let windowMinutes: Double?
     let remaining: Double?
     let currency: String?
@@ -276,6 +277,7 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
         remainingPercent: Double?,
         resetsAt: Date?,
         windowMinutes: Double?,
+        boundaryKind: String? = nil,
         metric: String? = nil,
         showMeter: Bool = true,
         remaining: Double? = nil,
@@ -288,6 +290,7 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
         self.usedPercent = usedPercent
         self.remainingPercent = remainingPercent
         self.resetsAt = resetsAt
+        self.boundaryKind = boundaryKind
         self.windowMinutes = windowMinutes
         self.remaining = remaining
         self.currency = currency
@@ -498,7 +501,7 @@ extension WidgetOverview {
 }
 
 extension WidgetLimitWindow {
-    private enum CodingKeys: String, CodingKey { case kind, metric, showMeter, usedPercent, remainingPercent, resetsAt, windowMinutes, remaining, currency, detail }
+    private enum CodingKeys: String, CodingKey { case kind, metric, showMeter, usedPercent, remainingPercent, resetsAt, boundaryKind, windowMinutes, remaining, currency, detail }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         kind = c.string(.kind)
@@ -508,6 +511,8 @@ extension WidgetLimitWindow {
         usedPercent = try? c.decodeIfPresent(Double.self, forKey: .usedPercent)
         remainingPercent = try? c.decodeIfPresent(Double.self, forKey: .remainingPercent)
         resetsAt = try? c.decodeIfPresent(Date.self, forKey: .resetsAt)
+        let rawBoundaryKind = c.string(.boundaryKind).lowercased()
+        boundaryKind = ["reset", "expiry", "mixed"].contains(rawBoundaryKind) ? rawBoundaryKind : nil
         windowMinutes = try? c.decodeIfPresent(Double.self, forKey: .windowMinutes)
         remaining = try? c.decodeIfPresent(Double.self, forKey: .remaining)
         currency = try? c.decodeIfPresent(String.self, forKey: .currency)

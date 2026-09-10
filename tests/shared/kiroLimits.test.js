@@ -206,6 +206,7 @@ test('fetchKiroLimits maps a healthy scan to a billing window', async () => {
   // Absolute credit count rides along so the renderer can show "remaining/total".
   assert.equal(provider.windows[0].used, 12.5);
   assert.equal(provider.windows[0].limit, 50);
+  assert.equal(provider.windows[0].boundaryKind, 'reset');
 });
 
 test('fetchKiroLimits adds a second window for bonus credits', async () => {
@@ -220,6 +221,9 @@ test('fetchKiroLimits adds a second window for bonus credits', async () => {
   assert.equal(bonus.usedPercent, 50);
   assert.equal(bonus.used, 5);
   assert.equal(bonus.limit, 10);
+  assert.equal(bonus.resetsAt, '2026-06-08T00:00:00.000Z');
+  assert.equal(bonus.boundaryKind, 'expiry');
+  assert.equal(bonus.resetDescription, '');
 });
 
 test('fetchKiroLimits adds an Overage note row when overage billing is on', async () => {

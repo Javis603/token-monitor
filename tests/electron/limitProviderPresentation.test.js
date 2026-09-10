@@ -276,7 +276,7 @@ test('Cursor limits render every normalized quota and format on-demand spend exp
   assert.doesNotMatch(windows, /visibleWindows = billingWindows\.length > 0 \? billingWindows : \[null\]/);
 });
 
-function runHomeLimitModule(rows, resetLabels = {}) {
+function runHomeLimitModule(rows, boundaryLabels = {}) {
   const app = readRendererFile('app.js');
   const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
   function createNode(tagName) {
@@ -299,7 +299,7 @@ function runHomeLimitModule(rows, resetLabels = {}) {
     iconKindFor: () => 'limits',
     homeLimitWindowLabel: (window) => window.label,
     formatHomeLimitWindowValue: () => '',
-    formatReset: (value) => resetLabels[value] || '',
+    formatLimitBoundary: (window) => boundaryLabels[window.resetsAt] || '',
     limitProviderPresentationApi: { limitProviderCompactWindowPeriodLabel: () => '' },
     state: { settings: {} },
     t: (key, values) => key === 'home.reset' ? `Reset ${values.value}` : key
@@ -308,18 +308,24 @@ function runHomeLimitModule(rows, resetLabels = {}) {
   return body;
 }
 
-test('Limits and Home share reset expiry while preserving the existing reset copy', () => {
+test('Limits and Home distinguish resets, expiries, and simultaneous boundaries', () => {
   const app = readRendererFile('app.js');
-  const formatReset = functionBody(app, 'formatReset', 'formatDuration');
+  const formatBoundary = functionBody(app, 'formatLimitBoundary', 'formatDuration');
+  const formatDuration = functionBody(app, 'formatDuration', 'formatActiveDuration');
   const limitWindow = functionBody(app, 'limitWindowNode', 'providersByLimitProviderId');
   const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
 
-  assert.match(formatReset, /limitResetRemainingMs\(value\)/);
-  assert.match(formatReset, /diffMs === 0\) return 'Reset now'/);
-  assert.match(formatReset, /return `Reset \$\{formatDuration\(diffMs\)\}`/);
-  assert.match(limitWindow, /window\?\.resetsAt\s*\? formatReset\(window\.resetsAt\)/);
-  assert.doesNotMatch(limitWindow, /formatReset\(window\?\.resetsAt\) \|\| window\?\.resetDescription/);
-  assert.match(homeLimits, /window\.resetsAt\s*\? resetAt \|\|/);
+  const labels = vm.runInNewContext(
+    `${formatBoundary}\n${formatDuration}\n[\n`
+      + `formatLimitBoundary({ resetsAt: 'future' }),\n`
+      + `formatLimitBoundary({ resetsAt: 'future', boundaryKind: 'expiry' }),\n`
+      + `formatLimitBoundary({ resetsAt: 'future', boundaryKind: 'mixed' }),\n`
+      + `formatLimitBoundary({ resetsAt: 'now', boundaryKind: 'expiry' })\n]`,
+    { limitProviderPresentationApi: { limitResetRemainingMs: (value) => value === 'now' ? 0 : 60 * 60 * 1000 } }
+  );
+  assert.deepEqual(Array.from(labels), ['Reset 1h 0m', 'Expires 1h 0m', 'Reset + expiry 1h 0m', 'Expires now']);
+  assert.match(limitWindow, /window\?\.resetsAt\s*\? formatLimitBoundary\(window\)/);
+  assert.match(homeLimits, /window\.resetsAt\s*\?\s*formatLimitBoundary\(window\)/);
   assert.doesNotMatch(app, /noActiveLimitWindow|formatResetDuration/);
 });
 
@@ -333,10 +339,11 @@ test('Home omits reset rows that have no visible reset content', () => {
         { label: 'Balance', value: '$4.00' },
         { label: 'Expired', value: '0% left', resetsAt: 'expired' },
         { label: 'Weekly', value: '88% left', resetsAt: 'future' },
+        { label: 'Bonus', value: '50% left', resetsAt: 'expiry', boundaryKind: 'expiry' },
         { label: 'Monthly', value: '50% left', resetDescription: '6d 23h' }
       ]
     }
-  ], { future: 'Reset 1h' });
+  ], { future: 'Reset 1h', expiry: 'Expires 7d' });
 
   const metrics = body.children[0].children[1].children;
   assert.equal(metrics[0].children.length, 1);
@@ -344,7 +351,9 @@ test('Home omits reset rows that have no visible reset content', () => {
   assert.equal(metrics[2].children.length, 2);
   assert.equal(metrics[2].children[1].textContent, 'Reset 1h');
   assert.equal(metrics[3].children.length, 2);
-  assert.equal(metrics[3].children[1].textContent, 'Reset 6d 23h');
+  assert.equal(metrics[3].children[1].textContent, 'Expires 7d');
+  assert.equal(metrics[4].children.length, 2);
+  assert.equal(metrics[4].children[1].textContent, 'Reset 6d 23h');
 });
 
 test('capability tags explain how each provider is collected in settings', () => {

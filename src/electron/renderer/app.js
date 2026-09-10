@@ -1096,11 +1096,16 @@ function syncCurrencyRateControls() {
 }
 function formatTime(value) { const date = value ? new Date(value) : new Date(); return Number.isNaN(date.getTime()) ? '--:--:--' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
 function formatPercent(value) { return Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'; }
-function formatReset(value) {
-  const diffMs = limitProviderPresentationApi.limitResetRemainingMs(value);
+function formatLimitBoundary(window) {
+  const diffMs = limitProviderPresentationApi.limitResetRemainingMs(window?.resetsAt);
   if (diffMs === null) return '';
-  if (diffMs === 0) return 'Reset now';
-  return `Reset ${formatDuration(diffMs)}`;
+  const prefix = window?.boundaryKind === 'expiry'
+    ? 'Expires'
+    : window?.boundaryKind === 'mixed'
+      ? 'Reset + expiry'
+      : 'Reset';
+  if (diffMs === 0) return `${prefix} now`;
+  return `${prefix} ${formatDuration(diffMs)}`;
 }
 function formatDuration(ms) {
   const totalMinutes = Math.max(0, Math.round(ms / 60000));
@@ -4697,7 +4702,7 @@ function limitWindowNode(label, window, color, tone = 1, valueOverride = null, d
   const reset = document.createElement('div');
   reset.className = 'limit-reset';
   const resetText = window?.resetsAt
-    ? formatReset(window.resetsAt)
+    ? formatLimitBoundary(window)
     : window?.resetDescription || '';
   if (detailText) {
     // Keep the reset text left-aligned (consistent with every other provider)
@@ -7488,9 +7493,8 @@ function renderHomeLimitModule() {
       }
       line.append(label, value);
       metric.append(line);
-      const resetAt = formatReset(window.resetsAt);
       const resetLabel = window.resetsAt
-        ? resetAt || ''
+        ? formatLimitBoundary(window) || ''
         : window.resetDescription
         ? t('home.reset', { value: window.resetDescription })
         : '';
