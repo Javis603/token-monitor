@@ -54,13 +54,16 @@ test('incomplete explicit account never falls through to a different CLI identit
   assert.equal(rows[0].status, 'notConfigured');
 });
 test('no subscription is hidden, while errors and malformed quota are unavailable', async () => {
-  for (const variant of ['none', 'error', 'missing', 'null-used', 'bad-total']) {
+  for (const variant of ['none', 'error', 'missing', 'null-used', 'bad-total', 'empty', 'unknown', 'zero']) {
     const body = response();
     if (variant === 'none') body.items[0].subscribed = false;
     if (variant === 'error') body.items[0].error = 'sensitive upstream response';
     if (variant === 'missing') body.items = [];
     if (variant === 'null-used') body.items[0].periods[0].used = null;
     if (variant === 'bad-total') body.items[0].periods[0].total = '100';
+    if (variant === 'empty') body.items[0].periods = [];
+    if (variant === 'unknown') body.items[0].periods = [{ label: 'unsupported', used: 1, total: 10 }];
+    if (variant === 'zero') body.items[0].periods = [{ label: '5h', used: 0, total: 0 }];
     let count = 0;
     const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async () => ++count === 1 ? auth : body });
     assert.equal(rows[0].status, variant === 'none' ? 'notConfigured' : 'unavailable');

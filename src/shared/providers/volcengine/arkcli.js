@@ -127,7 +127,7 @@ function parseArkcliPlan(body, updatedAt) {
       remaining: Math.max(0, total - used), usedPercent: Math.min(100, used / total * 100),
       resetsAt: Number.isFinite(reset) ? new Date(reset).toISOString() : null, showMeter: true });
   }
-  if (!windows.length) return null;
+  if (!windows.length) throw probeError();
   return normalizeLimitProvider({
     provider: 'volcengine', source: 'cli', status: 'ok', updatedAt,
     accountKey: hashKey('volcengine', 'arkcli', viewer.account_id, viewer.user_id || '', viewer.region || '', 'agent-plan'),
