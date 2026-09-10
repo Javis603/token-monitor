@@ -321,6 +321,24 @@ describe('gateway', () => {
     expect((await fetch(baseUrl+'/api/stats',{headers:{cookie}})).status).toBe(200);
   });
 
+  it('external proxy public assets and SPA fallbacks never mint browser sessions', async()=>{
+    await restartGateway({authMode:'trusted-proxy',proxyMode:'external',publicOrigin:baseUrl});
+    config.publicOrigin=baseUrl;
+    for(const path of ['/assets/app-abc123.js','/assets/anonymous','/icons/anonymous','/overview','/%69ndex.html']) {
+      const response=await fetch(baseUrl+path);
+      expect(response.status).toBe(200);
+      expect(response.headers.getSetCookie(),path).toEqual([]);
+    }
+    expect((await fetch(baseUrl+'/api/stats')).status).toBe(401);
+    for(const path of ['/','/index.html?view=snapshot']) {
+      const page=await fetch(baseUrl+path);
+      expect(page.status).toBe(200);
+      const cookie=page.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');
+      expect(cookie).toContain('tm_web_session=');
+      expect((await fetch(baseUrl+'/api/stats',{headers:{cookie}})).status).toBe(200);
+    }
+  });
+
   it('revokes an open browser SSE connection when logging out', async()=>{
     await restartGateway({authMode:'trusted-proxy',proxyMode:'external',publicOrigin:baseUrl});
     // Restart changes the ephemeral test port; config is shared by the server.

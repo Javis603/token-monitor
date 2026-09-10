@@ -53,6 +53,10 @@ export function createAuth(config:GatewayConfig, discover=()=>oidc.discovery(new
   }
   function hasSession(request:IncomingMessage) {prune();return sessions.has(cookie(request,COOKIE)||'');}
   function issue(request:IncomingMessage,response:ServerResponse) {
+    // External auth offload only vouches for these exact protected entry paths.
+    // Public assets and SPA fallbacks may return HTML but must not create sessions.
+    if(mode==='trusted-proxy' && config.proxyMode==='external'
+      && !['/','/index.html'].includes((request.url || '').split('?')[0]))return;
     if(hasSession(request))return;
     if(sessions.size>=10000)throw new Error('session_capacity');
     const id=randomBytes(32).toString('base64url');sessions.set(id,Date.now()+TTL);setCookie(response,COOKIE,id,TTL/1000);
@@ -64,7 +68,7 @@ export function createAuth(config:GatewayConfig, discover=()=>oidc.discovery(new
   function proxyIdentity(request:IncomingMessage,shell:boolean) {
     if(config.authMode==='proxy' && !config.trustOidcProxy)return false;
     if(!peerTrusted(request))return false;
-    // Explicit auth-offload contract: upstream authenticates EVERY non-API path.
+    // Explicit auth-offload contract: upstream authenticates the session entry paths.
     if(config.proxyMode==='external')return shell && !!config.publicOrigin && new URL(config.publicOrigin).host===request.headers.host;
     const value=request.headers[config.proxyHeader || 'x-forwarded-user'];
     return typeof value==='string' && value.trim().length>0;
