@@ -30,7 +30,10 @@
     "dist:linux": "npm run ensure:tokscale -- --platform=linux-x64 && electron-builder --config scripts/electron-builder.config.js --linux --x64 --publish never",
     "verify:release-artifact-names": "node scripts/verify-updater-artifact-names.js dist",
     "lint": "eslint .",
-    "verify": "npm run lint && npm test"
+    "verify": "npm run lint && npm test",
+    "web": "npm start --prefix web",
+    "web:build": "npm run build --prefix web",
+    "web:verify": "npm run verify --prefix web"
   },
   "build": {
     "appId": "com.javis.tokenmonitor",

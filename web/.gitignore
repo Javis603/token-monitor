@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-server/
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+
+# This is source code, not the root Hub data directory.
+!src/data/
+!src/data/**

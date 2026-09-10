@@ -313,3 +313,7 @@ Issues and PRs are welcome. Project conventions, architecture notes, and the com
 ## License
 
 [MIT](LICENSE) © [@Javis](https://github.com/Javis603)
+
+## Optional Web dashboard
+
+A self-hosted, read-only Hub dashboard with live updates, snapshots, mobile/PWA support, English/Chinese and system-aware light/dark themes is available in [`web/`](web/README.md). It is separate from the product website and does not change desktop installation or Hub APIs.

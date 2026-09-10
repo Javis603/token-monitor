@@ -1,0 +1,37 @@
+{
+  "name": "token-monitor-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "allowScripts": {
+    "esbuild": true
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "dev:gateway": "tsx watch server/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "build": "npm run typecheck && vite build && tsc -p tsconfig.server.json",
+    "start": "node dist-server/server/index.js",
+    "verify": "npm test && npm run typecheck",
+    "demo": "vite --mode demo --host 127.0.0.1"
+  },
+  "dependencies": {
+    "preact": "10.29.8"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "2.10.6",
+    "@testing-library/preact": "3.2.4",
+    "@testing-library/user-event": "14.6.6",
+    "@types/node": "26.4.0",
+    "jsdom": "30.0.1",
+    "tsx": "4.23.12",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}

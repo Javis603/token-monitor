@@ -1,0 +1,85 @@
+import { render, screen, waitFor, act } from '@testing-library/preact';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, afterEach, expect, it, vi } from 'vitest';
+import { App, Dashboard } from './app';
+import { PreferencesProvider } from './preferences';
+import { statsFixture } from './test/fixtures';
+import { createLiveStats, defaultFetchStats } from './data/liveStats';
+vi.mock('./data/liveStats',()=>({createLiveStats:vi.fn(),defaultFetchStats:vi.fn()}));
+vi.mock('./data/snapshot',()=>({loadOfflineSnapshot:vi.fn(async()=>null),saveOfflineSnapshot:vi.fn(async()=>{})}));
+const stop=vi.fn();
+beforeEach(()=>{
+  const storage=new Map<string,string>();
+  vi.stubGlobal('localStorage',{getItem:(key:string)=>storage.get(key) ?? null,setItem:(key:string,value:string)=>storage.set(key,value),clear:()=>storage.clear()});
+  window.localStorage.setItem('token-monitor-preferences',JSON.stringify({language:'zh',theme:'dark',mode:'live'}));
+  vi.clearAllMocks();
+  vi.mocked(createLiveStats).mockImplementation(options=>({start:async()=>{options.onSnapshot(statsFixture,'fetch');options.onStatus?.('live');},stop}));
+  vi.mocked(defaultFetchStats).mockResolvedValue(statsFixture);
+});
+afterEach(()=>vi.unstubAllGlobals());
+it('switches language and theme, preserving choices after remount', async()=>{
+  const user=userEvent.setup();
+  const mount=()=>render(<PreferencesProvider><Dashboard stats={statsFixture} connection="live" source="network" savedAt="2026-09-10T07:00:00Z" /></PreferencesProvider>);
+  const first=mount();
+  await user.click(screen.getByLabelText('显示设置'));
+  await user.selectOptions(screen.getByRole('combobox',{name:'语言'}),'en');
+  expect(screen.getByRole('heading',{name:'Balances & quotas'})).toBeTruthy();
+  expect(screen.getByRole('heading',{name:'Recent sessions'})).toBeTruthy();
+  await user.selectOptions(screen.getByRole('combobox',{name:'Theme'}),'light');
+  await waitFor(()=>expect(document.documentElement.dataset.theme).toBe('light'));
+  expect(document.documentElement.lang).toBe('en');
+  first.unmount(); mount();
+  await user.click(screen.getByLabelText('Display settings'));
+  expect(screen.getByRole('heading',{name:'Devices'})).toBeTruthy();
+  expect((screen.getByRole('combobox',{name:'Theme'}) as HTMLSelectElement).value).toBe('light');
+});
+it('freezes live data, closes the stream, refreshes only on request and reconnects on live',async()=>{
+  const user=userEvent.setup();
+  render(<PreferencesProvider><App /></PreferencesProvider>);
+  await screen.findByText('1.5K');
+  const callbacks=vi.mocked(createLiveStats).mock.calls[0][0];
+  await user.click(screen.getByRole('button',{name:'快照'}));
+  await waitFor(()=>expect(stop).toHaveBeenCalledTimes(1));
+  expect(defaultFetchStats).not.toHaveBeenCalled();
+  await act(async()=>callbacks.onSnapshot({...statsFixture,periods:{...statsFixture.periods,today:{...statsFixture.periods?.today,totalTokens:999}}},'stream'));
+  expect(screen.getByText('1.5K')).toBeTruthy();
+  await user.click(screen.getByRole('button',{name:'刷新快照'}));
+  await waitFor(()=>expect(defaultFetchStats).toHaveBeenCalledTimes(1));
+  await user.click(screen.getByRole('button',{name:'实时'}));
+  await waitFor(()=>expect(createLiveStats).toHaveBeenCalledTimes(2));
+});
+it('loads a persisted snapshot mode once without opening a stream',async()=>{
+  window.localStorage.setItem('token-monitor-preferences',JSON.stringify({mode:'snapshot',language:'zh'}));
+  render(<PreferencesProvider><App /></PreferencesProvider>);
+  await screen.findByText('1.5K');
+  await waitFor(()=>expect(defaultFetchStats).toHaveBeenCalledTimes(1));
+  expect(createLiveStats).not.toHaveBeenCalled();
+});
+it('keeps mode controls accessible when the initial snapshot fails',async()=>{
+  window.localStorage.setItem('token-monitor-preferences',JSON.stringify({mode:'snapshot',language:'zh'}));
+  vi.mocked(defaultFetchStats).mockRejectedValueOnce(new Error('offline'));
+  render(<PreferencesProvider><App /></PreferencesProvider>);
+  await screen.findByText('暂时无法连接 Hub，也没有可用的离线快照。');
+  await userEvent.setup().click(screen.getByRole('button',{name:'刷新快照'}));
+  await screen.findByText('1.5K');
+});
+
+it('defaults to browser language and system theme, tracking changes until explicitly overridden',async()=>{
+  window.localStorage.clear();
+  vi.spyOn(navigator,'languages','get').mockReturnValue(['en-US']);
+  let listener:()=>void=()=>{};
+  const media={matches:true,addEventListener:(_event:string,fn:()=>void)=>{listener=fn;},removeEventListener:vi.fn()};
+  vi.stubGlobal('matchMedia',()=>media);
+  const user=userEvent.setup();
+  render(<PreferencesProvider><Dashboard stats={statsFixture} connection="live" source="network" savedAt="2026-09-10T07:00:00Z" /></PreferencesProvider>);
+  await waitFor(()=>expect(document.documentElement.dataset.theme).toBe('dark'));
+  expect(screen.getByRole('heading',{name:'Devices'})).toBeTruthy();
+  await act(async()=>{media.matches=false;listener();});
+  await waitFor(()=>expect(document.documentElement.dataset.theme).toBe('light'));
+  await user.click(screen.getByLabelText('Display settings'));
+  await user.selectOptions(screen.getByRole('combobox',{name:'Theme'}),'dark');
+  await act(async()=>listener());
+  await waitFor(()=>expect(document.documentElement.dataset.theme).toBe('dark'));
+  expect(JSON.parse(window.localStorage.getItem('token-monitor-preferences')!)).toEqual({language:'system',theme:'dark',mode:'live'});
+  vi.restoreAllMocks();
+});
