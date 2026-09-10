@@ -153,15 +153,14 @@ function codexToolName(payload) {
 function parseCodexTranscript(text) {
   const events = [];
   let pendingTools = [];
-  let responsePromptIndex = -1;
+  let adjacentPrompt = null;
   for (const line of String(text || '').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    // Transitional logs emit the legacy user_message immediately after its response_item twin.
-    // Snapshot and clear the candidate for every physical JSONL record so an intervening item
-    // cannot make a later, distinct prompt replace an earlier boundary.
-    const adjacentResponsePromptIndex = responsePromptIndex;
-    responsePromptIndex = -1;
+    // Codex can persist the same prompt in either schema order. Snapshot and clear the candidate
+    // for every physical JSONL record so only adjacent, equivalent prompt records are coalesced.
+    const previousPrompt = adjacentPrompt;
+    adjacentPrompt = null;
     let obj;
     try { obj = JSON.parse(trimmed); } catch (_) { continue; }
     const payload = obj.payload || {};
@@ -180,17 +179,27 @@ function parseCodexTranscript(text) {
       // empty + no image → degenerate user_message; skip so its turns fold into the real prompt
       if (label) {
         const prompt = { kind: 'prompt', timestamp: obj.timestamp || '', text: label };
-        // One transitional schema writes both the response_item and the older event_msg for the
-        // same prompt. The event_msg is already the renderer-facing text, so let it replace the
-        // immediately preceding response_item boundary instead of showing the turn twice.
-        if (adjacentResponsePromptIndex >= 0 && adjacentResponsePromptIndex === events.length - 1) events[adjacentResponsePromptIndex] = prompt;
-        else events.push(prompt);
+        // Keep event_msg as the canonical renderer text when it follows its response_item twin.
+        if (previousPrompt?.source === 'response_item'
+          && previousPrompt.index === events.length - 1
+          && previousPrompt.text === label) {
+          events[previousPrompt.index] = prompt;
+        } else {
+          events.push(prompt);
+        }
+        adjacentPrompt = { source: 'event_msg', index: events.length - 1, text: label };
       }
     } else if (obj.type === 'response_item') {
       const label = codexResponseItemPrompt(payload);
       if (label) {
-        events.push({ kind: 'prompt', timestamp: obj.timestamp || '', text: label });
-        responsePromptIndex = events.length - 1;
+        // External-session imports persist event_msg first. Its response_item twin is model
+        // history, not a second user-visible boundary, so retain the canonical event_msg.
+        if (previousPrompt?.source !== 'event_msg'
+          || previousPrompt.index !== events.length - 1
+          || previousPrompt.text !== label) {
+          events.push({ kind: 'prompt', timestamp: obj.timestamp || '', text: label });
+        }
+        adjacentPrompt = { source: 'response_item', index: events.length - 1, text: label };
       }
     } else if (obj.type === 'event_msg' && payload.type === 'token_count') {
       const u = payload.info && payload.info.last_token_usage;

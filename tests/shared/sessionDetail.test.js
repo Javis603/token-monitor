@@ -181,7 +181,7 @@ test('parseCodexTranscript deduplicates transitional response_item and event_msg
     JSON.stringify({
       type: 'response_item',
       timestamp: '2026-09-10T02:21:50.000Z',
-      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'wrapped prompt' }] }
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'canonical\nprompt' }] }
     }),
     JSON.stringify({ type: 'event_msg', timestamp: '2026-09-10T02:21:50.001Z', payload: { type: 'user_message', message: 'canonical prompt' } }),
     JSON.stringify({ type: 'event_msg', timestamp: '2026-09-10T02:21:52.000Z', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 10 } } } })
@@ -190,6 +190,38 @@ test('parseCodexTranscript deduplicates transitional response_item and event_msg
   const events = parseCodexTranscript(lines);
   assert.equal(events.filter((event) => event.kind === 'prompt').length, 1);
   assert.equal(events[0].text, 'canonical prompt');
+});
+
+test('parseCodexTranscript deduplicates external-import event_msg and response_item prompts', () => {
+  const lines = [
+    JSON.stringify({ type: 'event_msg', timestamp: '2026-09-10T02:21:50.000Z', payload: { type: 'user_message', message: 'imported prompt' } }),
+    JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-09-10T02:21:50.001Z',
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'imported prompt' }] }
+    }),
+    JSON.stringify({ type: 'event_msg', timestamp: '2026-09-10T02:21:52.000Z', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 10 } } } })
+  ].join('\n');
+
+  const exchanges = groupEvents(parseCodexTranscript(lines));
+  assert.equal(exchanges.length, 1);
+  assert.equal(exchanges[0].promptPreview, 'imported prompt');
+  assert.equal(exchanges[0].turnCount, 1);
+  assert.equal(exchanges[0].tokens.total, 110);
+});
+
+test('parseCodexTranscript preserves distinct adjacent user records', () => {
+  const lines = [
+    JSON.stringify({ type: 'event_msg', timestamp: '2026-09-10T02:21:50.000Z', payload: { type: 'user_message', message: 'copied parent question' } }),
+    JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-09-10T02:21:50.001Z',
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'child question' }] }
+    })
+  ].join('\n');
+
+  const prompts = parseCodexTranscript(lines).filter((event) => event.kind === 'prompt');
+  assert.deepEqual(prompts.map((prompt) => prompt.text), ['copied parent question', 'child question']);
 });
 
 test('parseCodexTranscript does not deduplicate prompts across an intervening response_item', () => {
