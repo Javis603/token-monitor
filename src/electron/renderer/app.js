@@ -502,10 +502,6 @@ function toggleAccordionRow(row) {
   renderToolDetailFooter();
 }
 
-function setAttributeIfChanged(element, name, value) {
-  if (element.getAttribute(name) !== value) element.setAttribute(name, value);
-}
-
 document.addEventListener('click', (event) => {
   if (event.target.closest('button, a, input, select, textarea')) return;
   const row = event.target.closest('.row.has-accordion');
@@ -2213,15 +2209,6 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
     kind === 'session'
     && ['claude', 'codex', 'opencode', 'dsh'].includes(client)
   ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
-  if (interactive) {
-    row.setAttribute('role', 'button');
-    row.setAttribute('tabindex', '0');
-    row.setAttribute('aria-label', name || '');
-  } else {
-    row.removeAttribute('role');
-    row.removeAttribute('tabindex');
-    row.removeAttribute('aria-label');
-  }
   const mark = row.querySelector('.row-mark');
   const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '' }, state.breakdown);
   if (iconKind.kind === 'icon') {
@@ -2317,29 +2304,19 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
     row.classList.remove('expanded');
   }
   const rowHead = row.querySelector('.row-head');
-  if (row.classList.contains('has-accordion')) {
-    if (row.hasAttribute('tabindex')) row.removeAttribute('tabindex');
-    if (row.hasAttribute('role')) row.removeAttribute('role');
-    if (row.hasAttribute('aria-expanded')) row.removeAttribute('aria-expanded');
-    if (row.hasAttribute('aria-label')) row.removeAttribute('aria-label');
-    if (rowHead.tabIndex !== 0) rowHead.tabIndex = 0;
-    setAttributeIfChanged(rowHead, 'role', 'button');
-    setAttributeIfChanged(rowHead, 'aria-expanded', String(row.classList.contains('expanded')));
-    const tokenLabel = tokenDataUnavailable === true
-      ? (t('detailTokenUnavailable') || 'Unavailable')
-      : formatNumber(value);
-    const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0)}`;
-    setAttributeIfChanged(rowHead, 'aria-label', `${name}, ${t('dashboard.stat.totalTokens')}: ${tokenLabel}${costLabel}`);
-  } else {
-    if (row.hasAttribute('tabindex')) row.removeAttribute('tabindex');
-    if (row.hasAttribute('role')) row.removeAttribute('role');
-    if (row.hasAttribute('aria-expanded')) row.removeAttribute('aria-expanded');
-    if (row.hasAttribute('aria-label')) row.removeAttribute('aria-label');
-    if (rowHead.hasAttribute('tabindex')) rowHead.removeAttribute('tabindex');
-    if (rowHead.hasAttribute('role')) rowHead.removeAttribute('role');
-    if (rowHead.hasAttribute('aria-expanded')) rowHead.removeAttribute('aria-expanded');
-    if (rowHead.hasAttribute('aria-label')) rowHead.removeAttribute('aria-label');
-  }
+  const hasAccordion = row.classList.contains('has-accordion');
+  const tokenLabel = tokenDataUnavailable === true
+    ? (t('detailTokenUnavailable') || 'Unavailable')
+    : formatNumber(value);
+  const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0)}`;
+  sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
+    interactive,
+    hasAccordion,
+    expanded: row.classList.contains('expanded'),
+    ariaLabel: hasAccordion
+      ? `${name}, ${t('dashboard.stat.totalTokens')}: ${tokenLabel}${costLabel}`
+      : name
+  });
 }
 
 function applyHomeListMark(mark, iconKind, color) {
@@ -12685,11 +12662,7 @@ els.breakdown.addEventListener('click', (event) => {
 });
 
 els.breakdown.addEventListener('keydown', (event) => {
-  if (event.key !== 'Enter' && event.key !== ' ') return;
-  const row = event.target.closest('.row[role="button"]');
-  if (!row) return;
-  event.preventDefault();
-  row.click();
+  sessionRowsApi.handleBreakdownRowKeydown(event);
 });
 
 els.pinButton.addEventListener('click', (event) => {

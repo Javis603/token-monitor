@@ -74,8 +74,9 @@ function openDb(dbPath, sqliteMod) {
 }
 
 function isBackgroundReview(row) {
-  if (cleanText(row.model).toLowerCase() === 'codex-auto-review') return true;
-  if (cleanText(row.thread_source).toLowerCase() === 'guardian_review') return true;
+  const threadSource = cleanText(row.thread_source).toLowerCase();
+  if (threadSource === 'user') return false;
+  if (threadSource === 'guardian_review') return true;
   return /"other"\s*:\s*"guardian"/i.test(String(row.source || ''));
 }
 
@@ -117,7 +118,7 @@ function readSessionMeta(sessionIds, deps = {}) {
       db = openDb(dbPath, sqliteMod);
       const columns = new Set(db.prepare('PRAGMA table_info(threads)').all().map((column) => String(column.name)));
       if (!columns.has('id')) continue;
-      const fields = ['name', 'title', 'model', 'thread_source', 'source'];
+      const fields = ['name', 'title', 'thread_source', 'source'];
       for (let offset = 0; offset < candidateIds.length; offset += QUERY_CHUNK_SIZE) {
         const chunk = candidateIds.slice(offset, offset + QUERY_CHUNK_SIZE).filter((id) => !metaByThreadId.has(id));
         if (chunk.length === 0) continue;

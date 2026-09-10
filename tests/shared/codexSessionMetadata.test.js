@@ -46,18 +46,24 @@ maybe('reads persisted display titles and classifies guardian reviews without ex
       preview: '[@image.png](file:///private/a.png) Fix the compact session list Use the available Lody MCP tools when relevant; ignore this suffix.'
     },
     { id: 'review-model', model: 'codex-auto-review', preview: 'private review prompt' },
-    { id: 'review-source', threadSource: 'guardian_review', title: 'private guardian title' }
+    { id: 'review-user', model: 'codex-auto-review', threadSource: 'user', source: '{"subagent":{"other":"guardian"}}' },
+    { id: 'review-source', threadSource: 'guardian_review', title: 'private guardian title' },
+    { id: 'review-json-source', threadSource: 'subagent', source: '{"subagent":{"other":"guardian"}}' }
   ]);
 
-  const result = metadata.readSessionMeta(['named', 'fallback', 'review-model', 'review-source'], {
+  const result = metadata.readSessionMeta([
+    'named', 'fallback', 'review-model', 'review-user', 'review-source', 'review-json-source'
+  ], {
     dbPaths: [file],
     sqlite
   });
 
   assert.deepEqual(result.get('named'), { title: '繼續目前工作' });
   assert.equal(result.has('fallback'), false);
-  assert.deepEqual(result.get('review-model'), { sessionKind: 'background-review' });
+  assert.equal(result.has('review-model'), false);
+  assert.equal(result.has('review-user'), false);
   assert.deepEqual(result.get('review-source'), { sessionKind: 'background-review' });
+  assert.deepEqual(result.get('review-json-source'), { sessionKind: 'background-review' });
 });
 
 maybe('tolerates older thread schemas and uses title as the final fallback', () => {

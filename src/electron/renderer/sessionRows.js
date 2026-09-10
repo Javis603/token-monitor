@@ -91,6 +91,37 @@
     return typeof value === 'string' ? value.trim() : '';
   }
 
+  function clearButtonSemantics(element) {
+    for (const attribute of ['tabindex', 'role', 'aria-expanded', 'aria-label']) {
+      element.removeAttribute(attribute);
+    }
+  }
+
+  function applyBreakdownRowSemantics(row, rowHead, options = {}) {
+    clearButtonSemantics(row);
+    clearButtonSemantics(rowHead);
+    if (options.hasAccordion === true) {
+      rowHead.setAttribute('tabindex', '0');
+      rowHead.setAttribute('role', 'button');
+      rowHead.setAttribute('aria-expanded', String(options.expanded === true));
+      rowHead.setAttribute('aria-label', textValue(options.ariaLabel));
+      return;
+    }
+    if (options.interactive !== true) return;
+    row.setAttribute('tabindex', '0');
+    row.setAttribute('role', 'button');
+    row.setAttribute('aria-label', textValue(options.ariaLabel));
+  }
+
+  function handleBreakdownRowKeydown(event) {
+    if (event?.key !== 'Enter' && event?.key !== ' ') return false;
+    const row = event.target?.closest?.('.row[role="button"]');
+    if (!row) return false;
+    event.preventDefault();
+    row.click();
+    return true;
+  }
+
   function sessionTitleParts(session, labels, fallbackLabel = 'Session', explicitModel = '') {
     const client = textValue(session?.client);
     const clientLabel = labels[client] || client || fallbackLabel;
@@ -109,8 +140,7 @@
   }
 
   function isBackgroundReviewSession(session) {
-    if (textValue(session?.sessionKind) === 'background-review') return true;
-    return finiteNumber(session?.models?.['codex-auto-review']) > 0;
+    return textValue(session?.sessionKind) === 'background-review';
   }
 
   function nativeSessionRow(session, key, options, now) {
@@ -269,9 +299,11 @@
   }
 
   return {
+    applyBreakdownRowSemantics,
     archivedSessionCount,
     compactSessionTime,
     groupBackgroundReviewRows,
+    handleBreakdownRowKeydown,
     sessionBreakdownIncomplete,
     sessionIdLabel,
     sessionRowsForPeriod

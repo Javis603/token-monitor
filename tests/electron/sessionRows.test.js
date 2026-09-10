@@ -6,8 +6,10 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  applyBreakdownRowSemantics,
   archivedSessionCount,
   groupBackgroundReviewRows,
+  handleBreakdownRowKeydown,
   sessionBreakdownIncomplete,
   sessionIdLabel,
   sessionRowsForPeriod
@@ -131,7 +133,8 @@ test('background review sessions collapse into one interactive aggregate row wit
     },
     'codex:review-a': {
       client: 'codex', sessionId: 'review-a', totalTokens: 20, costUsd: 0.1,
-      models: { 'codex-auto-review': 20 }, lastUsedAt: localIso(2026, 5, 30, 12, 20)
+      sessionKind: 'background-review', models: { 'codex-auto-review': 20 },
+      lastUsedAt: localIso(2026, 5, 30, 12, 20)
     },
     'codex:review-b': {
       client: 'codex', sessionId: 'review-b', totalTokens: 30, costUsd: 0.2,
@@ -163,6 +166,79 @@ test('background review sessions collapse into one interactive aggregate row wit
   ]);
   assert.equal(Object.hasOwn(collapsed[1], 'sessionGroupExpanded'), false);
   assert.equal(Object.hasOwn(collapsed[1], 'sessionDetailAvailable'), false);
+});
+
+test('model name alone does not hide an ordinary Codex session in background reviews', () => {
+  const rows = sessionRowsForPeriod({ sessions: {
+    'codex:user-selected-review-model': {
+      client: 'codex',
+      sessionId: 'user-selected-review-model',
+      totalTokens: 20,
+      models: { 'codex-auto-review': 20 },
+      lastUsedAt: localIso(2026, 5, 30, 12, 20)
+    }
+  } }, { clientLabels, clientColors, now: new Date(2026, 4, 30, 12, 30) });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].backgroundReview, undefined);
+  assert.deepEqual(groupBackgroundReviewRows(rows).map((row) => row.key), [
+    'session:codex:user-selected-review-model'
+  ]);
+});
+
+test('breakdown row semantics keep sessions keyboard-accessible without changing accordion ownership', () => {
+  class FakeElement {
+    constructor() { this.attributes = new Map(); }
+    getAttribute(name) { return this.attributes.get(name) ?? null; }
+    hasAttribute(name) { return this.attributes.has(name); }
+    removeAttribute(name) { this.attributes.delete(name); }
+    setAttribute(name, value) { this.attributes.set(name, String(value)); }
+  }
+
+  const row = new FakeElement();
+  const rowHead = new FakeElement();
+  applyBreakdownRowSemantics(row, rowHead, {
+    interactive: true,
+    hasAccordion: false,
+    ariaLabel: 'Codex session'
+  });
+  assert.equal(row.getAttribute('role'), 'button');
+  assert.equal(row.getAttribute('tabindex'), '0');
+  assert.equal(row.getAttribute('aria-label'), 'Codex session');
+  assert.equal(rowHead.hasAttribute('role'), false);
+
+  applyBreakdownRowSemantics(row, rowHead, {
+    interactive: false,
+    hasAccordion: true,
+    expanded: true,
+    ariaLabel: 'Codex, Total tokens: 10'
+  });
+  assert.equal(row.hasAttribute('role'), false);
+  assert.equal(rowHead.getAttribute('role'), 'button');
+  assert.equal(rowHead.getAttribute('tabindex'), '0');
+  assert.equal(rowHead.getAttribute('aria-expanded'), 'true');
+  assert.equal(rowHead.getAttribute('aria-label'), 'Codex, Total tokens: 10');
+});
+
+test('breakdown row keyboard activation handles Enter and Space', () => {
+  let clicks = 0;
+  let prevented = 0;
+  const row = { click: () => { clicks += 1; } };
+  const target = {
+    closest: (selector) => selector === '.row[role="button"]' ? row : null
+  };
+
+  assert.equal(handleBreakdownRowKeydown({
+    key: 'Enter', target, preventDefault: () => { prevented += 1; }
+  }), true);
+  assert.equal(handleBreakdownRowKeydown({
+    key: ' ', target, preventDefault: () => { prevented += 1; }
+  }), true);
+  assert.equal(handleBreakdownRowKeydown({
+    key: 'Escape', target, preventDefault: () => { prevented += 1; }
+  }), false);
+  assert.equal(clicks, 2);
+  assert.equal(prevented, 2);
 });
 
 test('Reasonix native rows reuse the common session schema without a native accordion', () => {
