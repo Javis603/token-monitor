@@ -5,6 +5,9 @@ export type Language = 'zh' | 'en';
 export type Theme = 'dark' | 'light';
 export type DataMode = 'live' | 'snapshot';
 const dictionary: Record<string, string> = {
+  '隐藏':'Hide','已隐藏':'Hidden','管理显示':'Manage visibility','全部恢复':'Show all','默认账号':'Default account',
+  '所有项目均已隐藏':'All items are hidden','仅影响此浏览器，不影响采集与同步。':'Only affects this browser, not collection or sync.',
+  '浏览器存储不可用，设置仅在本次页面内有效。':'Browser storage is unavailable; changes last only for this page.',
   '今天':'Today','本月':'Month','全部':'All time','统计周期':'Period',
   '实时':'Live','快照':'Snapshot','刷新快照':'Refresh snapshot','连接中':'Connecting','重连中':'Reconnecting','离线':'Offline','异常':'Error',
   '离线快照':'Offline snapshot','快照时间':'Captured','Token 用量摘要':'Token usage summary','Token 用量':'Token usage',

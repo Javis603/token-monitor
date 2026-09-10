@@ -1,3 +1,5 @@
+import { useRef, useState } from 'preact/hooks';
+import { limitVisibilityKey, readHiddenLimits, saveHiddenLimits } from '../data/visibility';
 import PROVIDER_NAMES from 'virtual:provider-labels';
 import { usePreferences } from '../preferences';
 import { limitRows, type LimitRow } from '../data/stats';
@@ -100,9 +102,13 @@ function QuotaWindow({ window, provider, currency, compact = false }: { window: 
   </div>;
 }
 
-function ProviderCard({ row }: { row: LimitRow }) {
+function providerName(row: LimitRow) {
+  return ownLabel(PROVIDER_NAMES, row.provider) || row.provider.replace(/[-_]/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function ProviderCard({ row, onHide }: { row: LimitRow; onHide(): void }) {
   const {t} = usePreferences();
-  const name = ownLabel(PROVIDER_NAMES, row.provider) || row.provider.replace(/[-_]/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const name = providerName(row);
   // Older payloads may carry only a credits window, without a balance object.
   const creditWindow = row.windows.find((window) => window.metric === 'credits'
     || (row.provider === 'openrouter' && !window.metric && window.label === 'Credits'));
@@ -152,23 +158,48 @@ function ProviderCard({ row }: { row: LimitRow }) {
     {!balance && windows.length === 0 && <p class="limit-card__note">{t('暂无额度数据')}</p>}
     {known(count) && <div class="limit-reset"><span>{t('可用重置 ')}<strong>{count}</strong></span>
       <Timestamp label="到期" value={row.resetCredits?.nextExpiresAt} /></div>}
+    <button type="button" class="limit-hide" onClick={onHide} aria-label={`${t('隐藏')} ${name} ${row.accountLabel || row.accountName || row.accountEmail || ''}`.trim()}>{t('隐藏')}</button>
   </article>;
 }
 
 export function LimitsPanel({ stats }: { stats: HubStats }) {
   const {t} = usePreferences();
+  const [hidden, setHidden] = useState(readHiddenLimits);
+  const [storageFailed, setStorageFailed] = useState(false);
+  const manager = useRef<HTMLDetailsElement>(null);
   const rows = limitRows(stats).filter((row) => !['notConfigured', 'disabled'].includes(row.status));
-  const balances = rows.filter(row => row.balance || row.windows.some(window => window.metric === 'credits'));
-  const quotas = rows.filter(row => !balances.includes(row));
+  const visible = rows.filter(row => !hidden.includes(limitVisibilityKey(row)));
+  const balances = visible.filter(row => row.balance || row.windows.some(window => window.metric === 'credits'));
+  const quotas = visible.filter(row => !balances.includes(row));
+  const choices = [...new Map(rows.map(row => [limitVisibilityKey(row), row])).entries()];
+  function update(next: string[]) {
+    setHidden(next);
+    setStorageFailed(!saveHiddenLimits(next));
+  }
+  function hide(row: LimitRow) {
+    update([...new Set([...hidden, limitVisibilityKey(row)])]);
+    manager.current?.querySelector('summary')?.focus();
+  }
+  const renderCard = (row: LimitRow, index: number) => <ProviderCard key={`${limitVisibilityKey(row)}-${index}`} row={row} onHide={() => hide(row)} />;
   return <section class="limits-section" aria-labelledby="limits-title">
     <header class="panel__header"><h2 id="limits-title">{t('余额与额度')}</h2></header>
-    {rows.length === 0 ? <p class="empty">{t('暂无额度数据')}</p> : <>
-      {balances.length > 0 && <div class="limits-list limits-list--balances" role="group" aria-label={t('账户余额')}>
-        {balances.map((row, index) => <ProviderCard key={`${row.provider}-${index}`} row={row} />)}
-      </div>}
-      {quotas.length > 0 && <div class="limits-list limits-list--quotas" role="group" aria-label={t('订阅额度')}>
-        {quotas.map((row, index) => <ProviderCard key={`${row.provider}-${index}`} row={row} />)}
-      </div>}
+    <details ref={manager} class="limit-visibility" onKeyDown={event => {
+      if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); }
+    }}>
+      <summary>{t('管理显示')} <span class="muted">{t('已隐藏')} {rows.length - visible.length}</span></summary>
+      <div class="limit-visibility__body">
+        <p class="muted">{t('仅影响此浏览器，不影响采集与同步。')}</p>
+        <div class="limit-visibility__choices">{choices.map(([key, row]) => <label key={key}>
+          <input type="checkbox" checked={!hidden.includes(key)} onChange={event => update(event.currentTarget.checked ? hidden.filter(value => value !== key) : [...hidden, key])} />
+          <span>{t(providerName(row))}<small>{row.accountLabel || row.accountName || row.accountEmail || row.planLabel || t('默认账号')}</small></span>
+        </label>)}</div>
+        {hidden.length > 0 && <button type="button" onClick={() => update([])}>{t('全部恢复')}</button>}
+      </div>
+    </details>
+    {storageFailed && <p class="limit-card__note" role="status">{t('浏览器存储不可用，设置仅在本次页面内有效。')}</p>}
+    {rows.length === 0 ? <p class="empty">{t('暂无额度数据')}</p> : visible.length === 0 ? <p class="empty">{t('所有项目均已隐藏')}</p> : <>
+      {balances.length > 0 && <div class="limits-list limits-list--balances" role="group" aria-label={t('账户余额')}>{balances.map(renderCard)}</div>}
+      {quotas.length > 0 && <div class="limits-list limits-list--quotas" role="group" aria-label={t('订阅额度')}>{quotas.map(renderCard)}</div>}
     </>}
   </section>;
 }

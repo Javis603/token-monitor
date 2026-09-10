@@ -1,3 +1,4 @@
+import { limitVisibilityKey } from './visibility';
 import { isHubStats, recentSessions } from './stats';
 import type { HubStats, StoredSnapshot, UsagePeriod } from './types';
 
@@ -62,6 +63,7 @@ export function sanitizeStatsForOffline(stats: HubStats): HubStats {
     limits: {
       providers: (stats.limits?.providers ?? []).map((provider) => ({
         provider: provider.provider,
+        visibilityKey: limitVisibilityKey(provider),
         // Preserve only the key-kind flag needed for display, never arbitrary plan/account labels.
         ...(provider.provider === 'openrouter' && provider.planLabel?.trim().toLowerCase() === 'management'
           ? { planLabel: 'Management' } : {}),

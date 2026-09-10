@@ -122,7 +122,7 @@ it('does not invent an explanation drawer for Management balances', () => {
     windows: [{ metric: 'credits', usedPercent: 96, remaining: 37.6543 }]
   }] } }} />);
   expect(screen.getByText('USD 37.65')).toBeTruthy();
-  expect(document.querySelector('details')).toBeNull();
+  expect(document.querySelector('.limit-card details')).toBeNull();
   expect(screen.queryByRole('progressbar')).toBeNull();
   expect(screen.queryByText(/Management Key/)).toBeNull();
   expect(screen.queryByText(/累计 Credits/)).toBeNull();

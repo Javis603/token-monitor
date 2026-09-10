@@ -306,3 +306,18 @@ button { font: inherit; }
 .demo-banner { text-align: center; padding: 8px; font-size: .75rem; color: var(--muted); border-bottom: 1px solid var(--line); }
 
 .sign-out { margin-top: 16px; padding: 9px; width: 100%; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--panel); cursor: pointer; font: inherit; font-size: .8rem; }
+
+.limit-visibility { margin: -4px 0 20px; font-size: 0.75rem; }
+.limit-visibility > summary { width: fit-content; cursor: pointer; padding: 6px 0; }
+.limit-visibility > summary span { margin-left: 8px; }
+.limit-visibility__body { margin-top: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+.limit-visibility__body p { margin: 0 0 12px; }
+.limit-visibility__choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px; margin-bottom: 12px; }
+.limit-visibility__choices label { display: flex; gap: 8px; align-items: center; cursor: pointer; min-width: 0; overflow-wrap: anywhere; }
+.limit-visibility__choices input { flex: none; accent-color: var(--green); width: 16px; height: 16px; }
+.limit-visibility__choices small { display: block; color: var(--muted); margin-top: 3px; }
+.limit-hide { align-self: flex-start; margin-top: 12px; padding: 4px 8px; font-size: 0.65rem; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.limit-hide:hover { color: var(--text); border-color: var(--muted); }
+
+.limit-visibility__body > button { padding: 7px 12px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font: inherit; }
+.limit-visibility__body > button:hover { border-color: var(--muted); }

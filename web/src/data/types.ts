@@ -66,6 +66,11 @@ export interface ResetCredits {
 }
 
 export interface LimitProvider {
+  accountKey?: string;
+  webAccountKey?: string;
+  accountEmail?: string;
+  accountName?: string;
+  visibilityKey?: string;
   provider?: string;
   accountLabel?: string;
   planLabel?: string;
