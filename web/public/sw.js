@@ -1,7 +1,7 @@
-const STATIC_CACHE = 'token-monitor-static-v20';
+const STATIC_CACHE = 'token-monitor-static-v21';
 const SNAPSHOT_CACHE = 'token-monitor-snapshot-v2';
 const SNAPSHOT_URL = '/__offline__/stats.json';
-const APP_SHELL = ['/manifest.webmanifest', '/icons/icon-192.svg', '/icons/icon-512.svg', '/icons/apple-touch-icon.png'];
+const APP_SHELL = ['/manifest.webmanifest', '/icons/icon-192.svg', '/icons/icon-512.svg', '/icons/apple-touch-icon.png', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 async function cacheAppShell() {
   const cache = await caches.open(STATIC_CACHE);
