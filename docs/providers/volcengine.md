@@ -23,7 +23,8 @@ Account identity hashes the CLI viewer's account/user/region, not profile name
 or tier. The CLI and explicit credential paths are exclusive so two accounts
 are never silently combined; even incomplete explicit credentials block fallback.
 
-Set `TOKEN_MONITOR_VOLCENGINE_ARKCLI=0` to disable discovery, or
+Discovery is on by default when the Volcengine provider is enabled; no extra
+arkcli opt-in is required. Set `TOKEN_MONITOR_VOLCENGINE_ARKCLI=0` to disable it, or
 `TOKEN_MONITOR_ARKCLI_COMMAND` to an executable path if arkcli is not on PATH.
 For a headless deployment, enable `volcengine` in
 `TOKEN_MONITOR_LIMIT_PROVIDERS`, run the service as the logged-in user, and

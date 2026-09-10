@@ -118,5 +118,13 @@ test('npm launcher resolves to the native binary so cancellation targets the que
   const launcher = path.join(pkg, 'scripts', 'run.js');
   const binary = path.join(pkg, 'bin', 'arkcli-linux-amd64');
   fs.writeFileSync(launcher, ''); fs.writeFileSync(binary, '');
-  assert.equal(resolveArkcliCommand({ TOKEN_MONITOR_ARKCLI_COMMAND: launcher }, 'linux', 'x64'), binary);
+  const canonicalBinary = fs.realpathSync(binary);
+  assert.equal(resolveArkcliCommand({ TOKEN_MONITOR_ARKCLI_COMMAND: launcher }, 'linux', 'x64'), canonicalBinary);
+  // macOS temp roots themselves can be symlinks (/var -> /private/var).
+  // Exercise that distinction on every platform, not just the macOS runner.
+  const alias = path.join(root, 'linked-package');
+  fs.symlinkSync(pkg, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.equal(resolveArkcliCommand({
+    TOKEN_MONITOR_ARKCLI_COMMAND: path.join(alias, 'scripts', 'run.js')
+  }, 'linux', 'x64'), canonicalBinary);
 });
