@@ -111,6 +111,10 @@ test('renderer wires reset motion before app boot and respects reduced motion', 
   assert.match(app, /requestAnimationFrame\(\(startedAt\) => \{/);
   assert.match(app, /duration,\s*startedAt\s*\);/);
   assert.match(app, /delay: Math\.max\(0, duration - LIMIT_RESET_GLOW_LEAD_MS\)/);
+  assert.match(app, /highlight\.className = 'limit-meter-completion'/);
+  assert.doesNotMatch(app, /filter: 'brightness\(/);
+  assert.match(app, /if \(nextText !== renderedText\)/);
+  assert.match(css, /\.limit-meter-completion\s*\{[^}]*position:\s*absolute;[^}]*opacity:\s*0;/s);
   assert.doesNotMatch(css, /limit-window-resetting|limit-reset-shine|limit-reset-brighten|limit-reset-glow/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.limit-meter-fill/);
 });
