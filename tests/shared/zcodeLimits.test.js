@@ -284,7 +284,7 @@ test('parseZcodeStartPlanBalances aggregates model capacity across plans with we
   assert.equal(daily.remaining, 2578372);
   assert.equal(daily.boundaryKind, 'reset');
   assert.equal(byLabel.get('Model-unseen').usedPercent, 0);
-  assert.equal(byLabel.get('Model-unseen').boundaryKind, 'expiry');
+  assert.equal('boundaryKind' in byLabel.get('Model-unseen'), false);
   assert.equal(byLabel.get('GLM-5.3-Air').remaining, 1500000);
   const reversed = structuredClone(BILLING_PAYLOAD);
   reversed.data.plans.reverse();
@@ -308,6 +308,19 @@ test('model aggregation types its earliest lifecycle boundary, including simulta
   assert.equal(boundary(200, 100).boundaryKind, 'expiry');
   assert.equal(boundary(100, 200).boundaryKind, 'reset');
   assert.equal(boundary(100, 100).boundaryKind, 'mixed');
+});
+
+test('missing or unknown periods keep the legacy reset presentation', () => {
+  const { windows } = parseZcodeStartPlanBalances({ data: { balances: [
+    { show_name: 'Missing period', total_units: 10, remaining_units: 10, expires_at: 100 },
+    { show_name: 'Unknown period', period: 'weekly', total_units: 20, remaining_units: 20, expires_at: 200 }
+  ] } });
+
+  assert.equal(windows.length, 2);
+  for (const window of windows) {
+    assert.ok(window.resetsAt);
+    assert.equal('boundaryKind' in window, false);
+  }
 });
 
 test('model aggregation follows returned names regardless of capability ids, optional metadata, or model versions', () => {

@@ -342,7 +342,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"kiro","status":"ok","windows":[{"kind":"billing","remainingPercent":50,"resetsAt":"2026-07-24T09:00:00.000Z","boundaryKind":"expiry"}]}],"status":{"noData":false}}
         """)
         XCTAssertEqual(snapshot.quota.first?.windows.first?.boundaryKind, "expiry")
-        XCTAssertFalse(WidgetFormat.boundary(try XCTUnwrap(snapshot.quota.first?.windows.first)).isEmpty)
+        XCTAssertTrue(WidgetFormat.boundary(try XCTUnwrap(snapshot.quota.first?.windows.first)).hasPrefix("Expires"))
     }
 
     func testAllFiveIntentPagesAreIndependentValues() {

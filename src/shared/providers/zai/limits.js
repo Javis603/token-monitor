@@ -660,7 +660,8 @@ function zcodePlanBucketWindow(balance, periodByEntitlement = new Map()) {
   if (total !== null) window.limit = total;
   if (resetsAt) {
     window.resetsAt = resetsAt;
-    window.boundaryKind = period === 'daily' ? 'reset' : 'expiry';
+    if (period === 'daily') window.boundaryKind = 'reset';
+    else if (period === 'one_time') window.boundaryKind = 'expiry';
   }
   return window;
 }
@@ -719,18 +720,21 @@ function parseZcodeStartPlanBalances(payload) {
       .map(entry => {
         const boundary = {
           at: entry.window.resetsAt,
-          kind: entry.window.boundaryKind || 'reset'
+          kind: entry.window.boundaryKind || null
         };
         return [`${boundary.at}:${boundary.kind}`, boundary];
       })).values()]
-      .sort((a, b) => a.at.localeCompare(b.at) || a.kind.localeCompare(b.kind));
+      .sort((a, b) => a.at.localeCompare(b.at) || String(a.kind || '').localeCompare(String(b.kind || '')));
     const nextAt = boundaries[0]?.at || null;
-    const nextKinds = new Set(boundaries
-      .filter(boundary => boundary.at === nextAt)
-      .map(boundary => boundary.kind));
+    const nextBoundaries = boundaries.filter(boundary => boundary.at === nextAt);
+    const nextKinds = new Set(nextBoundaries.map(boundary => boundary.kind).filter(Boolean));
     if (nextAt) {
       window.resetsAt = nextAt;
-      window.boundaryKind = nextKinds.size > 1 ? 'mixed' : [...nextKinds][0];
+      if (nextBoundaries.every(boundary => boundary.kind)) {
+        window.boundaryKind = nextKinds.size > 1 ? 'mixed' : [...nextKinds][0];
+      } else {
+        delete window.boundaryKind;
+      }
     }
     const uniformDaily = periods.length === 1 && periods[0] === 'daily'
       && new Set(boundaries.map(boundary => boundary.at)).size === 1;
