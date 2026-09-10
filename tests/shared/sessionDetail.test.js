@@ -76,6 +76,82 @@ test('parseCodexTranscript marks a text+image user_message with an [image] prefi
   assert.equal(ev[0].text, '[image] image + test');
 });
 
+test('parseCodexTranscript reads user prompts from response_item messages', () => {
+  const lines = [
+    JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-09-10T02:21:50.000Z',
+      payload: {
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'plugin context' },
+          { type: 'input_text', text: 'project context' }
+        ],
+        internal_chat_message_metadata_passthrough: {
+          content_item_kinds: ['plugins.recommendations', 'agents_md.instructions']
+        }
+      }
+    }),
+    JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-09-10T02:21:51.000Z',
+      payload: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: '修復 session detail' }],
+        internal_chat_message_metadata_passthrough: { content_item_kinds: ['user.text'] }
+      }
+    }),
+    JSON.stringify({ type: 'event_msg', timestamp: '2026-09-10T02:21:52.000Z', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 10 } } } })
+  ].join('\n');
+
+  const events = parseCodexTranscript(lines);
+  assert.equal(events.length, 2);
+  assert.equal(events[0].kind, 'prompt');
+  assert.equal(events[0].text, '修復 session detail');
+  assert.equal(events[1].kind, 'turn');
+});
+
+test('parseCodexTranscript labels response_item images and keeps only user content kinds', () => {
+  const lines = JSON.stringify({
+    type: 'response_item',
+    timestamp: '2026-09-10T02:21:50.000Z',
+    payload: {
+      type: 'message',
+      role: 'user',
+      content: [
+        { type: 'input_text', text: 'hidden instructions' },
+        { type: 'input_image', image_url: 'data:image/png;base64,AAAA' },
+        { type: 'input_text', text: '看這個畫面' }
+      ],
+      internal_chat_message_metadata_passthrough: {
+        content_item_kinds: ['permissions.instructions', 'user.image', 'user.text']
+      }
+    }
+  });
+
+  const events = parseCodexTranscript(lines);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].text, '[image] 看這個畫面');
+});
+
+test('parseCodexTranscript deduplicates transitional response_item and event_msg prompts', () => {
+  const lines = [
+    JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-09-10T02:21:50.000Z',
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'wrapped prompt' }] }
+    }),
+    JSON.stringify({ type: 'event_msg', timestamp: '2026-09-10T02:21:50.001Z', payload: { type: 'user_message', message: 'canonical prompt' } }),
+    JSON.stringify({ type: 'event_msg', timestamp: '2026-09-10T02:21:52.000Z', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 10 } } } })
+  ].join('\n');
+
+  const events = parseCodexTranscript(lines);
+  assert.equal(events.filter((event) => event.kind === 'prompt').length, 1);
+  assert.equal(events[0].text, 'canonical prompt');
+});
+
 test('parseCodexTranscript reads last_token_usage and attaches preceding tools', () => {
   // Codex follows OpenAI's convention: input_tokens INCLUDES cached_input_tokens and output_tokens
   // INCLUDES reasoning_output_tokens. The turn total must equal Codex's own total_tokens

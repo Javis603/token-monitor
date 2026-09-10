@@ -71,6 +71,24 @@ function codexPromptText(raw) {
   return cleanPromptText(idx >= 0 ? text.slice(idx + marker.length) : text);
 }
 
+function codexResponseItemPrompt(payload) {
+  if (payload?.type !== 'message' || payload.role !== 'user') return null;
+  const content = Array.isArray(payload.content) ? payload.content : [];
+  const kinds = payload.internal_chat_message_metadata_passthrough?.content_item_kinds;
+  const hasKinds = Array.isArray(kinds);
+  const selected = content.filter((part, index) => !hasKinds || String(kinds[index] || '').startsWith('user.'));
+  // Current Codex records injected instructions as role=user too, but gives each content item a
+  // semantic kind. A message with metadata and no user.* items is context, not a prompt boundary.
+  if (hasKinds && selected.length === 0) return null;
+  const text = codexPromptText(selected
+    .filter((part) => part?.type === 'input_text')
+    .map((part) => part.text || '')
+    .join('\n'));
+  const imageCount = selected.filter((part) => part?.type === 'input_image').length;
+  const marker = imageCount > 1 ? `[${imageCount} images]` : (imageCount === 1 ? '[image]' : '');
+  return [marker, text].filter(Boolean).join(' ') || null;
+}
+
 function parseClaudeTranscript(text) {
   const events = [];
   // Claude Code inflates a transcript two ways, both of which would otherwise multiply token counts:
@@ -133,6 +151,7 @@ function codexToolName(payload) {
 function parseCodexTranscript(text) {
   const events = [];
   let pendingTools = [];
+  let responsePromptIndex = -1;
   for (const line of String(text || '').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -152,7 +171,21 @@ function parseCodexTranscript(text) {
       const marker = imageCount > 1 ? `[${imageCount} images]` : (imageCount === 1 ? '[image]' : '');
       const label = [marker, text].filter(Boolean).join(' '); // image-bearing prompts keep an [image] marker like Claude
       // empty + no image → degenerate user_message; skip so its turns fold into the real prompt
-      if (label) events.push({ kind: 'prompt', timestamp: obj.timestamp || '', text: label });
+      if (label) {
+        const prompt = { kind: 'prompt', timestamp: obj.timestamp || '', text: label };
+        // One transitional schema writes both the response_item and the older event_msg for the
+        // same prompt. The event_msg is already the renderer-facing text, so let it replace the
+        // immediately preceding response_item boundary instead of showing the turn twice.
+        if (responsePromptIndex >= 0 && responsePromptIndex === events.length - 1) events[responsePromptIndex] = prompt;
+        else events.push(prompt);
+      }
+      responsePromptIndex = -1;
+    } else if (obj.type === 'response_item') {
+      const label = codexResponseItemPrompt(payload);
+      if (label) {
+        events.push({ kind: 'prompt', timestamp: obj.timestamp || '', text: label });
+        responsePromptIndex = events.length - 1;
+      }
     } else if (obj.type === 'event_msg' && payload.type === 'token_count') {
       const u = payload.info && payload.info.last_token_usage;
       if (!u) continue; // session-start / idle tick with no turn usage — not a reply
@@ -171,6 +204,7 @@ function parseCodexTranscript(text) {
       if (tokens.total === 0) { pendingTools = []; continue; } // empty bookkeeping tick — skip
       events.push({ kind: 'turn', timestamp: obj.timestamp || '', tokens, tools: uniqueTools(pendingTools) });
       pendingTools = [];
+      responsePromptIndex = -1;
     }
   }
   return events;
