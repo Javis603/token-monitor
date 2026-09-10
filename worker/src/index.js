@@ -303,7 +303,11 @@ function publicPeriods(periods) {
     return [name, {
       ...safePeriod,
       sessions: Object.fromEntries(Object.entries(period?.sessions || {}).map(([key, session]) => {
-      const { projectId, projectLabel, projectPath, ...safe } = session;
+      const {
+        projectId, projectLabel, projectPath,
+        title, sessionTitle, session_title, name, preview, firstUserMessage, first_user_message,
+        ...safe
+      } = session;
       return [key, safe];
       }))
     }];

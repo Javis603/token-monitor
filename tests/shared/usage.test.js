@@ -10,8 +10,33 @@ const {
   mergeDeviceRecord,
   mergePeriods,
   normalizeClientName,
+  normalizePeriod,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('../../src/shared/usage');
+
+test('session normalization preserves bounded titles and recognized background-review metadata', () => {
+  const period = normalizePeriod({ sessions: {
+    'codex:review': {
+      client: 'codex',
+      sessionId: 'review',
+      totalTokens: 10,
+      title: '  Review   the change  ',
+      sessionKind: 'background-review'
+    },
+    'codex:unknown': {
+      client: 'codex',
+      sessionId: 'unknown',
+      totalTokens: 5,
+      title: 'x'.repeat(200),
+      sessionKind: 'untrusted-kind'
+    }
+  } });
+
+  assert.equal(period.sessions['codex:review'].title, 'Review the change');
+  assert.equal(period.sessions['codex:review'].sessionKind, 'background-review');
+  assert.equal(period.sessions['codex:unknown'].title.length, 160);
+  assert.equal(period.sessions['codex:unknown'].sessionKind, '');
+});
 
 function recordWithLimits(extra = {}) {
   return {

@@ -13,7 +13,8 @@ test('public stats periods strip every project identity field', async () => {
     },
     sessions: { 'codex:s1': {
       client: 'codex', sessionId: 's1', totalTokens: 1,
-      projectId: 'sha256:secret', projectLabel: 'Private-Client', projectPath: '/Users/alice/Private-Client'
+      projectId: 'sha256:secret', projectLabel: 'Private-Client', projectPath: '/Users/alice/Private-Client',
+      title: 'Private conversation', preview: 'Private preview', first_user_message: 'Private prompt'
     } }
   } });
   assert.deepEqual(periods.today.sessions['codex:s1'], { client: 'codex', sessionId: 's1', totalTokens: 1 });
@@ -21,6 +22,7 @@ test('public stats periods strip every project identity field', async () => {
   const json = JSON.stringify(periods);
   assert.doesNotMatch(json, /Private-Client/);
   assert.doesNotMatch(json, /private-client/);
+  assert.doesNotMatch(json, /Private conversation|Private preview|Private prompt/);
 });
 
 test('Worker public stats strip every account identity and plan field', async () => {

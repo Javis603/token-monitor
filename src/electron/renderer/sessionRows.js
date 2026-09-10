@@ -58,8 +58,12 @@
     if (reasonixLabel.toLowerCase().startsWith('reasonix-stats:')) return '';
     if (reasonixPrefix) return reasonixLabel;
     if (raw.toLowerCase().startsWith('reasonix-stats:')) return '';
+    const uuids = raw.match(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/gi) || [];
+    // Tokscale can merge resumed Codex rollouts into one session key. Keep that
+    // identity useful without exposing the rollout timestamps or join syntax.
+    if (uuids.length > 1) return uuids.join(' · ');
     const rollout = raw.match(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}[:-]\d{2}-(.+)$/);
-    if (rollout) return rollout[1];
+    if (rollout) return uuids[0] || rollout[1];
     if (/^\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}/.test(raw)) return '';
     return raw;
   }
@@ -102,6 +106,11 @@
   function messageLabel(session) {
     const count = finiteNumber(session?.messageCount);
     return count > 0 ? `${formatNumber(count)} msg${count === 1 ? '' : 's'}` : '';
+  }
+
+  function isBackgroundReviewSession(session) {
+    if (textValue(session?.sessionKind) === 'background-review') return true;
+    return finiteNumber(session?.models?.['codex-auto-review']) > 0;
   }
 
   function nativeSessionRow(session, key, options, now) {
@@ -166,7 +175,8 @@
         const { client, titleParts, clientLabel, modelLabel } = sessionTitleParts(session, labels);
         const sessionId = session?.sessionId || key;
         const archived = session?.archived === true || session?.deleted === true || session?.sourceDeleted === true;
-        const subtitleParts = [
+        const sessionTitle = textValue(session?.title);
+        const activityParts = [
           archived ? archivedLabel : '',
           sessionActivityLabel(session, now),
           messageLabel(session)
@@ -174,8 +184,9 @@
         return {
           key: `session:${key}`,
           kind: 'session',
-          name: titleParts.join(' · '),
-          subtitle: subtitleParts.join(' · '),
+          name: sessionTitle || titleParts.join(' · '),
+          subtitle: (sessionTitle ? titleParts : activityParts).join(' · '),
+          activity: sessionTitle ? activityParts.join(' · ') : undefined,
           detail: sessionIdLabel(sessionId),
           value,
           cost: finiteNumber(session?.costUsd),
@@ -183,6 +194,7 @@
           stale: false,
           archived: archived || undefined,
           client,
+          backgroundReview: isBackgroundReviewSession(session) || undefined,
           sortTime: sessionTimestampValue(session),
           title: `${clientLabel} session${sessionIdLabel(sessionId) ? ` ${sessionIdLabel(sessionId)}` : ''}`
         };
@@ -193,6 +205,47 @@
       if (row) rows.push(row);
     }
     return rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
+  }
+
+  function groupBackgroundReviewRows(rows, options = {}) {
+    const primary = [];
+    const reviews = [];
+    for (const row of Array.isArray(rows) ? rows : []) {
+      (row?.backgroundReview === true ? reviews : primary).push(row);
+    }
+    if (reviews.length === 0) return primary;
+    const value = reviews.reduce((sum, row) => sum + finiteNumber(row.value), 0);
+    const cost = reviews.reduce((sum, row) => sum + finiteNumber(row.cost), 0);
+    const sortTime = reviews.reduce((max, row) => Math.max(max, finiteNumber(row.sortTime)), 0);
+    const orderedReviews = [...reviews].sort((a, b) => finiteNumber(b.sortTime) - finiteNumber(a.sortTime));
+    const latest = orderedReviews[0] || null;
+    const countLabel = typeof options.countLabel === 'function'
+      ? options.countLabel(reviews.length)
+      : `${reviews.length} sessions`;
+    const summary = {
+      key: 'session-group:codex-auto-review',
+      kind: 'summary',
+      name: options.label || 'Codex Auto Review',
+      subtitle: typeof options.summaryLabel === 'function'
+        ? options.summaryLabel({
+          count: reviews.length,
+          countLabel,
+          latestTime: compactSessionTime(sortTime, options.now || new Date()),
+          latestValue: finiteNumber(latest?.value)
+        })
+        : countLabel,
+      detail: '',
+      value,
+      cost,
+      barValue: value,
+      color: reviews[0]?.color || fallbackColors[0],
+      stale: false,
+      client: 'codex',
+      sortTime,
+      reviewGroup: true,
+      backgroundReviewRows: orderedReviews
+    };
+    return [...primary, summary];
   }
 
   function sessionBreakdownIncomplete(stats, periodName) {
@@ -218,6 +271,7 @@
   return {
     archivedSessionCount,
     compactSessionTime,
+    groupBackgroundReviewRows,
     sessionBreakdownIncomplete,
     sessionIdLabel,
     sessionRowsForPeriod
