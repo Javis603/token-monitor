@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { BlockList, isIP } from 'node:net';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as oidc from 'openid-client';
@@ -7,8 +7,10 @@ import type { GatewayConfig } from './config.js';
 const COOKIE='tm_web_session';
 const FLOW_COOKIE='tm_oidc_flow';
 const TTL=8*60*60*1000;
-function equal(a:string,b:string) {
-  return timingSafeEqual(createHash('sha256').update(a).digest(),createHash('sha256').update(b).digest());
+function equal(a:string | Buffer,b:string) {
+  // Compare credential bytes directly; this is not password-hash storage.
+  const supplied=Buffer.from(a);const expected=Buffer.from(b);
+  return supplied.length===expected.length && timingSafeEqual(supplied,expected);
 }
 function cookie(request:IncomingMessage,name:string) {
   return request.headers.cookie?.split(';').map(x=>x.trim()).find(x=>x.startsWith(name+'='))?.slice(name.length+1);
@@ -74,9 +76,11 @@ export function createAuth(config:GatewayConfig, discover=()=>oidc.discovery(new
     return typeof value==='string' && value.trim().length>0;
   }
   function basic(request:IncomingMessage) {
+    prune();
+    if((failures.get(request.socket.remoteAddress || '')?.count || 0)>=20)return false;
     const match=/^Basic ([A-Za-z0-9+/=]+)$/i.exec(request.headers.authorization||'');
     if(!match || !config.basicUsername || !config.basicPassword)return false;
-    return equal(Buffer.from(match[1],'base64').toString('utf8'),config.basicUsername+':'+config.basicPassword);
+    return equal(Buffer.from(match[1],'base64'),config.basicUsername+':'+config.basicPassword);
   }
   function authorized(request:IncomingMessage,shell:boolean) {
     const header=request.headers.authorization;

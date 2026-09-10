@@ -35,6 +35,21 @@ it('Basic authenticates independently of Hub bearer, rate limits failures and re
  for(let i=0;i<21;i++)await fetch(base,{headers:{authorization:'Basic '+Buffer.from('demo:wrong').toString('base64')}});
  expect((await fetch(base,{headers:{authorization:'Basic '+Buffer.from('demo:wrong').toString('base64')}})).status).toBe(429);
 });
+it('Basic cooldown rejects even a correct password until the failed-attempt window expires',async()=>{
+ const base=await harness({...baseConfig(),authMode:'basic',basicUsername:'demo',basicPassword:'synthetic-password'});
+ const header=(password:string)=>({authorization:'Basic '+Buffer.from('demo:'+password).toString('base64')});
+ for(let i=0;i<20;i++)await fetch(base,{headers:header('wrong')});
+ const blocked=await fetch(base,{headers:header('synthetic-password')});
+ expect(blocked.status).toBe(429);expect(blocked.headers.getSetCookie()).toEqual([]);
+ const now=Date.now();vi.spyOn(Date,'now').mockReturnValue(now+61000);
+ expect((await fetch(base,{headers:header('synthetic-password')})).status).toBe(200);
+});
+it('Basic compares exact UTF-8 credential bytes without decoding malformed sequences',async()=>{
+ const base=await harness({...baseConfig(),authMode:'basic',basicUsername:'demo',basicPassword:'\uFFFD'});
+ const malformed=Buffer.concat([Buffer.from('demo:'),Buffer.from([255])]);
+ expect((await fetch(base,{headers:{authorization:'Basic '+malformed.toString('base64')}})).status).toBe(401);
+ expect((await fetch(base,{headers:{authorization:'Basic '+Buffer.from('demo:\uFFFD').toString('base64')}})).status).toBe(200);
+});
 it('trusted proxy validates socket peers and custom identity headers; XFF cannot grant trust',async()=>{
  const cfg={...baseConfig(),authMode:'trusted-proxy' as const,proxyHeader:'x-auth-user',trustedProxyPeers:['192.0.2.1']};
  const base=await harness(cfg);

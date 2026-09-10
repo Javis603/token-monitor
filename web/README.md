@@ -33,7 +33,7 @@ Use a **dedicated origin**: assets, authentication endpoints and PWA scope are r
 
 Set `WEB_AUTH_MODE=basic`, `WEB_PUBLIC_ORIGIN=https://monitor.example.com`, `WEB_BASIC_USERNAME`, and `WEB_BASIC_PASSWORD` in the protected server environment. The browser receives a standard HTTP Basic challenge; successful authentication creates a server-side Web session. Configure HTTPS termination before exposing this mode. Plain HTTP is permitted only for a loopback public origin during development.
 
-Password comparison uses constant-length timing-safe digests. Failed attempts are rate-limited per socket peer (the server does not trust arbitrary forwarded IPs). When proxied, this means the limit is shared by that proxy. The browser may retain HTTP Basic credentials after application logout and reuse them on a subsequent login; close a private browsing window to discard browser-held credentials.
+Credentials are compared as exact UTF-8 bytes using `timingSafeEqual` after checking byte lengths; no password hash is stored or generated. After 20 failed attempts, further Basic authentication is denied until the one-minute window expires, even if the next password is correct. Failed attempts are rate-limited per socket peer (the server does not trust arbitrary forwarded IPs). When proxied, this means the limit is shared by that proxy. The browser may retain HTTP Basic credentials after application logout and reuse them on a subsequent login; close a private browsing window to discard browser-held credentials.
 
 ### OIDC (Web-managed login)
 
