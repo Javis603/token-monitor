@@ -91,7 +91,7 @@ describe('PWA assets', () => {
     let pending: Promise<unknown> | undefined;
     harness.listeners.install({ waitUntil(value: Promise<unknown>) { pending = value; } });
     await pending;
-    const staticCache = harness.stores.get('token-monitor-static-v21');
+    const staticCache = harness.stores.get('token-monitor-static-v22');
     expect(staticCache?.addAll).toHaveBeenCalledWith(['/assets/index-def456.css', '/assets/index-abc123.js']);
     expect(staticCache?.put).toHaveBeenCalledWith('/index.html', expect.any(Response));
   });
@@ -142,7 +142,7 @@ it.each(['match', 'open', 'put'])('serves a successful static response when cach
   const harness = await serviceWorkerHarness();
   if (failure === 'match') harness.caches.match.mockRejectedValue(new Error('unavailable'));
   if (failure === 'open') harness.caches.open.mockRejectedValue(new Error('unavailable'));
-  if (failure === 'put') (await harness.caches.open('token-monitor-static-v21')).put.mockRejectedValue(new Error('full'));
+  if (failure === 'put') (await harness.caches.open('token-monitor-static-v22')).put.mockRejectedValue(new Error('full'));
   let pending: Promise<Response> | undefined;
   harness.listeners.fetch({ request: new Request('https://tm-web.example.test/assets/new.js'), respondWith(value: Promise<Response>) { pending = value; } });
   expect((await pending)?.status).toBe(200);

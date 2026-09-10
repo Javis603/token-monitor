@@ -114,3 +114,9 @@ The demo is synthetic and clearly marked. It does not fetch Hub data or register
 Web CI installs only this package and runs tests, typechecking and a production build on Node 22 and 24. Root `npm run verify` and existing desktop/Hub/Worker builds remain independent. No compiled assets are committed; `web/dist` and `web/dist-server` are build outputs.
 
 The Web adapter consumes the existing `/api/stats` contract and is tested against the actual Node Hub. It does not collect credentials, parse agent logs, or modify shared aggregation rules. Node Hub contract tests are included; a real Cloudflare deployment is not part of the test suite.
+
+### Wrapped quota card layout
+
+Balance cards use one/two/three columns at mobile/720px/1100px; subscription cards use one/two columns. Dividers and padding follow each grid row, including incomplete final rows. Expanded details grow the row without overlapping the following provider. Browser verification used seven synthetic cards per group at390px,800px and1200px, with details expanded and no horizontal overflow.
+
+![Synthetic wrapped-card layout regression preview](docs/screenshots/quota-grid-wrap.png)

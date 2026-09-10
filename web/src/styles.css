@@ -228,16 +228,25 @@ button { font: inherit; }
 .list-pagination button:disabled { opacity: .35; cursor: default; }
 .list-pagination button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 @media (min-width: 720px) {
-  .limits-list { gap: 0; }
-  .limit-card { padding: 0 20px; }
-  .limit-card:first-child { padding-left: 0; }
-  .limit-card:last-child { padding-right: 0; }
-  .limit-card + .limit-card { border-top: 0; border-left: 1px solid var(--line); }
-  .limits-list--balances { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-  .limits-list--quotas { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Borders and gutters follow grid columns, not first/last item in the list. */
+  .limits-list { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 24px; }
+  .limits-list > .limit-card { padding: 0 20px; border: 0; }
+  .limits-list > .limit-card:nth-child(2n + 1) { padding-left: 0; }
+  .limits-list > .limit-card:nth-child(2n) { padding-right: 0; border-left: 1px solid var(--line); }
+  .limits-list > .limit-card:nth-child(n + 3) { padding-top: 20px; border-top: 1px solid var(--line); }
   .quota-windows { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .quota-windows .limit-window { margin: 0; }
 
+}
+
+@media (min-width: 1100px) {
+  .limits-list--balances { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .limits-list--balances > .limit-card:nth-child(n) { padding: 0 20px; border: 0; }
+  .limits-list--balances > .limit-card:nth-child(3n + 1) { padding-left: 0; }
+  .limits-list--balances > .limit-card:nth-child(3n + 2),
+  .limits-list--balances > .limit-card:nth-child(3n) { border-left: 1px solid var(--line); }
+  .limits-list--balances > .limit-card:nth-child(3n) { padding-right: 0; }
+  .limits-list--balances > .limit-card:nth-child(n + 4) { padding-top: 20px; border-top: 1px solid var(--line); }
 }
 
 .layout-column { border: 1px solid var(--line); border-radius: 18px; background: var(--panel); overflow: hidden; }
