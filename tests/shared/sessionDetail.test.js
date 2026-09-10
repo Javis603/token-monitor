@@ -3,7 +3,13 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { parseClaudeTranscript, parseCodexTranscript } = require('../../src/shared/sessionDetail');
+const {
+  distributeCost,
+  filterExchangesByPeriod,
+  groupEvents,
+  parseClaudeTranscript,
+  parseCodexTranscript
+} = require('../../src/shared/sessionDetail');
 
 test('parseClaudeTranscript yields prompts and turns with exact tokens + tools', () => {
   const lines = [
@@ -136,6 +142,40 @@ test('parseCodexTranscript labels response_item images and keeps only user conte
   assert.equal(events[0].text, '[image] 看這個畫面');
 });
 
+test('parseCodexTranscript keeps an audio-only response_item as its own exchange boundary', () => {
+  const lines = [
+    JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-09-10T02:21:50.000Z',
+      payload: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'first prompt' }],
+        internal_chat_message_metadata_passthrough: { content_item_kinds: ['user.text'] }
+      }
+    }),
+    JSON.stringify({ type: 'event_msg', timestamp: '2026-09-10T02:21:51.000Z', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 10 } } } }),
+    JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-09-10T02:22:00.000Z',
+      payload: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_audio', audio_url: 'data:audio/wav;base64,AAAA' }],
+        internal_chat_message_metadata_passthrough: { content_item_kinds: ['user.audio'] }
+      }
+    }),
+    JSON.stringify({ type: 'event_msg', timestamp: '2026-09-10T02:22:01.000Z', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 200, cached_input_tokens: 150, output_tokens: 20 } } } })
+  ].join('\n');
+
+  const exchanges = groupEvents(parseCodexTranscript(lines));
+  assert.equal(exchanges.length, 2);
+  assert.equal(exchanges[0].promptPreview, 'first prompt');
+  assert.equal(exchanges[0].tokens.total, 110);
+  assert.equal(exchanges[1].promptPreview, '[audio]');
+  assert.equal(exchanges[1].tokens.total, 220);
+});
+
 test('parseCodexTranscript deduplicates transitional response_item and event_msg prompts', () => {
   const lines = [
     JSON.stringify({
@@ -150,6 +190,25 @@ test('parseCodexTranscript deduplicates transitional response_item and event_msg
   const events = parseCodexTranscript(lines);
   assert.equal(events.filter((event) => event.kind === 'prompt').length, 1);
   assert.equal(events[0].text, 'canonical prompt');
+});
+
+test('parseCodexTranscript does not deduplicate prompts across an intervening response_item', () => {
+  const lines = [
+    JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-09-10T02:21:50.000Z',
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'first prompt' }] }
+    }),
+    JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-09-10T02:21:50.001Z',
+      payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'intervening response' }] }
+    }),
+    JSON.stringify({ type: 'event_msg', timestamp: '2026-09-10T02:21:51.000Z', payload: { type: 'user_message', message: 'second prompt' } })
+  ].join('\n');
+
+  const prompts = parseCodexTranscript(lines).filter((event) => event.kind === 'prompt');
+  assert.deepEqual(prompts.map((prompt) => prompt.text), ['first prompt', 'second prompt']);
 });
 
 test('parseCodexTranscript reads last_token_usage and attaches preceding tools', () => {
@@ -212,7 +271,6 @@ test('parseClaudeTranscript counts one reply once across content-block splits an
   assert.deepEqual(turns[0].tools, ['exec_command']); // tool_use merged from a later block
 });
 
-const { groupEvents, filterExchangesByPeriod, distributeCost } = require('../../src/shared/sessionDetail');
 const { localDate, localIso } = require('../helpers/localTime');
 
 function turn(ts, total, tools = []) {

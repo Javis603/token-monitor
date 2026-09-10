@@ -85,8 +85,10 @@ function codexResponseItemPrompt(payload) {
     .map((part) => part.text || '')
     .join('\n'));
   const imageCount = selected.filter((part) => part?.type === 'input_image').length;
-  const marker = imageCount > 1 ? `[${imageCount} images]` : (imageCount === 1 ? '[image]' : '');
-  return [marker, text].filter(Boolean).join(' ') || null;
+  const imageMarker = imageCount > 1 ? `[${imageCount} images]` : (imageCount === 1 ? '[image]' : '');
+  const audioCount = selected.filter((part) => part?.type === 'input_audio').length;
+  const audioMarker = audioCount > 1 ? `[${audioCount} audio clips]` : (audioCount === 1 ? '[audio]' : '');
+  return [imageMarker, audioMarker, text].filter(Boolean).join(' ') || null;
 }
 
 function parseClaudeTranscript(text) {
@@ -155,6 +157,11 @@ function parseCodexTranscript(text) {
   for (const line of String(text || '').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
+    // Transitional logs emit the legacy user_message immediately after its response_item twin.
+    // Snapshot and clear the candidate for every physical JSONL record so an intervening item
+    // cannot make a later, distinct prompt replace an earlier boundary.
+    const adjacentResponsePromptIndex = responsePromptIndex;
+    responsePromptIndex = -1;
     let obj;
     try { obj = JSON.parse(trimmed); } catch (_) { continue; }
     const payload = obj.payload || {};
@@ -176,10 +183,9 @@ function parseCodexTranscript(text) {
         // One transitional schema writes both the response_item and the older event_msg for the
         // same prompt. The event_msg is already the renderer-facing text, so let it replace the
         // immediately preceding response_item boundary instead of showing the turn twice.
-        if (responsePromptIndex >= 0 && responsePromptIndex === events.length - 1) events[responsePromptIndex] = prompt;
+        if (adjacentResponsePromptIndex >= 0 && adjacentResponsePromptIndex === events.length - 1) events[adjacentResponsePromptIndex] = prompt;
         else events.push(prompt);
       }
-      responsePromptIndex = -1;
     } else if (obj.type === 'response_item') {
       const label = codexResponseItemPrompt(payload);
       if (label) {
@@ -204,7 +210,6 @@ function parseCodexTranscript(text) {
       if (tokens.total === 0) { pendingTools = []; continue; } // empty bookkeeping tick — skip
       events.push({ kind: 'turn', timestamp: obj.timestamp || '', tokens, tools: uniqueTools(pendingTools) });
       pendingTools = [];
-      responsePromptIndex = -1;
     }
   }
   return events;
