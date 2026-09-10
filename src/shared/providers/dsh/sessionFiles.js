@@ -50,6 +50,35 @@ function readFileHead(filePath, bytes = HEADER_READ_BYTES) {
 }
 
 const DSH_SESSION_LOG_NAMES = new Set(['session.jsonl', 'session.jsonl.zstd']);
+// A transcript's file name is optional-versioned: the pair above is what DSH
+// wrote up to v2, but a v3+ harness re-encodes the same session into a NEW file
+// (`session.v3.jsonl.zstd`) instead of rotating the old one — which is why a
+// fixed name list silently stopped finding live sessions (2026-09-10: a full
+// day of deepseek-v4.1-flash usage missing from both the widget and tokscale,
+// whose own dsh reader still matches only the unversioned pair). Matching the
+// version segment generically means the next rename is a segment, not a code
+// path.
+// Matches the harness's own `session.v<N>.<ext>` convention (observed: v3) rather
+// than any `session.<something>` sibling, so an unrelated file dropped into a
+// session directory cannot be mistaken for a transcript. A future rename that
+// stops being numeric would have to widen this pattern.
+const DSH_SESSION_LOG_PATTERN = /^session(?:\.v?\d+)?\.jsonl(?:\.zstd)?$/;
+
+function isDshSessionLogName(name) {
+  const value = String(name || '');
+  return DSH_SESSION_LOG_NAMES.has(value) || DSH_SESSION_LOG_PATTERN.test(value);
+}
+
+// Higher rank = preferred when one session directory holds several transcripts.
+// A v3 upgrade leaves the pre-upgrade file in place next to the re-encoded one,
+// so the versioned file is the live transcript and has to win the first match.
+function dshSessionLogRank(name) {
+  if (!isDshSessionLogName(name)) return -1;
+  // dsh spells the segment `v3` (session.v3.jsonl.zstd), so accept the
+  // optional `v`: the number is what orders two transcripts of one session.
+  const versioned = /^session\.v?(\d+)\.jsonl/.exec(String(name || ''));
+  return versioned ? Number(versioned[1]) : 0;
+}
 const DSH_SESSION_DIR_DEPTH = 2; // <root>/<project>/<session>/<artifact>
 const ZSTD_MAGIC = 0xFD2FB528;
 
@@ -73,7 +102,11 @@ function resolveDshSessionsRoot(options = {}) {
 }
 
 function dshSessionFiles(root) {
-  const files = [];
+  // Collected per directory so a session holding several transcripts yields its
+  // live one first: every caller that stops at the first match (session detail,
+  // the header index) then reads the same file, while callers that aggregate
+  // usage walk all of them and dedupe by event.
+  const byDir = new Map();
   const stack = [{ dir: root, depth: 0 }];
   while (stack.length > 0) {
     const { dir, depth } = stack.pop();
@@ -86,10 +119,17 @@ function dshSessionFiles(root) {
     for (const entry of entries) {
       if (entry.isDirectory()) {
         if (depth < DSH_SESSION_DIR_DEPTH) stack.push({ dir: path.join(dir, entry.name), depth: depth + 1 });
-      } else if (entry.isFile() && DSH_SESSION_LOG_NAMES.has(entry.name)) {
-        files.push(path.join(dir, entry.name));
+      } else if (entry.isFile() && isDshSessionLogName(entry.name)) {
+        const names = byDir.get(dir);
+        if (names) names.push(entry.name);
+        else byDir.set(dir, [entry.name]);
       }
     }
+  }
+  const files = [];
+  for (const [dir, names] of byDir) {
+    names.sort((a, b) => (dshSessionLogRank(b) - dshSessionLogRank(a)) || (a < b ? -1 : a > b ? 1 : 0));
+    for (const name of names) files.push(path.join(dir, name));
   }
   return files;
 }
@@ -273,7 +313,9 @@ function indexDshSessionHeaders(options = {}) {
   const index = new Map();
   for (const filePath of dshSessionFiles(root)) {
     const header = readDshSessionHeader(filePath);
-    if (header) index.set(header.id, { filePath, createdAt: header.createdAt });
+    // First wins: dshSessionFiles() lists a session's live transcript first, and a
+    // v3 upgrade leaves an older re-encode of the same id right beside it.
+    if (header && !index.has(header.id)) index.set(header.id, { filePath, createdAt: header.createdAt });
   }
   return index;
 }
@@ -281,10 +323,13 @@ function indexDshSessionHeaders(options = {}) {
 module.exports = {
   DSH_SESSION_DIR_DEPTH,
   DSH_SESSION_LOG_NAMES,
+  DSH_SESSION_LOG_PATTERN,
   decodeFirstFrameText,
   decodeSessionText,
   dshSessionFiles,
+  dshSessionLogRank,
   indexDshSessionHeaders,
+  isDshSessionLogName,
   readDshSessionHeader,
   resolveDshSessionsRoot,
   scanZstdFrames,

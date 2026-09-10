@@ -358,3 +358,23 @@ test('readDshSessionDetail dedups an identical replayed assistant/message', () =
   assert.equal(detail.exchanges.length, 1);
   assert.equal(detail.totals.totalTokens, 15);
 });
+
+// Same root cause as the aggregate read: the harness's v3 transcript name was
+// not one the file list matched, so a session written after the upgrade could
+// not be opened at all. The versioned name is matched uncompressed here so this
+// stays runnable without a zstd implementation; the compressed path is covered
+// by dshSessionFiles.test.js.
+test('readDshSessionDetail opens a session stored under the versioned name', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-v3-'));
+  const dir = path.join(root, 'proj', 'session-v3');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'session.v3.jsonl'), `${[
+    JSON.stringify(sessionHeader({ id: 'session-v3' })),
+    JSON.stringify(userMessage({ seq: 1, text: 'hi' })),
+    JSON.stringify(assistantMessage({ seq: 2, usage: { inputTokens: 10, outputTokens: 5 } }))
+  ].join('\n')}\n`);
+
+  const detail = readDshSessionDetail({ sessionId: 'session-v3', sessionsRoot: root, home: '/home/tester', env: {} });
+  assert.equal(detail.found, true);
+  assert.equal(detail.totals.totalTokens, 15);
+});

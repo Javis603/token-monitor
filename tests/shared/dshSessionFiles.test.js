@@ -12,6 +12,9 @@ const {
   decodeFirstFrameText,
   decodeSessionText,
   dshSessionFiles,
+  dshSessionLogRank,
+  indexDshSessionHeaders,
+  isDshSessionLogName,
   readDshSessionHeader,
   resolveDshSessionsRoot,
   scanZstdFrames,
@@ -275,4 +278,54 @@ test('readDshSessionHeader falls back to the directory name when the header cann
   const found = readDshSessionHeader(filePath);
   assert.equal(found?.id, 'session-unreadable-header');
   assert.equal(found?.createdAt, undefined);
+});
+
+// A v3 harness re-encodes a session into `session.v3.jsonl.zstd` rather than
+// rotating the unversioned file, so a fixed name list stopped seeing every
+// session written after the upgrade — no aggregate usage and no openable
+// session detail. The version segment is matched generically, so the next
+// rename is a segment rather than a code path.
+test('dshSessionFiles accepts a versioned transcript name and rejects near-misses', () => {
+  assert.equal(isDshSessionLogName('session.jsonl'), true);
+  assert.equal(isDshSessionLogName('session.jsonl.zstd'), true);
+  assert.equal(isDshSessionLogName('session.v3.jsonl.zstd'), true);
+  assert.equal(isDshSessionLogName('session.v12.jsonl'), true);
+  assert.equal(isDshSessionLogName('session.jsonl.lock'), false);
+  assert.equal(isDshSessionLogName('audit.jsonl'), false);
+  assert.equal(isDshSessionLogName('session.v3.jsonl.zstd.tmp'), false);
+  assert.equal(isDshSessionLogName('session.3.jsonl.zstd'), true);
+  assert.ok(dshSessionLogRank('session.v3.jsonl.zstd') > dshSessionLogRank('session.jsonl.zstd'));
+  assert.ok(dshSessionLogRank('session.v12.jsonl') > dshSessionLogRank('session.v3.jsonl.zstd'));
+});
+
+test('dshSessionFiles lists a session live versioned transcript before its pre-upgrade copy', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-files-v3-'));
+  const dir = path.join(root, 'projA', 'session-1');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'session.jsonl.zstd'), Buffer.alloc(0));
+  fs.writeFileSync(path.join(dir, 'session.v3.jsonl.zstd'), Buffer.alloc(0));
+
+  // Order matters: every caller that stops at the first match (session detail)
+  // must land on the file the harness is still writing.
+  assert.deepEqual(dshSessionFiles(root), [
+    path.join(dir, 'session.v3.jsonl.zstd'),
+    path.join(dir, 'session.jsonl.zstd')
+  ]);
+});
+
+test('indexDshSessionHeaders prefers the versioned transcript of a session', { skip: !hasZstd }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-index-v3-'));
+  const dir = path.join(root, 'projA', 'session-1');
+  fs.mkdirSync(dir, { recursive: true });
+  const versioned = path.join(dir, 'session.v3.jsonl.zstd');
+  fs.writeFileSync(versioned, zlib.zstdCompressSync(Buffer.from(
+    `${JSON.stringify({ type: 'session', id: 'session-1', createdAt: 1750000000000 })}\n`,
+    'utf8'
+  )));
+  // The pre-upgrade copy has no createdAt: a stale re-encode must not shadow it.
+  fs.writeFileSync(path.join(dir, 'session.jsonl'), `${JSON.stringify({ type: 'session', id: 'session-1' })}\n`);
+
+  const index = indexDshSessionHeaders({ sessionsRoot: root });
+  assert.equal(index.get('session-1').filePath, versioned, 'the live transcript must win over the stale copy');
+  assert.equal(index.get('session-1').createdAt, 1750000000000);
 });
