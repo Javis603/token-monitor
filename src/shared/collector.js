@@ -43,7 +43,9 @@ const {
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
 const { claudeSessionRoots } = require('./providers/claude/paths');
+const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
+const codexSession = require('./providers/codex/sessionMetadata');
 const opencodeSession = require('./providers/opencode/session');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
 const {
@@ -959,7 +961,16 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     const lastUsedAt = lastJsonlTimestamp(filePath) || startedAt;
     const identity = resolveProjects ? projectIdentity(projectPathFromJsonl(filePath)) : {};
     const key = `${client}:${sessionId}`;
-    metadata.set(key, { startedAt, lastUsedAt, ...identity });
+    const title = client === 'claude'
+      ? claudeSessionMetadata.readSessionTitle(filePath, deps.claudeMetadataDeps)
+      : '';
+    metadata.set(key, {
+      ...(metadata.get(key) || {}),
+      startedAt,
+      lastUsedAt,
+      ...identity,
+      ...(title ? { title } : {})
+    });
     if (identity.projectId) resolvedSessionKeys.add(key);
   };
 
@@ -974,7 +985,8 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
       const lastUsedAt = meta.lastUsedAt || startedAt;
       const identity = resolveProjects ? projectIdentity(meta.projectPath) : {};
       const key = `opencode:${sessionId}`;
-      if (startedAt || lastUsedAt || identity.projectId) metadata.set(key, { startedAt, lastUsedAt, ...identity });
+      const title = String(meta.title || '').trim();
+      if (startedAt || lastUsedAt || identity.projectId || title) metadata.set(key, { startedAt, lastUsedAt, ...identity, title });
       if (identity.projectId) resolvedSessionKeys.add(key);
     }
   }
@@ -992,13 +1004,31 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   for (const [sessionId, filePath] of transcriptFiles) applyFile('claude', sessionId, filePath);
 
   const codexIds = byClient.get('codex') || new Set();
+  if (codexIds.size > 0) {
+    const readCodexMeta = deps.readCodexMeta || (deps.scopedHome
+      ? (ids) => codexSession.readSessionMetaForHome(ids, home, deps.codexDeps)
+      : (ids) => codexSession.readSessionMeta(ids, {
+        ...(deps.codexDeps || {}),
+        homeDir: home,
+        env: deps.env
+      }));
+    for (const [sessionId, meta] of readCodexMeta(codexIds)) {
+      const key = `codex:${sessionId}`;
+      metadata.set(key, { ...(metadata.get(key) || {}), ...meta });
+    }
+  }
+  const codexHome = codexSession.codexHomeDir({
+    homeDir: home,
+    env: deps.env,
+    useEnvRoot: !deps.scopedHome
+  });
   const missingCodexIds = new Set();
   for (const sessionId of codexIds) {
-    const filePath = codexSessionFile(home, sessionId);
+    const filePath = codexSessionFile(home, sessionId, { codexHome });
     if (filePath) applyFile('codex', sessionId, filePath);
     else missingCodexIds.add(sessionId);
   }
-  const codexFiles = findSessionFiles(path.join(home, '.codex', 'sessions'), missingCodexIds);
+  const codexFiles = findSessionFiles(path.join(codexHome, 'sessions'), missingCodexIds);
   for (const [sessionId, filePath] of codexFiles) applyFile('codex', sessionId, filePath);
 
   const kimiIds = byClient.get('kimi') || new Set();
@@ -1131,6 +1161,8 @@ function propagateTodayProjects(today, periods) {
         target.projectId = session.projectId;
         target.projectLabel = session.projectLabel;
       }
+      if (session.title && !target.title) target.title = session.title;
+      if (session.sessionKind && !target.sessionKind) target.sessionKind = session.sessionKind;
       if (session.startedAt && (!target.startedAt || Date.parse(session.startedAt) < Date.parse(target.startedAt))) {
         target.startedAt = session.startedAt;
       }
@@ -1151,6 +1183,8 @@ function applySessionTimestamps(periods, home, deps = {}) {
       if (meta.lastUsedAt && (!session.lastUsedAt || Date.parse(meta.lastUsedAt) > Date.parse(session.lastUsedAt))) session.lastUsedAt = meta.lastUsedAt;
       if (meta.projectId) session.projectId = meta.projectId;
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
+      if (meta.title) session.title = meta.title;
+      if (meta.sessionKind) session.sessionKind = meta.sessionKind;
     }
   }
 }

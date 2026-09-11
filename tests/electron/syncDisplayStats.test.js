@@ -102,6 +102,28 @@ test('composeLocalSyncStats can render a local device before the first hub snaps
   assert.equal(result.devices[0].deviceId, 'local');
 });
 
+test('composeLocalSyncStats restores local titles over a title-free hub device', () => {
+  const hubLocal = device('local', 10, {
+    today: usagePeriod('codex', '2026-07-16T10:00:00.000Z', 10)
+  });
+  const hubStats = aggregateDevices([hubLocal], 0, Date.parse('2026-07-16T10:01:00.000Z'));
+  const local = device('local', 10, {
+    today: usagePeriod('codex', '2026-07-16T10:00:00.000Z', 10)
+  });
+  const key = Object.keys(local.today.sessions)[0];
+  local.today.sessions[key].title = 'Local-only conversation title';
+  assert.ok(Object.values(hubStats.periods.today.sessions).every((session) => !String(session.title || '').trim()));
+
+  const result = composeLocalSyncStats(hubStats, local, {
+    nowMs: Date.parse('2026-07-16T10:01:00.000Z')
+  });
+
+  assert.equal(
+    Object.values(result.periods.today.sessions).find((session) => session.title)?.title,
+    'Local-only conversation title'
+  );
+});
+
 test('sync presentation selects recent activity from the local device, not a newer remote session', () => {
   const nowMs = Date.parse('2026-07-16T10:02:00.000Z');
   const local = device('local', 10, {

@@ -3,7 +3,12 @@
 const http = require('node:http');
 const path = require('node:path');
 const { URL } = require('node:url');
-const { aggregateDevices, mergeDeviceRecord, aggregateHistory } = require('../shared/usage');
+const {
+  aggregateDevices,
+  mergeDeviceRecord,
+  aggregateHistory,
+  stripSessionTextFromDeviceRecord
+} = require('../shared/usage');
 const { DEFAULT_STALE_AFTER_MS } = require('../shared/syncUploadInterval');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const {
@@ -102,7 +107,10 @@ function createHub({
     if (!payload || (!payload.deviceId && !payload.id)) {
       throw new Error('deviceId_required');
     }
-    const record = mergeDeviceRecord(store.devices[String(payload.deviceId || payload.id)], { ...payload, receivedAt: new Date().toISOString() });
+    const deviceId = String(payload.deviceId || payload.id);
+    const existing = stripSessionTextFromDeviceRecord(store.devices[deviceId]);
+    const incoming = stripSessionTextFromDeviceRecord(payload);
+    const record = mergeDeviceRecord(existing, { ...incoming, receivedAt: new Date().toISOString() });
     store.devices[record.deviceId] = record;
     persist();
     broadcastStats('ingest');

@@ -1,7 +1,12 @@
 import { publicLimits } from './shared/limits/core.js';
 import subscriptionDisplay from './shared/subscriptionDisplay.js';
 import currency from './shared/currency.js';
-import { aggregateDevices, mergeDeviceRecord, aggregateHistory } from './shared/usage.js';
+import {
+  aggregateDevices,
+  mergeDeviceRecord,
+  aggregateHistory,
+  stripSessionTextFromDeviceRecord
+} from './shared/usage.js';
 import { DEFAULT_STALE_AFTER_MS } from './shared/syncUploadInterval.js';
 import { deviceHistoryRevision, historyPreview, historyRevision } from './shared/history.js';
 import hubBuildIdentity from './shared/hubBuildIdentity.js';
@@ -230,8 +235,9 @@ export class HubDO {
       catch (error) { return jsonResponse(400, { error: 'bad_request', message: error.message }); }
       if (!payload.deviceId && !payload.id) return jsonResponse(400, { error: 'deviceId_required' });
       const deviceId = String(payload.deviceId || payload.id);
-      const existing = await this.state.storage.get(`dev:${deviceId}`);
-      const record = mergeDeviceRecord(existing, { ...payload, receivedAt: new Date().toISOString() });
+      const existing = stripSessionTextFromDeviceRecord(await this.state.storage.get(`dev:${deviceId}`));
+      const incoming = stripSessionTextFromDeviceRecord(payload);
+      const record = mergeDeviceRecord(existing, { ...incoming, receivedAt: new Date().toISOString() });
       await this.state.storage.put(`dev:${record.deviceId}`, record);
       this.broadcast('ingest').catch(() => {});
       return jsonResponse(200, { ok: true, deviceId: record.deviceId, stats: await this.statsWithSubscriptionVersion() });
@@ -303,7 +309,11 @@ function publicPeriods(periods) {
     return [name, {
       ...safePeriod,
       sessions: Object.fromEntries(Object.entries(period?.sessions || {}).map(([key, session]) => {
-      const { projectId, projectLabel, projectPath, ...safe } = session;
+      const {
+        projectId, projectLabel, projectPath,
+        title, sessionTitle, session_title, name, preview, firstUserMessage, first_user_message,
+        ...safe
+      } = session;
       return [key, safe];
       }))
     }];

@@ -91,6 +91,27 @@ test('resolves a codex session via the walk fallback when the id is not a dated 
   } finally { cleanup(home); }
 });
 
+test('resolves Codex sessions from CODEX_HOME and ignores it for a scoped home', () => {
+  const home = tmpHome();
+  const configured = path.join(home, 'configured-codex');
+  try {
+    const id = 'custom-codex-session';
+    const dir = path.join(configured, 'sessions', '2026', '09', '10');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${id}.jsonl`);
+    fs.writeFileSync(file, '{}\n');
+
+    assert.equal(resolveSessionFile('codex', id, home, {
+      env: { CODEX_HOME: configured },
+      useEnvRoots: true
+    }), file);
+    assert.equal(resolveSessionFile('codex', id, home, {
+      env: { CODEX_HOME: configured },
+      useEnvRoots: false
+    }), '');
+  } finally { cleanup(home); }
+});
+
 test('returns empty string when not found or unknown client', () => {
   const home = tmpHome();
   try {
