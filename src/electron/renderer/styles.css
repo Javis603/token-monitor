@@ -3267,6 +3267,40 @@ html.is-windows .settings-panel select option {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+/* The grid-line class originates in dashboard.css, which this window never loads. */
+.live-rate-line-chart .grid-line {
+  stroke: rgba(var(--line-rgb), 0.07);
+  stroke-width: 1;
+}
+.home-live-rate-plot {
+  position: relative;
+  padding-left: 34px;
+}
+.home-live-rate-value {
+  margin-bottom: 2px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.home-live-rate-value.is-idle {
+  color: var(--muted);
+}
+.home-live-rate-scale {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: flex;
+  width: 30px;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 0.5px 0;
+  color: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: right;
+}
 .home-live-rate-axis {
   display: grid;
   min-width: 0;
