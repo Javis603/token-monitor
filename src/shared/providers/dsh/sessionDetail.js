@@ -81,6 +81,15 @@ function usageTokens(usage) {
   });
 }
 
+function lastStreamUsage(stream) {
+  if (!Array.isArray(stream)) return null;
+  for (let index = stream.length - 1; index >= 0; index -= 1) {
+    const usage = stream[index]?.chunk?.usage;
+    if (usage && typeof usage === 'object') return usage;
+  }
+  return null;
+}
+
 function parseDshDetailEvents(text) {
   const events = [];
   // dsh's own persistence layer can replay an already-flushed line back into
@@ -157,9 +166,19 @@ function parseDshDetailEvents(text) {
       if (record.data?.source?.kind !== 'user') continue;
       const promptText = promptFromContent(record.data?.content);
       if (promptText) events.push({ kind: 'prompt', timestamp: new Date(time).toISOString(), text: promptText });
-    } else if (record?.type === 'assistant/message' || record?.type === 'compaction/summary') {
+    } else if (record?.type === 'assistant/message'
+      || record?.type === 'assistant/attempt'
+      || record?.type === 'compaction/summary') {
       const isSummary = record.type === 'compaction/summary';
-      const usage = record.data?.usage;
+      const isAttempt = record.type === 'assistant/attempt';
+      // Current DSH persists calls that never produced a surface message as
+      // assistant/attempt and keeps their final usage inside the embedded
+      // stream. A successful assistant/message normally promotes usage to the
+      // top level; that value is authoritative when present, with the stream as
+      // a fallback for partially-promoted/current records.
+      const usage = !isAttempt && record.data?.usage
+        ? record.data.usage
+        : lastStreamUsage(record.data?.stream);
       if (!usage) continue;
       const tokens = usageTokens(usage);
       if (tokens.total === 0) continue;
@@ -169,7 +188,7 @@ function parseDshDetailEvents(text) {
         ? `msg:${messageId}`
         : (recordSeq !== null ? `seq:${recordSeq}` : `sid:${header?.id || ''}`);
       const dedupKey = [
-        isSummary ? `summary:${identity}` : identity,
+        isSummary ? `summary:${identity}` : (isAttempt ? `attempt:${identity}` : identity),
         time, source?.provider || '', source?.model || '',
         tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite, tokens.reasoning
       ].join(':');
@@ -180,7 +199,7 @@ function parseDshDetailEvents(text) {
         : [];
       events.push({
         kind: 'turn',
-        type: isSummary ? 'compaction-summary' : 'reply',
+        type: isSummary ? 'compaction-summary' : (isAttempt ? 'assistant-attempt' : 'reply'),
         timestamp: new Date(time).toISOString(),
         tokens,
         tools

@@ -56,8 +56,10 @@ const DSH_SESSION_LOG_NAMES = new Set(['session.jsonl', 'session.jsonl.zstd']);
 // fixed name list silently stopped finding live sessions (2026-09-10: a full
 // day of deepseek-v4.1-flash usage missing from the widget before its tokscale
 // vendor and Session Detail discovery were updated). Matching the version
-// segment generically means the next canonical generation is data, not a new
-// code path.
+// segment generically lets discovery select the canonical live artifact. The
+// detail parser then reads recognized event shapes best-effort; accepting the
+// filename is deliberately not a promise that every future event semantic is
+// understood.
 // Matches the harness's own `session.v<N>.<ext>` convention (observed: v3) rather
 // than any `session.<something>` sibling, so an unrelated file dropped into a
 // session directory cannot be mistaken for a transcript. A future rename that

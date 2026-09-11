@@ -28,9 +28,10 @@
 
   function turnRow(turn, index, replyIndex) {
     const isCompactionSummary = turn.type === 'compaction-summary';
+    const isAssistantAttempt = turn.type === 'assistant-attempt';
     return {
       key: `turn:${index}`,
-      label: isCompactionSummary ? 'Compaction summary' : `Reply #${replyIndex + 1}`,
+      label: isCompactionSummary ? 'Compaction summary' : (isAssistantAttempt ? 'Model attempt' : `Reply #${replyIndex + 1}`),
       value: finiteNumber(turn.tokens && turn.tokens.total),
       tokensAvailable: turn.tokensAvailable !== false,
       cost: finiteNumber(turn.costEstimate),
@@ -43,7 +44,7 @@
     let replyIndex = 0;
     return (turns || []).map((turn, index) => {
       const row = turnRow(turn, index, replyIndex);
-      if (turn.type !== 'compaction-summary') replyIndex += 1;
+      if (turn.type !== 'compaction-summary' && turn.type !== 'assistant-attempt') replyIndex += 1;
       return row;
     });
   }

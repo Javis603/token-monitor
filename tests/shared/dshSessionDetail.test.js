@@ -68,6 +68,23 @@ function assistantMessage({ seq, usage, tools = [] }) {
   };
 }
 
+function streamUsage(inputTokens, outputTokens, extra = {}) {
+  return {
+    type: 'chunk',
+    time: BASE_TIME,
+    chunk: { type: 'usage', usage: { inputTokens, outputTokens, ...extra } }
+  };
+}
+
+function assistantAttempt({ seq, stream }) {
+  return {
+    type: 'assistant/attempt',
+    seq,
+    time: BASE_TIME + seq * 1000,
+    data: { turn: 1, step: 1, stream }
+  };
+}
+
 function compactionSummary({ seq, usage }) {
   return {
     type: 'compaction/summary',
@@ -181,6 +198,64 @@ test('readDshSessionDetail counts compaction summaries as real provider calls', 
   assert.deepEqual(detail.exchanges[0].turns.map((turn) => turn.type), ['compaction-summary', 'reply']);
   assert.equal(detail.totals.totalTokens, 100);
   assert.equal(detail.totals.turnCount, 1);
+});
+
+test('readDshSessionDetail counts a failed attempt before its successful retry', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  writeFixture(root, 'session-retry', [
+    sessionHeader({ id: 'session-retry', version: 3, isSeeded: false }),
+    userMessage({ seq: 1, text: 'try this' }),
+    assistantAttempt({
+      seq: 2,
+      stream: [
+        streamUsage(6, 1),
+        { type: 'chunk', time: BASE_TIME, chunk: { type: 'error', reason: 'stream-error' } },
+        streamUsage(10, 2)
+      ]
+    }),
+    assistantMessage({ seq: 3, usage: { inputTokens: 20, outputTokens: 5 } })
+  ], 'session.v3.jsonl');
+
+  const detail = readDshSessionDetail({
+    sessionId: 'session-retry', sessionsRoot: root, home: '/home/tester', env: {}
+  });
+  assert.equal(detail.exchanges[0].turnCount, 1);
+  assert.deepEqual(detail.exchanges[0].turns.map((turn) => turn.type), ['assistant-attempt', 'reply']);
+  assert.deepEqual(detail.exchanges[0].turns.map((turn) => turn.tokens.total), [12, 25]);
+  assert.equal(detail.totals.totalTokens, 37);
+  assert.equal(detail.totals.turnCount, 1);
+});
+
+test('readDshSessionDetail falls back to the last stream usage for assistant/message', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  const message = assistantMessage({ seq: 2, usage: undefined });
+  message.data.stream = [streamUsage(5, 1), streamUsage(10, 5)];
+  writeFixture(root, 'session-stream-message', [
+    sessionHeader({ id: 'session-stream-message', version: 3, isSeeded: false }),
+    userMessage({ seq: 1, text: 'hi' }),
+    message
+  ], 'session.v3.jsonl');
+
+  const detail = readDshSessionDetail({
+    sessionId: 'session-stream-message', sessionsRoot: root, home: '/home/tester', env: {}
+  });
+  assert.equal(detail.totals.totalTokens, 15);
+});
+
+test('readDshSessionDetail prefers assistant/message top-level usage over stream usage', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
+  const message = assistantMessage({ seq: 2, usage: { inputTokens: 10, outputTokens: 5 } });
+  message.data.stream = [streamUsage(100, 50)];
+  writeFixture(root, 'session-promoted-message', [
+    sessionHeader({ id: 'session-promoted-message', version: 3, isSeeded: false }),
+    userMessage({ seq: 1, text: 'hi' }),
+    message
+  ], 'session.v3.jsonl');
+
+  const detail = readDshSessionDetail({
+    sessionId: 'session-promoted-message', sessionsRoot: root, home: '/home/tester', env: {}
+  });
+  assert.equal(detail.totals.totalTokens, 15);
 });
 
 test('readDshSessionDetail namespaces summaries away from matching assistant calls', () => {
@@ -444,6 +519,21 @@ test('readDshSessionDetail opens a session stored under the versioned name', () 
   ].join('\n')}\n`);
 
   const detail = readDshSessionDetail({ sessionId: 'session-v3', sessionsRoot: root, home: '/home/tester', env: {} });
+  assert.equal(detail.found, true);
+  assert.equal(detail.totals.totalTokens, 15);
+});
+
+test('readDshSessionDetail best-effort parses recognized events in a future generation', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-future-'));
+  writeFixture(root, 'session-v12', [
+    sessionHeader({ id: 'session-v12', version: 12, isSeeded: false }),
+    userMessage({ seq: 1, text: 'future semantics' }),
+    assistantMessage({ seq: 2, usage: { inputTokens: 10, outputTokens: 5 } })
+  ], 'session.v12.jsonl');
+
+  const detail = readDshSessionDetail({
+    sessionId: 'session-v12', sessionsRoot: root, home: '/home/tester', env: {}
+  });
   assert.equal(detail.found, true);
   assert.equal(detail.totals.totalTokens, 15);
 });
