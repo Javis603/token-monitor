@@ -287,8 +287,8 @@ const LIVE_TOKEN_RATE_CLEAR_MS = 3 * 60 * 1000;
 // Home live-rate history: one point per accepted live-rate sample, kept for the
 // last few minutes. Points live in a plain array of {at, speed, burn}; a revision
 // gap (idle expiry, scope reset) emits a gap so the line does not bridge it.
-const HOME_LIVE_RATE_HISTORY_WINDOW_MS = 5 * 60 * 1000;
-const HOME_LIVE_RATE_HISTORY_MAX_POINTS = 200;
+const HOME_LIVE_RATE_HISTORY_WINDOW_MS = 15 * 60 * 1000;
+const HOME_LIVE_RATE_HISTORY_MAX_POINTS = 400;
 const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;
 const LIMIT_RESET_MOTION_EASING = 'cubic-bezier(0.333, 0.667, 0.667, 1)';
 const LIMIT_RESET_GLOW_MS = 700;
