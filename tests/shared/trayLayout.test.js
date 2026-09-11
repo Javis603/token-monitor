@@ -11,6 +11,7 @@ const {
   createTrayLayoutItem,
   formatResetCountdown,
   liveTokenRateItems,
+  liveTokenRateItemsForSurfaces,
   moveTrayLayoutItem,
   normalizeTrayLayout,
   preferredRowProvider,
@@ -323,6 +324,23 @@ test('two-line information normalizes, discovers, and resolves live token rates'
   assert.equal(resolved.rows[0].available, true);
   assert.equal(resolved.rows[0].provider, 'app');
   assert.equal(preferredRowProvider(resolved.rows, 0), 'app');
+});
+
+test('live token rate discovery combines enabled compact display surfaces', () => {
+  const single = createTrayLayoutItem('liveTokenRate', { idFactory: () => 'single-rate' });
+  single.rateScope = 'device';
+  const stacked = createTrayLayoutItem('doubleInfo', { idFactory: () => 'stacked-rate' });
+  stacked.rows[1] = { metric: 'liveTokenRate', rateMode: 'burn', rateScope: 'all' };
+
+  assert.deepEqual(liveTokenRateItemsForSurfaces([
+    { enabled: true, content: 'liveTokenRate' },
+    { enabled: true, content: 'custom', layout: { version: 3, items: [single, stacked] } },
+    { enabled: false, content: 'liveTokenRate' }
+  ]), [
+    { metric: 'liveTokenRate', rateMode: 'speed', rateScope: 'all' },
+    normalizeTrayLayout({ version: 3, items: [single] }).items[0],
+    normalizeTrayLayout({ version: 3, items: [stacked] }).items[0].rows[1]
+  ]);
 });
 
 test('custom text items normalize and resolve without quota data', () => {

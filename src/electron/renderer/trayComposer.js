@@ -336,10 +336,7 @@
         heading.textContent = l(`trayComposer.group.${group.id}`, fallbackGroup);
         const grid = document.createElement('div');
         grid.className = 'tray-composer-gallery-grid';
-        const styles = surface === 'tray'
-          ? group.styles
-          : group.styles.filter((style) => style !== 'liveTokenRate');
-        for (const style of styles) {
+        for (const style of group.styles) {
           const choice = button('tray-composer-gallery-choice', '', () => {
             const next = layoutApi.appendTrayLayoutItem(layout(), style);
             selectedId = next.items.at(-1)?.id || '';
@@ -676,7 +673,7 @@
       );
     }
 
-    function textMetricChoices({ includeLiveTokenRate = surface === 'tray' } = {}) {
+    function textMetricChoices() {
       const choices = [
         { value: 'percent', style: 'percent' },
         { value: 'percentReset', style: 'percentReset' },
@@ -685,9 +682,7 @@
         { value: 'cost', style: 'cost' },
         { value: 'liveTokenRate', style: 'liveTokenRate' }
       ];
-      return choices
-        .filter((entry) => includeLiveTokenRate || entry.value !== 'liveTokenRate')
-        .map((entry) => ({ ...entry, label: styleTitle(entry.style) }));
+      return choices.map((entry) => ({ ...entry, label: styleTitle(entry.style) }));
     }
 
     function liveTokenRateEditor(item, rowIndex = 0) {
@@ -775,7 +770,7 @@
       }
       const metric = options.includeMetric === true ? source.metric : item.metric;
       if (options.includeMetric === true) {
-        const metrics = textMetricChoices({ includeLiveTokenRate: options.includeLiveTokenRate !== false });
+        const metrics = textMetricChoices();
         section.append(picker(
           l('trayComposer.textMetric', 'Text'),
           metrics,
@@ -1117,8 +1112,7 @@
               includeValue: item.type === 'bars'
                 || item.metric === 'percent'
                 || sourceForItem(item, index).metric === 'percent'
-                || sourceForItem(item, index).metric === 'percentReset',
-              includeLiveTokenRate: surface === 'tray'
+                || sourceForItem(item, index).metric === 'percentReset'
             }
           ));
         });
