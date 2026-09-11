@@ -293,7 +293,7 @@ test('dshSessionFiles accepts a versioned transcript name and rejects near-misse
   assert.equal(isDshSessionLogName('session.jsonl.lock'), false);
   assert.equal(isDshSessionLogName('audit.jsonl'), false);
   assert.equal(isDshSessionLogName('session.v3.jsonl.zstd.tmp'), false);
-  assert.equal(isDshSessionLogName('session.3.jsonl.zstd'), true);
+  assert.equal(isDshSessionLogName('session.3.jsonl.zstd'), false);
   assert.ok(dshSessionLogRank('session.v3.jsonl.zstd') > dshSessionLogRank('session.jsonl.zstd'));
   assert.ok(dshSessionLogRank('session.v12.jsonl') > dshSessionLogRank('session.v3.jsonl.zstd'));
 });

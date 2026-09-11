@@ -54,15 +54,15 @@ const DSH_SESSION_LOG_NAMES = new Set(['session.jsonl', 'session.jsonl.zstd']);
 // wrote up to v2, but a v3+ harness re-encodes the same session into a NEW file
 // (`session.v3.jsonl.zstd`) instead of rotating the old one — which is why a
 // fixed name list silently stopped finding live sessions (2026-09-10: a full
-// day of deepseek-v4.1-flash usage missing from both the widget and tokscale,
-// whose own dsh reader still matches only the unversioned pair). Matching the
-// version segment generically means the next rename is a segment, not a code
-// path.
+// day of deepseek-v4.1-flash usage missing from the widget before its tokscale
+// vendor and Session Detail discovery were updated). Matching the version
+// segment generically means the next canonical generation is data, not a new
+// code path.
 // Matches the harness's own `session.v<N>.<ext>` convention (observed: v3) rather
 // than any `session.<something>` sibling, so an unrelated file dropped into a
 // session directory cannot be mistaken for a transcript. A future rename that
 // stops being numeric would have to widen this pattern.
-const DSH_SESSION_LOG_PATTERN = /^session(?:\.v?\d+)?\.jsonl(?:\.zstd)?$/;
+const DSH_SESSION_LOG_PATTERN = /^session(?:\.v\d+)?\.jsonl(?:\.zstd)?$/;
 
 function isDshSessionLogName(name) {
   const value = String(name || '');
@@ -74,10 +74,29 @@ function isDshSessionLogName(name) {
 // so the versioned file is the live transcript and has to win the first match.
 function dshSessionLogRank(name) {
   if (!isDshSessionLogName(name)) return -1;
-  // dsh spells the segment `v3` (session.v3.jsonl.zstd), so accept the
-  // optional `v`: the number is what orders two transcripts of one session.
-  const versioned = /^session\.v?(\d+)\.jsonl/.exec(String(name || ''));
+  // dsh spells positive generations with the `v` prefix
+  // (`session.v3.jsonl.zstd`); the number orders two transcripts of one
+  // session using the same discovery contract as the pinned tokscale build.
+  const versioned = /^session\.v(\d+)\.jsonl/.exec(String(name || ''));
   return versioned ? Number(versioned[1]) : 0;
+}
+
+function sortDshSessionLogNames(names) {
+  return names.sort((a, b) => (dshSessionLogRank(b) - dshSessionLogRank(a)) || (a < b ? -1 : a > b ? 1 : 0));
+}
+
+function preferredDshSessionFileInDirectory(dir) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (_) {
+    return null;
+  }
+  const names = entries
+    .filter((entry) => entry.isFile() && isDshSessionLogName(entry.name))
+    .map((entry) => entry.name);
+  sortDshSessionLogNames(names);
+  return names.length > 0 ? path.join(dir, names[0]) : null;
 }
 const DSH_SESSION_DIR_DEPTH = 2; // <root>/<project>/<session>/<artifact>
 const ZSTD_MAGIC = 0xFD2FB528;
@@ -128,7 +147,7 @@ function dshSessionFiles(root) {
   }
   const files = [];
   for (const [dir, names] of byDir) {
-    names.sort((a, b) => (dshSessionLogRank(b) - dshSessionLogRank(a)) || (a < b ? -1 : a > b ? 1 : 0));
+    sortDshSessionLogNames(names);
     for (const name of names) files.push(path.join(dir, name));
   }
   return files;
@@ -330,6 +349,7 @@ module.exports = {
   dshSessionLogRank,
   indexDshSessionHeaders,
   isDshSessionLogName,
+  preferredDshSessionFileInDirectory,
   readDshSessionHeader,
   resolveDshSessionsRoot,
   scanZstdFrames,

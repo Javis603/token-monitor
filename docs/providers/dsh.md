@@ -44,9 +44,10 @@ transcript before its stale predecessor. Callers that stop at the first match (S
 the header index used for session timestamps) therefore read the file the harness is still
 writing, and a session whose only transcript is versioned is found at all.
 
-This matters even for the tokscale-backed usage plane: tokscale's own reader only matches the
-unversioned names as of 4.15.1, which is tracked upstream — the widget's local discovery must
-not wait for that fix to open a session.
+Token Monitor's pinned tokscale build uses the same canonical generic-version matcher. Keeping
+the two discovery rules aligned means a transcript visible in dashboard usage can also be opened
+in Session Detail. The npm 4.15.1 base predates this support; the vendor override supplies it
+until an official tokscale release includes the fix.
 
 ## Session Detail
 
@@ -69,9 +70,8 @@ tokens.
 
 ## Usage totals stay on the tokscale path
 
-The collector does not read dsh transcripts for period or dashboard totals. When the pinned
-tokscale build learns the versioned name, the sessions become visible through the normal scan
-with no widget-side change:
+The collector does not read dsh transcripts for period or dashboard totals. The pinned tokscale
+build already discovers the versioned name, so those sessions stay on the normal usage path:
 
 - tokscale's `dsh.rs` parses these records correctly once they are exposed under a name it
   matches — verified by exposing a v3 transcript under the unversioned name, which reproduced
@@ -81,6 +81,5 @@ with no widget-side change:
   matched names still report one session's count, and so does a partial copy beside a complete
   one).
 
-One caveat for that fix: tokscale resolves DSH from the `DSH_HOME` environment variable, so
-`--home <dir>` does not redirect it. A per-home scan (the WSL path) therefore keeps reading the
-host's `~/.dsh` unless `DSH_HOME` is set for the child process.
+Native scans honor `DSH_HOME`. An explicit `--home <dir>` disables host environment roots and
+uses `<dir>/.dsh` instead, so per-home WSL scans remain scoped to the requested distro home.

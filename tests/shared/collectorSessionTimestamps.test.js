@@ -360,6 +360,49 @@ test('applySessionTimestamps does not re-walk the DSH tree for already-known ses
   }
 });
 
+test('applySessionTimestamps promotes a cached unversioned DSH path when a versioned transcript appears', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-generation-cache-'));
+  try {
+    const id = 'session-upgraded';
+    const dir = path.join(home, '.dsh', 'sessions', 'proj', id);
+    fs.mkdirSync(dir, { recursive: true });
+    const header = `${JSON.stringify({ type: 'session', id, createdAt: 1750000000000 })}\n`;
+    const unversioned = path.join(dir, 'session.jsonl');
+    fs.writeFileSync(unversioned, header);
+    const oldMtime = new Date('2026-07-01T10:00:00.000Z');
+    fs.utimesSync(unversioned, oldMtime, oldMtime);
+
+    let indexCalls = 0;
+    const cache = {
+      metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set(),
+      dshSessionFileCache: new Map(), retryMisses: true,
+      indexDshSessionHeaders(options) {
+        indexCalls += 1;
+        return indexDshSessionHeaders(options);
+      }
+    };
+    const tick = () => {
+      const periods = { today: { sessions: { [`dsh:${id}`]: { client: 'dsh', sessionId: id } } } };
+      applySessionTimestamps(periods, home, cache);
+      return periods.today.sessions[`dsh:${id}`];
+    };
+
+    assert.equal(tick().lastUsedAt, oldMtime.toISOString());
+    assert.equal(indexCalls, 1);
+
+    const versioned = path.join(dir, 'session.v3.jsonl');
+    fs.writeFileSync(versioned, header);
+    const newMtime = new Date('2026-07-01T11:00:00.000Z');
+    fs.utimesSync(versioned, newMtime, newMtime);
+
+    assert.equal(tick().lastUsedAt, newMtime.toISOString());
+    assert.equal(indexCalls, 1, 'generation promotion must not re-walk the whole sessions tree');
+    assert.equal([...cache.dshSessionFileCache.values()][0].filePath, versioned);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 // The test above proves sessionTimestampMap's own caching logic works when a
 // caller shares one deps object across calls — but collectUsageOnce (what a
 // real collector tick actually calls) used to rebuild dshSessionFileCache

@@ -6,9 +6,20 @@
  * The durable log is the source of truth; prompts and per-step usage are read
  * only when the user opens a session in the widget and are never uploaded.
  *
- * Record-level parsing (which lines count, fork seeding, replayed-line dedupe)
- * lives in one place — dshTranscriptRecords below — so parseDshDetailEvents is a
- * thin projection over it rather than a second reading of the same format.
+ * Two things a naive per-line parse gets wrong on real dsh transcripts:
+ *
+ * - `user/message` events are not all user-typed prompts. `data.source.kind`
+ *   is `user` for what the person actually typed, but also `agent-instructions`
+ *   (a full AGENTS.md dump), `plugin` (runtime-context snapshots) and
+ *   `skill-catalog` (the available-skills list) for harness-injected context.
+ *   Only `kind === 'user'` may become a prompt bubble.
+ * - A forked session's log is seeded with a byte-for-byte copy of its parent's
+ *   events up to `session.seedLength` (the `seq` of the `session/end-seed`
+ *   marker). Tokscale's own aggregate leaves that seeded prefix on the parent
+ *   and counts only the fork's own new events; Session Detail must match, or
+ *   opening a forked session shows more tokens than tokscale's own count for
+ *   it (measured up to +52.7% total across a small real sample dominated by
+ *   one heavily-forked session).
  */
 
 const fs = require('node:fs');
@@ -71,39 +82,15 @@ function usageTokens(usage) {
   });
 }
 
-// One pass over a transcript's records, returning the parsed `session` header
-// plus normalized entries — either a prompt (`kind: 'prompt'`) or one billable
-// model call (`kind: 'usage'`). parseDshDetailEvents below is a projection over
-// this, so the rules that decide which records count are stated once.
-//
-// Everything in here exists because tokscale's dsh.rs does it too, and a second
-// implementation that got it slightly wrong would disagree with the totals the
-// dashboard already reports for the same session:
-//
-// - `user/message` events are not all user-typed prompts. `data.source.kind`
-//   is `user` for what the person actually typed, but also `agent-instructions`
-//   (a full AGENTS.md dump), `plugin` (runtime-context snapshots) and
-//   `skill-catalog` (the available-skills list) for harness-injected context.
-//   Only `kind === 'user'` may become a prompt bubble.
-// - A forked session's log is seeded with a byte-for-byte copy of its parent's
-//   events up to `session.seedLength` (the `seq` of the `session/end-seed`
-//   marker). Tokscale's own aggregate leaves that seeded prefix on the parent
-//   and counts only the fork's own new events; Session Detail must match, or
-//   opening a forked session shows more tokens than tokscale's own count for
-//   it (measured up to +52.7% total across a small real sample dominated by
-//   one heavily-forked session).
-// - dsh's persistence layer can replay an already-flushed line back into the
-//   file (crash/retry on the writer side); tokscale's dsh parser guards against
-//   double-counting it with a dedup key of message identity + time + routing +
-//   token signature. Summaries get their own namespace so an otherwise-identical
-//   assistant call cannot suppress a real compaction charge.
-function dshTranscriptRecords(text, options = {}) {
-  const records = [];
+function parseDshDetailEvents(text) {
+  const events = [];
+  // dsh's own persistence layer can replay an already-flushed line back into
+  // the file (crash/retry on the writer side); tokscale's dsh parser guards
+  // against double-counting it with a dedup key of message identity + time +
+  // routing + token signature. Summaries get their own namespace so an
+  // otherwise-identical assistant call cannot suppress a real compaction
+  // charge.
   const seenUsageKeys = new Set();
-  // dsh names the transcript directory after the session id, mirroring
-  // tokscale's session_id_from_path fallback, so a torn or unreadable leading
-  // `session` event still resolves to the id its own directory names.
-  const fallbackSessionId = String(options.sessionId || '').trim();
   let header = null;
   let seedLength = null;
   for (const line of String(text || '').split(/\r?\n/)) {
@@ -125,7 +112,7 @@ function dshTranscriptRecords(text, options = {}) {
     // `type` independently, and seed_length simply stays its 0 default until
     // (if ever) a session record sets it. A torn or unreadable header must
     // not make an otherwise-parseable transcript report zero tokens — this
-    // is what the directory-name fallback is for.
+    // is what findDshSessionFile's directory-name fallback is for.
     //
     // A forked session's log is seeded with its parent's events verbatim.
     // Tokscale credits that shared prefix to the parent only, so Session
@@ -148,7 +135,7 @@ function dshTranscriptRecords(text, options = {}) {
     if (record?.type === 'user/message') {
       if (record.data?.source?.kind !== 'user') continue;
       const promptText = promptFromContent(record.data?.content);
-      if (promptText) records.push({ kind: 'prompt', timeMs: time, text: promptText });
+      if (promptText) events.push({ kind: 'prompt', timestamp: new Date(time).toISOString(), text: promptText });
     } else if (record?.type === 'assistant/message' || record?.type === 'compaction/summary') {
       const isSummary = record.type === 'compaction/summary';
       const usage = record.data?.usage;
@@ -159,7 +146,7 @@ function dshTranscriptRecords(text, options = {}) {
       const messageId = String(record.data?.message?.id || '').trim();
       const identity = messageId
         ? `msg:${messageId}`
-        : (recordSeq !== null ? `seq:${recordSeq}` : `sid:${header?.id || fallbackSessionId}`);
+        : (recordSeq !== null ? `seq:${recordSeq}` : `sid:${header?.id || ''}`);
       const dedupKey = [
         isSummary ? `summary:${identity}` : identity,
         time, source?.provider || '', source?.model || '',
@@ -170,41 +157,12 @@ function dshTranscriptRecords(text, options = {}) {
       const tools = !isSummary && Array.isArray(record.data?.message?.content)
         ? record.data.message.content.filter((block) => block && block.type === 'tool-call' && typeof block.name === 'string').map((block) => block.name)
         : [];
-      records.push({
-        kind: 'usage',
-        timeMs: time,
-        isSummary,
-        model: String(source?.model || '').trim(),
-        provider: String(source?.provider || '').trim(),
-        messageId,
-        seq: recordSeq,
-        tools,
-        tokens
-      });
-    }
-  }
-  return {
-    header,
-    sessionId: String(header?.id || fallbackSessionId || '').trim(),
-    records
-  };
-}
-
-// Session Detail's view of the same parse: prompt bubbles and per-turn token
-// totals. `parseDshDetailEvents` keeps that name and shape because the widget's
-// session-detail tests and renderer consume it directly.
-function parseDshDetailEvents(text) {
-  const events = [];
-  for (const record of dshTranscriptRecords(text).records) {
-    if (record.kind === 'prompt') {
-      events.push({ kind: 'prompt', timestamp: new Date(record.timeMs).toISOString(), text: record.text });
-    } else {
       events.push({
         kind: 'turn',
-        type: record.isSummary ? 'compaction-summary' : 'reply',
-        timestamp: new Date(record.timeMs).toISOString(),
-        tokens: record.tokens,
-        tools: record.tools
+        type: isSummary ? 'compaction-summary' : 'reply',
+        timestamp: new Date(time).toISOString(),
+        tokens,
+        tools
       });
     }
   }
