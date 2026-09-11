@@ -1,0 +1,252 @@
+'use strict';
+
+const fs = require('node:fs');
+const os = require('node:os');
+const { hashKey } = require('./hashKey');
+const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
+const codexSession = require('./providers/codex/sessionMetadata');
+const opencodeSession = require('./providers/opencode/session');
+const kimiSessionMetadata = require('./providers/kimi/sessionMetadata');
+const dshSessionMetadata = require('./providers/dsh/sessionMetadata');
+
+function isoFromDate(value) {
+  const date = value instanceof Date ? value : new Date(value || '');
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
+
+function timestampFromSessionId(id) {
+  const raw = String(id || '');
+  const isoMatch = raw.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/);
+  if (isoMatch) return isoFromDate(isoMatch[0]);
+  const localMatch = raw.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})[:-](\d{2})(?:[:-](\d{2}))?/);
+  if (!localMatch) return '';
+  const [, year, month, day, hour, minute, second = '0'] = localMatch;
+  return isoFromDate(new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
+}
+
+function readFileTail(filePath, bytes = 64 * 1024) {
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const stat = fs.fstatSync(fd);
+    const length = Math.min(bytes, stat.size);
+    const buffer = Buffer.alloc(length);
+    fs.readSync(fd, buffer, 0, length, Math.max(0, stat.size - length));
+    return buffer.toString('utf8');
+  } catch (_) {
+    return '';
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) {}
+    }
+  }
+}
+
+function timestampFromJsonLine(line) {
+  try {
+    const obj = JSON.parse(line);
+    return isoFromDate(obj.timestamp || obj.updatedAt || obj.updated_at || obj.createdAt || obj.created_at);
+  } catch (_) {
+    return '';
+  }
+}
+
+const projectPathCache = new Map();
+
+function projectPathFromJsonl(filePath) {
+  let text;
+  let cacheKey;
+  try {
+    const stat = fs.statSync(filePath);
+    cacheKey = `${stat.size}:${stat.mtimeMs}`;
+    const cached = projectPathCache.get(filePath);
+    if (cached?.key === cacheKey) return cached.value;
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      const size = Math.min(256 * 1024, fs.fstatSync(fd).size);
+      const buffer = Buffer.alloc(size);
+      fs.readSync(fd, buffer, 0, size, 0);
+      text = buffer.toString('utf8');
+    } finally { fs.closeSync(fd); }
+  } catch (_) { return ''; }
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const obj = JSON.parse(line);
+      const payload = obj.payload && typeof obj.payload === 'object' ? obj.payload : obj;
+      const value = payload.cwd || payload.project_path || payload.projectPath || payload.workingDirectory || payload.working_directory;
+      if (typeof value === 'string' && value.trim()) {
+        const result = value.trim();
+        projectPathCache.set(filePath, { key: cacheKey, value: result });
+        return result;
+      }
+    } catch (_) { /* skip partial or non-JSON lines */ }
+  }
+  projectPathCache.set(filePath, { key: cacheKey, value: '' });
+  return '';
+}
+
+function normalizeProjectPath(value) {
+  let normalized = String(value || '').trim().replace(/\\/g, '/');
+  if (!normalized) return '';
+  const windows = /^[a-z]:\//i.test(normalized) || normalized.startsWith('//');
+  const root = normalized === '/' || /^[a-z]:\/$/i.test(normalized);
+  if (!root) normalized = normalized.replace(/\/+$/, '');
+  return windows ? normalized.toLowerCase() : normalized;
+}
+
+function projectIdentity(value) {
+  const normalized = normalizeProjectPath(value);
+  if (!normalized) return {};
+  const root = normalized === '/' || /^[a-z]:\/$/i.test(normalized);
+  let displayPath = String(value || '').trim().replace(/\\/g, '/');
+  if (!root) displayPath = displayPath.replace(/\/+$/, '');
+  const label = root ? (normalized === '/' ? '/' : `${normalized[0].toUpperCase()}:\\`) : displayPath.split('/').pop();
+  return { projectId: hashKey('project', normalized), projectLabel: label };
+}
+
+// This cache intentionally outlives one collection tick, so idle JSONL
+// sessions do not need to be reopened.
+const jsonlTimestampCache = new Map();
+
+function lastJsonlTimestamp(filePath) {
+  let stat;
+  try { stat = fs.statSync(filePath); } catch (_) { return ''; }
+  const cacheKey = `${stat.size}:${stat.mtimeMs}`;
+  const cached = jsonlTimestampCache.get(filePath);
+  if (cached?.key === cacheKey) return cached.value;
+  const tail = readFileTail(filePath);
+  const lines = tail.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  let value = '';
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const timestamp = timestampFromJsonLine(lines[index]);
+    if (timestamp) { value = timestamp; break; }
+  }
+  if (!value) value = stat.mtime.toISOString();
+  jsonlTimestampCache.set(filePath, { key: cacheKey, value });
+  return value;
+}
+
+function fileSessionMetadata(sessionId, filePath, context, existing = {}) {
+  const { resolveProjects } = context;
+  const startedAt = timestampFromSessionId(sessionId);
+  const lastUsedAt = lastJsonlTimestamp(filePath) || startedAt;
+  const identity = resolveProjects ? projectIdentity(projectPathFromJsonl(filePath)) : {};
+  return {
+    ...existing,
+    startedAt,
+    lastUsedAt,
+    ...identity
+  };
+}
+
+// Every provider adapter accepts (Set<sessionId>, context) and returns a Map
+// keyed by bare session id. Storage-specific cache and refresh policy stays in
+// the adapter; the registry only owns selection and the common row contract.
+// retryAfterTimestampFallback preserves the providers whose metadata can arrive
+// after tokscale first exposes a session id. Kimi and unknown clients retain the
+// existing one-shot id-timestamp fallback.
+const SESSION_METADATA_RESOLVERS = new Map([
+  ['opencode', { resolve: opencodeSession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
+  ['claude', { resolve: claudeSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
+  ['codex', { resolve: codexSession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
+  ['kimi', { resolve: kimiSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: false }],
+  ['dsh', { resolve: dshSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }]
+]);
+
+function resolverDefinition(entry) {
+  return typeof entry === 'function' ? { resolve: entry, retryAfterTimestampFallback: false } : entry;
+}
+
+function sessionRefsForPeriods(periods) {
+  const refs = new Map();
+  for (const period of Object.values(periods || {})) {
+    for (const session of Object.values(period?.sessions || {})) {
+      if (!session?.client || !session?.sessionId) continue;
+      refs.set(`${session.client}:${session.sessionId}`, { client: session.client, sessionId: session.sessionId });
+    }
+  }
+  return refs;
+}
+
+function sessionMetadataMap(periods, home = os.homedir(), deps = {}) {
+  const refs = sessionRefsForPeriods(periods);
+  const metadata = deps.metadataCache || new Map();
+  const resolvedSessionKeys = deps.resolvedSessionKeys || new Set();
+  const attemptedSessionKeys = deps.attemptedSessionKeys || new Set();
+  const resolveProjects = deps.resolveProjects !== false;
+  const byClient = new Map();
+  for (const ref of refs.values()) {
+    const key = `${ref.client}:${ref.sessionId}`;
+    if (resolvedSessionKeys.has(key)) continue;
+    if (!deps.retryMisses && attemptedSessionKeys.has(key)) continue;
+    if (!byClient.has(ref.client)) byClient.set(ref.client, new Set());
+    byClient.get(ref.client).add(ref.sessionId);
+  }
+
+  const resolvers = deps.sessionMetadataResolvers || SESSION_METADATA_RESOLVERS;
+  const context = {
+    deps,
+    home,
+    metadata,
+    resolveProjects,
+    projectIdentity,
+    isoFromDate,
+    fileSessionMetadata: (sessionId, filePath, existing) => fileSessionMetadata(
+      sessionId,
+      filePath,
+      { deps, resolveProjects },
+      existing
+    )
+  };
+  for (const [client, entry] of resolvers) {
+    const sessionIds = byClient.get(client);
+    if (!sessionIds) continue;
+    const definition = resolverDefinition(entry);
+    if (typeof definition?.resolve !== 'function') continue;
+    const resolved = definition.resolve(sessionIds, context);
+    for (const [sessionId, meta] of resolved) {
+      const key = `${client}:${sessionId}`;
+      metadata.set(key, meta);
+      if (meta.projectId) resolvedSessionKeys.add(key);
+    }
+  }
+
+  for (const ref of refs.values()) {
+    const key = `${ref.client}:${ref.sessionId}`;
+    if (resolvedSessionKeys.has(key) || metadata.has(key)) continue;
+    const timestamp = timestampFromSessionId(ref.sessionId);
+    if (timestamp) metadata.set(key, { startedAt: timestamp, lastUsedAt: timestamp });
+    const definition = resolverDefinition(resolvers.get(ref.client));
+    if (!definition?.retryAfterTimestampFallback) resolvedSessionKeys.add(key);
+  }
+  for (const ref of refs.values()) attemptedSessionKeys.add(`${ref.client}:${ref.sessionId}`);
+  return metadata;
+}
+
+function applySessionMetadata(periods, home, deps = {}) {
+  const metadata = sessionMetadataMap(periods, home, deps);
+  for (const period of Object.values(periods || {})) {
+    for (const [key, session] of Object.entries(period?.sessions || {})) {
+      const meta = metadata.get(key);
+      if (!meta) continue;
+      if (meta.startedAt && (!session.startedAt || Date.parse(meta.startedAt) < Date.parse(session.startedAt))) session.startedAt = meta.startedAt;
+      if (meta.lastUsedAt && (!session.lastUsedAt || Date.parse(meta.lastUsedAt) > Date.parse(session.lastUsedAt))) session.lastUsedAt = meta.lastUsedAt;
+      if (meta.projectId) session.projectId = meta.projectId;
+      if (meta.projectLabel) session.projectLabel = meta.projectLabel;
+      if (meta.title) session.title = meta.title;
+      if (meta.sessionKind) session.sessionKind = meta.sessionKind;
+    }
+  }
+}
+
+module.exports = {
+  applySessionMetadata,
+  // Compatibility aliases for existing callers; metadata now includes titles,
+  // projects, and session kind in addition to timestamps.
+  applySessionTimestamps: applySessionMetadata,
+  projectIdentity,
+  projectPathFromJsonl,
+  sessionMetadataMap,
+  sessionTimestampMap: sessionMetadataMap
+};

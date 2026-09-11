@@ -13,8 +13,12 @@ const { installInProcessWatchHost } = require('../helpers/watchHost');
 installInProcessWatchHost(test);
 
 const collectorPath = require.resolve('../../src/shared/collector');
+const sessionMetadataPath = require.resolve('../../src/shared/sessionMetadata');
+const dshSessionMetadataPath = require.resolve('../../src/shared/providers/dsh/sessionMetadata');
 function freshCollector() {
   delete require.cache[collectorPath];
+  delete require.cache[sessionMetadataPath];
+  delete require.cache[dshSessionMetadataPath];
   return require(collectorPath);
 }
 
@@ -64,6 +68,41 @@ test('applySessionTimestamps enriches Codex sessions from the local metadata ind
   assert.equal(calls, 1);
   assert.equal(periods.today.sessions['codex:ordinary'].title, 'Fix session details');
   assert.equal(periods.today.sessions['codex:review'].sessionKind, 'background-review');
+});
+
+test('applySessionTimestamps dispatches metadata providers through the registry contract', () => {
+  const periods = { today: { sessions: {
+    'example:session-1': { client: 'example', sessionId: 'session-1' }
+  } } };
+  let receivedContext;
+  const sessionMetadataResolvers = new Map([[
+    'example',
+    (ids, context) => {
+      assert.deepEqual([...ids], ['session-1']);
+      receivedContext = context;
+      return new Map([['session-1', {
+        startedAt: '2026-09-11T08:00:00.000Z',
+        lastUsedAt: '2026-09-11T08:05:00.000Z',
+        title: 'Registry result'
+      }]]);
+    }
+  ]]);
+
+  applySessionTimestamps(periods, '/home/example', {
+    env: { EXAMPLE_HOME: '/example' },
+    sessionMetadataResolvers
+  });
+
+  assert.equal(receivedContext.home, '/home/example');
+  assert.equal(receivedContext.deps.env.EXAMPLE_HOME, '/example');
+  assert.equal(receivedContext.resolveProjects, true);
+  assert.deepEqual(periods.today.sessions['example:session-1'], {
+    client: 'example',
+    sessionId: 'session-1',
+    startedAt: '2026-09-11T08:00:00.000Z',
+    lastUsedAt: '2026-09-11T08:05:00.000Z',
+    title: 'Registry result'
+  });
 });
 
 test('applySessionTimestamps leaves non-opencode sessions to the file path (no DB reader call)', () => {

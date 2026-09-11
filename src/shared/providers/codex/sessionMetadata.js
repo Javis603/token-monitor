@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { findSessionFiles, codexSessionFile } = require('../../sessionFiles');
 
 let sqlite = null;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
@@ -151,6 +152,49 @@ function readSessionMetaForHome(sessionIds, homeDir, deps = {}) {
   return readSessionMeta(sessionIds, { ...deps, homeDir, useEnvRoot: false });
 }
 
+function resolveSessionMetadata(sessionIds, context) {
+  const { deps, home, metadata } = context;
+  const result = new Map();
+  const readMetadata = deps.readCodexMeta || (deps.scopedHome
+    ? (ids) => readSessionMetaForHome(ids, home, deps.codexDeps)
+    : (ids) => readSessionMeta(ids, {
+      ...(deps.codexDeps || {}),
+      homeDir: home,
+      env: deps.env
+    }));
+  for (const [sessionId, meta] of readMetadata(sessionIds)) {
+    result.set(sessionId, { ...(metadata.get(`codex:${sessionId}`) || {}), ...meta });
+  }
+
+  const codexHome = codexHomeDir({
+    homeDir: home,
+    env: deps.env,
+    useEnvRoot: !deps.scopedHome
+  });
+  const missingIds = new Set();
+  for (const sessionId of sessionIds) {
+    const filePath = codexSessionFile(home, sessionId, { codexHome });
+    if (filePath) {
+      result.set(sessionId, context.fileSessionMetadata(
+        sessionId,
+        filePath,
+        result.get(sessionId)
+      ));
+    } else {
+      missingIds.add(sessionId);
+    }
+  }
+  const files = findSessionFiles(path.join(codexHome, 'sessions'), missingIds);
+  for (const [sessionId, filePath] of files) {
+    result.set(sessionId, context.fileSessionMetadata(
+      sessionId,
+      filePath,
+      result.get(sessionId)
+    ));
+  }
+  return result;
+}
+
 module.exports = {
   TITLE_MAX_CODE_POINTS,
   cleanSessionTitle,
@@ -158,5 +202,6 @@ module.exports = {
   discoverDbPaths,
   threadIdCandidates,
   readSessionMeta,
-  readSessionMetaForHome
+  readSessionMetaForHome,
+  resolveSessionMetadata
 };

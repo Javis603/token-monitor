@@ -1,6 +1,8 @@
 'use strict';
 
 const fs = require('node:fs');
+const { claudeSessionRoots } = require('./paths');
+const { findSessionFiles } = require('../../sessionFiles');
 
 const TITLE_MAX_CODE_POINTS = 96;
 const TITLE_READ_CHUNK_BYTES = 256 * 1024;
@@ -142,9 +144,35 @@ function readSessionTitle(filePath, deps = {}) {
   }
 }
 
+function resolveSessionMetadata(sessionIds, context) {
+  const { deps, home, metadata } = context;
+  const result = new Map();
+  const roots = claudeSessionRoots({
+    homeDir: home,
+    env: deps.env,
+    useEnvRoots: !deps.scopedHome
+  });
+  const applyFile = (sessionId, filePath) => {
+    const meta = context.fileSessionMetadata(
+      sessionId,
+      filePath,
+      metadata.get(`claude:${sessionId}`)
+    );
+    const title = readSessionTitle(filePath, deps.claudeMetadataDeps);
+    result.set(sessionId, { ...meta, ...(title ? { title } : {}) });
+  };
+  const projectFiles = findSessionFiles(roots.projects, sessionIds);
+  for (const [sessionId, filePath] of projectFiles) applyFile(sessionId, filePath);
+  const missingIds = new Set([...sessionIds].filter((sessionId) => !projectFiles.has(sessionId)));
+  const transcriptFiles = findSessionFiles(roots.transcripts, missingIds);
+  for (const [sessionId, filePath] of transcriptFiles) applyFile(sessionId, filePath);
+  return result;
+}
+
 module.exports = {
   TITLE_MAX_CODE_POINTS,
   TITLE_READ_CHUNK_BYTES,
   cleanTitle,
-  readSessionTitle
+  readSessionTitle,
+  resolveSessionMetadata
 };
