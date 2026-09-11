@@ -62,6 +62,37 @@ test('Codex RPC terminates its app-server child when its parent signal aborts', 
   assert.equal(child.kills, 1);
 });
 
+test('Codex RPC starts app-server with an approval policy supported by current CLI', async () => {
+  const child = fakeRpcChild((request, respond) => {
+    if (request.method === 'initialize') respond({});
+    if (request.method === 'account/rateLimits/read') {
+      respond({
+        rateLimits: {
+          primary: { usedPercent: 10, resetsAt: '2026-07-22T12:00:00Z', windowDurationMins: 300 }
+        }
+      });
+    }
+    if (request.method === 'account/read') {
+      respond({ account: { email: 'user@example.com', planType: 'plus' } });
+    }
+  });
+  let spawnSpec;
+
+  await readCodexRpcWithCommand('codex', {
+    spawn: (command, args) => {
+      spawnSpec = { command, args };
+      return child;
+    },
+    platform: 'linux',
+    codexEmptyQuotaRetry: false
+  });
+
+  assert.deepEqual(spawnSpec, {
+    command: 'codex',
+    args: ['-s', 'read-only', '-a', 'never', 'app-server']
+  });
+});
+
 test('Codex RPC rejects a pending request when app-server stdin breaks', async () => {
   const child = fakeChild();
   const pending = readCodexRpcWithCommand('codex', {

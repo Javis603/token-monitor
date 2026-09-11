@@ -40,6 +40,30 @@ test('applySessionTimestamps fills OpenCode session start/last from injected DB 
   const s = periods.today.sessions['opencode:ses_abc'];
   assert.strictEqual(s.startedAt, '2026-06-04T10:00:00.000Z');
   assert.strictEqual(s.lastUsedAt, '2026-06-04T10:05:00.000Z');
+  assert.strictEqual(s.title, 'Greeting');
+});
+
+test('applySessionTimestamps enriches Codex sessions from the local metadata index', () => {
+  const periods = { today: { sessions: {
+    'codex:ordinary': { client: 'codex', sessionId: 'ordinary' },
+    'codex:review': { client: 'codex', sessionId: 'review' }
+  } } };
+  let calls = 0;
+
+  applySessionTimestamps(periods, '/no/such/home', {
+    readCodexMeta(ids) {
+      calls += 1;
+      assert.deepEqual([...ids].sort(), ['ordinary', 'review']);
+      return new Map([
+        ['ordinary', { title: 'Fix session details' }],
+        ['review', { sessionKind: 'background-review' }]
+      ]);
+    }
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(periods.today.sessions['codex:ordinary'].title, 'Fix session details');
+  assert.equal(periods.today.sessions['codex:review'].sessionKind, 'background-review');
 });
 
 test('applySessionTimestamps leaves non-opencode sessions to the file path (no DB reader call)', () => {

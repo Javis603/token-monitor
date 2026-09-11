@@ -595,7 +595,7 @@ struct WidgetViewModel: Equatable {
                 page: page,
                 title: provider.map { $0.displayName ?? WidgetFormat.provider($0.provider) } ?? WidgetL10n.text("Quota"),
                 primaryValue: provider.map(WidgetFormat.quotaValue) ?? WidgetL10n.text("Not configured"),
-                secondaryValue: provider?.windows.first?.resetsAt.map(WidgetFormat.reset) ?? "",
+                secondaryValue: provider?.windows.first.map(WidgetFormat.boundary) ?? "",
                 rows: snapshot.quota.dropFirst().map {
                     "\($0.displayName ?? WidgetFormat.provider($0.provider)) · \(WidgetFormat.quotaValue($0))"
                 }
@@ -785,10 +785,27 @@ enum WidgetFormat {
         return provider.displayStatus
     }
 
-    static func reset(_ date: Date) -> String {
-        let seconds = max(0, date.timeIntervalSinceNow)
+    static func boundary(_ window: WidgetLimitWindow) -> String {
+        guard let date = window.resetsAt else { return "" }
+        return boundary(date, kind: window.boundaryKind ?? "reset")
+    }
+
+    private static func boundary(_ date: Date, kind: String) -> String {
+        let interval = date.timeIntervalSinceNow
+        let seconds = max(0, interval)
         let days = Int(seconds / 86_400)
         let hours = Int(seconds.truncatingRemainder(dividingBy: 86_400) / 3_600)
+        if kind == "expiry" {
+            return days > 0
+                ? WidgetL10n.format("Expires in %lldd %lldh", days, hours)
+                : WidgetL10n.format("Expires in %lldh", hours)
+        }
+        if kind == "mixed" {
+            if interval <= 0 { return WidgetL10n.text("Changes now") }
+            return days > 0
+                ? WidgetL10n.format("Changes in %lldd %lldh", days, hours)
+                : WidgetL10n.format("Changes in %lldh", hours)
+        }
         return days > 0
             ? WidgetL10n.format("Reset in %lldd %lldh", days, hours)
             : WidgetL10n.format("Reset in %lldh", hours)

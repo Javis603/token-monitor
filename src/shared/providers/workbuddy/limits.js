@@ -10,6 +10,7 @@ const WORKBUDDY_DEFAULT_ENDPOINT = 'https://copilot.tencent.com';
 const WORKBUDDY_PERSONAL_PATH = '/v2/billing/meter/get-user-resource';
 const WORKBUDDY_ENTERPRISE_PATH = '/v2/billing/meter/get-enterprise-user-usage';
 const WORKBUDDY_PRODUCT_CODE = 'p_tcaca';
+const WORKBUDDY_PERSONAL_RANGE_MS = 101 * 365 * 24 * 60 * 60 * 1000;
 
 // WorkBuddy is the only provider reading a credential this way: Trae needs the
 // same precedence but its own stricter cleaner, so this stays local rather than
@@ -79,6 +80,15 @@ function toIso(value) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+function formatWorkbuddyDateTime(value) {
+  const date = new Date(value);
+  const pad = (part) => String(part).padStart(2, '0');
+  return [
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  ].join(' ');
+}
+
 function pickValue(source, keys) {
   if (!source || typeof source !== 'object') return null;
   for (const key of keys) {
@@ -129,9 +139,8 @@ function parsePersonalUsage(body) {
       continue;
     }
     const status = numberOrNull(pickValue(resource, ['Status', 'status']));
-    // Status 3 is an exhausted/expired resource package. It is returned by
-    // the endpoint even with OnlyValidPeriod=true, but it is not part of the
-    // currently spendable balance shown by WorkBuddy's website.
+    // The official client requests Status 3 packages for its wider UI, but
+    // those historical rows are not part of the currently spendable balance.
     if (status !== null && status !== 0) continue;
     candidateResources += 1;
     const total = numberOrNull(pickValue(resource, ['CycleCapacitySizePrecise', 'cycleCapacitySizePrecise']));
@@ -397,11 +406,12 @@ async function fetchWorkbuddyLimits(options = {}, deps = {}) {
           PageNumber: 1,
           PageSize: 100,
           ProductCode: WORKBUDDY_PRODUCT_CODE,
-          // The endpoint can return exhausted/expired packages even when
-          // OnlyValidPeriod is true. The website's spendable balance is the
-          // active Status=0 set, so avoid downloading the historical rows too.
-          Status: [0],
-          OnlyValidPeriod: true
+          // Match the server-side package selection used by WorkBuddy's
+          // desktop client. parsePersonalUsage still excludes Status 3 rows
+          // from the current spendable aggregate.
+          Status: [0, 3],
+          PackageEndTimeRangeBegin: formatWorkbuddyDateTime(now),
+          PackageEndTimeRangeEnd: formatWorkbuddyDateTime(now + WORKBUDDY_PERSONAL_RANGE_MS)
         })
       }, requestDeps);
     const usage = isEnterprise ? parseEnterpriseUsage(body) : parsePersonalUsage(body);

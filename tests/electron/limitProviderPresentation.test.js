@@ -6,6 +6,9 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
+const compactTokenApi = require('../../src/shared/compactTokens');
+const limitProviderOrderApi = require('../../src/electron/renderer/limitProviderOrder');
+const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 
 const {
@@ -60,6 +63,13 @@ test('limitProviderDisplayLabel normalizes short account labels without rewritin
 
 test('Zed plan labels omit only the redundant provider prefix', () => {
   assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Student'), 'Student');
+  // Z.ai subscription names repeat the provider heading ("GLM Coding Pro");
+  // only the tier remains. Z.ai-prefixed and ZCode plan names keep theirs.
+  assert.equal(limitProviderPlanDisplayLabel('zai', 'GLM Coding Pro'), 'Pro');
+  assert.equal(limitProviderPlanDisplayLabel('zai', 'GLM Coding Lite'), 'Lite');
+  assert.equal(limitProviderPlanDisplayLabel('zai', 'GLM Coding Max'), 'Max');
+  assert.equal(limitProviderPlanDisplayLabel('zai', 'Z.ai Max'), 'Z.ai Max');
+  assert.equal(limitProviderPlanDisplayLabel('zai', 'ZCode Start Plan'), 'ZCode Start Plan');
   assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Pro'), 'Pro');
   assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Pro Trial'), 'Pro Trial');
   assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Business'), 'Business');
@@ -266,7 +276,7 @@ test('Cursor limits render every normalized quota and format on-demand spend exp
   assert.doesNotMatch(windows, /visibleWindows = billingWindows\.length > 0 \? billingWindows : \[null\]/);
 });
 
-function runHomeLimitModule(rows, resetLabels = {}) {
+function runHomeLimitModule(rows, boundaryLabels = {}) {
   const app = readRendererFile('app.js');
   const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
   function createNode(tagName) {
@@ -289,7 +299,7 @@ function runHomeLimitModule(rows, resetLabels = {}) {
     iconKindFor: () => 'limits',
     homeLimitWindowLabel: (window) => window.label,
     formatHomeLimitWindowValue: () => '',
-    formatReset: (value) => resetLabels[value] || '',
+    formatLimitBoundary: (window) => boundaryLabels[window.resetsAt] || '',
     limitProviderPresentationApi: { limitProviderCompactWindowPeriodLabel: () => '' },
     state: { settings: {} },
     t: (key, values) => key === 'home.reset' ? `Reset ${values.value}` : key
@@ -298,18 +308,25 @@ function runHomeLimitModule(rows, resetLabels = {}) {
   return body;
 }
 
-test('Limits and Home share reset expiry while preserving the existing reset copy', () => {
+test('Limits and Home distinguish resets, expiries, and simultaneous boundaries', () => {
   const app = readRendererFile('app.js');
-  const formatReset = functionBody(app, 'formatReset', 'formatDuration');
+  const formatBoundary = functionBody(app, 'formatLimitBoundary', 'formatDuration');
+  const formatDuration = functionBody(app, 'formatDuration', 'formatActiveDuration');
   const limitWindow = functionBody(app, 'limitWindowNode', 'providersByLimitProviderId');
   const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
 
-  assert.match(formatReset, /limitResetRemainingMs\(value\)/);
-  assert.match(formatReset, /diffMs === 0\) return 'Reset now'/);
-  assert.match(formatReset, /return `Reset \$\{formatDuration\(diffMs\)\}`/);
-  assert.match(limitWindow, /window\?\.resetsAt\s*\? formatReset\(window\.resetsAt\)/);
-  assert.doesNotMatch(limitWindow, /formatReset\(window\?\.resetsAt\) \|\| window\?\.resetDescription/);
-  assert.match(homeLimits, /window\.resetsAt\s*\? resetAt \|\|/);
+  const labels = vm.runInNewContext(
+    `${formatBoundary}\n${formatDuration}\n[\n`
+      + `formatLimitBoundary({ resetsAt: 'future' }),\n`
+      + `formatLimitBoundary({ resetsAt: 'future', boundaryKind: 'expiry' }),\n`
+      + `formatLimitBoundary({ resetsAt: 'future', boundaryKind: 'mixed' }),\n`
+      + `formatLimitBoundary({ resetsAt: 'now', boundaryKind: 'expiry' }),\n`
+      + `formatLimitBoundary({ resetsAt: 'now', boundaryKind: 'mixed' })\n]`,
+    { limitProviderPresentationApi: { limitResetRemainingMs: (value) => value === 'now' ? 0 : 60 * 60 * 1000 } }
+  );
+  assert.deepEqual(Array.from(labels), ['Reset 1h 0m', 'Expires 1h 0m', 'Changes in 1h 0m', 'Expires now', 'Changes now']);
+  assert.match(limitWindow, /window\?\.resetsAt\s*\? formatLimitBoundary\(window\)/);
+  assert.match(homeLimits, /window\.resetsAt\s*\?\s*formatLimitBoundary\(window\)/);
   assert.doesNotMatch(app, /noActiveLimitWindow|formatResetDuration/);
 });
 
@@ -323,10 +340,11 @@ test('Home omits reset rows that have no visible reset content', () => {
         { label: 'Balance', value: '$4.00' },
         { label: 'Expired', value: '0% left', resetsAt: 'expired' },
         { label: 'Weekly', value: '88% left', resetsAt: 'future' },
+        { label: 'Bonus', value: '50% left', resetsAt: 'expiry', boundaryKind: 'expiry' },
         { label: 'Monthly', value: '50% left', resetDescription: '6d 23h' }
       ]
     }
-  ], { future: 'Reset 1h' });
+  ], { future: 'Reset 1h', expiry: 'Expires 7d' });
 
   const metrics = body.children[0].children[1].children;
   assert.equal(metrics[0].children.length, 1);
@@ -334,7 +352,9 @@ test('Home omits reset rows that have no visible reset content', () => {
   assert.equal(metrics[2].children.length, 2);
   assert.equal(metrics[2].children[1].textContent, 'Reset 1h');
   assert.equal(metrics[3].children.length, 2);
-  assert.equal(metrics[3].children[1].textContent, 'Reset 6d 23h');
+  assert.equal(metrics[3].children[1].textContent, 'Expires 7d');
+  assert.equal(metrics[4].children.length, 2);
+  assert.equal(metrics[4].children[1].textContent, 'Reset 6d 23h');
 });
 
 test('capability tags explain how each provider is collected in settings', () => {
@@ -1098,19 +1118,41 @@ test('Volcengine renders quota windows as paired rows with an odd final window f
   assert.match(renderProviderWindows, /windows\.append\(\.\.\.nodes\)/);
 });
 
-test('Z.ai renders 5-hour and Weekly first, then MCP full-width', () => {
+test('Z.ai and Team keep all billing windows and render MCP full width after paired quotas', () => {
   const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
-
-  assert.match(renderProviderWindows, /provider\.provider === 'zai'/);
-  assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
-  assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
-  assert.match(renderProviderWindows, /const mcp = windowForKind\(provider, 'billing'\);/);
-  assert.match(renderProviderWindows, /const fiveHourNode = limitWindowNode\('5-hour', fiveHour, color, 0\.95\)/);
-  assert.match(renderProviderWindows, /if \(!weekly\) fiveHourNode\.classList\.add\('limit-window-wide'\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\('Weekly', weekly, color, 0\.68\)/);
-  assert.match(renderProviderWindows, /const mcpNode = limitWindowNode\('MCP', mcp, color, 0\.68\)/);
-  assert.match(renderProviderWindows, /mcpNode\.classList\.add\('limit-window-wide'\)/);
+  const render = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const node = () => ({ children: [], classes: new Set(),
+    classList: { add(...values) { values.forEach(value => this.owner.classes.add(value)); } },
+    append(...children) { this.children.push(...children); } });
+  const makeNode = () => { const result = node(); result.classList.owner = result; return result; };
+  for (const provider of ['zai', 'zaiteam']) {
+    const context = {
+      document: { createElement: makeNode },
+      windowForKind: (p, kind) => p.windows.find(w => w.kind === kind),
+      windowsForKind: (p, kind) => p.windows.filter(w => w.kind === kind),
+      limitWindowNode: (label, window, _color, _tone, _value, detail) => Object.assign(makeNode(), { label, window, detail }),
+      provider: { provider, windows: [
+        { kind: 'weekly', label: 'Weekly' },
+        { kind: 'billing', label: 'MCP' },
+        { kind: 'billing', label: 'Legacy bucket', detail: 'Missing plan id' }
+      ] }
+    };
+    const rendered = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+    assert.deepEqual(Array.from(rendered.children, n => n.label), ['Weekly', 'MCP', 'Legacy bucket']);
+    assert.ok(rendered.children.every(n => n.classes.has('limit-window-wide')));
+    assert.equal(rendered.children[2].detail, 'Missing plan id');
+    context.provider.windows = [
+      { kind: 'daily', label: 'model-alpha', detail: 'Daily' },
+      { kind: 'billing', limitId: 'model-beta', label: 'model-beta', detail: 'Combined grant' },
+      { kind: 'billing', label: 'MCP' }
+    ];
+    const paired = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+    assert.equal(paired.children[0].detail, 'Daily');
+    assert.equal(paired.children[1].detail, 'Combined grant');
+    assert.equal(paired.children[0].classes.has('limit-window-wide'), false);
+    assert.equal(paired.children[1].classes.has('limit-window-wide'), false);
+    assert.equal(paired.children[2].classes.has('limit-window-wide'), true);
+  }
 });
 
 test('Copilot renders monthly Premium and Chat quotas as billing windows', () => {
@@ -1883,10 +1925,120 @@ test('dynamic account summaries are never reset by the static translation pass',
 test('provider toggles converge through the limits push without a forced refresh', () => {
   const app = readRendererFile('app.js');
   const body = functionBody(app, 'onLimitProviderToggle', 'onLimitProviderMove');
+  const statsRenderStart = app.indexOf('function renderStatsUpdate()');
+  const statsRenderEnd = app.indexOf('const statsRenderScheduler =', statsRenderStart);
 
-  assert.match(body, /saveSettings\(\{ limitProviders: checked\.join\(','\), limitsEnabled: checked\.length > 0 \}\)/);
+  assert.match(body, /const patch = \{ limitProviders: checked\.join\(','\), limitsEnabled: checked\.length > 0 \};/);
+  assert.match(body, /state\.pendingLimitProviderSelection = \{ revision, \.\.\.patch \};/);
+  assert.match(body, /saveSettings\(patch\)/);
   assert.match(body, /clearDisabledLimitProviderPendingChecks\(new Set\(checked\)\)/);
+  assert.doesNotMatch(body, /state\.settings\s*=/);
   assert.doesNotMatch(body, /refreshStats\(/);
+  assert.ok(statsRenderStart >= 0 && statsRenderEnd > statsRenderStart);
+  assert.match(app.slice(statsRenderStart, statsRenderEnd), /renderLimitProviderCheckboxes\(\)/);
+});
+
+function createLimitProviderToggleHarness({
+  providerIds = ['codex'],
+  saveSettings
+} = {}) {
+  const app = readRendererFile('app.js');
+  const providerSelection = functionBody(app, 'configuredLimitProviderSelection', 'missingLimitProviderStatus');
+  const enabledProviderSelection = functionBody(app, 'enabledLimitProviderSet', 'limitProviderEnabled');
+  const toggleStart = app.indexOf('async function onLimitProviderToggle()');
+  const toggleEnd = app.indexOf('async function onLimitProviderMove(', toggleStart);
+  assert.ok(toggleStart >= 0 && toggleEnd > toggleStart);
+  const toggle = app.slice(toggleStart, toggleEnd);
+  let checkedProviders = [];
+  const context = {
+    DEFAULT_LIMIT_PROVIDER_ORDER: 'codex',
+    LIMIT_PROVIDERS: providerIds.map((id) => ({ id })),
+    limitProviderOrderApi,
+    settingsListFilterApi,
+    state: {
+      breakdown: 'tool',
+      limitProviderSelectionRevision: 0,
+      pendingLimitProviderSelection: null,
+      settings: { limitsEnabled: true, limitProviders: 'codex' }
+    },
+    els: {
+      limitProviderCheckboxes: {
+        querySelectorAll: () => providerIds.map((id) => ({
+          checked: checkedProviders.includes(id),
+          dataset: { provider: id }
+        }))
+      }
+    },
+    saveSettings,
+    renderLimitProviderCheckboxes() {},
+    clearDisabledLimitProviderPendingChecks() {},
+    setBreakdown() {}
+  };
+
+  vm.createContext(context);
+  vm.runInContext(`${providerSelection}\n${enabledProviderSelection}\n${toggle}`, context);
+  context.configuredLimitProviderSelection = vm.runInContext('configuredLimitProviderSelection', context);
+  return {
+    context,
+    selection: () => Array.from(context.configuredLimitProviderSelection()),
+    setChecked: (ids) => { checkedProviders = ids; },
+    toggle: () => vm.runInContext('onLimitProviderToggle()', context)
+  };
+}
+
+test('pending provider selection stays unchecked while the settings reply is pending', async () => {
+  let resolveUpdate;
+  const harness = createLimitProviderToggleHarness({
+    saveSettings: () => new Promise((resolve) => { resolveUpdate = resolve; })
+  });
+  harness.setChecked([]);
+
+  const pendingToggle = harness.toggle();
+  assert.deepEqual(harness.selection(), []);
+  harness.context.state.settings = { limitsEnabled: false, limitProviders: '' };
+  resolveUpdate();
+  await pendingToggle;
+
+  assert.equal(harness.context.state.pendingLimitProviderSelection, null);
+  assert.deepEqual(harness.selection(), []);
+});
+
+test('provider toggle restores the confirmed selection when persistence and recovery both fail', async () => {
+  const harness = createLimitProviderToggleHarness({
+    saveSettings: () => Promise.reject(new Error('persist failed'))
+  });
+  harness.setChecked([]);
+
+  await assert.rejects(harness.toggle(), /persist failed/);
+
+  assert.deepEqual(harness.selection(), ['codex']);
+});
+
+test('overlapping failures preserve the latest toggle, then fall back to a newer settings push', async () => {
+  const updates = [];
+  const harness = createLimitProviderToggleHarness({
+    providerIds: ['codex', 'claude', 'zed'],
+    saveSettings() {
+      let reject;
+      const promise = new Promise((_, rejectPromise) => { reject = rejectPromise; });
+      updates.push({ reject });
+      return promise;
+    }
+  });
+  harness.setChecked([]);
+  const firstToggle = harness.toggle();
+  harness.setChecked(['claude']);
+  const secondToggle = harness.toggle();
+  harness.context.state.settings = { limitsEnabled: true, limitProviders: 'zed' };
+
+  updates[0].reject(new Error('first persist failed'));
+  await assert.rejects(firstToggle, /first persist failed/);
+  assert.deepEqual(harness.selection(), ['claude']);
+
+  updates[1].reject(new Error('second persist failed'));
+  await assert.rejects(secondToggle, /second persist failed/);
+  assert.equal(harness.context.state.pendingLimitProviderSelection, null);
+  assert.deepEqual(harness.selection(), ['zed']);
 });
 
 test('empty OpenCode profiles render a localized summary before returning', () => {
@@ -2332,8 +2484,9 @@ test('copilot setup status asks for sign-in instead of an API key', () => {
   );
 });
 
-test('Z.ai, Volcengine, Qoder, Trae, WorkBuddy, and Ollama source labels and setup statuses', () => {
-  assert.deepEqual(presentation.limitProviderCapabilityTags('zai'), ['Coding Plan', 'API key']);
+test('Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama source labels and setup statuses', () => {
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zai'), ['Auto', 'Coding Plan', 'API key']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zaiteam'), ['Team Plan', 'API key']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Coding/Agent Plan', 'API key']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ['Manual login', 'Web']);
@@ -4758,4 +4911,35 @@ test('switching hubs does not wait out the old hub request before starting', () 
   // Nothing awaits it any more, so it has to keep its own failures rather than
   // surface them as an unhandled rejection.
   assert.match(functionBody(main, 'reconcileSharedSubscriptions', 'restartDeviceRuntimeForMode'), /\} catch \(error\) \{/);
+});
+
+test('GLM Home daily windows retain returned model names instead of the generic daily label', () => {
+  const window = { kind: 'daily', label: 'arbitrary-model-name' };
+  assert.equal(limitProviderCompactWindowLabel('zai', window), window.label);
+  assert.equal(limitProviderCompactWindowPeriodLabel('zai', window), '');
+  assert.equal(limitProviderCompactWindowLabel('zaiteam', window), '');
+});
+
+test('Z.ai token-pool windows print an absolute token pair through the detail slot', () => {
+  const app = readRendererFile('app.js');
+  const body = functionBody(app, 'formatZcodeTokensDetail', 'formatKiroOverageValue');
+  const detail = (window, showLimitUsed, unitSystem = 'western', locale = 'en') => vm.runInNewContext(
+    `${body}\nformatZcodeTokensDetail(window)`,
+    {
+      window,
+      optionalFiniteNumber: (value) => { const n = Number(value); return Number.isFinite(n) ? n : null; },
+      formatCompact: (value) => compactTokenApi.formatCompactTokens(value, unitSystem, locale),
+      state: { settings: { showLimitUsed } }
+    }
+  );
+  const pool = { limit: 305_000_000, remaining: 195_850_553 };
+  assert.equal(detail(pool, false), '195.9M / 305M');
+  assert.equal(detail(pool, true), '109.1M / 305M');
+  assert.equal(detail(pool, false, 'localized', 'zh-TW'), '1.96億 / 3.05億');
+  // Buckets without absolute units keep their percentage-only look.
+  assert.equal(detail({ usedPercent: 42 }, false), '');
+  assert.equal(detail({ limit: 0, remaining: 5 }, false), '');
+  // Shared compact formatting keeps its normal rounding and promotion rules.
+  assert.equal(detail({ limit: 3_000_000, remaining: 2_578_372 }, false), '2.6M / 3M');
+  assert.equal(detail({ limit: 999_950, remaining: 999_950 }, false), '1M / 1M');
 });

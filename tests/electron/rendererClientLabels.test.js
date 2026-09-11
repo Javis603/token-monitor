@@ -41,7 +41,7 @@ test('app.js takes client identity from the catalog and keeps no copy of it', ()
 
 test('renderer known clients include current tokscale-supported tools', () => {
   const clients = knownClientIds();
-  for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh']) {
+  for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh']) {
     assert.ok(clients.includes(client), `${client} should be a known renderer client`);
   }
 });

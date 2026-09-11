@@ -144,7 +144,8 @@ function runProcessText(command, args = [], options = {}) {
       cwd: options.cwd,
       env: options.env,
       shell: Boolean(options.shell),
-      windowsHide: true
+      windowsHide: true,
+      ...(options.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {})
     });
     let stdout = '';
     let stderr = '';
@@ -174,6 +175,7 @@ function runProcessText(command, args = [], options = {}) {
       if (code === 0 && stdout.trim()) finish(resolve, stdout);
       else finish(reject, errorWithStatus('unavailable', stderr.trim() || `${command} exited ${code}`));
     });
+    if (options.closeStdin) child.stdin?.end();
     signal?.addEventListener?.('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
   });

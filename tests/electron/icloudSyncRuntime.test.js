@@ -20,7 +20,11 @@ function rootFixture() {
 }
 
 function record(deviceId, tokens) {
-  const stamp = '2026-09-06T10:00:00.000Z';
+  const now = new Date();
+  const localDate = [now.getFullYear(), now.getMonth() + 1, now.getDate()]
+    .map((part, index) => index === 0 ? String(part) : String(part).padStart(2, '0'))
+    .join('-');
+  const stamp = now.toISOString();
   return {
     deviceId,
     hostname: deviceId,
@@ -31,7 +35,7 @@ function record(deviceId, tokens) {
     month: { totalTokens: tokens, clients: { codex: tokens } },
     allTime: { totalTokens: tokens, clients: { codex: tokens } },
     historyAvailable: true,
-    history: { daily: [{ date: '2026-09-06', tokens }], monthly: [], summary: {} }
+    history: { daily: [{ date: localDate, tokens }], monthly: [], summary: {} }
   };
 }
 

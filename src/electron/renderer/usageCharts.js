@@ -366,7 +366,7 @@
     claude: '#cc7c5e', codex: '#49a3b0', hermes: '#d4af37', gemini: '#4285f4',
     antigravity: '#4285f4', cline: '#323B43', kimi: '#16191e', grok: '#000000', copilot: '#000000', deepseek: '#4d6bfe', cursor: '#000000', opencode: '#000000', openrouter: '#6566F1',
     openclaw: '#ff4d4d', xai: '#000000', meta: '#1d65c1', mistral: '#fa520f', qwen: '#615ced',
-    pi: '#000', zed: '#4173e7', kilocode: '#F8F676', commandcode: '#8C4EDD', micode: '#000000', zcode: '#000000', kiro: '#9046FF', codebuddy: '#6C4DFF', workbuddy: '#0DC8A5', proma: '#000000', qodercn: '#2ADB5C', reasonix: '#4d6bfe', dsh: '#4d6bfe', cherrystudio: '#EA5E5D', lmstudio: '#6C5CE7', unsloth: '#40B85A',
+    pi: '#000', zed: '#4173e7', kilo: '#F8F676', commandcode: '#8C4EDD', micode: '#000000', zcode: '#000000', kiro: '#9046FF', codebuddy: '#6C4DFF', workbuddy: '#0DC8A5', proma: '#000000', qodercn: '#2ADB5C', reasonix: '#4d6bfe', dsh: '#4d6bfe', cherrystudio: '#EA5E5D', lmstudio: '#6C5CE7', unsloth: '#40B85A',
     moonshot: '#16191e', zai: '#000000', zaiteam: '#000000', cohere: '#39594d', xiaomi: '#ff6700', minimax: '#f23f5d', doubao: '#1E37FC', hunyuan: '#0053E0', volcengine: '#006EFF', qoder: '#2ADB5C', trae: '#32F08C', ollama: '#888888', alibaba: '#615CED', thirdparty: '#8090A6',
     default: '#6ab4f0'
   };
@@ -392,7 +392,7 @@
     if (/mimo|xiaomi/.test(name)) return 'xiaomi';
     if (/minimax|\babab/.test(name)) return 'minimax';
     if (/doubao|\bseed(?:-|$)/.test(name)) return 'doubao';
-    if (/hy3|hunyuan/.test(name)) return 'hunyuan';
+    if (/hy\d|hunyuan/.test(name)) return 'hunyuan';
     if (/^big-pickle$/.test(name)) return 'opencode'; // OpenCode Zen stealth model — no vendor hint in the name
     return null;
   }

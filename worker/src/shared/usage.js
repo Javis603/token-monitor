@@ -43,6 +43,13 @@ const TIMED_DURATION_KEYS = ['totalDurationMs', 'total_duration_ms', 'timedDurat
 const TIMED_TOKEN_KEYS = ['timedTokens', 'timed_tokens'];
 const STARTED_AT_KEYS = ['startedAt', 'started_at', 'createdAt', 'created_at'];
 const LAST_USED_AT_KEYS = ['lastUsedAt', 'last_used_at', 'updatedAt', 'updated_at', 'lastActivityAt', 'last_activity_at', 'timestamp'];
+const SESSION_TITLE_KEYS = ['sessionTitle', 'session_title'];
+const SESSION_TITLE_MAX_LENGTH = 160;
+const SESSION_TEXT_KEYS = [
+  'title', 'sessionTitle', 'session_title',
+  'name', 'preview', 'firstUserMessage', 'first_user_message',
+  'customTitle', 'custom_title', 'aiTitle', 'ai_title'
+];
 const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'minimax']);
 
 function asNumber(value) {
@@ -121,9 +128,58 @@ function normalizeIsoTimestamp(value) {
   return ms > 0 ? new Date(ms).toISOString() : '';
 }
 
+function normalizeSessionTitle(value) {
+  return Array.from(String(value || '').replace(/\s+/g, ' ').trim())
+    .slice(0, SESSION_TITLE_MAX_LENGTH)
+    .join('');
+}
+
+function normalizeSessionKind(value) {
+  return String(value || '').trim() === 'background-review' ? 'background-review' : '';
+}
+
+function stripSessionTextFromPeriod(period) {
+  if (!period || typeof period !== 'object' || !period.sessions || typeof period.sessions !== 'object') {
+    return period;
+  }
+  const sessions = {};
+  for (const [key, value] of Object.entries(period.sessions)) {
+    if (!value || typeof value !== 'object') {
+      sessions[key] = value;
+      continue;
+    }
+    const session = { ...value };
+    for (const field of SESSION_TEXT_KEYS) delete session[field];
+    sessions[key] = session;
+  }
+  return { ...period, sessions };
+}
+
+// Hub ingress is a trust boundary. Current clients already omit local titles,
+// but the Hub must enforce that privacy contract even for stale, buggy, or
+// custom senders. Preserve non-text classification such as `sessionKind`.
+function stripSessionTextFromDeviceRecord(record) {
+  if (!record || typeof record !== 'object') return record;
+  const stripped = { ...record };
+  for (const periodName of PERIODS) {
+    if (hasOwn(stripped, periodName)) {
+      stripped[periodName] = stripSessionTextFromPeriod(stripped[periodName]);
+    }
+  }
+  if (stripped.periods && typeof stripped.periods === 'object') {
+    stripped.periods = { ...stripped.periods };
+    for (const periodName of PERIODS) {
+      if (hasOwn(stripped.periods, periodName)) {
+        stripped.periods[periodName] = stripSessionTextFromPeriod(stripped.periods[periodName]);
+      }
+    }
+  }
+  return stripped;
+}
+
 function emptyPeriod() {
   return {
-    capabilities: { tokenComponents: true },
+    capabilities: { tokenComponents: true, throughput: true },
     totalTokens: 0,
     costUsd: 0,
     cacheReadTokens: 0,
@@ -185,7 +241,7 @@ function normalizeClientName(value) {
   if (raw.includes('copilot')) return 'copilot';
   if (/\bpi\b/.test(raw)) return 'pi';
   if (raw.includes('zed')) return 'zed';
-  if (raw.includes('kilocode')) return 'kilocode';
+  if (/^kilo[\s_-]*code$/.test(raw)) return 'kilo';
   if (/command[\s_-]*code/.test(raw)) return 'commandcode';
   if (raw.includes('micode')) return 'micode';
   if (raw.includes('zcode')) return 'zcode';
@@ -435,6 +491,8 @@ function emptySession(client, id) {
     lastUsedAt: '',
     projectId: '',
     projectLabel: '',
+    title: '',
+    sessionKind: '',
     models: {},
     modelCosts: {},
     providers: {}
@@ -465,6 +523,8 @@ function mergeSession(target, source) {
   } else if (target.projectId === sourceProjectId && !target.projectLabel && source.projectLabel) {
     target.projectLabel = String(source.projectLabel);
   }
+  if (!target.title && source.title) target.title = normalizeSessionTitle(source.title);
+  if (!target.sessionKind && source.sessionKind) target.sessionKind = normalizeSessionKind(source.sessionKind);
   for (const [model, tokens] of Object.entries(source.models || {})) {
     const key = normalizeModelNameForClient(model, target.client);
     if (key) target.models[key] = (target.models[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
@@ -510,6 +570,8 @@ function sessionFromRow(row) {
   session.lastUsedAt = normalizeIsoTimestamp(firstString(row, LAST_USED_AT_KEYS));
   session.projectId = String(row.projectId || row.project_id || '').trim();
   session.projectLabel = String(row.projectLabel || row.project_label || '').trim();
+  session.title = normalizeSessionTitle(firstString(row, SESSION_TITLE_KEYS));
+  session.sessionKind = normalizeSessionKind(row.sessionKind || row.session_kind);
   let model = detectModel(row, client);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
@@ -536,6 +598,8 @@ function normalizeSession(input, fallbackKey) {
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
   session.projectId = String(input.projectId || input.project_id || '').trim();
   session.projectLabel = String(input.projectLabel || input.project_label || '').trim();
+  session.title = normalizeSessionTitle(input.title || input.sessionTitle || input.session_title);
+  session.sessionKind = normalizeSessionKind(input.sessionKind || input.session_kind);
   if (input.models && typeof input.models === 'object') {
     for (const [model, value] of Object.entries(input.models)) {
       const key = normalizeModelNameForClient(model, client);
@@ -560,7 +624,13 @@ function normalizeSession(input, fallbackKey) {
 
 function normalizePeriod(input, options = {}) {
   const period = emptyPeriod();
-  if (!input || typeof input !== 'object') return period;
+  if (!input || typeof input !== 'object') {
+    // `emptyPeriod()` is also the exact neutral value used by current producers and
+    // merge targets, so it is throughput-capable by construction. Missing wire input
+    // is different: its zero counters are synthetic and must never seed a live delta.
+    period.capabilities.throughput = false;
+    return period;
+  }
   const projectsEnabled = options.projectsEnabled !== false;
   period.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? 0)));
   const componentCapability = input.capabilities?.tokenComponents;
@@ -594,6 +664,16 @@ function normalizePeriod(input, options = {}) {
       ?? (period.capabilities.tokenComponents ? 0 : period.totalTokens - knownComponentTokens)
     )))
   );
+  const throughputCapability = input.capabilities?.throughput;
+  const hasThroughputShape = [
+    ['timedTokens', 'timed_tokens'],
+    ['timedOutputTokens', 'timed_output_tokens'],
+    ['timedDurationMs', 'timed_duration_ms']
+  ].every((keys) => keys.some((key) => hasOwn(input, key)));
+  // Older producers did not carry these counters. Preserve that provenance instead of
+  // turning their normalized zero defaults into a baseline for a later all-day delta.
+  period.capabilities.throughput = throughputCapability === true
+    || (throughputCapability !== false && hasThroughputShape);
   period.timedTokens = Math.max(0, Math.round(asNumber(input.timedTokens ?? input.timed_tokens ?? 0)));
   // Capped at outputTokens because the gate makes that a physical bound: output is counted
   // whole or not at all, so a period cannot have timed more output than it produced. The
@@ -775,6 +855,7 @@ function fallbackUsagePeriod(json) {
   // across cache read/write and output. Preserve that distinction through the
   // hub instead of letting normalizePeriod's zero defaults imply a cache miss.
   period.capabilities.tokenComponents = period.totalTokens === 0;
+  period.capabilities.throughput = period.totalTokens === 0;
   period.unclassifiedTokens = period.totalTokens;
   return period;
 }
@@ -1225,6 +1306,8 @@ function aggregateHistory(devices, options = {}) {
 function addPeriodInto(target, source) {
   target.capabilities.tokenComponents = target.capabilities.tokenComponents === true
     && source.capabilities?.tokenComponents === true;
+  target.capabilities.throughput = target.capabilities.throughput === true
+    && source.capabilities?.throughput === true;
   target.totalTokens += source.totalTokens;
   target.costUsd += source.costUsd;
   target.cacheReadTokens += source.cacheReadTokens;
@@ -1412,6 +1495,12 @@ function deltaValue(base, fresh, anchor, key) {
     // while both the durable base and the fresh replacement prove it.
     return base === true && fresh === true;
   }
+  if (key === 'throughput') {
+    // Throughput drives a live delta, so the value being subtracted must also
+    // prove its provenance. Otherwise an unavailable anchor's zero defaults
+    // make the whole fresh Today snapshot look like one new delta.
+    return base === true && fresh === true && anchor === true;
+  }
   if (key === 'startedAt') {
     const baseMs = timestampMs(base);
     const freshMs = timestampMs(fresh);
@@ -1463,5 +1552,6 @@ module.exports = {
   normalizeModelNameForClient,
   normalizeDeviceRecord,
   normalizePeriod,
-  projectRollupFromSessions
+  projectRollupFromSessions,
+  stripSessionTextFromDeviceRecord
 };

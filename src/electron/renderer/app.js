@@ -19,7 +19,7 @@ const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
+  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
   'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
 // Limits rows mark more ids than there are tracked clients: every provider, plus
@@ -142,6 +142,7 @@ const TRAY_ICON_PROVIDERS = [
 const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.id).join(',');
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
 const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentation;
+const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
 const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
@@ -280,7 +281,12 @@ const TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/blob
 const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProviderPreferences;
 const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'sync'];
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
+const LIVE_TOKEN_RATE_ACTIVE_MS = 8000;
+const LIVE_TOKEN_RATE_CLEAR_MS = 3 * 60 * 1000;
 const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;
+const LIMIT_RESET_MOTION_EASING = 'cubic-bezier(0.333, 0.667, 0.667, 1)';
+const LIMIT_RESET_GLOW_MS = 700;
+const LIMIT_RESET_GLOW_LEAD_MS = 252;
 const initialFloatingBubble = window.__TOKEN_MONITOR_INITIAL_FLOATING_BUBBLE__ || { collapsed: false, side: null };
 const initialViewState = window.__TOKEN_MONITOR_INITIAL_VIEW_STATE__ || {};
 let initialBreakdownPreferenceApplied = typeof initialViewState.breakdown === 'string';
@@ -309,6 +315,8 @@ state.toolPreferenceSourceSignature = '';
 state.limitProviderRenderSignature = '';
 state.limitPanelRenderSignature = '';
 state.settingsPushRevision = 0;
+state.limitProviderSelectionRevision = 0;
+state.pendingLimitProviderSelection = null;
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.homeReturnVisible = false;
@@ -332,13 +340,13 @@ let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, compactTokenUnits: 'western', settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
 let preferenceDrag = null;
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), liveTokenRate: document.getElementById('liveTokenRate'), liveTokenRateValue: document.getElementById('liveTokenRateValue'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
@@ -434,6 +442,9 @@ Object.assign(els, {
   appUpdateMessage: document.getElementById('appUpdateMessage'),
   titleIconInput: document.getElementById('titleIconInput'),
   showCompactTotalTokensInput: document.getElementById('showCompactTotalTokensInput'),
+  showLiveTokenRateInput: document.getElementById('showLiveTokenRateInput'),
+  liveTokenRateScopeRow: document.getElementById('liveTokenRateScopeRow'),
+  liveTokenRateScopeInput: document.getElementById('liveTokenRateScopeInput'),
   compactTokenUnitsRow: document.getElementById('compactTokenUnitsRow'),
   compactTokenUnitsInput: document.getElementById('compactTokenUnitsInput'),
   swapSettingsRefreshInput: document.getElementById('swapSettingsRefreshInput'),
@@ -493,10 +504,6 @@ function toggleAccordionRow(row) {
     renderActiveToolDetail();
   }
   renderToolDetailFooter();
-}
-
-function setAttributeIfChanged(element, name, value) {
-  if (element.getAttribute(name) !== value) element.setAttribute(name, value);
 }
 
 document.addEventListener('click', (event) => {
@@ -816,6 +823,145 @@ const tokenRateBoost = tokenRateApi.createTokenRateBoostController({
   prefersReducedMotion,
   onChange: () => renderTokenRate()
 });
+const liveTokenRateTracker = tokenRateApi.createLiveTokenRateGroupTracker({
+  now: () => Date.now(),
+  activeMs: LIVE_TOKEN_RATE_ACTIVE_MS,
+  clearMs: LIVE_TOKEN_RATE_CLEAR_MS
+});
+let liveTokenRateContext = '';
+let liveTokenRateIdleTimer = null;
+let liveTokenRateAnimationTimer = null;
+let liveTokenRateRenderedRevision = 0;
+
+function liveTokenRateSourceKey(periodSource) {
+  return [
+    state.mode,
+    state.settings?.hubMode || '',
+    state.settings?.hubUrl || '',
+    state.settings?.deviceId || '',
+    state.settings?.clients || '',
+    effectiveLiveTokenRateScope(),
+    periodSource
+  ].join('|');
+}
+
+function effectiveLiveTokenRateScope() {
+  const hubMode = state.settings?.hubMode;
+  const syncMode = hubMode === 'client' || hubMode === 'host';
+  return syncMode && state.settings?.liveTokenRateScope !== 'device' ? 'all' : 'device';
+}
+
+function clearLiveTokenRateTimers() {
+  if (liveTokenRateIdleTimer) clearTimeout(liveTokenRateIdleTimer);
+  if (liveTokenRateAnimationTimer) clearTimeout(liveTokenRateAnimationTimer);
+  liveTokenRateIdleTimer = null;
+  liveTokenRateAnimationTimer = null;
+}
+
+function resetLiveTokenRateTracking() {
+  liveTokenRateContext = '';
+  liveTokenRateRenderedRevision = 0;
+  liveTokenRateTracker.reset();
+  clearLiveTokenRateTimers();
+}
+
+function scheduleLiveTokenRateExpiry() {
+  if (liveTokenRateIdleTimer) clearTimeout(liveTokenRateIdleTimer);
+  liveTokenRateIdleTimer = null;
+  const expiresAt = liveTokenRateTracker.nextExpiryAt();
+  if (!expiresAt) return;
+  liveTokenRateIdleTimer = setTimeout(() => {
+    liveTokenRateIdleTimer = null;
+    renderLiveTokenRate();
+    scheduleLiveTokenRateExpiry();
+  }, Math.max(0, expiresAt - Date.now()) + 10);
+}
+
+function observeLiveTokenRate(stats) {
+  if (state.settings?.showLiveTokenRate !== true) return;
+  const selection = tokenRateApi.selectLiveTokenRatePeriods(
+    stats,
+    state.settings?.deviceId,
+    state.settings?.hubMode,
+    effectiveLiveTokenRateScope()
+  );
+  const sourceKey = liveTokenRateSourceKey(selection.source);
+  if (sourceKey !== liveTokenRateContext) {
+    liveTokenRateContext = sourceKey;
+    liveTokenRateTracker.reset(selection.entries);
+    clearLiveTokenRateTimers();
+    renderLiveTokenRate();
+    return;
+  }
+  const result = liveTokenRateTracker.observe(selection.entries);
+  if (!result.changed) return;
+  scheduleLiveTokenRateExpiry();
+  renderLiveTokenRate();
+}
+
+function formatLiveTokenRate(value) {
+  const rate = Math.max(0, Number(value) || 0);
+  if (rate > 0 && rate < 0.1) return '<0.1';
+  if (rate > 0 && rate < 1) {
+    return rate.toLocaleString(currentLocale(), { maximumFractionDigits: 1 });
+  }
+  return formatCompact(rate, effectiveCompactTokenUnits(), currentLocale());
+}
+
+function renderLiveTokenRate() {
+  if (!els.liveTokenRate || !els.liveTokenRateValue) return;
+  const enabled = state.settings?.showLiveTokenRate === true;
+  if (!enabled) resetLiveTokenRateTracking();
+  els.liveTokenRate.classList.toggle('hidden', !enabled);
+  syncLiveTokenRateFooterState();
+  if (!enabled) return;
+
+  const burn = state.settings?.tokenRateMode === 'burn';
+  const sample = liveTokenRateTracker.getSample();
+  const unit = burn ? 'TPM' : 'tok/s';
+  const rate = sample ? (burn ? sample.burn : sample.speed) : null;
+  const value = rate === null ? '—' : formatLiveTokenRate(rate);
+  const text = `${value} ${unit}`;
+  const idle = !sample || sample.idle === true;
+  els.liveTokenRateValue.textContent = text;
+  els.liveTokenRate.dataset.mode = burn ? 'burn' : 'speed';
+  els.liveTokenRate.classList.toggle('is-idle', idle);
+  if (idle) els.liveTokenRate.classList.remove('is-fresh');
+  const scope = t(effectiveLiveTokenRateScope() === 'all'
+    ? 'settings.appearance.liveTokenRateScopeAll'
+    : 'settings.appearance.liveTokenRateScopeDevice');
+  const labelKey = idle && sample
+    ? (burn ? 'home.liveTokenRate.burnIdleTitle' : 'home.liveTokenRate.speedIdleTitle')
+    : (burn ? 'home.liveTokenRate.burnTitle' : 'home.liveTokenRate.speedTitle');
+  const label = t(labelKey, { value: text, scope });
+  els.liveTokenRate.title = label;
+  els.liveTokenRate.setAttribute('aria-label', label);
+
+  if (!idle && sample.revision !== liveTokenRateRenderedRevision) {
+    liveTokenRateRenderedRevision = sample.revision;
+    els.liveTokenRate.classList.remove('is-fresh');
+    void els.liveTokenRate.offsetWidth;
+    els.liveTokenRate.classList.add('is-fresh');
+    if (liveTokenRateAnimationTimer) clearTimeout(liveTokenRateAnimationTimer);
+    liveTokenRateAnimationTimer = setTimeout(() => {
+      liveTokenRateAnimationTimer = null;
+      els.liveTokenRate?.classList.remove('is-fresh');
+    }, 650);
+  }
+}
+
+function syncLiveTokenRateFooterState() {
+  const footer = els.liveTokenRate?.closest('.footer');
+  if (!footer) return;
+  const enabled = state.settings?.showLiveTokenRate === true;
+  const obscured = !els.toolDetailFooter?.classList.contains('hidden')
+    || !els.appUpdatePill?.classList.contains('hidden');
+  footer.classList.toggle('live-token-rate-enabled', enabled);
+  footer.classList.toggle('live-token-rate-obscured', enabled && obscured);
+  els.liveTokenRate.tabIndex = enabled && !obscured ? 0 : -1;
+  els.liveTokenRate.setAttribute('aria-hidden', String(!enabled || obscured));
+}
+
 function tokenRateText(rate, burn) {
   // formatCompact rounds, so a sub-0.5 rate would render as a bare "0". Treat that as no
   // data and stay hidden rather than claim a zero pace.
@@ -826,16 +972,18 @@ function tokenRateText(rate, burn) {
     : '';
 }
 function renderTokenRate() {
-  if (!els.tokenRateReveal) return;
-  tokenRateBoost.refresh();
-  const { burn, rate } = currentTokenRateValue();
-  const boost = tokenRateBoost.getSnapshot();
-  const displayRate = boost ? boost.displayRate : rate;
-  const text = tokenRateText(displayRate, boost ? boost.mode === 'burn' : burn);
-  els.tokenRateReveal.textContent = text;
-  els.tokenRateReveal.classList.toggle('has-value', Boolean(text));
-  els.tokenRateReveal.classList.toggle('boosting', boost?.phase === 'boosting');
-  els.tokenRateReveal.classList.toggle('settling', boost?.phase === 'settling');
+  if (els.tokenRateReveal) {
+    tokenRateBoost.refresh();
+    const { burn, rate } = currentTokenRateValue();
+    const boost = tokenRateBoost.getSnapshot();
+    const displayRate = boost ? boost.displayRate : rate;
+    const text = tokenRateText(displayRate, boost ? boost.mode === 'burn' : burn);
+    els.tokenRateReveal.textContent = text;
+    els.tokenRateReveal.classList.toggle('has-value', Boolean(text));
+    els.tokenRateReveal.classList.toggle('boosting', boost?.phase === 'boosting');
+    els.tokenRateReveal.classList.toggle('settling', boost?.phase === 'settling');
+  }
+  renderLiveTokenRate();
 }
 function startTokenRateBoost(event) {
   if (!tokenRateBoost.start(event)) return;
@@ -854,7 +1002,9 @@ function suppressTokenRateClickAfterHold(event) {
 // The title mark is the only pixel of the reveal that can take a click: a drag region does
 // not deliver mouse events, so this control and its hover target are the same no-drag island.
 //
-// Deliberately pointer-only, and the mark stays a non-focusable aria-hidden span. A focusable
+// The title affordance is deliberately pointer-only, and the mark stays a non-focusable
+// aria-hidden span. The persistent footer reading is the separate keyboard-accessible path.
+// A focusable
 // control here is worse than no keyboard path: the window assigns focus to a control when it
 // is shown, and Chromium then derives :focus-visible from that activation rather than from
 // any click, so the reveal reopens with a focus ring on a window the user just summoned with
@@ -947,11 +1097,17 @@ function syncCurrencyRateControls() {
 }
 function formatTime(value) { const date = value ? new Date(value) : new Date(); return Number.isNaN(date.getTime()) ? '--:--:--' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
 function formatPercent(value) { return Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'; }
-function formatReset(value) {
-  const diffMs = limitProviderPresentationApi.limitResetRemainingMs(value);
+function formatLimitBoundary(window) {
+  const diffMs = limitProviderPresentationApi.limitResetRemainingMs(window?.resetsAt);
   if (diffMs === null) return '';
-  if (diffMs === 0) return 'Reset now';
-  return `Reset ${formatDuration(diffMs)}`;
+  const mixed = window?.boundaryKind === 'mixed';
+  const prefix = window?.boundaryKind === 'expiry'
+    ? 'Expires'
+    : mixed
+      ? 'Changes in'
+      : 'Reset';
+  if (diffMs === 0) return mixed ? 'Changes now' : `${prefix} now`;
+  return `${prefix} ${formatDuration(diffMs)}`;
 }
 function formatDuration(ms) {
   const totalMinutes = Math.max(0, Math.round(ms / 60000));
@@ -1017,6 +1173,7 @@ function renderAppUpdatePill() {
     els.appUpdatePillRestart.removeAttribute('title');
     els.appUpdatePillRestart.removeAttribute('aria-label');
     setAppUpdatePillDisclosure(false);
+    syncLiveTokenRateFooterState();
     return;
   }
   const hasReleaseNotes = releaseNoteGroupsForCurrentLocale(s.latest).length > 0;
@@ -1045,6 +1202,7 @@ function renderAppUpdatePill() {
       ? `v${version}`
       : `↑ v${version}`;
   }
+  syncLiveTokenRateFooterState();
 }
 function releaseNoteGroupsForCurrentLocale(latest) {
   return appUpdatePresentationApi.releaseNoteGroupsForLocale(latest?.releaseNotes, currentLocale());
@@ -1405,6 +1563,7 @@ function animateTotalNumber(el, from, to, duration) {
 
 const rowNumberAnimations = new Map();
 const rowBarAnimations = new Map();
+const limitResetNumberAnimations = new Map();
 const rowRenderFingerprints = new WeakMap();
 const toolDetailData = new WeakMap();
 const largeSessionContainmentScheduler = createAfterLayoutScheduler(
@@ -1452,6 +1611,11 @@ function settleMotionAnimations() {
     delete el.dataset.motionTarget;
   }
   rowNumberAnimations.clear();
+  for (const [el, motion] of limitResetNumberAnimations) {
+    cancelAnimationFrame(motion.handle);
+    el.textContent = `${formatPercent(motion.target)} ${motion.suffix}`;
+  }
+  limitResetNumberAnimations.clear();
   for (const animation of document.getAnimations?.() || []) {
     try { animation.finish(); } catch (_) { animation.cancel(); }
   }
@@ -1577,7 +1741,14 @@ function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
   }
 }
 
-function animateBarBetween(fill, fromScale, toScale, delay = 0, duration = 420) {
+function animateBarBetween(
+  fill,
+  fromScale,
+  toScale,
+  delay = 0,
+  duration = 420,
+  easing = 'cubic-bezier(0.22, 1, 0.36, 1)'
+) {
   if (!fill?.animate) return;
   const previous = rowBarAnimations.get(fill);
   const previousIsActive = previous?.animation.pending || previous?.animation.playState === 'running';
@@ -1591,7 +1762,7 @@ function animateBarBetween(fill, fromScale, toScale, delay = 0, duration = 420) 
   ], {
     duration,
     delay,
-    easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    easing,
     fill: 'backwards'
   });
   const motion = { animation, target: toScale };
@@ -1601,6 +1772,64 @@ function animateBarBetween(fill, fromScale, toScale, delay = 0, duration = 420) 
   animation.onfinish = forget;
   animation.oncancel = forget;
   rowBarAnimations.set(fill, motion);
+}
+
+function animateLimitResetPercent(el, from, to, duration, startedAt = performance.now()) {
+  if (!el) return;
+  const suffix = el.dataset.limitMotionSuffix || '';
+  if (prefersReducedMotion() || !Number.isFinite(from) || !Number.isFinite(to) || from === to) {
+    el.textContent = `${formatPercent(to)} ${suffix}`;
+    return;
+  }
+  const delta = to - from;
+  const motion = { handle: 0, target: to, suffix };
+  let renderedText = `${formatPercent(from)} ${suffix}`;
+  el.textContent = renderedText;
+  function frame(now) {
+    if (prefersReducedMotion()) {
+      el.textContent = `${formatPercent(to)} ${suffix}`;
+      if (limitResetNumberAnimations.get(el) === motion) limitResetNumberAnimations.delete(el);
+      return;
+    }
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const eased = 1 - ((1 - progress) * (1 - progress));
+    const nextText = `${formatPercent(from + delta * eased)} ${suffix}`;
+    // The displayed value is integer-rounded, so several animation frames can
+    // resolve to the same string. Avoid invalidating text layout on those frames.
+    if (nextText !== renderedText) {
+      renderedText = nextText;
+      el.textContent = nextText;
+    }
+    if (progress < 1) {
+      motion.handle = requestAnimationFrame(frame);
+    } else if (limitResetNumberAnimations.get(el) === motion) {
+      limitResetNumberAnimations.delete(el);
+    }
+  }
+  motion.handle = requestAnimationFrame(frame);
+  limitResetNumberAnimations.set(el, motion);
+}
+
+function animateLimitResetCompletion(fill, duration) {
+  if (!fill?.animate || prefersReducedMotion()) return;
+  const highlight = document.createElement('span');
+  highlight.className = 'limit-meter-completion';
+  fill.append(highlight);
+  const animation = highlight.animate([
+    { opacity: 0 },
+    {
+      offset: LIMIT_RESET_GLOW_LEAD_MS / LIMIT_RESET_GLOW_MS,
+      opacity: 0.52
+    },
+    { opacity: 0 }
+  ], {
+    duration: LIMIT_RESET_GLOW_MS,
+    delay: Math.max(0, duration - LIMIT_RESET_GLOW_LEAD_MS),
+    easing: 'linear'
+  });
+  const removeHighlight = () => highlight.remove();
+  animation.onfinish = removeHighlight;
+  animation.oncancel = removeHighlight;
 }
 
 function captureTrendBarMotion() {
@@ -1688,17 +1917,31 @@ function applyBarScale(fill, scale) {
   animateBarBetween(fill, 0, safeScale, 0, 420);
 }
 
+function animateCachedLimitBarsFromZero() {
+  if (!state.animateBarsFromZero || prefersReducedMotion()) return;
+  for (const fill of els.limitsPanel?.querySelectorAll('.limit-meter-fill') || []) {
+    const targetScale = Math.max(
+      0,
+      Math.min(1, Number(fill.style.getPropertyValue('--bar-scale')) || 0)
+    );
+    animateBarBetween(fill, 0, targetScale, 0, 420);
+  }
+}
+
 function rowTemplate(rowData) {
-  const { key, name, platform, client, subtitle, detail, kind } = rowData;
+  const { key, name, platform, client, subtitle, activity, detail, kind } = rowData;
   const row = document.createElement('div');
   row.dataset.key = key;
   if (platform) row.dataset.platform = platform;
   if (client) row.dataset.client = client;
   if (kind) row.dataset.kind = kind;
-  row.innerHTML = '<div class="row-head"><div class="row-name"><span class="row-mark"></span><div class="row-label"><span class="row-title"></span><span class="row-subtitle"></span><span class="row-detail"></span></div></div><div class="row-metrics"><div class="row-value"></div><div class="row-cost"></div></div></div><div class="row-body"><div class="bar"><div class="bar-fill"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>';
+  row.innerHTML = '<div class="row-head"><div class="row-name"><span class="row-mark"></span><div class="row-label"><span class="row-title"></span><span class="row-subtitle"></span><span class="row-activity"></span><span class="row-detail"></span></div></div><div class="row-metrics"><div class="row-value"></div><div class="row-cost"></div></div></div><div class="row-body"><div class="bar"><div class="bar-fill"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>';
   row.querySelector('.row-title').textContent = name;
   row.querySelector('.row-subtitle').textContent = subtitle || '';
+  row.querySelector('.row-activity').textContent = activity || '';
   row.querySelector('.row-detail').textContent = detail || '';
+  bindHoverMarquee(row.querySelector('.row-title'));
+  bindHoverMarquee(row.querySelector('.row-detail'));
   return row;
 }
 
@@ -1736,6 +1979,52 @@ document.addEventListener('pointerdown', (event) => {
     }
   }
 });
+
+const hoverMarqueeStates = new WeakMap();
+
+function stopHoverMarquee(element, { reset = true } = {}) {
+  const motion = hoverMarqueeStates.get(element);
+  if (motion?.delayId) clearTimeout(motion.delayId);
+  if (motion?.frameId) cancelAnimationFrame(motion.frameId);
+  hoverMarqueeStates.delete(element);
+  element.classList.remove('is-hover-scrolling');
+  if (reset) element.scrollLeft = 0;
+}
+
+function startHoverMarquee(element) {
+  stopHoverMarquee(element);
+  if (prefersReducedMotion() || !element.closest('.session-mode')) return;
+  const distance = Math.ceil(element.scrollWidth - element.clientWidth);
+  if (distance <= 1) return;
+
+  const motion = { delayId: 0, frameId: 0 };
+  hoverMarqueeStates.set(element, motion);
+  motion.delayId = setTimeout(() => {
+    motion.delayId = 0;
+    element.classList.add('is-hover-scrolling');
+    const startedAt = performance.now();
+    const duration = Math.max(1800, Math.min(8000, distance * 22));
+    const step = (now) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      element.scrollLeft = distance * progress;
+      if (progress < 1) motion.frameId = requestAnimationFrame(step);
+      else motion.frameId = 0;
+    };
+    motion.frameId = requestAnimationFrame(step);
+  }, 240);
+}
+
+function bindHoverMarquee(element) {
+  element.addEventListener('mouseenter', () => startHoverMarquee(element));
+  element.addEventListener('mouseleave', () => stopHoverMarquee(element));
+}
+
+function setHoverMarqueeText(element, value) {
+  stopHoverMarquee(element);
+  const text = value || '';
+  element.textContent = text;
+  element.removeAttribute('title');
+}
 
 function renderDeviceAccordion(accordionInner, deviceDetail) {
   const signature = JSON.stringify([
@@ -1945,6 +2234,7 @@ function renderActiveToolDetail() {
 function renderToolDetailFooter() {
   const active = activeToolDetail();
   els.toolDetailFooter.classList.toggle('hidden', !active);
+  syncLiveTokenRateFooterState();
   if (!active) return;
   const mode = state.toolDetailMode;
   els.toolDetailFooter.setAttribute('aria-label', active.detail.name);
@@ -1962,7 +2252,7 @@ function setActiveToolDetailMode(mode) {
   renderToolDetailFooter();
 }
 
-function updateRow(row, { name, subtitle, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable }) {
+function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable, reviewGroup }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}`;
@@ -1978,11 +2268,17 @@ function updateRow(row, { name, subtitle, detail, value, cost, barValue, max, co
   if (platform !== undefined) row.dataset.platform = platform || '';
   if (client !== undefined) row.dataset.client = client || '';
   if (kind !== undefined) row.dataset.kind = kind || '';
+  if (reviewGroup === true) row.dataset.reviewGroup = 'true';
+  else delete row.dataset.reviewGroup;
   if (kind === 'session' && client === 'reasonix') {
     row.dataset.detailUnavailable = sessionDetailAvailable === true ? 'false' : 'true';
   } else if (row.hasAttribute('data-detail-unavailable')) {
     row.removeAttribute('data-detail-unavailable');
   }
+  const interactive = reviewGroup === true || (
+    kind === 'session'
+    && ['claude', 'codex', 'opencode', 'dsh'].includes(client)
+  ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
   const mark = row.querySelector('.row-mark');
   const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '' }, state.breakdown);
   if (iconKind.kind === 'icon') {
@@ -1992,12 +2288,15 @@ function updateRow(row, { name, subtitle, detail, value, cost, barValue, max, co
     mark.className = 'row-mark dot';
     mark.style.background = color;
   }
-  row.querySelector('.row-title').textContent = name;
+  setHoverMarqueeText(row.querySelector('.row-title'), name);
   const subtitleEl = row.querySelector('.row-subtitle');
   subtitleEl.textContent = subtitle || '';
   subtitleEl.classList.toggle('hidden', !subtitle);
+  const activityEl = row.querySelector('.row-activity');
+  activityEl.textContent = activity || '';
+  activityEl.classList.toggle('hidden', !activity);
   const detailEl = row.querySelector('.row-detail');
-  detailEl.textContent = detail || '';
+  setHoverMarqueeText(detailEl, detail);
   detailEl.classList.toggle('hidden', !detail);
   const valueEl = row.querySelector('.row-value');
   if (tokenDataUnavailable === true) {
@@ -2075,29 +2374,19 @@ function updateRow(row, { name, subtitle, detail, value, cost, barValue, max, co
     row.classList.remove('expanded');
   }
   const rowHead = row.querySelector('.row-head');
-  if (row.classList.contains('has-accordion')) {
-    if (row.hasAttribute('tabindex')) row.removeAttribute('tabindex');
-    if (row.hasAttribute('role')) row.removeAttribute('role');
-    if (row.hasAttribute('aria-expanded')) row.removeAttribute('aria-expanded');
-    if (row.hasAttribute('aria-label')) row.removeAttribute('aria-label');
-    if (rowHead.tabIndex !== 0) rowHead.tabIndex = 0;
-    setAttributeIfChanged(rowHead, 'role', 'button');
-    setAttributeIfChanged(rowHead, 'aria-expanded', String(row.classList.contains('expanded')));
-    const tokenLabel = tokenDataUnavailable === true
-      ? (t('detailTokenUnavailable') || 'Unavailable')
-      : formatNumber(value);
-    const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0)}`;
-    setAttributeIfChanged(rowHead, 'aria-label', `${name}, ${t('dashboard.stat.totalTokens')}: ${tokenLabel}${costLabel}`);
-  } else {
-    if (row.hasAttribute('tabindex')) row.removeAttribute('tabindex');
-    if (row.hasAttribute('role')) row.removeAttribute('role');
-    if (row.hasAttribute('aria-expanded')) row.removeAttribute('aria-expanded');
-    if (row.hasAttribute('aria-label')) row.removeAttribute('aria-label');
-    if (rowHead.hasAttribute('tabindex')) rowHead.removeAttribute('tabindex');
-    if (rowHead.hasAttribute('role')) rowHead.removeAttribute('role');
-    if (rowHead.hasAttribute('aria-expanded')) rowHead.removeAttribute('aria-expanded');
-    if (rowHead.hasAttribute('aria-label')) rowHead.removeAttribute('aria-label');
-  }
+  const hasAccordion = row.classList.contains('has-accordion');
+  const tokenLabel = tokenDataUnavailable === true
+    ? (t('detailTokenUnavailable') || 'Unavailable')
+    : formatNumber(value);
+  const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0)}`;
+  sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
+    interactive,
+    hasAccordion,
+    expanded: row.classList.contains('expanded'),
+    ariaLabel: hasAccordion
+      ? `${name}, ${t('dashboard.stat.totalTokens')}: ${tokenLabel}${costLabel}`
+      : name
+  });
 }
 
 function applyHomeListMark(mark, iconKind, color) {
@@ -2332,7 +2621,17 @@ function sessionRowsForPeriod(period) {
     archivedLabel: t('session.archived'),
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
-  if (rows.length > 0) return rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
+  if (rows.length > 0) {
+    rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
+    return sessionRowsApi.groupBackgroundReviewRows(rows, {
+      label: t('sessions.backgroundReviews'),
+      countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
+      summaryLabel: ({ latestTime, latestValue }) => [
+        latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
+        latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
+      ].filter(Boolean).join(' · ')
+    });
+  }
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
 }
@@ -3889,13 +4188,14 @@ function configuredLimitProviderOrder() {
 }
 
 function configuredLimitProviderSelection() {
-  const raw = state.settings?.limitProviders;
+  const raw = state.pendingLimitProviderSelection?.limitProviders ?? state.settings?.limitProviders;
   const source = raw === undefined || raw === null ? DEFAULT_LIMIT_PROVIDER_ORDER : raw;
   return limitProviderOrderApi.normalizeLimitProviderSelection(source, LIMIT_PROVIDERS);
 }
 
 function enabledLimitProviderSet() {
-  if (state.settings?.limitsEnabled === false) return new Set();
+  const limitsEnabled = state.pendingLimitProviderSelection?.limitsEnabled ?? state.settings?.limitsEnabled;
+  if (limitsEnabled === false) return new Set();
   return new Set(configuredLimitProviderSelection());
 }
 
@@ -4041,6 +4341,19 @@ function formatCommandcodeCreditsDetail(window) {
   const showUsed = Boolean(state.settings?.showLimitUsed);
   const value = showUsed ? Math.max(0, limit - remaining) : remaining;
   return `${formatMoney(value, window?.currency)} / ${formatMoney(limit, window?.currency)}`;
+}
+
+// ZCode plan buckets are token pools, so their detail counts tokens: "124M /
+// 305M" (remaining mode) or "181M / 305M" (used mode), from the same values
+// the meter derives from. Nothing when either side is missing — a bucket
+// without absolute units keeps its percentage-only look.
+function formatZcodeTokensDetail(window) {
+  const remaining = optionalFiniteNumber(window?.remaining);
+  const limit = optionalFiniteNumber(window?.limit);
+  if (remaining === null || limit === null || limit <= 0) return '';
+  const showUsed = Boolean(state.settings?.showLimitUsed);
+  const value = showUsed ? Math.max(0, limit - remaining) : remaining;
+  return `${formatCompact(value)} / ${formatCompact(limit)}`;
 }
 
 // One-line Overage value: "12.5 credits · $3.20" (credits used, then est. cost).
@@ -4488,27 +4801,40 @@ function limitMeterNode(color, percent, tone = 1) {
 function limitWindowNode(label, window, color, tone = 1, valueOverride = null, detailText = '') {
   const remaining = Number(window?.remainingPercent);
   const used = Number(window?.usedPercent);
+  const motionRemaining = limitResetMotionApi.remainingPercent(window);
   const showMeter = window?.showMeter !== false;
   const hasPercent = showMeter && (Number.isFinite(remaining) || Number.isFinite(used));
   // valueOverride windows carry a fixed (money/amount) label — keep their meter
   // on "remaining" so bar and label stay consistent; only percent-labelled
   // windows honour the used-mode flip.
   const showUsed = Boolean(state.settings?.showLimitUsed) && valueOverride == null;
-  const fillPercent = limitFillPercent(remaining, used, showUsed);
+  const fillPercent = limitResetMotionApi.displayPercent(
+    limitFillPercent(remaining, used, showUsed)
+  );
   const item = document.createElement('div');
   item.className = 'limit-window';
+  item.dataset.limitMotionKey = limitResetMotionApi.windowKey(label, window);
+  item.dataset.limitRemainingPercent = hasPercent && motionRemaining !== null
+    ? String(Math.max(0, Math.min(100, motionRemaining)))
+    : '';
+  item.dataset.limitDisplayPercent = hasPercent && fillPercent !== null ? String(fillPercent) : '';
+  item.dataset.limitResetAt = window?.resetsAt || '';
   const text = document.createElement('div');
   text.className = 'limit-window-text';
   const name = document.createElement('span');
   name.textContent = window?.label || label;
   const value = document.createElement('span');
   value.textContent = valueOverride != null ? valueOverride : formatLimitWindowValue(window, fillPercent, hasPercent, showUsed);
+  if (valueOverride == null && hasPercent && fillPercent !== null) {
+    value.dataset.limitMotionValue = String(fillPercent);
+    value.dataset.limitMotionSuffix = limitModeSuffix(showUsed);
+  }
   text.append(name, value);
   const meter = limitMeterNode(color, fillPercent, tone);
   const reset = document.createElement('div');
   reset.className = 'limit-reset';
   const resetText = window?.resetsAt
-    ? formatReset(window.resetsAt)
+    ? formatLimitBoundary(window)
     : window?.resetDescription || '';
   if (detailText) {
     // Keep the reset text left-aligned (consistent with every other provider)
@@ -5131,19 +5457,61 @@ function renderProviderWindows(provider, color) {
       windows.append(node);
     }
   } else if (provider.provider === 'zai' || provider.provider === 'zaiteam') {
-    const fiveHour = windowForKind(provider, 'session');
+    // Billing-kind windows are one of three things: the subscription MCP
+    // monthly bucket (no metric, no limitId), ZCode Start/Weekend plan
+    // buckets (limitId set, per-model labels), or the cash balance
+    // (metric 'credits'). Each renders in its own slot below.
+    const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
-    const mcp = windowForKind(provider, 'billing');
-    if (fiveHour) {
-      const fiveHourNode = limitWindowNode('5-hour', fiveHour, color, 0.95);
-      if (!weekly) fiveHourNode.classList.add('limit-window-wide');
-      windows.append(fiveHourNode);
+    const billingWindows = windowsForKind(provider, 'billing');
+    const dailyWindows = windowsForKind(provider, 'daily');
+    const planBuckets = billingWindows.filter((window) => window?.limitId && !window?.metric);
+    const monthlyWindows = billingWindows.filter((window) => !window?.metric && !window?.limitId);
+    const balanceWindow = (provider.windows || []).find((window) => window?.metric === 'credits');
+    const nodes = [
+      session && limitWindowNode(session.label || '5-hour', session, color, 0.95),
+      ...dailyWindows.map((window, index) => limitWindowNode(
+        window.label || (dailyWindows.length > 1 ? `Daily ${index + 1}` : 'Daily'),
+        window,
+        color,
+        0.78,
+        null,
+        window.detail || formatZcodeTokensDetail(window)
+      )),
+      weekly && limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68),
+      ...planBuckets.map((window) => limitWindowNode(
+        window.label || 'Start Plan',
+        window,
+        color,
+        0.68,
+        null,
+        window.detail || formatZcodeTokensDetail(window)
+      ))
+    ].filter(Boolean);
+    if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
+    windows.append(...nodes);
+    // Monthly subscription buckets stay full width, independent of the
+    // paired quota count. Preserve all legacy billing windows without ids.
+    for (const monthly of monthlyWindows) {
+      const node = limitWindowNode(monthly.label || 'MCP', monthly, color, 0.68, null, monthly.detail || '');
+      node.classList.add('limit-window-wide');
+      windows.append(node);
     }
-    if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
-    if (mcp) {
-      const mcpNode = limitWindowNode('MCP', mcp, color, 0.68);
-      mcpNode.classList.add('limit-window-wide');
-      windows.append(mcpNode);
+    // Balance sits at the bottom on its own full-width row: coding-plan quota
+    // is consumed before the cash pool, so the money line reads as the last
+    // resort.
+    if (balanceWindow) {
+      const balanceNode = limitWindowNode(
+        'Balance',
+        { remainingPercent: creditsMeterPercent(provider, balanceWindow) },
+        color,
+        0.95,
+        formatMoney(balanceWindow.remaining, balanceWindow.currency)
+      );
+      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
+      windows.append(balanceNode);
+      const spendNode = provider.balance && providerSpendNode(provider.balance);
+      if (spendNode) windows.append(spendNode);
     }
   } else if (provider.provider === 'volcengine') {
     const session = windowForKind(provider, 'session');
@@ -5618,6 +5986,7 @@ function renderLimitProviderRow(id, label, provider, color, options = {}) {
   if (options.accountRow) classes.push('limit-account-row');
   if (provider.stale) classes.push('stale');
   row.className = classes.join(' ');
+  row.dataset.limitMotionKey = limitResetMotionApi.providerKey(provider);
   row.append(
     renderLimitProviderHead(id, label, provider, color, options),
     renderProviderWindows(provider, color)
@@ -5932,6 +6301,84 @@ function renderVolcengineAccountGroup(label, providers, color) {
   });
 }
 
+function captureLimitResetMotion() {
+  const snapshot = new Map();
+  for (const row of els.limitsPanel?.querySelectorAll('.limit-row[data-limit-motion-key]') || []) {
+    for (const item of row.querySelectorAll('.limit-window[data-limit-motion-key]')) {
+      const key = `${row.dataset.limitMotionKey}\0${item.dataset.limitMotionKey}`;
+      const entry = {
+        remainingPercent: item.dataset.limitRemainingPercent,
+        displayPercent: item.dataset.limitDisplayPercent,
+        resetsAt: item.dataset.limitResetAt
+      };
+      // Ambiguous identities are safer left static than animated on the wrong row.
+      snapshot.set(key, snapshot.has(key) ? null : entry);
+    }
+  }
+  return snapshot;
+}
+
+function animateLimitResets(snapshot) {
+  if (!snapshot?.size || prefersReducedMotion()) return;
+  const motions = [];
+  for (const row of els.limitsPanel?.querySelectorAll('.limit-row[data-limit-motion-key]') || []) {
+    for (const item of row.querySelectorAll('.limit-window[data-limit-motion-key]')) {
+      const key = `${row.dataset.limitMotionKey}\0${item.dataset.limitMotionKey}`;
+      const previous = snapshot.get(key);
+      const current = {
+        remainingPercent: item.dataset.limitRemainingPercent,
+        displayPercent: item.dataset.limitDisplayPercent,
+        resetsAt: item.dataset.limitResetAt
+      };
+      if (!previous || !limitResetMotionApi.shouldAnimateReset(previous, current)) continue;
+      const from = Number(previous.displayPercent);
+      const to = Number(current.displayPercent);
+      const fill = item.querySelector('.limit-meter-fill');
+      if (
+        previous.displayPercent === ''
+        || current.displayPercent === ''
+        || !Number.isFinite(from)
+        || !Number.isFinite(to)
+        || !fill
+      ) continue;
+      const duration = limitResetMotionApi.durationMs(from, to);
+      motions.push({
+        fill,
+        from,
+        item,
+        to,
+        duration
+      });
+    }
+  }
+  if (!motions.length) return;
+  // Start only after the replacement DOM is paintable. The rest of the refresh render
+  // can delay this first frame; excluding that delay prevents the motion from visibly
+  // catching up by skipping its opening values.
+  requestAnimationFrame((startedAt) => {
+    if (prefersReducedMotion()) return;
+    for (const { fill, from, item, to, duration } of motions) {
+      if (!fill.isConnected || !item.isConnected) continue;
+      animateBarBetween(
+        fill,
+        from / 100,
+        to / 100,
+        0,
+        duration,
+        LIMIT_RESET_MOTION_EASING
+      );
+      animateLimitResetCompletion(fill, duration);
+      animateLimitResetPercent(
+        item.querySelector('[data-limit-motion-value]'),
+        from,
+        to,
+        duration,
+        startedAt
+      );
+    }
+  });
+}
+
 function renderLimits() {
   if (!els.limitsPanel) return;
   const holdLimitDetailTooltipRender = limitDetailTooltipShouldHoldRender();
@@ -5987,8 +6434,12 @@ function renderLimits() {
     state.limitPanelRenderSignature === renderSignature
     && els.limitsPanel.children.length === orderedProviders.length
   ) {
+    // View changes intentionally reuse the rendered Limits DOM. Replaying the
+    // entrance motion here keeps that cache from swallowing the normal bar fill.
+    animateCachedLimitBarsFromZero();
     return;
   }
+  const resetMotionSnapshot = captureLimitResetMotion();
   state.limitPanelRenderSignature = renderSignature;
   const nodes = [];
   const rows = orderedProviders;
@@ -6048,6 +6499,7 @@ function renderLimits() {
     nodes.push(renderLimitProviderRow(id, label, provider, thirdPartyVisual?.color || color, rowOptions));
   }
   els.limitsPanel.replaceChildren(...nodes);
+  animateLimitResets(resetMotionSnapshot);
 }
 
 function serviceStatusLabel(status) {
@@ -6254,8 +6706,8 @@ function applySessionDetailResult(request, options) {
   renderSessionDetail(options);
 }
 
-async function openSessionDetail({ client, sessionId, sessionCost, title }) {
-  const request = { client, sessionId, sessionCost, title, period: state.period, detail: null };
+async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null }) {
+  const request = { kind: 'session', client, sessionId, sessionCost, title, period: state.period, detail: null, returnTo };
   state.openSession = request;
   renderSessionDetail({ loading: true });
   try {
@@ -6283,6 +6735,16 @@ function closeSessionDetail() {
   render();
 }
 
+function sessionDetailBack() {
+  const returnTo = state.openSession?.returnTo;
+  if (returnTo?.kind === 'background-review-group') {
+    state.openSession = returnTo;
+    renderBackgroundReviewDetail(returnTo);
+    return;
+  }
+  closeSessionDetail();
+}
+
 function renderSessionDetail({ detail, loading, error } = {}) {
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
@@ -6295,7 +6757,7 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   const back = document.createElement('button');
   back.className = 'detail-back';
   back.textContent = `‹ ${t('sessions') || 'Sessions'}`;
-  back.addEventListener('click', closeSessionDetail);
+  back.addEventListener('click', sessionDetailBack);
   head.append(back);
 
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
@@ -6315,6 +6777,71 @@ function renderSessionDetail({ detail, loading, error } = {}) {
 
   const max = Math.max(1, ...rows.map((row) => row.value));
   for (const row of rows) container.append(exchangeNode(row, max));
+}
+
+function backgroundReviewRunNode(row, max, parent) {
+  const wrap = document.createElement('div');
+  wrap.className = 'detail-exchange background-review-run';
+  wrap.setAttribute('role', 'button');
+  wrap.setAttribute('tabindex', '0');
+  wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">›</span>'
+    + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span></div>'
+    + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
+    + '<div class="bar"><div class="bar-fill"></div></div>';
+  const time = sessionRowsApi.compactSessionTime(row.sortTime, new Date());
+  wrap.querySelector('.detail-ex-title').textContent = time || t('sessions.backgroundReviews');
+  wrap.querySelector('.detail-ex-sub').textContent = row.detail || '';
+  wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
+  wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0);
+  applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
+  const open = () => openSessionDetail({
+    client: row.client,
+    sessionId: String(row.key || '').replace(/^session:[^:]+:/, ''),
+    sessionCost: Number(row.cost || 0),
+    title: `${t('sessions.backgroundReviews')} · ${time}`,
+    returnTo: parent
+  });
+  wrap.addEventListener('click', open);
+  wrap.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    open();
+  });
+  return wrap;
+}
+
+function renderBackgroundReviewDetail(request) {
+  els.breakdown.classList.add('hidden');
+  els.sessionDetail.classList.remove('hidden');
+  els.sessionDetailHead.classList.remove('hidden');
+  const head = els.sessionDetailHead;
+  const container = els.sessionDetail;
+  head.replaceChildren();
+  container.replaceChildren();
+
+  const back = document.createElement('button');
+  back.className = 'detail-back';
+  back.textContent = `‹ ${t('sessions') || 'Sessions'}`;
+  back.addEventListener('click', closeSessionDetail);
+  const heading = document.createElement('strong');
+  heading.className = 'detail-heading';
+  heading.textContent = t('sessions.backgroundReviews');
+  head.append(back, heading);
+
+  const rows = request?.summary?.backgroundReviewRows || [];
+  if (rows.length === 0) {
+    container.append(detailNote(t('detailEmpty') || 'No activity in this period.'));
+    return;
+  }
+  const overview = document.createElement('div');
+  overview.className = 'background-review-overview';
+  overview.innerHTML = '<span class="background-review-count"></span><span class="background-review-totals"></span>';
+  overview.querySelector('.background-review-count').textContent = t('sessions.backgroundReviewCount', { count: rows.length });
+  overview.querySelector('.background-review-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0)}`;
+  container.append(overview);
+
+  const max = Math.max(1, ...rows.map((row) => Number(row.value) || 0));
+  for (const row of rows) container.append(backgroundReviewRunNode(row, max, request));
 }
 
 function detailNote(text) {
@@ -7173,9 +7700,8 @@ function renderHomeLimitModule() {
       }
       line.append(label, value);
       metric.append(line);
-      const resetAt = formatReset(window.resetsAt);
       const resetLabel = window.resetsAt
-        ? resetAt || ''
+        ? formatLimitBoundary(window) || ''
         : window.resetDescription
         ? t('home.reset', { value: window.resetDescription })
         : '';
@@ -7779,6 +8305,7 @@ function render() {
   }
   if (!state.stats) return;
   els.toolDetailFooter.classList.add('hidden');
+  syncLiveTokenRateFooterState();
   renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
   renderViewSwitcher();
@@ -7892,6 +8419,11 @@ function render() {
     els.trendsPanel.classList.add('hidden');
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
+    if (state.openSession.kind === 'background-review-group') {
+      const latest = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+      if (latest) state.openSession.summary = latest;
+      renderBackgroundReviewDetail(state.openSession);
+    }
     if (state.openSession.renderOptions) {
       const options = state.openSession.renderOptions;
       state.openSession.renderOptions = null;
@@ -8058,7 +8590,9 @@ async function refreshStats(options = {}) {
     setRefreshButtonState('refreshing');
   }
   try {
-    state.stats = overlayAllTimeSessions(await window.tokenMonitor.getStats(options));
+    const nextStats = overlayAllTimeSessions(await window.tokenMonitor.getStats(options));
+    observeLiveTokenRate(nextStats);
+    state.stats = nextStats;
     if (options.forceHistory === true) {
       // A manual history rescan is an explicit retry boundary. Let Home request the
       // corresponding full payload even when its revision is unchanged, and restore
@@ -8236,6 +8770,7 @@ function applyAppearanceSettings(settings) {
   // omit it, so we must not wipe theme overrides mid-slider-drag.
   if (settings && 'themeColors' in settings) applyThemeColors(settings.themeColors);
   els.liveDot.style.display = (settings?.showLiveDot !== false) ? '' : 'none';
+  renderLiveTokenRate();
   els.shell.classList.toggle('desktop-mode', settings?.windowBehavior === 'desktop');
   els.shell.classList.toggle('title-icon-only', settings?.titleIconOnly === true);
   const trayMode = settings && 'trayMode' in settings
@@ -8906,6 +9441,8 @@ function appearancePatchFromControls() {
     showToolIcons: Boolean(els.toolIconsInput.checked),
     titleIconOnly: Boolean(els.titleIconInput.checked),
     showCompactTotalTokens: Boolean(els.showCompactTotalTokensInput.checked),
+    showLiveTokenRate: Boolean(els.showLiveTokenRateInput.checked),
+    liveTokenRateScope: els.liveTokenRateScopeInput?.value === 'device' ? 'device' : 'all',
     compactTokenUnits: els.compactTokenUnitsInput?.value === 'localized' ? 'localized' : 'western',
     settingsInTitlebar: Boolean(els.swapSettingsRefreshInput.checked),
     glassOpacity: Number(els.glassInput.value === '' ? defaultAppearance.glassOpacity : els.glassInput.value),
@@ -9506,6 +10043,13 @@ function syncSettingsForm() {
   els.toolIconsInput.checked = state.settings.showToolIcons !== false;
   els.titleIconInput.checked = state.settings.titleIconOnly === true;
   els.showCompactTotalTokensInput.checked = state.settings.showCompactTotalTokens === true;
+  els.showLiveTokenRateInput.checked = state.settings.showLiveTokenRate === true;
+  if (els.liveTokenRateScopeInput) {
+    els.liveTokenRateScopeInput.value = state.settings.liveTokenRateScope === 'device' ? 'device' : 'all';
+  }
+  const liveRateHasScope = state.settings.showLiveTokenRate === true
+    && (state.settings.hubMode === 'client' || state.settings.hubMode === 'host');
+  els.liveTokenRateScopeRow?.classList.toggle('hidden', !liveRateHasScope);
   if (els.compactTokenUnitsInput) {
     els.compactTokenUnitsInput.value = state.settings.compactTokenUnits === 'localized' ? 'localized' : 'western';
   }
@@ -11716,13 +12260,27 @@ async function onLimitProviderToggle() {
   if (checked.length === 0 && state.breakdown === 'limits') {
     setBreakdown('tool');
   }
-  await saveSettings({ limitProviders: checked.join(','), limitsEnabled: checked.length > 0 });
-  clearDisabledLimitProviderPendingChecks(new Set(checked));
-  // settings:update reconfigures LimitsRuntime immediately. Its existing
-  // snapshot and the newly enabled provider's eventual result arrive through
-  // the normal stats push, so a forced usage + all-provider refresh here only
-  // replaces stable account summaries with an interim snapshot and duplicates
-  // collection work.
+  const patch = { limitProviders: checked.join(','), limitsEnabled: checked.length > 0 };
+  // LimitsRuntime publishes its reconfigured snapshot synchronously before the
+  // main process can send settings:push. Keep the renderer on the user's new
+  // selection so that intervening stats frames cannot rebuild this checkbox
+  // from the previous settings and visibly re-check it.
+  const revision = ++state.limitProviderSelectionRevision;
+  state.pendingLimitProviderSelection = { revision, ...patch };
+  try {
+    await saveSettings(patch);
+    clearDisabledLimitProviderPendingChecks(new Set(checked));
+    // settings:update reconfigures LimitsRuntime immediately. Its existing
+    // snapshot and the newly enabled provider's eventual result arrive through
+    // the normal stats push, so a forced usage + all-provider refresh here only
+    // replaces stable account summaries with an interim snapshot and duplicates
+    // collection work.
+  } finally {
+    if (state.pendingLimitProviderSelection?.revision === revision) {
+      state.pendingLimitProviderSelection = null;
+      renderLimitProviderCheckboxes();
+    }
+  }
 }
 
 async function onLimitProviderMove(providerId, direction) {
@@ -12113,7 +12671,17 @@ for (const tab of document.querySelectorAll('.tab')) {
     if (!setPeriod(targetPeriod)) return;
     syncPeriodTabs();
     if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session')) {
-      openSessionDetail(state.openSession);
+      if (state.openSession.kind === 'background-review-group') {
+        const period = state.stats?.periods?.[state.period];
+        const summary = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+        if (summary) {
+          state.openSession = { kind: 'background-review-group', period: state.period, summary };
+        } else {
+          state.openSession = null;
+        }
+      } else {
+        openSessionDetail({ ...state.openSession, returnTo: null });
+      }
     } else if (state.openSession) {
       state.openSession = null;
     }
@@ -12190,6 +12758,16 @@ els.breakdown.addEventListener('click', (event) => {
   if (state.breakdown !== 'session') return;
   const rowEl = event.target.closest('.row');
   if (!rowEl) return;
+  if (rowEl.dataset.reviewGroup === 'true') {
+    const period = state.stats?.periods?.[state.period];
+    const summary = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+    if (summary) {
+      const request = { kind: 'background-review-group', period: state.period, summary };
+      state.openSession = request;
+      renderBackgroundReviewDetail(request);
+    }
+    return;
+  }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
   if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh') return;
@@ -12207,6 +12785,10 @@ els.breakdown.addEventListener('click', (event) => {
     sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
     title: rowEl.querySelector('.row-title')?.textContent || ''
   });
+});
+
+els.breakdown.addEventListener('keydown', (event) => {
+  sessionRowsApi.handleBreakdownRowKeydown(event);
 });
 
 els.pinButton.addEventListener('click', (event) => {
@@ -12294,6 +12876,7 @@ els.appTitleMark?.addEventListener('click', suppressTokenRateClickAfterHold);
 els.liveDot?.addEventListener('click', suppressTokenRateClickAfterHold);
 els.appTitleMark?.addEventListener('click', toggleTokenRateMode);
 els.liveDot?.addEventListener('click', toggleTokenRateMode);
+els.liveTokenRate?.addEventListener('click', toggleTokenRateMode);
 
 els.languageInput?.addEventListener('change', async () => {
   await saveSettings({ language: els.languageInput.value });
@@ -12603,6 +13186,24 @@ els.toolIconsInput.addEventListener('change', async () => {
 });
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
 els.showCompactTotalTokensInput.addEventListener('change', async () => {
+  await saveAppearanceFromControls();
+});
+els.showLiveTokenRateInput.addEventListener('change', async () => {
+  state.settings.showLiveTokenRate = els.showLiveTokenRateInput.checked;
+  const liveRateHasScope = state.settings.showLiveTokenRate
+    && (state.settings.hubMode === 'client' || state.settings.hubMode === 'host');
+  els.liveTokenRateScopeRow?.classList.toggle('hidden', !liveRateHasScope);
+  if (state.settings.showLiveTokenRate) observeLiveTokenRate(state.stats);
+  renderLiveTokenRate();
+  await saveAppearanceFromControls();
+  if (state.settings.showLiveTokenRate) observeLiveTokenRate(state.stats);
+  renderLiveTokenRate();
+});
+els.liveTokenRateScopeInput?.addEventListener('change', async () => {
+  state.settings.liveTokenRateScope = els.liveTokenRateScopeInput.value === 'device' ? 'device' : 'all';
+  resetLiveTokenRateTracking();
+  observeLiveTokenRate(state.stats);
+  renderLiveTokenRate();
   await saveAppearanceFromControls();
 });
 els.compactTokenUnitsInput?.addEventListener('change', async () => {
@@ -12957,6 +13558,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     if (payload.data?.mode) state.mode = payload.data.mode;
     if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
     state.stats = overlayAllTimeSessions(payload.data.stats);
+    observeLiveTokenRate(state.stats);
     applyCodexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see
     // AGENTS.md collector notes), so only the final push can retire the
@@ -14958,7 +15560,10 @@ function copilotAccountStatusText(provider, configured, source, enabled = true) 
 function apiKeyAccountStatusText(providerName, provider, configured, source, enabled = true) {
   const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
   if (accountStatus === 'linked') {
-    return t(source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`);
+    // A ZCode-discovered login is an OAuth-style link, not a pasted API key,
+    // so it reads as connected the way Zed's linked sessions do.
+    const linkedKey = providerName === 'zai' && source === 'zcode-auto' ? 'settings.zai.statusLinked' : null;
+    return t(linkedKey || (source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`));
   }
   if (accountStatus === 'invalid') return t(`settings.${providerName}.statusInvalid`);
   if (accountStatus === 'notConfigured') return t(`settings.${providerName}.statusNotSet`);
@@ -15155,8 +15760,20 @@ function renderExternalProviderStatus(providerName) {
     statusEl,
     pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
   );
+  // A local ZCode install keeps the Z.ai row honest when unchecked: the
+  // auto-discovered plans still exist, so the pill shows auto-detect instead
+  // of the final "disabled" state the generic seven-state map lands on.
+  if (providerName === 'zai' && !enabled && state.settings?.zcodeLoginDetected === true) {
+    setCursorStatusText(statusEl, t('settings.limits.connection.autoDetect'));
+  }
   manualPanel.classList.toggle('hidden', linked);
   openBtn.classList.toggle('hidden', linked);
+  if (providerName === 'zai' && source === 'zcode-auto') {
+    // The discovered login is not user-entered, so the override input and the
+    // console link stay reachable instead of hiding behind linked.
+    manualPanel.classList.remove('hidden');
+    openBtn.classList.remove('hidden');
+  }
   const canClearConfiguredClaude = providerName === 'claude' && configured;
   logoutBtn.classList.toggle('hidden', source !== 'settings' || (!linked && !canClearConfiguredClaude));
   refreshBtn.classList.toggle('hidden', !configured);

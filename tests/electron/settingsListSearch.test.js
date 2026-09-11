@@ -59,11 +59,11 @@ test('the renderer loads the shared filter module', () => {
 // use, so this asserts the behaviour and not the shape of the code.
 test('a toggle applied to a partially rendered list preserves the rows it cannot see', () => {
   const stored = ['claude', 'codex', 'opencode', 'zed'];
-  const order = ['claude', 'codex', 'opencode', 'zed', 'kilocode'];
+  const order = ['claude', 'codex', 'opencode', 'zed', 'kilo'];
   // Only the rows matching a "kilo" query are rendered.
   assert.deepEqual(
-    mergeRenderedSelection(stored, [['kilocode', true]], order),
-    ['claude', 'codex', 'opencode', 'zed', 'kilocode']
+    mergeRenderedSelection(stored, [['kilo', true]], order),
+    ['claude', 'codex', 'opencode', 'zed', 'kilo']
   );
   // Unticking a visible row removes exactly that one.
   assert.deepEqual(
@@ -71,7 +71,7 @@ test('a toggle applied to a partially rendered list preserves the rows it cannot
     ['claude', 'opencode', 'zed']
   );
   // A plain read of the DOM would have written just the rendered row.
-  assert.notDeepEqual(mergeRenderedSelection(stored, [['kilocode', true]], order), ['kilocode']);
+  assert.notDeepEqual(mergeRenderedSelection(stored, [['kilo', true]], order), ['kilo']);
 });
 
 test('an unfiltered toggle writes the same selection the old DOM read produced', () => {

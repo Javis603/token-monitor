@@ -43,7 +43,9 @@ const {
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
 const { claudeSessionRoots } = require('./providers/claude/paths');
+const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
+const codexSession = require('./providers/codex/sessionMetadata');
 const opencodeSession = require('./providers/opencode/session');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
 const {
@@ -317,7 +319,8 @@ const tokscaleCapabilityResolver = createTokscaleCapabilityResolver({
 // stripped in collectUsageOnce before the filter is built, not dropped here.
 const TOKSCALE_CLIENT_ALIASES = {
   antigravity: ['antigravity-cli'],
-  pi: ['omp']
+  pi: ['omp'],
+  kilo: ['kilocode']
 };
 
 function tokscaleClientFilter(clients) {
@@ -958,7 +961,16 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     const lastUsedAt = lastJsonlTimestamp(filePath) || startedAt;
     const identity = resolveProjects ? projectIdentity(projectPathFromJsonl(filePath)) : {};
     const key = `${client}:${sessionId}`;
-    metadata.set(key, { startedAt, lastUsedAt, ...identity });
+    const title = client === 'claude'
+      ? claudeSessionMetadata.readSessionTitle(filePath, deps.claudeMetadataDeps)
+      : '';
+    metadata.set(key, {
+      ...(metadata.get(key) || {}),
+      startedAt,
+      lastUsedAt,
+      ...identity,
+      ...(title ? { title } : {})
+    });
     if (identity.projectId) resolvedSessionKeys.add(key);
   };
 
@@ -973,7 +985,8 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
       const lastUsedAt = meta.lastUsedAt || startedAt;
       const identity = resolveProjects ? projectIdentity(meta.projectPath) : {};
       const key = `opencode:${sessionId}`;
-      if (startedAt || lastUsedAt || identity.projectId) metadata.set(key, { startedAt, lastUsedAt, ...identity });
+      const title = String(meta.title || '').trim();
+      if (startedAt || lastUsedAt || identity.projectId || title) metadata.set(key, { startedAt, lastUsedAt, ...identity, title });
       if (identity.projectId) resolvedSessionKeys.add(key);
     }
   }
@@ -991,13 +1004,31 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
   for (const [sessionId, filePath] of transcriptFiles) applyFile('claude', sessionId, filePath);
 
   const codexIds = byClient.get('codex') || new Set();
+  if (codexIds.size > 0) {
+    const readCodexMeta = deps.readCodexMeta || (deps.scopedHome
+      ? (ids) => codexSession.readSessionMetaForHome(ids, home, deps.codexDeps)
+      : (ids) => codexSession.readSessionMeta(ids, {
+        ...(deps.codexDeps || {}),
+        homeDir: home,
+        env: deps.env
+      }));
+    for (const [sessionId, meta] of readCodexMeta(codexIds)) {
+      const key = `codex:${sessionId}`;
+      metadata.set(key, { ...(metadata.get(key) || {}), ...meta });
+    }
+  }
+  const codexHome = codexSession.codexHomeDir({
+    homeDir: home,
+    env: deps.env,
+    useEnvRoot: !deps.scopedHome
+  });
   const missingCodexIds = new Set();
   for (const sessionId of codexIds) {
-    const filePath = codexSessionFile(home, sessionId);
+    const filePath = codexSessionFile(home, sessionId, { codexHome });
     if (filePath) applyFile('codex', sessionId, filePath);
     else missingCodexIds.add(sessionId);
   }
-  const codexFiles = findSessionFiles(path.join(home, '.codex', 'sessions'), missingCodexIds);
+  const codexFiles = findSessionFiles(path.join(codexHome, 'sessions'), missingCodexIds);
   for (const [sessionId, filePath] of codexFiles) applyFile('codex', sessionId, filePath);
 
   const kimiIds = byClient.get('kimi') || new Set();
@@ -1130,6 +1161,8 @@ function propagateTodayProjects(today, periods) {
         target.projectId = session.projectId;
         target.projectLabel = session.projectLabel;
       }
+      if (session.title && !target.title) target.title = session.title;
+      if (session.sessionKind && !target.sessionKind) target.sessionKind = session.sessionKind;
       if (session.startedAt && (!target.startedAt || Date.parse(session.startedAt) < Date.parse(target.startedAt))) {
         target.startedAt = session.startedAt;
       }
@@ -1150,6 +1183,8 @@ function applySessionTimestamps(periods, home, deps = {}) {
       if (meta.lastUsedAt && (!session.lastUsedAt || Date.parse(meta.lastUsedAt) > Date.parse(session.lastUsedAt))) session.lastUsedAt = meta.lastUsedAt;
       if (meta.projectId) session.projectId = meta.projectId;
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
+      if (meta.title) session.title = meta.title;
+      if (meta.sessionKind) session.sessionKind = meta.sessionKind;
     }
   }
 }
@@ -2040,9 +2075,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // watcher prunes the rest of this broad app data root below.
   //
   // Only the roots tokscale declares as `PathRoot::XdgData` go through this —
-  // opencode, zed and micode (clients.rs), plus the CodeBuddy extension logs it
-  // resolves via `dirs::data_local_dir()`. Kiro's CLI database is deliberately
-  // NOT one of them: tokscale spells it as a home-relative literal
+  // opencode, zed, kilo and micode (clients.rs), plus the CodeBuddy extension
+  // logs it resolves via `dirs::data_local_dir()`. Kiro's CLI database is
+  // deliberately NOT one of them: tokscale spells it as a home-relative literal
   // (`{home}/.local/share/kiro-cli/data.sqlite3`, scanner.rs), so following XDG
   // there would watch a directory it never reads. The split is upstream's, not
   // an oversight — check clients.rs before adding or removing a root here.
@@ -2117,13 +2152,14 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['zed-threads', path.join(home, 'Library', 'Application Support', 'Zed', 'threads')],
     ['zed-threads', path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Zed', 'threads')]
   );
-  // Kilo Code (VS Code ext): tokscale 3.1.3 only scans the Linux .config root and
-  // the .vscode-server (remote) root for KiloCode — unlike Cline, it does NOT scan
-  // the native macOS Application Support / Windows %APPDATA% roots. Watching those
-  // would be dead watches + a false "waiting" status, so we mirror exactly what
-  // tokscale reads. (Native mac/win support pending upstream tokscale.)
+  // Kilo is one Token Monitor client backed by two Tokscale sources. `kilo`
+  // reads the CLI's XDG-data SQLite database, while `kilocode` reads the VS Code
+  // extension's Linux/local and remote task roots. Keep the native macOS and
+  // Windows VS Code roots out until Tokscale scans them; otherwise they would be
+  // dead watches and false presence signals.
   add(
-    'kilocode',
+    'kilo',
+    ['kilo-db', path.join(xdgHome, 'kilo'), path.join(xdgHome, 'kilo', 'kilo.db')],
     ['kilocode-tasks', path.join(home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')],
     ['kilocode-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')]
   );
@@ -2417,6 +2453,21 @@ function clientsForWatchPath(filePath, rootsByClient) {
 // never recurses into an ignored dir (so the runaway poll is gone), yet a
 // newly created state.db-wal is still seen on the next top-level readdir.
 const HERMES_DB_FILES = new Set(['state.db', 'state.db-wal', 'state.db-shm']);
+// OpenClaw keeps each agent's usage sources in a small set of lanes under
+// ~/.openclaw/agents/<agentId>: legacy/published JSONL under sessions/, doctor
+// migration archives beside it, the current per-agent SQLite store, and Codex
+// app-server rollouts under agent/codex-home and the legacy per-profile CLI
+// homes at agent/cli-auth/codex/<profile>. The rest of an agent directory is
+// runtime/workspace state and can contain dependency trees large enough to make
+// chokidar allocate thousands of directory watches. Keep the official source
+// lanes live; Tokscale's periodic full scan remains the fallback for a
+// non-standard JSONL placed elsewhere under agents/.
+const OPENCLAW_TRANSCRIPT_DIRS = new Set(['sessions', 'session-sqlite-import-archive']);
+const OPENCLAW_AGENT_DB_WATCH_PATTERN = /^openclaw-agent\.sqlite(?:-(?:wal|shm))?$/;
+// Both Codex homes an agent can own — `agent/codex-home` and the legacy
+// `agent/cli-auth/codex/<profile>` — expose their rollouts under the same two
+// directory names, so one set covers both.
+const OPENCLAW_CODEX_HOME_DIRS = new Set(['sessions', 'archived_sessions']);
 // OpenCode discovers only direct opencode.db / opencode-<channel>.db files.
 // WAL/SHM are not database inputs to tokscale, but they are the live-write
 // signals that must remain watched so a transaction committed before a
@@ -2528,6 +2579,32 @@ function watchPolicyEntries(clientsCsv) {
   // watch root — the home AND every profile dir under it — is kept by the
   // matcher itself, so a profile's own database still reports.
   bound('hermes', candidates.hermes || [], (parts) => !HERMES_DB_FILES.has(parts[parts.length - 1]));
+
+  bound('openclaw', candidates.openclaw || [], (parts) => {
+    // The first level is the dynamic agent id. Keep it so newly created agents
+    // can expose one of the bounded source lanes below.
+    if (parts.length === 1) return false;
+    if (OPENCLAW_TRANSCRIPT_DIRS.has(parts[1])) return false;
+    if (parts[1] !== 'agent') return true;
+
+    // Keep the parent so a fresh SQLite store, codex-home or cli-auth home can
+    // appear after startup, then limit its contents to those sources.
+    if (parts.length === 2) return false;
+    if (parts.length === 3) {
+      return parts[2] !== 'codex-home'
+        && parts[2] !== 'cli-auth'
+        && !OPENCLAW_AGENT_DB_WATCH_PATTERN.test(parts[2]);
+    }
+    if (parts[2] === 'codex-home') return !OPENCLAW_CODEX_HOME_DIRS.has(parts[3]);
+    if (parts[2] !== 'cli-auth') return true;
+    // Only `cli-auth/codex/<profile>` is a Codex home; `cli-auth/<other>` is an
+    // authentication profile Tokscale never reads. The profile level is kept so
+    // a login added after startup still reports, and `history.jsonl` beside its
+    // session dirs is pruned the same way it is under codex-home.
+    if (parts[3] !== 'codex') return true;
+    if (parts.length <= 5) return false;
+    return !OPENCLAW_CODEX_HOME_DIRS.has(parts[5]);
+  });
 
   bound('copilot', withBasename('copilot', '.copilot'), (parts) => {
     if (parts[0] === 'otel') return false;

@@ -7,9 +7,11 @@
 // setup on startup and writes the report to stdout/stderr as ANSI text. Running
 // `kiro-cli chat --no-interactive /usage` with TERM set captures that output
 // without an interactive session (the same approach Win-CodexBar uses, which is
-// what keeps this portable to Windows — no PTY required). We strip ANSI and
-// regex-parse the report. Parsing mirrors CodexBar's KiroStatusProbe so the
-// supported output formats stay aligned with upstream.
+// what keeps this portable to Windows — no PTY required). Kiro CLI 2.x's default
+// v2 engine can collapse that command to a plan-only summary, so we retry through
+// its legacy v1 UI only for that exact shape. We strip ANSI and regex-parse the
+// report. Parsing mirrors CodexBar's KiroStatusProbe so the supported output
+// formats stay aligned with upstream.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -263,7 +265,7 @@ function existingKiroCli(env = process.env, platform = process.platform, deps = 
 // formatted report; stdin is ignored so a prompt can never block us. We resolve
 // with stdout (or stderr when stdout is empty) regardless of exit code, because
 // kiro-cli sometimes prints the report and still exits non-zero.
-function runKiroUsageCli(deps = {}) {
+function runKiroUsageCliOnce(args, deps = {}) {
   const spawnFn = deps.spawn || spawn;
   const env = { ...(deps.env || process.env), TERM: 'xterm-256color' };
   const command = deps.kiroCliPath || 'kiro-cli';
@@ -273,7 +275,7 @@ function runKiroUsageCli(deps = {}) {
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawnFn(command, ['chat', '--no-interactive', '/usage'], {
+      child = spawnFn(command, args, {
         env,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe']
@@ -312,6 +314,25 @@ function runKiroUsageCli(deps = {}) {
     signal?.addEventListener?.('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
   });
+}
+
+function isKiroV2UsageSummary(text) {
+  const stripped = stripAnsi(text);
+  return /Plan:[^\n]*\|\s*\d+\s+usage breakdowns?\s*$/im.test(stripped)
+    && !/█+\s*\d+%/.test(stripped)
+    && !/\(\d+\.?\d*\s+of\s+\d+\s+covered/i.test(stripped);
+}
+
+async function runKiroUsageCli(deps = {}) {
+  const output = await runKiroUsageCliOnce(['chat', '--no-interactive', '/usage'], deps);
+  if (!isKiroV2UsageSummary(output)) return output;
+  return runKiroUsageCliOnce([
+    'chat',
+    '--no-interactive',
+    '--agent-engine=v1',
+    '--legacy-ui',
+    '/usage'
+  ], deps);
 }
 
 function statusOnlyProvider(status, updatedAt) {
@@ -361,7 +382,8 @@ async function fetchKiroLimits(_options = {}, deps = {}) {
       usedPercent: parsed.creditsPercent,
       used: parsed.creditsUsed,
       limit: parsed.creditsTotal,
-      resetsAt: parsed.resetsAt
+      resetsAt: parsed.resetsAt,
+      ...(parsed.resetsAt ? { boundaryKind: 'reset' } : {})
     });
   }
   if (parsed.bonus) {
@@ -375,7 +397,7 @@ async function fetchKiroLimits(_options = {}, deps = {}) {
       used: parsed.bonus.used,
       limit: parsed.bonus.total,
       resetsAt: expiryIso,
-      resetDescription: parsed.bonus.expiryDays !== null ? `expires in ${parsed.bonus.expiryDays}d` : ''
+      ...(expiryIso ? { boundaryKind: 'expiry' } : {})
     });
   }
   // Overage is a value, not a quota %, so it rides as a meterless note row (like

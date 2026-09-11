@@ -1544,6 +1544,14 @@ test('normalizeLimitWindow preserves only documented component sources', () => {
   assert.equal('source' in normalizeLimitWindow({ kind: 'session' }), false);
 });
 
+test('normalizeLimitWindow preserves only documented quota boundary kinds', () => {
+  assert.equal(normalizeLimitWindow({ kind: 'billing', boundaryKind: ' expiry ' }).boundaryKind, 'expiry');
+  assert.equal(normalizeLimitWindow({ kind: 'daily', boundary_kind: 'RESET' }).boundaryKind, 'reset');
+  assert.equal(normalizeLimitWindow({ kind: 'billing', boundaryKind: 'mixed' }).boundaryKind, 'mixed');
+  assert.equal('boundaryKind' in normalizeLimitWindow({ kind: 'billing', boundaryKind: 'renewal' }), false);
+  assert.equal('boundaryKind' in normalizeLimitWindow({ kind: 'billing' }), false);
+});
+
 test('normalizeLimitWindow preserves WorkBuddy credits on the shared credits contract', () => {
   const window = normalizeLimitWindow({
     kind: 'billing',

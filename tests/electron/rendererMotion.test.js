@@ -40,6 +40,27 @@ test('data bars animate on the compositor instead of changing layout width', () 
   assert.match(applyBarScale, /animateBarBetween\(fill, 0, safeScale, 0, 420\)/);
 });
 
+test('cached Limits bars replay their entrance motion when the view is revisited', () => {
+  const app = read('app.js');
+  const animateCachedLimitBarsFromZero = app.slice(
+    app.indexOf('function animateCachedLimitBarsFromZero('),
+    app.indexOf('function rowWidth(', app.indexOf('function animateCachedLimitBarsFromZero('))
+  );
+  const renderLimits = app.slice(
+    app.indexOf('function renderLimits('),
+    app.indexOf('function serviceStatusLabel(', app.indexOf('function renderLimits('))
+  );
+
+  assert.match(animateCachedLimitBarsFromZero, /if \(!state\.animateBarsFromZero \|\| prefersReducedMotion\(\)\) return;/);
+  assert.match(animateCachedLimitBarsFromZero, /querySelectorAll\('\.limit-meter-fill'\)/);
+  assert.match(animateCachedLimitBarsFromZero, /fill\.style\.getPropertyValue\('--bar-scale'\)/);
+  assert.match(animateCachedLimitBarsFromZero, /animateBarBetween\(fill, 0, targetScale, 0, 420\)/);
+  assert.match(
+    renderLimits,
+    /state\.limitPanelRenderSignature === renderSignature[\s\S]*?animateCachedLimitBarsFromZero\(\);\s*return;/
+  );
+});
+
 test('period changes preserve row identity, animate rank changes, and count from the previous total', () => {
   const app = read('app.js');
   const handler = app.slice(

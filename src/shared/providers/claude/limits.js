@@ -1294,6 +1294,7 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
     if (error?.code === 'CLAUDE_IDENTITY_UNAVAILABLE') throw error;
     if (!shouldTryClaudeCliFallback(error)) throw error;
     try {
+      if (!await isClaudeCliAuthenticated(deps)) throw error;
       const text = await runClaudeUsageCli(deps);
       const provider = mapClaudeCliUsageToProvider(text, {
         updatedAt: nowIso(nowMs),
@@ -1323,6 +1324,15 @@ function normalizeForLabelSearch(text) {
   return String(text || '').toLowerCase().replace(/[^a-z0-9%]+/g, '');
 }
 
+function claudeQuotaSection(line) {
+  const normalized = normalizeForLabelSearch(line);
+  if (normalized.startsWith('currentsession')) return 'session';
+  if (!normalized.startsWith('currentweek')) return '';
+  const suffix = normalized.slice('currentweek'.length);
+  if (!suffix || suffix.startsWith('allmodels') || /^[0-9]/.test(suffix)) return 'weekly';
+  return 'other-weekly';
+}
+
 function linePercentLeft(line) {
   const match = String(line || '').match(/([0-9]{1,3}(?:\.[0-9]+)?)\s*%/i);
   if (!match) return null;
@@ -1333,12 +1343,11 @@ function linePercentLeft(line) {
   return null;
 }
 
-function extractClaudePercent(lines, label) {
-  const normalizedLabel = normalizeForLabelSearch(label);
-  const normalizedLines = lines.map(normalizeForLabelSearch);
-  for (let i = 0; i < normalizedLines.length; i += 1) {
-    if (!normalizedLines[i].includes(normalizedLabel)) continue;
-    for (const line of lines.slice(i, i + 12)) {
+function extractClaudePercent(lines, section) {
+  for (let i = 0; i < lines.length; i += 1) {
+    if (claudeQuotaSection(lines[i]) !== section) continue;
+    for (const [offset, line] of lines.slice(i, i + 12).entries()) {
+      if (offset > 0 && claudeQuotaSection(line)) break;
       const percentLeft = linePercentLeft(line);
       if (percentLeft !== null && Number.isFinite(percentLeft)) return Math.round(percentLeft);
     }
@@ -1351,7 +1360,7 @@ function cleanClaudeResetLine(line) {
   if (!match) return '';
   return match[0]
     .replace(/\([^)]*\)?/g, '')
-    .replace(/^(resets?)(?=\d|[a-z])/i, '$1 ')
+    .replace(/^reset(?:s(?=[^\s:])|(?!s)(?=[^\s:]))/i, '$& ')
     .replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)(\d{1,2})/ig, '$1 $2')
     .replace(/(\d{1,2})(at)(\d{1,2})/ig, '$1 $2 $3')
     .replace(/([a-z])(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/ig, '$1 $2$3$4')
@@ -1360,14 +1369,11 @@ function cleanClaudeResetLine(line) {
     .trim();
 }
 
-function extractClaudeReset(lines, label) {
-  const normalizedLabel = normalizeForLabelSearch(label);
-  const normalizedLines = lines.map(normalizeForLabelSearch);
-  for (let i = 0; i < normalizedLines.length; i += 1) {
-    if (!normalizedLines[i].includes(normalizedLabel)) continue;
-    for (const line of lines.slice(i, i + 14)) {
-      const normalized = normalizeForLabelSearch(line);
-      if (normalized.startsWith('current') && !normalized.includes(normalizedLabel)) break;
+function extractClaudeReset(lines, section) {
+  for (let i = 0; i < lines.length; i += 1) {
+    if (claudeQuotaSection(lines[i]) !== section) continue;
+    for (const [offset, line] of lines.slice(i, i + 14).entries()) {
+      if (offset > 0 && claudeQuotaSection(line)) break;
       const reset = cleanClaudeResetLine(line);
       if (reset) return reset;
     }
@@ -1376,7 +1382,15 @@ function extractClaudeReset(lines, label) {
 }
 
 function allClaudeResetLines(lines) {
-  return uniqueStrings(lines.map(cleanClaudeResetLine).filter(Boolean));
+  let section = '';
+  const resets = [];
+  for (const line of lines) {
+    section = claudeQuotaSection(line) || section;
+    if (section !== 'session' && section !== 'weekly') continue;
+    const reset = cleanClaudeResetLine(line);
+    if (reset) resets.push(reset);
+  }
+  return uniqueStrings(resets);
 }
 
 const MONTHS = {
@@ -1445,16 +1459,20 @@ function parseClaudeResetDate(text, now = new Date()) {
 function parseClaudeCliUsageText(text, now = new Date()) {
   const clean = stripAnsiCodes(text);
   const lines = clean.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const sessionPercentLeft = extractClaudePercent(lines, 'Current session');
-  const weeklyPercentLeft = extractClaudePercent(lines, 'Current week');
-  const resetLines = allClaudeResetLines(lines);
-  let primaryResetDescription = extractClaudeReset(lines, 'Current session');
-  let secondaryResetDescription = extractClaudeReset(lines, 'Current week');
-  const sessionReset = resetLines.find((line) => claudeResetShape(line) === 'time') || '';
-  const weeklyReset = resetLines.find((line) => claudeResetShape(line) === 'date') || '';
-  if (!primaryResetDescription && sessionReset) primaryResetDescription = sessionReset;
-  if (!secondaryResetDescription || (weeklyReset && claudeResetShape(secondaryResetDescription) === 'time')) {
-    secondaryResetDescription = weeklyReset || secondaryResetDescription;
+  const sessionPercentLeft = extractClaudePercent(lines, 'session');
+  const weeklyPercentLeft = extractClaudePercent(lines, 'weekly');
+  let primaryResetDescription = extractClaudeReset(lines, 'session');
+  let secondaryResetDescription = extractClaudeReset(lines, 'weekly');
+  // PTY redraws can emit both reset rows after the weekly heading. Recover only
+  // when a distinct date-shaped reset proves reordering; weekly resets may also
+  // legitimately be time-only, so their section ownership otherwise wins.
+  if (!primaryResetDescription && claudeResetShape(secondaryResetDescription) === 'time') {
+    const resetLines = allClaudeResetLines(lines);
+    const weeklyDateReset = resetLines.find((line) => claudeResetShape(line) === 'date') || '';
+    if (weeklyDateReset) {
+      primaryResetDescription = secondaryResetDescription;
+      secondaryResetDescription = weeklyDateReset;
+    }
   }
   const accountEmail = (clean.match(/(?:Account|Email):\s*([^\s@]+@[^\s@]+)/i) || [])[1] || '';
   const accountOrganization = ((clean.match(/(?:Org|Organization):\s*(.+)/i) || [])[1] || '').trim();
@@ -1571,13 +1589,14 @@ function withClaudePathHints(env = process.env, platform = process.platform) {
   }
   return {
     ...env,
-    [pathKey]: uniqueStrings([...hints, ...currentPath.split(delimiter)]).join(delimiter)
+    [pathKey]: uniqueStrings([...hints, ...currentPath.split(delimiter)]).join(delimiter),
+    DISABLE_AUTOUPDATER: '1'
   };
 }
 
 function claudePtyPythonScript() {
   return `
-import fcntl, os, pty, re, select, signal, subprocess, sys, time
+import fcntl, os, pty, re, select, signal, struct, subprocess, sys, termios, time
 cmd = os.environ.get("TOKEN_MONITOR_CLAUDE_COMMAND_PATH", "claude")
 cwd = os.environ.get("TOKEN_MONITOR_CLAUDE_PROBE_DIR") or os.getcwd()
 timeout = float(os.environ.get("TOKEN_MONITOR_CLAUDE_CLI_TIMEOUT", "35"))
@@ -1589,6 +1608,7 @@ settings_path = os.path.join(cwd, ".claude", "settings.local.json")
 if not os.path.exists(settings_path):
     open(settings_path, "w").write('{"disableDeepLinkRegistration":"disable"}\\n')
 master, slave = pty.openpty()
+fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 160, 0, 0))
 proc = subprocess.Popen([cmd, "--allowed-tools", ""], stdin=slave, stdout=slave, stderr=slave, cwd=cwd, close_fds=True, start_new_session=True)
 os.close(slave)
 fcntl.fcntl(master, fcntl.F_SETFL, os.O_NONBLOCK)
@@ -1596,44 +1616,75 @@ ansi = re.compile(rb"\\x1b\\[[0-9;?]*[ -/]*[@-~]|\\x1b[()][A-Za-z0-9]|\\x1b[78=>
 def compact(data):
     text = ansi.sub(b"", data).decode("utf-8", "ignore").lower()
     return re.sub(r"[^a-z0-9%]+", "", text)
+def write_master(data):
+    try:
+        os.write(master, data)
+        return True
+    except OSError:
+        return False
 buf = b""
 start = time.time()
 last_enter = 0
 sent_cmd = False
+matched_at = None
+handled_prompts = set()
+prompt_tokens = [
+    "quicksafetycheck", "yesitrustthisfolder", "pressentertocontinue",
+    "readytocodehere", "showplanusage", "showplan"
+]
 slash_bytes = (slash_command + "\\r").encode("utf-8")
 try:
     while time.time() - start < timeout:
+        io_closed = False
         readable, _, _ = select.select([master], [], [], 0.08)
         if readable:
             try:
                 chunk = os.read(master, 8192)
                 if chunk:
                     buf += chunk
+                    if b"\\x1b[6n" in buf[-32:] and not write_master(b"\\x1b[1;1R"):
+                        io_closed = True
             except BlockingIOError:
                 pass
+            except OSError:
+                break
+        if io_closed:
+            break
         scan = compact(buf[-20000:])
         now = time.time()
-        if now - last_enter > 0.8 and any(token in scan for token in [
-            "quicksafetycheck", "yesitrustthisfolder", "pressentertocontinue",
-            "readytocodehere", "showplanusage", "showplan"
-        ]):
-            os.write(master, b"\\r")
-            last_enter = now
+        prompt_token = next(
+            (
+                token for token in sorted(prompt_tokens, key=len, reverse=True)
+                if token in scan and token not in handled_prompts
+            ),
+            None
+        )
+        if prompt_token is not None:
+            if not write_master(b"\\r"):
+                io_closed = True
+            else:
+                handled_prompts.update(
+                    token for token in prompt_tokens
+                    if prompt_token.startswith(token)
+                )
+                last_enter = now
+        if io_closed:
+            break
         if not sent_cmd and now - start > 5:
-            os.write(master, slash_bytes)
+            if not write_master(slash_bytes):
+                break
             sent_cmd = True
         if sent_cmd and now - last_enter > 0.8:
-            os.write(master, b"\\r")
+            if not write_master(b"\\r"):
+                break
             last_enter = now
-        if sent_cmd and exit_pattern is not None and exit_pattern.search(scan):
-            time.sleep(2)
+        if sent_cmd and exit_pattern is not None and exit_pattern.search(scan) and matched_at is None:
+            matched_at = now
+        if matched_at is not None and now - matched_at >= 2:
             break
     sys.stdout.buffer.write(buf)
 finally:
-    try:
-        os.write(master, b"/exit\\r")
-    except Exception:
-        pass
+    write_master(b"/exit\\r")
     try:
         os.killpg(proc.pid, signal.SIGTERM)
     except Exception:
@@ -1653,6 +1704,9 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
   fs.mkdirSync(probeDir, { recursive: true });
   const runEnv = {
     ...env,
+    DISABLE_AUTOUPDATER: '1',
+    TERM: env.TERM && env.TERM !== 'dumb' ? env.TERM : 'xterm-256color',
+    COLORTERM: env.COLORTERM || 'truecolor',
     TOKEN_MONITOR_CLAUDE_COMMAND_PATH: command,
     TOKEN_MONITOR_CLAUDE_PROBE_DIR: probeDir,
     TOKEN_MONITOR_CLAUDE_CLI_TIMEOUT: String(deps.claudeCliTimeoutSeconds || 35),
@@ -1671,10 +1725,62 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
       });
     } catch (error) {
       lastError = error;
-      if (error.code && error.code !== 'ENOENT') break;
+      if (error.code !== 'ENOENT') break;
     }
   }
   throw lastError || errorWithStatus('unavailable', 'Python PTY runner unavailable');
+}
+
+function claudeDirectInvocation(command, args, platform, env) {
+  if (platform !== 'win32' || /\.exe$/i.test(command)) return { command, args };
+  const commandShell = envValue(env, 'ComSpec') || 'cmd.exe';
+  const quotedCommand = `"${String(command).replace(/"/g, '""')}"`;
+  const commandLine = `"${[quotedCommand, ...args].join(' ')}"`;
+  return {
+    command: commandShell,
+    args: ['/d', '/s', '/c', commandLine],
+    windowsVerbatimArguments: true
+  };
+}
+
+function runClaudeDirectCommand(args, deps = {}, timeoutMs = 12000) {
+  const platform = deps.platform || process.platform;
+  const env = deps.env || process.env;
+  const command = existingClaudeCommandCandidates(claudeCommandCandidates(env, platform), deps)[0];
+  if (!command) throw errorWithStatus('notConfigured', 'Claude CLI not found');
+  const invocation = claudeDirectInvocation(command, args, platform, env);
+  return runProcessText(invocation.command, invocation.args, {
+    ...deps,
+    env: withClaudePathHints(env, platform),
+    closeStdin: true,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    timeoutMs
+  });
+}
+
+function runClaudeAuthStatus(deps = {}) {
+  if (deps.runClaudeAuthStatus) return deps.runClaudeAuthStatus();
+  return runClaudeDirectCommand(
+    ['auth', 'status', '--json'],
+    deps,
+    Number(deps.claudeAuthStatusTimeoutMs || 8000)
+  );
+}
+
+async function isClaudeCliAuthenticated(deps = {}) {
+  if (typeof deps.isClaudeCliAuthenticated === 'function') {
+    return await deps.isClaudeCliAuthenticated() === true;
+  }
+  try {
+    const clean = stripAnsiCodes(await runClaudeAuthStatus(deps)).trim();
+    const start = clean.indexOf('{');
+    const end = clean.lastIndexOf('}');
+    if (start === -1 || end < start) return false;
+    const status = JSON.parse(clean.slice(start, end + 1));
+    return status?.loggedIn === true;
+  } catch (_) {
+    return false;
+  }
 }
 
 async function runClaudeUsageCli(deps = {}) {
@@ -1684,16 +1790,11 @@ async function runClaudeUsageCli(deps = {}) {
 }
 
 function runClaudeDirectUsageCli(deps = {}) {
-  const platform = deps.platform || process.platform;
-  const env = deps.env || process.env;
-  const command = existingClaudeCommandCandidates(claudeCommandCandidates(env, platform), deps)[0];
-  if (!command) throw errorWithStatus('notConfigured', 'Claude CLI not found');
-  return runProcessText(command, ['/usage'], {
-    ...deps,
-    env: withClaudePathHints(env, platform),
-    shell: platform === 'win32',
-    timeoutMs: Number(deps.claudeDirectCliTimeoutMs || 12000)
-  });
+  return runClaudeDirectCommand(
+    ['/usage'],
+    deps,
+    Number(deps.claudeDirectCliTimeoutMs || 12000)
+  );
 }
 
 async function touchClaudeAuthPath(deps = {}) {
@@ -1714,6 +1815,7 @@ module.exports = {
   claudeWebCookie,
   delegatedClaudeRefresh,
   fetchClaudeLimits,
+  isClaudeCliAuthenticated,
   mapClaudeCliUsageToProvider,
   mapClaudeUsageToProvider,
   normalizeClaudeWebCookieInput,
@@ -1721,6 +1823,7 @@ module.exports = {
   rankClaudeCredentialFiles,
   refreshClaudeAccessToken,
   refreshClaudeCredentials,
+  runClaudeAuthStatus,
   touchClaudeAuthPath,
   wslClaudeCredentialPaths
 };
