@@ -28,6 +28,7 @@ const {
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
+const hermesSession = require('./providers/hermes/session');
 const { createWatcherHost } = require('./watcherHost');
 const { localDayKey, mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
@@ -802,8 +803,14 @@ function timestampFromSessionId(id) {
   const isoMatch = raw.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/);
   if (isoMatch) return isoFromDate(isoMatch[0]);
   const localMatch = raw.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})[:-](\d{2})(?:[:-](\d{2}))?/);
-  if (!localMatch) return '';
-  const [, year, month, day, hour, minute, second = '0'] = localMatch;
+  if (localMatch) {
+    const [, year, month, day, hour, minute, second = '0'] = localMatch;
+    return isoFromDate(new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
+  }
+  // Hermes Desktop/CLI: 20260911_115516_2cedb0 (local wall time, not ISO).
+  const hermesMatch = raw.match(/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})(?:_[0-9a-f]+)?$/i);
+  if (!hermesMatch) return '';
+  const [, year, month, day, hour, minute, second] = hermesMatch;
   return isoFromDate(new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
 }
 
@@ -974,6 +981,28 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     if (identity.projectId) resolvedSessionKeys.add(key);
   };
 
+  // Hermes has no transcript file — timestamps live in state.db (started_at /
+  // last_activity_at). Desktop sessions keep last_activity_at moving while the
+  // chat is open, so these rows are never frozen in resolvedSessionKeys.
+  const hermesIds = byClient.get('hermes') || new Set();
+  if (hermesIds.size > 0) {
+    const readHermesMeta = deps.readHermesMeta || ((ids) => hermesSession.readSessionMeta(ids, {
+      homeDir: home,
+      env: deps.scopedHome ? {} : (deps.env || process.env),
+      platform: deps.platform,
+      ...(deps.hermesDeps || {})
+    }));
+    for (const [sessionId, meta] of readHermesMeta(hermesIds)) {
+      const startedAt = meta.startedAt || timestampFromSessionId(sessionId) || '';
+      const lastUsedAt = meta.lastUsedAt || startedAt;
+      const identity = resolveProjects ? projectIdentity(meta.projectPath) : {};
+      const key = `hermes:${sessionId}`;
+      if (startedAt || lastUsedAt || identity.projectId) {
+        metadata.set(key, { startedAt, lastUsedAt, ...identity });
+      }
+    }
+  }
+
   // OpenCode has no transcript file — its timestamps come from the opencode.db `session` table.
   const opencodeIds = byClient.get('opencode') || new Set();
   if (opencodeIds.size > 0) {
@@ -1140,7 +1169,7 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
     if (metadata.has(key)) continue;
     const timestamp = timestampFromSessionId(ref.sessionId);
     if (timestamp) metadata.set(key, { startedAt: timestamp, lastUsedAt: timestamp });
-    if (!['claude', 'codex', 'opencode', 'dsh'].includes(ref.client)) resolvedSessionKeys.add(key);
+    if (!['claude', 'codex', 'opencode', 'dsh', 'hermes'].includes(ref.client)) resolvedSessionKeys.add(key);
   }
   for (const ref of refs.values()) attemptedSessionKeys.add(`${ref.client}:${ref.sessionId}`);
 
@@ -3264,6 +3293,8 @@ function startCollector(options) {
   let pendingWaiters = [];
   let debounceTimer = null;
   let intervalTimer = null;
+  let hermesPollTimer = null;
+  let hermesPollFingerprint = '';
   let stopped = false;
   let lastTickAttemptAt = 0;
   let lastTickSuccessAt = 0;
@@ -3852,6 +3883,43 @@ function startCollector(options) {
     });
   }
 
+  function hermesDbFingerprint() {
+    const home = resolveHermesHome({
+      env: options.env || process.env,
+      homeDir: options.homeDir || os.homedir(),
+      platform: options.platform || process.platform
+    });
+    const dirs = [home, ...hermesProfileWatchDirs(home)];
+    let fingerprint = '';
+    for (const dir of dirs) {
+      for (const name of ['state.db', 'state.db-wal', 'state.db-shm']) {
+        try {
+          const st = fs.statSync(path.join(dir, name));
+          fingerprint += `${st.size}:${Math.trunc(st.mtimeMs)};`;
+        } catch (_) { /* file not created yet */ }
+      }
+    }
+    return fingerprint;
+  }
+
+  // SQLite WAL writes on Windows often never surface as chokidar events (mmap).
+  // Stat the db family every 2s and treat a size/mtime change as a Hermes watch
+  // tick so Desktop token counts refresh while the conversation is live.
+  function startHermesDbPoll() {
+    if (hermesPollTimer || stopped) return;
+    if (!watchTriggersCollection || !trackedClients.has('hermes')) return;
+    hermesPollFingerprint = hermesDbFingerprint();
+    hermesPollTimer = setInterval(() => {
+      if (stopped) return;
+      const fingerprint = hermesDbFingerprint();
+      if (!fingerprint || fingerprint === hermesPollFingerprint) return;
+      hermesPollFingerprint = fingerprint;
+      scheduleTick('watch:poll:state.db', ['hermes']);
+    }, 2000);
+    if (typeof hermesPollTimer.unref === 'function') hermesPollTimer.unref();
+    log('Polling Hermes state.db every 2s for live Desktop usage');
+  }
+
   function setupWatchers() {
     if (!watchEnabled) return;
     // Canonicalise before anything derives from these roots, so the paths handed
@@ -4006,6 +4074,7 @@ function startCollector(options) {
     runtimeAbortController.abort(new Error('collector stopped'));
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
+    if (hermesPollTimer) { clearInterval(hermesPollTimer); hermesPollTimer = null; }
     clearRolloverHistoryRetry();
     sourceSyncQueue.stop();
     closeWatchers({ skipClose: options.skipCloseWatchers === true });
@@ -4061,6 +4130,7 @@ function startCollector(options) {
   }
 
   setupWatchers();
+  startHermesDbPoll();
   loop();
 
   // A rescan of one tool. Was cursor-only because a Cursor sign-in was the only
