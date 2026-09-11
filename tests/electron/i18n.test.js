@@ -195,6 +195,13 @@ test('tray limit labels describe remaining quota instead of ambiguous worst wind
   assert.equal(translate('ko', 'settings.tray.limitsAllSessions'), '한도: 처음 두 도구의 주요 한도 (12% · 34%)');
 });
 
+test('live rate tray labels are translated in every bundled locale', () => {
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+    assert.notEqual(translate(locale, 'settings.tray.liveTokenRate'), 'settings.tray.liveTokenRate');
+    assert.notEqual(translate(locale, 'trayMenu.content.liveTokenRate'), 'trayMenu.content.liveTokenRate');
+  }
+});
+
 test('window shortcut labels stay concise in Chinese', () => {
   assert.equal(translate('zh-TW', 'settings.display.windowShortcut'), '快捷鍵');
   assert.equal(translate('zh-TW', 'settings.shortcut.record'), '錄製');

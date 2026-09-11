@@ -10,6 +10,7 @@ const {
   createDefaultTrayLayout,
   createTrayLayoutItem,
   formatResetCountdown,
+  liveTokenRateItems,
   moveTrayLayoutItem,
   normalizeTrayLayout,
   preferredRowProvider,
@@ -294,6 +295,36 @@ test('two-line information resolves independently selected existing metrics', ()
   assert.equal(resolved.rows[1].selection, null);
 });
 
+test('two-line information normalizes, discovers, and resolves live token rates', () => {
+  const item = createTrayLayoutItem('doubleInfo', { idFactory: () => 'live-info' });
+  item.rows[0] = {
+    metric: 'liveTokenRate',
+    rateMode: 'burn',
+    rateScope: 'device'
+  };
+
+  const layout = { version: 3, items: [item] };
+  const normalized = normalizeTrayLayout(layout);
+  assert.deepEqual(normalized.items[0].rows[0], {
+    metric: 'liveTokenRate',
+    rateMode: 'burn',
+    rateScope: 'device'
+  });
+  assert.deepEqual(liveTokenRateItems(layout), [normalized.items[0].rows[0]]);
+
+  const [resolved] = resolveTrayLayout(normalized, stats, {
+    nowMs: now,
+    liveTokenRates: {
+      device: { speed: 18, burn: 1080, idle: false }
+    },
+    liveTokenRateFormatter: (value) => String(value)
+  }).items;
+  assert.equal(resolved.rows[0].text, '1080 TPM');
+  assert.equal(resolved.rows[0].available, true);
+  assert.equal(resolved.rows[0].provider, 'app');
+  assert.equal(preferredRowProvider(resolved.rows, 0), 'app');
+});
+
 test('custom text items normalize and resolve without quota data', () => {
   const single = createTrayLayoutItem('customText', { idFactory: () => 'single-copy' });
   single.text = '  Build green  ';
@@ -317,6 +348,73 @@ test('custom text items normalize and resolve without quota data', () => {
   assert.equal(resolved.items[0].available, true);
   assert.deepEqual(resolved.items[1].rows.map((row) => row.text), ['Primary', 'Secondary']);
   assert.equal(resolved.items[1].available, true);
+});
+
+test('live token rate items keep independent mode and device scope settings', () => {
+  const item = createTrayLayoutItem('liveTokenRate', { idFactory: () => 'rate' });
+  assert.deepEqual(item, {
+    id: 'rate',
+    type: 'text',
+    style: 'liveTokenRate',
+    metric: 'liveTokenRate',
+    rateMode: 'speed',
+    rateScope: 'all',
+    fontStyle: 'normal'
+  });
+
+  const normalized = normalizeTrayLayout({
+    version: 2,
+    items: [{
+      id: 'legacy-rate',
+      type: 'text',
+      metric: 'liveTokenRate',
+      rateMode: 'invalid',
+      rateScope: 'invalid',
+      fontStyle: 'compactMono'
+    }]
+  });
+  assert.deepEqual(normalized.items[0], {
+    id: 'legacy-rate',
+    type: 'text',
+    style: 'liveTokenRate',
+    metric: 'liveTokenRate',
+    rateMode: 'speed',
+    rateScope: 'all',
+    fontStyle: 'compactMono'
+  });
+});
+
+test('live token rate items resolve speed, burn, idle, and missing samples', () => {
+  const speed = createTrayLayoutItem('liveTokenRate', { idFactory: () => 'speed' });
+  const burn = createTrayLayoutItem('liveTokenRate', { idFactory: () => 'burn' });
+  const idle = createTrayLayoutItem('liveTokenRate', { idFactory: () => 'idle' });
+  const missing = createTrayLayoutItem('liveTokenRate', { idFactory: () => 'missing' });
+  burn.rateMode = 'burn';
+  burn.rateScope = 'device';
+  idle.rateScope = 'device';
+  missing.rateScope = 'device';
+
+  const resolved = resolveTrayLayout({ version: 3, items: [speed, burn, idle, missing] }, {}, {
+    liveTokenRates: {
+      all: { speed: 42.5, burn: 2550, idle: false },
+      device: { speed: 18, burn: 1080, idle: true }
+    },
+    liveTokenRateFormatter: (value) => String(value)
+  }).items;
+  assert.equal(resolved[0].text, '42.5 tok/s');
+  assert.equal(resolved[0].available, true);
+  assert.equal(resolved[1].text, '1080 TPM');
+  assert.equal(resolved[1].available, false);
+  assert.equal(resolved[2].text, '18 tok/s');
+  assert.equal(resolved[2].available, false);
+  assert.equal(resolved[3].text, '18 tok/s');
+  assert.equal(resolved[3].available, false);
+  const missingResolved = resolveTrayLayout({ version: 3, items: [createTrayLayoutItem('liveTokenRate')] }, {}, {
+    liveTokenRates: {},
+    liveTokenRateFormatter: (value) => String(value)
+  }).items[0];
+  assert.equal(missingResolved.text, '— tok/s');
+  assert.equal(missingResolved.available, false);
 });
 
 test('active Codex account selection excludes managed accounts while lowest mode keeps them eligible', () => {
@@ -545,6 +643,7 @@ test('tray layout clock runs only when displayed values contain a countdown', ()
     createTrayLayoutItem('percent'),
     createTrayLayoutItem('tokens'),
     createTrayLayoutItem('cost'),
+    createTrayLayoutItem('liveTokenRate'),
     createTrayLayoutItem('customText'),
     createTrayLayoutItem('doubleCustomText'),
     createTrayLayoutItem('spacer'),

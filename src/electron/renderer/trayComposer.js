@@ -8,7 +8,7 @@
   const STYLE_GROUPS = [
     { id: 'icons', styles: ['appIcon', 'providerIcon'] },
     { id: 'bars', styles: ['singleBar', 'doubleBar', 'doublePercent', 'doubleReset'] },
-    { id: 'text', styles: ['percent', 'percentReset', 'reset', 'tokens', 'cost', 'doubleInfo', 'customText', 'doubleCustomText'] },
+    { id: 'text', styles: ['percent', 'percentReset', 'reset', 'tokens', 'cost', 'liveTokenRate', 'doubleInfo', 'customText', 'doubleCustomText'] },
     { id: 'spacing', styles: ['spacer', 'separatorDot'] }
   ];
 
@@ -234,6 +234,7 @@
         reset: 'Reset time',
         tokens: 'Tokens',
         cost: 'Cost',
+        liveTokenRate: 'Live token rate',
         account: 'Account',
         customText: 'Custom text',
         doubleCustomText: 'Double custom text',
@@ -335,7 +336,10 @@
         heading.textContent = l(`trayComposer.group.${group.id}`, fallbackGroup);
         const grid = document.createElement('div');
         grid.className = 'tray-composer-gallery-grid';
-        for (const style of group.styles) {
+        const styles = surface === 'tray'
+          ? group.styles
+          : group.styles.filter((style) => style !== 'liveTokenRate');
+        for (const style of styles) {
           const choice = button('tray-composer-gallery-choice', '', () => {
             const next = layoutApi.appendTrayLayoutItem(layout(), style);
             selectedId = next.items.at(-1)?.id || '';
@@ -672,14 +676,45 @@
       );
     }
 
-    function textMetricChoices() {
-      return [
+    function textMetricChoices({ includeLiveTokenRate = surface === 'tray' } = {}) {
+      const choices = [
         { value: 'percent', style: 'percent' },
         { value: 'percentReset', style: 'percentReset' },
         { value: 'reset', style: 'reset' },
         { value: 'tokens', style: 'tokens' },
-        { value: 'cost', style: 'cost' }
-      ].map((entry) => ({ ...entry, label: styleTitle(entry.style) }));
+        { value: 'cost', style: 'cost' },
+        { value: 'liveTokenRate', style: 'liveTokenRate' }
+      ];
+      return choices
+        .filter((entry) => includeLiveTokenRate || entry.value !== 'liveTokenRate')
+        .map((entry) => ({ ...entry, label: styleTitle(entry.style) }));
+    }
+
+    function liveTokenRateEditor(item, rowIndex = 0) {
+      const source = Array.isArray(item.rows) ? sourceForItem(item, rowIndex) : item;
+      const patch = (changes) => Array.isArray(item.rows)
+        ? sourcePatch(item, rowIndex, changes)
+        : { ...item, ...changes };
+      return [
+        picker(
+          l('trayComposer.rateMode', 'Rate'),
+          [
+            { value: 'speed', label: l('trayComposer.rateMode.speed', 'Generation speed (tok/s)') },
+            { value: 'burn', label: l('trayComposer.rateMode.burn', 'Token burn (TPM)') }
+          ],
+          source.rateMode,
+          (rateMode) => updateItem(item, patch({ rateMode }))
+        ),
+        picker(
+          l('trayComposer.rateScope', 'Devices'),
+          [
+            { value: 'all', label: l('trayComposer.rateScope.all', 'All devices') },
+            { value: 'device', label: l('trayComposer.rateScope.device', 'This device') }
+          ],
+          source.rateScope,
+          (rateScope) => updateItem(item, patch({ rateScope }))
+        )
+      ];
     }
 
     function periodChoices() {
@@ -740,13 +775,18 @@
       }
       const metric = options.includeMetric === true ? source.metric : item.metric;
       if (options.includeMetric === true) {
-        const metrics = textMetricChoices();
+        const metrics = textMetricChoices({ includeLiveTokenRate: options.includeLiveTokenRate !== false });
         section.append(picker(
           l('trayComposer.textMetric', 'Text'),
           metrics,
           metric,
           (nextMetric) => updateItem(item, sourcePatch(item, rowIndex, { metric: nextMetric }))
         ));
+      }
+
+      if (metric === 'liveTokenRate') {
+        section.append(...liveTokenRateEditor(item, rowIndex));
+        return section;
       }
 
       if (metric === 'tokens' || metric === 'cost') {
@@ -1077,7 +1117,8 @@
               includeValue: item.type === 'bars'
                 || item.metric === 'percent'
                 || sourceForItem(item, index).metric === 'percent'
-                || sourceForItem(item, index).metric === 'percentReset'
+                || sourceForItem(item, index).metric === 'percentReset',
+              includeLiveTokenRate: surface === 'tray'
             }
           ));
         });
@@ -1124,7 +1165,9 @@
           }
         ));
         popover.append(fontStyleEditor(item));
-        if (item.metric === 'tokens' || item.metric === 'cost') {
+        if (item.metric === 'liveTokenRate') {
+          popover.append(...liveTokenRateEditor(item));
+        } else if (item.metric === 'tokens' || item.metric === 'cost') {
           popover.append(usageScopeEditor(item));
           popover.append(picker(
             l('trayComposer.period', 'Period'),
