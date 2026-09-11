@@ -10106,6 +10106,7 @@ function syncSettingsForm() {
   renderSettingsAppUpdateRow();
   renderCodexAccounts();
   renderCustomPricing();
+  modelAliasForm?.syncSettings();
   renderCursorStatus();
 }
 
@@ -16946,6 +16947,19 @@ function setCursorCheckboxesEnabled(enabled) {
 }
 
 let openCustomPricingForm = null;
+let modelAliasForm = null;
+
+function setupModelAliasesUI() {
+  const toggle = document.getElementById('modelAliasesSettingsToggle');
+  if (!toggle) return;
+  toggle.addEventListener('click', () => setAccountGroupExpanded('modelAliases', !state.modelAliasesExpanded, 'modelAliasesExpanded'));
+  setAccountGroupExpanded('modelAliases', false, 'modelAliasesExpanded');
+  modelAliasForm = window.TokenMonitorModelAliasForm.createModelAliasForm({
+    document, t,
+    getAliases: () => state.settings?.modelAliases || {},
+    saveAliases: (modelAliases) => saveSettings({ modelAliases })
+  });
+}
 
 function customPricingMeta(ov) {
   const parts = [];
@@ -18692,4 +18706,5 @@ initSettingsAnimationWrappers();
 setupSettingsSections();
 setupCursorAccountUI();
 setupCustomPricingUI();
+setupModelAliasesUI();
 init();

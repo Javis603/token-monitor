@@ -5795,12 +5795,17 @@ html.is-windows .limit-live-badge {
   border-radius: 50%;
 }
 
-.custom-pricing-form {
+.custom-pricing-form,
+.model-alias-form {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-top: 8px;
 }
+
+.model-alias-form label { display: grid; gap: 4px; min-width: 0; }
+.model-alias-form input { width: 100%; min-width: 0; box-sizing: border-box; }
+.model-alias-example { overflow-wrap: anywhere; }
 
 
 
