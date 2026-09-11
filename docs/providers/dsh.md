@@ -1,18 +1,19 @@
 ---
-summary: "DeepSeek Harness (dsh) provider notes: where the harness stores transcripts, how a versioned transcript name is discovered, and why the usage totals come from tokscale rather than a local reader."
+summary: "DeepSeek Harness (dsh) provider notes: where the harness stores transcripts, how usage, session metadata and Session Detail read them, and why usage totals still come from tokscale."
 read_when:
-  - Changing or debugging DeepSeek Harness (dsh) session discovery or Session Detail
+  - Changing or debugging DeepSeek Harness (dsh) session discovery, titles or Session Detail
   - Investigating DSH usage that is missing from the widget
   - Touching providers/dsh/sessionFiles.js, providers/dsh/sessionDetail.js or paths.js
 ---
 
 # DeepSeek Harness (dsh) provider
 
-DSH has two data planes, and they are deliberately separate:
+DSH has three data planes, and they are deliberately separate:
 
 | Data plane | Read by | Source |
 | --- | --- | --- |
 | Token usage (periods, dashboard, history) | the shared usage collector, through `tokscale` | DSH session transcripts, parsed by tokscale's `dsh.rs` |
+| Local session metadata (timestamps, persisted title) | collector metadata enrichment in `collector.js`, through `providers/dsh/sessionFiles.js` | transcript header, file metadata and the latest `session/title`, parsed locally |
 | Session Detail (per-turn breakdown, prompts) | `providers/dsh/sessionDetail.js`, on demand | the same transcripts, parsed locally |
 
 ## Where the data lives
@@ -41,13 +42,27 @@ versioned file is the live one — the unversioned file stopped being appended t
 upgraded. So `sessionFiles.js` matches the version segment generically
 (`session[.vN].<ext>`, numeric — the harness's own convention) and lists a session's versioned
 transcript before its stale predecessor. Callers that stop at the first match (Session Detail,
-the header index used for session timestamps) therefore read the file the harness is still
+the header index used for session timestamps and titles) therefore read the file the harness is still
 writing, and a session whose only transcript is versioned is found at all.
 
 Token Monitor's pinned tokscale build uses the same canonical generic-version matcher. Keeping
 the two discovery rules aligned means a transcript visible in dashboard usage can also be opened
 in Session Detail. The npm 4.15.1 base predates this support; the vendor override supplies it
 until an official tokscale release includes the fix.
+
+## Local session metadata
+
+The collector enriches local session rows from the preferred transcript without changing token
+accounting. It takes the session start from the transcript header, last activity from the file
+mtime, and folds the latest durable `session/title` event as the conversation title. It never
+derives a title from `user/message` or `session/title-llm-request` content.
+
+Title reads retain complete plain-JSONL or zstd-frame boundaries for incremental refreshes. Before
+reusing an append offset, `sessionFiles.js` verifies the file identity and a bounded head/tail
+fingerprint; a rewrite or generation change resets the fold, while an unfinished tail is replayed
+on the next refresh. DSH validates titles before persistence, so Token Monitor preserves
+`event.data.title` rather than applying a separate display limit. Resolved titles remain local and
+are not added to the device wire record.
 
 ## Session Detail
 
