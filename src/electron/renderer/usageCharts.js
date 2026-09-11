@@ -453,6 +453,22 @@
     return `<svg class="area-line" viewBox="0 0 ${model.width} ${model.height}" preserveAspectRatio="none" width="100%" height="100%" aria-hidden="true">${defs}${fill}${line}</svg>`;
   }
 
+  // Live-rate history for the Home module: one stroked polyline per continuous run
+  // of samples (segments are split where idle broke the line). Stroke colours live
+  // in styles.css like the other charts.
+  function liveRateLineSvg(model, options = {}) {
+    const o = Object.assign({ title: '' }, options || {});
+    const paths = (model.segments || [])
+      .filter((segment) => segment.length)
+      .map((segment) => segment
+        .map((point, index) => `${index === 0 ? 'M' : 'L'}${svgRound(point.x)},${svgRound(point.y)}`)
+        .join(' '))
+      .map((path) => `<path class="live-rate-line" d="${path}"></path>`)
+      .join('');
+    const label = o.title ? `<title>${escapeXml(o.title)}</title>` : '';
+    return `<svg class="live-rate-line-chart" viewBox="0 0 ${model.width} ${model.height}" preserveAspectRatio="none" width="100%" height="${model.height}" aria-hidden="true">${label}${paths}</svg>`;
+  }
+
   function axisText(label, x, y) {
     return label ? `<text class="axis-label" x="${svgRound(x)}" y="${svgRound(y)}" text-anchor="middle">${escapeXml(label)}</text>` : '';
   }
@@ -616,7 +632,7 @@
 
   return {
     localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
-    areaLineChart, areaLineSvg,
+    areaLineChart, areaLineSvg, liveRateLineSvg,
     selectPreviewSeries, patchTodayBar, sparklineSvg,
     clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
     barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths

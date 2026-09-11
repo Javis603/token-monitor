@@ -252,7 +252,8 @@ const HOME_MODULE_OPTIONS = [
   { id: 'tool', labelKey: 'home.tools', viewId: 'tool' },
   { id: 'device', labelKey: 'home.devices', viewId: 'device' },
   { id: 'model', labelKey: 'home.models', viewId: 'model' },
-  { id: 'trends', labelKey: 'home.activity', viewId: 'trends' }
+  { id: 'trends', labelKey: 'home.activity', viewId: 'trends' },
+  { id: 'liveRate', labelKey: 'home.liveRate', viewId: 'home' }
 ];
 const VIEW_SWITCHER_LONG_PRESS_MS = 420;
 const VIEW_SWITCHER_HOVER_CLOSE_MS = 160;
@@ -283,6 +284,11 @@ const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools'
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
 const LIVE_TOKEN_RATE_ACTIVE_MS = 8000;
 const LIVE_TOKEN_RATE_CLEAR_MS = 3 * 60 * 1000;
+// Home live-rate history: one point per accepted live-rate sample, kept for the
+// last few minutes. Points live in a plain array of {at, speed, burn}; a revision
+// gap (idle expiry, scope reset) emits a gap so the line does not bridge it.
+const HOME_LIVE_RATE_HISTORY_WINDOW_MS = 5 * 60 * 1000;
+const HOME_LIVE_RATE_HISTORY_MAX_POINTS = 200;
 const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;
 const LIMIT_RESET_MOTION_EASING = 'cubic-bezier(0.333, 0.667, 0.667, 1)';
 const LIMIT_RESET_GLOW_MS = 700;
@@ -830,6 +836,9 @@ let liveTokenRateContext = '';
 let liveTokenRateIdleTimer = null;
 let liveTokenRateAnimationTimer = null;
 let liveTokenRateRenderedRevision = 0;
+// History of live-rate samples for the Home module, mirroring the footer tracker.
+let homeLiveRateHistory = [];
+let homeLiveRateHistoryRevision = 0;
 
 function liveTokenRateSourceKey(periodSource) {
   return [
@@ -864,6 +873,8 @@ function resetLiveTokenRateTracking() {
 }
 
 function displayLiveTokenRateItems() {
+  const homeWantsLiveRate = state.breakdown === 'home'
+    && homeModuleIds().includes('liveRate');
   return trayLayoutApi.liveTokenRateItemsForSurfaces([
     {
       enabled: state.settings?.showTrayIcon !== false,
@@ -874,7 +885,10 @@ function displayLiveTokenRateItems() {
       enabled: state.settings?.floatingBubbleEnabled === true,
       content: state.settings?.floatingBubbleContent,
       layout: state.settings?.floatingBubbleCustomLayout
-    }
+    },
+    // The Home chart observes through the same trackers so enabling it works
+    // without the footer reading, and turning it off stops the observations.
+    { enabled: homeWantsLiveRate, content: 'liveTokenRate' }
   ]);
 }
 
@@ -914,6 +928,7 @@ function observeDisplayLiveTokenRates(stats) {
   const items = displayLiveTokenRateItems();
   if (!items.length) {
     resetDisplayLiveTokenRateTracking();
+    recordHomeLiveRateSample(null);
     return false;
   }
 
@@ -959,6 +974,7 @@ function observeDisplayLiveTokenRates(stats) {
     changed = true;
   }
   scheduleDisplayLiveTokenRateExpiry();
+  recordHomeLiveRateSample(displayLiveTokenRateSamples().all);
   return changed;
 }
 
@@ -1053,6 +1069,37 @@ function renderLiveTokenRate() {
       els.liveTokenRate?.classList.remove('is-fresh');
     }, 650);
   }
+}
+
+// One history point per revision change of the display trackers' sample, so the
+// Home chart shares the exact readings the tray and bubble show. An idle sample
+// still carries its last reading and extends the line; a null one (data fully
+// expired) pushes a gap the chart must not bridge.
+// The Home chart only re-renders itself between full renders when its module is
+// actually shown; otherwise the sample is recorded for nothing.
+function moduleIdsIncludeLiveRate() {
+  return homeModuleIds().includes('liveRate');
+}
+
+function recordHomeLiveRateSample(sample) {
+  const revision = sample && !sample.idle ? sample.revision : null;
+  if (revision !== null && revision === homeLiveRateHistoryRevision) return;
+  homeLiveRateHistoryRevision = revision;
+  const rate = sample ? (state.settings?.tokenRateMode === 'burn' ? sample.burn : sample.speed) : null;
+  homeLiveRateHistory.push({
+    at: Date.now(),
+    speed: sample ? sample.speed : null,
+    burn: sample ? sample.burn : null,
+    idle: !sample || sample.idle === true,
+    value: rate
+  });
+  const cutoff = Date.now() - HOME_LIVE_RATE_HISTORY_WINDOW_MS;
+  while (homeLiveRateHistory.length > 0
+    && (homeLiveRateHistory.length > HOME_LIVE_RATE_HISTORY_MAX_POINTS
+      || homeLiveRateHistory[0].at < cutoff)) {
+    homeLiveRateHistory.shift();
+  }
+  if (state.breakdown === 'home' && moduleIdsIncludeLiveRate()) renderHomeLiveRateModule({ sample });
 }
 
 function syncLiveTokenRateFooterState() {
@@ -8155,6 +8202,80 @@ function hideHomeActivityTooltip({ preserveHover = false } = {}) {
   }
 }
 
+// Home module charting the last few minutes of live token rate. Points come from
+// recordHomeLiveRateSample(); a null speed starts a new polyline, so idle gaps
+// (no accepted snapshot for a while) are never bridged. X is sample time, not the
+// array index, so an idle stretch compresses instead of freezing the timeline.
+function renderHomeLiveRateModule(options = {}) {
+  const charts = window.TokenMonitorUsageCharts;
+  // Same source that feeds recordHomeLiveRateSample: the tray/bubble display
+  // trackers, which observe while the Home module is enabled regardless of the
+  // footer reading.
+  const liveSample = options.sample !== undefined
+    ? options.sample
+    : displayLiveTokenRateTrackers.get(effectiveDisplayLiveTokenRateScope('all'))?.getSample() || null;
+  const burn = state.settings?.tokenRateMode === 'burn';
+  const history = homeLiveRateHistory;
+  const hasData = history.some((point) => point.value !== null);
+  const meta = liveSample && !liveSample.idle
+    ? formatLiveTokenRate(burn ? liveSample.burn : liveSample.speed) + ' ' + (burn ? 'TPM' : 'tok/s')
+    : '';
+  const { module, body } = homeModuleShell('liveRate', t('home.liveRate'), 'home', meta);
+  if (!hasData) {
+    const empty = document.createElement('div');
+    empty.className = 'home-module-empty';
+    empty.textContent = t('home.liveRateEmpty');
+    body.append(empty);
+    return module;
+  }
+  const cutoff = Date.now() - HOME_LIVE_RATE_HISTORY_WINDOW_MS;
+  const points = history
+    .filter((point) => point.at >= cutoff)
+    .map((point) => ({ at: point.at, value: point.value }));
+  const model = buildLiveRateLineModel(points, { width: 300, height: 60 });
+  const currentRate = liveSample && !liveSample.idle ? (burn ? liveSample.burn : liveSample.speed) : null;
+  const title = currentRate === null
+    ? t('home.liveRateIdle')
+    : t('home.liveRateTitle', { value: formatLiveTokenRate(currentRate), unit: burn ? 'TPM' : 'tok/s' });
+  body.innerHTML = charts.liveRateLineSvg(model, { title });
+  const axis = document.createElement('div');
+  axis.className = 'home-live-rate-axis';
+  const timed = points.filter((point) => point.value !== null);
+  const start = new Date(timed[0]?.at ?? points[0].at);
+  const end = new Date(timed[0]?.at !== undefined
+    ? (timed[timed.length - 1].at > start.getTime() ? timed[timed.length - 1].at : timed[0].at)
+    : points[0].at);
+  axis.innerHTML = `<span>${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span><span>${t('home.liveRateWindow')}</span><span>${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
+  body.append(axis);
+  return module;
+}
+
+function buildLiveRateLineModel(points, options = {}) {
+  const o = Object.assign({ width: 300, height: 60, padTop: 4, padRight: 3, padBottom: 4, padLeft: 3 }, options || {});
+  const maxVal = Math.max(1, ...points.map((point) => (Number.isFinite(point.value) && point.value > 0 ? point.value : 0)));
+  const innerW = Math.max(0, o.width - o.padLeft - o.padRight);
+  const innerH = Math.max(0, o.height - o.padTop - o.padBottom);
+  const startTime = points.length ? points[0].at : 0;
+  const endTime = points.length ? points[points.length - 1].at : 0;
+  const span = Math.max(1, endTime - startTime);
+  const xOf = (at) => o.padLeft + innerW * (at - startTime) / span;
+  const yOf = (value) => o.padTop + innerH - innerH * (Number.isFinite(value) && value > 0 ? value : 0) / maxVal;
+  const segments = [];
+  let current = null;
+  for (const point of points) {
+    if (point.value === null) {
+      current = null;
+      continue;
+    }
+    if (!current) {
+      current = [];
+      segments.push(current);
+    }
+    current.push({ x: xOf(point.at), y: yOf(point.value), value: point.value });
+  }
+  return { width: o.width, height: o.height, maxVal, segments };
+}
+
 function renderHomeTrendsModule() {
   const charts = window.TokenMonitorUsageCharts;
   const historyEnabled = state.settings?.historyEnabled !== false;
@@ -8314,6 +8435,7 @@ function renderHome() {
     if (id === 'tool') return renderHomeToolModule(period);
     if (id === 'device') return renderHomeDeviceModule();
     if (id === 'model') return renderHomeModelModule(period);
+    if (id === 'liveRate') return renderHomeLiveRateModule();
     return renderHomeTrendsModule();
   });
   els.homePanel.replaceChildren(...nodes);

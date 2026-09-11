@@ -768,3 +768,40 @@ test('the no-drag hit area stays scoped to the collapsed title states', () => {
     assert.match(selector, /\.shell\.title-(collapsed|icon-only)/, `unscoped no-drag rule: ${selector}`);
   }
 });
+
+test('the live-rate line chart splits polylines on idle gaps and maps x by sample time', () => {
+  // Loaded through usageCharts so the same chart module that renders Home is what is asserted.
+  const charts = require(path.join(rendererDir, 'usageCharts.js'));
+  const model = charts.liveRateLineSvg({
+    width: 300,
+    height: 60,
+    segments: [
+      [{ x: 0, y: 40, value: 10 }, { x: 100, y: 20, value: 30 }],
+      [{ x: 200, y: 30, value: 20 }]
+    ]
+  }, { title: 'Now 20 tok/s' });
+  assert.match(model, /class="live-rate-line" d="M0,40 L100,20"/);
+  assert.match(model, /class="live-rate-line" d="M200,30"/);
+  assert.match(model, /<title>Now 20 tok\/s<\/title>/);
+  // An all-idle history renders the frame without any path to bridge.
+  const empty = charts.liveRateLineSvg({ width: 300, height: 60, segments: [] });
+  assert.doesNotMatch(empty, /live-rate-line"/);
+});
+
+test('the Home live-rate history records one point per revision and is rendered as a Home module', () => {
+  // The recorder appends only when the display trackers' revision moves (a fresh
+  // sample), prunes beyond the window, and never rewrites an existing point.
+  assert.match(app, /function recordHomeLiveRateSample\(sample\)/);
+  assert.match(app, /homeLiveRateHistoryRevision = revision/);
+  assert.match(app, /HOME_LIVE_RATE_HISTORY_MAX_POINTS/);
+  // Sampling rides on the display trackers' observation path, so the Home module
+  // works without the footer reading being enabled.
+  assert.match(app, /recordHomeLiveRateSample\(displayLiveTokenRateSamples\(\)\.all\)/);
+  assert.match(app, /if \(id === 'liveRate'\) return renderHomeLiveRateModule\(\)/);
+  // The chart divides x by sample time, never by index, so an idle stretch
+  // compresses the timeline instead of freezing it.
+  assert.match(app, /innerW \* \(at - startTime\) \/ span/);
+  assert.match(css, /\.live-rate-line \{/);
+  assert.match(css, /\.live-rate-line-chart \{/);
+  assert.match(css, /\.home-live-rate-axis \{/);
+});

@@ -307,6 +307,24 @@ test('areaLineSvg renders line and filled area paths', () => {
   assert.match(svg, /fill="url\(#area-line-grad\)"|class="area-line-fill"/);
 });
 
+test('liveRateLineSvg renders one polyline per continuous run of samples', () => {
+  const { liveRateLineSvg } = require('../../src/electron/renderer/usageCharts.js');
+  const svg = liveRateLineSvg({
+    width: 300,
+    height: 60,
+    segments: [
+      [{ x: 0, y: 40, value: 10 }, { x: 150, y: 10, value: 40 }],
+      [{ x: 250, y: 25, value: 20 }]
+    ]
+  });
+  assert.match(svg, /^<svg /);
+  assert.match(svg, /viewBox="0 0 300 60"/);
+  assert.match(svg, /class="live-rate-line" d="M0,40 L150,10"/);
+  assert.match(svg, /class="live-rate-line" d="M250,25"/);
+  // No idle data means no path, but the frame still renders.
+  assert.doesNotMatch(liveRateLineSvg({ width: 300, height: 60, segments: [] }), /class="live-rate-line"/);
+});
+
 test('areaLineChart can smooth a compact trend path', () => {
   const model = areaLineChart([
     { date: '2026-06-01', tokens: 10 },
