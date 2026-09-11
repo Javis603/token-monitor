@@ -549,3 +549,68 @@ test('applySessionTimestamps retries a progressive miss in the final pass', () =
   assert.equal(reads, 2, 'the final pass should retry a prior miss once');
   assert.equal(periods.today.sessions['opencode:s1'].projectLabel, 'project');
 });
+
+test('applySessionTimestamps fills Hermes session start/last from injected DB meta', () => {
+  const periods = {
+    today: {
+      sessions: {
+        'hermes:20260911_115516_2cedb0': {
+          client: 'hermes',
+          sessionId: '20260911_115516_2cedb0',
+          startedAt: '',
+          lastUsedAt: ''
+        }
+      }
+    }
+  };
+  applySessionTimestamps(periods, '/no/such/home', {
+    readHermesMeta(ids) {
+      assert.ok(ids.has('20260911_115516_2cedb0'));
+      return new Map([['20260911_115516_2cedb0', {
+        startedAt: '2026-09-11T03:56:18.697Z',
+        lastUsedAt: '2026-09-11T04:24:19.108Z',
+        projectPath: '/work/hermes-desktop'
+      }]]);
+    }
+  });
+
+  const session = periods.today.sessions['hermes:20260911_115516_2cedb0'];
+  assert.equal(session.startedAt, '2026-09-11T03:56:18.697Z');
+  assert.equal(session.lastUsedAt, '2026-09-11T04:24:19.108Z');
+  assert.equal(session.projectLabel, 'hermes-desktop');
+});
+
+test('applySessionTimestamps parses Hermes compact session ids when sqlite meta is missing', () => {
+  const periods = { today: { sessions: {
+    'hermes:20260911_115516_2cedb0': { client: 'hermes', sessionId: '20260911_115516_2cedb0', startedAt: '', lastUsedAt: '' }
+  } } };
+  applySessionTimestamps(periods, '/no/such/home', {
+    readHermesMeta: () => new Map(),
+    metadataCache: new Map(),
+    resolvedSessionKeys: new Set(),
+    attemptedSessionKeys: new Set()
+  });
+  const expected = new Date(2026, 8, 11, 11, 55, 16).toISOString();
+  const session = periods.today.sessions['hermes:20260911_115516_2cedb0'];
+  assert.equal(session.startedAt, expected);
+  assert.equal(session.lastUsedAt, expected);
+});
+
+test('applySessionTimestamps does not freeze Hermes rows so lastUsedAt can refresh', () => {
+  const cache = { metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set() };
+  let lastUsedAt = '2026-09-11T04:00:00.000Z';
+  const readHermesMeta = () => new Map([['s1', {
+    startedAt: '2026-09-11T03:56:18.697Z',
+    lastUsedAt
+  }]]);
+  const tick = () => {
+    const periods = { today: { sessions: { 'hermes:s1': { client: 'hermes', sessionId: 's1' } } } };
+    applySessionTimestamps(periods, '/no/such/home', { ...cache, readHermesMeta, retryMisses: true });
+    return periods.today.sessions['hermes:s1'];
+  };
+
+  assert.equal(tick().lastUsedAt, '2026-09-11T04:00:00.000Z');
+  lastUsedAt = '2026-09-11T04:25:00.000Z';
+  assert.equal(tick().lastUsedAt, '2026-09-11T04:25:00.000Z');
+  assert.equal(cache.resolvedSessionKeys.has('hermes:s1'), false);
+});
