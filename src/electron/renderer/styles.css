@@ -44,6 +44,22 @@
   --red: #f47788;
   --shadow: rgba(0, 0, 0, 0.36);
 }
+
+.codex-web-cost-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.codex-web-cost-settings .settings-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.codex-web-cost-settings .settings-item span { overflow-wrap: anywhere; }
 * { box-sizing: border-box; }
 html, body {
   width: 100%;

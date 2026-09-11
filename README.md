@@ -30,6 +30,8 @@ A desktop widget that shows live token usage and AI Tool Limits across 35+ AI co
 
 ## Supported Tools
 
+ChatGPT Web estimates can be selected per model under **Settings → Collection → Codex** without hiding token usage. See [estimated-cost selections](docs/usage-cost-selection.md) for defaults and attribution limits.
+
 Token Monitor supports token usage, account-limit checks, and session details separately:
 
 | Logo | Tool | Data path | Token Usage | AI Tool Limits | Session Details |
