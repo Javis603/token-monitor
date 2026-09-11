@@ -823,9 +823,9 @@ const liveTokenRateTracker = tokenRateApi.createLiveTokenRateGroupTracker({
   activeMs: LIVE_TOKEN_RATE_ACTIVE_MS,
   clearMs: LIVE_TOKEN_RATE_CLEAR_MS
 });
-const trayLiveTokenRateTrackers = new Map();
-const trayLiveTokenRateContexts = new Map();
-let trayLiveTokenRateExpiryTimer = null;
+const displayLiveTokenRateTrackers = new Map();
+const displayLiveTokenRateContexts = new Map();
+let displayLiveTokenRateExpiryTimer = null;
 let liveTokenRateContext = '';
 let liveTokenRateIdleTimer = null;
 let liveTokenRateAnimationTimer = null;
@@ -863,56 +863,61 @@ function resetLiveTokenRateTracking() {
   clearLiveTokenRateTimers();
 }
 
-function trayLiveTokenRateItems() {
-  if (state.settings?.showTrayIcon === false) return [];
-  const customItems = state.settings?.trayContent === 'custom'
-    ? trayLayoutApi.liveTokenRateItems(state.settings?.trayCustomLayout)
-    : [];
-  if (state.settings?.trayContent === 'liveTokenRate') {
-    return [...customItems, { metric: 'liveTokenRate', rateScope: 'all' }];
-  }
-  return customItems;
+function displayLiveTokenRateItems() {
+  return trayLayoutApi.liveTokenRateItemsForSurfaces([
+    {
+      enabled: state.settings?.showTrayIcon !== false,
+      content: state.settings?.trayContent,
+      layout: state.settings?.trayCustomLayout
+    },
+    {
+      enabled: state.settings?.floatingBubbleEnabled === true,
+      content: state.settings?.floatingBubbleContent,
+      layout: state.settings?.floatingBubbleCustomLayout
+    }
+  ]);
 }
 
-function effectiveTrayLiveTokenRateScope(scope) {
+function effectiveDisplayLiveTokenRateScope(scope) {
   const hubMode = state.settings?.hubMode;
   const syncMode = hubMode === 'client' || hubMode === 'host';
   return syncMode && scope === 'all' ? 'all' : 'device';
 }
 
-function clearTrayLiveTokenRateExpiryTimer() {
-  if (trayLiveTokenRateExpiryTimer) clearTimeout(trayLiveTokenRateExpiryTimer);
-  trayLiveTokenRateExpiryTimer = null;
+function clearDisplayLiveTokenRateExpiryTimer() {
+  if (displayLiveTokenRateExpiryTimer) clearTimeout(displayLiveTokenRateExpiryTimer);
+  displayLiveTokenRateExpiryTimer = null;
 }
 
-function scheduleTrayLiveTokenRateExpiry() {
-  clearTrayLiveTokenRateExpiryTimer();
-  const expiries = [...trayLiveTokenRateTrackers.values()]
+function scheduleDisplayLiveTokenRateExpiry() {
+  clearDisplayLiveTokenRateExpiryTimer();
+  const expiries = [...displayLiveTokenRateTrackers.values()]
     .map((tracker) => tracker.nextExpiryAt())
     .filter((value) => Number.isFinite(value));
   if (!expiries.length) return;
-  trayLiveTokenRateExpiryTimer = setTimeout(() => {
-    trayLiveTokenRateExpiryTimer = null;
+  displayLiveTokenRateExpiryTimer = setTimeout(() => {
+    displayLiveTokenRateExpiryTimer = null;
     void maybeUpdateBarsIcon({ refreshComposers: false });
+    renderFloatingBubbleContent();
     if (isSettingsSurfaceVisible()) refreshTrayComposers();
-    scheduleTrayLiveTokenRateExpiry();
+    scheduleDisplayLiveTokenRateExpiry();
   }, Math.max(0, Math.min(...expiries) - Date.now()) + 10);
 }
 
-function resetTrayLiveTokenRateTracking() {
-  trayLiveTokenRateTrackers.clear();
-  trayLiveTokenRateContexts.clear();
-  clearTrayLiveTokenRateExpiryTimer();
+function resetDisplayLiveTokenRateTracking() {
+  displayLiveTokenRateTrackers.clear();
+  displayLiveTokenRateContexts.clear();
+  clearDisplayLiveTokenRateExpiryTimer();
 }
 
-function observeTrayLiveTokenRates(stats) {
-  const items = trayLiveTokenRateItems();
+function observeDisplayLiveTokenRates(stats) {
+  const items = displayLiveTokenRateItems();
   if (!items.length) {
-    resetTrayLiveTokenRateTracking();
+    resetDisplayLiveTokenRateTracking();
     return false;
   }
 
-  const scopes = new Set(items.map((item) => effectiveTrayLiveTokenRateScope(item.rateScope)));
+  const scopes = new Set(items.map((item) => effectiveDisplayLiveTokenRateScope(item.rateScope)));
   let changed = false;
   for (const scope of scopes) {
     const selection = tokenRateApi.selectLiveTokenRatePeriods(
@@ -930,37 +935,37 @@ function observeTrayLiveTokenRates(stats) {
       scope,
       selection.source
     ].join('|');
-    let tracker = trayLiveTokenRateTrackers.get(scope);
+    let tracker = displayLiveTokenRateTrackers.get(scope);
     if (!tracker) {
       tracker = tokenRateApi.createLiveTokenRateGroupTracker({
         now: () => Date.now(),
         activeMs: LIVE_TOKEN_RATE_ACTIVE_MS,
         clearMs: LIVE_TOKEN_RATE_CLEAR_MS
       });
-      trayLiveTokenRateTrackers.set(scope, tracker);
+      displayLiveTokenRateTrackers.set(scope, tracker);
     }
-    if (trayLiveTokenRateContexts.get(scope) !== context) {
-      trayLiveTokenRateContexts.set(scope, context);
+    if (displayLiveTokenRateContexts.get(scope) !== context) {
+      displayLiveTokenRateContexts.set(scope, context);
       tracker.reset(selection.entries);
       changed = true;
     } else {
       changed = tracker.observe(selection.entries).changed || changed;
     }
   }
-  for (const scope of [...trayLiveTokenRateTrackers.keys()]) {
+  for (const scope of [...displayLiveTokenRateTrackers.keys()]) {
     if (scopes.has(scope)) continue;
-    trayLiveTokenRateTrackers.delete(scope);
-    trayLiveTokenRateContexts.delete(scope);
+    displayLiveTokenRateTrackers.delete(scope);
+    displayLiveTokenRateContexts.delete(scope);
     changed = true;
   }
-  scheduleTrayLiveTokenRateExpiry();
+  scheduleDisplayLiveTokenRateExpiry();
   return changed;
 }
 
-function trayLiveTokenRateSamples() {
-  const device = trayLiveTokenRateTrackers.get('device')?.getSample() || null;
-  const all = effectiveTrayLiveTokenRateScope('all') === 'all'
-    ? trayLiveTokenRateTrackers.get('all')?.getSample() || null
+function displayLiveTokenRateSamples() {
+  const device = displayLiveTokenRateTrackers.get('device')?.getSample() || null;
+  const all = effectiveDisplayLiveTokenRateScope('all') === 'all'
+    ? displayLiveTokenRateTrackers.get('all')?.getSample() || null
     : device;
   return { all, device };
 }
@@ -8610,7 +8615,7 @@ async function refreshStats(options = {}) {
     const nextStats = overlayAllTimeSessions(await window.tokenMonitor.getStats(options));
     observeLiveTokenRate(nextStats);
     state.stats = nextStats;
-    observeTrayLiveTokenRates(nextStats);
+    observeDisplayLiveTokenRates(nextStats);
     if (options.forceHistory === true) {
       // A manual history rescan is an explicit retry boundary. Let Home request the
       // corresponding full payload even when its revision is unchanged, and restore
@@ -9223,7 +9228,7 @@ function applyFloatingBubbleState(payload = {}, options = {}) {
   ensureServiceStatusTicker();
 }
 
-const BUBBLE_CONTENT_VALUES = ['icon', 'tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'custom'];
+const BUBBLE_CONTENT_VALUES = ['icon', 'tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'custom'];
 function normalizeTrayContentValue(value) {
   return BUBBLE_CONTENT_VALUES.includes(value) ? value : 'icon';
 }
@@ -13405,7 +13410,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   state.settingsPushRevision += 1;
   state.settings = next;
   applyEffectiveCurrencyRates();
-  observeTrayLiveTokenRates(state.stats);
+  observeDisplayLiveTokenRates(state.stats);
   preserveSettingsPanelScroll(syncSettingsForm);
   if (isSettingsSurfaceVisible()) render(); else statsRenderScheduler.request();
   maybeUpdateBarsIcon();
@@ -13533,7 +13538,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     if (payload.data?.mode) state.mode = payload.data.mode;
     state.stats = overlayAllTimeSessions(payload.data.stats);
     observeLiveTokenRate(state.stats);
-    observeTrayLiveTokenRates(state.stats);
+    observeDisplayLiveTokenRates(state.stats);
     applyCodexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see
     // AGENTS.md collector notes), so only the final push can retire the
@@ -14269,7 +14274,7 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
     nowMs: Date.now(),
     activeAccountKeys: activeCodexKey ? { codex: activeCodexKey } : {},
     availableProviderIds: Object.keys(trayProviderImages),
-    liveTokenRates: options.liveTokenRates || trayLiveTokenRateSamples(),
+    liveTokenRates: options.liveTokenRates || displayLiveTokenRateSamples(),
     liveTokenRateFormatter: options.liveTokenRateFormatter || ((value) => formatLiveTokenRate(value))
   });
   const items = resolved.items.map((item) => (
@@ -14620,7 +14625,7 @@ function createTrayComposer(surface) {
     label: t,
     onLayoutChange: (nextLayout, { commit }) => {
       state.settings[layoutKey] = trayLayoutApi.normalizeTrayLayout(nextLayout);
-      if (isTray) observeTrayLiveTokenRates(state.stats);
+      observeDisplayLiveTokenRates(state.stats);
       if (isTray) void maybeUpdateBarsIcon({ refreshComposers: commit });
       else {
         renderFloatingBubbleContent();

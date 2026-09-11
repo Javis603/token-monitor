@@ -629,7 +629,7 @@ test('the live footer rate is opt-in, accessible, and shares the persisted mode'
   assert.match(css, /\.footer\.live-token-rate-obscured \.live-token-rate,[\s\S]*visibility: hidden;/);
 });
 
-test('the custom macOS tray can render live rates independently of the footer setting', () => {
+test('compact display surfaces can render live rates independently of the footer setting', () => {
   assert.match(trayLayout, /'liveTokenRate'/);
   assert.match(trayLayout, /rateMode: 'speed'/);
   assert.match(trayLayout, /rateScope: 'all'/);
@@ -637,29 +637,35 @@ test('the custom macOS tray can render live rates independently of the footer se
   assert.match(trayLayout, /available: Boolean\(sample && sample\.idle !== true\)/);
   assert.match(trayComposer, /styles: \['percent',[\s\S]*'liveTokenRate'/);
   assert.match(trayComposer, /function liveTokenRateEditor\(item, rowIndex = 0\)/);
-  assert.match(trayComposer, /function textMetricChoices\(\{ includeLiveTokenRate = surface === 'tray' \} = \{\}\)/);
-  assert.match(trayComposer, /textMetricChoices\(\{ includeLiveTokenRate: options\.includeLiveTokenRate !== false \}\)/);
-  assert.match(trayComposer, /includeLiveTokenRate: surface === 'tray'/);
+  assert.match(trayComposer, /for \(const style of group\.styles\)/);
+  assert.match(trayComposer, /function textMetricChoices\(\)/);
+  assert.match(trayComposer, /const metrics = textMetricChoices\(\)/);
   assert.match(trayComposer, /if \(metric === 'liveTokenRate'\) \{[\s\S]*liveTokenRateEditor\(item, rowIndex\)/);
   assert.match(trayComposer, /rateMode\.speed/);
   assert.match(trayComposer, /rateScope\.device/);
   assert.match(main, /const TRAY_CONTENT_VALUES = new Set\([\s\S]*'liveTokenRate'/);
-  assert.match(main, /const FLOATING_BUBBLE_CONTENT_VALUES = new Set\([\s\S]*'custom'\]\)/);
-  assert.match(main, /floatingBubbleContent: normalizeTrayContent\([\s\S]*FLOATING_BUBBLE_CONTENT_VALUES/);
+  assert.doesNotMatch(main, /FLOATING_BUBBLE_CONTENT_VALUES/);
+  assert.match(main, /floatingBubbleContent: normalizeTrayContent\([^\n]+, 'icon'\)/);
   assert.match(main, /const trayImageMode = \(mode === 'limitsAllSessions'[\s\S]*mode === 'liveTokenRate'/);
   assert.match(traySource, /\['liveTokenRate', 'trayMenu\.content\.liveTokenRate'\]/);
-  assert.match(app, /const trayLiveTokenRateTrackers = new Map\(\)/);
-  assert.match(app, /function observeTrayLiveTokenRates\(stats\)/);
-  assert.match(app, /trayLayoutApi\.liveTokenRateItems\(state\.settings\?\.trayCustomLayout\)/);
-  assert.match(app, /state\.settings\?\.trayContent === 'liveTokenRate'/);
+  assert.match(app, /const displayLiveTokenRateTrackers = new Map\(\)/);
+  assert.match(app, /const BUBBLE_CONTENT_VALUES = \[[^\n]*'liveTokenRate'/);
+  assert.match(app, /function observeDisplayLiveTokenRates\(stats\)/);
+  assert.match(app, /floatingBubbleEnabled === true/);
+  assert.match(app, /floatingBubbleCustomLayout/);
+  assert.match(app, /trayLayoutApi\.liveTokenRateItemsForSurfaces\(\[/);
   assert.match(app, /function liveTokenRateTrayLayout\(\)/);
   assert.match(app, /if \(mode === 'liveTokenRate'\) \{[\s\S]*liveTokenRateTrayLayout\(\)/);
   assert.match(app, /if \(isSettingsSurfaceVisible\(\)\) refreshTrayComposers\(\)/);
-  assert.match(app, /state\.stats = nextStats;\s*observeTrayLiveTokenRates\(nextStats\)/);
-  assert.match(app, /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);\s*observeLiveTokenRate\(state\.stats\);\s*observeTrayLiveTokenRates\(state\.stats\)/);
-  assert.match(app, /liveTokenRates: options\.liveTokenRates \|\| trayLiveTokenRateSamples\(\)/);
+  assert.match(app, /state\.stats = nextStats;\s*observeDisplayLiveTokenRates\(nextStats\)/);
+  assert.match(app, /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);\s*observeLiveTokenRate\(state\.stats\);\s*observeDisplayLiveTokenRates\(state\.stats\)/);
+  assert.match(app, /liveTokenRates: options\.liveTokenRates \|\| displayLiveTokenRateSamples\(\)/);
+  assert.match(app, /renderFloatingBubbleContent\(\);\s*if \(isSettingsSurfaceVisible\(\)\) refreshTrayComposers\(\)/);
   assert.match(app, /trayContentInput\.value = \['tokens',[\s\S]*'liveTokenRate'/);
-  assert.match(html, /<option value="liveTokenRate" data-i18n="settings\.tray\.liveTokenRate">/);
+  const bubbleOptions = html.slice(html.indexOf('id="floatingBubbleContentInput"'), html.indexOf('id="floatingBubbleComposer"'));
+  const trayOptions = html.slice(html.indexOf('id="trayContentInput"'), html.indexOf('id="trayComposer"'));
+  assert.match(bubbleOptions, /<option value="liveTokenRate" data-i18n="settings\.tray\.liveTokenRate">/);
+  assert.match(trayOptions, /<option value="liveTokenRate" data-i18n="settings\.tray\.liveTokenRate">/);
   assert.equal((i18n.match(/'trayComposer\.style\.liveTokenRate'/g) || []).length, 5);
 });
 

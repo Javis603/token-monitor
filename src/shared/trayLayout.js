@@ -580,6 +580,17 @@
     });
   }
 
+  function liveTokenRateItemsForSurfaces(surfaces) {
+    if (!Array.isArray(surfaces)) return [];
+    return surfaces.flatMap((surface) => {
+      if (surface?.enabled !== true) return [];
+      if (surface.content === 'liveTokenRate') {
+        return [{ metric: 'liveTokenRate', rateMode: 'speed', rateScope: 'all' }];
+      }
+      return surface.content === 'custom' ? liveTokenRateItems(surface.layout) : [];
+    });
+  }
+
   function replaceTrayLayoutItem(layout, itemId, patch) {
     const normalized = normalizeTrayLayout(layout);
     const index = normalized.items.findIndex((item) => item.id === itemId);
@@ -1113,6 +1124,7 @@
     displayPercent,
     formatResetCountdown,
     liveTokenRateItems,
+    liveTokenRateItemsForSurfaces,
     moveTrayLayoutItem,
     normalizeSource,
     normalizeTrayLayout,
