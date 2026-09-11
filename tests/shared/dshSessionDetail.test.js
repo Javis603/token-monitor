@@ -10,17 +10,18 @@ const { readDshSessionDetail, parseDshDetailEvents } = require('../../src/shared
 
 const BASE_TIME = Date.parse('2026-08-15T10:00:00Z');
 
-function sessionHeader({ id, seedLength, parentSession } = {}) {
+function sessionHeader({ id, version = 0, seedLength, parentSession, isSeeded } = {}) {
   return {
     type: 'session',
-    version: 0,
+    version,
     id,
     createdAt: BASE_TIME,
     cwd: '/work/project',
     delegationDepth: 0,
     agentPreset: 'standard',
     ...(seedLength !== undefined ? { seedLength } : {}),
-    ...(parentSession ? { parentSession } : {})
+    ...(parentSession ? { parentSession } : {}),
+    ...(isSeeded !== undefined ? { isSeeded } : {})
   };
 }
 
@@ -81,10 +82,10 @@ function compactionSummary({ seq, usage }) {
   };
 }
 
-function writeFixture(root, sessionId, lines) {
+function writeFixture(root, sessionId, lines, filename = 'session.jsonl') {
   const dir = path.join(root, 'proj', sessionId);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'session.jsonl'), `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`);
+  fs.writeFileSync(path.join(dir, filename), `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`);
   return dir;
 }
 
@@ -257,6 +258,58 @@ test('readDshSessionDetail drops events strictly before seedLength on a forked s
   assert.equal(detail.totals.totalTokens, 15);
 });
 
+test('readDshSessionDetail drops the v3 inherited prefix through the last tagged end-seed marker', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-v3-fork-'));
+  writeFixture(root, 'session-v3-fork', [
+    sessionHeader({
+      id: 'session-v3-fork', version: 3, parentSession: 'session-parent', isSeeded: true
+    }),
+    userMessage({ seq: 0, text: 'inherited root question' }),
+    assistantMessage({ seq: 1, usage: { inputTokens: 1000, outputTokens: 1000 } }),
+    { type: 'session/end-seed', seq: 2, time: BASE_TIME + 2000, data: { inherited: true } },
+    // This ancestor marker is itself inside the prefix copied into the current
+    // child, so using the first tagged marker would leak the intermediate
+    // parent's work into this session.
+    userMessage({ seq: 3, text: 'inherited intermediate question' }),
+    assistantMessage({ seq: 4, usage: { inputTokens: 500, outputTokens: 500 } }),
+    { type: 'session/end-seed', seq: 5, time: BASE_TIME + 5000, data: { inherited: true } },
+    userMessage({ seq: 6, text: 'child question' }),
+    assistantMessage({ seq: 7, usage: { inputTokens: 10, outputTokens: 5 } })
+  ], 'session.v3.jsonl');
+
+  const detail = readDshSessionDetail({
+    sessionId: 'session-v3-fork', sessionsRoot: root, home: '/home/tester', env: {}
+  });
+
+  assert.equal(detail.exchanges.length, 1);
+  assert.equal(detail.exchanges[0].promptPreview, 'child question');
+  assert.equal(detail.totals.totalTokens, 15);
+});
+
+test('readDshSessionDetail does not treat an untagged v3 resume marker as a fork cut', () => {
+  const events = parseDshDetailEvents([
+    sessionHeader({ id: 'session-v3-resume', version: 3, isSeeded: false }),
+    userMessage({ seq: 0, text: 'earlier question' }),
+    assistantMessage({ seq: 1, usage: { inputTokens: 10, outputTokens: 5 } }),
+    { type: 'session/end-seed', seq: 2, time: BASE_TIME + 2000, data: {} },
+    userMessage({ seq: 3, text: 'resumed question' }),
+    assistantMessage({ seq: 4, usage: { inputTokens: 20, outputTokens: 5 } })
+  ].map((line) => JSON.stringify(line)).join('\n'));
+
+  assert.equal(events.filter((event) => event.kind === 'prompt').length, 2);
+  assert.equal(events.reduce((total, event) => total + (event.tokens?.total || 0), 0), 40);
+});
+
+test('readDshSessionDetail fails closed when a seeded v3 transcript has no tagged cut', () => {
+  const events = parseDshDetailEvents([
+    sessionHeader({ id: 'session-v3-torn', version: 3, parentSession: 'parent', isSeeded: true }),
+    userMessage({ seq: 0, text: 'ownership unknown' }),
+    assistantMessage({ seq: 1, usage: { inputTokens: 10, outputTokens: 5 } })
+  ].map((line) => JSON.stringify(line)).join('\n'));
+
+  assert.deepEqual(events, []);
+});
+
 test('readDshSessionDetail keeps a usage row without seq even when a fork has seedLength', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-detail-'));
   const turn = assistantMessage({ seq: 5, usage: { inputTokens: 10, outputTokens: 5 } });
@@ -300,6 +353,22 @@ test('readDshSessionDetail still counts events when the header itself is unreada
   assert.equal(detail.found, true);
   assert.equal(detail.exchanges.length, 1);
   assert.equal(detail.totals.totalTokens, 15);
+});
+
+test('readDshSessionDetail does not retroactively apply a late header to earlier events', () => {
+  const events = parseDshDetailEvents([
+    userMessage({ seq: 1, text: 'kept before a torn header' }),
+    assistantMessage({ seq: 2, usage: { inputTokens: 10, outputTokens: 5 } }),
+    sessionHeader({ id: 'session-late-header', seedLength: 4 }),
+    userMessage({ seq: 3, text: 'inherited after the header' }),
+    userMessage({ seq: 4, text: 'owned after the cut' })
+  ].map((line) => JSON.stringify(line)).join('\n'));
+
+  assert.deepEqual(events.filter((event) => event.kind === 'prompt').map((event) => event.text), [
+    'kept before a torn header',
+    'owned after the cut'
+  ]);
+  assert.equal(events.reduce((total, event) => total + (event.tokens?.total || 0), 0), 15);
 });
 
 test('readDshSessionDetail returns not-found for an unknown session id', () => {
@@ -369,7 +438,7 @@ test('readDshSessionDetail opens a session stored under the versioned name', () 
   const dir = path.join(root, 'proj', 'session-v3');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'session.v3.jsonl'), `${[
-    JSON.stringify(sessionHeader({ id: 'session-v3' })),
+    JSON.stringify(sessionHeader({ id: 'session-v3', version: 3, isSeeded: false })),
     JSON.stringify(userMessage({ seq: 1, text: 'hi' })),
     JSON.stringify(assistantMessage({ seq: 2, usage: { inputTokens: 10, outputTokens: 5 } }))
   ].join('\n')}\n`);

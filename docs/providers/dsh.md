@@ -57,9 +57,11 @@ record rules shared by every DSH reader:
 - `user/message` events are not all user-typed prompts. `data.source.kind` is `user` for what the
   person typed, but `agent-instructions`, `plugin` and `skill-catalog` for harness-injected
   context — only `kind === 'user'` becomes a prompt bubble.
-- A forked session's log is seeded with a byte-for-byte copy of its parent's events up to
-  `session.seedLength`; that prefix is credited to the parent, so it is skipped here. Tokscale
-  does the same (`seq < seed_length`).
+- A forked session's log starts with a byte-for-byte copy of its parent's events. Legacy headers
+  expose the exact cut as `session.seedLength`; current v3 headers use `isSeeded: true`, and the
+  cut is the last `session/end-seed` marker whose data has `inherited: true`. Session Detail
+  supports both forms and skips the inherited prefix. An ordinary untagged resume marker is not
+  a fork cut.
 - dsh's writer can replay an already-flushed line; a replayed record is deduped on message
   identity + time + routing + token signature, matching tokscale's own guard.
 
