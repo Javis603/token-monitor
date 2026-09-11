@@ -180,7 +180,7 @@ brew install --cask token-monitor
 
 ## マルチデバイス同期
 
-すべてのデバイス（および headless agent）が接続する **hub を 1 つ** 選びます。各デバイスでウィジェットを開き、**設定 → マルチデバイス同期** でモードを選択します。ウィジェットがこのデバイスの使用量を自動的にアップロードします。ウィジェットがないマシンでのみ `npm run agent` を実行してください。
+デバイス（および headless agent）で使う **マルチデバイス同期方式を 1 つ** 選びます。各デバイスでウィジェットを開き、**設定 → マルチデバイス同期** でモードを選択します。ウィジェットがこのデバイスの使用量を自動的にアップロードします。ウィジェットがないマシンでのみ `npm run agent` を実行してください。iCloud Drive は macOS ウィジェット専用で、headless agent には対応しません。
 
 #### オプション A — ウィジェットから hub をホスト（最も簡単、CLI 不要）
 
@@ -212,6 +212,10 @@ npx wrangler deploy
 ```
 
 デプロイ URL を各デバイスの **設定 → マルチデバイス同期** に貼り付けます。iOS ウィジェットは [worker/README.md](worker/README.md)、HTTP API は [docs/API.md](docs/API.md) を参照してください。
+
+#### オプション D — iCloud Drive（macOS、Hub サーバー不要）
+
+同じ Apple ID でサインインした各 Mac で、**設定 → マルチデバイス同期 → iCloud Drive** を選択します。任意で有効にする macOS 専用モードで、Token Monitor は iCloud Drive の `Token Monitor/sync-v1/` にデバイスごと・書き込み元ごとのアトミックスナップショットを保存し、各 Mac が有効なファイルを集計します。Token Monitor のサーバー、CloudKit、資格情報は使用せず、プロバイダーの API キー、Cookie、token はローカルに残ります。iCloud Drive は結果整合性のため、別の Mac の更新が表示されるまで時間がかかることがあり、壊れたファイルや一時的に見えないファイルで最後の正常な集計が消えることはありません。
 
 ## アプリデータ
 

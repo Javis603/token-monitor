@@ -39,7 +39,7 @@ test('every Electron collector mode follows the retained-session setting for dai
 });
 
 test('every Electron collector mode yields daily-history writes to an external agent', () => {
-  assert.match(main, /dailyHistoryArchiveWriteEnabled:\s*\(\) => !isExternalAgentActive\(\)/);
+  assert.match(main, /dailyHistoryArchiveWriteEnabled:\s*\(\) => settings\?\.hubMode === 'icloud' \|\| !isExternalAgentActive\(\)/);
   assertEveryCollectorModeUsesUsageConfig();
 });
 

@@ -180,7 +180,7 @@ brew install --cask token-monitor
 
 ## 多设备同步
 
-挑一个所有设备（与任何无头代理）都能连上的 hub 后端。在每台设备上打开小部件，在 设置 → 多设备同步 选一个模式。小部件会自动上报本机用量；只在没有小部件的机器上跑 `npm run agent`。
+挑一个供设备（与任何无头代理）使用的多设备同步后端。在每台设备上打开小部件，在 设置 → 多设备同步 选一个模式。小部件会自动上报本机用量；只在没有小部件的机器上跑 `npm run agent`。iCloud Drive 仅供 macOS 小部件使用，不支持无头代理。
 
 #### 方案 A——直接在小部件内开 hub（最简单，无需命令行）
 
@@ -212,6 +212,10 @@ npx wrangler deploy
 ```
 
 把部署 URL 贴到每台设备的小部件 设置 → 多设备同步。iOS 小部件配方与端点参考见 [worker/README.md](worker/README.md)，hub HTTP API 见 [docs/API.md](docs/API.md)。
+
+#### 方案 D——iCloud Drive（macOS，无需 Hub Server）
+
+在每台登录同一 Apple ID 的 Mac 上，进入 设置 → 多设备同步并选择 **iCloud Drive**。这是可选的 macOS 专属模式：Token Monitor 会在 iCloud Drive 的 `Token Monitor/sync-v1/` 下为每台设备和每个写入者保存原子快照，再由每台 Mac 聚合有效文件。不使用 Token Monitor 服务器、CloudKit 或凭据；提供方 API key、Cookie 和 token 保留在本机。iCloud Drive 采用最终一致性，其他 Mac 的更新可能需要一点时间才会出现，损坏或暂时缺失的文件也不会清空最后一次有效的聚合结果。
 
 ## App 数据
 

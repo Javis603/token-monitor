@@ -26,7 +26,7 @@ function selectLocalDeviceRecord(options = {}) {
     .find((device) => device?.deviceId === deviceId) || null;
   const displayHubRecord = (Array.isArray(options.latestStats?.devices) ? options.latestStats.devices : [])
     .find((device) => device?.deviceId === deviceId) || null;
-  if (options.externalAgentActive === true) return rawHubRecord;
+  if (options.externalAgentActive === true && options.hubMode !== 'icloud') return rawHubRecord;
 
   const candidates = [options.lastCollectedDevice, options.localDevice, displayHubRecord, rawHubRecord]
     .filter((device) => device?.deviceId === deviceId);
@@ -114,6 +114,7 @@ function createDiagnosticSnapshotBuilder(options = {}) {
   const getExternalAgentActive = options.getExternalAgentActive || (() => false);
   const getDeviceRuntime = options.getDeviceRuntime || (() => null);
   const getEmbeddedHub = options.getEmbeddedHub || (() => null);
+  const getIcloudSync = options.getIcloudSync || (() => null);
   const getStreamState = options.getStreamState || (() => ({ connected: false, failure: null }));
   const getLatestHubStats = options.getLatestHubStats || (() => null);
   const getLatestHubStatsReceivedAt = options.getLatestHubStatsReceivedAt || (() => null);
@@ -144,20 +145,26 @@ function createDiagnosticSnapshotBuilder(options = {}) {
     const { url: hubUrl } = getEffectiveHubConfig() || {};
     const externalAgentActive = Boolean(getExternalAgentActive());
     const runtimeHandle = getDeviceRuntime();
+    const icloud = getIcloudSync() || null;
+    const icloudWidgetProducerActive = hubMode === 'icloud' && Boolean(runtimeHandle && icloud);
     const runtimeDiagnostics = runtimeHandle?.getDiagnostics?.() || {};
     const usageDiagnostics = runtimeDiagnostics.usage || null;
     const limitsDiagnostics = runtimeDiagnostics.limits || null;
-    const usageOwner = externalAgentActive
-      ? 'external-agent'
-      : usageDiagnostics && canRefreshUsageRuntime(getMode(), () => false)
-        ? 'electron-widget'
-        : 'none';
+    const usageOwner = icloudWidgetProducerActive
+      ? 'electron-widget'
+      : externalAgentActive
+        ? 'external-agent'
+        : usageDiagnostics && canRefreshUsageRuntime(getMode(), () => false)
+          ? 'electron-widget'
+          : 'none';
     const limitsOwner = limitsDiagnostics ? 'electron-widget' : 'none';
-    const usageCompleteness = externalAgentActive
-      ? 'partial-external-owner'
-      : usageDiagnostics
-        ? 'full'
-        : 'partial-no-runtime';
+    const usageCompleteness = icloudWidgetProducerActive
+      ? 'full'
+      : externalAgentActive
+        ? 'partial-external-owner'
+        : usageDiagnostics
+          ? 'full'
+          : 'partial-no-runtime';
     const limitsCompleteness = limitsDiagnostics ? 'full' : 'partial-no-runtime';
     let hubKind = 'none';
     let hubSoftwareVersion = 'not-applicable';
@@ -170,6 +177,10 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       hubKind = 'remote-unknown';
       hubSoftwareVersion = 'unknown';
       hubSoftwareVersionSource = 'unavailable';
+    } else if (hubMode === 'icloud') {
+      hubKind = 'icloud-drive';
+      hubSoftwareVersion = 'not-applicable';
+      hubSoftwareVersionSource = 'not-applicable';
     }
     const stream = getStreamState() || {};
     const embeddedHub = getEmbeddedHub();
@@ -177,7 +188,9 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       ? 'not-applicable'
       : hubMode === 'host'
         ? embeddedHub ? 'connected' : 'disconnected'
-        : stream.connected ? 'connected' : 'disconnected';
+        : hubMode === 'icloud'
+          ? 'not-applicable'
+          : stream.connected ? 'connected' : 'disconnected';
     const lastStreamFailureCode = streamState === 'disconnected'
       ? diagnosticStreamDetailCode(stream.failure || {})
       : 'none';
@@ -185,7 +198,9 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       ? 'host'
       : hubMode === 'client'
         ? 'client'
-        : 'none';
+        : hubMode === 'icloud'
+          ? 'icloud'
+          : 'none';
     const sourceMatches = typeof getLatestHubStatsSource !== 'function'
       || String(getLatestHubStatsSource() || 'none') === expectedHubStatsSource;
     const generationMatches = typeof getLatestHubStatsGeneration !== 'function'
@@ -204,8 +219,12 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       hubKind,
       hubSoftwareVersion,
       hubSoftwareVersionSource,
-      hubTarget: hubMode === 'local' ? 'none' : diagnosticHubTarget(hubUrl),
-      hubTransport: hubMode === 'local' ? 'none' : diagnosticHubTransport(hubUrl),
+      hubTarget: hubMode === 'local'
+        ? 'none'
+        : hubMode === 'icloud' ? 'icloud-drive' : diagnosticHubTarget(hubUrl),
+      hubTransport: hubMode === 'local'
+        ? 'none'
+        : hubMode === 'icloud' ? 'filesystem' : diagnosticHubTransport(hubUrl),
       streamState,
       hubStatsCacheAgeSeconds
     };
@@ -218,13 +237,16 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       limitsOwner,
       usageCompleteness,
       limitsCompleteness,
+      icloudWidgetProducerActive,
       hubStatsCacheMatchesMode,
       hubRuntime,
+      icloud,
       topology: {
         hubMode,
         hubTarget: hubRuntime.hubTarget,
         hubTransport: hubRuntime.hubTransport,
         externalAgentAlive: externalAgentActive,
+        icloudWidgetProducerActive,
         usageOwner,
         limitsOwner,
         streamState,
@@ -260,6 +282,9 @@ function createDiagnosticSnapshotBuilder(options = {}) {
     } else if (settings.hubMode === 'client') {
       hubStats = runtime.hubStatsCacheMatchesMode ? getLatestHubStats() : null;
       hubSummarySource = 'cached-hub-stats';
+    } else if (settings.hubMode === 'icloud') {
+      hubStats = runtime.hubStatsCacheMatchesMode ? getLatestHubStats() : null;
+      hubSummarySource = 'icloud-sync-cache';
     }
     const hubDevices = projectHubDevices(hubStats, {
       summaryAvailable: Boolean(hubStats && Array.isArray(hubStats.devices)),
@@ -313,6 +338,15 @@ function createDiagnosticSnapshotBuilder(options = {}) {
         runtime: runtime.hubRuntime,
         devices: hubDevices
       },
+      icloud: runtime.icloud || {
+        state: platform === 'darwin' ? 'waiting' : 'unsupported',
+        availability: 'unavailable',
+        supported: platform === 'darwin',
+        root: '[redacted]/Token Monitor/sync-v1',
+        deviceCount: 0,
+        watcher: 'inactive',
+        reconciliation: 'idle'
+      },
       usage: {
         usageOwner: runtime.usageOwner,
         localUsageRuntimePresent: Boolean(getDeviceRuntime() && runtime.usageDiagnostics),
@@ -327,7 +361,7 @@ function createDiagnosticSnapshotBuilder(options = {}) {
       },
       collector: {
         ...(runtime.usageDiagnostics || { state: 'unavailable' }),
-        detailsAvailable: !runtime.externalAgentActive && Boolean(runtime.usageDiagnostics)
+        detailsAvailable: runtime.usageOwner === 'electron-widget' && Boolean(runtime.usageDiagnostics)
       },
       clients,
       limits: runtime.limitsDiagnostics || { enabled: false, active: 0, maxConcurrency: null, queued: 0, providers: [] },
