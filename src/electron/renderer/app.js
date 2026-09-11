@@ -502,10 +502,6 @@ function toggleAccordionRow(row) {
   renderToolDetailFooter();
 }
 
-function setAttributeIfChanged(element, name, value) {
-  if (element.getAttribute(name) !== value) element.setAttribute(name, value);
-}
-
 document.addEventListener('click', (event) => {
   if (event.target.closest('button, a, input, select, textarea')) return;
   const row = event.target.closest('.row.has-accordion');
@@ -1928,17 +1924,66 @@ function animateCachedLimitBarsFromZero() {
 }
 
 function rowTemplate(rowData) {
-  const { key, name, platform, client, subtitle, detail, kind } = rowData;
+  const { key, name, platform, client, subtitle, activity, detail, kind } = rowData;
   const row = document.createElement('div');
   row.dataset.key = key;
   if (platform) row.dataset.platform = platform;
   if (client) row.dataset.client = client;
   if (kind) row.dataset.kind = kind;
-  row.innerHTML = '<div class="row-head"><div class="row-name"><span class="row-mark"></span><div class="row-label"><span class="row-title"></span><span class="row-subtitle"></span><span class="row-detail"></span></div></div><div class="row-metrics"><div class="row-value"></div><div class="row-cost"></div></div></div><div class="row-body"><div class="bar"><div class="bar-fill"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>';
+  row.innerHTML = '<div class="row-head"><div class="row-name"><span class="row-mark"></span><div class="row-label"><span class="row-title"></span><span class="row-subtitle"></span><span class="row-activity"></span><span class="row-detail"></span></div></div><div class="row-metrics"><div class="row-value"></div><div class="row-cost"></div></div></div><div class="row-body"><div class="bar"><div class="bar-fill"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>';
   row.querySelector('.row-title').textContent = name;
   row.querySelector('.row-subtitle').textContent = subtitle || '';
+  row.querySelector('.row-activity').textContent = activity || '';
   row.querySelector('.row-detail').textContent = detail || '';
+  bindHoverMarquee(row.querySelector('.row-title'));
+  bindHoverMarquee(row.querySelector('.row-detail'));
   return row;
+}
+
+const hoverMarqueeStates = new WeakMap();
+
+function stopHoverMarquee(element, { reset = true } = {}) {
+  const motion = hoverMarqueeStates.get(element);
+  if (motion?.delayId) clearTimeout(motion.delayId);
+  if (motion?.frameId) cancelAnimationFrame(motion.frameId);
+  hoverMarqueeStates.delete(element);
+  element.classList.remove('is-hover-scrolling');
+  if (reset) element.scrollLeft = 0;
+}
+
+function startHoverMarquee(element) {
+  stopHoverMarquee(element);
+  if (prefersReducedMotion() || !element.closest('.session-mode')) return;
+  const distance = Math.ceil(element.scrollWidth - element.clientWidth);
+  if (distance <= 1) return;
+
+  const motion = { delayId: 0, frameId: 0 };
+  hoverMarqueeStates.set(element, motion);
+  motion.delayId = setTimeout(() => {
+    motion.delayId = 0;
+    element.classList.add('is-hover-scrolling');
+    const startedAt = performance.now();
+    const duration = Math.max(1800, Math.min(8000, distance * 22));
+    const step = (now) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      element.scrollLeft = distance * progress;
+      if (progress < 1) motion.frameId = requestAnimationFrame(step);
+      else motion.frameId = 0;
+    };
+    motion.frameId = requestAnimationFrame(step);
+  }, 240);
+}
+
+function bindHoverMarquee(element) {
+  element.addEventListener('mouseenter', () => startHoverMarquee(element));
+  element.addEventListener('mouseleave', () => stopHoverMarquee(element));
+}
+
+function setHoverMarqueeText(element, value) {
+  stopHoverMarquee(element);
+  const text = value || '';
+  element.textContent = text;
+  element.removeAttribute('title');
 }
 
 function renderDeviceAccordion(accordionInner, deviceDetail) {
@@ -2137,7 +2182,7 @@ function setActiveToolDetailMode(mode) {
   renderToolDetailFooter();
 }
 
-function updateRow(row, { name, subtitle, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable }) {
+function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable, reviewGroup }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}`;
@@ -2153,11 +2198,17 @@ function updateRow(row, { name, subtitle, detail, value, cost, barValue, max, co
   if (platform !== undefined) row.dataset.platform = platform || '';
   if (client !== undefined) row.dataset.client = client || '';
   if (kind !== undefined) row.dataset.kind = kind || '';
+  if (reviewGroup === true) row.dataset.reviewGroup = 'true';
+  else delete row.dataset.reviewGroup;
   if (kind === 'session' && client === 'reasonix') {
     row.dataset.detailUnavailable = sessionDetailAvailable === true ? 'false' : 'true';
   } else if (row.hasAttribute('data-detail-unavailable')) {
     row.removeAttribute('data-detail-unavailable');
   }
+  const interactive = reviewGroup === true || (
+    kind === 'session'
+    && ['claude', 'codex', 'opencode', 'dsh'].includes(client)
+  ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
   const mark = row.querySelector('.row-mark');
   const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '' }, state.breakdown);
   if (iconKind.kind === 'icon') {
@@ -2167,12 +2218,15 @@ function updateRow(row, { name, subtitle, detail, value, cost, barValue, max, co
     mark.className = 'row-mark dot';
     mark.style.background = color;
   }
-  row.querySelector('.row-title').textContent = name;
+  setHoverMarqueeText(row.querySelector('.row-title'), name);
   const subtitleEl = row.querySelector('.row-subtitle');
   subtitleEl.textContent = subtitle || '';
   subtitleEl.classList.toggle('hidden', !subtitle);
+  const activityEl = row.querySelector('.row-activity');
+  activityEl.textContent = activity || '';
+  activityEl.classList.toggle('hidden', !activity);
   const detailEl = row.querySelector('.row-detail');
-  detailEl.textContent = detail || '';
+  setHoverMarqueeText(detailEl, detail);
   detailEl.classList.toggle('hidden', !detail);
   const valueEl = row.querySelector('.row-value');
   if (tokenDataUnavailable === true) {
@@ -2250,29 +2304,19 @@ function updateRow(row, { name, subtitle, detail, value, cost, barValue, max, co
     row.classList.remove('expanded');
   }
   const rowHead = row.querySelector('.row-head');
-  if (row.classList.contains('has-accordion')) {
-    if (row.hasAttribute('tabindex')) row.removeAttribute('tabindex');
-    if (row.hasAttribute('role')) row.removeAttribute('role');
-    if (row.hasAttribute('aria-expanded')) row.removeAttribute('aria-expanded');
-    if (row.hasAttribute('aria-label')) row.removeAttribute('aria-label');
-    if (rowHead.tabIndex !== 0) rowHead.tabIndex = 0;
-    setAttributeIfChanged(rowHead, 'role', 'button');
-    setAttributeIfChanged(rowHead, 'aria-expanded', String(row.classList.contains('expanded')));
-    const tokenLabel = tokenDataUnavailable === true
-      ? (t('detailTokenUnavailable') || 'Unavailable')
-      : formatNumber(value);
-    const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0)}`;
-    setAttributeIfChanged(rowHead, 'aria-label', `${name}, ${t('dashboard.stat.totalTokens')}: ${tokenLabel}${costLabel}`);
-  } else {
-    if (row.hasAttribute('tabindex')) row.removeAttribute('tabindex');
-    if (row.hasAttribute('role')) row.removeAttribute('role');
-    if (row.hasAttribute('aria-expanded')) row.removeAttribute('aria-expanded');
-    if (row.hasAttribute('aria-label')) row.removeAttribute('aria-label');
-    if (rowHead.hasAttribute('tabindex')) rowHead.removeAttribute('tabindex');
-    if (rowHead.hasAttribute('role')) rowHead.removeAttribute('role');
-    if (rowHead.hasAttribute('aria-expanded')) rowHead.removeAttribute('aria-expanded');
-    if (rowHead.hasAttribute('aria-label')) rowHead.removeAttribute('aria-label');
-  }
+  const hasAccordion = row.classList.contains('has-accordion');
+  const tokenLabel = tokenDataUnavailable === true
+    ? (t('detailTokenUnavailable') || 'Unavailable')
+    : formatNumber(value);
+  const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0)}`;
+  sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
+    interactive,
+    hasAccordion,
+    expanded: row.classList.contains('expanded'),
+    ariaLabel: hasAccordion
+      ? `${name}, ${t('dashboard.stat.totalTokens')}: ${tokenLabel}${costLabel}`
+      : name
+  });
 }
 
 function applyHomeListMark(mark, iconKind, color) {
@@ -2505,7 +2549,17 @@ function sessionRowsForPeriod(period) {
     archivedLabel: t('session.archived'),
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
-  if (rows.length > 0) return rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
+  if (rows.length > 0) {
+    rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
+    return sessionRowsApi.groupBackgroundReviewRows(rows, {
+      label: t('sessions.backgroundReviews'),
+      countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
+      summaryLabel: ({ latestTime, latestValue }) => [
+        latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
+        latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
+      ].filter(Boolean).join(' · ')
+    });
+  }
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
 }
@@ -6575,8 +6629,8 @@ function applySessionDetailResult(request, options) {
   renderSessionDetail(options);
 }
 
-async function openSessionDetail({ client, sessionId, sessionCost, title }) {
-  const request = { client, sessionId, sessionCost, title, period: state.period, detail: null };
+async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null }) {
+  const request = { kind: 'session', client, sessionId, sessionCost, title, period: state.period, detail: null, returnTo };
   state.openSession = request;
   renderSessionDetail({ loading: true });
   try {
@@ -6604,6 +6658,16 @@ function closeSessionDetail() {
   render();
 }
 
+function sessionDetailBack() {
+  const returnTo = state.openSession?.returnTo;
+  if (returnTo?.kind === 'background-review-group') {
+    state.openSession = returnTo;
+    renderBackgroundReviewDetail(returnTo);
+    return;
+  }
+  closeSessionDetail();
+}
+
 function renderSessionDetail({ detail, loading, error } = {}) {
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
@@ -6616,7 +6680,7 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   const back = document.createElement('button');
   back.className = 'detail-back';
   back.textContent = `‹ ${t('sessions') || 'Sessions'}`;
-  back.addEventListener('click', closeSessionDetail);
+  back.addEventListener('click', sessionDetailBack);
   head.append(back);
 
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
@@ -6636,6 +6700,71 @@ function renderSessionDetail({ detail, loading, error } = {}) {
 
   const max = Math.max(1, ...rows.map((row) => row.value));
   for (const row of rows) container.append(exchangeNode(row, max));
+}
+
+function backgroundReviewRunNode(row, max, parent) {
+  const wrap = document.createElement('div');
+  wrap.className = 'detail-exchange background-review-run';
+  wrap.setAttribute('role', 'button');
+  wrap.setAttribute('tabindex', '0');
+  wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">›</span>'
+    + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span></div>'
+    + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
+    + '<div class="bar"><div class="bar-fill"></div></div>';
+  const time = sessionRowsApi.compactSessionTime(row.sortTime, new Date());
+  wrap.querySelector('.detail-ex-title').textContent = time || t('sessions.backgroundReviews');
+  wrap.querySelector('.detail-ex-sub').textContent = row.detail || '';
+  wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
+  wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0);
+  applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
+  const open = () => openSessionDetail({
+    client: row.client,
+    sessionId: String(row.key || '').replace(/^session:[^:]+:/, ''),
+    sessionCost: Number(row.cost || 0),
+    title: `${t('sessions.backgroundReviews')} · ${time}`,
+    returnTo: parent
+  });
+  wrap.addEventListener('click', open);
+  wrap.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    open();
+  });
+  return wrap;
+}
+
+function renderBackgroundReviewDetail(request) {
+  els.breakdown.classList.add('hidden');
+  els.sessionDetail.classList.remove('hidden');
+  els.sessionDetailHead.classList.remove('hidden');
+  const head = els.sessionDetailHead;
+  const container = els.sessionDetail;
+  head.replaceChildren();
+  container.replaceChildren();
+
+  const back = document.createElement('button');
+  back.className = 'detail-back';
+  back.textContent = `‹ ${t('sessions') || 'Sessions'}`;
+  back.addEventListener('click', closeSessionDetail);
+  const heading = document.createElement('strong');
+  heading.className = 'detail-heading';
+  heading.textContent = t('sessions.backgroundReviews');
+  head.append(back, heading);
+
+  const rows = request?.summary?.backgroundReviewRows || [];
+  if (rows.length === 0) {
+    container.append(detailNote(t('detailEmpty') || 'No activity in this period.'));
+    return;
+  }
+  const overview = document.createElement('div');
+  overview.className = 'background-review-overview';
+  overview.innerHTML = '<span class="background-review-count"></span><span class="background-review-totals"></span>';
+  overview.querySelector('.background-review-count').textContent = t('sessions.backgroundReviewCount', { count: rows.length });
+  overview.querySelector('.background-review-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0)}`;
+  container.append(overview);
+
+  const max = Math.max(1, ...rows.map((row) => Number(row.value) || 0));
+  for (const row of rows) container.append(backgroundReviewRunNode(row, max, request));
 }
 
 function detailNote(text) {
@@ -8213,6 +8342,11 @@ function render() {
     els.trendsPanel.classList.add('hidden');
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
+    if (state.openSession.kind === 'background-review-group') {
+      const latest = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+      if (latest) state.openSession.summary = latest;
+      renderBackgroundReviewDetail(state.openSession);
+    }
     if (state.openSession.renderOptions) {
       const options = state.openSession.renderOptions;
       state.openSession.renderOptions = null;
@@ -12411,7 +12545,17 @@ for (const tab of document.querySelectorAll('.tab')) {
     if (!setPeriod(targetPeriod)) return;
     syncPeriodTabs();
     if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session')) {
-      openSessionDetail(state.openSession);
+      if (state.openSession.kind === 'background-review-group') {
+        const period = state.stats?.periods?.[state.period];
+        const summary = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+        if (summary) {
+          state.openSession = { kind: 'background-review-group', period: state.period, summary };
+        } else {
+          state.openSession = null;
+        }
+      } else {
+        openSessionDetail({ ...state.openSession, returnTo: null });
+      }
     } else if (state.openSession) {
       state.openSession = null;
     }
@@ -12488,6 +12632,16 @@ els.breakdown.addEventListener('click', (event) => {
   if (state.breakdown !== 'session') return;
   const rowEl = event.target.closest('.row');
   if (!rowEl) return;
+  if (rowEl.dataset.reviewGroup === 'true') {
+    const period = state.stats?.periods?.[state.period];
+    const summary = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+    if (summary) {
+      const request = { kind: 'background-review-group', period: state.period, summary };
+      state.openSession = request;
+      renderBackgroundReviewDetail(request);
+    }
+    return;
+  }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
   if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh') return;
@@ -12505,6 +12659,10 @@ els.breakdown.addEventListener('click', (event) => {
     sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
     title: rowEl.querySelector('.row-title')?.textContent || ''
   });
+});
+
+els.breakdown.addEventListener('keydown', (event) => {
+  sessionRowsApi.handleBreakdownRowKeydown(event);
 });
 
 els.pinButton.addEventListener('click', (event) => {

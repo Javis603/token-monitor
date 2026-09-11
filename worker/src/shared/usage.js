@@ -43,6 +43,13 @@ const TIMED_DURATION_KEYS = ['totalDurationMs', 'total_duration_ms', 'timedDurat
 const TIMED_TOKEN_KEYS = ['timedTokens', 'timed_tokens'];
 const STARTED_AT_KEYS = ['startedAt', 'started_at', 'createdAt', 'created_at'];
 const LAST_USED_AT_KEYS = ['lastUsedAt', 'last_used_at', 'updatedAt', 'updated_at', 'lastActivityAt', 'last_activity_at', 'timestamp'];
+const SESSION_TITLE_KEYS = ['sessionTitle', 'session_title'];
+const SESSION_TITLE_MAX_LENGTH = 160;
+const SESSION_TEXT_KEYS = [
+  'title', 'sessionTitle', 'session_title',
+  'name', 'preview', 'firstUserMessage', 'first_user_message',
+  'customTitle', 'custom_title', 'aiTitle', 'ai_title'
+];
 const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'minimax']);
 
 function asNumber(value) {
@@ -119,6 +126,55 @@ function timestampMs(value) {
 function normalizeIsoTimestamp(value) {
   const ms = timestampMs(value);
   return ms > 0 ? new Date(ms).toISOString() : '';
+}
+
+function normalizeSessionTitle(value) {
+  return Array.from(String(value || '').replace(/\s+/g, ' ').trim())
+    .slice(0, SESSION_TITLE_MAX_LENGTH)
+    .join('');
+}
+
+function normalizeSessionKind(value) {
+  return String(value || '').trim() === 'background-review' ? 'background-review' : '';
+}
+
+function stripSessionTextFromPeriod(period) {
+  if (!period || typeof period !== 'object' || !period.sessions || typeof period.sessions !== 'object') {
+    return period;
+  }
+  const sessions = {};
+  for (const [key, value] of Object.entries(period.sessions)) {
+    if (!value || typeof value !== 'object') {
+      sessions[key] = value;
+      continue;
+    }
+    const session = { ...value };
+    for (const field of SESSION_TEXT_KEYS) delete session[field];
+    sessions[key] = session;
+  }
+  return { ...period, sessions };
+}
+
+// Hub ingress is a trust boundary. Current clients already omit local titles,
+// but the Hub must enforce that privacy contract even for stale, buggy, or
+// custom senders. Preserve non-text classification such as `sessionKind`.
+function stripSessionTextFromDeviceRecord(record) {
+  if (!record || typeof record !== 'object') return record;
+  const stripped = { ...record };
+  for (const periodName of PERIODS) {
+    if (hasOwn(stripped, periodName)) {
+      stripped[periodName] = stripSessionTextFromPeriod(stripped[periodName]);
+    }
+  }
+  if (stripped.periods && typeof stripped.periods === 'object') {
+    stripped.periods = { ...stripped.periods };
+    for (const periodName of PERIODS) {
+      if (hasOwn(stripped.periods, periodName)) {
+        stripped.periods[periodName] = stripSessionTextFromPeriod(stripped.periods[periodName]);
+      }
+    }
+  }
+  return stripped;
 }
 
 function emptyPeriod() {
@@ -435,6 +491,8 @@ function emptySession(client, id) {
     lastUsedAt: '',
     projectId: '',
     projectLabel: '',
+    title: '',
+    sessionKind: '',
     models: {},
     modelCosts: {},
     providers: {}
@@ -465,6 +523,8 @@ function mergeSession(target, source) {
   } else if (target.projectId === sourceProjectId && !target.projectLabel && source.projectLabel) {
     target.projectLabel = String(source.projectLabel);
   }
+  if (!target.title && source.title) target.title = normalizeSessionTitle(source.title);
+  if (!target.sessionKind && source.sessionKind) target.sessionKind = normalizeSessionKind(source.sessionKind);
   for (const [model, tokens] of Object.entries(source.models || {})) {
     const key = normalizeModelNameForClient(model, target.client);
     if (key) target.models[key] = (target.models[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
@@ -510,6 +570,8 @@ function sessionFromRow(row) {
   session.lastUsedAt = normalizeIsoTimestamp(firstString(row, LAST_USED_AT_KEYS));
   session.projectId = String(row.projectId || row.project_id || '').trim();
   session.projectLabel = String(row.projectLabel || row.project_label || '').trim();
+  session.title = normalizeSessionTitle(firstString(row, SESSION_TITLE_KEYS));
+  session.sessionKind = normalizeSessionKind(row.sessionKind || row.session_kind);
   let model = detectModel(row, client);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
@@ -536,6 +598,8 @@ function normalizeSession(input, fallbackKey) {
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
   session.projectId = String(input.projectId || input.project_id || '').trim();
   session.projectLabel = String(input.projectLabel || input.project_label || '').trim();
+  session.title = normalizeSessionTitle(input.title || input.sessionTitle || input.session_title);
+  session.sessionKind = normalizeSessionKind(input.sessionKind || input.session_kind);
   if (input.models && typeof input.models === 'object') {
     for (const [model, value] of Object.entries(input.models)) {
       const key = normalizeModelNameForClient(model, client);
@@ -1488,5 +1552,6 @@ module.exports = {
   normalizeModelNameForClient,
   normalizeDeviceRecord,
   normalizePeriod,
-  projectRollupFromSessions
+  projectRollupFromSessions,
+  stripSessionTextFromDeviceRecord
 };
