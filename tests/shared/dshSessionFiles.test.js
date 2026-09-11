@@ -242,20 +242,21 @@ test('decodeSessionText reads raw .jsonl without decompression', () => {
   assert.equal(text, '{"type":"session"}\n');
 });
 
-test('readDshSessionTitle folds the latest persisted title and normalizes it', () => {
+test('readDshSessionTitle folds and preserves the latest persisted title', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-'));
   const file = path.join(root, 'session.jsonl');
   try {
+    const persistedTitle = `Renamed title ${'x'.repeat(200)}`;
     fs.writeFileSync(file, [
       JSON.stringify({ type: 'session', id: 's1' }),
       JSON.stringify({ type: 'session/title', seq: 1, data: { title: '  First\n title  ' } }),
       JSON.stringify({ type: 'user/message', seq: 2, data: { content: 'private prompt' } }),
-      JSON.stringify({ type: 'session/title', seq: 3, data: { title: 'Renamed title' } }),
+      JSON.stringify({ type: 'session/title', seq: 3, data: { title: persistedTitle } }),
       ''
     ].join('\n'));
 
     const state = readDshSessionTitle(file);
-    assert.equal(state.title, 'Renamed title');
+    assert.equal(state.title, persistedTitle);
     assert.equal(state.offset, state.size);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -279,7 +280,7 @@ test('readDshSessionTitle never derives a title from conversation text', () => {
   }
 });
 
-test('readDshSessionTitle reads only appended plain JSONL after the initial fold', () => {
+test('readDshSessionTitle reuses the append boundary after checking content continuity', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-append-'));
   const file = path.join(root, 'session.jsonl');
   const realReadSync = fs.readSync;
@@ -297,7 +298,9 @@ test('readDshSessionTitle reads only appended plain JSONL after the initial fold
     const second = readDshSessionTitle(file, first);
 
     assert.equal(second.title, 'Updated');
-    assert.deepEqual(reads, [{ length: Buffer.byteLength(appended), position: first.offset }]);
+    assert.equal(reads.filter(({ length, position }) => (
+      length === Buffer.byteLength(appended) && position === first.offset
+    )).length, 1);
   } finally {
     fs.readSync = realReadSync;
     fs.rmSync(root, { recursive: true, force: true });
@@ -344,6 +347,34 @@ test('readDshSessionTitle resets latest-wins state after a same-size rewrite', (
     const second = readDshSessionTitle(file, first);
     assert.equal(second.title, 'Other title');
     assert.equal(second.offset, second.size);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('readDshSessionTitle refolds a larger in-place rewrite instead of treating it as an append', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-larger-rewrite-'));
+  const file = path.join(root, 'session.jsonl');
+  try {
+    const event = (title, paddingBytes) => [
+      JSON.stringify({ type: 'session', id: 's1' }),
+      JSON.stringify({ type: 'session/title', data: { title } }),
+      JSON.stringify({ type: 'assistant/message', data: { content: 'x'.repeat(paddingBytes) } }),
+      '',
+      's'.repeat(64 * 1024)
+    ].join('\n');
+    fs.writeFileSync(file, event('Title A', 160 * 1024));
+    const first = readDshSessionTitle(file);
+    // Keep the old file's final 64 KiB identical: a tail-only check would still
+    // misclassify this as an append and skip the new title near the front.
+    fs.writeFileSync(file, event('Title B', 192 * 1024));
+    const nextMtime = new Date(first.mtimeMs + 1000);
+    fs.utimesSync(file, nextMtime, nextMtime);
+    assert.ok(fs.statSync(file).size > first.size);
+
+    const second = readDshSessionTitle(file, first);
+    assert.equal(second.title, 'Title B');
+    assert.equal(second.offset, second.size - (64 * 1024));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -22,6 +22,7 @@
  */
 
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const zlib = require('node:zlib');
@@ -102,8 +103,8 @@ function preferredDshSessionFileInDirectory(dir) {
 }
 const DSH_SESSION_DIR_DEPTH = 2; // <root>/<project>/<session>/<artifact>
 const ZSTD_MAGIC = 0xFD2FB528;
-const DSH_SESSION_TITLE_MAX_CODE_POINTS = 160;
 const DSH_SESSION_TITLE_READ_BYTES = 256 * 1024;
+const DSH_SESSION_CONTINUITY_BYTES = 64 * 1024;
 
 function resolveDshSessionsRoot(options = {}) {
   const platform = options.platform || process.platform;
@@ -277,24 +278,55 @@ function decodeSessionText(filePath, buffer) {
   return decodeZstdText(buffer).text;
 }
 
-function normalizeDshSessionTitle(value) {
-  if (typeof value !== 'string') return '';
-  return Array.from(value.replace(/\s+/g, ' ').trim())
-    .slice(0, DSH_SESSION_TITLE_MAX_CODE_POINTS)
-    .join('');
+function persistedDshSessionTitle(value) {
+  return typeof value === 'string' && value.length > 0 ? value : '';
 }
 
 function foldDshSessionTitle(text, initialTitle = '') {
-  let title = normalizeDshSessionTitle(initialTitle);
+  let title = persistedDshSessionTitle(initialTitle);
   for (const line of String(text || '').split(/\r?\n/)) {
     if (!line.trim()) continue;
     let event;
     try { event = JSON.parse(line); } catch (_) { continue; }
     if (event?.type !== 'session/title') continue;
-    const nextTitle = normalizeDshSessionTitle(event.data?.title);
+    const nextTitle = persistedDshSessionTitle(event.data?.title);
     if (nextTitle) title = nextTitle;
   }
   return title;
+}
+
+function dshSessionFileIdentity(stat) {
+  return `${String(stat.dev ?? '')}:${String(stat.ino ?? '')}`;
+}
+
+function hashDshSessionRange(hash, fd, start, length) {
+  const buffer = Buffer.allocUnsafe(length);
+  let offset = 0;
+  while (offset < length) {
+    const bytesRead = fs.readSync(fd, buffer, offset, length - offset, start + offset);
+    if (bytesRead <= 0) throw new Error('DSH transcript changed during continuity read');
+    offset += bytesRead;
+  }
+  hash.update(buffer);
+}
+
+function readDshSessionContinuity(fd, size) {
+  const hash = crypto.createHash('sha256');
+  const headLength = Math.min(size, DSH_SESSION_CONTINUITY_BYTES);
+  hashDshSessionRange(hash, fd, 0, headLength);
+  const tailStart = Math.max(headLength, size - DSH_SESSION_CONTINUITY_BYTES);
+  hashDshSessionRange(hash, fd, tailStart, size - tailStart);
+  return {
+    size,
+    hash: hash.digest('hex')
+  };
+}
+
+function dshSessionContinuityMatches(fd, previous, previousSize) {
+  const continuity = previous?.continuity;
+  if (!continuity || continuity.size !== previousSize
+    || typeof continuity.hash !== 'string') return false;
+  return readDshSessionContinuity(fd, previousSize).hash === continuity.hash;
 }
 
 function decodeSessionAppend(filePath, buffer) {
@@ -310,26 +342,30 @@ function decodeSessionAppend(filePath, buffer) {
 }
 
 // DSH titles are durable `session/title` events and use latest-wins folding.
-// The log is append-only, so retain the last complete JSONL/zstd boundary and
-// decode only new bytes on later collector ticks. A shrink or same-size rewrite
-// resets the fold, while a torn final record/frame remains eligible for retry.
+// Retain the last complete JSONL/zstd boundary and decode only new bytes when
+// the previous file identity and bounded head/tail fingerprint still match. Any
+// replacement or rewrite resets the fold, while a torn final record/frame
+// remains eligible for retry.
 function readDshSessionTitle(filePath, previous = {}) {
   let stat;
   try { stat = fs.statSync(filePath); } catch (_) { return { title: '', offset: 0, size: 0, mtimeMs: 0 }; }
   const size = Number(stat.size) || 0;
   const mtimeMs = Number(stat.mtimeMs) || 0;
+  const identity = dshSessionFileIdentity(stat);
   const previousSize = Number(previous.size) || 0;
   const previousMtimeMs = Number(previous.mtimeMs) || 0;
-  if (size === previousSize && mtimeMs === previousMtimeMs) return previous;
+  if (size === previousSize && mtimeMs === previousMtimeMs
+    && identity === previous.identity && previous.continuity) return previous;
 
   const previousOffset = Number(previous.offset);
-  const appendOnly = size > previousSize && Number.isSafeInteger(previousOffset)
-    && previousOffset >= 0 && previousOffset <= previousSize;
-  const start = appendOnly ? previousOffset : 0;
-  let title = normalizeDshSessionTitle(appendOnly ? previous.title : '');
   let fd;
   try {
     fd = fs.openSync(filePath, 'r');
+    const appendOnly = size > previousSize && identity === previous.identity
+      && Number.isSafeInteger(previousOffset) && previousOffset >= 0 && previousOffset <= previousSize
+      && dshSessionContinuityMatches(fd, previous, previousSize);
+    const start = appendOnly ? previousOffset : 0;
+    let title = persistedDshSessionTitle(appendOnly ? previous.title : '');
     const isZstd = filePath.endsWith('.jsonl.zstd');
     let position = start;
     let consumed = 0;
@@ -369,7 +405,9 @@ function readDshSessionTitle(filePath, previous = {}) {
       title,
       offset: start + consumed,
       size,
-      mtimeMs
+      mtimeMs,
+      identity,
+      continuity: readDshSessionContinuity(fd, size)
     };
   } catch (_) {
     // Do not cache a failed read as though this file revision were observed;
