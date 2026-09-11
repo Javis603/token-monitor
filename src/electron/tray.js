@@ -260,6 +260,7 @@ const TRAY_CONTENT_MENU_ITEMS = [
   ['costAll', 'trayMenu.content.totalCost'],
   ['bothAll', 'trayMenu.content.totalBoth'],
   ['limitsAllSessions', 'trayMenu.content.aiToolLimits'],
+  ['liveTokenRate', 'trayMenu.content.liveTokenRate'],
   ['barsSession', 'trayMenu.content.sessionLimitBar'],
   ['barsWeekly', 'trayMenu.content.weeklyLimitBar'],
   ['barsAllSessions', 'trayMenu.content.allToolsLimitBars'],

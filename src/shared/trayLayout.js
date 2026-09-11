@@ -29,6 +29,7 @@
     'reset',
     'tokens',
     'cost',
+    'liveTokenRate',
     'account',
     'customText',
     'doubleCustomText',
@@ -39,7 +40,7 @@
   const ITEM_TYPES = new Set(['icon', 'bars', 'stack', 'text', 'spacer']);
   const ACCOUNT_MODES = new Set(['lowest', 'active', 'specific']);
   const VALUE_MODES = new Set(['remaining', 'used']);
-  const TEXT_METRICS = new Set(['percent', 'percentReset', 'reset', 'tokens', 'cost', 'account', 'custom']);
+  const TEXT_METRICS = new Set(['percent', 'percentReset', 'reset', 'tokens', 'cost', 'liveTokenRate', 'account', 'custom']);
   const INFO_METRICS = new Set(['percent', 'percentReset', 'reset', 'tokens', 'cost']);
   const STACK_METRICS = new Set(['percent', 'reset', 'mixed', 'custom']);
   const STACK_ALIGNMENTS = new Set(['left', 'right']);
@@ -52,6 +53,8 @@
   const USAGE_SCOPES = new Set(['all', 'recent']);
   const PERIODS = new Set(['today', 'month', 'allTime']);
   const WINDOW_PRESETS = new Set(['primary', 'secondary', 'session', 'daily', 'weekly', 'billing']);
+  const LIVE_RATE_MODES = new Set(['speed', 'burn']);
+  const LIVE_RATE_SCOPES = new Set(['all', 'device']);
 
   function clean(value, max = 160) {
     return String(value || '').trim().slice(0, max);
@@ -132,6 +135,16 @@
   function normalizeUsageScope(value) {
     const scope = clean(value, 24);
     return USAGE_SCOPES.has(scope) ? scope : 'all';
+  }
+
+  function normalizeLiveRateMode(value) {
+    const mode = clean(value, 24);
+    return LIVE_RATE_MODES.has(mode) ? mode : 'speed';
+  }
+
+  function normalizeLiveRateScope(value) {
+    const scope = clean(value, 24);
+    return LIVE_RATE_SCOPES.has(scope) ? scope : 'all';
   }
 
   function normalizeSource(input, fallbackWindow = 'primary') {
@@ -302,6 +315,17 @@
         text: 'Text'
       };
     }
+    if (styleId === 'liveTokenRate') {
+      return {
+        id,
+        type: 'text',
+        style: styleId,
+        metric: 'liveTokenRate',
+        rateMode: 'speed',
+        rateScope: 'all',
+        fontStyle: 'normal'
+      };
+    }
     if (styleId === 'spacer' || styleId === 'separatorDot') {
       return {
         id,
@@ -458,6 +482,17 @@
         metric: 'custom',
         fontStyle: normalizeFontStyle(input.fontStyle),
         text: clean(input.text, 40)
+      };
+    }
+    if (metric === 'liveTokenRate' || style === 'liveTokenRate') {
+      return {
+        id,
+        type,
+        style: 'liveTokenRate',
+        metric: 'liveTokenRate',
+        rateMode: normalizeLiveRateMode(input.rateMode),
+        rateScope: normalizeLiveRateScope(input.rateScope),
+        fontStyle: normalizeFontStyle(input.fontStyle)
       };
     }
     const period = PERIODS.has(input.period) ? input.period : 'today';
@@ -870,6 +905,20 @@
   }
 
   function resolveTextItem(item, stats, options, recentProvider = null) {
+    if (item.metric === 'liveTokenRate') {
+      const scope = normalizeLiveRateScope(item.rateScope);
+      const sample = options.liveTokenRates?.[scope] || null;
+      const mode = normalizeLiveRateMode(item.rateMode);
+      const rawRate = sample ? sample[mode] : null;
+      const rate = rawRate === null || rawRate === undefined ? null : finite(rawRate);
+      const text = `${rate === null ? '—' : formatLiveRate(rate, options)} ${mode === 'burn' ? 'TPM' : 'tok/s'}`;
+      return {
+        ...item,
+        available: Boolean(sample && sample.idle !== true),
+        text,
+        liveTokenRate: sample
+      };
+    }
     if (item.metric === 'custom') {
       const text = clean(item.text, 40);
       return { ...item, available: Boolean(text), text: text || '--' };
@@ -894,6 +943,18 @@
     else if (item.metric === 'reset') text = reset || '--';
     else text = accountLabel(selection.providerRecord) || selection.provider;
     return { ...item, available: Boolean(text && text !== '--'), text: text || '--', selection };
+  }
+
+  function formatLiveRate(value, options = {}) {
+    if (typeof options.liveTokenRateFormatter === 'function') {
+      return options.liveTokenRateFormatter(value);
+    }
+    if (trayTextApi?.formatCompactNumber) return trayTextApi.formatCompactNumber(value, options);
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '—';
+    if (number > 0 && number < 0.1) return '<0.1';
+    if (number > 0 && number < 1) return number.toLocaleString(options.locale || options.language || 'en', { maximumFractionDigits: 1 });
+    return String(Math.round(number));
   }
 
   function preferredRowProvider(rows, preferredIndex = 0) {
