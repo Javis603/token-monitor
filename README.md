@@ -286,7 +286,7 @@ There are two places to configure Token Monitor; day-to-day use only needs the f
 
 See the [configuration reference](docs/configuration.md) for every setting and all environment variables.
 
-**Model aliases** in Collection settings let you merge equivalent model IDs in local views, including retained history, without changing costs or stored/synced/exported data. See the [model alias guide](docs/model-aliases.md).
+**Model aliases** automatically merge observed provider-qualified and separator variants in local views; manual mappings cover names that cannot be matched safely. Costs and stored, synced, or exported IDs remain unchanged. See the [model alias guide](docs/model-aliases.md).
 
 ## Privacy
 

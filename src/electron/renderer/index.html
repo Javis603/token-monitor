@@ -570,8 +570,8 @@
                 </span>
               </button>
               <div id="modelAliasesSettingsDetails" class="cursor-settings-details hidden">
-                <p class="settings-note" data-i18n="settings.modelAliases.note">Merge model names only in this app's views, including history. Costs, source logs, sync and exports are unchanged. Remove mappings to restore separate groups.</p>
-                <p class="settings-note" data-i18n="settings.modelAliases.matching">Matching ignores case and dots versus hyphens, but keeps dated versions and tiers distinct. Mappings apply once; only map names you know are the same model.</p>
+                <p class="settings-note" data-i18n="settings.modelAliases.note">Equivalent provider-qualified and separator variants are merged automatically in this app's views. Add an alias only when the automatic matcher cannot prove two names are equivalent. Costs, source logs, sync and exports are unchanged.</p>
+                <p class="settings-note" data-i18n="settings.modelAliases.matching">Automatic matching keeps dated versions, tiers and model variants distinct. Manual mappings apply once and can override a specific reported ID.</p>
                 <p class="settings-note model-alias-example">anthropic/claude-opus-5 → claude-opus-5</p>
                 <div id="modelAliasesList" class="managed-account-list"></div>
                 <div class="settings-actions">

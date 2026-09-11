@@ -24,7 +24,7 @@ test('Electron presentation applies aliases after limit projection without chang
   assert.deepEqual(project(raw).periods.today.models, { 'claude-opus-5': 50 });
   assert.equal(project(raw).periods.today.costUsd, 9);
   settings.modelAliases = {};
-  assert.strictEqual(project(raw), raw);
+  assert.deepEqual(project(raw).periods.today.models, { 'claude-opus-5': 50 });
   assert.equal(raw.periods.today.models['anthropic/claude-opus-5'], 20);
 });
 
@@ -36,7 +36,9 @@ test('complete dashboard history uses local mappings for offline and multi-devic
   assert.deepEqual(projected.daily[0].perModel, { 'claude-opus-5': { tokens: 50, cost: 9, unclassifiedTokens: 50 } });
   assert.deepEqual(projected.deviceHistories[0].history.daily[0].perModel, projected.daily[0].perModel);
   settings.modelAliases = {};
-  assert.equal((await getHistory()).daily[0].perModel['anthropic/claude-opus-5'].tokens, 20);
+  assert.deepEqual((await getHistory()).daily[0].perModel, {
+    'claude-opus-5': { tokens: 50, cost: 9, unclassifiedTokens: 50 }
+  });
 });
 
 test('custom pricing still offers original model IDs when reporting aliases are enabled', () => {
