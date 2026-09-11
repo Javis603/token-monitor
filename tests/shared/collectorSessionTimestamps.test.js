@@ -236,7 +236,11 @@ test('applySessionTimestamps fills DSH session start/last from the transcript he
     const dir = path.join(home, '.dsh', 'sessions', 'proj', 'session-abc');
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, 'session.jsonl');
-    fs.writeFileSync(file, `${JSON.stringify({ type: 'session', id: 'session-abc', createdAt: 1750000000000 })}\n`);
+    fs.writeFileSync(file, [
+      JSON.stringify({ type: 'session', id: 'session-abc', createdAt: 1750000000000 }),
+      JSON.stringify({ type: 'session/title', seq: 1, data: { title: 'DSH session title' } }),
+      ''
+    ].join('\n'));
     const mtime = new Date('2026-07-01T12:00:00.000Z');
     fs.utimesSync(file, mtime, mtime);
 
@@ -251,6 +255,37 @@ test('applySessionTimestamps fills DSH session start/last from the transcript he
     const session = periods.today.sessions['dsh:session-abc'];
     assert.equal(session.startedAt, new Date(1750000000000).toISOString());
     assert.equal(session.lastUsedAt, mtime.toISOString());
+    assert.equal(session.title, 'DSH session title');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('applySessionTimestamps refreshes a cached DSH title after rename', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-title-refresh-'));
+  try {
+    const id = 'session-title-refresh';
+    const dir = path.join(home, '.dsh', 'sessions', 'proj', id);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'session.jsonl');
+    fs.writeFileSync(file, [
+      JSON.stringify({ type: 'session', id, createdAt: 1750000000000 }),
+      JSON.stringify({ type: 'session/title', seq: 1, data: { title: 'Initial title' } }),
+      ''
+    ].join('\n'));
+    const cache = {
+      metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set(),
+      dshSessionFileCache: new Map(), retryMisses: true
+    };
+    const tick = () => {
+      const periods = { today: { sessions: { [`dsh:${id}`]: { client: 'dsh', sessionId: id } } } };
+      applySessionTimestamps(periods, home, cache);
+      return periods.today.sessions[`dsh:${id}`];
+    };
+
+    assert.equal(tick().title, 'Initial title');
+    fs.appendFileSync(file, `${JSON.stringify({ type: 'session/title', seq: 2, data: { title: 'Renamed title' } })}\n`);
+    assert.equal(tick().title, 'Renamed title');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
