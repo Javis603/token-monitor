@@ -303,6 +303,7 @@ const {
   usageConfigFingerprint,
   usageConfigFromSettings
 } = require('./runtimeConfig');
+const { CUSTOM_SCAN_CLIENT_IDS, normalizeCustomScanPaths } = require('../shared/customScanPaths');
 const {
   canRefreshUsageRuntime,
   drainPendingUsageClientRefreshes: drainPendingUsageClientRefreshQueue,
@@ -511,6 +512,7 @@ function defaultSettings() {
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
     lastPostedDeviceId: '',
     clients: clientsCsvForSetting(process.env.TOKEN_MONITOR_CLIENTS),
+    customScanPaths: {},
     clientDisplayOrder: '',
     hiddenClients: '',
     pinnedClients: '',
@@ -2415,6 +2417,7 @@ function readSettings() {
     if (!saved.secret && defaults.secret) delete saved.secret;
     const merged = { ...defaults, ...saved, ...storedCredentials };
     merged.clients = clientsCsvForSetting(merged.clients);
+    merged.customScanPaths = normalizeCustomScanPaths(merged.customScanPaths);
     // A missing settings file is the only reliable fresh-install signal: a
     // missing limitProviders field also occurs when an existing installation
     // upgrades, where changing the user's effective defaults would be wrong.
@@ -6662,6 +6665,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.subscriptionsHub;
     delete normalizedPatch.subscriptionsUpdatedAt;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
+    if (patch.customScanPaths !== undefined) normalizedPatch.customScanPaths = normalizeCustomScanPaths(patch.customScanPaths);
     if (patch.vendorColors !== undefined) normalizedPatch.vendorColors = migrateVendorColors(patch.vendorColors);
     if (patch.claudeWebCookie !== undefined) normalizedPatch.claudeWebCookie = normalizeClaudeWebCookie(patch.claudeWebCookie);
     if (patch.deepseekApiKey !== undefined) normalizedPatch.deepseekApiKey = normalizeDeepSeekApiKey(patch.deepseekApiKey);
@@ -6703,6 +6707,7 @@ app.whenReady().then(() => {
       hubHostSecret: patch.hubHostSecret !== undefined ? String(patch.hubHostSecret) : settings.hubHostSecret,
       deviceId: (patch.deviceId !== undefined ? String(patch.deviceId).trim() : settings.deviceId) || defaultDeviceId(),
       clients: patch.clients !== undefined ? clientsCsvForSetting(patch.clients, '') : clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS),
+      customScanPaths: normalizeCustomScanPaths(patch.customScanPaths ?? settings.customScanPaths),
       refreshMs: Math.max(5000, Number(patch.refreshMs ?? settings.refreshMs ?? 15000)),
       glassOpacity: Math.max(0, Math.min(100, Number(patch.glassOpacity ?? settings.glassOpacity ?? 68))),
       glassBlur: Math.max(0, Math.min(100, Number(patch.glassBlur ?? settings.glassBlur ?? 32))),
@@ -7144,8 +7149,8 @@ app.whenReady().then(() => {
   const clientSourceIpcHandlers = createClientSourceIpcHandlers({
     knownClients: KNOWN_CLIENTS,
     trackedClients: () => trackedClientSet(clientsCsvForSetting(settings?.clients)),
-    visibleDiagnosticRoots,
-    clientDiagnosticRoots,
+    visibleDiagnosticRoots: (clients) => visibleDiagnosticRoots(clients, { customScanPaths: settings?.customScanPaths }),
+    clientDiagnosticRoots: (clients) => clientDiagnosticRoots(clients, { customScanPaths: settings?.customScanPaths }),
     showItemInFolder: (target) => shell.showItemInFolder(target),
     openPath: (target) => shell.openPath(target),
     revealClientSyncLock: () => {
@@ -7162,6 +7167,19 @@ app.whenReady().then(() => {
     onRescanError: (error) => console.log(`[usage-runtime] rescan failed: ${error.message}`)
   });
   ipcMain.handle('usage:clientSources', (_event, clientId) => clientSourceIpcHandlers.clientSources(clientId));
+  ipcMain.handle('usage:pickCustomScanPath', async (_event, clientId) => {
+    const client = String(clientId || '').trim().toLowerCase();
+    if (!CUSTOM_SCAN_CLIENT_IDS.includes(client)) return { ok: false, error: 'unsupported-client' };
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      defaultPath: app.getPath('home')
+    });
+    if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
+    const dir = result.filePaths[0];
+    const normalized = normalizeCustomScanPaths({ [client]: [dir] });
+    if (!normalized[client]?.[0]) return { ok: false, error: 'unsupported-path' };
+    return { ok: true, dir: normalized[client][0] };
+  });
   // The renderer sends a client id, never a path: anything it could send would
   // otherwise become an arbitrary filesystem open.
   ipcMain.handle('usage:revealClientSource', (_event, clientId) => clientSourceIpcHandlers.revealClientSource(clientId));

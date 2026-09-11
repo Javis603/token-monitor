@@ -4580,6 +4580,57 @@ test('Tokscale headless capture roots are optional only while they are the defau
   }
 });
 
+test('custom Tokscale scan paths stay visible while missing and join watcher discovery when present', () => {
+  const tmp = withTmpHome([]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { clientSourceChecks, visibleDiagnosticRoots, watchPathsForClients } = freshCollector();
+    const custom = path.join(tmp, 'relocated', 'codex');
+    const options = { customScanPaths: { codex: [custom] } };
+
+    const missing = visibleDiagnosticRoots('codex', options).codex.find((root) => root.custom === true);
+    assert.deepEqual(missing, {
+      id: 'custom-scan-path',
+      dir: custom,
+      custom: true,
+      exists: false
+    });
+    assert.deepEqual(clientSourceChecks('codex', options).codex.at(-1), {
+      id: 'custom-scan-path',
+      exists: false
+    });
+    assert.equal(watchPathsForClients('codex', options).includes(custom), false);
+
+    fs.mkdirSync(custom, { recursive: true });
+    assert.equal(watchPathsForClients('codex', options).includes(custom), true);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('custom Tokscale roots remain watchable for self-synced clients without watching their caches', () => {
+  const tmp = withTmpHome([]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchPathsForClients } = freshCollector();
+    const customCursor = path.join(tmp, 'relocated', 'cursor');
+    fs.mkdirSync(customCursor, { recursive: true });
+
+    const roots = watchPathsForClients('cursor', {
+      customScanPaths: { cursor: [customCursor] }
+    });
+    assert.deepEqual(roots, [customCursor]);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('the quit variant of stop() skips the watcher walk and leans on `stopped`', async () => {
   const tmp = withTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;

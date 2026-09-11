@@ -19,7 +19,10 @@ function createHandlers({ trackedClients = ['codex'], repairResult = { ok: true,
     visibleDiagnosticRoots: (client) => {
       calls.sourceProbes.push(client);
       return {
-        [client]: [{ id: `${client}-data`, dir: `/tmp/${client}`, exists: true }]
+        [client]: [
+          { id: `${client}-data`, dir: `/tmp/${client}`, exists: true },
+          { id: 'custom-scan-path', dir: `/tmp/${client}-custom`, exists: false, custom: true }
+        ]
       };
     },
     clientDiagnosticRoots: (client) => ({
@@ -50,7 +53,10 @@ test('source inspection allows known untracked clients while rescan stays tracke
   const { calls, handlers } = createHandlers();
 
   assert.deepEqual(handlers.clientSources('commandcode'), {
-    sources: [{ id: 'commandcode-data', dir: '/tmp/commandcode', exists: true }],
+    sources: [
+      { id: 'commandcode-data', dir: '/tmp/commandcode', exists: true },
+      { id: 'custom-scan-path', dir: '/tmp/commandcode-custom', exists: false, custom: true }
+    ],
     omittedCount: 0
   });
   assert.equal(await handlers.revealClientSource('commandcode'), true);

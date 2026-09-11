@@ -306,7 +306,9 @@ test('countOverall tallies by headline state', () => {
 // files for a reason (one needs `fs`, the other ships to the Worker), so nothing
 // but this test stops a new client's root from being silently dropped on ingest.
 test('every source-root id the collector emits is in the allowlist', () => {
-  const roots = clientSourceRoots(KNOWN_CLIENTS);
+  const roots = clientSourceRoots(KNOWN_CLIENTS, {
+    customScanPaths: { codex: [path.join(path.sep, 'tmp', 'codex-extra')] }
+  });
   const emitted = new Set();
   for (const entries of Object.values(roots)) {
     for (const { id, dir } of entries) {

@@ -3,7 +3,15 @@
 // Client identity — ids, labels and display order — comes from the shared
 // catalog (loaded as a script before this file). Destructured to the bare
 // names the call sites below already use.
-const { CLIENT_IDS, CLIENT_LABELS: clientLabels, KNOWN_CLIENT_LIST: KNOWN_CLIENTS } = window.TokenMonitorClientCatalog;
+const {
+  CLIENT_CATALOG,
+  CLIENT_IDS,
+  CLIENT_LABELS: clientLabels,
+  KNOWN_CLIENT_LIST: KNOWN_CLIENTS
+} = window.TokenMonitorClientCatalog;
+const TOKSCALE_CUSTOM_SOURCE_CLIENTS = new Set(
+  CLIENT_CATALOG.filter((client) => client.locallyParsed !== true).map((client) => client.id)
+);
 // Limits provider identity comes from its own shared catalog, bound here rather
 // than at its first use below because the icon tables are derived from it.
 const { LIMIT_PROVIDER_CATALOG: LIMIT_PROVIDERS, LIMIT_PROVIDER_IDS } = window.TokenMonitorLimitProviders;
@@ -312,6 +320,7 @@ state.clientRescans = clientRescanStateApi.createClientRescanState({
 state.toolPreferenceRenderSignature = '';
 state.toolPreferenceDetailSignature = '';
 state.toolPreferenceSourceSignature = '';
+state.customScanPathErrors = new Map();
 state.limitProviderRenderSignature = '';
 state.limitPanelRenderSignature = '';
 state.settingsPushRevision = 0;
@@ -11195,9 +11204,74 @@ function friendlyPath(dir) {
   return clientHealthPresentationApi.friendlyPath(dir, state.appInfo?.homeDir, state.appInfo?.platform);
 }
 
+function customScanPathsForClient(clientId) {
+  const paths = state.settings?.customScanPaths?.[clientId];
+  return Array.isArray(paths) ? paths : [];
+}
+
+function customSourceIcon(kind) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const first = document.createElementNS(svg.namespaceURI, 'path');
+  first.setAttribute('d', kind === 'add' ? 'M8 3v10' : 'M4 4l8 8');
+  const second = document.createElementNS(svg.namespaceURI, 'path');
+  second.setAttribute('d', kind === 'add' ? 'M3 8h10' : 'M12 4l-8 8');
+  svg.append(first, second);
+  return svg;
+}
+
+function resetClientSourceProbe(clientId) {
+  state.clientSources?.entries?.delete(clientId);
+  state.clientSourcesKey = '';
+  state.clientSourcesRequest += 1;
+}
+
+async function addCustomScanPath(clientId) {
+  try {
+    const result = await window.tokenMonitor?.pickCustomScanPath?.(clientId);
+    if (result?.canceled) return;
+    if (!result?.ok || !result.dir) throw new Error(result?.error || 'pick-failed');
+    const current = customScanPathsForClient(clientId);
+    if (current.includes(result.dir)) return;
+    const customScanPaths = {
+      ...(state.settings?.customScanPaths || {}),
+      [clientId]: [...current, result.dir]
+    };
+    const tracked = enabledClientSet();
+    const patch = { customScanPaths };
+    if (!tracked.has(clientId)) patch.clients = [...tracked, clientId].join(',');
+    await saveSettings(patch);
+    state.customScanPathErrors.delete(clientId);
+    resetClientSourceProbe(clientId);
+    loadClientSources(clientId, { force: true });
+    refillOpenClientHealthPanel();
+  } catch (_) {
+    state.customScanPathErrors.set(clientId, 'settings.tools.health.customSourceError');
+    refillOpenClientHealthPanel();
+  }
+}
+
+async function removeCustomScanPath(clientId, dir) {
+  try {
+    const remaining = customScanPathsForClient(clientId).filter((entry) => entry !== dir);
+    const customScanPaths = { ...(state.settings?.customScanPaths || {}) };
+    if (remaining.length > 0) customScanPaths[clientId] = remaining;
+    else delete customScanPaths[clientId];
+    await saveSettings({ customScanPaths });
+    state.customScanPathErrors.delete(clientId);
+    resetClientSourceProbe(clientId);
+    loadClientSources(clientId, { force: true });
+    refillOpenClientHealthPanel();
+  } catch (_) {
+    state.customScanPathErrors.set(clientId, 'settings.tools.health.customSourceError');
+    refillOpenClientHealthPanel();
+  }
+}
+
 // Values are formatted here and nowhere else — the presentation helper returns
 // three semantic groups containing only raw numbers, timestamps and i18n keys.
-function clientHealthGroup(group, notes) {
+function clientHealthGroup(group, notes, clientId) {
   const section = document.createElement('section');
   section.className = `tool-health-group tool-health-group-${group.id}`;
   const heading = document.createElement('h4');
@@ -11207,24 +11281,62 @@ function clientHealthGroup(group, notes) {
   body.className = 'tool-health-group-body';
 
   if (group.id === 'source') {
+    section.append(heading);
+    const summaryRow = document.createElement('div');
+    summaryRow.className = 'tool-health-source-summary-row';
     const summary = document.createElement('div');
     summary.className = 'tool-health-group-summary';
     summary.textContent = t(`settings.tools.health.source.${group.state}`, {
       detected: group.detectedCount,
       checked: group.checkedCount
     });
-    body.append(summary);
+    summaryRow.append(summary);
+    if (TOKSCALE_CUSTOM_SOURCE_CLIENTS.has(clientId)) {
+      const addSource = document.createElement('button');
+      addSource.type = 'button';
+      addSource.className = 'tool-health-source-control tool-health-source-add';
+      addSource.title = t('settings.tools.health.addCustomSource');
+      addSource.setAttribute('aria-label', addSource.title);
+      addSource.append(customSourceIcon('add'));
+      const label = document.createElement('span');
+      label.textContent = addSource.title;
+      addSource.append(label);
+      addSource.addEventListener('click', () => { void addCustomScanPath(clientId); });
+      summaryRow.append(addSource);
+    }
+    body.append(summaryRow);
+    const customSourceError = state.customScanPathErrors.get(clientId);
+    if (customSourceError) {
+      const error = document.createElement('div');
+      error.className = 'tool-health-group-meta tool-health-source-error';
+      error.setAttribute('role', 'status');
+      error.textContent = t(customSourceError);
+      body.append(error);
+    }
     if (group.checks.length > 0) {
       const list = document.createElement('div');
       list.className = 'tool-health-checks';
       for (const check of group.checks) {
         const paths = check.paths?.length ? check.paths : [{ dir: '', exists: check.exists }];
         for (const pathInfo of paths) {
+          const row = document.createElement('div');
+          row.className = 'tool-health-check-row';
           const chip = document.createElement('code');
           chip.className = `tool-health-check${pathInfo.exists ? ' found' : pathInfo.pending ? ' pending' : ''}`;
           chip.textContent = pathInfo.dir ? friendlyPath(pathInfo.dir) : check.id;
           if (pathInfo.dir) chip.title = pathInfo.dir;
-          list.append(chip);
+          row.append(chip);
+          if (pathInfo.custom) {
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'tool-health-source-control tool-health-source-remove';
+            remove.title = t('settings.tools.health.removeCustomSource');
+            remove.setAttribute('aria-label', `${remove.title}: ${friendlyPath(pathInfo.dir)}`);
+            remove.append(customSourceIcon('remove'));
+            remove.addEventListener('click', () => { void removeCustomScanPath(clientId, pathInfo.dir); });
+            row.append(remove);
+          }
+          list.append(row);
         }
       }
       body.append(list);
@@ -11293,7 +11405,8 @@ function clientHealthGroup(group, notes) {
     line.textContent = t(`settings.tools.health.code.${note.code}`);
     body.append(line);
   }
-  section.append(heading, body);
+  if (group.id !== 'source') section.append(heading);
+  section.append(body);
   return section;
 }
 
@@ -11418,7 +11531,8 @@ function clientHealthPanel(detail, clientId) {
   for (const group of detail.groups) {
     groups.append(clientHealthGroup(
       group,
-      detail.notes.filter((note) => note.group === group.id)
+      detail.notes.filter((note) => note.group === group.id),
+      clientId
     ));
   }
   box.append(groups, clientHealthActions(clientId, detail));
@@ -11565,7 +11679,8 @@ function toolPreferenceRenderSignature() {
       state.settings?.clientDisplayOrder || '',
       state.settings?.locale || state.settings?.language || '',
       state.settings?.currency || '',
-      state.settings?.compactTokenUnits || ''
+      state.settings?.compactTokenUnits || '',
+      JSON.stringify(state.settings?.customScanPaths || {})
     ],
     query: toolPreferenceQuery(),
     deviceId: device?.deviceId || '',
