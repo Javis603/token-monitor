@@ -403,6 +403,45 @@ test('applySessionTimestamps promotes a cached unversioned DSH path when a versi
   }
 });
 
+test('applySessionTimestamps closes the initial DSH index generation race before caching', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-generation-index-race-'));
+  try {
+    const id = 'session-index-race';
+    const dir = path.join(home, '.dsh', 'sessions', 'proj', id);
+    fs.mkdirSync(dir, { recursive: true });
+    const header = `${JSON.stringify({ type: 'session', id, createdAt: 1750000000000 })}\n`;
+    const unversioned = path.join(dir, 'session.jsonl');
+    const versioned = path.join(dir, 'session.v3.jsonl');
+    fs.writeFileSync(unversioned, header);
+    const oldMtime = new Date('2026-07-01T10:00:00.000Z');
+    const newMtime = new Date('2026-07-01T11:00:00.000Z');
+    fs.utimesSync(unversioned, oldMtime, oldMtime);
+
+    let indexCalls = 0;
+    const cache = {
+      metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set(),
+      dshSessionFileCache: new Map(), retryMisses: true,
+      indexDshSessionHeaders() {
+        indexCalls += 1;
+        // Model a migration after this directory was scanned but before the
+        // completed whole-tree index is returned to the collector.
+        fs.writeFileSync(versioned, header);
+        fs.utimesSync(versioned, newMtime, newMtime);
+        return new Map([[id, { filePath: unversioned, createdAt: 1750000000000 }]]);
+      }
+    };
+    const periods = { today: { sessions: { [`dsh:${id}`]: { client: 'dsh', sessionId: id } } } };
+
+    applySessionTimestamps(periods, home, cache);
+
+    assert.equal(periods.today.sessions[`dsh:${id}`].lastUsedAt, newMtime.toISOString());
+    assert.equal(indexCalls, 1);
+    assert.equal([...cache.dshSessionFileCache.values()][0].filePath, versioned);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 // The test above proves sessionTimestampMap's own caching logic works when a
 // caller shares one deps object across calls — but collectUsageOnce (what a
 // real collector tick actually calls) used to rebuild dshSessionFileCache

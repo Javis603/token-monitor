@@ -1114,14 +1114,31 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
       for (const [sessionId, entry] of index) {
         const key = dshKey(sessionId);
         if (dshFileCache.has(key)) continue;
+        const directory = path.dirname(entry.filePath);
+        // Capture the fingerprint before the final per-directory selection.
+        // If a migration lands before or during that selection, it is picked
+        // immediately; if it lands afterwards, the older fingerprint makes
+        // the next tick retry instead of pinning the stale path for the rest
+        // of the process.
+        const directoryFingerprint = directoryStatFingerprint(directory);
+        let selectedEntry = entry;
+        const preferredPath = preferredDshSessionFileInDirectory(directory);
+        if (preferredPath && preferredPath !== entry.filePath) {
+          const preferredHeader = readDshSessionHeader(preferredPath);
+          if (preferredHeader?.id === sessionId) {
+            selectedEntry = { filePath: preferredPath, createdAt: preferredHeader.createdAt };
+          }
+        }
         // A stat fingerprint lets an entry whose header was unreadable at
         // index time (createdAt undefined, directory-name fallback) be re-read
         // later, once the file actually changes, instead of being stuck on
         // mtime forever.
         let statFingerprint = '';
-        try { const st = fs.statSync(entry.filePath); statFingerprint = `${st.size}:${st.mtimeMs}`; } catch (_) { /* file vanished mid-scan */ }
-        const directoryFingerprint = directoryStatFingerprint(path.dirname(entry.filePath));
-        dshFileCache.set(key, { ...entry, statFingerprint, directoryFingerprint });
+        try {
+          const st = fs.statSync(selectedEntry.filePath);
+          statFingerprint = `${st.size}:${st.mtimeMs}`;
+        } catch (_) { /* file vanished mid-scan */ }
+        dshFileCache.set(key, { ...selectedEntry, statFingerprint, directoryFingerprint });
       }
     }
     for (const sessionId of dshIds) {
