@@ -690,7 +690,11 @@
         .map((entry) => ({ ...entry, label: styleTitle(entry.style) }));
     }
 
-    function liveTokenRateEditor(item) {
+    function liveTokenRateEditor(item, rowIndex = 0) {
+      const source = Array.isArray(item.rows) ? sourceForItem(item, rowIndex) : item;
+      const patch = (changes) => Array.isArray(item.rows)
+        ? sourcePatch(item, rowIndex, changes)
+        : { ...item, ...changes };
       return [
         picker(
           l('trayComposer.rateMode', 'Rate'),
@@ -698,8 +702,8 @@
             { value: 'speed', label: l('trayComposer.rateMode.speed', 'Generation speed (tok/s)') },
             { value: 'burn', label: l('trayComposer.rateMode.burn', 'Token burn (TPM)') }
           ],
-          item.rateMode,
-          (rateMode) => updateItem(item, { ...item, rateMode })
+          source.rateMode,
+          (rateMode) => updateItem(item, patch({ rateMode }))
         ),
         picker(
           l('trayComposer.rateScope', 'Devices'),
@@ -707,8 +711,8 @@
             { value: 'all', label: l('trayComposer.rateScope.all', 'All devices') },
             { value: 'device', label: l('trayComposer.rateScope.device', 'This device') }
           ],
-          item.rateScope,
-          (rateScope) => updateItem(item, { ...item, rateScope })
+          source.rateScope,
+          (rateScope) => updateItem(item, patch({ rateScope }))
         )
       ];
     }
@@ -778,6 +782,11 @@
           metric,
           (nextMetric) => updateItem(item, sourcePatch(item, rowIndex, { metric: nextMetric }))
         ));
+      }
+
+      if (metric === 'liveTokenRate') {
+        section.append(...liveTokenRateEditor(item, rowIndex));
+        return section;
       }
 
       if (metric === 'tokens' || metric === 'cost') {
@@ -1109,7 +1118,7 @@
                 || item.metric === 'percent'
                 || sourceForItem(item, index).metric === 'percent'
                 || sourceForItem(item, index).metric === 'percentReset',
-              includeLiveTokenRate: item.style !== 'doubleInfo'
+              includeLiveTokenRate: surface === 'tray'
             }
           ));
         });

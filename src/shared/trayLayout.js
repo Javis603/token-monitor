@@ -41,7 +41,7 @@
   const ACCOUNT_MODES = new Set(['lowest', 'active', 'specific']);
   const VALUE_MODES = new Set(['remaining', 'used']);
   const TEXT_METRICS = new Set(['percent', 'percentReset', 'reset', 'tokens', 'cost', 'liveTokenRate', 'account', 'custom']);
-  const INFO_METRICS = new Set(['percent', 'percentReset', 'reset', 'tokens', 'cost']);
+  const INFO_METRICS = new Set(['percent', 'percentReset', 'reset', 'tokens', 'cost', 'liveTokenRate']);
   const STACK_METRICS = new Set(['percent', 'reset', 'mixed', 'custom']);
   const STACK_ALIGNMENTS = new Set(['left', 'right']);
   const FONT_STYLES = new Set(['normal', 'condensed', 'menubar', 'compactMono']);
@@ -172,6 +172,9 @@
       metric: INFO_METRICS.has(metric) ? metric : 'percent',
       period: 'today'
     };
+    if (row.metric === 'liveTokenRate') {
+      return { metric: 'liveTokenRate', rateMode: 'speed', rateScope: 'all' };
+    }
     if (row.metric === 'cost') return { ...row, usageScope: 'all', ...normalizeCostDisplay() };
     return row.metric === 'tokens' ? { ...row, usageScope: 'all' } : row;
   }
@@ -184,6 +187,13 @@
       metric: INFO_METRICS.has(metric) ? metric : fallbackMetric,
       period: PERIODS.has(row.period) ? row.period : 'today'
     };
+    if (normalized.metric === 'liveTokenRate') {
+      return {
+        metric: 'liveTokenRate',
+        rateMode: normalizeLiveRateMode(row.rateMode),
+        rateScope: normalizeLiveRateScope(row.rateScope)
+      };
+    }
     if (normalized.metric === 'cost') {
       return {
         ...normalized,
@@ -560,6 +570,16 @@
     return { version: VERSION, items };
   }
 
+  function liveTokenRateItems(layout) {
+    return normalizeTrayLayout(layout).items.flatMap((item) => {
+      if (item.metric === 'liveTokenRate') return [item];
+      if (item.type === 'stack' && item.metric === 'mixed') {
+        return item.rows.filter((row) => row.metric === 'liveTokenRate');
+      }
+      return [];
+    });
+  }
+
   function replaceTrayLayoutItem(layout, itemId, patch) {
     const normalized = normalizeTrayLayout(layout);
     const index = normalized.items.findIndex((item) => item.id === itemId);
@@ -916,6 +936,7 @@
         ...item,
         available: Boolean(sample && sample.idle !== true),
         text,
+        provider: 'app',
         liveTokenRate: sample
       };
     }
@@ -1091,6 +1112,7 @@
     createTrayLayoutItem,
     displayPercent,
     formatResetCountdown,
+    liveTokenRateItems,
     moveTrayLayoutItem,
     normalizeSource,
     normalizeTrayLayout,

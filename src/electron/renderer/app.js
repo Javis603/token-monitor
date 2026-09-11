@@ -866,8 +866,7 @@ function resetLiveTokenRateTracking() {
 function trayLiveTokenRateItems() {
   if (state.settings?.showTrayIcon === false) return [];
   const customItems = state.settings?.trayContent === 'custom'
-    ? trayLayoutApi.normalizeTrayLayout(state.settings?.trayCustomLayout).items
-      .filter((item) => item.metric === 'liveTokenRate')
+    ? trayLayoutApi.liveTokenRateItems(state.settings?.trayCustomLayout)
     : [];
   if (state.settings?.trayContent === 'liveTokenRate') {
     return [...customItems, { metric: 'liveTokenRate', rateScope: 'all' }];

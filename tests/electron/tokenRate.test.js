@@ -636,10 +636,11 @@ test('the custom macOS tray can render live rates independently of the footer se
   assert.match(trayLayout, /options\.liveTokenRates\?\./);
   assert.match(trayLayout, /available: Boolean\(sample && sample\.idle !== true\)/);
   assert.match(trayComposer, /styles: \['percent',[\s\S]*'liveTokenRate'/);
-  assert.match(trayComposer, /function liveTokenRateEditor\(item\)/);
+  assert.match(trayComposer, /function liveTokenRateEditor\(item, rowIndex = 0\)/);
   assert.match(trayComposer, /function textMetricChoices\(\{ includeLiveTokenRate = surface === 'tray' \} = \{\}\)/);
   assert.match(trayComposer, /textMetricChoices\(\{ includeLiveTokenRate: options\.includeLiveTokenRate !== false \}\)/);
-  assert.match(trayComposer, /includeLiveTokenRate: item\.style !== 'doubleInfo'/);
+  assert.match(trayComposer, /includeLiveTokenRate: surface === 'tray'/);
+  assert.match(trayComposer, /if \(metric === 'liveTokenRate'\) \{[\s\S]*liveTokenRateEditor\(item, rowIndex\)/);
   assert.match(trayComposer, /rateMode\.speed/);
   assert.match(trayComposer, /rateScope\.device/);
   assert.match(main, /const TRAY_CONTENT_VALUES = new Set\([\s\S]*'liveTokenRate'/);
@@ -649,6 +650,7 @@ test('the custom macOS tray can render live rates independently of the footer se
   assert.match(traySource, /\['liveTokenRate', 'trayMenu\.content\.liveTokenRate'\]/);
   assert.match(app, /const trayLiveTokenRateTrackers = new Map\(\)/);
   assert.match(app, /function observeTrayLiveTokenRates\(stats\)/);
+  assert.match(app, /trayLayoutApi\.liveTokenRateItems\(state\.settings\?\.trayCustomLayout\)/);
   assert.match(app, /state\.settings\?\.trayContent === 'liveTokenRate'/);
   assert.match(app, /function liveTokenRateTrayLayout\(\)/);
   assert.match(app, /if \(mode === 'liveTokenRate'\) \{[\s\S]*liveTokenRateTrayLayout\(\)/);

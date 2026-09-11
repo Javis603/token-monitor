@@ -10,6 +10,7 @@ const {
   createDefaultTrayLayout,
   createTrayLayoutItem,
   formatResetCountdown,
+  liveTokenRateItems,
   moveTrayLayoutItem,
   normalizeTrayLayout,
   preferredRowProvider,
@@ -292,6 +293,36 @@ test('two-line information resolves independently selected existing metrics', ()
   assert.deepEqual(resolved.rows.map((row) => row.text), ['72%', '9.5M']);
   assert.equal(resolved.rows[0].selection.provider, 'codex');
   assert.equal(resolved.rows[1].selection, null);
+});
+
+test('two-line information normalizes, discovers, and resolves live token rates', () => {
+  const item = createTrayLayoutItem('doubleInfo', { idFactory: () => 'live-info' });
+  item.rows[0] = {
+    metric: 'liveTokenRate',
+    rateMode: 'burn',
+    rateScope: 'device'
+  };
+
+  const layout = { version: 3, items: [item] };
+  const normalized = normalizeTrayLayout(layout);
+  assert.deepEqual(normalized.items[0].rows[0], {
+    metric: 'liveTokenRate',
+    rateMode: 'burn',
+    rateScope: 'device'
+  });
+  assert.deepEqual(liveTokenRateItems(layout), [normalized.items[0].rows[0]]);
+
+  const [resolved] = resolveTrayLayout(normalized, stats, {
+    nowMs: now,
+    liveTokenRates: {
+      device: { speed: 18, burn: 1080, idle: false }
+    },
+    liveTokenRateFormatter: (value) => String(value)
+  }).items;
+  assert.equal(resolved.rows[0].text, '1080 TPM');
+  assert.equal(resolved.rows[0].available, true);
+  assert.equal(resolved.rows[0].provider, 'app');
+  assert.equal(preferredRowProvider(resolved.rows, 0), 'app');
 });
 
 test('custom text items normalize and resolve without quota data', () => {
