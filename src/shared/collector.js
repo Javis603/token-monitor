@@ -43,10 +43,16 @@ const {
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
 const { claudeSessionRoots } = require('./providers/claude/paths');
-const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
-const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
-const codexSession = require('./providers/codex/sessionMetadata');
-const opencodeSession = require('./providers/opencode/session');
+const {
+  applySessionMetadata,
+  projectIdentity,
+  projectPathFromJsonl,
+  sessionMetadataMap
+} = require('./sessionMetadata');
+const {
+  kimiCodeSessionsHome,
+  kimiWorkSessionsRoots
+} = require('./providers/kimi/sessionMetadata');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
 const {
   buildQoderCnHistoryGraph,
@@ -58,20 +64,12 @@ const {
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 const {
-  indexDshSessionHeaders,
-  preferredDshSessionFileInDirectory,
-  readDshSessionHeader,
-  readDshSessionTitle,
-  resolveDshSessionsRoot
-} = require('./providers/dsh/sessionFiles');
-const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
   isReasonixNativeSessionSidecar,
   reasonixNativeSessionWatchRoots,
   emptyNativeView
 } = require('./providers/reasonix/sessions');
-const { hashKey } = require('./hashKey');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
 const {
   clampTimerDelayMs,
@@ -798,426 +796,6 @@ function computePeriodWindows(now = new Date()) {
   };
 }
 
-function isoFromDate(value) {
-  const date = value instanceof Date ? value : new Date(value || '');
-  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
-}
-
-function timestampFromSessionId(id) {
-  const raw = String(id || '');
-  const isoMatch = raw.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/);
-  if (isoMatch) return isoFromDate(isoMatch[0]);
-  const localMatch = raw.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})[:-](\d{2})(?:[:-](\d{2}))?/);
-  if (!localMatch) return '';
-  const [, year, month, day, hour, minute, second = '0'] = localMatch;
-  return isoFromDate(new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
-}
-
-function readFileTail(filePath, bytes = 64 * 1024) {
-  let fd;
-  try {
-    fd = fs.openSync(filePath, 'r');
-    const stat = fs.fstatSync(fd);
-    const length = Math.min(bytes, stat.size);
-    const buffer = Buffer.alloc(length);
-    fs.readSync(fd, buffer, 0, length, Math.max(0, stat.size - length));
-    return buffer.toString('utf8');
-  } catch (_) {
-    return '';
-  } finally {
-    if (fd !== undefined) {
-      try { fs.closeSync(fd); } catch (_) {}
-    }
-  }
-}
-
-function timestampFromJsonLine(line) {
-  try {
-    const obj = JSON.parse(line);
-    return isoFromDate(obj.timestamp || obj.updatedAt || obj.updated_at || obj.createdAt || obj.created_at);
-  } catch (_) {
-    return '';
-  }
-}
-
-const projectPathCache = new Map();
-
-function projectPathFromJsonl(filePath) {
-  let text;
-  let cacheKey;
-  try {
-    const stat = fs.statSync(filePath);
-    cacheKey = `${stat.size}:${stat.mtimeMs}`;
-    const cached = projectPathCache.get(filePath);
-    if (cached?.key === cacheKey) return cached.value;
-    const fd = fs.openSync(filePath, 'r');
-    try {
-      const size = Math.min(256 * 1024, fs.fstatSync(fd).size);
-      const buffer = Buffer.alloc(size);
-      fs.readSync(fd, buffer, 0, size, 0);
-      text = buffer.toString('utf8');
-    } finally { fs.closeSync(fd); }
-  } catch (_) { return ''; }
-  for (const line of text.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    try {
-      const obj = JSON.parse(line);
-      const payload = obj.payload && typeof obj.payload === 'object' ? obj.payload : obj;
-      const value = payload.cwd || payload.project_path || payload.projectPath || payload.workingDirectory || payload.working_directory;
-      if (typeof value === 'string' && value.trim()) {
-        const result = value.trim();
-        projectPathCache.set(filePath, { key: cacheKey, value: result });
-        return result;
-      }
-    } catch (_) { /* skip partial or non-JSON lines */ }
-  }
-  projectPathCache.set(filePath, { key: cacheKey, value: '' });
-  return '';
-}
-
-function normalizeProjectPath(value) {
-  let normalized = String(value || '').trim().replace(/\\/g, '/');
-  if (!normalized) return '';
-  const windows = /^[a-z]:\//i.test(normalized) || normalized.startsWith('//');
-  const root = normalized === '/' || /^[a-z]:\/$/i.test(normalized);
-  if (!root) normalized = normalized.replace(/\/+$/, '');
-  return windows ? normalized.toLowerCase() : normalized;
-}
-
-function projectIdentity(value) {
-  const normalized = normalizeProjectPath(value);
-  if (!normalized) return {};
-  const root = normalized === '/' || /^[a-z]:\/$/i.test(normalized);
-  let displayPath = String(value || '').trim().replace(/\\/g, '/');
-  if (!root) displayPath = displayPath.replace(/\/+$/, '');
-  const label = root ? (normalized === '/' ? '/' : `${normalized[0].toUpperCase()}:\\`) : displayPath.split('/').pop();
-  return { projectId: hashKey('project', normalized), projectLabel: label };
-}
-
-// Keyed by path -> { key: `size:mtimeMs`, value }, mirroring projectPathCache.
-// The tail timestamp only moves when the transcript grows, so a mtime match lets
-// a full-tick decoration skip re-reading every idle session (issue: periodic UI
-// stutter once project tracking made this run on every session each tick).
-const jsonlTimestampCache = new Map();
-
-// Keyed by `sessionsRoot\0sessionId` ->
-// { filePath, createdAt, statFingerprint, directoryFingerprint }.
-// DSH sessions are deliberately excluded from sessionTimestampMap's
-// resolvedSessionKeys (so lastUsedAt keeps refreshing), so every known id is
-// looked up again on every tick; this is what turns that into a stat() on an
-// already-known path instead of a fresh walk of the whole DSH sessions tree
-// each time — the same perceived-UI-stutter class jsonlTimestampCache above
-// exists to avoid. The root is part of the key because one collector process
-// decorates both the native home and every running WSL distro's home, and the
-// same session id can exist under more than one root (a cloned/migrated home);
-// a bare-id key would let the second root reuse the first root's file path and
-// timestamps. Module-level (not threaded through collectUsageOnce's per-call
-// deps) so it survives across ticks: collectUsageOnce reconstructs its
-// session-metadata deps fresh on every call, same as jsonlTimestampCache and
-// projectPathCache already rely on being module-level rather than deps-held.
-const dshSessionFileCache = new Map();
-
-function directoryStatFingerprint(dir) {
-  try {
-    // Number-valued mtimeMs/ctimeMs can collapse two directory mutations into
-    // the same floating-point millisecond. BigInt nanoseconds preserve the
-    // precision needed to notice a migration file created immediately after
-    // the original transcript was indexed.
-    const stat = fs.statSync(dir, { bigint: true });
-    return `${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
-  } catch (_) {
-    return '';
-  }
-}
-
-function lastJsonlTimestamp(filePath) {
-  let stat;
-  try { stat = fs.statSync(filePath); } catch (_) { return ''; }
-  const cacheKey = `${stat.size}:${stat.mtimeMs}`;
-  const cached = jsonlTimestampCache.get(filePath);
-  if (cached?.key === cacheKey) return cached.value;
-  const tail = readFileTail(filePath);
-  const lines = tail.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  let value = '';
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const timestamp = timestampFromJsonLine(lines[index]);
-    if (timestamp) { value = timestamp; break; }
-  }
-  if (!value) value = stat.mtime.toISOString();
-  jsonlTimestampCache.set(filePath, { key: cacheKey, value });
-  return value;
-}
-
-function sessionRefsForPeriods(periods) {
-  const refs = new Map();
-  for (const period of Object.values(periods || {})) {
-    for (const session of Object.values(period?.sessions || {})) {
-      if (!session?.client || !session?.sessionId) continue;
-      refs.set(`${session.client}:${session.sessionId}`, { client: session.client, sessionId: session.sessionId });
-    }
-  }
-  return refs;
-}
-
-function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
-  const refs = sessionRefsForPeriods(periods);
-  const metadata = deps.metadataCache || new Map();
-  const resolvedSessionKeys = deps.resolvedSessionKeys || new Set();
-  const attemptedSessionKeys = deps.attemptedSessionKeys || new Set();
-  // Timestamps are always backfilled (the session view sorts by recency); project
-  // identity is the part gated by the Projects opt-out (issue #182).
-  const resolveProjects = deps.resolveProjects !== false;
-  const byClient = new Map();
-  for (const ref of refs.values()) {
-    const key = `${ref.client}:${ref.sessionId}`;
-    if (resolvedSessionKeys.has(key)) continue;
-    if (!deps.retryMisses && attemptedSessionKeys.has(key)) continue;
-    if (!byClient.has(ref.client)) byClient.set(ref.client, new Set());
-    byClient.get(ref.client).add(ref.sessionId);
-  }
-
-  const applyFile = (client, sessionId, filePath) => {
-    const startedAt = timestampFromSessionId(sessionId);
-    const lastUsedAt = lastJsonlTimestamp(filePath) || startedAt;
-    const identity = resolveProjects ? projectIdentity(projectPathFromJsonl(filePath)) : {};
-    const key = `${client}:${sessionId}`;
-    const title = client === 'claude'
-      ? claudeSessionMetadata.readSessionTitle(filePath, deps.claudeMetadataDeps)
-      : '';
-    metadata.set(key, {
-      ...(metadata.get(key) || {}),
-      startedAt,
-      lastUsedAt,
-      ...identity,
-      ...(title ? { title } : {})
-    });
-    if (identity.projectId) resolvedSessionKeys.add(key);
-  };
-
-  // OpenCode has no transcript file — its timestamps come from the opencode.db `session` table.
-  const opencodeIds = byClient.get('opencode') || new Set();
-  if (opencodeIds.size > 0) {
-    const readOpencodeMeta = deps.readOpencodeMeta || (deps.scopedHome
-      ? (ids) => opencodeSession.readSessionMetaForHome(ids, home, deps.opencodeDeps)
-      : (ids) => opencodeSession.readSessionMeta(ids, deps.opencodeDeps));
-    for (const [sessionId, meta] of readOpencodeMeta(opencodeIds)) {
-      const startedAt = meta.startedAt || '';
-      const lastUsedAt = meta.lastUsedAt || startedAt;
-      const identity = resolveProjects ? projectIdentity(meta.projectPath) : {};
-      const key = `opencode:${sessionId}`;
-      const title = String(meta.title || '').trim();
-      if (startedAt || lastUsedAt || identity.projectId || title) metadata.set(key, { startedAt, lastUsedAt, ...identity, title });
-      if (identity.projectId) resolvedSessionKeys.add(key);
-    }
-  }
-
-  const claudeRoots = claudeSessionRoots({
-    homeDir: home,
-    env: deps.env,
-    useEnvRoots: !deps.scopedHome
-  });
-  const claudeIds = byClient.get('claude') || new Set();
-  const projectFiles = findSessionFiles(claudeRoots.projects, claudeIds);
-  for (const [sessionId, filePath] of projectFiles) applyFile('claude', sessionId, filePath);
-  const missingClaudeIds = new Set([...claudeIds].filter((sessionId) => !projectFiles.has(sessionId)));
-  const transcriptFiles = findSessionFiles(claudeRoots.transcripts, missingClaudeIds);
-  for (const [sessionId, filePath] of transcriptFiles) applyFile('claude', sessionId, filePath);
-
-  const codexIds = byClient.get('codex') || new Set();
-  if (codexIds.size > 0) {
-    const readCodexMeta = deps.readCodexMeta || (deps.scopedHome
-      ? (ids) => codexSession.readSessionMetaForHome(ids, home, deps.codexDeps)
-      : (ids) => codexSession.readSessionMeta(ids, {
-        ...(deps.codexDeps || {}),
-        homeDir: home,
-        env: deps.env
-      }));
-    for (const [sessionId, meta] of readCodexMeta(codexIds)) {
-      const key = `codex:${sessionId}`;
-      metadata.set(key, { ...(metadata.get(key) || {}), ...meta });
-    }
-  }
-  const codexHome = codexSession.codexHomeDir({
-    homeDir: home,
-    env: deps.env,
-    useEnvRoot: !deps.scopedHome
-  });
-  const missingCodexIds = new Set();
-  for (const sessionId of codexIds) {
-    const filePath = codexSessionFile(home, sessionId, { codexHome });
-    if (filePath) applyFile('codex', sessionId, filePath);
-    else missingCodexIds.add(sessionId);
-  }
-  const codexFiles = findSessionFiles(path.join(codexHome, 'sessions'), missingCodexIds);
-  for (const [sessionId, filePath] of codexFiles) applyFile('codex', sessionId, filePath);
-
-  const kimiIds = byClient.get('kimi') || new Set();
-  if (kimiIds.size > 0) {
-    const kimiRoots = [
-      ...(deps.scopedHome ? [] : kimiWorkSessionsRoots(
-        home,
-        deps.platform || process.platform,
-        deps.env || process.env,
-        { readFileSync: deps.readFileSync }
-      )),
-      kimiCodeSessionsHome(home, { env: deps.env, useEnvRoots: !deps.scopedHome })
-    ];
-    for (const [sessionId, statePath] of readKimiSessionStateFiles(kimiRoots, kimiIds)) {
-      const raw = kimiStateMetadata(statePath, { resolveProjects });
-      const meta = {
-        ...(resolveProjects && raw.projectId
-          ? { projectId: raw.projectId, projectLabel: raw.projectLabel }
-          : {}),
-        ...(raw.startedAt ? { startedAt: raw.startedAt } : {}),
-        ...(raw.lastUsedAt ? { lastUsedAt: raw.lastUsedAt } : {})
-      };
-      const key = `kimi:${sessionId}`;
-      if (meta.projectId || meta.startedAt || meta.lastUsedAt) {
-        metadata.set(key, meta);
-        if (meta.projectId) resolvedSessionKeys.add(key);
-      }
-    }
-  }
-
-  // DSH session ids are random UUIDs (no embedded timestamp), so the generic
-  // fallback below can never date them. The transcript itself has what we
-  // need: the header's `createdAt` for startedAt, and the file's mtime (an
-  // append-only log, so mtime tracks the last flush) for lastUsedAt. DSH
-  // sessions are deliberately never added to resolvedSessionKeys (see below),
-  // so every id in scope this tick is looked up again on the next one too.
-  // A session normally keeps one file path, so dshFileCache (persisted across
-  // ticks by the caller, like metadataCache) lets a known id skip straight to
-  // statting its own file instead of re-walking the whole DSH sessions tree.
-  // A format migration is the exception: dsh adds a higher-generation file
-  // beside the retained predecessor. The cached directory fingerprint below
-  // detects that one-time structural change and reselects within that session
-  // directory only; ordinary appends still avoid directory reads.
-  const dshIds = byClient.get('dsh') || new Set();
-  if (dshIds.size > 0) {
-    // Falls back to the module-level cache, not a fresh Map: this must
-    // persist across collectUsageOnce calls to do anything, and every
-    // caller that wants test isolation already passes its own Map explicitly.
-    const dshFileCache = deps.dshSessionFileCache || dshSessionFileCache;
-    // providers/dsh/paths.js checks env.DSH_HOME before the homeDir it's given,
-    // same as
-    // tokscale's own PathRoot::EnvVar — and tokscale's own scanner never lets
-    // that leak into an explicit --home lookup (use_env_roots: false, lib.rs).
-    // scopedHome means `home` is a specific WSL distro, not this machine's
-    // own profile, so a host-configured DSH_HOME must not redirect it back.
-    // The resolved root namespaces the cache key (see dshSessionFileCache).
-    const dshEnv = deps.scopedHome ? {} : (deps.env || process.env);
-    const dshRoot = resolveDshSessionsRoot({ homeDir: home, env: dshEnv, platform: deps.platform });
-    const dshKey = (id) => `${dshRoot}\u0000${id}`;
-    const unresolvedDshIds = [...dshIds].filter((id) => !dshFileCache.has(dshKey(id)));
-    if (unresolvedDshIds.length > 0) {
-      const buildIndex = deps.indexDshSessionHeaders || indexDshSessionHeaders;
-      const index = buildIndex({ homeDir: home, env: dshEnv, platform: deps.platform });
-      for (const [sessionId, entry] of index) {
-        const key = dshKey(sessionId);
-        if (dshFileCache.has(key)) continue;
-        const directory = path.dirname(entry.filePath);
-        // Capture the fingerprint before the final per-directory selection.
-        // If a migration lands before or during that selection, it is picked
-        // immediately; if it lands afterwards, the older fingerprint makes
-        // the next tick retry instead of pinning the stale path for the rest
-        // of the process.
-        const directoryFingerprint = directoryStatFingerprint(directory);
-        let selectedEntry = entry;
-        const preferredPath = preferredDshSessionFileInDirectory(directory);
-        if (preferredPath && preferredPath !== entry.filePath) {
-          const preferredHeader = readDshSessionHeader(preferredPath);
-          if (preferredHeader?.id === sessionId) {
-            selectedEntry = { filePath: preferredPath, createdAt: preferredHeader.createdAt };
-          }
-        }
-        // A stat fingerprint lets an entry whose header was unreadable at
-        // index time (createdAt undefined, directory-name fallback) be re-read
-        // later, once the file actually changes, instead of being stuck on
-        // mtime forever.
-        let statFingerprint = '';
-        try {
-          const st = fs.statSync(selectedEntry.filePath);
-          statFingerprint = `${st.size}:${st.mtimeMs}`;
-        } catch (_) { /* file vanished mid-scan */ }
-        dshFileCache.set(key, { ...selectedEntry, statFingerprint, directoryFingerprint });
-      }
-    }
-    for (const sessionId of dshIds) {
-      const key = dshKey(sessionId);
-      let entry = dshFileCache.get(key);
-      if (!entry) continue;
-      const directoryFingerprint = directoryStatFingerprint(path.dirname(entry.filePath));
-      if (directoryFingerprint && entry.directoryFingerprint && directoryFingerprint !== entry.directoryFingerprint) {
-        const preferredPath = preferredDshSessionFileInDirectory(path.dirname(entry.filePath));
-        if (preferredPath && preferredPath !== entry.filePath) {
-          const preferredHeader = readDshSessionHeader(preferredPath);
-          if (preferredHeader?.id === sessionId) {
-            entry = {
-              filePath: preferredPath,
-              createdAt: preferredHeader.createdAt,
-              statFingerprint: '',
-              directoryFingerprint,
-              titleState: undefined
-            };
-            dshFileCache.set(key, entry);
-          }
-        }
-      }
-      if (directoryFingerprint && entry.directoryFingerprint !== directoryFingerprint) {
-        entry.directoryFingerprint = directoryFingerprint;
-        dshFileCache.set(key, entry);
-      }
-      let lastUsedAt = '';
-      let statFingerprint = '';
-      try {
-        const st = fs.statSync(entry.filePath);
-        lastUsedAt = isoFromDate(st.mtime);
-        statFingerprint = `${st.size}:${st.mtimeMs}`;
-      } catch (_) { /* file vanished mid-scan */ }
-      // A header read earlier may have fallen back to the directory name (no
-      // createdAt) because the file was mid-write or torn. If it has since
-      // grown or been rewritten, re-read the header once to recover the real
-      // createdAt before falling back to mtime. Entries with a known createdAt
-      // are left alone: the header is the first thing written to an
-      // append-only log and never changes, so re-reading it is pure waste.
-      if (entry.createdAt === undefined && statFingerprint && statFingerprint !== entry.statFingerprint) {
-        const refreshed = readDshSessionHeader(entry.filePath);
-        if (refreshed) {
-          entry = { ...entry, createdAt: refreshed.createdAt, statFingerprint };
-        } else {
-          entry.statFingerprint = statFingerprint;
-        }
-        dshFileCache.set(key, entry);
-      }
-      const readTitle = deps.readDshSessionTitle || readDshSessionTitle;
-      const titleState = readTitle(entry.filePath, entry.titleState);
-      if (titleState !== entry.titleState) {
-        entry = { ...entry, titleState };
-        dshFileCache.set(key, entry);
-      }
-      const startedAt = isoFromDate(Number(entry.createdAt));
-      if (!startedAt && !lastUsedAt) continue;
-      metadata.set(`dsh:${sessionId}`, {
-        startedAt: startedAt || lastUsedAt,
-        lastUsedAt: lastUsedAt || startedAt,
-        ...(titleState?.title ? { title: titleState.title } : {})
-      });
-    }
-  }
-
-  for (const ref of refs.values()) {
-    const key = `${ref.client}:${ref.sessionId}`;
-    if (resolvedSessionKeys.has(key)) continue;
-    if (metadata.has(key)) continue;
-    const timestamp = timestampFromSessionId(ref.sessionId);
-    if (timestamp) metadata.set(key, { startedAt: timestamp, lastUsedAt: timestamp });
-    if (!['claude', 'codex', 'opencode', 'dsh'].includes(ref.client)) resolvedSessionKeys.add(key);
-  }
-  for (const ref of refs.values()) attemptedSessionKeys.add(`${ref.client}:${ref.sessionId}`);
-
-  return metadata;
-}
-
 // Copy freshly decorated identities/timestamps from `today` onto the same session
 // in the delta-derived periods. Used on watch ticks, where month/allTime are not
 // re-decorated: a session that started today is absent from the anchor, so its
@@ -1240,22 +818,6 @@ function propagateTodayProjects(today, periods) {
       if (session.lastUsedAt && (!target.lastUsedAt || Date.parse(session.lastUsedAt) > Date.parse(target.lastUsedAt))) {
         target.lastUsedAt = session.lastUsedAt;
       }
-    }
-  }
-}
-
-function applySessionTimestamps(periods, home, deps = {}) {
-  const metadata = sessionTimestampMap(periods, home, deps);
-  for (const period of Object.values(periods || {})) {
-    for (const [key, session] of Object.entries(period?.sessions || {})) {
-      const meta = metadata.get(key);
-      if (!meta) continue;
-      if (meta.startedAt && (!session.startedAt || Date.parse(meta.startedAt) < Date.parse(session.startedAt))) session.startedAt = meta.startedAt;
-      if (meta.lastUsedAt && (!session.lastUsedAt || Date.parse(meta.lastUsedAt) > Date.parse(session.lastUsedAt))) session.lastUsedAt = meta.lastUsedAt;
-      if (meta.projectId) session.projectId = meta.projectId;
-      if (meta.projectLabel) session.projectLabel = meta.projectLabel;
-      if (meta.title) session.title = meta.title;
-      if (meta.sessionKind) session.sessionKind = meta.sessionKind;
     }
   }
 }
@@ -1416,7 +978,7 @@ async function collectUsageOnce(options) {
     // across collectUsageOnce calls — every field in this object, unlike
     // that one, is intentionally rebuilt fresh on every call.
   };
-  const decorateLocalPeriods = (periods, { retryMisses = false } = {}) => applySessionTimestamps(
+  const decorateLocalPeriods = (periods, { retryMisses = false } = {}) => applySessionMetadata(
     periods,
     options.homeDir || os.homedir(),
     { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
@@ -1682,7 +1244,7 @@ async function collectUsageOnce(options) {
           pricingRevision: options.pricingRevision
         }),
         logger: options.logger,
-        decoratePeriods: (periods, home) => applySessionTimestamps(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
+        decoratePeriods: (periods, home) => applySessionMetadata(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
@@ -1703,7 +1265,7 @@ async function collectUsageOnce(options) {
           pricingRevision: options.pricingRevision
         }),
         logger: options.logger,
-        decoratePeriods: (periods, home) => applySessionTimestamps(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
+        decoratePeriods: (periods, home) => applySessionMetadata(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
@@ -1926,111 +1488,6 @@ function cherryStudioTranscriptRoots({ homeDir, platform = process.platform, env
 
 function xdgDataHome(home) {
   return nonBlankEnvPath('XDG_DATA_HOME', path.join(home, '.local', 'share'));
-}
-
-const KIMI_WORK_RUNTIME_SUFFIX = path.join(
-  'daimon',
-  'runtime',
-  'kimi-code',
-  'home',
-  'sessions'
-);
-
-const KIMI_WORK_SESSIONS_SUFFIX = path.join(
-  'kimi-desktop',
-  'daimon-share',
-  KIMI_WORK_RUNTIME_SUFFIX
-);
-
-function kimiWorkShareDirRoot(appData, options = {}) {
-  const readFileSync = options.readFileSync || fs.readFileSync;
-  let config;
-  try {
-    config = JSON.parse(readFileSync(path.join(appData, 'kimi-desktop', 'daimon-storage.json'), 'utf8'));
-  } catch (_) {
-    return null;
-  }
-  const shareDir = typeof config?.shareDir === 'string' ? config.shareDir : '';
-  return shareDir.trim() ? path.join(shareDir, KIMI_WORK_RUNTIME_SUFFIX) : null;
-}
-
-function kimiWorkSessionsRoots(home = os.homedir(), platform = process.platform, env = process.env, options = {}) {
-  if (platform === 'darwin') {
-    return [path.join(home, 'Library', 'Application Support', KIMI_WORK_SESSIONS_SUFFIX)];
-  }
-  if (platform === 'win32') {
-    const homeAppData = path.join(home, 'AppData', 'Roaming');
-    const roots = [path.join(homeAppData, KIMI_WORK_SESSIONS_SUFFIX)];
-    if (options.useEnvRoots !== false) {
-      // Tokscale uses `var_os("APPDATA").filter(|value| !value.is_empty())`:
-      // missing/empty values add no env-derived root, while whitespace remains
-      // a literal path. Keep health and watcher discovery semantically aligned.
-      const appData = typeof env.APPDATA === 'string' && env.APPDATA.length > 0
-        ? env.APPDATA
-        : null;
-      if (appData) {
-        roots.push(kimiWorkShareDirRoot(appData, options) || path.join(appData, KIMI_WORK_SESSIONS_SUFFIX));
-      }
-    }
-    return [...new Set(roots)];
-  }
-  return [];
-}
-
-function kimiCodeSessionsHome(home = os.homedir(), options = {}) {
-  const env = options.env || process.env;
-  const configured = options.useEnvRoots === false ? '' : env.KIMI_CODE_HOME;
-  const kimiCodeHome = typeof configured === 'string' && configured.trim()
-    ? configured
-    : path.join(home, '.kimi-code');
-  return path.join(kimiCodeHome, 'sessions');
-}
-
-// Kimi sessions (CLI `session_*`, Work `conv-*`/`ctitle-*`) put their workspace
-// in a sibling state.json (`workDir` / `custom.workspacePath`), not in the wire
-// stream tokscale parses. The session id is the directory name directly under a
-// workspace dir. Enumerate the on-disk session dirs once instead of probing the
-// workspace x requested-session Cartesian product on the Electron main thread.
-function readKimiSessionStateFiles(roots, sessionIds) {
-  const wanted = new Set(sessionIds);
-  const found = new Map();
-  for (const root of roots) {
-    if (found.size >= wanted.size) break;
-    let workspaceDirs;
-    try { workspaceDirs = fs.readdirSync(root, { withFileTypes: true }); } catch (_) { continue; }
-    for (const workspace of workspaceDirs) {
-      if (!workspace.isDirectory()) continue;
-      let sessionDirs;
-      try { sessionDirs = fs.readdirSync(path.join(root, workspace.name), { withFileTypes: true }); } catch (_) { continue; }
-      for (const session of sessionDirs) {
-        const sessionId = session.name;
-        if (!session.isDirectory() || !wanted.has(sessionId) || found.has(sessionId)) continue;
-        const statePath = path.join(root, workspace.name, sessionId, 'state.json');
-        if (fileExists(statePath)) found.set(sessionId, statePath);
-      }
-      if (found.size >= wanted.size) break;
-    }
-  }
-  return found;
-}
-
-function kimiStateMetadata(statePath, options = {}) {
-  let state;
-  try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (_) { return {}; }
-  if (!state || typeof state !== 'object') return {};
-  const stringValue = (value) => typeof value === 'string' ? value.trim() : '';
-  const projectPath = stringValue(state.workDir) || stringValue(state.custom?.workspacePath);
-  const identity = options.resolveProjects === false
-    ? {}
-    : projectIdentity(projectPath);
-  // Kimi writes valid ISO strings in state.json; pass them through as-is.
-  const startedAt = stringValue(state.createdAt);
-  const lastUsedAt = stringValue(state.updatedAt);
-  return {
-    ...(identity.projectId ? identity : {}),
-    ...(startedAt ? { startedAt } : {}),
-    ...(lastUsedAt ? { lastUsedAt } : {})
-  };
 }
 
 // Where tokscale looks for captured `codex exec --json` output. Both defaults
@@ -4162,7 +3619,7 @@ function startCollector(options) {
 }
 
 module.exports = {
-  applySessionTimestamps,
+  applySessionTimestamps: applySessionMetadata,
   projectIdentity,
   projectPathFromJsonl,
   collectHistoryOnce,
@@ -4192,7 +3649,7 @@ module.exports = {
   localTodayKey,
   nextLimitsResetBoundary,
   normalizeHistoryIntervalMs,
-  sessionTimestampMap,
+  sessionTimestampMap: sessionMetadataMap,
   locateBundledBinary,
   lookupModelPricing,
   normalizePromaPricing,
