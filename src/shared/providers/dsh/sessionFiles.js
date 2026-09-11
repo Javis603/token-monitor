@@ -102,6 +102,8 @@ function preferredDshSessionFileInDirectory(dir) {
 }
 const DSH_SESSION_DIR_DEPTH = 2; // <root>/<project>/<session>/<artifact>
 const ZSTD_MAGIC = 0xFD2FB528;
+const DSH_SESSION_TITLE_MAX_CODE_POINTS = 160;
+const DSH_SESSION_TITLE_READ_BYTES = 256 * 1024;
 
 function resolveDshSessionsRoot(options = {}) {
   const platform = options.platform || process.platform;
@@ -236,8 +238,7 @@ function decodeZstdBuffer(buffer, frames) {
   return { text, decodedEnd, stoppedOnError: false };
 }
 
-function decodeSessionText(filePath, buffer) {
-  if (!filePath.endsWith('.jsonl.zstd')) return buffer.toString('utf8');
+function decodeZstdText(buffer) {
   const frames = scanZstdFrames(buffer);
   const decoded = decodeZstdBuffer(buffer, frames);
   // The first content-corrupt complete frame is the recovery boundary: nothing
@@ -245,7 +246,7 @@ function decodeSessionText(filePath, buffer) {
   // recovery could still read — tokscale's streaming decoder stops at the same
   // first decode error, so records past the corruption must not be resurrected
   // through tail recovery.
-  if (decoded.stoppedOnError) return decoded.text;
+  if (decoded.stoppedOnError) return { text: decoded.text, consumed: decoded.decodedEnd };
   let text = decoded.text;
   // A live transcript is scanned mid-write routinely, so the trailing frame is
   // often torn. dsh's own reader (decompressZstdPrefix with ZSTD_e_flush) and
@@ -253,8 +254,8 @@ function decodeSessionText(filePath, buffer) {
   // managed to write out completely, dropping only the fragment at the cut.
   // zlib's finishFlush reproduces that at block granularity: it emits every
   // fully-decoded block in the torn tail, and the per-line JSON parse
-  // downstream skips the remainder. Scoped to decodeSessionText (not the
-  // header-only decodeFirstFrameText), which already returns '' for a torn
+  // downstream skips the remainder. The header-only decodeFirstFrameText path
+  // deliberately does not use this recovery and still returns '' for a torn
   // first frame.
   const tailStart = decoded.decodedEnd;
   if (tailStart < buffer.length) {
@@ -268,7 +269,119 @@ function decodeSessionText(filePath, buffer) {
       }
     }
   }
-  return text;
+  return { text, consumed: decoded.decodedEnd };
+}
+
+function decodeSessionText(filePath, buffer) {
+  if (!filePath.endsWith('.jsonl.zstd')) return buffer.toString('utf8');
+  return decodeZstdText(buffer).text;
+}
+
+function normalizeDshSessionTitle(value) {
+  if (typeof value !== 'string') return '';
+  return Array.from(value.replace(/\s+/g, ' ').trim())
+    .slice(0, DSH_SESSION_TITLE_MAX_CODE_POINTS)
+    .join('');
+}
+
+function foldDshSessionTitle(text, initialTitle = '') {
+  let title = normalizeDshSessionTitle(initialTitle);
+  for (const line of String(text || '').split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let event;
+    try { event = JSON.parse(line); } catch (_) { continue; }
+    if (event?.type !== 'session/title') continue;
+    const nextTitle = normalizeDshSessionTitle(event.data?.title);
+    if (nextTitle) title = nextTitle;
+  }
+  return title;
+}
+
+function decodeSessionAppend(filePath, buffer) {
+  if (!filePath.endsWith('.jsonl.zstd')) {
+    // Only advance over newline-complete JSONL records. A final partial record
+    // is re-read after the next append instead of being cached as consumed.
+    const lastNewline = buffer.lastIndexOf(0x0a);
+    const consumed = lastNewline < 0 ? 0 : lastNewline + 1;
+    return { text: buffer.subarray(0, consumed).toString('utf8'), consumed };
+  }
+
+  return decodeZstdText(buffer);
+}
+
+// DSH titles are durable `session/title` events and use latest-wins folding.
+// The log is append-only, so retain the last complete JSONL/zstd boundary and
+// decode only new bytes on later collector ticks. A shrink or same-size rewrite
+// resets the fold, while a torn final record/frame remains eligible for retry.
+function readDshSessionTitle(filePath, previous = {}) {
+  let stat;
+  try { stat = fs.statSync(filePath); } catch (_) { return { title: '', offset: 0, size: 0, mtimeMs: 0 }; }
+  const size = Number(stat.size) || 0;
+  const mtimeMs = Number(stat.mtimeMs) || 0;
+  const previousSize = Number(previous.size) || 0;
+  const previousMtimeMs = Number(previous.mtimeMs) || 0;
+  if (size === previousSize && mtimeMs === previousMtimeMs) return previous;
+
+  const previousOffset = Number(previous.offset);
+  const appendOnly = size > previousSize && Number.isSafeInteger(previousOffset)
+    && previousOffset >= 0 && previousOffset <= previousSize;
+  const start = appendOnly ? previousOffset : 0;
+  let title = normalizeDshSessionTitle(appendOnly ? previous.title : '');
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const isZstd = filePath.endsWith('.jsonl.zstd');
+    let position = start;
+    let consumed = 0;
+    let pending = Buffer.alloc(0);
+    let stoppedOnError = false;
+    while (position < size && !stoppedOnError) {
+      const length = Math.min(DSH_SESSION_TITLE_READ_BYTES, size - position);
+      const chunk = Buffer.allocUnsafe(length);
+      const bytesRead = fs.readSync(fd, chunk, 0, length, position);
+      if (bytesRead <= 0) break;
+      position += bytesRead;
+      const data = chunk.subarray(0, bytesRead);
+      pending = pending.length > 0 ? Buffer.concat([pending, data]) : data;
+
+      if (isZstd) {
+        const decoded = decodeZstdBuffer(pending, scanZstdFrames(pending));
+        title = foldDshSessionTitle(decoded.text, title);
+        consumed += decoded.decodedEnd;
+        pending = pending.subarray(decoded.decodedEnd);
+        stoppedOnError = decoded.stoppedOnError;
+      } else {
+        const lastNewline = pending.lastIndexOf(0x0a);
+        if (lastNewline >= 0) {
+          const complete = lastNewline + 1;
+          title = foldDshSessionTitle(pending.subarray(0, complete).toString('utf8'), title);
+          consumed += complete;
+          pending = pending.subarray(complete);
+        }
+      }
+    }
+    if (filePath.endsWith('.jsonl.zstd') && !stoppedOnError && pending.length > 0) {
+      // A live final frame may be torn but still contain complete JSONL rows.
+      // Fold those rows now, while retaining the frame boundary for replay.
+      title = foldDshSessionTitle(decodeSessionAppend(filePath, pending).text, title);
+    }
+    return {
+      title,
+      offset: start + consumed,
+      size,
+      mtimeMs
+    };
+  } catch (_) {
+    // Do not cache a failed read as though this file revision were observed;
+    // preserving the older fingerprint makes the next tick retry it.
+    return previous && typeof previous === 'object'
+      ? previous
+      : { title: '', offset: 0, size: 0, mtimeMs: 0 };
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) {}
+    }
+  }
 }
 
 // DSH appends one zstd frame per flush, and the leading `session` header is
@@ -353,6 +466,7 @@ module.exports = {
   isDshSessionLogName,
   preferredDshSessionFileInDirectory,
   readDshSessionHeader,
+  readDshSessionTitle,
   resolveDshSessionsRoot,
   scanZstdFrames,
   zstdAvailable

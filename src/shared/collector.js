@@ -61,6 +61,7 @@ const {
   indexDshSessionHeaders,
   preferredDshSessionFileInDirectory,
   readDshSessionHeader,
+  readDshSessionTitle,
   resolveDshSessionsRoot
 } = require('./providers/dsh/sessionFiles');
 const {
@@ -1155,7 +1156,8 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
               filePath: preferredPath,
               createdAt: preferredHeader.createdAt,
               statFingerprint: '',
-              directoryFingerprint
+              directoryFingerprint,
+              titleState: undefined
             };
             dshFileCache.set(key, entry);
           }
@@ -1187,9 +1189,19 @@ function sessionTimestampMap(periods, home = os.homedir(), deps = {}) {
         }
         dshFileCache.set(key, entry);
       }
+      const readTitle = deps.readDshSessionTitle || readDshSessionTitle;
+      const titleState = readTitle(entry.filePath, entry.titleState);
+      if (titleState !== entry.titleState) {
+        entry = { ...entry, titleState };
+        dshFileCache.set(key, entry);
+      }
       const startedAt = isoFromDate(Number(entry.createdAt));
       if (!startedAt && !lastUsedAt) continue;
-      metadata.set(`dsh:${sessionId}`, { startedAt: startedAt || lastUsedAt, lastUsedAt: lastUsedAt || startedAt });
+      metadata.set(`dsh:${sessionId}`, {
+        startedAt: startedAt || lastUsedAt,
+        lastUsedAt: lastUsedAt || startedAt,
+        ...(titleState?.title ? { title: titleState.title } : {})
+      });
     }
   }
 
