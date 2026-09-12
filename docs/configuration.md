@@ -15,12 +15,12 @@ Click the `⚙` button in the bottom-right corner of the widget to open the sett
 
 | Section | What it controls |
 |---|---|
-| **General** | Language, launch at login, app updates, Discord Rich Presence, About, and Advanced (open the raw `settings.json` for less-common options such as `allTimeSince`). |
+| **General** | Language, launch at login, app updates (optionally downloaded in the background), Discord Rich Presence, About — including an on-demand redacted diagnostic report to attach to an issue — and Advanced (open the raw `settings.json` for less-common options such as `allTimeSince`). |
 | **Main** | Which Home modules appear and their order, plus the display currency (USD, TWD, HKD, or CNY; daily auto rate or a manual override). |
-| **Window** | Window behavior (float above other apps / normal / desktop-pinned), tray mode (macOS menu bar or Windows system tray, and what shows next to the icon), the floating bubble, and the global show/hide shortcut. |
-| **Appearance** | Interface theme (presets such as Default and Obsidian, a porcelain light mode, or custom colors), per-vendor tool colors, and system glass opacity / blur. |
-| **Collection** | Tracked tools (and hide / pin / drag-reorder for the main list), collection cadence, **Keep usage from deleted sessions**, custom pricing, data export, and — on Windows — the built-in WSL scan toggle. |
-| **AI Tool Limits** | Which providers to enable, their credentials and sign-in options, multiple accounts per provider (including switching the active local Codex account), session / daily / weekly / billing / credit windows, and how often to refresh. |
+| **Window** | Window behavior (float above other apps / normal / desktop-pinned), tray mode (macOS menu bar or Windows system tray, and what shows next to the icon), built-in or hand-built menu bar and floating-bubble layouts, hiding the taskbar/Dock icon while keeping the widget on screen, and the global show/hide shortcut. |
+| **Appearance** | Interface theme (presets such as Default and Obsidian, a porcelain light mode, or custom colors), per-vendor tool colors, system glass opacity / blur, and separate interface and display fonts. |
+| **Collection** | Tracked tools — searchable, with hide / pin / drag-reorder for the main list, per-tool source health, re-scan, and custom scan paths for sessions kept outside the defaults — collection cadence, **Keep usage from deleted sessions**, custom pricing, data export, and — on Windows — the built-in WSL scan toggle. |
+| **AI Tool Limits** | Which providers to enable, their credentials and sign-in options, multiple accounts per provider (including switching the active local Codex account), session / daily / weekly / billing / credit windows, and how often to refresh (a fixed interval, or adaptive to how fast a quota is being consumed). The provider list is searchable. |
 | **Subscriptions** | What you actually pay for each AI account — a recurring plan, or a top-up ledger for balance-style accounts — surfaced on hover of that account's plan label. Entered by hand; nothing is fetched from any provider. With a hub configured the list is stored on the hub and shared by every connected device; otherwise it stays in this device's `settings.json`. |
 | **Multi-device Sync** | **Local only** (no hub), **Connect to a hub** (paste another machine's Hub URL + secret), or **Host hub on this device** (run a hub locally; the panel lists reachable LAN / Tailscale / ZeroTier addresses). |
 

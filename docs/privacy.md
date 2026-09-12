@@ -9,6 +9,7 @@ Token Monitor makes network requests only for documented or user-enabled feature
 - Packaged builds check GitHub Releases for updates.
 - Exchange-rate and service-status views fetch their public data sources.
 - Enabled AI Tool Limits integrations contact the corresponding provider. Credentials are sent only to that provider.
+- The optional Codex reset forecast fetches codex-resets.com, a third-party source that is not OpenAI.
 - Discord Rich Presence sends the selected activity details to Discord when explicitly enabled.
 - Multi-device sync sends data to the hub URL configured by the operator.
 
