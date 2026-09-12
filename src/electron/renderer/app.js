@@ -5835,20 +5835,38 @@ function codexResetForecastType(value) {
 function codexResetForecastTooltip(forecast) {
   const entries = [];
   const disclaimer = t('limits.codexResetForecast.disclaimer');
-  const latestResetType = codexResetForecastType(forecast?.latestResetType);
-  if (latestResetType) {
-    entries.push([t('limits.codexResetForecast.resetType'), latestResetType]);
+  const resetType = codexResetForecastType(
+    forecast?.status === 'scheduled' ? forecast?.scheduledResetType : forecast?.latestResetType
+  );
+  if (resetType) {
+    entries.push([t('limits.codexResetForecast.resetType'), resetType]);
+  }
+  const scheduledFor = codexResetForecastDate(forecast?.scheduledFor);
+  const scheduledIn = codexResetForecastTimeUntil(forecast?.scheduledFor);
+  if (scheduledFor) {
+    entries.push([
+      t('limits.codexResetForecast.scheduledFor'),
+      [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
+    ]);
   }
   const latestReset = codexResetForecastDate(forecast?.latestResetAt);
   if (latestReset) {
     const age = codexResetForecastAge(forecast.latestResetAt);
     entries.push([t('limits.codexResetForecast.lastReset'), [latestReset, age].filter(Boolean).join(' · ')]);
   }
+  const sourceObservedAt = forecast?.status === 'scheduled'
+    ? forecast?.scheduledAnnouncedAt
+    : forecast?.observedAt;
   const source = [
     codexResetForecastSourceAuthor(forecast?.sourceAuthor),
-    codexResetForecastAge(forecast?.observedAt)
+    codexResetForecastAge(sourceObservedAt)
   ].filter(Boolean).join(' · ');
-  if (source) entries.push([t('limits.codexResetForecast.sourceSignal'), source]);
+  if (source) {
+    const sourceLabel = forecast?.status === 'scheduled'
+      ? 'limits.codexResetForecast.sourceAnnouncement'
+      : 'limits.codexResetForecast.sourceSignal';
+    entries.push([t(sourceLabel), source]);
+  }
   const expiresAt = codexResetForecastDate(forecast?.expiresAt);
   const expiresIn = codexResetForecastTimeUntil(forecast?.expiresAt);
   if (expiresAt) {
@@ -5915,6 +5933,18 @@ function renderCodexResetForecast() {
   if (state.codexResetForecastBusy && !forecast) {
     item.classList.add('is-loading');
     value.textContent = t('limits.codexResetForecast.loading');
+  } else if (forecast?.status === 'scheduled') {
+    value.textContent = t('limits.codexResetForecast.scheduled');
+    const scheduledFor = codexResetForecastDate(forecast.scheduledFor);
+    const scheduledIn = codexResetForecastTimeUntil(forecast.scheduledFor);
+    detail.textContent = [
+      scheduledFor
+        ? t('limits.codexResetForecast.expected', {
+            date: [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
+          })
+        : t('limits.codexResetForecast.schedulePending'),
+      forecast.stale ? t('limits.codexResetForecast.stale') : ''
+    ].filter(Boolean).join(' · ');
   } else if (forecast?.status === 'active' && !expired) {
     const chance = forecast.chancePercent;
     value.textContent = Number.isFinite(chance)
@@ -5924,7 +5954,7 @@ function renderCodexResetForecast() {
     const expiresAt = codexResetForecastDate(forecast.expiresAt);
     detail.textContent = [
       predictedAt
-        ? t('limits.codexResetForecast.expectedReset', { date: predictedAt })
+        ? t('limits.codexResetForecast.expected', { date: predictedAt })
         : (expiresAt || ''),
       forecast.stale ? t('limits.codexResetForecast.stale') : ''
     ].filter(Boolean).join(' · ');
