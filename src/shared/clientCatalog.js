@@ -43,6 +43,7 @@
     { id: 'claude', label: 'Claude Code' },
     { id: 'codex', label: 'Codex' },
     { id: 'opencode', label: 'OpenCode' },
+    { id: 'droid', label: 'Droid' },
     { id: 'hermes', label: 'Hermes Agent' },
     { id: 'openclaw', label: 'OpenClaw' },
     { id: 'cursor', label: 'Cursor' },

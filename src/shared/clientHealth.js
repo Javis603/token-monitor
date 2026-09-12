@@ -187,6 +187,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'copilot-data',
   'copilot-otel',
   'copilot-otel-exporter',
+  'droid-sessions',
   DSH_SOURCE_CHECK_ID,
   'grok-sessions',
   'grok-unified-log',

@@ -61,7 +61,7 @@
   // listed here but present in clientColors are appended after these, then the
   // synthetic "default" fallback is shown last.
   const VENDOR_ORDER = [
-    'claude', 'codex', 'hermes', 'opencode', 'openrouter', 'openclaw', 'cline', 'cursor',
+    'claude', 'codex', 'droid', 'hermes', 'opencode', 'openrouter', 'openclaw', 'cline', 'cursor',
     'gemini', 'antigravity', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'qoder', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth', 'deepseek', 'xai', 'meta', 'mistral',
     'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'minimax', 'doubao', 'hunyuan', 'volcengine', 'ollama', 'trae', 'alibaba', 'thirdparty'
   ];
@@ -72,6 +72,7 @@
   const VENDOR_LABELS = {
     claude: 'Claude Code',
     codex: 'Codex',
+    droid: 'Droid',
     hermes: 'Hermes Agent',
     opencode: 'OpenCode',
     openrouter: 'OpenRouter',
