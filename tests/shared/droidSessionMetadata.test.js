@@ -9,8 +9,14 @@ const test = require('node:test');
 const { projectIdentity } = require('../../src/shared/sessionMetadata');
 const droid = require('../../src/shared/providers/droid/sessionMetadata');
 
+const tmpDirs = [];
+test.after(() => {
+  for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 function makeHome(index) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'droid-meta-'));
+  tmpDirs.push(home);
   if (index !== null) {
     fs.mkdirSync(path.join(home, '.factory'), { recursive: true });
     fs.writeFileSync(path.join(home, '.factory', 'sessions-index.json'), index);

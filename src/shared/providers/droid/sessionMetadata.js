@@ -44,7 +44,7 @@ function droidSessionMetadataFromEntry(entry, { projectIdentity, resolveProjects
 
 function resolveSessionMetadata(sessionIds, context) {
   const { deps = {}, home = os.homedir(), projectIdentity, resolveProjects } = context;
-  const wanted = sessionIds instanceof Set ? sessionIds : new Set(sessionIds);
+  const wanted = new Set(sessionIds);
   const entries = readDroidSessionIndex(sessionsIndexPath(home), deps.readFileSync);
   const result = new Map();
   for (const entry of entries) {
