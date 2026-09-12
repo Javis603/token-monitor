@@ -18,6 +18,7 @@ const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./toksc
 const { createTokscaleCapabilityResolver, filterSupportedClients, parseSupportedClients } = require('./tokscaleCapabilities');
 const { customPricingPath, tokscaleCacheDirs, tokscaleConfigDir, tokscaleHomeDir } = require('./tokscaleConfig');
 const { normalizeCustomScanPaths, tokscaleExtraDirsEnv } = require('./customScanPaths');
+const { TOKSCALE_CLIENT_ALIASES, tokscaleScanClientIds } = require('./tokscaleClientMapping');
 const {
   applyPeriodDelta,
   emptyPeriod,
@@ -263,7 +264,7 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
 const TOKSCALE_CAPABILITY_PROBE_TIMEOUT_MS = 10_000;
 const MAX_TOKSCALE_STDERR_LENGTH = 64 * 1024;
 // tokscale rejects an unknown --client value with this exact exit code (see
-// the TOKSCALE_CLIENT_ALIASES comment above) — verified on 4.7.0 and 4.8.0.
+// the umbrella-client mapping comment below) — verified on 4.7.0 and 4.8.0.
 const TOKSCALE_UNKNOWN_CLIENT_EXIT_CODE = 2;
 
 function spawnTokscaleHelp(command, options = {}) {
@@ -327,22 +328,16 @@ const tokscaleCapabilityResolver = createTokscaleCapabilityResolver({
 // extractUsageFromTokscale's normalizeClientName folds them back into the umbrella
 // id. Every alias must be a real tokscale client id: an unknown --client value is
 // rejected with exit 2 and takes the whole scan down with it (verified on 4.7.0
-// and 4.8.0), so this list is not a free-form place to invent sub-source names.
+// and 4.8.0), so the shared mapping is not a free-form place to invent
+// sub-source names.
 // Clients tokscale doesn't know at all — Proma, which we parse ourselves, is
 // stripped in collectUsageOnce before the filter is built, not dropped here.
-const TOKSCALE_CLIENT_ALIASES = {
-  antigravity: ['antigravity-cli'],
-  pi: ['omp'],
-  kilo: ['kilocode']
-};
-
 function tokscaleClientFilter(clients) {
   const ordered = [];
   const seen = new Set();
   for (const id of String(clients ?? '').split(',').map((value) => value.trim()).filter(Boolean)) {
-    if (!seen.has(id)) { seen.add(id); ordered.push(id); }
-    for (const alias of TOKSCALE_CLIENT_ALIASES[id] || []) {
-      if (!seen.has(alias)) { seen.add(alias); ordered.push(alias); }
+    for (const scanId of tokscaleScanClientIds(id)) {
+      if (!seen.has(scanId)) { seen.add(scanId); ordered.push(scanId); }
     }
   }
   return ordered.join(',');

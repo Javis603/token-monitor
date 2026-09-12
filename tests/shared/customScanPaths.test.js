@@ -58,9 +58,19 @@ test('Tokscale extra directories append without replacing an existing environmen
   );
 });
 
-test('Kilo custom directories target the supported Kilo Code sub-source', () => {
+test('umbrella clients expand custom directories to every supported Tokscale source', () => {
   assert.equal(
-    tokscaleExtraDirsEnv({ kilo: ['/var/data/kilo-tasks'] }, '', { platform: 'linux' }),
-    'kilocode:/var/data/kilo-tasks'
+    tokscaleExtraDirsEnv({
+      antigravity: ['/var/data/antigravity'],
+      pi: ['/var/data/pi'],
+      kilo: ['/var/data/kilo-tasks']
+    }, '', { platform: 'linux' }),
+    [
+      'antigravity:/var/data/antigravity',
+      'antigravity-cli:/var/data/antigravity',
+      'pi:/var/data/pi',
+      'omp:/var/data/pi',
+      'kilocode:/var/data/kilo-tasks'
+    ].join(',')
   );
 });

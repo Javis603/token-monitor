@@ -2,6 +2,7 @@
 
 const path = require('node:path');
 const { CLIENT_IDS, LOCALLY_PARSED_CLIENT_IDS } = require('./clientCatalog');
+const { tokscaleCustomScanClientIds } = require('./tokscaleClientMapping');
 
 const MAX_CUSTOM_SCAN_PATHS = 64;
 const MAX_CUSTOM_SCAN_PATHS_PER_CLIENT = 16;
@@ -62,8 +63,8 @@ function customScanPathEntries(value, options = {}) {
 }
 
 function tokscaleExtraDirsEnv(value, inherited = '', options = {}) {
-  const additions = customScanPathEntries(value, options).map(({ client, dir }) => (
-    `${client === 'kilo' ? 'kilocode' : client}:${dir}`
+  const additions = customScanPathEntries(value, options).flatMap(({ client, dir }) => (
+    tokscaleCustomScanClientIds(client).map((scanId) => `${scanId}:${dir}`)
   ));
   return [String(inherited || '').trim(), ...additions].filter(Boolean).join(',');
 }
