@@ -16,6 +16,11 @@ const {
 } = require('./archiveHelpers');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
+const { isCursorEventScopedSession } = require('./providers/cursor/sessionGuard');
+
+function isUnstableArchivedSession(session, key = '') {
+  return isReasonixSyntheticSession(session, key) || isCursorEventScopedSession(session, key);
+}
 
 function sessionUsageArchiveDate(deviceRecord, fallback = new Date()) {
   const collectedAt = new Date(deviceRecord?.updatedAt || '');
@@ -37,7 +42,7 @@ function sameJson(left, right) {
 }
 
 function normalizedSessionFrom(value, fallbackKey) {
-  if (isReasonixSyntheticSession(value, fallbackKey)) return null;
+  if (isUnstableArchivedSession(value, fallbackKey)) return null;
   const period = normalizePeriod({ sessions: { [fallbackKey || 'session']: value } });
   return Object.values(period.sessions)[0] || null;
 }
@@ -53,7 +58,7 @@ function normalizeSessionUsageArchive(value) {
 
   for (const [rawKey, rawEntry] of Object.entries(source)) {
     if (!rawEntry || typeof rawEntry !== 'object') continue;
-    if (isReasonixSyntheticSession(rawEntry, rawKey)) continue;
+    if (isUnstableArchivedSession(rawEntry, rawKey)) continue;
     const rawPeriods = rawEntry.periods && typeof rawEntry.periods === 'object'
       ? rawEntry.periods
       : rawEntry;
@@ -69,7 +74,7 @@ function normalizeSessionUsageArchive(value) {
 
     for (const periodName of PERIODS) {
       const session = normalizedSessionFrom(rawPeriods?.[periodName], rawKey);
-      if (!session || isReasonixSyntheticSession(session, rawKey) || !hasSessionUsage(session)) continue;
+      if (!session || isUnstableArchivedSession(session, rawKey) || !hasSessionUsage(session)) continue;
       const key = sessionKey(session.client, session.sessionId);
       if (!key) continue;
       entry.client = session.client;
@@ -98,7 +103,7 @@ function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = 
   for (const periodName of PERIODS) {
     const period = periodFor(deviceRecord, periodName);
     for (const session of Object.values(period.sessions || {})) {
-      if (isReasonixSyntheticSession(session) || !hasSessionUsage(session)) continue;
+      if (isUnstableArchivedSession(session) || !hasSessionUsage(session)) continue;
       const archiveKey = sessionKey(session.client, session.sessionId);
       if (!archiveKey) continue;
       const entry = archive.sessions[archiveKey] || {
@@ -174,7 +179,7 @@ function addSessionBreakdown(period, session) {
 }
 
 function addArchivedSession(period, session) {
-  if (isReasonixSyntheticSession(session)) return;
+  if (isUnstableArchivedSession(session)) return;
   const key = sessionKey(session.client, session.sessionId);
   if (!key || period.sessions[key]) return;
 

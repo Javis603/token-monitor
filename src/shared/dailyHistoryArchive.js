@@ -387,15 +387,37 @@ function dayComponentQuality(day) {
   )) ? 1 : 0;
 }
 
+function equalUsageInflatesCost(incomingTokens, incomingCost, previousTokens, previousCost) {
+  return incomingTokens === previousTokens && incomingCost > previousCost && previousCost > 0;
+}
+
 function liveDayIsGreater(incoming, previous) {
   const incomingTokens = dayTokens(incoming);
   const previousTokens = dayTokens(previous);
   if (incomingTokens !== previousTokens) return incomingTokens > previousTokens;
+  const incomingCost = dayCost(incoming);
+  const previousCost = dayCost(previous);
+  // Same token total with a higher price is the Cursor liveDays inflation:
+  // a same-day snapshot frozen an older rate, then the graph later priced the
+  // same events at catalog. Do not let that snapshot raise 30D above TOTAL.
+  // A zero previous cost still accepts a fill-in price.
+  if (equalUsageInflatesCost(incomingTokens, incomingCost, previousTokens, previousCost)) return false;
   const qualityDifference = dayComponentQuality(incoming) - dayComponentQuality(previous);
   if (qualityDifference !== 0) return qualityDifference > 0;
-  // Equal usage can receive a corrected price in either direction. The later
-  // live observation is authoritative once its provenance quality is equal.
-  return dayCost(incoming) !== dayCost(previous);
+  return incomingCost !== previousCost;
+}
+
+function observationWithStableCost(observation, previous) {
+  if (!previous) return observation;
+  if (!equalUsageInflatesCost(
+    num(observation.tokens),
+    num(observation.cost),
+    num(previous.tokens),
+    num(previous.cost)
+  )) {
+    return observation;
+  }
+  return { ...observation, cost: previous.cost };
 }
 
 function mergeLiveDayMetadata(liveDay, previousDay) {
@@ -403,6 +425,7 @@ function mergeLiveDayMetadata(liveDay, previousDay) {
   const observations = Object.fromEntries(Object.entries(liveDay.observations).map(([key, observation]) => {
     const previous = previousDay.observations[key];
     if (!previous) return [key, observation];
+    observation = observationWithStableCost(observation, previous);
     if (liveDay.componentSummary) {
       return [key, {
         ...observation,
