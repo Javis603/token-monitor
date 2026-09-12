@@ -85,6 +85,70 @@ test('normalizes the public codex-resets v1 status schema', () => {
   assert.equal(result.latestResetType, 'banked');
 });
 
+test('prefers an explicit scheduled reset over an empty active watch', async () => {
+  const payload = {
+    data: {
+      latest_reset: {
+        announced_at: '2026-09-08T01:56:57.501Z',
+        reset_type: 'regular'
+      },
+      scheduled_reset: {
+        id: '2098612714704891959',
+        status: 'scheduled',
+        reset_type: 'regular',
+        announced_at: '2026-09-12T03:20:36.000Z',
+        scheduled_for: '2026-09-12T07:00:00.000Z',
+        text: 'Third-party announcement text must not cross into the renderer.',
+        source: {
+          type: 'x_post',
+          author: 'thsottiaux',
+          url: 'https://x.com/thsottiaux/status/2098612714704891959'
+        }
+      },
+      active_watch: null
+    }
+  };
+  const result = normalizeCodexResetForecast(payload, { checkedAt: '2026-09-12T05:15:02.280Z' });
+
+  assert.equal(result.status, 'scheduled');
+  assert.equal(result.scheduledFor, '2026-09-12T07:00:00.000Z');
+  assert.equal(result.scheduledAnnouncedAt, '2026-09-12T03:20:36.000Z');
+  assert.equal(result.scheduledResetType, 'regular');
+  assert.equal(result.sourceAuthor, 'thsottiaux');
+  assert.equal(result.latestResetAt, '2026-09-08T01:56:57.501Z');
+  assert.equal(Object.hasOwn(result, 'text'), false);
+  assert.equal(Object.hasOwn(result, 'sourceUrl'), false);
+
+  const client = createCodexResetForecastClient({
+    now: () => Date.parse('2026-09-12T05:15:02.280Z'),
+    fetchImpl: async () => ({ ok: true, json: async () => payload })
+  });
+  const cached = await client.getForecast();
+  assert.equal(cached.status, 'scheduled');
+  assert.equal(cached.error, undefined);
+  assert.equal(cached.retryAfterMs, 15 * 60 * 1000);
+});
+
+test('keeps scheduled status when its time is absent or has passed', () => {
+  const withoutTime = normalizeCodexResetForecast({
+    data: {
+      scheduled_reset: { status: 'scheduled', scheduled_for: null },
+      active_watch: null
+    }
+  }, { checkedAt: '2026-09-12T05:15:02.280Z' });
+  assert.equal(withoutTime.status, 'scheduled');
+  assert.equal(withoutTime.scheduledFor, '');
+
+  const past = normalizeCodexResetForecast({
+    data: {
+      scheduled_reset: { status: 'scheduled', scheduled_for: '2026-09-12T05:00:00.000Z' },
+      active_watch: null
+    }
+  }, { checkedAt: '2026-09-12T05:15:02.280Z' });
+  assert.equal(past.status, 'scheduled');
+  assert.equal(past.scheduledFor, '2026-09-12T05:00:00.000Z');
+});
+
 test('drops unknown reset types instead of exposing third-party values', () => {
   const result = normalizeCodexResetForecast({
     data: {
