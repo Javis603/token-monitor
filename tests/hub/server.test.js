@@ -50,6 +50,10 @@ function tempDataFile() {
   return path.join(os.tmpdir(), `tm-hub-test-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
 }
 
+function utcTodayAt(time) {
+  return `${new Date().toISOString().slice(0, 10)}T${time}Z`;
+}
+
 test('resolveBindHost keeps the requested host when a secret is set', () => {
   assert.equal(resolveBindHost('0.0.0.0', 's3cret'), '0.0.0.0');
   assert.equal(resolveBindHost('192.168.1.10', 's3cret'), '192.168.1.10');
@@ -519,11 +523,12 @@ test('official senders can request a minimal ingest acknowledgement while legacy
   await hub.start();
   try {
     const { port } = hub.server.address();
+    const sampleAt = utcTodayAt('10:00:00.000');
     const sessions = Object.fromEntries(Array.from({ length: 80 }, (_, index) => [
       `session-${index}`,
-      { totalTokens: index + 1, costUsd: 0.01, model: 'gpt-test', lastUsedAt: '2026-09-09T10:00:00.000Z' }
+      { totalTokens: index + 1, costUsd: 0.01, model: 'gpt-test', lastUsedAt: sampleAt }
     ]));
-    const payload = { deviceId: 'dev-a', updatedAt: '2026-09-09T10:00:00.000Z', today: { totalTokens: 3240, sessions } };
+    const payload = { deviceId: 'dev-a', updatedAt: sampleAt, today: { totalTokens: 3240, sessions } };
     const post = (extraHeaders = {}) => fetch(`http://127.0.0.1:${port}/api/ingest`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: 'Bearer shh', ...extraHeaders },
@@ -544,7 +549,7 @@ test('official senders can request a minimal ingest acknowledgement while legacy
   }
 });
 
-test('the stats stream coalesces bursts and replaces timestamp-only snapshots with negotiated freshness events', async () => {
+test('the stats stream coalesces bursts and negotiates timestamp-only freshness events', async () => {
   const dataFile = tempDataFile();
   const hub = createHub({
     port: 0,
@@ -558,10 +563,13 @@ test('the stats stream coalesces bursts and replaces timestamp-only snapshots wi
   let modern;
   let legacy;
   try {
+    const initialAt = utcTodayAt('10:00:00.000');
+    const refreshedAt = utcTodayAt('10:01:00.000');
+    const changedAt = utcTodayAt('10:02:00.000');
     const base = {
       deviceId: 'dev-a',
-      updatedAt: '2026-09-09T10:00:00.000Z',
-      today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: '2026-09-09T10:00:00.000Z' } } }
+      updatedAt: initialAt,
+      today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } }
     };
     hub.ingest(base);
     const { port } = hub.server.address();
@@ -574,14 +582,16 @@ test('the stats stream coalesces bursts and replaces timestamp-only snapshots wi
     modern.events.length = 0;
     legacy.events.length = 0;
 
-    hub.ingest({ ...base, updatedAt: '2026-09-09T10:01:00.000Z' });
-    await waitFor(() => modern.events.length === 1);
+    hub.ingest({ ...base, updatedAt: refreshedAt });
+    await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
     assert.equal(modern.events[0].event, 'freshness');
-    assert.equal(modern.events[0].data.stats.devices[0].updatedAt, '2026-09-09T10:01:00.000Z');
-    assert.equal(legacy.events.length, 0);
+    assert.equal(modern.events[0].data.stats.devices[0].updatedAt, refreshedAt);
+    assert.equal(legacy.events[0].event, 'stats');
+    assert.equal(legacy.events[0].data.stats.devices[0].updatedAt, refreshedAt);
     modern.events.length = 0;
+    legacy.events.length = 0;
 
-    hub.ingest({ ...base, updatedAt: '2026-09-09T10:02:00.000Z', today: { ...base.today, totalTokens: 2 } });
+    hub.ingest({ ...base, updatedAt: changedAt, today: { ...base.today, totalTokens: 2 } });
     await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
     assert.equal(modern.events[0].event, 'stats');
     assert.equal(legacy.events[0].event, 'stats');
@@ -592,7 +602,7 @@ test('the stats stream coalesces bursts and replaces timestamp-only snapshots wi
     for (let totalTokens = 3; totalTokens <= 12; totalTokens += 1) {
       hub.ingest({
         ...base,
-        updatedAt: `2026-09-09T10:02:${String(totalTokens).padStart(2, '0')}.000Z`,
+        updatedAt: utcTodayAt(`10:02:${String(totalTokens).padStart(2, '0')}.000`),
         today: { ...base.today, totalTokens }
       });
     }

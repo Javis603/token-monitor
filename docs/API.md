@@ -351,7 +351,7 @@ Returns an SSE stream. Every connection begins with a complete `snapshot` event 
 
 Ingests within a 100 ms window are coalesced. If usage, limits, sessions, projects, History, subscriptions, or derived stale/period state changed, the hub sends one complete `stats` event containing the newest state. An ingest that changed only the device's transport timestamps does not send another complete snapshot.
 
-Official clients send `x-token-monitor-stream: 2`. For those clients, a timestamp-only ingest produces a small `freshness` event containing aggregate limit freshness and per-device timestamps/stale state; the client applies it to its existing snapshot without replacing periods or session/project detail. Clients without the header continue to receive complete snapshots for meaningful changes and can ignore the optional event type. A newer client remains compatible with an older hub because the header is advisory and the existing `snapshot` / `stats` events are unchanged.
+Official clients send `x-token-monitor-stream: 2`. For those clients, a timestamp-only ingest produces a small `freshness` event containing only `limits.updatedAt` plus per-device timestamps/stale state; the client merges that metadata into its existing snapshot without replacing limit providers, periods, or session/project detail. Clients without the header retain the legacy behavior and receive a complete `stats` event for every coalesced ingest window. A newer client remains compatible with an older hub because the header is advisory and the existing `snapshot` / `stats` events are unchanged.
 
 ## `GET /api/devices`
 

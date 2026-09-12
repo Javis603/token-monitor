@@ -45,6 +45,10 @@ function waitFor(predicate, timeoutMs = 1000) {
   });
 }
 
+function utcTodayAt(time) {
+  return `${new Date().toISOString().slice(0, 10)}T${time}Z`;
+}
+
 function collectSse(response, events) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -69,11 +73,12 @@ function collectSse(response, events) {
 
 test('the Worker negotiates compact ingest acknowledgements and gzip JSON', async () => {
   const hub = await createHub();
+  const sampleAt = utcTodayAt('10:00:00.000');
   const sessions = Object.fromEntries(Array.from({ length: 80 }, (_, index) => [
     `session-${index}`,
-    { totalTokens: index + 1, costUsd: 0.01, model: 'gpt-test', lastUsedAt: '2026-09-09T10:00:00.000Z' }
+    { totalTokens: index + 1, costUsd: 0.01, model: 'gpt-test', lastUsedAt: sampleAt }
   ]));
-  const payload = { deviceId: 'dev-a', updatedAt: '2026-09-09T10:00:00.000Z', today: { totalTokens: 3240, sessions } };
+  const payload = { deviceId: 'dev-a', updatedAt: sampleAt, today: { totalTokens: 3240, sessions } };
 
   const minimal = await hub.fetch(ingestRequest(payload, { 'x-token-monitor-response': 'minimal' }));
   assert.deepEqual(await minimal.json(), { ok: true, deviceId: 'dev-a' });
@@ -87,10 +92,13 @@ test('the Worker negotiates compact ingest acknowledgements and gzip JSON', asyn
 
 test('the Worker stream matches the Node Hub freshness and coalescing behavior', async () => {
   const hub = await createHub();
+  const initialAt = utcTodayAt('10:00:00.000');
+  const refreshedAt = utcTodayAt('10:01:00.000');
+  const changedAt = utcTodayAt('10:02:00.000');
   const base = {
     deviceId: 'dev-a',
-    updatedAt: '2026-09-09T10:00:00.000Z',
-    today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: '2026-09-09T10:00:00.000Z' } } }
+    updatedAt: initialAt,
+    today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } }
   };
   await hub.fetch(ingestRequest(base, { 'x-token-monitor-response': 'minimal' }));
 
@@ -115,17 +123,20 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
     modern.length = 0;
     legacy.length = 0;
 
-    await hub.fetch(ingestRequest({ ...base, updatedAt: '2026-09-09T10:01:00.000Z' }, {
+    await hub.fetch(ingestRequest({ ...base, updatedAt: refreshedAt }, {
       'x-token-monitor-response': 'minimal'
     }));
-    await waitFor(() => modern.length === 1);
+    await waitFor(() => modern.length === 1 && legacy.length === 1);
     assert.equal(modern[0].event, 'freshness');
-    assert.equal(legacy.length, 0);
+    assert.equal(modern[0].data.stats.devices[0].updatedAt, refreshedAt);
+    assert.equal(legacy[0].event, 'stats');
+    assert.equal(legacy[0].data.stats.devices[0].updatedAt, refreshedAt);
     modern.length = 0;
+    legacy.length = 0;
 
     await hub.fetch(ingestRequest({
       ...base,
-      updatedAt: '2026-09-09T10:02:00.000Z',
+      updatedAt: changedAt,
       today: { ...base.today, totalTokens: 2 }
     }, { 'x-token-monitor-response': 'minimal' }));
     await waitFor(() => modern.length === 1 && legacy.length === 1);
@@ -138,7 +149,7 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
     for (let totalTokens = 3; totalTokens <= 12; totalTokens += 1) {
       await hub.fetch(ingestRequest({
         ...base,
-        updatedAt: `2026-09-09T10:02:${String(totalTokens).padStart(2, '0')}.000Z`,
+        updatedAt: utcTodayAt(`10:02:${String(totalTokens).padStart(2, '0')}.000`),
         today: { ...base.today, totalTokens }
       }, { 'x-token-monitor-response': 'minimal' }));
     }

@@ -194,7 +194,11 @@ export class HubDO {
     }
     const event = hubProtocol.freshnessEvent(stats, 'ingest', at);
     for (const client of this.sseClients) {
-      if (client.freshnessEvents) this.writeClient(client, 'freshness', event);
+      if (client.freshnessEvents) {
+        this.writeClient(client, 'freshness', event);
+      } else {
+        this.writeClient(client, 'stats', { type: 'stats', reason: 'ingest', stats, at });
+      }
     }
   }
 

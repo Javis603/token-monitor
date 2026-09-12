@@ -31,9 +31,9 @@ function acceptsEncoding(source, requestedEncoding) {
   if (!requested) return false;
   let wildcardQuality = null;
   for (const part of headerValue(source, 'accept-encoding').split(',')) {
-    const [encoding, ...parameters] = part.trim().toLowerCase().split(';');
-    const qualityParameter = parameters.find((parameter) => parameter.trim().startsWith('q='));
-    const quality = qualityParameter ? Number(qualityParameter.trim().slice(2)) : 1;
+    const [encoding, ...parameters] = part.toLowerCase().split(';').map((segment) => segment.trim());
+    const qualityParameter = parameters.find((parameter) => parameter.startsWith('q='));
+    const quality = qualityParameter ? Number(qualityParameter.slice(2)) : 1;
     const accepted = Number.isFinite(quality) && quality > 0 && quality <= 1;
     if (encoding === requested) return accepted;
     if (encoding === '*') wildcardQuality = accepted;
@@ -63,13 +63,14 @@ function hubStatsContentKey(stats) {
 }
 
 function freshnessEvent(stats, reason = 'ingest', at = new Date().toISOString()) {
+  const limitsUpdatedAt = stats?.limits?.updatedAt;
   return {
     type: 'freshness',
     reason,
     stats: {
       updatedAt: stats?.updatedAt || at,
       staleAfterMs: stats?.staleAfterMs,
-      limits: stats?.limits,
+      ...(limitsUpdatedAt ? { limits: { updatedAt: limitsUpdatedAt } } : {}),
       devices: (stats?.devices || []).map((device) => ({
         deviceId: device.deviceId,
         updatedAt: device.updatedAt,
@@ -89,7 +90,7 @@ function applyFreshnessEvent(stats, event) {
     ...stats,
     ...(event.stats.updatedAt ? { updatedAt: event.stats.updatedAt } : {}),
     ...(Number.isFinite(event.stats.staleAfterMs) ? { staleAfterMs: event.stats.staleAfterMs } : {}),
-    ...(event.stats.limits ? { limits: event.stats.limits } : {}),
+    ...(event.stats.limits ? { limits: { ...(stats.limits || {}), ...event.stats.limits } } : {}),
     devices: (stats.devices || []).map((device) => {
       const freshness = byDeviceId.get(device.deviceId);
       return freshness ? { ...device, ...freshness } : device;

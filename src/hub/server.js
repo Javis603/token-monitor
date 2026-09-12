@@ -139,7 +139,11 @@ function createHub({
     }
     const event = freshnessEvent(stats, 'ingest', at);
     for (const client of sseClients) {
-      if (client.freshnessEvents) writeSse(client, 'freshness', event);
+      if (client.freshnessEvents) {
+        writeSse(client, 'freshness', event);
+      } else {
+        writeSse(client, 'stats', { type: 'stats', reason: 'ingest', stats, at });
+      }
     }
   }
 

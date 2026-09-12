@@ -64,6 +64,10 @@ test('freshness events update live metadata without replacing sessions or projec
   const original = stats();
   const current = stats({
     updatedAt: '2026-09-09T10:02:00.000Z',
+    limits: {
+      updatedAt: '2026-09-09T10:02:00.000Z',
+      providers: [{ provider: 'should-not-be-sent' }]
+    },
     devices: [{
       ...original.devices[0],
       updatedAt: '2026-09-09T10:02:00.000Z',
@@ -79,7 +83,11 @@ test('freshness events update live metadata without replacing sessions or projec
   assert.equal(applied.devices[0].ageMs, 5);
   assert.deepEqual(applied.periods, original.periods);
   assert.deepEqual(applied.devices[0].periods, original.devices[0].periods);
-  assert.deepEqual(applied.limits, current.limits);
+  assert.deepEqual(event.stats.limits, { updatedAt: current.limits.updatedAt });
+  assert.deepEqual(applied.limits, {
+    ...original.limits,
+    updatedAt: current.limits.updatedAt
+  });
 });
 
 test('Hub protocol features require explicit request headers', () => {
@@ -88,6 +96,7 @@ test('Hub protocol features require explicit request headers', () => {
   assert.equal(wantsFreshnessEvents(new Headers({ 'x-token-monitor-stream': '2' })), true);
   assert.equal(wantsFreshnessEvents(new Headers()), false);
   assert.equal(acceptsEncoding(new Headers({ 'accept-encoding': 'br, gzip' }), 'gzip'), true);
+  assert.equal(acceptsEncoding(new Headers({ 'accept-encoding': 'br, gzip ; q=0.5' }), 'gzip'), true);
   assert.equal(acceptsEncoding(new Headers({ 'accept-encoding': 'gzip;q=0, br' }), 'gzip'), false);
   assert.equal(acceptsEncoding(new Headers({ 'accept-encoding': '*;q=0.5' }), 'gzip'), true);
   assert.equal(acceptsEncoding(new Headers({ 'accept-encoding': 'gzip;q=0, *;q=1' }), 'gzip'), false);
