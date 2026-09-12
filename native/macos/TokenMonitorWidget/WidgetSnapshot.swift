@@ -5,6 +5,7 @@ struct WidgetSnapshot: Decodable, Equatable {
     let generatedAt: Date
     let overview: WidgetOverview
     let quota: [WidgetQuotaProvider]
+    let tools: [WidgetTool]
     let models: [WidgetModel]
     let activity: WidgetActivity
     let trend: WidgetTrend
@@ -47,16 +48,19 @@ struct WidgetSnapshot: Decodable, Equatable {
                 return (period, value)
             })
             let fallbackOverview = try container.decodeIfPresent(WidgetOverview.self, forKey: .overview) ?? .empty(generatedAt: generatedAt)
+            let fallbackTools = try container.decodeIfPresent([WidgetTool].self, forKey: .tools) ?? []
             let fallbackModels = normalizeWidgetModels(try container.decodeIfPresent([WidgetModel].self, forKey: .models) ?? [])
             let fallbackActivity = try container.decodeIfPresent(WidgetActivity.self, forKey: .activity) ?? .empty
             let fallbackTrend = try container.decodeIfPresent(WidgetTrend.self, forKey: .trend) ?? .empty
             let initialPeriod = periods[.day] ?? WidgetPeriodSnapshot(
                 overview: fallbackOverview,
+                tools: fallbackTools,
                 models: fallbackModels,
                 activity: fallbackActivity,
                 trend: fallbackTrend
             )
             overview = initialPeriod.overview
+            tools = initialPeriod.tools
             models = initialPeriod.models
             activity = initialPeriod.activity
             trend = initialPeriod.trend
@@ -71,6 +75,7 @@ struct WidgetSnapshot: Decodable, Equatable {
             let limits = decodedLimits?.values ?? []
             overview = WidgetOverview(currentPeriod: "today", totalTokens: today.totalTokens, costUsd: today.costUsd, primaryTool: nil, updatedAt: generatedAt)
             quota = normalizeQuotaProviders(limits)
+            tools = []
             models = []
             activity = .empty
             trend = .empty
@@ -80,11 +85,12 @@ struct WidgetSnapshot: Decodable, Equatable {
         }
     }
 
-    init(schemaVersion: Int, generatedAt: Date, overview: WidgetOverview, quota: [WidgetQuotaProvider], models: [WidgetModel], activity: WidgetActivity, trend: WidgetTrend, periods: [WidgetPeriod: WidgetPeriodSnapshot] = [:], presentation: WidgetPresentation, status: WidgetStatus) {
+    init(schemaVersion: Int, generatedAt: Date, overview: WidgetOverview, quota: [WidgetQuotaProvider], tools: [WidgetTool] = [], models: [WidgetModel], activity: WidgetActivity, trend: WidgetTrend, periods: [WidgetPeriod: WidgetPeriodSnapshot] = [:], presentation: WidgetPresentation, status: WidgetStatus) {
         self.schemaVersion = schemaVersion
         self.generatedAt = generatedAt
         self.overview = overview
         self.quota = quota
+        self.tools = tools
         self.models = models
         self.activity = activity
         self.trend = trend
@@ -101,6 +107,7 @@ struct WidgetSnapshot: Decodable, Equatable {
                 generatedAt: generatedAt,
                 overview: WidgetOverview(currentPeriod: period.title.lowercased(), totalTokens: 0, costUsd: 0, primaryTool: nil, updatedAt: generatedAt),
                 quota: quota,
+                tools: [],
                 models: [],
                 activity: WidgetActivity(currentPeriod: period.title.lowercased(), activeDays: 0, days: []),
                 trend: .empty,
@@ -114,6 +121,7 @@ struct WidgetSnapshot: Decodable, Equatable {
             generatedAt: generatedAt,
             overview: selected.overview,
             quota: quota,
+            tools: selected.tools,
             models: selected.models,
             activity: selected.activity,
             trend: selected.trend,
@@ -157,21 +165,24 @@ struct WidgetSnapshot: Decodable, Equatable {
 
 struct WidgetPeriodSnapshot: Decodable, Equatable {
     let overview: WidgetOverview
+    let tools: [WidgetTool]
     let models: [WidgetModel]
     let activity: WidgetActivity
     let trend: WidgetTrend
 
-    private enum CodingKeys: String, CodingKey { case overview, models, activity, trend }
+    private enum CodingKeys: String, CodingKey { case overview, tools, models, activity, trend }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         overview = try c.decodeIfPresent(WidgetOverview.self, forKey: .overview) ?? .empty(generatedAt: .distantPast)
+        tools = try c.decodeIfPresent([WidgetTool].self, forKey: .tools) ?? []
         models = normalizeWidgetModels(try c.decodeIfPresent([WidgetModel].self, forKey: .models) ?? [])
         activity = try c.decodeIfPresent(WidgetActivity.self, forKey: .activity) ?? .empty
         trend = try c.decodeIfPresent(WidgetTrend.self, forKey: .trend) ?? .empty
     }
 
-    init(overview: WidgetOverview, models: [WidgetModel], activity: WidgetActivity, trend: WidgetTrend) {
+    init(overview: WidgetOverview, tools: [WidgetTool] = [], models: [WidgetModel], activity: WidgetActivity, trend: WidgetTrend) {
         self.overview = overview
+        self.tools = tools
         self.models = models
         self.activity = activity
         self.trend = trend
@@ -199,6 +210,8 @@ private struct LegacyToday: Decodable {
 struct WidgetQuotaProvider: Decodable, Equatable, Identifiable {
     let instanceId: String
     let displayName: String?
+    let accountLabel: String?
+    let isCurrentAccount: Bool
     let provider: String
     let status: String
     let updatedAt: Date?
@@ -219,7 +232,7 @@ struct WidgetQuotaProvider: Decodable, Equatable, Identifiable {
         }
     }
 
-    private enum CodingKeys: String, CodingKey { case instanceId, displayName, provider, status, updatedAt, balance, windows }
+    private enum CodingKeys: String, CodingKey { case instanceId, displayName, accountLabel, isCurrentAccount, provider, status, updatedAt, balance, windows }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         guard let decodedProvider = container.optionalString(.provider), !decodedProvider.isEmpty else {
@@ -235,11 +248,15 @@ struct WidgetQuotaProvider: Decodable, Equatable, Identifiable {
             ? widgetQuotaFallbackID(provider: provider)
             : decodedInstanceId
         displayName = container.optionalString(.displayName)
+        accountLabel = container.optionalString(.accountLabel)
+        isCurrentAccount = (try? container.decodeIfPresent(Bool.self, forKey: .isCurrentAccount)) ?? false
     }
 
-    init(provider: String, status: String, updatedAt: Date?, windows: [WidgetLimitWindow], balance: WidgetQuotaBalance? = nil, instanceId: String? = nil, displayName: String? = nil) {
+    init(provider: String, status: String, updatedAt: Date?, windows: [WidgetLimitWindow], balance: WidgetQuotaBalance? = nil, instanceId: String? = nil, displayName: String? = nil, accountLabel: String? = nil, isCurrentAccount: Bool = false) {
         self.instanceId = instanceId ?? widgetQuotaFallbackID(provider: provider)
         self.displayName = displayName
+        self.accountLabel = accountLabel
+        self.isCurrentAccount = isCurrentAccount
         self.provider = provider
         self.status = status
         self.updatedAt = updatedAt
@@ -248,7 +265,7 @@ struct WidgetQuotaProvider: Decodable, Equatable, Identifiable {
     }
 
     func withInstanceId(_ value: String) -> WidgetQuotaProvider {
-        WidgetQuotaProvider(provider: provider, status: status, updatedAt: updatedAt, windows: windows, balance: balance, instanceId: value, displayName: displayName)
+        WidgetQuotaProvider(provider: provider, status: status, updatedAt: updatedAt, windows: windows, balance: balance, instanceId: value, displayName: displayName, accountLabel: accountLabel, isCurrentAccount: isCurrentAccount)
     }
 }
 
@@ -317,6 +334,13 @@ struct WidgetModel: Decodable, Equatable, Identifiable {
     func withModelId(_ value: String) -> WidgetModel {
         WidgetModel(displayName: displayName, totalTokens: totalTokens, costUsd: costUsd, sharePercent: sharePercent, id: value)
     }
+}
+
+struct WidgetTool: Decodable, Equatable, Identifiable {
+    let id: String
+    let totalTokens: Int
+    let costUsd: Double
+    let sharePercent: Double
 }
 
 struct WidgetActivityDay: Decodable, Equatable, Identifiable {
@@ -624,7 +648,7 @@ extension WidgetSnapshot {
     }
 
     static let placeholder = WidgetSnapshot(
-        schemaVersion: 6,
+        schemaVersion: 8,
         generatedAt: Date(),
         overview: WidgetOverview(currentPeriod: "today", totalTokens: 27_800_000, costUsd: 14.86, primaryTool: "codex", updatedAt: Date()),
         quota: [
@@ -633,24 +657,31 @@ extension WidgetSnapshot {
             WidgetQuotaProvider(provider: "deepseek", status: "ok", updatedAt: Date(), windows: [], balance: WidgetQuotaBalance(amount: 9.33, currency: "CNY")),
             WidgetQuotaProvider(provider: "antigravity", status: "notConfigured", updatedAt: Date(), windows: [])
         ],
+        tools: [
+            WidgetTool(id: "codex", totalTokens: 22_300_000, costUsd: 11.4, sharePercent: 80),
+            WidgetTool(id: "claude", totalTokens: 5_500_000, costUsd: 3.46, sharePercent: 20)
+        ],
         models: [WidgetModel(displayName: "GPT-5.6", totalTokens: 20_900_000, costUsd: 10, sharePercent: 75), WidgetModel(displayName: "MiMo", totalTokens: 2_900_000, costUsd: 2, sharePercent: 11)],
         activity: WidgetActivity(currentPeriod: "month", activeDays: 18, days: placeholderActivityDays(count: 28)),
         trend: WidgetTrend(startDate: "07/04", endDate: "07/17", peakTokens: 4_200_000, currentTokens: 2_800_000, points: (1...14).map { WidgetTrendPoint(date: "\($0)", totalTokens: $0 * 200_000, costUsd: 0) }),
         periods: [
             .day: WidgetPeriodSnapshot(
                 overview: WidgetOverview(currentPeriod: "today", totalTokens: 27_800_000, costUsd: 14.86, primaryTool: "codex", updatedAt: Date()),
+                tools: [WidgetTool(id: "codex", totalTokens: 22_300_000, costUsd: 11.4, sharePercent: 80), WidgetTool(id: "claude", totalTokens: 5_500_000, costUsd: 3.46, sharePercent: 20)],
                 models: [WidgetModel(displayName: "GPT-5.6", totalTokens: 20_900_000, costUsd: 10, sharePercent: 75), WidgetModel(displayName: "MiMo", totalTokens: 2_900_000, costUsd: 2, sharePercent: 11)],
                 activity: WidgetActivity(currentPeriod: "today", activeDays: 1, days: placeholderActivityDays(count: 7)),
                 trend: WidgetTrend(startDate: "07/04", endDate: "07/17", peakTokens: 4_200_000, currentTokens: 2_800_000, points: (1...14).map { WidgetTrendPoint(date: "\($0)", totalTokens: $0 * 200_000, costUsd: 0) })
             ),
             .month: WidgetPeriodSnapshot(
                 overview: WidgetOverview(currentPeriod: "month", totalTokens: 61_200_000, costUsd: 237.42, primaryTool: "codex", updatedAt: Date()),
+                tools: [WidgetTool(id: "codex", totalTokens: 48_900_000, costUsd: 190, sharePercent: 80), WidgetTool(id: "claude", totalTokens: 12_300_000, costUsd: 47.42, sharePercent: 20)],
                 models: [WidgetModel(displayName: "GPT-5.6", totalTokens: 44_000_000, costUsd: 120, sharePercent: 72), WidgetModel(displayName: "MiMo", totalTokens: 7_000_000, costUsd: 10, sharePercent: 11)],
                 activity: WidgetActivity(currentPeriod: "month", activeDays: 18, days: placeholderActivityDays(count: 28)),
                 trend: WidgetTrend(startDate: "07/04", endDate: "07/17", peakTokens: 9_200_000, currentTokens: 4_800_000, points: (1...14).map { WidgetTrendPoint(date: "\($0)", totalTokens: $0 * 340_000, costUsd: 0) })
             ),
             .total: WidgetPeriodSnapshot(
                 overview: WidgetOverview(currentPeriod: "allTime", totalTokens: 180_000_000, costUsd: 620.15, primaryTool: "codex", updatedAt: Date()),
+                tools: [WidgetTool(id: "codex", totalTokens: 144_000_000, costUsd: 500, sharePercent: 80), WidgetTool(id: "claude", totalTokens: 36_000_000, costUsd: 120.15, sharePercent: 20)],
                 models: [WidgetModel(displayName: "GPT-5.6", totalTokens: 120_000_000, costUsd: 220, sharePercent: 67), WidgetModel(displayName: "MiMo", totalTokens: 30_000_000, costUsd: 38, sharePercent: 17)],
                 activity: WidgetActivity(currentPeriod: "allTime", activeDays: 144, days: placeholderActivityDays(count: 180)),
                 trend: WidgetTrend(startDate: "01/01", endDate: "07/17", peakTokens: 18_200_000, currentTokens: 12_800_000, points: (1...14).map { WidgetTrendPoint(date: "\($0)", totalTokens: $0 * 900_000, costUsd: 0) })

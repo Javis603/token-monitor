@@ -83,7 +83,7 @@ function aggregateDevice(deviceId, sourceTime, totalTokens = 42) {
   };
 }
 
-test('builds schema v6 overview, quota, models, activity, trend and presentation', () => {
+test('builds schema v8 overview, quota, tools, models, activity, trend and presentation', () => {
   const snapshot = buildSnapshot(sampleStats(), {
     now: NOW,
     presentation: {
@@ -93,7 +93,7 @@ test('builds schema v6 overview, quota, models, activity, trend and presentation
   });
 
   assert.equal(snapshot.schemaVersion, MAC_WIDGET_SCHEMA_VERSION);
-  assert.equal(MAC_WIDGET_SCHEMA_VERSION, 6);
+  assert.equal(MAC_WIDGET_SCHEMA_VERSION, 8);
   assert.deepEqual(snapshot.overview, {
     currentPeriod: 'today', totalTokens: 1_200_000, costUsd: 1.25,
     primaryTool: 'codex', updatedAt: SOURCE_UPDATED_AT
@@ -101,6 +101,11 @@ test('builds schema v6 overview, quota, models, activity, trend and presentation
   assert.equal(snapshot.periods.day.overview.totalTokens, 1_200_000);
   assert.equal(snapshot.periods.month.overview.totalTokens, 9_000_000);
   assert.equal(snapshot.periods.total.overview.totalTokens, 20_000_000);
+  assert.deepEqual(snapshot.tools.map((tool) => [tool.id, tool.totalTokens]), [
+    ['codex', 1_000_000], ['claude', 200_000]
+  ]);
+  assert.ok(Math.abs(snapshot.tools[0].sharePercent - (100 / 1.2)) < Number.EPSILON * 100);
+  assert.ok(Math.abs(snapshot.tools[1].sharePercent - (100 / 6)) < Number.EPSILON * 100);
   assert.deepEqual(snapshot.quota[0].windows[0], {
     kind: 'weekly', metric: null, showMeter: true,
     usedPercent: 35, remainingPercent: 65,
@@ -249,7 +254,7 @@ test('preserves WorkBuddy finite credits and unlimited detail for the native wid
   assert.equal(Object.hasOwn(unlimited.quota[0].windows[0], 'remaining'), false);
 });
 
-test('keeps multi-account provider identities stable without exporting account details', () => {
+test('keeps multi-account provider identities stable with masked email labels', () => {
   const stats = {
     limits: { providers: [
       {
@@ -266,11 +271,16 @@ test('keeps multi-account provider identities stable without exporting account d
       }
     ]}
   };
-  const first = buildSnapshot(stats, { now: NOW });
+  const first = buildSnapshot(stats, {
+    now: NOW,
+    activeCodexAccount: { accountKey: 'workspace-b', accountEmail: 'b@example.com' }
+  });
   stats.limits.providers[0].windows[0].remainingPercent = 65;
   const second = buildSnapshot(stats, { now: NOW });
 
-  assert.deepEqual(first.quota.map((provider) => provider.displayName), ['Codex 1', 'Codex 2']);
+  assert.deepEqual(first.quota.map((provider) => provider.displayName), ['Codex', 'Codex']);
+  assert.deepEqual(first.quota.map((provider) => provider.accountLabel), ['a***@example.com', 'b***@example.com']);
+  assert.deepEqual(first.quota.map((provider) => provider.isCurrentAccount || false), [false, true]);
   assert.equal(new Set(first.quota.map((provider) => provider.instanceId)).size, 2);
   assert.deepEqual(first.quota.map((provider) => provider.instanceId), second.quota.map((provider) => provider.instanceId));
   for (const privateValue of ['workspace-a', 'workspace-b', 'a@example.com', 'b@example.com', 'auth.json', 'secret-a', 'private-a']) {
@@ -461,12 +471,13 @@ test('accepts only real UTC calendar dates and lets the last duplicate date win'
 
 test('returns a complete empty schema and stale status for missing or old data', () => {
   const empty = buildSnapshot({}, { now: NOW });
-  assert.equal(empty.schemaVersion, 6);
+  assert.equal(empty.schemaVersion, 8);
   assert.equal(empty.overview.totalTokens, 0);
   assert.equal(empty.periods.day.overview.totalTokens, 0);
   assert.equal(empty.periods.month.overview.totalTokens, 0);
   assert.equal(empty.periods.total.overview.totalTokens, 0);
   assert.deepEqual(empty.quota, []);
+  assert.deepEqual(empty.tools, []);
   assert.deepEqual(empty.models, []);
   assert.equal(empty.status.noData, true);
 
@@ -602,7 +613,8 @@ test('uses explicit allowlists so secrets, identities and raw history never ente
   for (const value of sensitive) assert.equal(serialized.includes(value), false);
   assert.equal(serialized.endsWith('\n'), true);
   const parsed = JSON.parse(serialized);
-  assert.equal(parsed.schemaVersion, 6);
+  assert.equal(parsed.schemaVersion, 8);
+  assert.equal(parsed.quota.find((provider) => provider.provider === 'codex').accountLabel, 'p***e@example.com');
   assert.deepEqual(parsed.quota.find((provider) => provider.provider === 'mimo').balance, {
     amount: 3.62,
     currency: 'CNY'

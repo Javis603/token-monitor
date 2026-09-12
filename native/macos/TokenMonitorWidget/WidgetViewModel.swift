@@ -13,28 +13,23 @@ enum WidgetL10n {
 import WidgetKit
 
 enum WidgetDesignTokens {
-    static let sectionPadding: CGFloat = 9
-    static let cornerRadius: CGFloat = 12
     static let smallGap: CGFloat = 5
     static let mediumGap: CGFloat = 10
     static let largeGap: CGFloat = 8
-    static let titleSize: CGFloat = 15
     static let smallPrimarySize: CGFloat = 27
     static let mediumPrimarySize: CGFloat = 31
     static let largePrimarySize: CGFloat = 34
     static let secondarySize: CGFloat = 10
     static let microSize: CGFloat = 9
     static let dividerOpacity = 0.14
-    static let panelOpacity = 0.065
     static let accent = Color.accentColor
-    static let periodControlHeight: CGFloat = 17
-    static let pageControlHeight: CGFloat = 18
-    static let openButtonSize: CGFloat = 20
+    static let chartBlue = Color(red: 115 / 255, green: 189 / 255, blue: 245 / 255)
+    static let number = Color(red: 243 / 255, green: 251 / 255, blue: 247 / 255)
+    static let muted = Color(red: 163 / 255, green: 173 / 255, blue: 187 / 255)
 }
 
 struct WidgetScaffoldGeometry: Equatable {
     let headerHeight: CGFloat
-    let footerHeight: CGFloat
     let contentGap: CGFloat
 
     var contentTopReserved: CGFloat {
@@ -42,7 +37,7 @@ struct WidgetScaffoldGeometry: Equatable {
     }
 
     var contentBottomReserved: CGFloat {
-        footerHeight + contentGap
+        0
     }
 
     func contentHeight(for availableHeight: CGFloat) -> CGFloat {
@@ -58,12 +53,6 @@ struct WidgetScaffoldGeometry: Equatable {
                 y: contentTopReserved,
                 width: size.width,
                 height: contentHeight
-            ),
-            footer: CGRect(
-                x: 0,
-                y: max(0, size.height - footerHeight),
-                width: size.width,
-                height: footerHeight
             )
         )
     }
@@ -72,7 +61,6 @@ struct WidgetScaffoldGeometry: Equatable {
 struct WidgetScaffoldRegionFrames: Equatable {
     let header: CGRect
     let content: CGRect
-    let footer: CGRect
 }
 
 struct WidgetLayoutMetrics: Equatable {
@@ -80,9 +68,7 @@ struct WidgetLayoutMetrics: Equatable {
     let outerBottomInset: CGFloat
     let horizontalInset: CGFloat
     let headerHeight: CGFloat
-    let footerHeight: CGFloat
     let contentGap: CGFloat
-    let pageControlWidth: CGFloat
     let activityMinCellSize: CGFloat
     let activityMaxCellSize: CGFloat
     let activityCellSpacing: CGFloat
@@ -99,7 +85,6 @@ struct WidgetLayoutMetrics: Equatable {
     var scaffoldGeometry: WidgetScaffoldGeometry {
         WidgetScaffoldGeometry(
             headerHeight: headerHeight,
-            footerHeight: footerHeight,
             contentGap: contentGap
         )
     }
@@ -108,10 +93,8 @@ struct WidgetLayoutMetrics: Equatable {
         outerTopInset: 0,
         outerBottomInset: 0,
         horizontalInset: 0,
-        headerHeight: 20,
-        footerHeight: 25,
+        headerHeight: 18,
         contentGap: WidgetDesignTokens.smallGap,
-        pageControlWidth: 108,
         activityMinCellSize: 5,
         activityMaxCellSize: 16,
         activityCellSpacing: 2
@@ -121,10 +104,8 @@ struct WidgetLayoutMetrics: Equatable {
         outerTopInset: 0,
         outerBottomInset: 0,
         horizontalInset: 0,
-        headerHeight: 22,
-        footerHeight: 26,
+        headerHeight: 18,
         contentGap: WidgetDesignTokens.mediumGap,
-        pageControlWidth: 112,
         activityMinCellSize: 5,
         activityMaxCellSize: 20,
         activityCellSpacing: 2
@@ -134,10 +115,8 @@ struct WidgetLayoutMetrics: Equatable {
         outerTopInset: 0,
         outerBottomInset: 0,
         horizontalInset: 0,
-        headerHeight: 24,
-        footerHeight: 28,
+        headerHeight: 18,
         contentGap: WidgetDesignTokens.largeGap,
-        pageControlWidth: 112,
         activityMinCellSize: 5,
         activityMaxCellSize: 22,
         activityCellSpacing: 2
@@ -600,6 +579,15 @@ struct WidgetViewModel: Equatable {
                     "\($0.displayName ?? WidgetFormat.provider($0.provider)) · \(WidgetFormat.quotaValue($0))"
                 }
             )
+        case .tools:
+            let tools = snapshot.tools
+            return WidgetViewModel(
+                page: page,
+                title: WidgetL10n.text("Tools"),
+                primaryValue: tools.first.map { WidgetFormat.provider($0.id) } ?? WidgetL10n.text("No data"),
+                secondaryValue: tools.first.map { "\(WidgetFormat.tokens($0.totalTokens, style: snapshot.presentation.numberStyle, presentation: snapshot.presentation)) · \(Int($0.sharePercent.rounded()))%" } ?? "",
+                rows: tools.dropFirst().map { "\(WidgetFormat.provider($0.id)) · \(Int($0.sharePercent.rounded()))%" }
+            )
         case .models:
             let models = snapshot.models
             return WidgetViewModel(
@@ -626,6 +614,50 @@ struct WidgetViewModel: Equatable {
                 rows: [WidgetL10n.format("Peak · %@", WidgetFormat.tokens(snapshot.trend.peakTokens, style: snapshot.presentation.numberStyle, presentation: snapshot.presentation))]
             )
         }
+    }
+}
+
+enum WidgetQuotaSelectionResolver {
+    static func providers(in snapshot: WidgetSnapshot, selectedIDs: [String], limit: Int) -> [WidgetQuotaProvider] {
+        guard !selectedIDs.isEmpty else { return Array(snapshot.quota.prefix(limit)) }
+        let providersByID = Dictionary(uniqueKeysWithValues: snapshot.quota.map { ($0.instanceId, $0) })
+        var seenProviderIDs = Set<String>()
+        let selected = selectedIDs.compactMap { id -> WidgetQuotaProvider? in
+            let provider = id == WidgetQuotaSelectionID.currentCodexAccount
+                ? snapshot.quota.first { $0.provider.caseInsensitiveCompare("codex") == .orderedSame && $0.isCurrentAccount }
+                : providersByID[id]
+            guard let provider, seenProviderIDs.insert(provider.instanceId).inserted else { return nil }
+            return provider
+        }
+        return Array((selected.isEmpty ? snapshot.quota : selected).prefix(limit))
+    }
+}
+
+enum WidgetQuotaFreshness {
+    static func newestUpdatedAt(
+        in snapshot: WidgetSnapshot,
+        selectedIDs: [String],
+        limit: Int = 2
+    ) -> Date? {
+        WidgetQuotaSelectionResolver.providers(
+            in: snapshot,
+            selectedIDs: selectedIDs,
+            limit: limit
+        )
+        .compactMap(\.updatedAt)
+        .max()
+    }
+
+    static func isStale(
+        snapshot: WidgetSnapshot,
+        selectedIDs: [String],
+        at date: Date,
+        threshold: TimeInterval = 20 * 60
+    ) -> Bool {
+        guard let updatedAt = newestUpdatedAt(in: snapshot, selectedIDs: selectedIDs) else {
+            return snapshot.isStale(at: date, threshold: threshold)
+        }
+        return date.timeIntervalSince(updatedAt) > threshold
     }
 }
 
@@ -722,6 +754,9 @@ enum WidgetFormat {
         case "grok": "Grok"
         case "copilot": "GitHub Copilot"
         case "mimo": "MiMo"
+        case "micode": "MiMo Code"
+        case "hermes": "Hermes Agent"
+        case "lmstudio": "LM Studio"
         case "zai": "GLM"
         case "zaiteam": "GLM Team"
         case "kiro": "Kiro"
@@ -809,5 +844,14 @@ enum WidgetFormat {
         return days > 0
             ? WidgetL10n.format("Reset in %lldd %lldh", days, hours)
             : WidgetL10n.format("Reset in %lldh", hours)
+    }
+
+    static func windowTitle(_ value: String) -> String {
+        switch value.lowercased() {
+        case "session", "five_hour", "five-hour", "5h", "5-hour": "Session"
+        case "weekly", "week", "7d", "seven_day", "seven-day": "Weekly"
+        case "monthly", "month": "Monthly"
+        default: value.replacingOccurrences(of: "_", with: " ").capitalized
+        }
     }
 }

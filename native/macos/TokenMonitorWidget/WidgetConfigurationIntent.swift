@@ -5,6 +5,7 @@ import WidgetKit
 enum WidgetPage: String, AppEnum, CaseIterable {
     case overview
     case quota
+    case tools
     case models
     case activity
     case trend
@@ -13,6 +14,7 @@ enum WidgetPage: String, AppEnum, CaseIterable {
     static let caseDisplayRepresentations: [WidgetPage: DisplayRepresentation] = [
         .overview: DisplayRepresentation(title: "Overview", image: .init(systemName: "house")),
         .quota: DisplayRepresentation(title: "Quota", image: .init(systemName: "gauge.with.dots.needle.50percent")),
+        .tools: DisplayRepresentation(title: "Tools", image: .init(systemName: "hammer")),
         .models: DisplayRepresentation(title: "Models", image: .init(systemName: "cpu")),
         .activity: DisplayRepresentation(title: "Activity", image: .init(systemName: "square.grid.3x3")),
         .trend: DisplayRepresentation(title: "Trend", image: .init(systemName: "chart.xyaxis.line"))
@@ -22,6 +24,7 @@ enum WidgetPage: String, AppEnum, CaseIterable {
         switch self {
         case .overview: WidgetL10n.text("Overview")
         case .quota: WidgetL10n.text("Quota")
+        case .tools: WidgetL10n.text("Tools")
         case .models: WidgetL10n.text("Models")
         case .activity: WidgetL10n.text("Activity")
         case .trend: WidgetL10n.text("Trend")
@@ -32,29 +35,237 @@ enum WidgetPage: String, AppEnum, CaseIterable {
         switch self {
         case .overview: "house"
         case .quota: "gauge.with.dots.needle.50percent"
+        case .tools: "hammer"
         case .models: "cpu"
         case .activity: "square.grid.3x3"
         case .trend: "chart.xyaxis.line"
         }
     }
 
-    var next: WidgetPage {
+}
+
+struct TokenMonitorWidgetConfigurationIntent: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "Token Monitor Widget"
+    static let description = IntentDescription("Choose one focused view and period for this widget.")
+
+    @Parameter(title: "Display Page", default: .overview)
+    var page: WidgetPage
+
+    @Parameter(title: "Period", default: .day)
+    var period: WidgetPeriod
+}
+
+enum WidgetBreakdown: String, AppEnum, CaseIterable {
+    case tools
+    case models
+
+    static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Breakdown")
+    static let caseDisplayRepresentations: [WidgetBreakdown: DisplayRepresentation] = [
+        .tools: DisplayRepresentation(title: "Tools"),
+        .models: DisplayRepresentation(title: "Models")
+    ]
+
+    var page: WidgetPage {
         switch self {
-        case .overview: .quota
-        case .quota: .models
-        case .models: .activity
-        case .activity: .trend
-        case .trend: .overview
+        case .tools: .tools
+        case .models: .models
         }
     }
 }
 
-struct TokenMonitorWidgetConfigurationIntent: WidgetConfigurationIntent {
-    static let title: LocalizedStringResource = "Token Monitor Page"
-    static let description = IntentDescription("Choose the page shown by this widget instance.")
+struct UsageSummaryWidgetIntent: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "Usage Summary"
+    static let description = IntentDescription("Choose the usage period shown by this widget.")
 
-    @Parameter(title: "Display Page", default: .overview)
-    var page: WidgetPage
+    @Parameter(title: "Period", default: .day)
+    var period: WidgetPeriod
+}
+
+struct BreakdownWidgetIntent: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "Usage Breakdown"
+    static let description = IntentDescription("Choose a tool or model breakdown and its period.")
+
+    @Parameter(title: "Breakdown", default: .tools)
+    var breakdown: WidgetBreakdown
+
+    @Parameter(title: "Period", default: .day)
+    var period: WidgetPeriod
+}
+
+struct TrendWidgetIntent: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "Usage Trend"
+    static let description = IntentDescription("Choose the usage period summarized by this trend.")
+
+    @Parameter(title: "Period", default: .day)
+    var period: WidgetPeriod
+}
+
+struct DashboardWidgetIntent: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "Dashboard"
+    static let description = IntentDescription("Choose the dashboard period and breakdown.")
+
+    @Parameter(title: "Period", default: .day)
+    var period: WidgetPeriod
+
+    @Parameter(title: "Breakdown", default: .models)
+    var breakdown: WidgetBreakdown
+
+    @Parameter(title: "Quota 1")
+    var primaryQuota: WidgetQuotaSelection?
+
+    @Parameter(title: "Quota 2")
+    var secondaryQuota: WidgetSecondaryQuotaSelection?
+}
+
+struct QuotaWidgetIntent: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "Quota"
+    static let description = IntentDescription("Choose up to two quota accounts to keep visible.")
+
+    @Parameter(title: "Quota 1")
+    var primaryQuota: WidgetQuotaSelection?
+
+    @Parameter(title: "Quota 2")
+    var secondaryQuota: WidgetSecondaryQuotaSelection?
+}
+
+enum WidgetQuotaSelectionID {
+    static let currentCodexAccount = "codex-current-account"
+}
+
+struct WidgetQuotaSelection: AppEntity {
+    static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Quota Account")
+    static let defaultQuery = WidgetQuotaSelectionQuery()
+
+    let id: String
+    let name: String
+    let provider: String
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(name)")
+    }
+}
+
+struct WidgetQuotaSelectionQuery: EntityQuery {
+    func entities(for identifiers: [WidgetQuotaSelection.ID]) async throws -> [WidgetQuotaSelection] {
+        let identifierSet = Set(identifiers)
+        return Self.availableSelections.filter { identifierSet.contains($0.id) }
+    }
+
+    func suggestedEntities() async throws -> [WidgetQuotaSelection] {
+        Self.availableSelections
+    }
+
+    func defaultResult() async -> WidgetQuotaSelection? {
+        Self.availableSelections.first { $0.id != WidgetQuotaSelectionID.currentCodexAccount }
+    }
+
+    private static var availableSelections: [WidgetQuotaSelection] {
+        WidgetQuotaSelectionCatalog.availableSelections.map { selection in
+            WidgetQuotaSelection(
+                id: selection.id,
+                name: selection.name,
+                provider: selection.provider
+            )
+        }
+    }
+}
+
+// Quota 2 deliberately uses a distinct AppEntity query. WidgetKit asks each
+// parameter for its own default, and using the same query for both fields makes
+// both resolve to the first account. The secondary query starts at item two.
+struct WidgetSecondaryQuotaSelection: AppEntity {
+    static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Quota Account")
+    static let defaultQuery = WidgetSecondaryQuotaSelectionQuery()
+
+    let id: String
+    let name: String
+    let provider: String
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(name)")
+    }
+}
+
+struct WidgetSecondaryQuotaSelectionQuery: EntityQuery {
+    func entities(for identifiers: [WidgetSecondaryQuotaSelection.ID]) async throws -> [WidgetSecondaryQuotaSelection] {
+        let identifierSet = Set(identifiers)
+        return Self.availableSelections.filter { identifierSet.contains($0.id) }
+    }
+
+    func suggestedEntities() async throws -> [WidgetSecondaryQuotaSelection] {
+        Self.availableSelections
+    }
+
+    func defaultResult() async -> WidgetSecondaryQuotaSelection? {
+        Self.availableSelections
+            .filter { $0.id != WidgetQuotaSelectionID.currentCodexAccount }
+            .dropFirst()
+            .first
+    }
+
+    private static var availableSelections: [WidgetSecondaryQuotaSelection] {
+        WidgetQuotaSelectionCatalog.availableSelections.map { selection in
+            WidgetSecondaryQuotaSelection(
+                id: selection.id,
+                name: selection.name,
+                provider: selection.provider
+            )
+        }
+    }
+}
+
+private struct WidgetQuotaSelectionValue {
+    let id: String
+    let name: String
+    let provider: String
+}
+
+private enum WidgetQuotaSelectionCatalog {
+    static var availableSelections: [WidgetQuotaSelectionValue] {
+        let appGroup = Bundle.main.object(forInfoDictionaryKey: "TokenMonitorAppGroup") as? String ?? ""
+        guard let snapshot = WidgetSnapshot.load(appGroup: appGroup) else { return [] }
+
+        let providerCounts = Dictionary(grouping: snapshot.quota, by: \.provider).mapValues(\.count)
+        var providerOrdinals: [String: Int] = [:]
+        let concreteSelections = snapshot.quota.map { provider in
+            let baseName = provider.displayName ?? WidgetFormat.provider(provider.provider)
+            providerOrdinals[provider.provider, default: 0] += 1
+            let ordinal = providerOrdinals[provider.provider, default: 1]
+            let selectionName: String
+            if providerCounts[provider.provider, default: 0] > 1 {
+                if let accountLabel = provider.accountLabel, !accountLabel.isEmpty {
+                    selectionName = "\(baseName) · \(accountLabel)"
+                } else {
+                    selectionName = "\(baseName) \(ordinal)"
+                }
+            } else {
+                selectionName = baseName
+            }
+            return WidgetQuotaSelectionValue(
+                id: provider.instanceId,
+                name: selectionName,
+                provider: provider.provider
+            )
+        }
+        let codexProviders = snapshot.quota.filter { $0.provider.caseInsensitiveCompare("codex") == .orderedSame }
+        guard codexProviders.count > 1, codexProviders.contains(where: \.isCurrentAccount) else {
+            return concreteSelections
+        }
+        guard let insertionIndex = concreteSelections.firstIndex(where: {
+            $0.provider.caseInsensitiveCompare("codex") == .orderedSame
+        }) else { return concreteSelections }
+
+        var selections = concreteSelections
+        selections.insert(
+            WidgetQuotaSelectionValue(
+                id: WidgetQuotaSelectionID.currentCodexAccount,
+                name: "Codex · \(String(localized: "Current Account"))",
+                provider: "codex"
+            ),
+            at: insertionIndex
+        )
+        return selections
+    }
 }
 
 enum WidgetPeriod: String, Codable, AppEnum, CaseIterable {
@@ -64,16 +275,16 @@ enum WidgetPeriod: String, Codable, AppEnum, CaseIterable {
 
     static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Period")
     static let caseDisplayRepresentations: [WidgetPeriod: DisplayRepresentation] = [
-        .day: DisplayRepresentation(title: "DAY", subtitle: "Today"),
-        .month: DisplayRepresentation(title: "MONTH", subtitle: "This month"),
-        .total: DisplayRepresentation(title: "TOTAL", subtitle: "All time")
+        .day: DisplayRepresentation(title: "Day"),
+        .month: DisplayRepresentation(title: "Month"),
+        .total: DisplayRepresentation(title: "Total")
     ]
 
     var title: String {
         switch self {
-        case .day: WidgetL10n.text("DAY")
-        case .month: WidgetL10n.text("MONTH")
-        case .total: WidgetL10n.text("TOTAL")
+        case .day: "DAY"
+        case .month: "MONTH"
+        case .total: "TOTAL"
         }
     }
 
@@ -82,6 +293,14 @@ enum WidgetPeriod: String, Codable, AppEnum, CaseIterable {
         case .day: WidgetL10n.text("Today usage")
         case .month: WidgetL10n.text("This month usage")
         case .total: WidgetL10n.text("All-time usage")
+        }
+    }
+
+    var displayTitle: String {
+        switch self {
+        case .day: "TODAY"
+        case .month: "MONTH"
+        case .total: "TOTAL"
         }
     }
 
@@ -102,7 +321,7 @@ enum WidgetPeriod: String, Codable, AppEnum, CaseIterable {
 
 enum WidgetPeriodPolicy {
     static func isSelectable(on page: WidgetPage) -> Bool {
-        page == .overview || page == .models
+        page == .overview || page == .tools || page == .models
     }
 
     static func effectivePeriod(for page: WidgetPage, selectedPeriod: WidgetPeriod) -> WidgetPeriod {
@@ -385,7 +604,7 @@ enum WidgetActivitySelection {
             store.clearSelectedActivityDay(for: family)
             return nil
         }
-        let maxWeeks = family == .medium ? 14 : 26
+        let maxWeeks = 26
         let reference = WidgetActivityDate.startOfDay(referenceDate, timeZone: timeZone)
         let gridStart = WidgetActivityDate.addingDays(
             -(maxWeeks - 1) * 7,
@@ -460,18 +679,6 @@ enum WidgetIntentActions {
         reload(widgetKind)
     }
 
-    static func cyclePage(
-        family: WidgetFamilyScope,
-        currentPage: WidgetPage,
-        store: WidgetPresentationStateStoring,
-        widgetKind: String,
-        reload: (String) -> Void
-    ) {
-        store.clearSelectedActivityDay(for: family)
-        let current = store.selectedPage(for: family) ?? currentPage
-        store.setSelectedPage(current.next, for: family)
-        reload(widgetKind)
-    }
 }
 
 struct SelectActivityDayIntent: AppIntent {
@@ -500,7 +707,7 @@ struct SelectActivityDayIntent: AppIntent {
             date: date,
             store: WidgetPresentationStateStore.shared,
             widgetKind: WidgetIntentRuntime.widgetKind,
-            reload: { WidgetCenter.shared.reloadTimelines(ofKind: $0) }
+            reload: { _ in WidgetCenter.shared.reloadAllTimelines() }
         )
         return .result()
     }
@@ -540,39 +747,6 @@ struct CycleWidgetPeriodIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         WidgetIntentActions.cyclePeriod(
-            store: WidgetPresentationStateStore.shared,
-            widgetKind: WidgetIntentRuntime.widgetKind,
-            reload: { WidgetCenter.shared.reloadTimelines(ofKind: $0) }
-        )
-        return .result()
-    }
-}
-
-struct CycleWidgetPageIntent: AppIntent {
-    static var title: LocalizedStringResource = "Cycle Widget Page"
-    static var description = IntentDescription("Switch the page shown by the current widget size.")
-    static var openAppWhenRun: Bool { false }
-
-    @Parameter(title: "Widget Size", default: .small)
-    var family: WidgetFamilyScope
-
-    @Parameter(title: "Current Page", default: .overview)
-    var currentPage: WidgetPage
-
-    init() {
-        self.family = .small
-        self.currentPage = .overview
-    }
-
-    init(family: WidgetFamilyScope, currentPage: WidgetPage) {
-        self.family = family
-        self.currentPage = currentPage
-    }
-
-    func perform() async throws -> some IntentResult {
-        WidgetIntentActions.cyclePage(
-            family: family,
-            currentPage: currentPage,
             store: WidgetPresentationStateStore.shared,
             widgetKind: WidgetIntentRuntime.widgetKind,
             reload: { WidgetCenter.shared.reloadTimelines(ofKind: $0) }

@@ -5,6 +5,7 @@ const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
 const PAGE_TO_VIEW = Object.freeze({
   overview: 'home',
   quota: 'limits',
+  tools: 'tool',
   models: 'model',
   activity: 'trends',
   trend: 'trends'

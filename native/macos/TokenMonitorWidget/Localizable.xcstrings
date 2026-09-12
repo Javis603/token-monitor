@@ -2,6 +2,40 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "Current Account": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current Account"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前账号"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前帳號"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在のアカウント"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "현재 계정"
+          }
+        }
+      }
+    },
     "Overview": {
       "localizations": {
         "en": {
@@ -66,6 +100,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "할당량"
+          }
+        }
+      }
+    },
+    "Tools": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tools"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工具"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工具"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ツール"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "도구"
           }
         }
       }
@@ -1883,25 +1951,25 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当日"
+            "value": "Today"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "當日"
+            "value": "Today"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日"
+            "value": "Today"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "오늘"
+            "value": "Today"
           }
         }
       }
@@ -1917,25 +1985,25 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "本月"
+            "value": "This month"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "本月"
+            "value": "This month"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "今月"
+            "value": "This month"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "이번 달"
+            "value": "This month"
           }
         }
       }
@@ -1951,25 +2019,25 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "累计"
+            "value": "All time"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "累計"
+            "value": "All time"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "累計"
+            "value": "All time"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "누적"
+            "value": "All time"
           }
         }
       }
@@ -1985,25 +2053,25 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当日"
+            "value": "DAY"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "當日"
+            "value": "DAY"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日"
+            "value": "DAY"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "오늘"
+            "value": "DAY"
           }
         }
       }
@@ -2019,25 +2087,25 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "本月"
+            "value": "MONTH"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "本月"
+            "value": "MONTH"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "今月"
+            "value": "MONTH"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "이번 달"
+            "value": "MONTH"
           }
         }
       }
@@ -2053,25 +2121,25 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "累计"
+            "value": "TOTAL"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "累計"
+            "value": "TOTAL"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "累計"
+            "value": "TOTAL"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "누적"
+            "value": "TOTAL"
           }
         }
       }

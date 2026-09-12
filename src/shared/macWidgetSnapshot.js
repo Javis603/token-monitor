@@ -3,7 +3,7 @@
 const { KNOWN_CLIENTS } = require('./clientTracking');
 const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } = require('./limitProviders');
 
-const MAC_WIDGET_SCHEMA_VERSION = 6;
+const MAC_WIDGET_SCHEMA_VERSION = 8;
 const MAC_WIDGET_FRESHNESS_HEARTBEAT_MS = 5 * 60 * 1000;
 const KNOWN_TOOLS = new Set(KNOWN_CLIENTS.split(',').filter(Boolean));
 const KNOWN_LIMIT_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
@@ -94,6 +94,22 @@ function safeDisplayName(value, fallback = '') {
   return name;
 }
 
+// Widget snapshots live in an App Group container, so account identity must be
+// useful for disambiguation without copying the full email address across the
+// process boundary. Keep this deliberately narrower than the renderer's
+// configurable account-label presentation: WidgetKit always receives a mask.
+function maskedWidgetEmail(value) {
+  const email = String(value || '').trim().toLowerCase();
+  const at = email.lastIndexOf('@');
+  if (at <= 0 || at === email.length - 1) return '';
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (!/^[^\s@]+\.[^\s@]+$/.test(domain)) return '';
+  const first = local[0] || '';
+  const last = local.length > 1 ? local.at(-1) : '';
+  return `${first}***${last}@${domain}`;
+}
+
 function isLikelySensitivePathOrUrl(value) {
   const raw = String(value || '').trim();
   if (!raw || raw.length > 80 || /[\u0000-\u001f\u007f]/.test(raw)) return true;
@@ -123,11 +139,16 @@ function buildTools(period) {
     if (totalTokens <= 0 && costUsd <= 0) continue;
     tools.push({ id: tool, totalTokens, costUsd });
   }
-  return tools.sort((left, right) => (
+  tools.sort((left, right) => (
     right.totalTokens - left.totalTokens
     || right.costUsd - left.costUsd
     || left.id.localeCompare(right.id)
   ));
+  const denominator = tools.reduce((sum, tool) => sum + tool.totalTokens, 0);
+  return tools.slice(0, 10).map((tool) => ({
+    ...tool,
+    sharePercent: denominator > 0 ? Math.max(0, Math.min(100, tool.totalTokens / denominator * 100)) : 0
+  }));
 }
 
 function buildLimitWindow(window) {
@@ -178,7 +199,17 @@ function isCanonicalCodexWindow(providerId, window) {
   return window?.additional !== true;
 }
 
-function buildQuota(limits) {
+function codexAccountMatchesActive(provider, activeAccount) {
+  if (!activeAccount || String(provider?.provider || '').trim().toLowerCase() !== 'codex') return false;
+  const providerKey = String(provider?.accountKey || '').trim();
+  const activeKey = String(activeAccount?.accountKey || '').trim();
+  if (providerKey && activeKey) return providerKey === activeKey;
+  const providerEmail = String(provider?.accountEmail || '').trim().toLowerCase();
+  const activeEmail = String(activeAccount?.accountEmail || '').trim().toLowerCase();
+  return Boolean(providerEmail && activeEmail && providerEmail === activeEmail);
+}
+
+function buildQuota(limits, activeCodexAccount) {
   const providers = Array.isArray(limits?.providers) ? limits.providers : [];
   const candidates = [];
   for (const [inputIndex, provider] of providers.entries()) {
@@ -194,6 +225,7 @@ function buildQuota(limits) {
       : [];
     const balance = buildProviderBalance(provider);
     const accountKey = String(provider.accountKey || '').trim();
+    const accountLabel = maskedWidgetEmail(provider.accountEmail);
     const source = String(provider.source || '').trim().toLowerCase();
     const sourceDetail = String(provider.sourceDetail || '').trim().toLowerCase();
     const stableRecord = {
@@ -212,6 +244,8 @@ function buildQuota(limits) {
       provider: providerId,
       status: stableRecord.status,
       updatedAt: normalizedIso(provider.updatedAt),
+      ...(codexAccountMatchesActive(provider, activeCodexAccount) ? { isCurrentAccount: true } : {}),
+      ...(accountLabel ? { accountLabel } : {}),
       ...(balance ? { balance } : {}),
       windows
       }
@@ -222,7 +256,6 @@ function buildQuota(limits) {
     || left.identitySortKey.localeCompare(right.identitySortKey)
     || left.inputIndex - right.inputIndex
   ));
-  const providerCounts = new Map();
   const providerTotals = new Map();
   for (const candidate of candidates) {
     providerTotals.set(candidate.record.provider, (providerTotals.get(candidate.record.provider) || 0) + 1);
@@ -232,7 +265,6 @@ function buildQuota(limits) {
   const identityCounts = new Map();
   const output = candidates.map((candidate) => {
     const providerId = candidate.record.provider;
-    providerCounts.set(providerId, (providerCounts.get(providerId) || 0) + 1);
     const providerOrdinal = (providerOrdinals.get(providerId) || 0) + 1;
     providerOrdinals.set(providerId, providerOrdinal);
     const identityKey = `${providerId}|${candidate.identitySortKey}`;
@@ -256,7 +288,7 @@ function buildQuota(limits) {
     };
   }).map((provider) => ({
     ...provider,
-    displayName: `${providerLabel(provider.provider)}${providerCounts.get(provider.provider) > 1 ? ` ${provider._providerOrdinal}` : ''}`
+    displayName: providerLabel(provider.provider)
   }));
   return output.sort((left, right) => {
     const leftReady = left.status === 'ok' && (left.balance || left.windows.length) ? 0 : 1;
@@ -418,7 +450,7 @@ function buildPeriodSnapshot(stats, period, generatedAt, history, sourceUpdatedA
     primaryTool: tools[0]?.id || null,
     updatedAt: sourceUpdatedAt || normalizedIso(stats?.updatedAt) || generatedAt
   };
-  return { overview, models, activity, trend };
+  return { overview, tools, models, activity, trend };
 }
 
 function buildPresentation(source = {}) {
@@ -464,7 +496,7 @@ function buildMacWidgetSnapshot(stats, options = {}) {
   const generatedAt = safeNow.toISOString();
   const sourceFreshness = resolveWidgetSourceFreshness(stats, safeNow);
   const presentation = buildPresentation(options.presentation);
-  const quota = buildQuota(stats?.limits);
+  const quota = buildQuota(stats?.limits, options.activeCodexAccount);
   const history = options.history;
   const periods = {
     day: buildPeriodSnapshot(stats, 'today', generatedAt, history, sourceFreshness.sourceUpdatedAt, safeNow),
@@ -485,6 +517,7 @@ function buildMacWidgetSnapshot(stats, options = {}) {
     periods,
     overview: selected.overview,
     quota,
+    tools: selected.tools,
     models: selected.models,
     activity: selected.activity,
     trend: selected.trend,

@@ -240,7 +240,7 @@ test('serializes aggregate stats before writing the snapshot', async () => {
 
     assert.equal(result.ok, true);
     const snapshot = JSON.parse(await fs.readFile(snapshotPath, 'utf8'));
-    assert.equal(snapshot.schemaVersion, 6);
+    assert.equal(snapshot.schemaVersion, 8);
     assert.equal(snapshot.generatedAt, '2026-07-16T09:00:00.000Z');
     assert.equal(snapshot.overview.totalTokens, 42);
     assert.equal(snapshot.overview.costUsd, 0.5);

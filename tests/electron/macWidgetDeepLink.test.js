@@ -7,6 +7,7 @@ const { parseMacWidgetDeepLink } = require('../../src/electron/macWidgetDeepLink
 test('maps every Widget page to the matching application area', () => {
   assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://overview', 'token-monitor-widget-dev'), { page: 'overview', view: 'home', settings: false });
   assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://quota', 'token-monitor-widget-dev'), { page: 'quota', view: 'limits', settings: false });
+  assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://tools', 'token-monitor-widget-dev'), { page: 'tools', view: 'tool', settings: false });
   assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://models', 'token-monitor-widget-dev'), { page: 'models', view: 'model', settings: false });
   assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://activity', 'token-monitor-widget-dev'), { page: 'activity', view: 'trends', settings: false });
   assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://trend', 'token-monitor-widget-dev'), { page: 'trend', view: 'trends', settings: false });

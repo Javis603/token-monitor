@@ -86,6 +86,17 @@ function resolveWidgetUrlScheme(env = process.env, root = path.resolve(__dirname
   return normalizeWidgetURLScheme(value, DEFAULT_WIDGET_URL_SCHEME);
 }
 
+function localWidgetSigningIdentity(env, appGroup) {
+  const explicitIdentity = String(env.TOKEN_MONITOR_MAC_DEVELOPMENT_IDENTITY || '').trim();
+  if (explicitIdentity) return explicitIdentity;
+
+  const developmentTeam = String(env.DEVELOPMENT_TEAM || '').trim();
+  if (developmentTeam && String(appGroup || '').startsWith(`${developmentTeam}.`)) {
+    return 'Apple Development';
+  }
+  return '-';
+}
+
 function widgetMacBuildConfig(baseMac = {}, options = {}) {
   const env = options.env || process.env;
   const root = options.root || path.resolve(__dirname, '..');
@@ -100,6 +111,7 @@ function widgetMacBuildConfig(baseMac = {}, options = {}) {
   assertWidgetArtifacts(root, { env });
   const urlScheme = resolveWidgetUrlScheme(env, root);
   const localDevelopmentSigning = String(env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING || '').trim() === '1';
+  const appGroup = String(env.TOKEN_MONITOR_APP_GROUP || 'group.com.example.tokenmonitor').trim();
   const extraFiles = Array.isArray(base.extraFiles)
     ? base.extraFiles
     : (base.extraFiles === undefined ? [] : [base.extraFiles]);
@@ -108,7 +120,7 @@ function widgetMacBuildConfig(baseMac = {}, options = {}) {
     : (base.extraResources === undefined ? [] : [base.extraResources]);
   return {
     ...base,
-    ...(localDevelopmentSigning ? { identity: '-' } : {}),
+    ...(localDevelopmentSigning ? { identity: localWidgetSigningIdentity(env, appGroup) } : {}),
     entitlements: 'build/macos-widget/TokenMonitor.entitlements',
     sign: 'scripts/sign-macos-with-widget.js',
     extraFiles: [
@@ -160,6 +172,7 @@ module.exports = {
   DEFAULT_WIDGET_URL_SCHEME,
   assertWidgetArtifacts,
   createBuilderConfig,
+  localWidgetSigningIdentity,
   resolveWidgetUrlScheme,
   widgetArtifactPaths,
   widgetEnabled,
