@@ -36,10 +36,12 @@ and an optional `factoryCredits` (Factory Standard Credits) that tokscale's acco
 - The kernel is shared, and so is the data: a future `factory` tracked client scanning
   `~/.factory/sessions` would double-count every session. Usage collection stays solely under
   `droid`; a `factory` provider is quota/balance only.
-- Auth overlaps by design — one login serves the CLI and the desktop app. Tokens live in the OS
-  keyring (`~/.factory/auth.v2.loginkeychain`); API keys live in plain `~/.factory/.env`
-  (`FACTORY_API_KEY`). Discovery may use the plain file or keyring *presence*; keyring contents
-  stay off-limits.
+- Auth overlaps by design — one login serves the CLI and the desktop app. droid keeps login
+  tokens in one of three stores (`auth.v2.keyring` via keytar, `auth.v2.loginkeychain`,
+  `auth.v2.file`); the loginkeychain variant is a plain local file, so token material is
+  locally readable. API keys live in plain `~/.factory/.env` (`FACTORY_API_KEY`). Whether a
+  future provider may read the loginkeychain at all is the open question on PR #682; the
+  API-key file is the safe floor.
 
 | Data plane | Read by | Source |
 | --- | --- | --- |
