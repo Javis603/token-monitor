@@ -500,3 +500,50 @@ test('resetting the capability cache lets the workspace grouping be tried again'
     delete require.cache[collectorPath];
   }
 });
+
+test('turning Projects off stops asking the scan to resolve workspaces', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    setImmediate(() => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+
+  const collectorPath = require.resolve('../../src/shared/collector');
+  delete require.cache[collectorPath];
+
+  try {
+    const { collectUsageOnce } = require(collectorPath);
+    await collectUsageOnce({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false,
+      projectsEnabled: false
+    });
+
+    // Resolving and labelling workspaces is work the scan only does when asked,
+    // so the opt-out has to reach the argument list rather than discard the
+    // answer afterwards. Session titles and activity bounds ride this grouping
+    // too, so the opt-out costs no timestamps.
+    assert.equal(calls.length, 3);
+    for (const args of calls) {
+      assert.equal(args[args.indexOf('--group-by') + 1], 'client,session,model');
+    }
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});

@@ -444,14 +444,19 @@ function runCursorAwareTokscale(clientFilter, operation, signal) {
   return includesCursor ? withCursorLifecycle(operation, { signal }) : operation();
 }
 
-function runTokscale({ clients, flags, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed }) {
+function runTokscale({ clients, flags, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, workspaces = true }) {
   throwIfAborted(signal);
   const command = tokscaleCommand();
   const requested = tokscaleClientFilter(clients);
   if (!requested) return Promise.resolve({ entries: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
   if (!clientFilter) return Promise.resolve({ entries: [] });
-  const groupBy = workspaceGroupBySupported(command.identity)
+  // Asking for the join is what makes the scan resolve and label workspaces, so
+  // the Projects opt-out has to be applied here rather than on the way out: a
+  // scan that still resolved them and had its answer discarded would keep
+  // charging for a feature the user turned off. Session titles and activity
+  // bounds ride the plain session grouping too, so they are unaffected.
+  const groupBy = workspaces && workspaceGroupBySupported(command.identity)
     ? TOKSCALE_WORKSPACE_GROUP_BY
     : TOKSCALE_SESSION_GROUP_BY;
   const runArgs = (filter, grouping = groupBy) => ['--json', '--client', filter, '--group-by', grouping, ...flags];
@@ -995,8 +1000,10 @@ async function collectUsageOnce(options) {
       // Diagnostics observers must never affect collection or cancellation.
     }
   };
+  const projectsEnabled = options.projectsEnabled !== false;
   const runTokscaleScan = options.runTokscale || ((input) => runTokscale({
     ...input,
+    workspaces: projectsEnabled,
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
@@ -1020,7 +1027,6 @@ async function collectUsageOnce(options) {
     ? hostOsInfo()
     : normalizeOsInfo(options.osInfo);
   const normalizedClients = normalizeClientsCsv(clients);
-  const projectsEnabled = options.projectsEnabled !== false;
   const localSessionMetadataDeps = {
     ...(options.sessionMetadataDeps || {}),
     metadataCache: new Map(),
