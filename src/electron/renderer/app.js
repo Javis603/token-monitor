@@ -11204,9 +11204,47 @@ function friendlyPath(dir) {
   return clientHealthPresentationApi.friendlyPath(dir, state.appInfo?.homeDir, state.appInfo?.platform);
 }
 
+let customScanPathMutationQueue = Promise.resolve();
+
 function customScanPathsForClient(clientId) {
   const paths = state.settings?.customScanPaths?.[clientId];
   return Array.isArray(paths) ? paths : [];
+}
+
+function queueCustomScanPathMutation(operation) {
+  const queued = customScanPathMutationQueue.then(operation, operation);
+  // A rejected mutation must not poison the queue. The caller still receives
+  // the original result while the retained tail always permits the next edit.
+  customScanPathMutationQueue = queued.catch(() => {});
+  return queued;
+}
+
+function mutateCustomScanPaths(clientId, mutation, options = {}) {
+  return queueCustomScanPathMutation(async () => {
+    try {
+      // Read inside the queue so every operation starts from the settings
+      // returned by the preceding save, including edits for another client.
+      const current = customScanPathsForClient(clientId);
+      const next = mutation(current);
+      if (!Array.isArray(next)) return;
+      const customScanPaths = { ...(state.settings?.customScanPaths || {}) };
+      if (next.length > 0) customScanPaths[clientId] = next;
+      else delete customScanPaths[clientId];
+      const patch = { customScanPaths };
+      if (options.enableClient === true) {
+        const tracked = enabledClientSet();
+        if (!tracked.has(clientId)) patch.clients = [...tracked, clientId].join(',');
+      }
+      await saveSettings(patch);
+      state.customScanPathErrors.delete(clientId);
+      resetClientSourceProbe(clientId);
+      loadClientSources(clientId, { force: true });
+      refillOpenClientHealthPanel();
+    } catch (_) {
+      state.customScanPathErrors.set(clientId, 'settings.tools.health.customSourceError');
+      refillOpenClientHealthPanel();
+    }
+  });
 }
 
 function customSourceIcon(kind) {
@@ -11232,20 +11270,9 @@ async function addCustomScanPath(clientId) {
     const result = await window.tokenMonitor?.pickCustomScanPath?.(clientId);
     if (result?.canceled) return;
     if (!result?.ok || !result.dir) throw new Error(result?.error || 'pick-failed');
-    const current = customScanPathsForClient(clientId);
-    if (current.includes(result.dir)) return;
-    const customScanPaths = {
-      ...(state.settings?.customScanPaths || {}),
-      [clientId]: [...current, result.dir]
-    };
-    const tracked = enabledClientSet();
-    const patch = { customScanPaths };
-    if (!tracked.has(clientId)) patch.clients = [...tracked, clientId].join(',');
-    await saveSettings(patch);
-    state.customScanPathErrors.delete(clientId);
-    resetClientSourceProbe(clientId);
-    loadClientSources(clientId, { force: true });
-    refillOpenClientHealthPanel();
+    await mutateCustomScanPaths(clientId, (current) => (
+      current.includes(result.dir) ? null : [...current, result.dir]
+    ), { enableClient: true });
   } catch (_) {
     state.customScanPathErrors.set(clientId, 'settings.tools.health.customSourceError');
     refillOpenClientHealthPanel();
@@ -11253,20 +11280,10 @@ async function addCustomScanPath(clientId) {
 }
 
 async function removeCustomScanPath(clientId, dir) {
-  try {
-    const remaining = customScanPathsForClient(clientId).filter((entry) => entry !== dir);
-    const customScanPaths = { ...(state.settings?.customScanPaths || {}) };
-    if (remaining.length > 0) customScanPaths[clientId] = remaining;
-    else delete customScanPaths[clientId];
-    await saveSettings({ customScanPaths });
-    state.customScanPathErrors.delete(clientId);
-    resetClientSourceProbe(clientId);
-    loadClientSources(clientId, { force: true });
-    refillOpenClientHealthPanel();
-  } catch (_) {
-    state.customScanPathErrors.set(clientId, 'settings.tools.health.customSourceError');
-    refillOpenClientHealthPanel();
-  }
+  await mutateCustomScanPaths(clientId, (current) => {
+    const remaining = current.filter((entry) => entry !== dir);
+    return remaining.length === current.length ? null : remaining;
+  });
 }
 
 // Values are formatted here and nowhere else — the presentation helper returns
