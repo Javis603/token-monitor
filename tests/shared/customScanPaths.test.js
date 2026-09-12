@@ -58,7 +58,13 @@ test('Windows paths deduplicate case-insensitively and remain absolute', () => {
 });
 
 test('custom scan path limits reject a seventeenth path for one client', () => {
-  assert.equal(customScanPathLimitError({ codex: paths('codex', 17) }, { platform: 'linux' }),
+  const oversized = paths('codex', 18);
+  Object.defineProperty(oversized, 17, {
+    get() {
+      throw new Error('validation read beyond the first over-limit path');
+    }
+  });
+  assert.equal(customScanPathLimitError({ codex: oversized }, { platform: 'linux' }),
     CUSTOM_SCAN_PATH_LIMIT_ERRORS.PER_CLIENT);
 });
 

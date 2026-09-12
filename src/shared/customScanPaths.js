@@ -32,6 +32,7 @@ function validCustomScanPaths(value, options = {}) {
   const platform = options.platform || process.platform;
   const allowedClients = options.allowedClients || TOKSCALE_CLIENTS;
   const result = {};
+  let total = 0;
   for (const client of CLIENT_IDS) {
     const rawPaths = value[client];
     if (!allowedClients.has(client) || !Array.isArray(rawPaths)) continue;
@@ -47,8 +48,13 @@ function validCustomScanPaths(value, options = {}) {
       if (seen.has(key)) continue;
       seen.add(key);
       paths.push(dir);
+      // One value beyond either limit is enough for validation to reject the
+      // mutation. Keep normalization of damaged settings bounded as well.
+      if (paths.length > MAX_CUSTOM_SCAN_PATHS_PER_CLIENT || total + paths.length > MAX_CUSTOM_SCAN_PATHS) break;
     }
     if (paths.length > 0) result[client] = paths;
+    total += paths.length;
+    if (total > MAX_CUSTOM_SCAN_PATHS) break;
   }
   return result;
 }

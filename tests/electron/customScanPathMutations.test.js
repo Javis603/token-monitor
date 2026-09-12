@@ -39,14 +39,11 @@ function mutationHarness(initialCustomScanPaths, saveSettings) {
     context
   );
   return {
-    mutate: (clientId, dir) => vm.runInContext(
-      `mutateCustomScanPaths(${JSON.stringify(clientId)}, (current) => [...current, ${JSON.stringify(dir)}])`,
-      context
+    mutate: (clientId, dir) => context.mutateCustomScanPaths(
+      clientId,
+      (current) => [...current, dir]
     ),
-    remove: (clientId, dir) => vm.runInContext(
-      `removeCustomScanPath(${JSON.stringify(clientId)}, ${JSON.stringify(dir)})`,
-      context
-    ),
+    remove: (clientId, dir) => context.removeCustomScanPath(clientId, dir),
     state
   };
 }
