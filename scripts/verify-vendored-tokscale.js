@@ -49,6 +49,25 @@ const FIXTURE_LINES = [
 ];
 const EXPECTED = { client: FIXTURE_CLIENT, model: 'deepseek-reasoner', input: 2885, output: 2, reasoning: 23, cacheRead: 0 };
 
+// Second capability this fixture proves: the collector asks for the fork's
+// workspace-joined grouping so one scan can attribute sessions to projects. A
+// pin that quietly loses that patch would still parse DSH correctly and still
+// report the right totals — the collector would just fall back and projects
+// would go back to being re-derived by reopening every transcript, which no
+// other test can see. Under `upstream` mode the assertion inverts: the binary
+// is not expected to carry a downstream patch, so what gets pinned instead is
+// the rejection the fallback keys on.
+const SESSION_GROUP_BY = 'client,workspace,session,model';
+const EXPECTED_SESSION = {
+  client: FIXTURE_CLIENT,
+  sessionId: FIXTURE_SESSION_ID,
+  firstActiveMs: 1785730448979,
+  lastActiveMs: 1785730448979
+};
+const EXPECTED_WORKSPACE = { workspaceKey: '/tmp/dsh-workspace', label: 'dsh-workspace' };
+// isUnknownTokscaleGroupByError() in src/shared/collector.js matches this.
+const GROUP_BY_REJECTION = /invalid group-by value/i;
+
 // Guaranteed-unreachable loopback port (nothing listens on 9/discard), used
 // as an offline guarantee for pricing lookups even if TOKSCALE_PRICING_CACHE_ONLY
 // is ever bypassed by a future code path — same technique tokscale's own
@@ -111,12 +130,16 @@ function hermeticEnv(home) {
   return env;
 }
 
-function runAgainstFixture(binPath, home) {
-  const result = spawnSync(binPath, ['--json', '--client', FIXTURE_CLIENT, '--group-by', 'client,model', '--no-spinner'], {
+function spawnFixture(binPath, home, groupBy) {
+  return spawnSync(binPath, ['--json', '--client', FIXTURE_CLIENT, '--group-by', groupBy, '--no-spinner'], {
     encoding: 'utf8',
     timeout: 15_000,
     env: hermeticEnv(home)
   });
+}
+
+function runAgainstFixture(binPath, home, groupBy = 'client,model') {
+  const result = spawnFixture(binPath, home, groupBy);
   if (result.error) throw new Error(`Fixture run failed to execute: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`Fixture run exited ${result.status}: ${result.stderr || result.stdout}`);
   let parsed;
@@ -143,6 +166,40 @@ function assertExpected(parsed) {
   }
 }
 
+function assertSessionMetadata(parsed) {
+  const entry = (Array.isArray(parsed.entries) ? parsed.entries : [])[0];
+  if (!entry || entry.sessionId !== FIXTURE_SESSION_ID || entry.workspaceKey !== EXPECTED_WORKSPACE.workspaceKey) {
+    throw new Error(
+      `Expected the joined grouping to put both the session id and its workspace on the row, got ${JSON.stringify(entry)}.`
+    );
+  }
+  const session = (Array.isArray(parsed.sessions) ? parsed.sessions : [])[0];
+  const sessionMismatches = Object.entries(EXPECTED_SESSION).filter(([key, value]) => session?.[key] !== value);
+  if (sessionMismatches.length > 0) {
+    throw new Error(
+      `Session metadata mismatch — expected ${JSON.stringify(EXPECTED_SESSION)}, got ${JSON.stringify(session)}.`
+    );
+  }
+  const workspace = (Array.isArray(parsed.workspaces) ? parsed.workspaces : [])[0];
+  const workspaceMismatches = Object.entries(EXPECTED_WORKSPACE).filter(([key, value]) => workspace?.[key] !== value);
+  if (workspaceMismatches.length > 0) {
+    throw new Error(
+      `Workspace metadata mismatch — expected ${JSON.stringify(EXPECTED_WORKSPACE)}, got ${JSON.stringify(workspace)}.`
+    );
+  }
+}
+
+function assertGroupByRejected(result) {
+  const output = `${result.stderr || ''}${result.stdout || ''}`;
+  if (result.status === 0 || !GROUP_BY_REJECTION.test(output)) {
+    throw new Error(
+      `Expected an upstream binary to reject '${SESSION_GROUP_BY}' with the message the collector's fallback matches, ` +
+        `got exit ${result.status}: ${output.trim() || '(no output)'}. If upstream now accepts it, the collector's ` +
+        'fallback and this check should be revisited together.'
+    );
+  }
+}
+
 function main() {
   const manifest = loadManifest();
   const isUpstream = manifestMode(manifest) === 'upstream';
@@ -160,11 +217,19 @@ function main() {
   try {
     const parsed = runAgainstFixture(binPath, home);
     assertExpected(parsed);
+    if (isUpstream) {
+      assertGroupByRejected(spawnFixture(binPath, home, SESSION_GROUP_BY));
+    } else {
+      assertSessionMetadata(runAgainstFixture(binPath, home, SESSION_GROUP_BY));
+    }
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
 
-  console.log(`Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): DSH fixture parses with correct reasoning-corrected token buckets.`);
+  console.log(
+    `Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): DSH fixture parses with correct ` +
+      `reasoning-corrected token buckets, and ${isUpstream ? `'${SESSION_GROUP_BY}' is rejected as the collector's fallback expects` : 'the joined grouping reports session and workspace metadata'}.`
+  );
 }
 
 if (require.main === module) {

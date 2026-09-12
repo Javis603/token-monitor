@@ -186,6 +186,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'codebuddy-projects',
   'codex-sessions',
   'commandcode-projects',
+  'custom-scan-path',
   'copilot-data',
   'copilot-otel',
   'copilot-otel-exporter',

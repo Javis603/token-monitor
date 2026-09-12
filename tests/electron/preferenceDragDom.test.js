@@ -190,6 +190,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
 
   const signature = functionBody(app, 'toolPreferenceRenderSignature', 'renderToolPreferencesNow');
   assert.match(signature, /\[\.\.\.enabledClientSet\(\)\]\.sort\(\)/);
+  assert.match(signature, /state\.settings\?\.customScanPaths/);
   assert.doesNotMatch(signature, /trackedClients/);
   assert.match(signature, /healthRows: KNOWN_CLIENTS\.map/);
   assert.match(signature, /health\?\.clients\?\.\[id\]\?\.overall/);
@@ -204,6 +205,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
 
   const body = functionBody(app, 'renderToolPreferencesNow', 'connectLimitProviderCheckboxName');
   const fill = functionBody(app, 'fillClientHealthPanel', 'clientHealthGroup');
+  const healthGroup = functionBody(app, 'clientHealthGroup', 'clientHealthPanel');
   assert.match(body, /state\.toolPreferenceRenderSignature === renderSignature/);
   assert.match(body, /state\.toolPreferenceDetailSignature !== detailSignature/);
   assert.match(body, /state\.settings\?\.currencyRatesEffective \|\| null/);
@@ -211,6 +213,9 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(body, /loadClientSources\(state\.clientHealthExpanded\);\s*refillOpenClientHealthPanel\(\);/);
   assert.match(body, /else \{\s*refillOpenClientHealthPanel\(\);\s*\}/);
   assert.match(body, /const detail = clientHealthDetailFor\(id\);/);
+  assert.match(healthGroup, /state\.appInfo\?\.customScanClientIds\?\.includes\(clientId\)/);
+  assert.match(healthGroup, /addCustomScanPath/);
+  assert.match(healthGroup, /tool-health-source-remove/);
   assert.match(body, /visibility\.id = `toolVisibility-\$\{id\}`/);
   assert.match(body, /pin\.id = `toolPin-\$\{id\}`/);
   assert.match(body, /const focusedId = document\.activeElement\?\.id \|\| ''/);
