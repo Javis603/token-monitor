@@ -68,6 +68,12 @@ subscription.
   homes are the per-tool custom-scan-paths use case — tokscale's droid scanner honors
   `TOKSCALE_EXTRA_DIRS` (verified against the pinned build).
 
+The pinned tokscale fork also emits scan-backed `sessions` timestamps (`firstActiveMs` /
+`lastActiveMs`) for droid, and the collector folds them in before this resolver runs. The two
+sources reconcile rather than race — earliest start wins, latest last-activity wins — and the
+scan does not answer two things the index still owns: it carries no `title`, and its `workspaces`
+array is not decoded for droid, so title and project attribution remain resolver-provided.
+
 ## Session Detail is deliberately not supported
 
 `parseByClient` in `sessionDetail.js` parses claude and codex transcripts only, and the README's
