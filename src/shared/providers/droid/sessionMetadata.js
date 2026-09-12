@@ -24,7 +24,9 @@ function readDroidSessionIndex(indexPath, readFileSync = fs.readFileSync) {
 
 function isoFromEpoch(value) {
   const ms = Number(value);
-  return Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : '';
+  if (!Number.isFinite(ms) || ms <= 0) return '';
+  const date = new Date(ms);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
 }
 
 function droidSessionMetadataFromEntry(entry, { projectIdentity, resolveProjects }) {

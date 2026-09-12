@@ -66,6 +66,18 @@ test('skips project identity when resolveProjects is disabled', () => {
   assert.equal(result.get('s').startedAt, new Date(1000).toISOString());
 });
 
+test('ignores finite timestamps outside the Date range', () => {
+  const home = makeHome(JSON.stringify({
+    entries: [{ sessionId: 'out-of-range', title: 'still usable', createdAt: 1e20, mtime: 1e300 }]
+  }));
+  const result = droid.resolveSessionMetadata(new Set(['out-of-range']), {
+    home,
+    projectIdentity,
+    resolveProjects: true
+  });
+  assert.deepEqual(result.get('out-of-range'), { title: 'still usable' });
+});
+
 test('malformed or missing indexes resolve to an empty map', () => {
   assert.deepEqual(droid.resolveSessionMetadata(new Set(['a']), {
     home: makeHome('{not json'), projectIdentity, resolveProjects: true
