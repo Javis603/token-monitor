@@ -2114,6 +2114,10 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   const entries = [];
   const claimed = new Map();
   let boundedCount = 0;
+  const customRoots = new Map(Object.entries(customScanPaths).map(([client, dirs]) => [
+    client,
+    new Set(dirs.map(canonicalRoot))
+  ]));
   // Same-root duplicates within one client (Kiro's cased globalStorage spellings,
   // Zed's per-platform roots) collapse here. Duplicates ACROSS clients must not:
   // two policies on one directory is precisely the overlap the union resolves,
@@ -2123,8 +2127,12 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   const bound = (client, dirs, policy) => {
     if (!claimed.has(client)) claimed.set(client, new Set());
     const seen = claimed.get(client);
-    for (const dir of dirs) seen.add(dir);
-    for (const root of new Set(dirs.map(canonicalRoot))) {
+    // Built-in policies describe each client's default directory shape. A
+    // custom root follows Tokscale's recursive extra-root contract instead,
+    // even when it belongs to a client whose default root is tightly pruned.
+    const boundedDirs = dirs.filter((dir) => !customRoots.get(client)?.has(canonicalRoot(dir)));
+    for (const dir of boundedDirs) seen.add(dir);
+    for (const root of new Set(boundedDirs.map(canonicalRoot))) {
       entries.push({ root, prefix: root + path.sep, policy });
       boundedCount += 1;
     }

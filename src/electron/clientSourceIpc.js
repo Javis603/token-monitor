@@ -52,7 +52,13 @@ function createClientSourceIpcHandlers(options = {}) {
           exists: root.exists === true,
           ...(root.custom === true ? { custom: true } : {})
         }));
-      const sources = all.slice(0, 32);
+      const custom = all.filter((root) => root.custom === true).slice(0, 32);
+      const sources = all.length <= 32
+        ? all
+        : [
+            ...all.filter((root) => root.custom !== true).slice(0, 32 - custom.length),
+            ...custom
+          ];
       return { sources, omittedCount: all.length - sources.length };
     } catch (_) {
       return null;

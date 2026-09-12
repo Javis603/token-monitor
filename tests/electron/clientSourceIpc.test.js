@@ -96,6 +96,29 @@ test('tracked clients retain source inspection and rescan behavior', async () =>
   assert.deepEqual(calls.rescans, ['codex']);
 });
 
+test('source inspection keeps every custom source when the diagnostic cap is exceeded', () => {
+  const builtIns = Array.from({ length: 32 }, (_, index) => ({
+    id: `codex-data-${index}`,
+    dir: `/tmp/codex-${index}`,
+    exists: true
+  }));
+  const custom = Array.from({ length: 16 }, (_, index) => ({
+    id: 'custom-scan-path',
+    dir: `/tmp/custom-${index}`,
+    exists: true,
+    custom: true
+  }));
+  const handlers = createClientSourceIpcHandlers({
+    knownClients: ['codex'],
+    visibleDiagnosticRoots: () => ({ codex: [...builtIns, ...custom] })
+  });
+
+  const result = handlers.clientSources('codex');
+  assert.equal(result.sources.length, 32);
+  assert.equal(result.sources.filter((source) => source.custom === true).length, 16);
+  assert.equal(result.omittedCount, 16);
+});
+
 test('Antigravity sync-lock repair is tracked-only and re-scans only after a safe repair', async () => {
   const untracked = createHandlers();
   assert.deepEqual(

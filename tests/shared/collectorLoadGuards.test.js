@@ -4580,12 +4580,12 @@ test('Tokscale headless capture roots are optional only while they are the defau
   }
 });
 
-test('custom Tokscale scan paths stay visible while missing and join watcher discovery when present', () => {
+test('custom Tokscale scan paths stay visible and use recursive extra-root watcher semantics', () => {
   const tmp = withTmpHome([]);
   const originalHomedir = os.homedir;
   os.homedir = () => tmp;
   try {
-    const { clientSourceChecks, visibleDiagnosticRoots, watchPathsForClients } = freshCollector();
+    const { clientSourceChecks, visibleDiagnosticRoots, watchIgnoreMatcher, watchPathsForClients } = freshCollector();
     const custom = path.join(tmp, 'relocated', 'codex');
     const options = { customScanPaths: { codex: [custom] } };
 
@@ -4604,6 +4604,12 @@ test('custom Tokscale scan paths stay visible while missing and join watcher dis
 
     fs.mkdirSync(custom, { recursive: true });
     assert.equal(watchPathsForClients('codex', options).includes(custom), true);
+
+    const opencodeOptions = { customScanPaths: { opencode: [custom] } };
+    const ignored = watchIgnoreMatcher('opencode', opencodeOptions);
+    assert.equal(ignored(path.join(custom, 'direct.json')), false);
+    assert.equal(ignored(path.join(custom, 'nested')), false);
+    assert.equal(ignored(path.join(custom, 'nested', 'session.json')), false);
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];

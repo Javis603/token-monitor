@@ -58,13 +58,7 @@ test('Windows paths deduplicate case-insensitively and remain absolute', () => {
 });
 
 test('custom scan path limits reject a seventeenth path for one client', () => {
-  const oversized = paths('codex', 18);
-  Object.defineProperty(oversized, 17, {
-    get() {
-      throw new Error('validation read beyond the first over-limit path');
-    }
-  });
-  assert.equal(customScanPathLimitError({ codex: oversized }, { platform: 'linux' }),
+  assert.equal(customScanPathLimitError({ codex: paths('codex', 17) }, { platform: 'linux' }),
     CUSTOM_SCAN_PATH_LIMIT_ERRORS.PER_CLIENT);
 });
 
@@ -82,6 +76,19 @@ test('custom scan path limits reject a sixty-fifth path without displacing later
     codex: [...existing.codex, '/var/data/codex-16']
   }, { platform: 'linux' }), CUSTOM_SCAN_PATH_LIMIT_ERRORS.GLOBAL);
   assert.deepEqual(normalizeCustomScanPaths(existing, { platform: 'linux' }), existing);
+});
+
+test('normalization keeps the full global allowance across overflowing clients', () => {
+  const normalized = normalizeCustomScanPaths({
+    claude: paths('claude', 17),
+    codex: paths('codex', 17),
+    opencode: paths('opencode', 17),
+    hermes: paths('hermes', 17)
+  }, { platform: 'linux' });
+
+  assert.deepEqual(Object.fromEntries(
+    Object.entries(normalized).map(([client, entries]) => [client, entries.length])
+  ), { claude: 16, codex: 16, opencode: 16, hermes: 16 });
 });
 
 test('Tokscale extra directories append without replacing an existing environment value', () => {
