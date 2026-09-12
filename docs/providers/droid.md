@@ -5,6 +5,7 @@ read_when:
   - Investigating Droid usage that is missing from, or zero in, the widget
   - Touching providers/droid/sessionMetadata.js or the droid-sessions source root
   - Considering FACTORY_HOME_OVERRIDE or custom scan paths for relocated Droid data
+  - Considering a Factory (`factory`) limits provider, OAuth discovery, or a second scanner for the same sessions
 ---
 
 # Droid (Factory) provider
@@ -26,6 +27,19 @@ so one tracked client (`droid`) covers both front-ends and tokscale's recursive
 `*.settings.json` scan needs no desktop-specific root. The settings file carries one `model` per
 session plus cumulative `tokenUsage.{inputTokens,outputTokens,cacheCreationTokens,cacheReadTokens,thinkingTokens}`
 and an optional `factoryCredits` (Factory Standard Credits) that tokscale's accounting does not read.
+
+## Naming and identity: `droid` tracks, `factory` bills
+
+- The tracked client id is `droid` — tokscale's name and the agent product's own. The vendor and
+  billing plane are `factory` (`api.factory.ai`, `app.factory.ai`), so a future limits provider
+  registers as `factory` under `providers/factory/`; this folder stays usage-side only.
+- The kernel is shared, and so is the data: a future `factory` tracked client scanning
+  `~/.factory/sessions` would double-count every session. Usage collection stays solely under
+  `droid`; a `factory` provider is quota/balance only.
+- Auth overlaps by design — one login serves the CLI and the desktop app. Tokens live in the OS
+  keyring (`~/.factory/auth.v2.loginkeychain`); API keys live in plain `~/.factory/.env`
+  (`FACTORY_API_KEY`). Discovery may use the plain file or keyring *presence*; keyring contents
+  stay off-limits.
 
 | Data plane | Read by | Source |
 | --- | --- | --- |
