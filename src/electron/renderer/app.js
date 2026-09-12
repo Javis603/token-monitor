@@ -11219,6 +11219,17 @@ function queueCustomScanPathMutation(operation) {
   return queued;
 }
 
+function customScanPathErrorKey(error) {
+  const message = String(error?.message || error || '');
+  if (message.includes('custom-scan-path-limit-per-client')) {
+    return 'settings.tools.health.customSourcePerClientLimit';
+  }
+  if (message.includes('custom-scan-path-limit-global')) {
+    return 'settings.tools.health.customSourceGlobalLimit';
+  }
+  return 'settings.tools.health.customSourceError';
+}
+
 function mutateCustomScanPaths(clientId, mutation, options = {}) {
   return queueCustomScanPathMutation(async () => {
     try {
@@ -11240,8 +11251,8 @@ function mutateCustomScanPaths(clientId, mutation, options = {}) {
       resetClientSourceProbe(clientId);
       loadClientSources(clientId, { force: true });
       refillOpenClientHealthPanel();
-    } catch (_) {
-      state.customScanPathErrors.set(clientId, 'settings.tools.health.customSourceError');
+    } catch (error) {
+      state.customScanPathErrors.set(clientId, customScanPathErrorKey(error));
       refillOpenClientHealthPanel();
     }
   });
@@ -11273,8 +11284,8 @@ async function addCustomScanPath(clientId) {
     await mutateCustomScanPaths(clientId, (current) => (
       current.includes(result.dir) ? null : [...current, result.dir]
     ), { enableClient: true });
-  } catch (_) {
-    state.customScanPathErrors.set(clientId, 'settings.tools.health.customSourceError');
+  } catch (error) {
+    state.customScanPathErrors.set(clientId, customScanPathErrorKey(error));
     refillOpenClientHealthPanel();
   }
 }

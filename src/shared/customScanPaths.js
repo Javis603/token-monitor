@@ -7,6 +7,10 @@ const { tokscaleCustomScanClientIds } = require('./tokscaleClientMapping');
 const MAX_CUSTOM_SCAN_PATHS = 64;
 const MAX_CUSTOM_SCAN_PATHS_PER_CLIENT = 16;
 const MAX_CUSTOM_SCAN_PATH_LENGTH = 4096;
+const CUSTOM_SCAN_PATH_LIMIT_ERRORS = Object.freeze({
+  GLOBAL: 'custom-scan-path-limit-global',
+  PER_CLIENT: 'custom-scan-path-limit-per-client'
+});
 // Tokscale exposes extra roots for its recursive/file scanners. Locally parsed
 // clients never enter Tokscale at all. Token Monitor's Kilo row combines the
 // `kilo` CLI database and `kilocode` extension sources; the former rejects
@@ -23,14 +27,11 @@ function isAbsolutePath(value, platform = process.platform) {
   return path.posix.isAbsolute(value);
 }
 
-function normalizeCustomScanPaths(value, options = {}) {
+function validCustomScanPaths(value, options = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const platform = options.platform || process.platform;
   const allowedClients = options.allowedClients || TOKSCALE_CLIENTS;
   const result = {};
-  let total = 0;
-  // Catalog order makes the persisted object and usage fingerprint stable even
-  // if the renderer or an imported settings file supplied keys in another order.
   for (const client of CLIENT_IDS) {
     const rawPaths = value[client];
     if (!allowedClients.has(client) || !Array.isArray(rawPaths)) continue;
@@ -46,11 +47,36 @@ function normalizeCustomScanPaths(value, options = {}) {
       if (seen.has(key)) continue;
       seen.add(key);
       paths.push(dir);
-      total += 1;
-      if (paths.length >= MAX_CUSTOM_SCAN_PATHS_PER_CLIENT || total >= MAX_CUSTOM_SCAN_PATHS) break;
     }
     if (paths.length > 0) result[client] = paths;
-    if (total >= MAX_CUSTOM_SCAN_PATHS) break;
+  }
+  return result;
+}
+
+function customScanPathLimitError(value, options = {}) {
+  const pathsByClient = validCustomScanPaths(value, options);
+  let total = 0;
+  for (const paths of Object.values(pathsByClient)) {
+    if (paths.length > MAX_CUSTOM_SCAN_PATHS_PER_CLIENT) {
+      return CUSTOM_SCAN_PATH_LIMIT_ERRORS.PER_CLIENT;
+    }
+    total += paths.length;
+  }
+  return total > MAX_CUSTOM_SCAN_PATHS ? CUSTOM_SCAN_PATH_LIMIT_ERRORS.GLOBAL : '';
+}
+
+function normalizeCustomScanPaths(value, options = {}) {
+  const pathsByClient = validCustomScanPaths(value, options);
+  const result = {};
+  let total = 0;
+  // Catalog order makes the persisted object and usage fingerprint stable even
+  // if the renderer or an imported settings file supplied keys in another order.
+  for (const [client, rawPaths] of Object.entries(pathsByClient)) {
+    const remaining = MAX_CUSTOM_SCAN_PATHS - total;
+    if (remaining <= 0) break;
+    const paths = rawPaths.slice(0, Math.min(MAX_CUSTOM_SCAN_PATHS_PER_CLIENT, remaining));
+    if (paths.length > 0) result[client] = paths;
+    total += paths.length;
   }
   return result;
 }
@@ -70,9 +96,11 @@ function tokscaleExtraDirsEnv(value, inherited = '', options = {}) {
 }
 
 module.exports = {
+  CUSTOM_SCAN_PATH_LIMIT_ERRORS,
   CUSTOM_SCAN_CLIENT_IDS,
   MAX_CUSTOM_SCAN_PATHS,
   MAX_CUSTOM_SCAN_PATHS_PER_CLIENT,
+  customScanPathLimitError,
   customScanPathEntries,
   normalizeCustomScanPaths,
   tokscaleExtraDirsEnv

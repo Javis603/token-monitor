@@ -4,10 +4,16 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  CUSTOM_SCAN_PATH_LIMIT_ERRORS,
   CUSTOM_SCAN_CLIENT_IDS,
+  customScanPathLimitError,
   normalizeCustomScanPaths,
   tokscaleExtraDirsEnv
 } = require('../../src/shared/customScanPaths');
+
+function paths(prefix, count) {
+  return Array.from({ length: count }, (_, index) => `/var/data/${prefix}-${index + 1}`);
+}
 
 test('custom scan paths keep supported Tokscale clients in catalog order', () => {
   const normalized = normalizeCustomScanPaths({
@@ -49,6 +55,27 @@ test('Windows paths deduplicate case-insensitively and remain absolute', () => {
   }, { platform: 'win32' }), {
     codex: ['C:\\Users\\Me\\Sessions']
   });
+});
+
+test('custom scan path limits reject a seventeenth path for one client', () => {
+  assert.equal(customScanPathLimitError({ codex: paths('codex', 17) }, { platform: 'linux' }),
+    CUSTOM_SCAN_PATH_LIMIT_ERRORS.PER_CLIENT);
+});
+
+test('custom scan path limits reject a sixty-fifth path without displacing later clients', () => {
+  const existing = {
+    codex: paths('codex', 15),
+    opencode: paths('opencode', 16),
+    hermes: paths('hermes', 16),
+    openclaw: paths('openclaw', 1),
+    dsh: paths('dsh', 16)
+  };
+  assert.equal(customScanPathLimitError(existing, { platform: 'linux' }), '');
+  assert.equal(customScanPathLimitError({
+    ...existing,
+    codex: [...existing.codex, '/var/data/codex-16']
+  }, { platform: 'linux' }), CUSTOM_SCAN_PATH_LIMIT_ERRORS.GLOBAL);
+  assert.deepEqual(normalizeCustomScanPaths(existing, { platform: 'linux' }), existing);
 });
 
 test('Tokscale extra directories append without replacing an existing environment value', () => {

@@ -39,6 +39,10 @@ function mutationHarness(initialCustomScanPaths, saveSettings) {
     context
   );
   return {
+    mutate: (clientId, dir) => vm.runInContext(
+      `mutateCustomScanPaths(${JSON.stringify(clientId)}, (current) => [...current, ${JSON.stringify(dir)}])`,
+      context
+    ),
     remove: (clientId, dir) => vm.runInContext(
       `removeCustomScanPath(${JSON.stringify(clientId)}, ${JSON.stringify(dir)})`,
       context
@@ -68,6 +72,23 @@ test('rapid custom path removals serialize and use the latest saved state', asyn
   assert.deepEqual(saves, [{ dsh: ['/sessions/b'] }, {}]);
   assert.deepEqual(harness.state.settings.customScanPaths, {});
 });
+
+for (const [errorCode, messageKey] of [
+  ['custom-scan-path-limit-per-client', 'settings.tools.health.customSourcePerClientLimit'],
+  ['custom-scan-path-limit-global', 'settings.tools.health.customSourceGlobalLimit']
+]) {
+  test(`${errorCode} keeps settings unchanged and shows a specific error`, async () => {
+    const initial = { codex: ['/sessions/codex'] };
+    const harness = mutationHarness(initial, async () => {
+      throw new Error(errorCode);
+    });
+
+    await harness.mutate('codex', '/sessions/extra');
+
+    assert.deepEqual(harness.state.settings.customScanPaths, initial);
+    assert.equal(harness.state.customScanPathErrors.get('codex'), messageKey);
+  });
+}
 
 test('queued custom path removals preserve mutations made for another client', async () => {
   const saves = [];
