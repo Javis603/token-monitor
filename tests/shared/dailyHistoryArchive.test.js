@@ -716,3 +716,112 @@ test('clearDailyHistoryArchive removes persisted data and accepts a missing file
     throw error;
   } }), false);
 });
+
+function cursorLivePeriod(totalTokens, costUsd) {
+  return {
+    capabilities: { tokenComponents: true },
+    totalTokens,
+    costUsd,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    outputTokens: 0,
+    clients: { cursor: totalTokens },
+    clientCosts: { cursor: costUsd },
+    models: { 'cursor-grok-4.6-high': totalTokens },
+    modelCosts: { 'cursor-grok-4.6-high': costUsd },
+    clientModels: { cursor: { 'cursor-grok-4.6-high': totalTokens } },
+    clientModelCosts: { cursor: { 'cursor-grok-4.6-high': costUsd } }
+  };
+}
+
+test('equal-token liveDays snapshot does not inflate cost over the graph archive', () => {
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 202_924_472, 141.5175, 91)
+  ]), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, cursorLivePeriod(202_924_472, 243.0328), {
+    todayKey: '2026-08-18'
+  });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  const day = restored.daily.find((row) => row.date === '2026-08-18');
+  assert.equal(day.tokens, 202_924_472);
+  assert.equal(day.cost, 141.5175);
+  assert.equal(day.perModel['cursor-grok-4.6-high'].cost, 141.5175);
+});
+
+test('equal-token liveDays may lower cost when the graph later corrects pricing', () => {
+  let archive = captureLiveDailyHistory({}, cursorLivePeriod(100, 2), { todayKey: '2026-08-18' });
+  archive = captureDailyHistoryArchive(archive, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 100, 1, 1)
+  ]), { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  const day = restored.daily.find((row) => row.date === '2026-08-18');
+  assert.equal(day.tokens, 100);
+  assert.equal(day.cost, 1);
+});
+
+test('live day with more tokens does not inflate an equal-token model price', () => {
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-28', [
+    client('cursor', 'cursor-grok-4.6-high', 83_478_257, 60.45, 10),
+    client('cursor', 'gpt-5.5', 95_000_000, 27.55, 5)
+  ]), { todayKey: '2026-08-28' });
+  archive = captureLiveDailyHistory(archive, {
+    capabilities: { tokenComponents: true },
+    totalTokens: 234_765_552,
+    costUsd: 141.62,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    outputTokens: 0,
+    clients: { cursor: 234_765_552 },
+    clientCosts: { cursor: 141.62 },
+    models: {
+      'cursor-grok-4.6-high': 83_478_257,
+      'gpt-5.5': 151_287_295
+    },
+    modelCosts: {
+      'cursor-grok-4.6-high': 109.99,
+      'gpt-5.5': 31.63
+    },
+    clientModels: {
+      cursor: {
+        'cursor-grok-4.6-high': 83_478_257,
+        'gpt-5.5': 151_287_295
+      }
+    },
+    clientModelCosts: {
+      cursor: {
+        'cursor-grok-4.6-high': 109.99,
+        'gpt-5.5': 31.63
+      }
+    }
+  }, { todayKey: '2026-08-28' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-29'
+  }), '2026-08-29');
+  const day = restored.daily.find((row) => row.date === '2026-08-28');
+  assert.equal(day.perModel['cursor-grok-4.6-high'].tokens, 83_478_257);
+  assert.equal(day.perModel['cursor-grok-4.6-high'].cost, 60.45);
+  assert.equal(day.tokens, 234_765_552);
+});
+
+test('equal-token liveDays fills in a missing price without requiring more tokens', () => {
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 100, 0, 1)
+  ]), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, cursorLivePeriod(100, 1.5), {
+    todayKey: '2026-08-18'
+  });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  const day = restored.daily.find((row) => row.date === '2026-08-18');
+  assert.equal(day.tokens, 100);
+  assert.equal(day.cost, 1.5);
+});

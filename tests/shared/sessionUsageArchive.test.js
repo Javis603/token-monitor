@@ -468,3 +468,101 @@ test('reapplying an archive never invents a period the preview omitted', () => {
   assert.equal('allTime' in visible, false);
   assert.equal(visible.today.sessions['opencode:o1'].archived, true);
 });
+
+function liveCursorConversationSummary() {
+  return {
+    allTime: {
+      totalTokens: 1000,
+      costUsd: 10,
+      clients: { cursor: 1000 },
+      clientCosts: { cursor: 10 },
+      models: { 'cursor-grok-4.6-high': 1000 },
+      modelCosts: { 'cursor-grok-4.6-high': 10 },
+      sessions: {
+        'cursor:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee': {
+          client: 'cursor',
+          sessionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+          totalTokens: 1000,
+          costUsd: 10,
+          cacheReadTokens: 900,
+          outputTokens: 40,
+          models: { 'cursor-grok-4.6-high': 1000 },
+          modelCosts: { 'cursor-grok-4.6-high': 10 },
+          lastUsedAt: '2026-09-12T11:00:00.000Z'
+        }
+      }
+    }
+  };
+}
+
+function legacyCursorEventArchive() {
+  return {
+    sessions: {
+      'cursor:cursor-active-2026-08-13T02:42:39.510Z': {
+        client: 'cursor',
+        sessionId: 'cursor-active-2026-08-13T02:42:39.510Z',
+        capturedAt: '2026-08-30T06:33:52.626Z',
+        day: '2026-08-30',
+        month: '2026-08',
+        periods: {
+          allTime: {
+            client: 'cursor',
+            sessionId: 'cursor-active-2026-08-13T02:42:39.510Z',
+            totalTokens: 800,
+            costUsd: 8,
+            cacheReadTokens: 700,
+            outputTokens: 50,
+            models: { 'cursor-grok-4.6-high': 800 },
+            modelCosts: { 'cursor-grok-4.6-high': 8 }
+          }
+        }
+      }
+    }
+  };
+}
+
+test('does not reapply Cursor event-scoped archive IDs on top of live conversation sessions', () => {
+  const visible = applySessionUsageArchive(liveCursorConversationSummary(), legacyCursorEventArchive(), {
+    now: new Date('2026-09-12T12:00:00.000Z')
+  });
+
+  assert.equal(visible.allTime.totalTokens, 1000);
+  assert.equal(visible.allTime.costUsd, 10);
+  assert.equal(visible.allTime.clients.cursor, 1000);
+  assert.equal(visible.allTime.models['cursor-grok-4.6-high'], 1000);
+  assert.equal(visible.allTime.sessions['cursor:cursor-active-2026-08-13T02:42:39.510Z'], undefined);
+  assert.equal(visible.allTime.sessions['cursor:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'].archived, undefined);
+});
+
+test('drops Cursor event-scoped IDs when normalizing an existing archive', () => {
+  const normalized = normalizeSessionUsageArchive(legacyCursorEventArchive());
+  assert.deepEqual(normalized.sessions, {});
+});
+
+test('does not capture Cursor event-scoped live sessions into the archive', () => {
+  const summary = liveCursorConversationSummary();
+  summary.allTime.sessions = {
+    'cursor:cursor-active-2026-08-13T02:42:39.510Z': {
+      client: 'cursor',
+      sessionId: 'cursor-active-2026-08-13T02:42:39.510Z',
+      totalTokens: 800,
+      costUsd: 8,
+      models: { 'cursor-grok-4.6-high': 800 },
+      modelCosts: { 'cursor-grok-4.6-high': 8 }
+    }
+  };
+  const archive = captureSessionUsageArchive({}, summary, new Date('2026-09-12T12:00:00.000Z'));
+  assert.equal(archive.sessions['cursor:cursor-active-2026-08-13T02:42:39.510Z'], undefined);
+});
+
+test('still preserves Cursor conversation sessions after the live source drops them', () => {
+  const archive = captureSessionUsageArchive({}, liveCursorConversationSummary(), new Date('2026-09-12T12:00:00.000Z'));
+  const visible = applySessionUsageArchive({ allTime: { sessions: {} } }, archive, {
+    now: new Date('2026-09-12T12:05:00.000Z')
+  });
+
+  assert.equal(archive.sessions['cursor:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'].periods.allTime.totalTokens, 1000);
+  assert.equal(visible.allTime.totalTokens, 1000);
+  assert.equal(visible.allTime.clients.cursor, 1000);
+  assert.equal(visible.allTime.sessions['cursor:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'].archived, true);
+});
