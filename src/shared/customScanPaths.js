@@ -12,11 +12,22 @@ const CUSTOM_SCAN_PATH_LIMIT_ERRORS = Object.freeze({
   PER_CLIENT: 'custom-scan-path-limit-per-client'
 });
 // Tokscale exposes extra roots for its recursive/file scanners. Locally parsed
-// clients never enter Tokscale at all. Token Monitor's Kilo row combines the
-// `kilo` CLI database and `kilocode` extension sources; the former rejects
-// extra roots, so persisted Kilo roots are forwarded to the latter below.
+// clients never enter Tokscale at all. OpenCode's generic extra-root scanner
+// covers only its legacy JSON storage; modern SQLite databases require the
+// separate scanner.opencodeDbPaths setting, which TOKSCALE_EXTRA_DIRS cannot
+// express. Cursor's scanner accepts only Tokscale's generated usage cache, not
+// native Cursor session data, so an arbitrary user-selected Cursor data root is
+// similarly misleading. Keep both controls hidden rather than accepting paths
+// that appear healthy but contribute no usage. Token Monitor's Kilo row combines
+// the `kilo` CLI database and `kilocode` extension sources; the former rejects
+// extra roots, so persisted Kilo roots are forwarded to the latter.
+const UNSUPPORTED_CUSTOM_SCAN_CLIENTS = new Set([
+  ...LOCALLY_PARSED_CLIENT_IDS,
+  'opencode',
+  'cursor'
+]);
 const CUSTOM_SCAN_CLIENT_IDS = Object.freeze(
-  CLIENT_IDS.filter((id) => !LOCALLY_PARSED_CLIENT_IDS.includes(id))
+  CLIENT_IDS.filter((id) => !UNSUPPORTED_CUSTOM_SCAN_CLIENTS.has(id))
 );
 const TOKSCALE_CLIENTS = new Set(CUSTOM_SCAN_CLIENT_IDS);
 

@@ -7125,6 +7125,7 @@ app.whenReady().then(() => {
     // So the diagnostics panel can print ~/… instead of the user's account name.
     homeDir: require('os').homedir(),
     sharedDataDir: sharedDataDir(),
+    customScanClientIds: CUSTOM_SCAN_CLIENT_IDS,
     loginItemSupported: loginItemEnabledHere(),
     loginItemOpenAtLogin: currentLoginItemState(),
     systemDarkUi: currentSystemDarkTrayUi()

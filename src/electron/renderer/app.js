@@ -4,14 +4,10 @@
 // catalog (loaded as a script before this file). Destructured to the bare
 // names the call sites below already use.
 const {
-  CLIENT_CATALOG,
   CLIENT_IDS,
   CLIENT_LABELS: clientLabels,
   KNOWN_CLIENT_LIST: KNOWN_CLIENTS
 } = window.TokenMonitorClientCatalog;
-const TOKSCALE_CUSTOM_SOURCE_CLIENTS = new Set(
-  CLIENT_CATALOG.filter((client) => client.locallyParsed !== true).map((client) => client.id)
-);
 // Limits provider identity comes from its own shared catalog, bound here rather
 // than at its first use below because the icon tables are derived from it.
 const { LIMIT_PROVIDER_CATALOG: LIMIT_PROVIDERS, LIMIT_PROVIDER_IDS } = window.TokenMonitorLimitProviders;
@@ -11319,7 +11315,7 @@ function clientHealthGroup(group, notes, clientId) {
       checked: group.checkedCount
     });
     summaryRow.append(summary);
-    if (TOKSCALE_CUSTOM_SOURCE_CLIENTS.has(clientId)) {
+    if (state.appInfo?.customScanClientIds?.includes(clientId)) {
       const addSource = document.createElement('button');
       addSource.type = 'button';
       addSource.className = 'tool-health-source-control tool-health-source-add';

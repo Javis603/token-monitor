@@ -19,6 +19,8 @@ test('custom scan paths keep supported Tokscale clients in catalog order', () =>
   const normalized = normalizeCustomScanPaths({
     dsh: ['/var/data/dsh'],
     codex: ['/var/data/codex'],
+    opencode: ['/var/data/opencode'],
+    cursor: ['/var/data/cursor'],
     proma: ['/var/data/proma'],
     kilo: ['/var/data/kilo'],
     unknown: ['/var/data/unknown']
@@ -31,6 +33,8 @@ test('custom scan paths keep supported Tokscale clients in catalog order', () =>
   });
   assert.equal(CUSTOM_SCAN_CLIENT_IDS.includes('codex'), true);
   assert.equal(CUSTOM_SCAN_CLIENT_IDS.includes('kilo'), true);
+  assert.equal(CUSTOM_SCAN_CLIENT_IDS.includes('opencode'), false);
+  assert.equal(CUSTOM_SCAN_CLIENT_IDS.includes('cursor'), false);
   assert.equal(CUSTOM_SCAN_CLIENT_IDS.includes('proma'), false);
 });
 
@@ -64,8 +68,8 @@ test('custom scan path limits reject a seventeenth path for one client', () => {
 
 test('custom scan path limits reject a sixty-fifth path without displacing later clients', () => {
   const existing = {
+    claude: paths('claude', 16),
     codex: paths('codex', 15),
-    opencode: paths('opencode', 16),
     hermes: paths('hermes', 16),
     openclaw: paths('openclaw', 1),
     dsh: paths('dsh', 16)
@@ -82,13 +86,13 @@ test('normalization keeps the full global allowance across overflowing clients',
   const normalized = normalizeCustomScanPaths({
     claude: paths('claude', 17),
     codex: paths('codex', 17),
-    opencode: paths('opencode', 17),
-    hermes: paths('hermes', 17)
+    hermes: paths('hermes', 17),
+    openclaw: paths('openclaw', 17)
   }, { platform: 'linux' });
 
   assert.deepEqual(Object.fromEntries(
     Object.entries(normalized).map(([client, entries]) => [client, entries.length])
-  ), { claude: 16, codex: 16, opencode: 16, hermes: 16 });
+  ), { claude: 16, codex: 16, hermes: 16, openclaw: 16 });
 });
 
 test('Tokscale extra directories append without replacing an existing environment value', () => {

@@ -4605,8 +4605,8 @@ test('custom Tokscale scan paths stay visible and use recursive extra-root watch
     fs.mkdirSync(custom, { recursive: true });
     assert.equal(watchPathsForClients('codex', options).includes(custom), true);
 
-    const opencodeOptions = { customScanPaths: { opencode: [custom] } };
-    const ignored = watchIgnoreMatcher('opencode', opencodeOptions);
+    const openclawOptions = { customScanPaths: { openclaw: [custom] } };
+    const ignored = watchIgnoreMatcher('openclaw', openclawOptions);
     assert.equal(ignored(path.join(custom, 'direct.json')), false);
     assert.equal(ignored(path.join(custom, 'nested')), false);
     assert.equal(ignored(path.join(custom, 'nested', 'session.json')), false);
@@ -4627,19 +4627,19 @@ test('custom Tokscale scan paths stay visible and use recursive extra-root watch
   }
 });
 
-test('custom Tokscale roots remain watchable for self-synced clients without watching their caches', () => {
+test('custom Antigravity roots remain watchable without watching its self-sync cache', () => {
   const tmp = withTmpHome([]);
   const originalHomedir = os.homedir;
   os.homedir = () => tmp;
   try {
     const { watchPathsForClients } = freshCollector();
-    const customCursor = path.join(tmp, 'relocated', 'cursor');
-    fs.mkdirSync(customCursor, { recursive: true });
+    const customAntigravity = path.join(tmp, 'relocated', 'antigravity');
+    fs.mkdirSync(customAntigravity, { recursive: true });
 
-    const roots = watchPathsForClients('cursor', {
-      customScanPaths: { cursor: [customCursor] }
+    const roots = watchPathsForClients('antigravity', {
+      customScanPaths: { antigravity: [customAntigravity] }
     });
-    assert.deepEqual(roots, [customCursor]);
+    assert.deepEqual(roots, [customAntigravity]);
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];

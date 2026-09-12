@@ -213,7 +213,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(body, /loadClientSources\(state\.clientHealthExpanded\);\s*refillOpenClientHealthPanel\(\);/);
   assert.match(body, /else \{\s*refillOpenClientHealthPanel\(\);\s*\}/);
   assert.match(body, /const detail = clientHealthDetailFor\(id\);/);
-  assert.match(healthGroup, /TOKSCALE_CUSTOM_SOURCE_CLIENTS\.has\(clientId\)/);
+  assert.match(healthGroup, /state\.appInfo\?\.customScanClientIds\?\.includes\(clientId\)/);
   assert.match(healthGroup, /addCustomScanPath/);
   assert.match(healthGroup, /tool-health-source-remove/);
   assert.match(body, /visibility\.id = `toolVisibility-\$\{id\}`/);
