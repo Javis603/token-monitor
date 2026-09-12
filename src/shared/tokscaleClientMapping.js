@@ -6,7 +6,14 @@
 // directory scan.
 const TOKSCALE_CLIENT_GROUPS = Object.freeze({
   antigravity: Object.freeze({ aliases: Object.freeze(['antigravity-cli']) }),
-  pi: Object.freeze({ aliases: Object.freeze(['omp']) }),
+  // OMP delegates to Pi's parser because both products write the same JSONL
+  // format. Keep both ids in normal scans so their distinct default roots are
+  // discovered, but assign an explicit custom root to Pi only; forwarding the
+  // same root to both ids would parse every matching file twice.
+  pi: Object.freeze({
+    aliases: Object.freeze(['omp']),
+    customScanIds: Object.freeze(['pi'])
+  }),
   // Kilo CLI loads one fixed SQLite database and Tokscale rejects extra roots
   // for it. The combined row can still accept custom Kilo Code task roots.
   kilo: Object.freeze({

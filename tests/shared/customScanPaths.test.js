@@ -58,7 +58,7 @@ test('Tokscale extra directories append without replacing an existing environmen
   );
 });
 
-test('umbrella clients expand custom directories to every supported Tokscale source', () => {
+test('umbrella custom directories use each source without double-scanning shared formats', () => {
   assert.equal(
     tokscaleExtraDirsEnv({
       antigravity: ['/var/data/antigravity'],
@@ -69,7 +69,6 @@ test('umbrella clients expand custom directories to every supported Tokscale sou
       'antigravity:/var/data/antigravity',
       'antigravity-cli:/var/data/antigravity',
       'pi:/var/data/pi',
-      'omp:/var/data/pi',
       'kilocode:/var/data/kilo-tasks'
     ].join(',')
   );
