@@ -17,6 +17,8 @@ const {
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
 const { createTokscaleCapabilityResolver, filterSupportedClients, parseSupportedClients } = require('./tokscaleCapabilities');
 const { customPricingPath, tokscaleCacheDirs, tokscaleConfigDir, tokscaleHomeDir } = require('./tokscaleConfig');
+const { normalizeCustomScanPaths, tokscaleExtraDirsEnv } = require('./customScanPaths');
+const { TOKSCALE_CLIENT_ALIASES, tokscaleScanClientIds } = require('./tokscaleClientMapping');
 const {
   applyPeriodDelta,
   emptyPeriod,
@@ -157,12 +159,20 @@ function resolvePlatformBinary() {
   return decideResolver({ downloaded, bundled, shim });
 }
 
-function tokscaleCommand() {
+function tokscaleCommand(options = {}) {
   const resolved = resolvePlatformBinary();
   const useDirect = Boolean(resolved && resolved.source !== 'shim');
+  const customExtraDirs = tokscaleExtraDirsEnv(
+    options.customScanPaths,
+    process.env.TOKSCALE_EXTRA_DIRS,
+    { platform: options.platform || process.platform }
+  );
+  const env = customExtraDirs
+    ? { ...process.env, TOKSCALE_EXTRA_DIRS: customExtraDirs }
+    : process.env;
   const command = useDirect
-    ? { bin: resolved.path, prefixArgs: [], env: process.env }
-    : { bin: process.execPath, prefixArgs: [TOKSCALE_BIN_JS], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } };
+    ? { bin: resolved.path, prefixArgs: [], env }
+    : { bin: process.execPath, prefixArgs: [TOKSCALE_BIN_JS], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } };
   return {
     ...command,
     identity: [resolved?.source || 'none', resolved?.path || '', resolved?.version || '', resolved?.integrity || ''].join('|')
@@ -255,7 +265,7 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
 const TOKSCALE_CAPABILITY_PROBE_TIMEOUT_MS = 10_000;
 const MAX_TOKSCALE_STDERR_LENGTH = 64 * 1024;
 // tokscale rejects an unknown --client value with this exact exit code (see
-// the TOKSCALE_CLIENT_ALIASES comment above) — verified on 4.7.0 and 4.8.0.
+// the umbrella-client mapping comment below) — verified on 4.7.0 and 4.8.0.
 const TOKSCALE_UNKNOWN_CLIENT_EXIT_CODE = 2;
 
 function spawnTokscaleHelp(command, options = {}) {
@@ -319,22 +329,16 @@ const tokscaleCapabilityResolver = createTokscaleCapabilityResolver({
 // extractUsageFromTokscale's normalizeClientName folds them back into the umbrella
 // id. Every alias must be a real tokscale client id: an unknown --client value is
 // rejected with exit 2 and takes the whole scan down with it (verified on 4.7.0
-// and 4.8.0), so this list is not a free-form place to invent sub-source names.
+// and 4.8.0), so the shared mapping is not a free-form place to invent
+// sub-source names.
 // Clients tokscale doesn't know at all — Proma, which we parse ourselves, is
 // stripped in collectUsageOnce before the filter is built, not dropped here.
-const TOKSCALE_CLIENT_ALIASES = {
-  antigravity: ['antigravity-cli'],
-  pi: ['omp'],
-  kilo: ['kilocode']
-};
-
 function tokscaleClientFilter(clients) {
   const ordered = [];
   const seen = new Set();
   for (const id of String(clients ?? '').split(',').map((value) => value.trim()).filter(Boolean)) {
-    if (!seen.has(id)) { seen.add(id); ordered.push(id); }
-    for (const alias of TOKSCALE_CLIENT_ALIASES[id] || []) {
-      if (!seen.has(alias)) { seen.add(alias); ordered.push(alias); }
+    for (const scanId of tokscaleScanClientIds(id)) {
+      if (!seen.has(scanId)) { seen.add(scanId); ordered.push(scanId); }
     }
   }
   return ordered.join(',');
@@ -444,9 +448,18 @@ function runCursorAwareTokscale(clientFilter, operation, signal) {
   return includesCursor ? withCursorLifecycle(operation, { signal }) : operation();
 }
 
-function runTokscale({ clients, flags, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, workspaces = true }) {
+function runTokscale({
+  clients,
+  flags,
+  commandTimeoutMs,
+  signal,
+  terminationOptions,
+  onTerminationUnconfirmed,
+  customScanPaths,
+  workspaces = true
+}) {
   throwIfAborted(signal);
-  const command = tokscaleCommand();
+  const command = tokscaleCommand({ customScanPaths });
   const requested = tokscaleClientFilter(clients);
   if (!requested) return Promise.resolve({ entries: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
@@ -498,9 +511,9 @@ function runTokscale({ clients, flags, commandTimeoutMs, signal, terminationOpti
   ), signal);
 }
 
-function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed }) {
+function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths }) {
   throwIfAborted(signal);
-  const command = tokscaleCommand();
+  const command = tokscaleCommand({ customScanPaths });
   const requested = tokscaleClientFilter(clients);
   if (!requested) return Promise.resolve({ contributions: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
@@ -1007,6 +1020,7 @@ async function collectUsageOnce(options) {
   const runTokscaleScan = options.runTokscale || ((input) => runTokscale({
     ...input,
     workspaces: projectsEnabled,
+    customScanPaths: options.customScanPaths,
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
@@ -1017,6 +1031,7 @@ async function collectUsageOnce(options) {
   };
   const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
     ...input,
+    customScanPaths: options.customScanPaths,
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-graph')
   }));
@@ -1394,7 +1409,13 @@ async function collectUsageOnce(options) {
   // record below. Probing twice cost a second pass over every client's roots —
   // including the per-workspace walk Copilot needs — and let one snapshot report
   // a directory as both present and absent when it appeared between the two.
-  const sourceChecks = clientSourceChecks(normalizedClients, { wslDetected: wslStatus?.detected });
+  const sourceChecks = clientSourceChecks(normalizedClients, {
+    customScanPaths: options.customScanPaths,
+    env: options.env,
+    homeDir: options.homeDir,
+    platform: platformValue,
+    wslDetected: wslStatus?.detected
+  });
 
   const summary = {
     deviceId,
@@ -1644,11 +1665,12 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const byClient = {};
   const add = (client, ...roots) => {
     if (enabled.has(client)) {
-      byClient[client] = roots.map(([id, dir, sourcePath, optional]) => ({
+      byClient[client] = roots.map(([id, dir, sourcePath, optional, custom]) => ({
         id,
         dir,
         ...(sourcePath ? { sourcePath } : {}),
-        ...(optional ? { optional: true } : {})
+        ...(optional ? { optional: true } : {}),
+        ...(custom ? { custom: true } : {})
       }));
     }
   };
@@ -1898,6 +1920,12 @@ function clientSourceRoots(clientsCsv, options = {}) {
   add('lmstudio', ['lmstudio-server-logs', path.join(lmStudioHome, 'server-logs')]);
   const unslothHome = nonBlankEnvPath('UNSLOTH_STUDIO_HOME', path.join(home, '.unsloth', 'studio'), env);
   add('unsloth', ['unsloth-db', unslothHome, path.join(unslothHome, 'studio.db')]);
+  const customScanPaths = normalizeCustomScanPaths(options.customScanPaths, { platform });
+  for (const [client, dirs] of Object.entries(customScanPaths)) {
+    if (!enabled.has(client)) continue;
+    const roots = byClient[client] || (byClient[client] = []);
+    roots.push(...dirs.map((dir) => ({ id: 'custom-scan-path', dir, custom: true })));
+  }
   return byClient;
 }
 
@@ -1912,9 +1940,9 @@ const INTERVAL_ONLY_SOURCE_CHECK_IDS = new Set(['kiro-ide-globalstorage']);
 
 // The watcher only ever wants paths, so it keeps its original shape rather than
 // learning about check ids it would immediately discard.
-function clientWatchCandidates(clientsCsv) {
+function clientWatchCandidates(clientsCsv, options = {}) {
   const byClient = {};
-  for (const [client, roots] of Object.entries(clientSourceRoots(clientsCsv))) {
+  for (const [client, roots] of Object.entries(clientSourceRoots(clientsCsv, options))) {
     // The Copilot data root already keeps its `otel/` child through the
     // matcher below. Keep that child as a diagnostic/source check, but do not
     // hand both nested paths to chokidar or it may install two native watches
@@ -1963,11 +1991,18 @@ function selfSyncSourceRootsForClients(clientsCsv) {
   return rootsByClient;
 }
 
-function watchClientRootsForClients(clientsCsv) {
+function watchClientRootsForClients(clientsCsv, options = {}) {
   const rootsByClient = {};
-  for (const [client, dirs] of Object.entries(clientWatchCandidates(clientsCsv))) {
-    if (SELF_SYNCED_CLIENTS.has(client)) continue;
-    const existing = [...new Set(dirs.filter(dirExists))];
+  const customScanPaths = normalizeCustomScanPaths(options.customScanPaths, {
+    platform: options.platform || process.platform
+  });
+  for (const [client, dirs] of Object.entries(clientWatchCandidates(clientsCsv, options))) {
+    // Cursor and Antigravity's built-in roots are caches written by our own
+    // self-sync. A custom root is external input, so it must remain watchable.
+    const candidates = SELF_SYNCED_CLIENTS.has(client)
+      ? dirs.filter((dir) => customScanPaths[client]?.includes(dir))
+      : dirs;
+    const existing = [...new Set(candidates.filter(dirExists))];
     if (existing.length > 0) rootsByClient[client] = existing;
   }
   for (const [client, dirs] of Object.entries(selfSyncSourceRootsForClients(clientsCsv))) {
@@ -1991,8 +2026,8 @@ function watchClientRootsForClients(clientsCsv) {
   return rootsByClient;
 }
 
-function watchPathsForClients(clientsCsv) {
-  return [...new Set(Object.values(watchClientRootsForClients(clientsCsv)).flat())];
+function watchPathsForClients(clientsCsv, options = {}) {
+  return [...new Set(Object.values(watchClientRootsForClients(clientsCsv, options)).flat())];
 }
 
 // The same roots, but as attribution prefixes rather than watch targets. The two
@@ -2007,13 +2042,13 @@ function watchPathsForClients(clientsCsv) {
 // both maps from one probe, and deriving them from two separate dirExists sweeps
 // would let a directory created between the two land in one map and not the
 // other — the same "two derivations of one thing" trap the exporter had.
-function watchAttributionRootsForClients(clientsCsv, watchRoots = null) {
-  const rootsByClient = watchRoots || watchClientRootsForClients(clientsCsv);
+function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options = {}) {
+  const rootsByClient = watchRoots || watchClientRootsForClients(clientsCsv, options);
   const exporter = copilotExporterWatch(os.homedir());
   if (!exporter || !rootsByClient.copilot) return rootsByClient;
   const exporterDir = path.resolve(exporter.dir);
   const ownedByOtherSource = new Set(
-    (clientSourceRoots(clientsCsv).copilot || [])
+    (clientSourceRoots(clientsCsv, options).copilot || [])
       .filter((root) => root.id !== 'copilot-otel-exporter')
       .map((root) => path.resolve(root.dir))
   );
@@ -2140,8 +2175,11 @@ function directChildOnly(isSource) {
 // Every source root of every tracked client, paired with its policy. Bounded
 // roots are counted so a client set with nothing to prune can skip the matcher
 // entirely rather than hand chokidar a predicate that always answers false.
-function watchPolicyEntries(clientsCsv) {
-  const candidates = clientWatchCandidates(clientsCsv);
+function watchPolicyEntries(clientsCsv, options = {}) {
+  const candidates = clientWatchCandidates(clientsCsv, options);
+  const customScanPaths = normalizeCustomScanPaths(options.customScanPaths, {
+    platform: options.platform || process.platform
+  });
   // canonicalWatchPath must be applied here too: chokidar reports events under
   // whatever root it was handed, so a matcher built on the uncanonicalised path
   // would stop matching on Windows and silently un-prune the Hermes runtime
@@ -2150,6 +2188,10 @@ function watchPolicyEntries(clientsCsv) {
   const entries = [];
   const claimed = new Map();
   let boundedCount = 0;
+  const customRoots = new Map(Object.entries(customScanPaths).map(([client, dirs]) => [
+    client,
+    new Set(dirs.map(canonicalRoot))
+  ]));
   // Same-root duplicates within one client (Kiro's cased globalStorage spellings,
   // Zed's per-platform roots) collapse here. Duplicates ACROSS clients must not:
   // two policies on one directory is precisely the overlap the union resolves,
@@ -2159,8 +2201,12 @@ function watchPolicyEntries(clientsCsv) {
   const bound = (client, dirs, policy) => {
     if (!claimed.has(client)) claimed.set(client, new Set());
     const seen = claimed.get(client);
-    for (const dir of dirs) seen.add(dir);
-    for (const root of new Set(dirs.map(canonicalRoot))) {
+    // Built-in policies describe each client's default directory shape. A
+    // custom root follows Tokscale's recursive extra-root contract instead,
+    // even when it belongs to a client whose default root is tightly pruned.
+    const boundedDirs = dirs.filter((dir) => !customRoots.get(client)?.has(canonicalRoot(dir)));
+    for (const dir of boundedDirs) seen.add(dir);
+    for (const root of new Set(boundedDirs.map(canonicalRoot))) {
       entries.push({ root, prefix: root + path.sep, policy });
       boundedCount += 1;
     }
@@ -2293,15 +2339,18 @@ function watchPolicyEntries(clientsCsv) {
   bound('codebuddy', withBasename('codebuddy', 'Logs'), (parts) => !CODEBUDDY_EXTENSION_SOURCE_DIRS.has(parts[0]));
 
   // Everything left is a recursive transcript tree: tokscale walks it, so every
-  // path inside it is a potential source. Copilot is excluded wholesale because
-  // each of its roots is bounded above, and the self-synced cache roots are
-  // never handed to chokidar in the first place. The parse-local Antigravity CLI
-  // dir is added back explicitly — it shares the umbrella client id but is
-  // written by `agy`, not by our sync.
+  // path inside it is a potential source. Copilot's built-in roots are bounded
+  // above, but its custom roots still follow Tokscale's recursive extra-root
+  // contract. The self-synced cache roots are never handed to chokidar in the
+  // first place. The parse-local Antigravity CLI dir is added back explicitly —
+  // it shares the umbrella client id but is written by `agy`, not by our sync.
   const recursive = [
     ...Object.entries(candidates)
-      .filter(([client]) => client !== 'copilot' && !SELF_SYNCED_CLIENTS.has(client))
-      .flatMap(([client, dirs]) => dirs.filter((dir) => !(claimed.get(client) || EMPTY_SET).has(dir))),
+      .flatMap(([client, dirs]) => dirs.filter((dir) => (
+        (client !== 'copilot' || customRoots.get(client)?.has(canonicalRoot(dir)))
+        && (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir))
+        && !(claimed.get(client) || EMPTY_SET).has(dir)
+      ))),
     ...(antigravityEnabled && dirExists(antigravityCliDataDir()) ? [antigravityCliDataDir()] : [])
   ];
   for (const root of new Set(recursive.map(canonicalRoot))) {
@@ -2310,8 +2359,8 @@ function watchPolicyEntries(clientsCsv) {
   return { entries, boundedCount };
 }
 
-function watchIgnoreMatcher(clientsCsv) {
-  const { entries, boundedCount } = watchPolicyEntries(clientsCsv);
+function watchIgnoreMatcher(clientsCsv, options = {}) {
+  const { entries, boundedCount } = watchPolicyEntries(clientsCsv, options);
   if (boundedCount === 0) return undefined;
   return (target) => {
     const resolved = path.resolve(target);
@@ -2347,14 +2396,15 @@ function sourceRootExists(root) {
 // watch root stays available to the watcher through clientWatchCandidates(),
 // which reads clientSourceRoots() directly; `sourcePath` rides along so a reveal
 // can tell a file from a directory without stat-ing it again.
-function evaluatedClientSourceRoots(clientsCsv) {
-  return Object.fromEntries(Object.entries(clientSourceRoots(clientsCsv)).map(([client, roots]) => [
+function evaluatedClientSourceRoots(clientsCsv, options = {}) {
+  return Object.fromEntries(Object.entries(clientSourceRoots(clientsCsv, options)).map(([client, roots]) => [
     client,
     roots.map((root) => ({
       id: root.id,
       dir: root.sourcePath || root.dir,
       ...(root.sourcePath ? { sourcePath: root.sourcePath } : {}),
       ...(root.optional ? { optional: true } : {}),
+      ...(root.custom ? { custom: true } : {}),
       exists: sourceRootExists(root)
     }))
   ]));
@@ -2368,7 +2418,7 @@ function clientSourceChecks(clientsCsv, options = {}) {
     if (found) found.exists = found.exists || exists;
     else list.push({ id, exists });
   };
-  for (const [client, roots] of Object.entries(evaluatedClientSourceRoots(clientsCsv))) {
+  for (const [client, roots] of Object.entries(evaluatedClientSourceRoots(clientsCsv, options))) {
     checks[client] = checks[client] || [];
     for (const { id, exists } of roots) push(client, id, exists);
   }
@@ -2415,15 +2465,15 @@ function clientSourceChecks(clientsCsv, options = {}) {
 //
 // clientDiagnosticRoots() stays faithful for callers that want every probed
 // root — the reveal handler picks from it and selects on `exists` itself.
-function visibleDiagnosticRoots(clientsCsv) {
-  return Object.fromEntries(Object.entries(clientDiagnosticRoots(clientsCsv)).map(([client, roots]) => [
+function visibleDiagnosticRoots(clientsCsv, options = {}) {
+  return Object.fromEntries(Object.entries(clientDiagnosticRoots(clientsCsv, options)).map(([client, roots]) => [
     client,
     roots.filter((root) => !(root.optional === true && root.exists !== true))
   ]));
 }
 
-function clientDiagnosticRoots(clientsCsv) {
-  const byClient = evaluatedClientSourceRoots(clientsCsv);
+function clientDiagnosticRoots(clientsCsv, options = {}) {
+  const byClient = evaluatedClientSourceRoots(clientsCsv, options);
   if (byClient.antigravity) {
     byClient.antigravity.unshift(
       ...antigravityDataRoots().map((dir) => ({ id: 'antigravity-ide-source', dir, exists: dirExists(dir) })),
@@ -2807,6 +2857,12 @@ function startCollector(options) {
     : normalizeOsInfo(options.osInfo);
   const log = logger || (() => {});
   const normalizedClients = normalizeClientsCsv(clients);
+  const sourceOptions = {
+    customScanPaths: options.customScanPaths,
+    env: options.env,
+    homeDir: options.homeDir,
+    platform: options.platform
+  };
   const qoderCnDbPath = qoderCnDbPathForClients(normalizedClients, {
     homeDir: options.homeDir,
     platform: process.platform,
@@ -3453,7 +3509,7 @@ function startCollector(options) {
     // One dirExists sweep feeds both maps: probing twice would let a directory
     // created between the sweeps land in the watch list and not the attribution
     // list, or the reverse.
-    const watchRoots = watchClientRootsForClients(clients);
+    const watchRoots = watchClientRootsForClients(clients, sourceOptions);
     const rootsByClient = Object.fromEntries(
       Object.entries(watchRoots)
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
@@ -3463,7 +3519,7 @@ function startCollector(options) {
     // copilot prefix. Canonicalised through the same function so both still
     // compare equal to the paths chokidar reports.
     const attributionRootsByClient = Object.fromEntries(
-      Object.entries(watchAttributionRootsForClients(clients, watchRoots))
+      Object.entries(watchAttributionRootsForClients(clients, watchRoots, sourceOptions))
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
     );
     // A subset of the same roots, matched separately so a write to a client's
@@ -3527,7 +3583,7 @@ function startCollector(options) {
     const usePolling = watchUsePolling || watchDescriptorFallback;
     try {
       const host = createWatcherHost(
-        { dirs, clients, usePolling },
+        { dirs, clients, customScanPaths: sourceOptions.customScanPaths, usePolling },
         {
           onHostFallback: (error) => {
             emitDiagnosticEvent({ subsystem: 'watcher', code: 'watcher-host-fallback' });
