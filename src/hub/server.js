@@ -18,6 +18,12 @@ const {
 } = require('../shared/subscriptionDisplay');
 const { CURRENCY_CODES, normalizeCurrency } = require('../shared/currency');
 const { currentHubBuild } = require('../shared/hubBuildIdentity');
+const {
+  freshnessEvent,
+  hubStatsContentKey,
+  wantsFreshnessEvents,
+  wantsMinimalResponse
+} = require('../shared/hubProtocol');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
 
@@ -38,6 +44,7 @@ function createHub({
   host = '0.0.0.0',
   secret = '',
   staleAfterMs = DEFAULT_STALE_AFTER_MS,
+  broadcastDelayMs = 100,
   dataFile = path.join(projectRoot(), 'data', 'devices.json'),
   logger = console
 } = {}) {
@@ -81,24 +88,68 @@ function createHub({
 
   const sseClients = new Set();
   const statsListeners = new Set();
+  let broadcastTimer = null;
+  let lastSseContentKey = '';
 
   function sseFormat(event, data) {
     return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   }
 
+  function writeSse(client, event, data) {
+    try {
+      client.res.write(sseFormat(event, data));
+      return true;
+    } catch (_) {
+      sseClients.delete(client);
+      return false;
+    }
+  }
+
+  function notifyStatsListeners(reason, stats = getStats(), at = new Date().toISOString()) {
+    for (const listener of statsListeners) {
+      try { listener(stats, reason, at); } catch (_) { /* listener errors must not break ingest */ }
+    }
+  }
+
   function broadcastStats(reason = 'update') {
+    if (broadcastTimer) {
+      clearTimeout(broadcastTimer);
+      broadcastTimer = null;
+    }
     if (sseClients.size === 0 && statsListeners.size === 0) return;
     const stats = getStats();
     const at = new Date().toISOString();
     if (sseClients.size > 0) {
-      const payload = sseFormat('stats', { type: 'stats', reason, stats, at });
-      for (const res of sseClients) {
-        try { res.write(payload); } catch (_) { sseClients.delete(res); }
+      lastSseContentKey = hubStatsContentKey(stats);
+      for (const client of sseClients) writeSse(client, 'stats', { type: 'stats', reason, stats, at });
+    }
+    notifyStatsListeners(reason, stats, at);
+  }
+
+  function flushQueuedStatsBroadcast() {
+    broadcastTimer = null;
+    if (sseClients.size === 0) return;
+    const stats = getStats();
+    const nextContentKey = hubStatsContentKey(stats);
+    const at = new Date().toISOString();
+    if (!lastSseContentKey || nextContentKey !== lastSseContentKey) {
+      lastSseContentKey = nextContentKey;
+      for (const client of sseClients) writeSse(client, 'stats', { type: 'stats', reason: 'ingest', stats, at });
+      return;
+    }
+    const event = freshnessEvent(stats, 'ingest', at);
+    for (const client of sseClients) {
+      if (client.freshnessEvents) {
+        writeSse(client, 'freshness', event);
+      } else {
+        writeSse(client, 'stats', { type: 'stats', reason: 'ingest', stats, at });
       }
     }
-    for (const listener of statsListeners) {
-      try { listener(stats, reason, at); } catch (_) { /* listener errors must not break ingest */ }
-    }
+  }
+
+  function queueStatsBroadcast() {
+    if (sseClients.size === 0 || broadcastTimer) return;
+    broadcastTimer = setTimeout(flushQueuedStatsBroadcast, Math.max(0, Number(broadcastDelayMs) || 0));
   }
 
   // Transport-agnostic core: both the HTTP POST handler and the same-process
@@ -113,7 +164,8 @@ function createHub({
     const record = mergeDeviceRecord(existing, { ...incoming, receivedAt: new Date().toISOString() });
     store.devices[record.deviceId] = record;
     persist();
-    broadcastStats('ingest');
+    if (statsListeners.size > 0) notifyStatsListeners('ingest');
+    queueStatsBroadcast();
     return record;
   }
 
@@ -208,16 +260,27 @@ function createHub({
     if (req.method === 'GET' && url.pathname === '/api/history') return sendJson(res, 200, getHistory());
 
     if (req.method === 'GET' && url.pathname === '/api/stats/stream') {
+      const stats = getStats();
       res.writeHead(200, {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache, no-transform',
         'connection': 'keep-alive',
         'x-accel-buffering': 'no'
       });
-      res.write(sseFormat('snapshot', { type: 'stats', reason: 'snapshot', stats: getStats(), at: new Date().toISOString() }));
-      sseClients.add(res);
+      res.write(sseFormat('snapshot', { type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString() }));
+      const client = { res, freshnessEvents: wantsFreshnessEvents(req) };
+      if (sseClients.size === 0) lastSseContentKey = hubStatsContentKey(stats);
+      sseClients.add(client);
       const heartbeat = setInterval(() => { try { res.write(': hb\n\n'); } catch (_) {} }, 30000);
-      const cleanup = () => { clearInterval(heartbeat); sseClients.delete(res); };
+      const cleanup = () => {
+        clearInterval(heartbeat);
+        sseClients.delete(client);
+        if (sseClients.size === 0) {
+          lastSseContentKey = '';
+          if (broadcastTimer) clearTimeout(broadcastTimer);
+          broadcastTimer = null;
+        }
+      };
       req.on('close', cleanup);
       req.on('error', cleanup);
       return;
@@ -227,7 +290,8 @@ function createHub({
       try {
         const payload = await readJsonBody(req);
         const record = ingest(payload);
-        return sendJson(res, 200, { ok: true, deviceId: record.deviceId, stats: getStats() });
+        const response = { ok: true, deviceId: record.deviceId };
+        return sendJson(res, 200, wantsMinimalResponse(req) ? response : { ...response, stats: getStats() });
       } catch (error) {
         if (error.message === 'deviceId_required') return sendJson(res, 400, { error: 'deviceId_required' });
         if (error.code === 'payload_too_large') {
@@ -292,7 +356,9 @@ function createHub({
 
   function stop() {
     return new Promise((resolve) => {
-      for (const res of sseClients) { try { res.end(); } catch (_) {} }
+      if (broadcastTimer) clearTimeout(broadcastTimer);
+      broadcastTimer = null;
+      for (const client of sseClients) { try { client.res.end(); } catch (_) {} }
       sseClients.clear();
       server.close(() => resolve());
     });

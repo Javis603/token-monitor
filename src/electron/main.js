@@ -223,6 +223,13 @@ const {
 } = require('../shared/sessionUsageArchive');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
 const { aggregateDevices, aggregateHistory, applyProjectRollups } = require('../shared/usage');
+const {
+  HUB_RESPONSE_HEADER,
+  HUB_RESPONSE_MINIMAL,
+  HUB_STREAM_HEADER,
+  HUB_STREAM_VERSION,
+  applyFreshnessEvent
+} = require('../shared/hubProtocol');
 const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const {
@@ -3253,7 +3260,11 @@ async function postToHub(summary) {
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/ingest`;
   const { response } = await postSyncPayload(fetch, url, {
-    headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      [HUB_RESPONSE_HEADER]: HUB_RESPONSE_MINIMAL,
+      ...(secret ? { authorization: `Bearer ${secret}` } : {})
+    },
     summary,
     logger: (message) => console.log(`[sync] ${message}`)
   });
@@ -4456,7 +4467,11 @@ async function startStatsStream(options = {}) {
   sseAbortController = controller;
   try {
     const response = await fetch(url, {
-      headers: { accept: 'text/event-stream', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+      headers: {
+        accept: 'text/event-stream',
+        [HUB_STREAM_HEADER]: HUB_STREAM_VERSION,
+        ...(secret ? { authorization: `Bearer ${secret}` } : {})
+      },
       signal: controller.signal
     });
     if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
@@ -4481,10 +4496,20 @@ async function startStatsStream(options = {}) {
         buffer = buffer.slice(idx + 2);
         let parsed = parseSseChunk(chunk);
         if (parsed) {
-          if (parsed.event === 'stats' && parsed.data?.stats) {
+          if ((parsed.event === 'stats' || parsed.event === 'snapshot') && parsed.data?.stats) {
             setLatestHubStatsCache(parsed.data.stats, 'client', generation, cacheIdentity);
             const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
             parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
+            updateDiscordRpcDisplay(displayStats);
+          } else if (parsed.event === 'freshness') {
+            const refreshed = applyFreshnessEvent(latestHubStats, parsed.data);
+            if (!refreshed) continue;
+            setLatestHubStatsCache(refreshed, 'client', generation, cacheIdentity);
+            const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
+            parsed = {
+              event: 'stats',
+              data: { type: 'stats', reason: parsed.data?.reason || 'ingest', stats: displayStats, at: parsed.data?.at }
+            };
             updateDiscordRpcDisplay(displayStats);
           }
           sendPush(parsed, { widgetProducerOwner });

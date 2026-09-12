@@ -5,12 +5,53 @@ const test = require('node:test');
 const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
+const http = require('node:http');
 
 const { createHub, resolveBindHost } = require('../../src/hub/server');
 const { codexAccountKey } = require('../../src/shared/providers/codex/auth');
 
+function waitFor(predicate, timeoutMs = 1000) {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + timeoutMs;
+    const check = () => {
+      if (predicate()) return resolve();
+      if (Date.now() >= deadline) return reject(new Error('timed out waiting for SSE event'));
+      setTimeout(check, 10);
+    };
+    check();
+  });
+}
+
+function openSse(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.get(url, { headers }, (response) => {
+      const events = [];
+      let buffer = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => {
+        buffer += chunk;
+        let index;
+        while ((index = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, index);
+          buffer = buffer.slice(index + 2);
+          if (frame.startsWith(':')) continue;
+          const event = frame.match(/^event:\s*(.+)$/m)?.[1];
+          const data = frame.match(/^data:\s*(.+)$/m)?.[1];
+          if (event && data) events.push({ event, data: JSON.parse(data) });
+        }
+      });
+      resolve({ events, close: () => request.destroy() });
+    });
+    request.on('error', reject);
+  });
+}
+
 function tempDataFile() {
   return path.join(os.tmpdir(), `tm-hub-test-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
+}
+
+function utcTodayAt(time) {
+  return `${new Date().toISOString().slice(0, 10)}T${time}Z`;
 }
 
 test('resolveBindHost keeps the requested host when a secret is set', () => {
@@ -471,6 +512,108 @@ test('a currency the app carries no rate for is refused, not rewritten', async (
       assert.equal(ok.status, 200, `${code} should be accepted`);
     }
   } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('official senders can request a minimal ingest acknowledgement while legacy responses stay intact', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const sampleAt = utcTodayAt('10:00:00.000');
+    const sessions = Object.fromEntries(Array.from({ length: 80 }, (_, index) => [
+      `session-${index}`,
+      { totalTokens: index + 1, costUsd: 0.01, model: 'gpt-test', lastUsedAt: sampleAt }
+    ]));
+    const payload = { deviceId: 'dev-a', updatedAt: sampleAt, today: { totalTokens: 3240, sessions } };
+    const post = (extraHeaders = {}) => fetch(`http://127.0.0.1:${port}/api/ingest`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer shh', ...extraHeaders },
+      body: JSON.stringify(payload)
+    });
+
+    const minimal = await post({ 'x-token-monitor-response': 'minimal' });
+    assert.deepEqual(await minimal.json(), { ok: true, deviceId: 'dev-a' });
+
+    const legacy = await post({ 'accept-encoding': 'gzip' });
+    assert.equal(legacy.headers.get('content-encoding'), 'gzip');
+    const legacyBody = await legacy.json();
+    assert.equal(legacyBody.ok, true);
+    assert.equal(legacyBody.stats.devices[0].deviceId, 'dev-a');
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('the stats stream coalesces bursts and negotiates timestamp-only freshness events', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: 'shh',
+    broadcastDelayMs: 200,
+    dataFile,
+    logger: { error() {} }
+  });
+  await hub.start();
+  let modern;
+  let legacy;
+  try {
+    const initialAt = utcTodayAt('10:00:00.000');
+    const refreshedAt = utcTodayAt('10:01:00.000');
+    const changedAt = utcTodayAt('10:02:00.000');
+    const base = {
+      deviceId: 'dev-a',
+      updatedAt: initialAt,
+      today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } }
+    };
+    hub.ingest(base);
+    const { port } = hub.server.address();
+    const streamUrl = `http://127.0.0.1:${port}/api/stats/stream`;
+    modern = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' });
+    legacy = await openSse(streamUrl, { authorization: 'Bearer shh' });
+    await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
+    assert.equal(modern.events[0].event, 'snapshot');
+    assert.equal(legacy.events[0].event, 'snapshot');
+    modern.events.length = 0;
+    legacy.events.length = 0;
+
+    hub.ingest({ ...base, updatedAt: refreshedAt });
+    await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
+    assert.equal(modern.events[0].event, 'freshness');
+    assert.equal(modern.events[0].data.stats.devices[0].updatedAt, refreshedAt);
+    assert.equal(legacy.events[0].event, 'stats');
+    assert.equal(legacy.events[0].data.stats.devices[0].updatedAt, refreshedAt);
+    modern.events.length = 0;
+    legacy.events.length = 0;
+
+    hub.ingest({ ...base, updatedAt: changedAt, today: { ...base.today, totalTokens: 2 } });
+    await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
+    assert.equal(modern.events[0].event, 'stats');
+    assert.equal(legacy.events[0].event, 'stats');
+    assert.equal(modern.events[0].data.stats.periods.today.totalTokens, 2);
+    modern.events.length = 0;
+    legacy.events.length = 0;
+
+    for (let totalTokens = 3; totalTokens <= 12; totalTokens += 1) {
+      hub.ingest({
+        ...base,
+        updatedAt: utcTodayAt(`10:02:${String(totalTokens).padStart(2, '0')}.000`),
+        today: { ...base.today, totalTokens }
+      });
+    }
+    await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(modern.events.length, 1);
+    assert.equal(legacy.events.length, 1);
+    assert.equal(modern.events[0].data.stats.periods.today.totalTokens, 12);
+  } finally {
+    modern?.close();
+    legacy?.close();
     await hub.stop();
     fs.rmSync(dataFile, { force: true });
   }
