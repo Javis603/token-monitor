@@ -20,6 +20,7 @@ const { alibabaVariant } = require('../../src/shared/providers/alibaba/limits');
 
 const BASE_USAGE_SETTINGS = Object.freeze({
   clients: 'claude',
+  customScanPaths: {},
   allTimeSince: '2024-01-01',
   collectionIntervalMs: 5 * 60 * 1000,
   collectionMode: 'smart',
@@ -123,6 +124,7 @@ test('usage config fingerprint dedupes raw settings with the same effective runt
 test('every usage structural setting maps to an effective fingerprint change', () => {
   const cases = {
     clients: { clients: 'claude,codex' },
+    customScanPaths: { customScanPaths: { claude: [path.resolve('tmp', 'claude-sessions')] } },
     allTimeSince: { allTimeSince: '2025-01-01' },
     collectionIntervalMs: {
       previous: { collectionMode: 'fixed' },

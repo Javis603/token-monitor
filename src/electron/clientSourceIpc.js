@@ -46,8 +46,19 @@ function createClientSourceIpcHandlers(options = {}) {
           const key = `${root.id}\0${root.dir}`;
           return !seen.has(key) && seen.add(key);
         })
-        .map((root) => ({ id: root.id, dir: root.dir, exists: root.exists === true }));
-      const sources = all.slice(0, 32);
+        .map((root) => ({
+          id: root.id,
+          dir: root.dir,
+          exists: root.exists === true,
+          ...(root.custom === true ? { custom: true } : {})
+        }));
+      const custom = all.filter((root) => root.custom === true).slice(0, 32);
+      const sources = all.length <= 32
+        ? all
+        : [
+            ...all.filter((root) => root.custom !== true).slice(0, 32 - custom.length),
+            ...custom
+          ];
       return { sources, omittedCount: all.length - sources.length };
     } catch (_) {
       return null;
