@@ -19,7 +19,10 @@ function createHandlers({ trackedClients = ['codex'], repairResult = { ok: true,
     visibleDiagnosticRoots: (client) => {
       calls.sourceProbes.push(client);
       return {
-        [client]: [{ id: `${client}-data`, dir: `/tmp/${client}`, exists: true }]
+        [client]: [
+          { id: `${client}-data`, dir: `/tmp/${client}`, exists: true },
+          { id: 'custom-scan-path', dir: `/tmp/${client}-custom`, exists: false, custom: true }
+        ]
       };
     },
     clientDiagnosticRoots: (client) => ({
@@ -50,7 +53,10 @@ test('source inspection allows known untracked clients while rescan stays tracke
   const { calls, handlers } = createHandlers();
 
   assert.deepEqual(handlers.clientSources('commandcode'), {
-    sources: [{ id: 'commandcode-data', dir: '/tmp/commandcode', exists: true }],
+    sources: [
+      { id: 'commandcode-data', dir: '/tmp/commandcode', exists: true },
+      { id: 'custom-scan-path', dir: '/tmp/commandcode-custom', exists: false, custom: true }
+    ],
     omittedCount: 0
   });
   assert.equal(await handlers.revealClientSource('commandcode'), true);
@@ -88,6 +94,29 @@ test('tracked clients retain source inspection and rescan behavior', async () =>
   assert.deepEqual(calls.sourceProbes, ['codex']);
   assert.deepEqual(calls.revealDirectories, ['/tmp/codex']);
   assert.deepEqual(calls.rescans, ['codex']);
+});
+
+test('source inspection keeps every custom source when the diagnostic cap is exceeded', () => {
+  const builtIns = Array.from({ length: 32 }, (_, index) => ({
+    id: `codex-data-${index}`,
+    dir: `/tmp/codex-${index}`,
+    exists: true
+  }));
+  const custom = Array.from({ length: 16 }, (_, index) => ({
+    id: 'custom-scan-path',
+    dir: `/tmp/custom-${index}`,
+    exists: true,
+    custom: true
+  }));
+  const handlers = createClientSourceIpcHandlers({
+    knownClients: ['codex'],
+    visibleDiagnosticRoots: () => ({ codex: [...builtIns, ...custom] })
+  });
+
+  const result = handlers.clientSources('codex');
+  assert.equal(result.sources.length, 32);
+  assert.equal(result.sources.filter((source) => source.custom === true).length, 16);
+  assert.equal(result.omittedCount, 16);
 });
 
 test('Antigravity sync-lock repair is tracked-only and re-scans only after a safe repair', async () => {

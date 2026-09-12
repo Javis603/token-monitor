@@ -14,6 +14,35 @@ function mainFunction(name, dependencies) {
   return vm.runInNewContext(`(${body})`, { ...policy, ...dependencies });
 }
 
+test('tool preference rendering reacts independently to cost rules and custom scan paths', () => {
+  const renderer = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const body = renderer.match(/function toolPreferenceRenderSignature\([^]*?\n\}/)?.[0];
+  assert.ok(body);
+  const state = { settings: {} };
+  const signature = vm.runInNewContext(`(${body})`, {
+    state,
+    localClientStatus: () => ({}),
+    localClientHealth: () => ({}),
+    localDevice: () => ({ deviceId: 'local' }),
+    enabledClientSet: () => new Set(['codex']),
+    toolPreferenceQuery: () => '',
+    KNOWN_CLIENTS: [{ id: 'codex' }]
+  });
+  const initial = signature();
+  assert.equal(signature(), initial);
+  state.settings.usageCostRules = rules;
+  const costsChanged = signature();
+  assert.notEqual(costsChanged, initial);
+  state.settings.customScanPaths = { codex: ['/custom/sessions'] };
+  const bothChanged = signature();
+  assert.notEqual(bothChanged, costsChanged);
+  state.settings.usageCostRules = [];
+  assert.notEqual(signature(), bothChanged);
+  assert.notEqual(signature(), initial);
+  state.settings.customScanPaths = {};
+  assert.equal(signature(), initial);
+});
+
 test('main process projects cached stats and restoring the setting needs no rescan', () => {
   const raw = { periods: { today: { totalTokens: 100, costUsd: 9, clientCosts: { codex: 9 }, modelCosts: { 'chatgpt-web/pro': 9 }, clientModelCosts: { codex: { 'chatgpt-web/pro': 9 } } } } };
   const settings = { usageCostRules: rules };

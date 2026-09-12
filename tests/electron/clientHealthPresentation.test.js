@@ -141,6 +141,18 @@ test('pending local paths stay neutral without changing canonical truth', () => 
   ]);
 });
 
+test('custom source identity survives the canonical source merge', () => {
+  const source = clientHealthGroups(entry({
+    source: { state: 'missing', detectedCount: 0, checkedCount: 1, checks: [{ id: 'custom-scan-path', exists: false }] }
+  }), {
+    sources: [{ id: 'custom-scan-path', dir: '/Volumes/archive/codex', exists: false, custom: true }]
+  })[0];
+
+  assert.deepEqual(source.checks[0].paths, [
+    { dir: '/Volumes/archive/codex', exists: false, pending: false, custom: true }
+  ]);
+});
+
 test('pathless and probe-only checks survive the source merge', () => {
   const source = clientHealthGroups(entry({
     source: { state: 'detected', detectedCount: 1, checkedCount: 2, checks: [{ id: 'wsl-home', exists: true }] }
