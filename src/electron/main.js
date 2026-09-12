@@ -94,6 +94,7 @@ const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
+const { normalizeModelAliases, projectModelAliasStats, projectModelAliasHistory } = require('./modelAliasPresentation');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
 const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie, alibabaCookie, alibabaVariant, normalizeAlibabaCookieHeader } = require('../shared/limits/collector');
@@ -543,6 +544,7 @@ function defaultSettings() {
     archivedClientUsage: { version: 1, clients: {} },
     allTimeSince: process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01',
     customModelPricing: [],
+    modelAliases: {},
     limitsEnabled: parseBoolean(process.env.TOKEN_MONITOR_LIMITS_ENABLED, true),
     limitProviders: parseLimitProviders(process.env.TOKEN_MONITOR_LIMIT_PROVIDERS).join(','),
     limitProviderOrder: defaultLimitProviderOrder(),
@@ -2496,6 +2498,7 @@ function readSettings() {
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
+    merged.modelAliases = normalizeModelAliases(merged.modelAliases);
     merged.interfaceFontFamily = fontSettingsApi.normalizeFontFamily(merged.interfaceFontFamily);
     merged.displayFontFamily = fontSettingsApi.normalizeFontFamily(merged.displayFontFamily);
     merged.tokenRateMode = normalizeTokenRateMode(merged.tokenRateMode);
@@ -2892,11 +2895,11 @@ let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
 
 function electronPresentationStats(stats) {
-  return projectLimitStatsForDisplay(stats, {
+  return projectModelAliasStats(projectLimitStatsForDisplay(stats, {
     localDeviceId: settings?.deviceId,
     syncActive: mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim()),
     opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
-  });
+  }), settings?.modelAliases);
 }
 let trayCodexPendingSince = 0;
 let trayCodexSwitchInFlight = false;
@@ -4068,6 +4071,7 @@ function captureMacWidgetWork({ stats, owner }) {
       ? macWidgetHistoryCachePath(app.getPath('userData'), sourceKey)
       : null,
     presentation: macWidgetPresentation(),
+    modelAliases: Object.freeze(normalizeModelAliases(settings?.modelAliases)),
     snapshotPath: widget.snapshotPath,
     widgetKind: widget.widgetKind
   };
@@ -4104,7 +4108,7 @@ function ensureMacWidgetSnapshotController() {
       snapshotPath: work.snapshotPath,
       snapshotOptions: {
         presentation: work.presentation,
-        history
+        history: projectModelAliasHistory(history, work.modelAliases)
       },
       logger: (message) => console.warn(message)
     }),
@@ -5512,7 +5516,8 @@ function requestAppQuit() {
 // itself; callers pass only `periods` (privacy: devices/limits never enter).
 async function writeExportTo(dir, periods, options = {}) {
   if (!dir) return { ok: false, reason: 'no-dir' };
-  const history = await getDashboardHistory().catch(() => null);
+  // Export remains lossless: local display aliases never rewrite exported IDs.
+  const history = await getCompleteHistory().catch(() => null);
   // History unavailable (e.g. a transient hub fetch failure) is NOT the same as
   // "no history": writing a snapshot-only set would emit empty time-series JSON
   // AND the orphan cleanup below would delete an existing daily.csv. Never write a
@@ -6444,13 +6449,13 @@ async function getDashboardHistory(options = {}) {
     : { history: await getCompleteHistory(), deviceHistories: undefined };
   const history = resolved.history;
   const source = completeHistorySource(historyResolverOptions());
-  return {
+  return projectModelAliasHistory({
     ...history,
     ...(includeDevices ? { deviceHistories: resolved.deviceHistories } : {}),
     fixedPeriods: fixedPeriodHistoryMeta({
       source
     })
-  };
+  }, settings?.modelAliases);
 }
 
 let cursorStatusCache = { value: null, at: 0 };
@@ -6729,6 +6734,7 @@ app.whenReady().then(() => {
       showLiveTokenRate: parseBoolean(patch.showLiveTokenRate ?? settings.showLiveTokenRate, false),
       liveTokenRateScope: normalizeLiveTokenRateScope(patch.liveTokenRateScope ?? settings.liveTokenRateScope),
       compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
+      modelAliases: normalizeModelAliases(patch.modelAliases ?? settings.modelAliases),
       interfaceFontFamily: fontSettingsApi.normalizeFontFamily(
         patch.interfaceFontFamily ?? settings.interfaceFontFamily
       ),
@@ -6948,6 +6954,15 @@ app.whenReady().then(() => {
       // Re-project the cached aggregate immediately. The Hub can be offline and
       // therefore may not send another frame after this local-only setting changes.
       refreshLimitStatsPresentation();
+    }
+    if (JSON.stringify(settings.modelAliases) !== JSON.stringify(previousSettingsState.modelAliases)) {
+      // No collection/pricing refresh: regroup the cached source immediately,
+      // including when the hub is offline. Revision decoration invalidates the
+      // main renderer's full-history caches; the dashboard has its own event.
+      refreshLimitStatsPresentation();
+      if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+        try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
+      }
     }
     pushSettingsToRenderer();
     return settingsForRenderer();

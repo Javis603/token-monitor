@@ -561,6 +561,37 @@
                 </div>
               </div>
             </div>
+            <div id="modelAliasesAccountGroup" class="settings-group cursor-account-group">
+              <button id="modelAliasesSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="modelAliasesSettingsDetails">
+                <span data-i18n="settings.modelAliases.title">Model aliases</span>
+                <span class="cursor-settings-summary">
+                  <span id="modelAliasesStatus" class="cursor-status-pill"></span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="modelAliasesSettingsDetails" class="cursor-settings-details hidden">
+                <p class="settings-note" data-i18n="settings.modelAliases.note">Equivalent provider-qualified and separator variants are merged automatically in this app's views. Add an alias only when the automatic matcher cannot prove two names are equivalent. Costs, source logs, sync and exports are unchanged.</p>
+                <p class="settings-note" data-i18n="settings.modelAliases.matching">Automatic matching keeps dated versions, tiers and model variants distinct. Manual mappings apply once and can override a specific reported ID.</p>
+                <p class="settings-note model-alias-example">anthropic/claude-opus-5 → claude-opus-5</p>
+                <div id="modelAliasesList" class="managed-account-list"></div>
+                <div class="settings-actions">
+                  <button id="modelAliasesAddButton" type="button" data-i18n="settings.modelAliases.add">Add alias</button>
+                </div>
+                <div id="modelAliasesForm" class="model-alias-form hidden">
+                  <label for="modelAliasesAliasInput"><span data-i18n="settings.modelAliases.alias">Alias (reported model ID)</span>
+                    <input id="modelAliasesAliasInput" type="text" maxlength="256" placeholder="anthropic/claude-opus-5" spellcheck="false" />
+                  </label>
+                  <label for="modelAliasesCanonicalInput"><span data-i18n="settings.modelAliases.canonical">Group as (model ID)</span>
+                    <input id="modelAliasesCanonicalInput" type="text" maxlength="256" placeholder="claude-opus-5" spellcheck="false" />
+                  </label>
+                  <div class="settings-actions">
+                    <button id="modelAliasesSaveButton" type="button" data-i18n="settings.modelAliases.save">Save</button>
+                    <button id="modelAliasesCancelButton" type="button" data-i18n="settings.modelAliases.cancel">Cancel</button>
+                  </div>
+                </div>
+                <p id="modelAliasesError" class="settings-note error hidden" role="alert"></p>
+              </div>
+            </div>
             <div id="customPricingAccountGroup" class="settings-group cursor-account-group">
               <button id="customPricingSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="customPricingSettingsDetails">
                 <span data-i18n="settings.customPricing.title">Custom model pricing</span>
@@ -1801,6 +1832,8 @@
     <script src="projectRows.js"></script>
     <script src="sessionDetail.js"></script>
     <script src="customPricingForm.js"></script>
+    <script src="modelAliases.js"></script>
+    <script src="modelAliasForm.js"></script>
     <script src="../windowShortcut.js"></script>
     <script src="../../shared/currency.js"></script>
     <script src="../../shared/subscriptionDisplay.js"></script>
