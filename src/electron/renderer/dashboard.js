@@ -517,6 +517,12 @@ function renderActivity() {
 }
 
 function renderNow() {
+  const costNote = document.getElementById('usageCostPolicyNote');
+  if (costNote) {
+    costNote.hidden = !state.history?.costPolicyActive;
+    costNote.textContent = t(state.history?.costPolicyIncomplete
+      ? 'settings.codex.webCosts.incomplete' : 'settings.codex.webCosts.active');
+  }
   hideTooltip();
   const hasData = (state.history?.daily || []).length > 0 || (state.history?.monthly || []).length > 0;
   els.empty.classList.toggle('hidden', hasData);

@@ -93,6 +93,7 @@ const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
 const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
+const { normalizeUsageCostRules, projectUsageCosts, projectHistoryCosts } = require('./usageCostPolicy');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
@@ -500,6 +501,7 @@ function defaultSettings() {
     tokenRateMode: 'speed',
     heatmapMetric: 'cost',
     modelRankingMetric: 'tokens',
+    usageCostRules: [],
     homeActiveDaysWindow: 'all',
     periodMonthMode: 'month',
     themeColors: {},
@@ -2491,6 +2493,7 @@ function readSettings() {
     merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
+    merged.usageCostRules = normalizeUsageCostRules(merged.usageCostRules);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
@@ -2892,11 +2895,11 @@ let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
 
 function electronPresentationStats(stats) {
-  return projectLimitStatsForDisplay(stats, {
+  return projectUsageCosts(projectLimitStatsForDisplay(stats, {
     localDeviceId: settings?.deviceId,
     syncActive: mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim()),
     opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
-  });
+  }), settings?.usageCostRules);
 }
 let trayCodexPendingSince = 0;
 let trayCodexSwitchInFlight = false;
@@ -4068,6 +4071,7 @@ function captureMacWidgetWork({ stats, owner }) {
       ? macWidgetHistoryCachePath(app.getPath('userData'), sourceKey)
       : null,
     presentation: macWidgetPresentation(),
+    usageCostRules: normalizeUsageCostRules(settings?.usageCostRules),
     snapshotPath: widget.snapshotPath,
     widgetKind: widget.widgetKind
   };
@@ -4104,7 +4108,7 @@ function ensureMacWidgetSnapshotController() {
       snapshotPath: work.snapshotPath,
       snapshotOptions: {
         presentation: work.presentation,
-        history
+        history: projectHistoryCosts(history, work.usageCostRules)
       },
       logger: (message) => console.warn(message)
     }),
@@ -5512,7 +5516,7 @@ function requestAppQuit() {
 // itself; callers pass only `periods` (privacy: devices/limits never enter).
 async function writeExportTo(dir, periods, options = {}) {
   if (!dir) return { ok: false, reason: 'no-dir' };
-  const history = await getDashboardHistory().catch(() => null);
+  const history = await getDashboardHistory({ raw: true }).catch(() => null);
   // History unavailable (e.g. a transient hub fetch failure) is NOT the same as
   // "no history": writing a snapshot-only set would emit empty time-series JSON
   // AND the orphan cleanup below would delete an existing daily.csv. Never write a
@@ -6442,11 +6446,11 @@ async function getDashboardHistory(options = {}) {
   const resolved = includeDevices
     ? await resolveCompleteHistoryWithDevices(historyResolverOptions())
     : { history: await getCompleteHistory(), deviceHistories: undefined };
-  const history = resolved.history;
+  const history = options.raw === true ? resolved.history : projectHistoryCosts(resolved.history, settings?.usageCostRules);
   const source = completeHistorySource(historyResolverOptions());
   return {
     ...history,
-    ...(includeDevices ? { deviceHistories: resolved.deviceHistories } : {}),
+    ...(includeDevices ? { deviceHistories: resolved.deviceHistories?.map((device) => projectUsageCosts(device, settings?.usageCostRules)) } : {}),
     fixedPeriods: fixedPeriodHistoryMeta({
       source
     })
@@ -6771,6 +6775,7 @@ app.whenReady().then(() => {
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
+      usageCostRules: normalizeUsageCostRules(patch.usageCostRules ?? settings.usageCostRules),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
@@ -6948,6 +6953,10 @@ app.whenReady().then(() => {
       // Re-project the cached aggregate immediately. The Hub can be offline and
       // therefore may not send another frame after this local-only setting changes.
       refreshLimitStatsPresentation();
+    }
+    if (JSON.stringify(settings.usageCostRules) !== JSON.stringify(previousSettingsState.usageCostRules)) {
+      refreshLimitStatsPresentation();
+      if (dashboardWindow && !dashboardWindow.isDestroyed()) dashboardWindow.webContents.send('dashboard:historyChanged');
     }
     pushSettingsToRenderer();
     return settingsForRenderer();
