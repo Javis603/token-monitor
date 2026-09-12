@@ -444,3 +444,59 @@ test('collectUsageOnce falls back to plain session grouping when the binary reje
     delete require.cache[collectorPath];
   }
 });
+
+test('resetting the capability cache lets the workspace grouping be tried again', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    const groupBy = args[args.indexOf('--group-by') + 1];
+    setImmediate(() => {
+      if (groupBy === 'client,workspace,session,model') {
+        child.stderr.emit('data', Buffer.from("Error: Invalid group-by value: 'client,workspace,session,model'."));
+        child.emit('close', 1);
+        return;
+      }
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+
+  const collectorPath = require.resolve('../../src/shared/collector');
+  delete require.cache[collectorPath];
+
+  try {
+    const { collectUsageOnce, resetTokscaleCapabilityCache } = require(collectorPath);
+    const options = {
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false
+    };
+
+    await collectUsageOnce(options);
+    const afterFirst = calls.length;
+    // The rejection is remembered, so nothing retries the joined grouping...
+    assert.equal(calls[afterFirst - 1][calls[afterFirst - 1].indexOf('--group-by') + 1], 'client,session,model');
+
+    // ...until the binary's recorded capabilities are dropped, which is what a
+    // replaced binary at the same path needs.
+    resetTokscaleCapabilityCache();
+    await collectUsageOnce(options);
+
+    const firstAfterReset = calls[afterFirst];
+    assert.equal(firstAfterReset[firstAfterReset.indexOf('--group-by') + 1], 'client,workspace,session,model');
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});

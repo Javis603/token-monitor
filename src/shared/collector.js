@@ -342,6 +342,9 @@ function tokscaleClientFilter(clients) {
 
 function resetTokscaleCapabilityCache() {
   tokscaleCapabilityResolver.reset();
+  // Same category of state: what this binary identity was observed to support.
+  // Leaving it behind would keep a replaced binary pinned to the fallback grouping.
+  tokscaleWorkspaceGroupBySupport.clear();
 }
 
 // Exit code 2 alone is clap's generic "argument parsing failed" code, not a
@@ -997,14 +1000,9 @@ async function collectUsageOnce(options) {
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
-  // Set by the scan itself rather than by the binary's identity: what matters
-  // downstream is whether this tick's rows actually carry a workspace, which is
-  // also false when the scan fell back to the grouping that has none.
-  let tokscaleSuppliedProjects = false;
   const runTokscaleFn = async (input) => {
     const json = await runTokscaleScan(input);
-    const applied = applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
-    if (applied.projects > 0) tokscaleSuppliedProjects = true;
+    applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
     return json;
   };
   const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
@@ -1036,9 +1034,10 @@ async function collectUsageOnce(options) {
   const decorateLocalPeriods = (periods, { retryMisses = false } = {}) => applySessionMetadata(
     periods,
     options.homeDir || os.homedir(),
-    // Reopening every transcript to recover a project path is the expensive half
-    // of this pass, and a scan that already reported one makes it redundant.
-    { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled && !tokscaleSuppliedProjects }
+    // Still unconditional: only the clients whose parser records a workspace come
+    // back from the scan attributed, so the resolvers stay the answer for the rest.
+    // applySessionMetadata skips the expensive path read per session, not per tick.
+    { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
   );
   // Proma and Qoder CN remain local compatibility adapters. Reasonix aggregate
   // usage is supplied by the same Tokscale path as every other tracked client.

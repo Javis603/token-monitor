@@ -235,6 +235,23 @@ function sessionRefsForPeriods(periods) {
   return refs;
 }
 
+// Sessions the scan already attributed to a project, so the file-reading path
+// can skip re-deriving one. Kept per session rather than as a single flag for
+// the whole collection: a scan covers only the clients whose parser records a
+// workspace, and one client answering must not stop another client's resolver
+// from answering for itself.
+function sessionsWithProject(periods) {
+  const attributed = new Set();
+  for (const period of Object.values(periods || {})) {
+    for (const session of Object.values(period?.sessions || {})) {
+      if (session?.client && session?.sessionId && session.projectId) {
+        attributed.add(`${session.client}:${session.sessionId}`);
+      }
+    }
+  }
+  return attributed;
+}
+
 function sessionMetadataMap(periods, home = os.homedir(), deps = {}) {
   const refs = sessionRefsForPeriods(periods);
   const metadata = deps.metadataCache || new Map();
@@ -251,26 +268,31 @@ function sessionMetadataMap(periods, home = os.homedir(), deps = {}) {
   }
 
   const resolvers = deps.sessionMetadataResolvers || SESSION_METADATA_RESOLVERS;
-  const context = {
+  const attributed = sessionsWithProject(periods);
+  const contextFor = (client) => ({
     deps,
     home,
     metadata,
     resolveProjects,
     projectIdentity,
     isoFromDate,
+    // Reading a transcript in full to recover its project path is the expensive
+    // half of this pass, so it is skipped for the sessions that already have one.
+    // Resolvers that carry their own path (it comes with the record they already
+    // read) keep seeing `resolveProjects` itself and stay unconditional.
     fileSessionMetadata: (sessionId, filePath, existing) => fileSessionMetadata(
       sessionId,
       filePath,
-      { deps, resolveProjects },
+      { deps, resolveProjects: resolveProjects && !attributed.has(`${client}:${sessionId}`) },
       existing
     )
-  };
+  });
   for (const [client, entry] of resolvers) {
     const sessionIds = byClient.get(client);
     if (!sessionIds) continue;
     const definition = resolverDefinition(entry);
     if (typeof definition?.resolve !== 'function') continue;
-    const resolved = definition.resolve(sessionIds, context);
+    const resolved = definition.resolve(sessionIds, contextFor(client));
     for (const [sessionId, meta] of resolved) {
       const key = `${client}:${sessionId}`;
       metadata.set(key, meta);
