@@ -26,27 +26,29 @@
   }
 
   function providerKey(provider = {}) {
-    const identity = clean(provider.accountKey)
-      || clean(provider.webAccountKey)
-      || normalized(provider.accountEmail)
-      || clean(provider.accountName)
-      || clean(provider.accountLabel)
-      || clean(provider.profileId)
+    const source = provider || {};
+    const identity = clean(source.accountKey)
+      || clean(source.webAccountKey)
+      || normalized(source.accountEmail)
+      || clean(source.accountName)
+      || clean(source.accountLabel)
+      || clean(source.profileId)
       || 'default';
-    return opaqueKey([normalized(provider.provider), identity]);
+    return opaqueKey([normalized(source.provider), identity]);
   }
 
   function windowKey(label, window = {}) {
-    const explicitId = clean(window.limitId)
-      || clean(window.id)
-      || clean(window.quotaId)
-      || clean(window.model)
-      || clean(window.group);
+    const source = window || {};
+    const explicitId = clean(source.limitId)
+      || clean(source.id)
+      || clean(source.quotaId)
+      || clean(source.model)
+      || clean(source.group);
     return opaqueKey([
-      normalized(window.kind),
+      normalized(source.kind),
       explicitId,
-      normalized(window.label || label),
-      window.additional === true ? 'additional' : 'canonical'
+      normalized(source.label || label),
+      source.additional === true ? 'additional' : 'canonical'
     ]);
   }
 
@@ -63,9 +65,10 @@
   }
 
   function remainingPercent(window = {}) {
-    const remaining = finitePercent(window.remainingPercent);
+    const source = window || {};
+    const remaining = finitePercent(source.remainingPercent);
     if (remaining !== null) return remaining;
-    const used = finitePercent(window.usedPercent);
+    const used = finitePercent(source.usedPercent);
     return used === null ? null : 100 - used;
   }
 

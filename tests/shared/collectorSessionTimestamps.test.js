@@ -13,8 +13,12 @@ const { installInProcessWatchHost } = require('../helpers/watchHost');
 installInProcessWatchHost(test);
 
 const collectorPath = require.resolve('../../src/shared/collector');
+const sessionMetadataPath = require.resolve('../../src/shared/sessionMetadata');
+const dshSessionMetadataPath = require.resolve('../../src/shared/providers/dsh/sessionMetadata');
 function freshCollector() {
   delete require.cache[collectorPath];
+  delete require.cache[sessionMetadataPath];
+  delete require.cache[dshSessionMetadataPath];
   return require(collectorPath);
 }
 
@@ -40,6 +44,65 @@ test('applySessionTimestamps fills OpenCode session start/last from injected DB 
   const s = periods.today.sessions['opencode:ses_abc'];
   assert.strictEqual(s.startedAt, '2026-06-04T10:00:00.000Z');
   assert.strictEqual(s.lastUsedAt, '2026-06-04T10:05:00.000Z');
+  assert.strictEqual(s.title, 'Greeting');
+});
+
+test('applySessionTimestamps enriches Codex sessions from the local metadata index', () => {
+  const periods = { today: { sessions: {
+    'codex:ordinary': { client: 'codex', sessionId: 'ordinary' },
+    'codex:review': { client: 'codex', sessionId: 'review' }
+  } } };
+  let calls = 0;
+
+  applySessionTimestamps(periods, '/no/such/home', {
+    readCodexMeta(ids) {
+      calls += 1;
+      assert.deepEqual([...ids].sort(), ['ordinary', 'review']);
+      return new Map([
+        ['ordinary', { title: 'Fix session details' }],
+        ['review', { sessionKind: 'background-review' }]
+      ]);
+    }
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(periods.today.sessions['codex:ordinary'].title, 'Fix session details');
+  assert.equal(periods.today.sessions['codex:review'].sessionKind, 'background-review');
+});
+
+test('applySessionTimestamps dispatches metadata providers through the registry contract', () => {
+  const periods = { today: { sessions: {
+    'example:session-1': { client: 'example', sessionId: 'session-1' }
+  } } };
+  let receivedContext;
+  const sessionMetadataResolvers = new Map([[
+    'example',
+    (ids, context) => {
+      assert.deepEqual([...ids], ['session-1']);
+      receivedContext = context;
+      return new Map([['session-1', {
+        startedAt: '2026-09-11T08:00:00.000Z',
+        lastUsedAt: '2026-09-11T08:05:00.000Z',
+        title: 'Registry result'
+      }]]);
+    }
+  ]]);
+
+  applySessionTimestamps(periods, '/home/example', {
+    env: { EXAMPLE_HOME: '/example' },
+    sessionMetadataResolvers
+  });
+
+  assert.equal(receivedContext.home, '/home/example');
+  assert.equal(receivedContext.deps.env.EXAMPLE_HOME, '/example');
+  assert.equal(receivedContext.resolveProjects, true);
+  assert.deepEqual(periods.today.sessions['example:session-1'], {
+    client: 'example',
+    sessionId: 'session-1',
+    startedAt: '2026-09-11T08:00:00.000Z',
+    lastUsedAt: '2026-09-11T08:05:00.000Z',
+    title: 'Registry result'
+  });
 });
 
 test('applySessionTimestamps leaves non-opencode sessions to the file path (no DB reader call)', () => {
@@ -212,7 +275,11 @@ test('applySessionTimestamps fills DSH session start/last from the transcript he
     const dir = path.join(home, '.dsh', 'sessions', 'proj', 'session-abc');
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, 'session.jsonl');
-    fs.writeFileSync(file, `${JSON.stringify({ type: 'session', id: 'session-abc', createdAt: 1750000000000 })}\n`);
+    fs.writeFileSync(file, [
+      JSON.stringify({ type: 'session', id: 'session-abc', createdAt: 1750000000000 }),
+      JSON.stringify({ type: 'session/title', seq: 1, data: { title: 'DSH session title' } }),
+      ''
+    ].join('\n'));
     const mtime = new Date('2026-07-01T12:00:00.000Z');
     fs.utimesSync(file, mtime, mtime);
 
@@ -227,6 +294,37 @@ test('applySessionTimestamps fills DSH session start/last from the transcript he
     const session = periods.today.sessions['dsh:session-abc'];
     assert.equal(session.startedAt, new Date(1750000000000).toISOString());
     assert.equal(session.lastUsedAt, mtime.toISOString());
+    assert.equal(session.title, 'DSH session title');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('applySessionTimestamps refreshes a cached DSH title after rename', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-title-refresh-'));
+  try {
+    const id = 'session-title-refresh';
+    const dir = path.join(home, '.dsh', 'sessions', 'proj', id);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'session.jsonl');
+    fs.writeFileSync(file, [
+      JSON.stringify({ type: 'session', id, createdAt: 1750000000000 }),
+      JSON.stringify({ type: 'session/title', seq: 1, data: { title: 'Initial title' } }),
+      ''
+    ].join('\n'));
+    const cache = {
+      metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set(),
+      dshSessionFileCache: new Map(), retryMisses: true
+    };
+    const tick = () => {
+      const periods = { today: { sessions: { [`dsh:${id}`]: { client: 'dsh', sessionId: id } } } };
+      applySessionTimestamps(periods, home, cache);
+      return periods.today.sessions[`dsh:${id}`];
+    };
+
+    assert.equal(tick().title, 'Initial title');
+    fs.appendFileSync(file, `${JSON.stringify({ type: 'session/title', seq: 2, data: { title: 'Renamed title' } })}\n`);
+    assert.equal(tick().title, 'Renamed title');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -331,6 +429,88 @@ test('applySessionTimestamps does not re-walk the DSH tree for already-known ses
     assert.equal(calls, 1, 'first tick resolves the unknown id via one walk');
     tick();
     assert.equal(calls, 1, 'second tick must reuse the cached file path, not walk again');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('applySessionTimestamps promotes a cached unversioned DSH path when a versioned transcript appears', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-generation-cache-'));
+  try {
+    const id = 'session-upgraded';
+    const dir = path.join(home, '.dsh', 'sessions', 'proj', id);
+    fs.mkdirSync(dir, { recursive: true });
+    const header = `${JSON.stringify({ type: 'session', id, createdAt: 1750000000000 })}\n`;
+    const unversioned = path.join(dir, 'session.jsonl');
+    fs.writeFileSync(unversioned, header);
+    const oldMtime = new Date('2026-07-01T10:00:00.000Z');
+    fs.utimesSync(unversioned, oldMtime, oldMtime);
+
+    let indexCalls = 0;
+    const cache = {
+      metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set(),
+      dshSessionFileCache: new Map(), retryMisses: true,
+      indexDshSessionHeaders(options) {
+        indexCalls += 1;
+        return indexDshSessionHeaders(options);
+      }
+    };
+    const tick = () => {
+      const periods = { today: { sessions: { [`dsh:${id}`]: { client: 'dsh', sessionId: id } } } };
+      applySessionTimestamps(periods, home, cache);
+      return periods.today.sessions[`dsh:${id}`];
+    };
+
+    assert.equal(tick().lastUsedAt, oldMtime.toISOString());
+    assert.equal(indexCalls, 1);
+
+    const versioned = path.join(dir, 'session.v3.jsonl');
+    fs.writeFileSync(versioned, header);
+    const newMtime = new Date('2026-07-01T11:00:00.000Z');
+    fs.utimesSync(versioned, newMtime, newMtime);
+
+    assert.equal(tick().lastUsedAt, newMtime.toISOString());
+    assert.equal(indexCalls, 1, 'generation promotion must not re-walk the whole sessions tree');
+    assert.equal([...cache.dshSessionFileCache.values()][0].filePath, versioned);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('applySessionTimestamps closes the initial DSH index generation race before caching', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-generation-index-race-'));
+  try {
+    const id = 'session-index-race';
+    const dir = path.join(home, '.dsh', 'sessions', 'proj', id);
+    fs.mkdirSync(dir, { recursive: true });
+    const header = `${JSON.stringify({ type: 'session', id, createdAt: 1750000000000 })}\n`;
+    const unversioned = path.join(dir, 'session.jsonl');
+    const versioned = path.join(dir, 'session.v3.jsonl');
+    fs.writeFileSync(unversioned, header);
+    const oldMtime = new Date('2026-07-01T10:00:00.000Z');
+    const newMtime = new Date('2026-07-01T11:00:00.000Z');
+    fs.utimesSync(unversioned, oldMtime, oldMtime);
+
+    let indexCalls = 0;
+    const cache = {
+      metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set(),
+      dshSessionFileCache: new Map(), retryMisses: true,
+      indexDshSessionHeaders() {
+        indexCalls += 1;
+        // Model a migration after this directory was scanned but before the
+        // completed whole-tree index is returned to the collector.
+        fs.writeFileSync(versioned, header);
+        fs.utimesSync(versioned, newMtime, newMtime);
+        return new Map([[id, { filePath: unversioned, createdAt: 1750000000000 }]]);
+      }
+    };
+    const periods = { today: { sessions: { [`dsh:${id}`]: { client: 'dsh', sessionId: id } } } };
+
+    applySessionTimestamps(periods, home, cache);
+
+    assert.equal(periods.today.sessions[`dsh:${id}`].lastUsedAt, newMtime.toISOString());
+    assert.equal(indexCalls, 1);
+    assert.equal([...cache.dshSessionFileCache.values()][0].filePath, versioned);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

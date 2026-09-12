@@ -430,6 +430,7 @@ test('tray context menu complements the primary click with useful commands', () 
   ]);
   assert.equal(template.some((item) => item.label === 'Show / Hide'), false);
   assert.equal(template[3].submenu.find((item) => item.label === 'Today Tokens + Cost').checked, true);
+  assert.equal(template[3].submenu.find((item) => item.label === 'Live rate (tok/s)').checked, false);
   assert.equal(template[4].submenu.find((item) => item.label === 'Tray Popover').checked, true);
 
   template[0].click();
@@ -466,7 +467,9 @@ test('tray context menu uses the selected locale for every visible level', () =>
   ]);
   assert.equal(template[1].submenu[0].label, '主頁');
   assert.equal(template[3].submenu[0].label, '今日 Tokens');
-  assert.deepEqual(template[3].submenu.slice(-2).map((item) => item.label), [
+  assert.equal(template[3].submenu.find((item) => item.label === '即時速率（tok/s）').checked, false);
+  assert.deepEqual(template[3].submenu.slice(-3).map((item) => item.label), [
+    '最低剩餘額度條',
     '僅顯示 App 圖示',
     '自訂'
   ]);
@@ -1131,6 +1134,11 @@ test('tray token text follows the shared localized unit setting', () => {
     ),
     '1.2萬 · HK$7.80'
   );
+});
+
+test('live rate is a generated tray mode with no legacy token title', () => {
+  assert.equal(isGeneratedTrayIconMode('liveTokenRate'), true);
+  assert.equal(formatTrayText({ periods: { today: { totalTokens: 12_000 } } }, 'liveTokenRate'), '');
 });
 
 test('only macOS draws a tray title beside the icon', () => {

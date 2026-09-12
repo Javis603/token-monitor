@@ -395,7 +395,7 @@ const CSP_HEADER = [
   "form-action 'none'",
   "frame-ancestors 'none'"
 ].join('; ');
-const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
+const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval']);
@@ -1961,9 +1961,9 @@ function migrateViewDisplayOrder(value) {
   return hasKnownView ? normalizeViewDisplayOrder(value, DEFAULT_VIEW_LIST).join(',') : '';
 }
 
-function normalizeTrayContent(value, fallback = 'tokens') {
+function normalizeTrayContent(value, fallback = 'tokens', allowedValues = TRAY_CONTENT_VALUES) {
   const v = String(value || '').trim();
-  return TRAY_CONTENT_VALUES.has(v) ? v : fallback;
+  return allowedValues.has(v) ? v : fallback;
 }
 
 function normalizeHubMode(value, fallback = 'local') {
@@ -4281,7 +4281,8 @@ function updateTrayDisplay() {
   // A renderer-generated icon is cached in the main process. Only reuse it
   // while the current stats still have quota text; otherwise it can outlive
   // the provider data that generated it.
-  const trayImageMode = mode === 'limitsAllSessions' && Boolean(limitText) && providerTrayIcons[mode];
+  const trayImageMode = (mode === 'limitsAllSessions' && Boolean(limitText) || mode === 'liveTokenRate')
+    && providerTrayIcons[mode];
   const customImageMode = mode === 'custom' && providerTrayIcons.custom;
   const text = trayImageMode || customImageMode ? '' : limitText;
   if (trayShowsTitle(process.platform)) tray.setTitle(text);

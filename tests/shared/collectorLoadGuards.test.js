@@ -179,6 +179,9 @@ test('watchIgnoreMatcher bounds OpenClaw to its per-agent usage sources', () => 
     path.join(root, 'main', 'session-sqlite-import-archive'),
     path.join(root, 'main', 'agent', 'codex-home', 'sessions', '2026', '09', '07'),
     path.join(root, 'main', 'agent', 'codex-home', 'archived_sessions'),
+    path.join(root, 'main', 'agent', 'cli-auth', 'codex', 'default', 'sessions', '2026', '08', '30'),
+    path.join(root, 'main', 'agent', 'cli-auth', 'codex', 'default', 'archived_sessions'),
+    path.join(root, 'main', 'agent', 'cli-auth', 'other', 'default', 'sessions'),
     path.join(root, 'main', 'workspace', 'node_modules', 'package', 'cache'),
     path.join(root, 'main', 'logs')
   ]);
@@ -208,7 +211,23 @@ test('watchIgnoreMatcher bounds OpenClaw to its per-agent usage sources', () => 
       path.join(agents, 'main', 'agent', 'codex-home', 'sessions'),
       path.join(agents, 'main', 'agent', 'codex-home', 'sessions', '2026', '09', '07', 'rollout.jsonl'),
       path.join(agents, 'main', 'agent', 'codex-home', 'archived_sessions'),
-      path.join(agents, 'main', 'agent', 'codex-home', 'archived_sessions', 'rollout.jsonl')
+      path.join(agents, 'main', 'agent', 'codex-home', 'archived_sessions', 'rollout.jsonl'),
+      // Legacy per-profile CLI homes hold Codex rollouts OpenClaw owns too. The
+      // `codex` and `<profile>` levels are kept so a login added after startup
+      // still reports.
+      path.join(agents, 'main', 'agent', 'cli-auth'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'codex'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'codex', 'default'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'codex', 'default', 'sessions'),
+      path.join(
+        agents, 'main', 'agent', 'cli-auth', 'codex', 'default',
+        'sessions', '2026', '08', '30', 'rollout.jsonl'
+      ),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'codex', 'default', 'archived_sessions'),
+      path.join(
+        agents, 'main', 'agent', 'cli-auth', 'codex', 'default',
+        'archived_sessions', 'rollout.jsonl'
+      )
     ];
     for (const target of kept) assert.equal(ignored(target), false, target);
 
@@ -223,7 +242,15 @@ test('watchIgnoreMatcher bounds OpenClaw to its per-agent usage sources', () => 
       path.join(agents, 'main', 'agent', 'incognito-openclaw-agent.sqlite'),
       path.join(agents, 'main', 'agent', 'codex-home', 'history.jsonl'),
       path.join(agents, 'main', 'agent', 'codex-home', 'tmp'),
-      path.join(agents, 'main', 'agent', 'codex-home', 'tmp', 'rollout.jsonl')
+      path.join(agents, 'main', 'agent', 'codex-home', 'tmp', 'rollout.jsonl'),
+      // `cli-auth/<other>` is an authentication profile, not a Codex home, and
+      // `history.jsonl` beside the session dirs is not a rollout.
+      path.join(agents, 'main', 'agent', 'cli-auth', 'other'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'other', 'default'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'other', 'default', 'sessions'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'codex', 'default', 'history.jsonl'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'codex', 'default', 'tmp'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'codex', 'default', 'tmp', 'rollout.jsonl')
     ];
     for (const target of pruned) assert.equal(ignored(target), true, target);
   } finally {

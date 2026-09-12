@@ -37,6 +37,7 @@ test('quota refill motion requires an existing non-full value reaching full', ()
 });
 
 test('remaining percentage preserves missing values and derives used-only windows', () => {
+  assert.equal(remainingPercent(null), null);
   assert.equal(remainingPercent({ remainingPercent: null }), null);
   assert.equal(remainingPercent({ usedPercent: 100 }), 0);
   assert.equal(remainingPercent({ usedPercent: 31 }), 69);
@@ -81,6 +82,8 @@ test('used-only snapshots can still identify a refill without changing display m
 });
 
 test('motion keys preserve account and window identity without exposing labels', () => {
+  assert.equal(providerKey(null), providerKey());
+  assert.equal(windowKey('Weekly', null), windowKey('Weekly'));
   const firstAccount = providerKey({ provider: 'codex', accountEmail: 'first@example.com' });
   const secondAccount = providerKey({ provider: 'codex', accountEmail: 'second@example.com' });
   assert.notEqual(firstAccount, secondAccount);
@@ -108,6 +111,10 @@ test('renderer wires reset motion before app boot and respects reduced motion', 
   assert.match(app, /requestAnimationFrame\(\(startedAt\) => \{/);
   assert.match(app, /duration,\s*startedAt\s*\);/);
   assert.match(app, /delay: Math\.max\(0, duration - LIMIT_RESET_GLOW_LEAD_MS\)/);
+  assert.match(app, /highlight\.className = 'limit-meter-completion'/);
+  assert.doesNotMatch(app, /filter: 'brightness\(/);
+  assert.match(app, /if \(nextText !== renderedText\)/);
+  assert.match(css, /\.limit-meter-completion\s*\{[^}]*position:\s*absolute;[^}]*opacity:\s*0;/s);
   assert.doesNotMatch(css, /limit-window-resetting|limit-reset-shine|limit-reset-brighten|limit-reset-glow/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.limit-meter-fill/);
 });

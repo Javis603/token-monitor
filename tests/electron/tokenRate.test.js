@@ -11,6 +11,10 @@ const tokenRatePresentation = fs.readFileSync(path.join(rendererDir, 'tokenRateP
 const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
 const tokenRateApi = require(path.join(rendererDir, 'tokenRatePresentation.js'));
+const trayLayout = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'trayLayout.js'), 'utf8');
+const trayComposer = fs.readFileSync(path.join(rendererDir, 'trayComposer.js'), 'utf8');
+const i18n = fs.readFileSync(path.join(rendererDir, 'i18n.js'), 'utf8');
+const traySource = fs.readFileSync(path.join(rendererDir, '..', 'tray.js'), 'utf8');
 
 const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
 
@@ -370,10 +374,24 @@ test('live rate selects every active hub device or only this device by scope', (
     source: 'device:this-device'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'missing', 'local'), {
-    entries: [],
+    entries: [{ id: 'device:missing', period: aggregate }],
     source: 'device:missing'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods({ periods: { today: aggregate }, devices: [] }, 'this-device', 'local'), {
+    entries: [{ id: 'device:this-device', period: aggregate }],
+    source: 'device:this-device'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods({
+    periods: { today: aggregate },
+    devices: [{ deviceId: 'old-device', periods: { today: other } }]
+  }, 'this-device', 'local'), {
+    entries: [{ id: 'device:this-device', period: aggregate }],
+    source: 'device:this-device'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods({
+    periods: { today: aggregate },
+    devices: [{ deviceId: 'old-device', periods: { today: other } }]
+  }, 'this-device', 'client', 'device'), {
     entries: [],
     source: 'device:this-device'
   });
@@ -609,6 +627,46 @@ test('the live footer rate is opt-in, accessible, and shares the persisted mode'
   assert.match(css, /\.live-token-rate-icon[\s\S]*icons\/actions\/zap\.svg/);
   assert.match(css, /--view-switcher-max-width: min\(112px, max\(0px, calc\(50% - 66px\)\)\)/);
   assert.match(css, /\.footer\.live-token-rate-obscured \.live-token-rate,[\s\S]*visibility: hidden;/);
+});
+
+test('compact display surfaces can render live rates independently of the footer setting', () => {
+  assert.match(trayLayout, /'liveTokenRate'/);
+  assert.match(trayLayout, /rateMode: 'speed'/);
+  assert.match(trayLayout, /rateScope: 'all'/);
+  assert.match(trayLayout, /options\.liveTokenRates\?\./);
+  assert.match(trayLayout, /available: Boolean\(sample && sample\.idle !== true\)/);
+  assert.match(trayComposer, /styles: \['percent',[\s\S]*'liveTokenRate'/);
+  assert.match(trayComposer, /function liveTokenRateEditor\(item, rowIndex = 0\)/);
+  assert.match(trayComposer, /for \(const style of group\.styles\)/);
+  assert.match(trayComposer, /function textMetricChoices\(\)/);
+  assert.match(trayComposer, /const metrics = textMetricChoices\(\)/);
+  assert.match(trayComposer, /if \(metric === 'liveTokenRate'\) \{[\s\S]*liveTokenRateEditor\(item, rowIndex\)/);
+  assert.match(trayComposer, /rateMode\.speed/);
+  assert.match(trayComposer, /rateScope\.device/);
+  assert.match(main, /const TRAY_CONTENT_VALUES = new Set\([\s\S]*'liveTokenRate'/);
+  assert.doesNotMatch(main, /FLOATING_BUBBLE_CONTENT_VALUES/);
+  assert.match(main, /floatingBubbleContent: normalizeTrayContent\([^\n]+, 'icon'\)/);
+  assert.match(main, /const trayImageMode = \(mode === 'limitsAllSessions'[\s\S]*mode === 'liveTokenRate'/);
+  assert.match(traySource, /\['liveTokenRate', 'trayMenu\.content\.liveTokenRate'\]/);
+  assert.match(app, /const displayLiveTokenRateTrackers = new Map\(\)/);
+  assert.match(app, /const BUBBLE_CONTENT_VALUES = \[[^\n]*'liveTokenRate'/);
+  assert.match(app, /function observeDisplayLiveTokenRates\(stats\)/);
+  assert.match(app, /floatingBubbleEnabled === true/);
+  assert.match(app, /floatingBubbleCustomLayout/);
+  assert.match(app, /trayLayoutApi\.liveTokenRateItemsForSurfaces\(\[/);
+  assert.match(app, /function liveTokenRateTrayLayout\(\)/);
+  assert.match(app, /if \(mode === 'liveTokenRate'\) \{[\s\S]*liveTokenRateTrayLayout\(\)/);
+  assert.match(app, /if \(isSettingsSurfaceVisible\(\)\) refreshTrayComposers\(\)/);
+  assert.match(app, /state\.stats = nextStats;\s*observeDisplayLiveTokenRates\(nextStats\)/);
+  assert.match(app, /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);\s*observeLiveTokenRate\(state\.stats\);\s*observeDisplayLiveTokenRates\(state\.stats\)/);
+  assert.match(app, /liveTokenRates: options\.liveTokenRates \|\| displayLiveTokenRateSamples\(\)/);
+  assert.match(app, /renderFloatingBubbleContent\(\);\s*if \(isSettingsSurfaceVisible\(\)\) refreshTrayComposers\(\)/);
+  assert.match(app, /trayContentInput\.value = \['tokens',[\s\S]*'liveTokenRate'/);
+  const bubbleOptions = html.slice(html.indexOf('id="floatingBubbleContentInput"'), html.indexOf('id="floatingBubbleComposer"'));
+  const trayOptions = html.slice(html.indexOf('id="trayContentInput"'), html.indexOf('id="trayComposer"'));
+  assert.match(bubbleOptions, /<option value="liveTokenRate" data-i18n="settings\.tray\.liveTokenRate">/);
+  assert.match(trayOptions, /<option value="liveTokenRate" data-i18n="settings\.tray\.liveTokenRate">/);
+  assert.equal((i18n.match(/'trayComposer\.style\.liveTokenRate'/g) || []).length, 5);
 });
 
 test('the live footer rate uses matched timed deltas rather than scan wall time', () => {

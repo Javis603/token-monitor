@@ -8,7 +8,7 @@
   const STYLE_GROUPS = [
     { id: 'icons', styles: ['appIcon', 'providerIcon'] },
     { id: 'bars', styles: ['singleBar', 'doubleBar', 'doublePercent', 'doubleReset'] },
-    { id: 'text', styles: ['percent', 'percentReset', 'reset', 'tokens', 'cost', 'doubleInfo', 'customText', 'doubleCustomText'] },
+    { id: 'text', styles: ['percent', 'percentReset', 'reset', 'tokens', 'cost', 'liveTokenRate', 'doubleInfo', 'customText', 'doubleCustomText'] },
     { id: 'spacing', styles: ['spacer', 'separatorDot'] }
   ];
 
@@ -234,6 +234,7 @@
         reset: 'Reset time',
         tokens: 'Tokens',
         cost: 'Cost',
+        liveTokenRate: 'Live token rate',
         account: 'Account',
         customText: 'Custom text',
         doubleCustomText: 'Double custom text',
@@ -673,13 +674,42 @@
     }
 
     function textMetricChoices() {
-      return [
+      const choices = [
         { value: 'percent', style: 'percent' },
         { value: 'percentReset', style: 'percentReset' },
         { value: 'reset', style: 'reset' },
         { value: 'tokens', style: 'tokens' },
-        { value: 'cost', style: 'cost' }
-      ].map((entry) => ({ ...entry, label: styleTitle(entry.style) }));
+        { value: 'cost', style: 'cost' },
+        { value: 'liveTokenRate', style: 'liveTokenRate' }
+      ];
+      return choices.map((entry) => ({ ...entry, label: styleTitle(entry.style) }));
+    }
+
+    function liveTokenRateEditor(item, rowIndex = 0) {
+      const source = Array.isArray(item.rows) ? sourceForItem(item, rowIndex) : item;
+      const patch = (changes) => Array.isArray(item.rows)
+        ? sourcePatch(item, rowIndex, changes)
+        : { ...item, ...changes };
+      return [
+        picker(
+          l('trayComposer.rateMode', 'Rate'),
+          [
+            { value: 'speed', label: l('trayComposer.rateMode.speed', 'Generation speed (tok/s)') },
+            { value: 'burn', label: l('trayComposer.rateMode.burn', 'Token burn (TPM)') }
+          ],
+          source.rateMode,
+          (rateMode) => updateItem(item, patch({ rateMode }))
+        ),
+        picker(
+          l('trayComposer.rateScope', 'Devices'),
+          [
+            { value: 'all', label: l('trayComposer.rateScope.all', 'All devices') },
+            { value: 'device', label: l('trayComposer.rateScope.device', 'This device') }
+          ],
+          source.rateScope,
+          (rateScope) => updateItem(item, patch({ rateScope }))
+        )
+      ];
     }
 
     function periodChoices() {
@@ -747,6 +777,11 @@
           metric,
           (nextMetric) => updateItem(item, sourcePatch(item, rowIndex, { metric: nextMetric }))
         ));
+      }
+
+      if (metric === 'liveTokenRate') {
+        section.append(...liveTokenRateEditor(item, rowIndex));
+        return section;
       }
 
       if (metric === 'tokens' || metric === 'cost') {
@@ -1124,7 +1159,9 @@
           }
         ));
         popover.append(fontStyleEditor(item));
-        if (item.metric === 'tokens' || item.metric === 'cost') {
+        if (item.metric === 'liveTokenRate') {
+          popover.append(...liveTokenRateEditor(item));
+        } else if (item.metric === 'tokens' || item.metric === 'cost') {
           popover.append(usageScopeEditor(item));
           popover.append(picker(
             l('trayComposer.period', 'Period'),

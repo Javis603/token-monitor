@@ -643,10 +643,10 @@ function zcodePlanBucketWindow(balance, periodByEntitlement = new Map()) {
     else if (used !== null) usedPercent = clampPercent((used / total) * 100);
   }
   if (usedPercent === null) usedPercent = clampPercent(balance?.percentage);
-  const label = String(balance?.show_name || '').trim() || 'Start Plan';
-  const resetsAt = toIso(balance?.expires_at ?? balance?.period_end);
   const period = periodByEntitlement.get(JSON.stringify([balance?.plan_id || '', balance?.entitlement_id || '']))
     || String(balance?.period || '');
+  const label = String(balance?.show_name || '').trim() || 'Start Plan';
+  const resetsAt = toIso(balance?.expires_at ?? balance?.period_end);
   const window = {
     kind: period === 'daily' ? 'daily' : 'billing',
     label,
@@ -658,7 +658,11 @@ function zcodePlanBucketWindow(balance, periodByEntitlement = new Map()) {
   if (used !== null) window.used = used;
   if (remaining !== null) window.remaining = remaining;
   if (total !== null) window.limit = total;
-  if (resetsAt) window.resetsAt = resetsAt;
+  if (resetsAt) {
+    window.resetsAt = resetsAt;
+    if (period === 'daily') window.boundaryKind = 'reset';
+    else if (period === 'one_time') window.boundaryKind = 'expiry';
+  }
   return window;
 }
 
@@ -711,15 +715,35 @@ function parseZcodeStartPlanBalances(payload) {
       window.limitId = `zcode-bucket:${hashKey(key)}`;
     }
     const periods = [...new Set(entries.map(entry => entry.period))].sort();
-    const boundaries = [...new Set(entries.map(entry => entry.window.resetsAt || ''))].filter(Boolean).sort();
-    const uniformDaily = periods.length === 1 && periods[0] === 'daily' && boundaries.length === 1;
+    const boundaries = [...new Map(entries
+      .filter(entry => entry.window.resetsAt)
+      .map(entry => {
+        const boundary = {
+          at: entry.window.resetsAt,
+          kind: entry.window.boundaryKind || null
+        };
+        return [`${boundary.at}:${boundary.kind}`, boundary];
+      })).values()]
+      .sort((a, b) => a.at.localeCompare(b.at) || String(a.kind || '').localeCompare(String(b.kind || '')));
+    const nextAt = boundaries[0]?.at || null;
+    const nextBoundaries = boundaries.filter(boundary => boundary.at === nextAt);
+    const nextKinds = new Set(nextBoundaries.map(boundary => boundary.kind).filter(Boolean));
+    if (nextAt) {
+      window.resetsAt = nextAt;
+      if (nextBoundaries.every(boundary => boundary.kind)) {
+        window.boundaryKind = nextKinds.size > 1 ? 'mixed' : [...nextKinds][0];
+      } else {
+        delete window.boundaryKind;
+      }
+    }
+    const uniformDaily = periods.length === 1 && periods[0] === 'daily'
+      && new Set(boundaries.map(boundary => boundary.at)).size === 1;
     if (!uniformDaily) {
       window.kind = 'billing';
       delete window.windowMinutes;
-      // resetsAt is the earliest component boundary, so reset scheduling
-      // keeps working; wording is the shared presentation layer's call.
-      const next = boundaries[0] || null;
-      if (next) window.resetsAt = next;
+      // resetsAt remains the compatibility/scheduling timestamp. boundaryKind
+      // tells every presentation surface whether that earliest change is a
+      // replenishing reset, a grant expiry, or both at the same instant.
     }
     return window;
   }).sort((a, b) => a.label.localeCompare(b.label) || a.limitId.localeCompare(b.limitId));

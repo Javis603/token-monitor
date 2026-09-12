@@ -382,7 +382,8 @@ async function fetchKiroLimits(_options = {}, deps = {}) {
       usedPercent: parsed.creditsPercent,
       used: parsed.creditsUsed,
       limit: parsed.creditsTotal,
-      resetsAt: parsed.resetsAt
+      resetsAt: parsed.resetsAt,
+      ...(parsed.resetsAt ? { boundaryKind: 'reset' } : {})
     });
   }
   if (parsed.bonus) {
@@ -396,7 +397,7 @@ async function fetchKiroLimits(_options = {}, deps = {}) {
       used: parsed.bonus.used,
       limit: parsed.bonus.total,
       resetsAt: expiryIso,
-      resetDescription: parsed.bonus.expiryDays !== null ? `expires in ${parsed.bonus.expiryDays}d` : ''
+      ...(expiryIso ? { boundaryKind: 'expiry' } : {})
     });
   }
   // Overage is a value, not a quota %, so it rides as a meterless note row (like

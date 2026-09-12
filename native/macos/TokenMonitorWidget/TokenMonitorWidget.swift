@@ -712,8 +712,8 @@ struct TokenMonitorWidgetView: View {
             if showsBars, let remaining {
                 quotaBar(remaining)
             }
-            if showsReset, let reset = provider.windows.first?.resetsAt {
-                Text(WidgetFormat.reset(reset))
+            if showsReset, let window = provider.windows.first, window.resetsAt != nil {
+                Text(WidgetFormat.boundary(window))
                     .font(.system(size: WidgetDesignTokens.microSize, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }

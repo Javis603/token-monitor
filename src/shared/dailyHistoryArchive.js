@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
-const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
+const { sharedDataDir, writeJsonAtomic } = require('./config');
 const {
   normalizeTokscaleClientName, num, sumOutputTokens, sumTokens
 } = require('./history');
@@ -531,9 +531,45 @@ function dailyHistoryArchivePath(options = {}) {
   return options.path || path.join(sharedDataDir(options), 'daily-history-archive.json');
 }
 
+function validateDailyHistoryArchiveDocument(value, filePath) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Could not parse JSON in ${filePath}: archive root must be an object`);
+  }
+  for (const key of ['days', 'liveDays']) {
+    if (Object.prototype.hasOwnProperty.call(value, key)
+      && (!value[key] || typeof value[key] !== 'object' || Array.isArray(value[key]))) {
+      throw new Error(`Could not parse JSON in ${filePath}: ${key} must be an object`);
+    }
+  }
+  return value;
+}
+
 function readDailyHistoryArchive(options = {}) {
-  const read = options.readJson || readJson;
-  return normalizeDailyHistoryArchive(read(dailyHistoryArchivePath(options), {}));
+  const filePath = dailyHistoryArchivePath(options);
+  if (typeof options.readJson === 'function') {
+    return normalizeDailyHistoryArchive(
+      validateDailyHistoryArchiveDocument(options.readJson(filePath, {}), filePath)
+    );
+  }
+  let content;
+  try {
+    content = fs.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return normalizeDailyHistoryArchive({});
+    throw error;
+  }
+  if (!content.trim()) {
+    throw new Error(`Could not parse JSON in ${filePath}: archive is empty`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    const parseError = new Error(`Could not parse JSON in ${filePath}: ${error.message}`);
+    parseError.cause = error;
+    throw parseError;
+  }
+  return normalizeDailyHistoryArchive(validateDailyHistoryArchiveDocument(parsed, filePath));
 }
 
 function writeDailyHistoryArchive(archive, options = {}) {
