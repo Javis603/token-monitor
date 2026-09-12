@@ -250,6 +250,26 @@
     }));
   }
 
+  // Keep the date lookup in the shared renderer API so the dashboard and its
+  // tests use the same calendar-key semantics. Do not infer a model when an
+  // older history row has totals but no perModel breakdown.
+  function modelsForDay(history, date) {
+    const key = String(date || '').slice(0, 10);
+    const day = (history?.daily || []).find((row) => String(row?.date || '').slice(0, 10) === key);
+    return Object.entries(day?.perModel || {})
+      .map(([model, value]) => ({
+        model,
+        tokens: n(value?.tokens),
+        cost: n(value?.cost),
+        cacheReadTokens: n(value?.cacheReadTokens),
+        cacheWriteTokens: n(value?.cacheWriteTokens),
+        outputTokens: n(value?.outputTokens),
+        unclassifiedTokens: n(value?.unclassifiedTokens)
+      }))
+      .filter((row) => row.tokens > 0 || row.cost > 0)
+      .sort((a, b) => b.tokens - a.tokens || b.cost - a.cost || a.model.localeCompare(b.model));
+  }
+
   function sparklinePreview(points, options) {
     const o = Object.assign({ width: 120, height: 28, gap: 0.25, metric: 'tokens' }, options || {});
     const arr = Array.isArray(points) ? points : [];
@@ -523,7 +543,7 @@
   }
 
   function heatmapSvg(model, options) {
-    const o = Object.assign({ titleOf: () => '', monthLabel: (m) => m.label, radius: 3, glowFilterId: '', spotlightId: '', spotlightRadius: 86, initialHidden: false }, options || {});
+    const o = Object.assign({ titleOf: () => '', ariaLabelOf: () => '', monthLabel: (m) => m.label, radius: 3, glowFilterId: '', spotlightId: '', spotlightRadius: 86, initialHidden: false, interactive: false }, options || {});
     const botPad = 16;
     const modelWidth = Math.max(0, Number(model.width) || 0);
     const modelHeight = Math.max(0, Number(model.height) || 0);
@@ -544,7 +564,12 @@
     }
     const defs = defsParts.length ? `<defs>${defsParts.join('')}</defs>` : '';
     const initialVisibility = o.initialHidden ? ' data-motion-hidden="true" opacity="0"' : '';
-    const cellAttrs = (c) => `class="heat lvl-${c.intensity}" data-d="${escapeXml(c.date)}" data-t="${svgRound(c.tokens || 0)}" data-cost="${svgRound(c.cost || 0)}" x="${svgRound(c.x)}" y="${svgRound(c.y)}" width="${svgRound(c.size)}" height="${svgRound(c.size)}" rx="${svgRound(Math.max(0, Number(o.radius) || 0))}"${initialVisibility}`;
+    const cellAttrs = (c) => {
+      const aria = o.interactive
+        ? ` tabindex="0" role="button" aria-label="${escapeXml(o.ariaLabelOf(c) || c.date)}"`
+        : '';
+      return `class="heat lvl-${c.intensity}" data-d="${escapeXml(c.date)}" data-t="${svgRound(c.tokens || 0)}" data-cost="${svgRound(c.cost || 0)}"${aria} x="${svgRound(c.x)}" y="${svgRound(c.y)}" width="${svgRound(c.size)}" height="${svgRound(c.size)}" rx="${svgRound(Math.max(0, Number(o.radius) || 0))}"${initialVisibility}`;
+    };
     const cells = (model.cells || []).map((c) =>
       `<rect ${cellAttrs(c)}>${o.titleOf(c) ? `<title>${escapeXml(o.titleOf(c))}</title>` : ''}</rect>`
     ).join('');
@@ -615,7 +640,7 @@
   }
 
   return {
-    localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
+    localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, modelsForDay, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
     areaLineChart, areaLineSvg,
     selectPreviewSeries, patchTodayBar, sparklineSvg,
     clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,

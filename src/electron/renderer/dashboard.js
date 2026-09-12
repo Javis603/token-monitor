@@ -28,6 +28,7 @@ const els = {
   chart: document.getElementById('dashChart'),
   legend: document.getElementById('dashLegend'),
   heatmap: document.getElementById('dashHeatmap'),
+  dayDetail: document.getElementById('dashDayDetail'),
   cards: document.getElementById('dashCards'),
   empty: document.getElementById('dashEmpty'),
   tooltip: document.getElementById('dashTooltip'),
@@ -41,7 +42,7 @@ const state = {
   tab: 'activity', range: '30', stackBy: 'client', mode: 'bars', flat: false,
   locale: 'en', currency: 'USD', compactTokenUnits: 'western', history: null, chartModel: null,
   chartKind: 'bars', motion: 'none', reduceMotion: 'system',
-  heatmapMetric: 'cost'
+  heatmapMetric: 'cost', selectedDate: null
 };
 
 const DATA_MOTION_MS = 800;
@@ -250,6 +251,9 @@ function applyVendorColorOverrides(overrides) {
 function formatCompact(value) {
   return compactTokenApi.formatCompactTokens(value, effectiveCompactTokenUnits(), state.locale);
 }
+function escapeXml(value) {
+  return String(value).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+}
 function formatDurationCompact(ms) {
   const totalMinutes = Math.max(0, Math.round(Number(ms || 0) / 60000));
   const hours = Math.floor(totalMinutes / 60);
@@ -286,6 +290,15 @@ function longDate(key) {
   const mo = Number(m[2]), d = Number(m[3]);
   if (state.locale.startsWith('zh')) return `${mo}月${d}日`;
   return new Date(Date.UTC(2000, mo - 1, d)).toLocaleString('en-US', { month: 'short', day: 'numeric' });
+}
+function fullDate(key) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(key));
+  if (!m) return String(key);
+  const year = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  if (state.locale.startsWith('zh')) return `${year}年${mo}月${d}日`;
+  if (state.locale === 'ja') return `${year}年${mo}月${d}日`;
+  if (state.locale === 'ko') return `${year}.${String(mo).padStart(2, '0')}.${String(d).padStart(2, '0')}`;
+  return new Date(Date.UTC(year, mo - 1, d)).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 function chartSize() {
   return { w: Math.max(320, els.chart.clientWidth || 800), h: Math.max(200, els.chart.clientHeight || 360) };
@@ -495,10 +508,19 @@ function renderActivity() {
   const hideHeatmapForEntry = !prefersReducedMotion()
     && (state.motion === 'entry' || els.heatmap.classList.contains('is-motion-pending'));
   els.heatmap.innerHTML = heat.cells.length
-    ? charts.heatmapSvg(heat, { monthLabel: (m) => monthLabel(m.label), initialHidden: hideHeatmapForEntry })
+    ? charts.heatmapSvg(heat, {
+      monthLabel: (m) => monthLabel(m.label),
+      initialHidden: hideHeatmapForEntry,
+      interactive: true,
+      ariaLabelOf: (cell) => `${fullDate(cell.date)}: ${formatCompact(cell.tokens || 0)} ${state.locale.startsWith('zh') ? 'Token' : 'tokens'}`
+    })
     : '';
   animateHeatmapEntry();
-  state.dayMap = new Map((state.history?.daily || []).map((d) => [String(d.date).slice(0, 10), { tokens: Number(d.tokens || 0), cost: Number(d.cost || 0) }]));
+  state.dayMap = new Map((state.history?.daily || []).map((d) => [String(d.date).slice(0, 10), d]));
+  els.heatmap.querySelectorAll('.heat[data-d]').forEach((cell) => {
+    cell.dataset.selected = String(cell.dataset.d === state.selectedDate);
+  });
+  renderDayDetail();
   const cards = charts.statsCards(state.history?.summary || {});
   const LABELS = {
     totalTokens: 'dashboard.stat.totalTokens', totalCost: 'dashboard.stat.totalCost',
@@ -568,6 +590,33 @@ function handleDashboardVisibilityChange() {
 document.addEventListener('visibilitychange', handleDashboardVisibilityChange);
 
 function hideTooltip() { els.tooltip.classList.add('hidden'); }
+
+function renderDayDetail() {
+  if (!els.dayDetail) return;
+  const date = state.selectedDate;
+  if (!date) {
+    els.dayDetail.innerHTML = '';
+    els.dayDetail.classList.add('hidden');
+    return;
+  }
+  const day = state.dayMap?.get(date);
+  const tokens = Number(day?.tokens || 0);
+  const cost = Number(day?.cost || 0);
+  const rows = charts.modelsForDay(state.history, date);
+  let html = `<div class="dash-day-detail-head"><span class="dash-day-detail-title">${t('dashboard.dayDetail.title')} · ${fullDate(date)}</span><span class="dash-day-detail-total">${formatCompact(tokens)}</span></div>`;
+  html += `<div class="dash-day-detail-meta"><span>${t('dashboard.dayDetail.tokens')}: ${formatCompact(tokens)}</span>${cost > 0 ? `<span>${t('dashboard.dayDetail.cost')}: ${formatCost(cost)}</span>` : ''}</div>`;
+  if (rows.length) {
+    html += `<div class="dash-day-models"><span class="dash-day-detail-label">${t('dashboard.dayDetail.models')}</span><span class="dash-day-detail-label">${t('dashboard.dayDetail.tokens')}</span><span class="dash-day-detail-label">${t('dashboard.dayDetail.cost')}</span>`;
+    html += rows.map((row) => `<span class="dash-day-model" title="${escapeXml(row.model)}">${escapeXml(row.model)}</span><span class="dash-day-model-tokens">${formatCompact(row.tokens)}${tokens > 0 ? ` · ${(row.tokens / tokens * 100).toFixed(1)}%` : ''}</span><span class="dash-day-model-cost">${formatCost(row.cost)}</span>`).join('');
+    html += '</div>';
+  } else if (tokens > 0 || cost > 0) {
+    html += `<div class="dash-day-detail-empty">${t('dashboard.dayDetail.unavailable')}</div>`;
+  } else {
+    html += `<div class="dash-day-detail-empty">${t('dashboard.dayDetail.empty')}</div>`;
+  }
+  els.dayDetail.innerHTML = html;
+  els.dayDetail.classList.remove('hidden');
+}
 
 function positionTooltip(ev) {
   els.tooltip.classList.remove('hidden');
@@ -765,6 +814,24 @@ els.heatmap.addEventListener('mousemove', (ev) => {
   if (!hit) { hideTooltip(); return; }
   const date = hit.getAttribute('data-d');
   showHeatTooltip(date, state.dayMap && state.dayMap.get(date), ev);
+});
+els.heatmap.addEventListener('click', (ev) => {
+  const hit = ev.target.closest('.heat');
+  if (!hit) return;
+  ev.stopPropagation();
+  state.selectedDate = hit.getAttribute('data-d');
+  els.heatmap.querySelectorAll('.heat[data-d]').forEach((cell) => {
+    cell.dataset.selected = String(cell.dataset.d === state.selectedDate);
+  });
+  renderDayDetail();
+  hideTooltip();
+});
+els.heatmap.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  const hit = ev.target.closest('.heat');
+  if (!hit) return;
+  ev.preventDefault();
+  hit.click();
 });
 els.heatmap.addEventListener('mouseleave', hideTooltip);
 
