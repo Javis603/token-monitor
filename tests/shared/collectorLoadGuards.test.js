@@ -4610,6 +4610,16 @@ test('custom Tokscale scan paths stay visible and use recursive extra-root watch
     assert.equal(ignored(path.join(custom, 'direct.json')), false);
     assert.equal(ignored(path.join(custom, 'nested')), false);
     assert.equal(ignored(path.join(custom, 'nested', 'session.json')), false);
+
+    const copilotCustom = path.join(tmp, '.copilot', 'imported-sessions');
+    fs.mkdirSync(copilotCustom, { recursive: true });
+    const copilotIgnored = watchIgnoreMatcher('copilot', {
+      customScanPaths: { copilot: [copilotCustom] }
+    });
+    assert.equal(copilotIgnored(path.join(tmp, '.copilot', 'cache')), true);
+    assert.equal(copilotIgnored(path.join(copilotCustom, 'direct.jsonl')), false);
+    assert.equal(copilotIgnored(path.join(copilotCustom, 'nested')), false);
+    assert.equal(copilotIgnored(path.join(copilotCustom, 'nested', 'session.jsonl')), false);
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];

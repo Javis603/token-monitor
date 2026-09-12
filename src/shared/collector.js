@@ -2265,16 +2265,16 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   bound('codebuddy', withBasename('codebuddy', 'Logs'), (parts) => !CODEBUDDY_EXTENSION_SOURCE_DIRS.has(parts[0]));
 
   // Everything left is a recursive transcript tree: tokscale walks it, so every
-  // path inside it is a potential source. Copilot is excluded wholesale because
-  // each of its roots is bounded above, and the self-synced cache roots are
-  // never handed to chokidar in the first place. The parse-local Antigravity CLI
-  // dir is added back explicitly — it shares the umbrella client id but is
-  // written by `agy`, not by our sync.
+  // path inside it is a potential source. Copilot's built-in roots are bounded
+  // above, but its custom roots still follow Tokscale's recursive extra-root
+  // contract. The self-synced cache roots are never handed to chokidar in the
+  // first place. The parse-local Antigravity CLI dir is added back explicitly —
+  // it shares the umbrella client id but is written by `agy`, not by our sync.
   const recursive = [
     ...Object.entries(candidates)
-      .filter(([client]) => client !== 'copilot')
       .flatMap(([client, dirs]) => dirs.filter((dir) => (
-        (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir))
+        (client !== 'copilot' || customRoots.get(client)?.has(canonicalRoot(dir)))
+        && (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir))
         && !(claimed.get(client) || EMPTY_SET).has(dir)
       ))),
     ...(antigravityEnabled && dirExists(antigravityCliDataDir()) ? [antigravityCliDataDir()] : [])
