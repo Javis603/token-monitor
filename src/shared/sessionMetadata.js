@@ -80,10 +80,15 @@ function applyTokscaleSessionMetadata(json, { resolveProjects = true } = {}) {
   for (const entry of Array.isArray(json?.workspaces) ? json.workspaces : []) {
     const key = String(entry?.workspaceKey ?? entry?.workspace_key ?? '').trim();
     if (!key || identities.has(key)) continue;
-    // The decoded path is what makes Claude Code's dash-mangled slug and Codex's
-    // plain path name one project. A key that decodes to nothing (an opaque
-    // client id, a deleted directory) still identifies itself.
-    const identity = projectIdentity(entry?.path || key);
+    // Only a decoded path is an answer. It is what makes Claude Code's
+    // dash-mangled slug and Codex's plain path name one project, and tokscale
+    // returns none when the key is opaque or its directory is gone — exactly
+    // the cases where a transcript still records the real `cwd`, so hashing the
+    // raw key here would both lose that answer and mint a second identity for a
+    // directory that already has one. Leaving it unattributed hands the session
+    // back to the file-reading resolvers.
+    const path = String(entry?.path || '').trim();
+    const identity = path ? projectIdentity(path) : {};
     identities.set(key, identity.projectId
       ? { projectId: identity.projectId, projectLabel: identity.projectLabel || String(entry?.label || '').trim() }
       : null);

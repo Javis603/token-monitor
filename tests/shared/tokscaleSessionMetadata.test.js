@@ -96,16 +96,54 @@ test('a scan without the arrays leaves every row untouched', () => {
   assert.equal(json.entries[0].startedAt, undefined);
 });
 
-test('a workspace key that decodes to nothing still identifies itself', () => {
+test('a workspace key that decodes to nothing is left unattributed', () => {
+  // tokscale reports no path for a key that is an opaque client id or whose
+  // directory is gone. Hashing the raw key would mint a second identity for a
+  // directory other clients still name correctly, and — worse — mark the
+  // session attributed so its transcript is never read for the real cwd.
   const json = {
     entries: [{ client: 'commandcode', sessionId: 'session-3', workspaceKey: 'users-someone-repo-b', input: 1, output: 1, cost: 1 }],
     sessions: [{ client: 'commandcode', sessionId: 'session-3', firstActiveMs: 1789119106979, lastActiveMs: 1789119106979 }],
     workspaces: [{ workspaceKey: 'users-someone-repo-b', label: 'users-someone-repo-b' }]
   };
 
-  applyTokscaleSessionMetadata(json, { resolveProjects: true });
+  const result = applyTokscaleSessionMetadata(json, { resolveProjects: true });
 
-  assert.equal(json.entries[0].projectId, projectIdentity('users-someone-repo-b').projectId);
+  assert.equal(json.entries[0].projectId, undefined);
+  assert.equal(result.projects, 0);
+  // The timestamps ride the same pass and are unaffected by the missing path.
+  assert.equal(json.entries[0].startedAt, new Date(1789119106979).toISOString());
+});
+
+test('a Claude slug whose directory is gone still recovers its path from the transcript', () => {
+  // The regression this guards: the slug decode fails once the directory is
+  // deleted, but the transcript still records the cwd, so the resolver must
+  // keep answering instead of being skipped as already attributed.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-deleted-workspace-'));
+  try {
+    const transcript = path.join(home, 'session.jsonl');
+    fs.writeFileSync(transcript, `${JSON.stringify({ cwd: '/Users/someone/repo-gone' })}\n`);
+    const json = {
+      entries: [{ client: 'claude', sessionId: 'session-4', workspaceKey: '-Users-someone-repo-gone', input: 1, output: 1, cost: 1 }],
+      sessions: [{ client: 'claude', sessionId: 'session-4', firstActiveMs: 1789119106979, lastActiveMs: 1789119106979 }],
+      workspaces: [{ workspaceKey: '-Users-someone-repo-gone', label: 'repo-gone' }]
+    };
+    applyTokscaleSessionMetadata(json, { resolveProjects: true });
+    const periods = { allTime: extractUsageFromTokscale(json) };
+
+    applySessionMetadata(periods, home, {
+      sessionMetadataResolvers: new Map([
+        ['claude', { resolve: (ids, context) => new Map([...ids].map((id) => [id, context.fileSessionMetadata(id, transcript, {})])) }]
+      ])
+    });
+
+    assert.equal(
+      periods.allTime.sessions['claude:session-4'].projectId,
+      projectIdentity('/Users/someone/repo-gone').projectId
+    );
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('a session the scan could not attribute still reaches the file-reading resolver', () => {
