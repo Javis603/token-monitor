@@ -45,6 +45,7 @@ const { createCursorSelfSync } = require('./providers/cursor/selfSync');
 const { claudeSessionRoots } = require('./providers/claude/paths');
 const {
   applySessionMetadata,
+  applyTokscaleSessionMetadata,
   projectIdentity,
   projectPathFromJsonl,
   sessionMetadataMap
@@ -348,6 +349,29 @@ function resetTokscaleCapabilityCache() {
 // the same way. Requiring stderr to actually mention --client keeps a real
 // probe+retry reserved for the one flag this call site varies by binary
 // identity; anything else still surfaces as-is.
+// The workspace-joined grouping is a downstream addition: the vendored fork
+// returns the session's workspace on the same row, which is what lets one scan
+// answer "which project does this session belong to". An upstream build rejects
+// the value outright, so the fallback grouping is the one it has always known.
+const TOKSCALE_SESSION_GROUP_BY = 'client,session,model';
+const TOKSCALE_WORKSPACE_GROUP_BY = 'client,workspace,session,model';
+
+// Keyed by binary identity like the client-capability cache: a rejection is a
+// property of the binary, not of the tick, so one scan pays for the discovery
+// and every later scan on the same binary starts with the grouping it accepts.
+const tokscaleWorkspaceGroupBySupport = new Map();
+
+function workspaceGroupBySupported(identity) {
+  return tokscaleWorkspaceGroupBySupport.get(identity) !== false;
+}
+
+// Clap exits 1 with this message for an unparseable --group-by value. Matching
+// the message rather than the exit code alone keeps the retry reserved for the
+// one flag that varies by binary; anything else still surfaces as-is.
+function isUnknownTokscaleGroupByError(error) {
+  return Boolean(error) && /invalid group-by value/i.test(error?.tokscaleStderr || '');
+}
+
 function isUnknownTokscaleClientError(error) {
   return Boolean(error)
     && error.tokscaleExitCode === TOKSCALE_UNKNOWN_CLIENT_EXIT_CODE
@@ -424,16 +448,37 @@ function runTokscale({ clients, flags, commandTimeoutMs, signal, terminationOpti
   if (!requested) return Promise.resolve({ entries: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
   if (!clientFilter) return Promise.resolve({ entries: [] });
-  const runArgs = (filter) => ['--json', '--client', filter, '--group-by', 'client,session,model', ...flags];
+  const groupBy = workspaceGroupBySupported(command.identity)
+    ? TOKSCALE_WORKSPACE_GROUP_BY
+    : TOKSCALE_SESSION_GROUP_BY;
+  const runArgs = (filter, grouping = groupBy) => ['--json', '--client', filter, '--group-by', grouping, ...flags];
   const subprocessOptions = {
     operation: 'tokscale scan',
     terminationOptions,
     onTerminationUnconfirmed
   };
+  const scan = (filter, grouping) => spawnTokscaleJson(
+    runArgs(filter, grouping),
+    commandTimeoutMs,
+    command,
+    signal,
+    subprocessOptions
+  ).catch((error) => {
+    if (!isUnknownTokscaleGroupByError(error)) return Promise.reject(error);
+    tokscaleWorkspaceGroupBySupport.set(command.identity, false);
+    throwIfAborted(signal);
+    return spawnTokscaleJson(
+      runArgs(filter, TOKSCALE_SESSION_GROUP_BY),
+      commandTimeoutMs,
+      command,
+      signal,
+      subprocessOptions
+    );
+  });
   return runCursorAwareTokscale(clientFilter, () => (
-    spawnTokscaleJson(runArgs(clientFilter), commandTimeoutMs, command, signal, subprocessOptions).catch((error) => (
+    scan(clientFilter).catch((error) => (
       retryWithKnownCapabilities(error, requested, command, { entries: [] }, (filtered) => (
-        spawnTokscaleJson(runArgs(filtered), commandTimeoutMs, command, signal, subprocessOptions)
+        scan(filtered)
       ), signal, {
         terminationOptions,
         onTerminationUnconfirmed
@@ -947,11 +992,21 @@ async function collectUsageOnce(options) {
       // Diagnostics observers must never affect collection or cancellation.
     }
   };
-  const runTokscaleFn = options.runTokscale || ((input) => runTokscale({
+  const runTokscaleScan = options.runTokscale || ((input) => runTokscale({
     ...input,
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
+  // Set by the scan itself rather than by the binary's identity: what matters
+  // downstream is whether this tick's rows actually carry a workspace, which is
+  // also false when the scan fell back to the grouping that has none.
+  let tokscaleSuppliedProjects = false;
+  const runTokscaleFn = async (input) => {
+    const json = await runTokscaleScan(input);
+    const applied = applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
+    if (applied.projects > 0) tokscaleSuppliedProjects = true;
+    return json;
+  };
   const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
     ...input,
     terminationOptions: options.subprocessTerminationOptions,
@@ -981,7 +1036,9 @@ async function collectUsageOnce(options) {
   const decorateLocalPeriods = (periods, { retryMisses = false } = {}) => applySessionMetadata(
     periods,
     options.homeDir || os.homedir(),
-    { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
+    // Reopening every transcript to recover a project path is the expensive half
+    // of this pass, and a scan that already reported one makes it redundant.
+    { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled && !tokscaleSuppliedProjects }
   );
   // Proma and Qoder CN remain local compatibility adapters. Reasonix aggregate
   // usage is supplied by the same Tokscale path as every other tracked client.

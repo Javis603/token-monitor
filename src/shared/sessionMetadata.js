@@ -14,6 +14,11 @@ function isoFromDate(value) {
   return Number.isNaN(date.getTime()) ? '' : date.toISOString();
 }
 
+function isoFromMs(value) {
+  const ms = Number(value);
+  return Number.isFinite(ms) && ms > 0 ? isoFromDate(new Date(ms)) : '';
+}
+
 function timestampFromSessionId(id) {
   const raw = String(id || '');
   const isoMatch = raw.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/);
@@ -49,6 +54,67 @@ function timestampFromJsonLine(line) {
   } catch (_) {
     return '';
   }
+}
+
+// Tokscale's session-grouped JSON carries per-session facts beside the rows:
+// `sessions` (title and activity bounds per client and session id) and
+// `workspaces` (each workspace key's label and the real path it decodes to).
+// Folding them onto the rows lets the shared extractor read them through the
+// aliases it already understands, so nothing downstream needs to know the scan
+// supplied them. A binary that does not emit the arrays leaves every row
+// untouched and the file-reading resolvers below still answer.
+function applyTokscaleSessionMetadata(json, { resolveProjects = true } = {}) {
+  const rows = Array.isArray(json?.entries) ? json.entries : [];
+  const result = { sessions: 0, projects: 0 };
+  if (rows.length === 0) return result;
+
+  const sessionMeta = new Map();
+  for (const entry of Array.isArray(json?.sessions) ? json.sessions : []) {
+    const client = String(entry?.client || '').trim();
+    const sessionId = String(entry?.sessionId ?? entry?.session_id ?? '').trim();
+    if (client && sessionId) sessionMeta.set(`${client}:${sessionId}`, entry);
+  }
+  // Identity is resolved per workspace, not per row: a scan has far more rows
+  // than workspaces, and projectIdentity hashes.
+  const identities = new Map();
+  for (const entry of Array.isArray(json?.workspaces) ? json.workspaces : []) {
+    const key = String(entry?.workspaceKey ?? entry?.workspace_key ?? '').trim();
+    if (!key || identities.has(key)) continue;
+    // The decoded path is what makes Claude Code's dash-mangled slug and Codex's
+    // plain path name one project. A key that decodes to nothing (an opaque
+    // client id, a deleted directory) still identifies itself.
+    const identity = projectIdentity(entry?.path || key);
+    identities.set(key, identity.projectId
+      ? { projectId: identity.projectId, projectLabel: identity.projectLabel || String(entry?.label || '').trim() }
+      : null);
+  }
+  if (sessionMeta.size === 0 && identities.size === 0) return result;
+
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const client = String(row.client || '').trim();
+    const sessionId = String(row.sessionId ?? row.session_id ?? '').trim();
+    const meta = client && sessionId ? sessionMeta.get(`${client}:${sessionId}`) : null;
+    if (meta) {
+      // 0 is tokscale's "no usable timestamp", not the epoch.
+      const startedAt = isoFromMs(meta.firstActiveMs ?? meta.first_active_ms);
+      const lastUsedAt = isoFromMs(meta.lastActiveMs ?? meta.last_active_ms);
+      if (startedAt && !row.startedAt) row.startedAt = startedAt;
+      if (lastUsedAt && !row.lastUsedAt) row.lastUsedAt = lastUsedAt;
+      const title = String(meta.title || '').trim();
+      if (title && !row.sessionTitle) row.sessionTitle = title;
+      result.sessions += 1;
+    }
+    if (!resolveProjects) continue;
+    const workspaceKey = String(row.workspaceKey ?? row.workspace_key ?? '').trim();
+    if (!workspaceKey || row.projectId) continue;
+    const identity = identities.get(workspaceKey);
+    if (!identity) continue;
+    row.projectId = identity.projectId;
+    row.projectLabel = identity.projectLabel;
+    result.projects += 1;
+  }
+  return result;
 }
 
 const projectPathCache = new Map();
@@ -242,6 +308,7 @@ function applySessionMetadata(periods, home, deps = {}) {
 
 module.exports = {
   applySessionMetadata,
+  applyTokscaleSessionMetadata,
   // Compatibility aliases for existing callers; metadata now includes titles,
   // projects, and session kind in addition to timestamps.
   applySessionTimestamps: applySessionMetadata,

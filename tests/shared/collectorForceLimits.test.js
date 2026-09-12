@@ -286,7 +286,7 @@ test('collectUsageOnce includes the normalized tracked client list in summaries'
   }
 });
 
-test('collectUsageOnce requests session-level tokscale grouping', async () => {
+test('collectUsageOnce requests the workspace-joined session grouping', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
@@ -322,7 +322,7 @@ test('collectUsageOnce requests session-level tokscale grouping', async () => {
     for (const args of calls) {
       const groupIndex = args.indexOf('--group-by');
       assert.notEqual(groupIndex, -1);
-      assert.equal(args[groupIndex + 1], 'client,session,model');
+      assert.equal(args[groupIndex + 1], 'client,workspace,session,model');
     }
   } finally {
     childProcess.spawn = originalSpawn;
@@ -388,5 +388,59 @@ test('collectUsageOnce enriches session rows with local last-used timestamps', a
     childProcess.spawn = originalSpawn;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectUsageOnce falls back to plain session grouping when the binary rejects the join', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    const groupBy = args[args.indexOf('--group-by') + 1];
+    setImmediate(() => {
+      if (groupBy === 'client,workspace,session,model') {
+        // What an upstream build actually prints for an unknown --group-by.
+        child.stderr.emit('data', Buffer.from("Error: Invalid group-by value: 'client,workspace,session,model'."));
+        child.emit('close', 1);
+        return;
+      }
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+
+  const collectorPath = require.resolve('../../src/shared/collector');
+  delete require.cache[collectorPath];
+
+  try {
+    const { collectUsageOnce } = require(collectorPath);
+    await collectUsageOnce({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false
+    });
+
+    const groupings = calls.map((args) => args[args.indexOf('--group-by') + 1]);
+    // One rejection teaches the whole tick: the retry and both later scans go
+    // straight to the grouping this binary knows.
+    assert.deepEqual(groupings, [
+      'client,workspace,session,model',
+      'client,session,model',
+      'client,session,model',
+      'client,session,model'
+    ]);
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
   }
 });
