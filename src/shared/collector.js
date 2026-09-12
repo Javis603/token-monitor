@@ -456,16 +456,19 @@ function runTokscale({ clients, flags, commandTimeoutMs, signal, terminationOpti
   // scan that still resolved them and had its answer discarded would keep
   // charging for a feature the user turned off. Session titles and activity
   // bounds ride the plain session grouping too, so they are unaffected.
-  const groupBy = workspaces && workspaceGroupBySupported(command.identity)
+  // Read per spawn rather than once per call: a rejection recorded by the
+  // fallback below must already be visible to the unknown-client retry, which
+  // would otherwise re-offer the grouping this binary just refused.
+  const groupBy = () => (workspaces && workspaceGroupBySupported(command.identity)
     ? TOKSCALE_WORKSPACE_GROUP_BY
-    : TOKSCALE_SESSION_GROUP_BY;
-  const runArgs = (filter, grouping = groupBy) => ['--json', '--client', filter, '--group-by', grouping, ...flags];
+    : TOKSCALE_SESSION_GROUP_BY);
+  const runArgs = (filter, grouping) => ['--json', '--client', filter, '--group-by', grouping, ...flags];
   const subprocessOptions = {
     operation: 'tokscale scan',
     terminationOptions,
     onTerminationUnconfirmed
   };
-  const scan = (filter, grouping) => spawnTokscaleJson(
+  const scan = (filter, grouping = groupBy()) => spawnTokscaleJson(
     runArgs(filter, grouping),
     commandTimeoutMs,
     command,
