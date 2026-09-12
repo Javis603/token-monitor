@@ -7,11 +7,11 @@ const compactTokens = require('../shared/compactTokens');
 const CLIENT_ID = '1507034330436862062';
 const GITHUB_URL = 'https://github.com/Javis603/token-monitor';
 const KNOWN_CLIENT_ASSETS = new Set([
-  'claude', 'codex', 'hermes', 'gemini', 'cursor', 'opencode', 'openclaw', 'antigravity', 'cline',
+  'claude', 'codex', 'droid', 'hermes', 'gemini', 'cursor', 'opencode', 'openclaw', 'antigravity', 'cline',
   'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth'
 ]);
 const CLIENT_LABELS = {
-  claude: 'Claude', codex: 'Codex', hermes: 'Hermes Agent',
+  claude: 'Claude', codex: 'Codex', droid: 'Droid', hermes: 'Hermes Agent',
   gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw',
   antigravity: 'Antigravity', cline: 'Cline',
   kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot',
