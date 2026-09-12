@@ -5,7 +5,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorHomeModulePreferences = api;
 })(typeof window !== 'undefined' ? window : null, function createHomeModulePreferencesApi() {
-  const DEFAULT_HOME_MODULE_ORDER = 'limits,tool,device,model,trends';
+  const DEFAULT_HOME_MODULE_ORDER = 'limits,tool,device,model,trends,liveRate';
 
   function optionIds(options) {
     return (options || []).map((option) => String(option?.id || '').trim().toLowerCase()).filter(Boolean);
@@ -76,7 +76,9 @@
   function defaultHomeModulePreferences() {
     return {
       homeModuleOrder: DEFAULT_HOME_MODULE_ORDER,
-      hiddenHomeModules: 'tool,device'
+      // tool/device stay hidden from the original overview decision; a new module
+      // starts hidden too, so an upgrade never reshuffles an existing Home layout.
+      hiddenHomeModules: 'tool,device,liveRate'
     };
   }
 

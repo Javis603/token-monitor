@@ -307,9 +307,13 @@
       : '';
   }
 
-  function smoothLinePath(points) {
+  // Optional yMin/yMax clamp the control points: sharp swings would otherwise
+  // overshoot the viewBox and get visually flattened by the frame (the Home
+  // live-rate chart is only 60px tall with samples sitting on its baseline).
+  function smoothLinePath(points, yMin = null, yMax = null) {
     if (!points.length) return '';
     if (points.length < 3) return straightLinePath(points);
+    const clampY = yMin === null || yMax === null ? (y) => y : (y) => Math.max(yMin, Math.min(yMax, y));
     let path = `M${svgRound(points[0].x)},${svgRound(points[0].y)}`;
     for (let i = 0; i < points.length - 1; i++) {
       const p0 = points[Math.max(0, i - 1)];
@@ -317,9 +321,9 @@
       const p2 = points[i + 1];
       const p3 = points[Math.min(points.length - 1, i + 2)];
       const c1x = p1.x + (p2.x - p0.x) / 6;
-      const c1y = p1.y + (p2.y - p0.y) / 6;
+      const c1y = clampY(p1.y + (p2.y - p0.y) / 6);
       const c2x = p2.x - (p3.x - p1.x) / 6;
-      const c2y = p2.y - (p3.y - p1.y) / 6;
+      const c2y = clampY(p2.y - (p3.y - p1.y) / 6);
       path += ` C${svgRound(c1x)},${svgRound(c1y)} ${svgRound(c2x)},${svgRound(c2y)} ${svgRound(p2.x)},${svgRound(p2.y)}`;
     }
     return path;
@@ -451,6 +455,22 @@
     const fill = model.areaPath ? `<path class="area-line-fill" d="${model.areaPath}"></path>` : '';
     const line = model.linePath ? `<path class="area-line-stroke" d="${model.linePath}"></path>` : '';
     return `<svg class="area-line" viewBox="0 0 ${model.width} ${model.height}" preserveAspectRatio="none" width="100%" height="100%" aria-hidden="true">${defs}${fill}${line}</svg>`;
+  }
+
+  // Live-rate history for the Home module: a single bridged polyline (null samples
+  // never split it) with optional horizontal gridlines. Tick labels render as HTML
+  // beside the chart, since preserveAspectRatio="none" would stretch SVG text.
+  function liveRateLineSvg(model, options = {}) {
+    const o = Object.assign({ title: '' }, options || {});
+    const grid = (model.grid || []).map((tick) =>
+      `<line class="grid-line" x1="0" y1="${svgRound(tick.y)}" x2="${svgRound(model.width)}" y2="${svgRound(tick.y)}"></line>`
+    ).join('');
+    const paths = (model.segments || [])
+      .filter((segment) => segment.length)
+      .map((segment) => `<path class="live-rate-line" d="${smoothLinePath(segment, 1, model.height - 1)}"></path>`)
+      .join('');
+    const label = o.title ? `<title>${escapeXml(o.title)}</title>` : '';
+    return `<svg class="live-rate-line-chart" viewBox="0 0 ${model.width} ${model.height}" preserveAspectRatio="none" width="100%" height="${model.height}" aria-hidden="true">${label}${grid}${paths}</svg>`;
   }
 
   function axisText(label, x, y) {
@@ -616,7 +636,7 @@
 
   return {
     localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
-    areaLineChart, areaLineSvg,
+    areaLineChart, areaLineSvg, liveRateLineSvg,
     selectPreviewSeries, patchTodayBar, sparklineSvg,
     clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
     barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths

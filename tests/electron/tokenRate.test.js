@@ -768,3 +768,100 @@ test('the no-drag hit area stays scoped to the collapsed title states', () => {
     assert.match(selector, /\.shell\.title-(collapsed|icon-only)/, `unscoped no-drag rule: ${selector}`);
   }
 });
+
+test('the live-rate line chart bridges across idle gaps and maps x by sample time', () => {
+  // Null samples are skipped rather than treated as segment boundaries: the Home
+  // chart stays continuous across idle stretches, so one bridge polyline is all
+  // the model ever produces.
+  assert.match(app, /Null\/non-finite samples are skipped, not treated as segment boundaries/);
+  assert.match(app, /if \(!Number\.isFinite\(point\.value\)\) continue;/);
+  assert.match(app, /segments: line\.length \? \[line\] : \[\]/);
+  // A null sample records nothing (no split point), so the next real sample
+  // bridges the gap instead of starting a new polyline.
+  assert.match(app, /if \(!sample\) return;/);
+
+  // Loaded through usageCharts so the same chart module that renders Home is what is asserted.
+  const charts = require(path.join(rendererDir, 'usageCharts.js'));
+  const model = charts.liveRateLineSvg({
+    width: 300,
+    height: 60,
+    segments: [[{ x: 0, y: 40, value: 10 }, { x: 100, y: 20, value: 30 }, { x: 200, y: 30, value: 20 }]]
+  }, { title: 'Now 20 tok/s' });
+  // Three or more points draw a Catmull-Rom smoothed cubic curve; the curve ends
+  // on the exact sample points even though the stroke wiggles between them.
+  assert.match(model, /class="live-rate-line" d="M0,40 C16\.67,36\.67 66\.67,21\.67 100,20 C133\.33,18\.33 183\.33,28\.33 200,30"/);
+  assert.match(model, /<title>Now 20 tok\/s<\/title>/);
+  // Fewer than three points keep the plain polyline fallback.
+  const pair = charts.liveRateLineSvg({
+    width: 300,
+    height: 60,
+    segments: [[{ x: 0, y: 40, value: 10 }, { x: 100, y: 20, value: 30 }]]
+  });
+  assert.match(pair, /class="live-rate-line" d="M0,40 L100,20"/);
+  // Gridlines render inside the stretched SVG (lines don't distort) but tick
+  // labels render as HTML beside the chart, and the polyline paints above them.
+  const gridded = charts.liveRateLineSvg({
+    width: 300,
+    height: 60,
+    grid: [{ y: 4, value: 20 }, { y: 32, value: 10 }, { y: 56, value: 0 }],
+    segments: [[{ x: 0, y: 40, value: 10 }]]
+  });
+  const gridStart = gridded.indexOf('class="grid-line"');
+  const pathStart = gridded.indexOf('class="live-rate-line"');
+  assert.ok(gridStart > -1 && pathStart > gridStart, 'gridlines render before the polyline');
+  assert.match(gridded, /class="grid-line" x1="0" y1="4" x2="300" y2="4"/);
+  const ungridded = charts.liveRateLineSvg({ width: 300, height: 60, segments: [] });
+  assert.doesNotMatch(ungridded, /grid-line/);
+  // An all-idle history renders the frame without any path to bridge.
+  const empty = charts.liveRateLineSvg({ width: 300, height: 60, segments: [] });
+  assert.doesNotMatch(empty, /live-rate-line"/);
+});
+
+test('the Home live-rate history records one point per revision and is rendered as a Home module', () => {
+  // The recorder appends only when the display trackers' revision moves (a fresh
+  // sample), prunes beyond the window, and never rewrites an existing point.
+  assert.match(app, /function recordHomeLiveRateSample\(sample\)/);
+  assert.match(app, /homeLiveRateHistoryRevision = revision/);
+  assert.match(app, /HOME_LIVE_RATE_HISTORY_MAX_POINTS/);
+  // Sampling rides on the display trackers' observation path, so the Home module
+  // works without the footer reading being enabled.
+  assert.match(app, /recordHomeLiveRateSample\(displayLiveTokenRateSamples\(\)\.all\)/);
+  assert.match(app, /if \(id === 'liveRate'\) return renderHomeLiveRateModule\(\)/);
+  // The chart divides x by sample time, never by index, so an idle stretch
+  // compresses the timeline instead of freezing it.
+  assert.match(app, /innerW \* \(at - startTime\) \/ span/);
+  assert.match(css, /\.live-rate-line \{/);
+  assert.match(css, /\.live-rate-line-chart \{/);
+  assert.match(css, /\.home-live-rate-axis \{/);
+  // The y axis shows nice-rounded gridline labels beside the chart (HTML text, so
+  // the non-uniform SVG stretch never distorts them).
+  assert.match(app, /buildLiveRateLineModel\(points, \{ width: 300, height: 60, yTicks: 2 \}\)/);
+  assert.match(app, /function niceCeilRateMax\(/);
+  assert.match(app, /function formatLiveRateTick\(/);
+  assert.match(app, /home-live-rate-scale/);
+  assert.match(css, /\.home-live-rate-scale \{/);
+  // The grid lines ride on dashboard.css's .grid-line class, which the Home
+  // window never loads — styles.css must carry its own scoped rule.
+  assert.match(css, /\.live-rate-line-chart \.grid-line \{/);
+  // Emptiness is judged on the cutoff-filtered points (not the raw history), so
+  // an all-expired history can never feed an empty array into the coordinate math.
+  assert.match(app, /const points = homeLiveRateHistory[\s\S]{0,200}if \(!points\.length\) \{/);
+  assert.doesNotMatch(app, /const hasData = history\.some/);
+  // The module body keeps a persistent value line fed by the same history the
+  // chart plots — the number shown is exactly the chart's last point, dimmed
+  // while idle rather than disappearing.
+  assert.match(app, /home-live-rate-value' \+ \(lastPoint\.idle \? ' is-idle' : ''\)/);
+  assert.match(app, /formatLiveTokenRate\(lastPoint\.value\) \+ ' ' \+ \(burn \? 'TPM' : 'tok\/s'\)/);
+  assert.match(css, /\.home-live-rate-value \{/);
+  assert.match(css, /\.home-live-rate-value\.is-idle \{/);
+  // Sampling follows the module toggle alone — visiting another surface must not
+  // drop the Home chart's observations (the breakdown check only gates re-renders).
+  assert.match(app, /const homeWantsLiveRate = homeModuleIds\(\)\.includes\('liveRate'\);/);
+  // The empty state explains what starts the recording instead of just waiting.
+  assert.match(i18n, /'home\.liveRateEmpty': 'Waiting for tokens — they appear once a tracked client starts\.'/);
+  // The jump icon reuses the trends line-chart mark, and the tray/bubble/menubar
+  // rate text keeps the full ink colour while idle instead of the faint grey.
+  assert.match(app, /homeModuleShell\('liveRate', t\('home\.liveRate'\), 'home', meta, VIEW_ICON_CLASSES\.trends\)/);
+  assert.match(app, /row\.available === false && row\.metric !== 'liveTokenRate' \? trackColor : textColor/);
+  assert.match(app, /item\.available === false && item\.metric !== 'liveTokenRate' \? trackColor : textColor/);
+});
