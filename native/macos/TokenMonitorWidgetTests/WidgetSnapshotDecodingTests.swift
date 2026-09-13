@@ -272,6 +272,13 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertTrue(WidgetFormat.boundary(windows[1]).hasPrefix("Changes"))
     }
 
+    func testQuotaBoundaryUsesAtMostTwoCompactDurationUnits() {
+        XCTAssertEqual(WidgetFormat.compactDuration(seconds: 4 * 3_600), "4h")
+        XCTAssertEqual(WidgetFormat.compactDuration(seconds: 4 * 3_600 + 12 * 60), "4h 12m")
+        XCTAssertEqual(WidgetFormat.compactDuration(seconds: 2 * 86_400 + 59 * 60), "2d 59m")
+        XCTAssertEqual(WidgetFormat.compactDuration(seconds: 30), "1m")
+    }
+
     func testWidgetPageDisplayNamesAreLocalized() {
         XCTAssertEqual(WidgetPage.quota.title, "Quota")
         XCTAssertEqual(WidgetPeriod.day.title, "DAY")
@@ -348,6 +355,17 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         )
         XCTAssertNil(store.selectedActivityDay(for: .medium))
         XCTAssertEqual(reloadedKinds, ["all", "all"])
+    }
+
+    func testRefreshActionReloadsWidgetsWithoutOpeningTheApp() {
+        var reloadCount = 0
+
+        WidgetIntentActions.refresh {
+            reloadCount += 1
+        }
+
+        XCTAssertEqual(reloadCount, 1)
+        XCTAssertFalse(RefreshWidgetIntent.openAppWhenRun)
     }
 
     func testWidgetFamilyScopeMapsSupportedFamiliesOnly() {

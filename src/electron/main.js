@@ -257,10 +257,8 @@ const {
   readMacWidgetHistoryCache,
   writeMacWidgetHistoryCache
 } = require('./macWidgetHistoryStore');
-const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServicesRecovery');
 const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
-const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
 const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidgetDemand');
 const linuxAutostart = require('./linuxAutostart');
@@ -464,16 +462,6 @@ function normalizeHomeLimitAccountCount(value) {
   if (!Number.isFinite(count)) return HOME_LIMIT_ACCOUNT_COUNT_DEFAULT;
   return Math.max(1, Math.min(HOME_LIMIT_ACCOUNT_COUNT_MAX, count));
 }
-
-let pendingMacWidgetOpen = null;
-app.on('open-url', (event, url) => {
-  const urlScheme = macWidgetConfiguration()?.urlScheme || 'token-monitor';
-  const destination = parseMacWidgetDeepLink(url, urlScheme);
-  if (!destination) return;
-  event.preventDefault();
-  pendingMacWidgetOpen = destination;
-  if (app.isReady()) setImmediate(openMainWindowFromWidget);
-});
 
 function defaultSettings() {
   const envHubUrl = process.env.TOKEN_MONITOR_HUB_URL || '';
@@ -3953,7 +3941,6 @@ function macWidgetConfiguration() {
   if (cachedMacWidgetConfiguration !== undefined) return cachedMacWidgetConfiguration;
 
   let appGroup = String(process.env.TOKEN_MONITOR_APP_GROUP || '').trim();
-  let urlScheme = String(process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME || 'token-monitor').trim();
   let snapshotFileName = 'snapshot.json';
   let widgetKind = DEFAULT_WIDGET_KIND;
   const configCandidates = [
@@ -3965,7 +3952,6 @@ function macWidgetConfiguration() {
       try {
         const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
         appGroup = String(config.appGroup || '').trim();
-        urlScheme = String(config.urlScheme || urlScheme).trim();
         widgetKind = String(config.widgetKind || widgetKind).trim();
         snapshotFileName = String(config.snapshotFileName || snapshotFileName).trim();
         if (appGroup) break;
@@ -3984,10 +3970,7 @@ function macWidgetConfiguration() {
   cachedMacWidgetConfiguration = {
     appGroup,
     snapshotPath,
-    widgetKind,
-    urlScheme: (() => {
-      try { return normalizeWidgetURLScheme(urlScheme); } catch (_) { return 'token-monitor'; }
-    })()
+    widgetKind
   };
   return cachedMacWidgetConfiguration;
 }
@@ -4551,36 +4534,6 @@ function showPopover() {
   // case where macOS fires blur immediately after show because the click that
   // opened us still has the menu bar as the focused element.
   setTimeout(() => { suppressNextBlurHide = false; }, 250);
-}
-
-function openMainWindowFromWidget() {
-  if (!app.isReady()) return;
-  const destination = pendingMacWidgetOpen || { page: 'overview', view: 'home' };
-  pendingMacWidgetOpen = null;
-  updateRendererViewState({ breakdown: destination.view });
-  applyMacActivationPolicy({ mainWindowVisible: true });
-  // Closing the window with the tray icon off destroys it while macOS keeps the
-  // app alive, so a widget click has to be able to build one again — the same
-  // recovery focusExistingWindow() performs for the dock and the shortcut.
-  // Bailing out instead consumed the open-url event and left the widget dead
-  // for the rest of the session, since nothing else reads pendingMacWidgetOpen.
-  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const sendDestination = () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    mainWindow.webContents.send('view:open', destination.view);
-  };
-  if (mainWindow.webContents.isLoadingMainFrame()) mainWindow.webContents.once('did-finish-load', sendDestination);
-  else sendDestination();
-  if (settings?.trayMode && tray) {
-    showPopover();
-    return;
-  }
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  applyMacSpaceBehavior(false);
-  // A collapsed bubble would otherwise swallow the navigation we just sent.
-  if (floatingBubbleState.collapsed) expandFloatingBubble();
-  else mainWindow.show();
 }
 
 function hidePopover() {
@@ -6588,7 +6541,6 @@ app.whenReady().then(() => {
   configureWindowToggleShortcut();
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
   ensureTray();
-  if (pendingMacWidgetOpen) setImmediate(openMainWindowFromWidget);
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
   if (widgetRuntimeSupported) ensureMacWidgetDemand();

@@ -24,7 +24,6 @@ For a formal Widget distribution, configure all of the following without committ
 - `TOKEN_MONITOR_APP_PROVISIONING_PROFILE` — app provisioning profile when the App Group uses the `group.*` form.
 - `TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE` — extension provisioning profile for the same App Group.
 - `DEVELOPMENT_TEAM` — Apple Developer Team ID used by Xcode when signing is enabled.
-- `TOKEN_MONITOR_WIDGET_URL_SCHEME` — page-specific Widget deep-link scheme.
 - `TOKEN_MONITOR_WIDGET_KIND` — stable WidgetKit kind shared by the extension and reload helper.
 
 The Widget bundle identifier must be inside the configured Electron app identifier namespace. App Groups must use either the `group.<name>` form or the `<10-character-DEVELOPMENT_TEAM>.<name>` form; the latter requires an explicit matching `DEVELOPMENT_TEAM`. A `group.*` App Group requires both provisioning profiles, and those profiles must be non-development Developer ID profiles (`get-task-allow=false`, `ProvisionsAllDevices=true`, and no `ProvisionedDevices`). The build fails before signing when required production values, identifiers, channel, or profiles are invalid.

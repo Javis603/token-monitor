@@ -36,6 +36,7 @@ struct ActivityHeatmap: View {
                                         color: activityColor(cell.intensity),
                                         isSelected: false
                                     )
+                                    .allowsHitTesting(false)
                                     .accessibilityHidden(!cell.isSelectable)
                                 }
                             }
@@ -99,16 +100,21 @@ struct MediumActivityModule: View {
             maxCellSize: 9.5,
             spacing: 2.5
         )
-        VStack(alignment: .leading, spacing: 8) {
-            ActivityHeatmapWithMonthLabels(layout: layout, family: .medium, selectedDate: selectedActivityDate)
-                .frame(maxWidth: .infinity, alignment: .center)
-            ActivitySummaryLabel(
-                snapshot: snapshot,
-                selectedDate: selectedActivityDate,
-                fallback: overviewSummary,
-                includesCost: true
-            )
-            .font(.caption.weight(.medium))
+        ZStack {
+            WidgetRefreshBackground()
+            VStack(alignment: .leading, spacing: 8) {
+                ActivityHeatmapWithMonthLabels(layout: layout, family: .medium, selectedDate: selectedActivityDate)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                WidgetRefreshButton {
+                    ActivitySummaryLabel(
+                        snapshot: snapshot,
+                        selectedDate: selectedActivityDate,
+                        fallback: overviewSummary,
+                        includesCost: true
+                    )
+                    .font(.caption.weight(.medium))
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
@@ -136,17 +142,24 @@ struct DashboardActivityModule: View {
             maxCellSize: 7.5,
             spacing: 2.25
         )
-        VStack(alignment: .leading, spacing: 7) {
-            ModuleTitle(WidgetL10n.text("Activity"))
-            ActivityHeatmapWithMonthLabels(layout: layout, family: .large, selectedDate: selectedActivityDate)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            ActivitySummaryLabel(
-                snapshot: snapshot,
-                selectedDate: selectedActivityDate,
-                fallback: WidgetL10n.format("%lld active days", snapshot.activity.activeDays),
-                includesCost: false
-            )
-            .font(.system(size: WidgetDesignTokens.dashboardDetailSize, weight: .medium))
+        ZStack(alignment: .topLeading) {
+            WidgetRefreshBackground()
+            VStack(alignment: .leading, spacing: 7) {
+                WidgetRefreshButton {
+                    ModuleTitle(WidgetL10n.text("Activity"))
+                }
+                ActivityHeatmapWithMonthLabels(layout: layout, family: .large, selectedDate: selectedActivityDate)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                WidgetRefreshButton {
+                    ActivitySummaryLabel(
+                        snapshot: snapshot,
+                        selectedDate: selectedActivityDate,
+                        fallback: WidgetL10n.format("%lld active days", snapshot.activity.activeDays),
+                        includesCost: false
+                    )
+                    .font(.system(size: WidgetDesignTokens.dashboardDetailSize, weight: .medium))
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }

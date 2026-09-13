@@ -8,7 +8,6 @@ const { promisify } = require('node:util');
 const { signApp } = require('@electron/osx-sign');
 const {
   normalizeMacDistributionChannel,
-  normalizeWidgetURLScheme,
   validateAppGroupForDistribution,
   validateAppGroupSyntax
 } = require('./macos-widget-config');
@@ -246,12 +245,6 @@ async function signAppForMode(options, localDevelopmentSigning) {
   }
 }
 
-function widgetURLScheme() {
-  const value = String(process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME || '').trim();
-  if (!value) return null;
-  return normalizeWidgetURLScheme(value);
-}
-
 module.exports = async function signMacAppWithWidget(options) {
   const extensionPath = widgetExtensionPath(options.app);
   const entitlementsPath = widgetEntitlementsPath();
@@ -306,4 +299,3 @@ module.exports.localElectronHelperEntitlements = localElectronHelperEntitlements
 module.exports.localElectronHelperPaths = localElectronHelperPaths;
 module.exports.localElectronHelperSignArgs = localElectronHelperSignArgs;
 module.exports.reloaderSignArgs = reloaderSignArgs;
-module.exports.widgetURLScheme = widgetURLScheme;

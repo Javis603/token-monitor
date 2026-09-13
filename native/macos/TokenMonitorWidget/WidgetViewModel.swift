@@ -478,28 +478,34 @@ enum WidgetFormat {
 
     static func boundary(_ window: WidgetLimitWindow) -> String {
         guard let date = window.resetsAt else { return "" }
-        return boundary(date, kind: window.boundaryKind ?? "reset")
+        return boundary(date, kind: window.boundaryKind ?? "reset", now: Date())
     }
 
-    private static func boundary(_ date: Date, kind: String) -> String {
-        let interval = date.timeIntervalSinceNow
-        let seconds = max(0, interval)
-        let days = Int(seconds / 86_400)
-        let hours = Int(seconds.truncatingRemainder(dividingBy: 86_400) / 3_600)
+    static func boundary(_ date: Date, kind: String, now: Date) -> String {
+        let interval = date.timeIntervalSince(now)
+        let duration = compactDuration(seconds: max(0, interval))
         if kind == "expiry" {
-            return days > 0
-                ? WidgetL10n.format("Expires in %lldd %lldh", days, hours)
-                : WidgetL10n.format("Expires in %lldh", hours)
+            return WidgetL10n.format("Expires in %@", duration)
         }
         if kind == "mixed" {
             if interval <= 0 { return WidgetL10n.text("Changes now") }
-            return days > 0
-                ? WidgetL10n.format("Changes in %lldd %lldh", days, hours)
-                : WidgetL10n.format("Changes in %lldh", hours)
+            return WidgetL10n.format("Changes in %@", duration)
         }
-        return days > 0
-            ? WidgetL10n.format("Reset in %lldd %lldh", days, hours)
-            : WidgetL10n.format("Reset in %lldh", hours)
+        return WidgetL10n.format("Reset in %@", duration)
+    }
+
+    static func compactDuration(seconds: TimeInterval) -> String {
+        let totalMinutes = max(1, Int(ceil(max(0, seconds) / 60)))
+        let components = [
+            (totalMinutes / (24 * 60), "d"),
+            ((totalMinutes / 60) % 24, "h"),
+            (totalMinutes % 60, "m")
+        ]
+        let visible = components
+            .filter { $0.0 > 0 }
+            .prefix(2)
+            .map { "\($0.0)\($0.1)" }
+        return visible.isEmpty ? "1m" : visible.joined(separator: " ")
     }
 
     static func windowTitle(_ value: String) -> String {

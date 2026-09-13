@@ -7,7 +7,6 @@ const signMacAppWithWidget = require('./sign-macos-with-widget');
 const {
   DEFAULT_WIDGET_BUNDLE_ID,
   DEFAULT_WIDGET_KIND,
-  DEFAULT_URL_SCHEME,
   WIDGET_SCHEMA_VERSION,
   WIDGET_UI_VERSION,
   buildTimestamp,
@@ -100,14 +99,13 @@ function readWidgetConfig(appPath) {
     appGroup: String(config.appGroup || '').trim(),
     bundleId: String(process.env.TOKEN_MONITOR_WIDGET_BUNDLE_ID || DEFAULT_WIDGET_BUNDLE_ID).trim(),
     widgetKind: String(config.widgetKind || DEFAULT_WIDGET_KIND).trim(),
-    urlScheme: String(config.urlScheme || DEFAULT_URL_SCHEME).trim(),
     packageVersion: String(config.packageVersion || config.marketingVersion || '').trim(),
     marketingVersion: String(config.marketingVersion || config.packageVersion || '').trim()
   };
 }
 
 function updatedWidgetConfig(config, metadata) {
-  return {
+  const updated = {
     ...config,
     widgetUIVersion: WIDGET_UI_VERSION,
     widgetSchemaVersion: WIDGET_SCHEMA_VERSION,
@@ -115,6 +113,8 @@ function updatedWidgetConfig(config, metadata) {
     gitRevision: metadata.revision,
     buildTimestamp: metadata.timestamp
   };
+  delete updated.urlScheme;
+  return updated;
 }
 
 function refreshPackagedWidgetConfig(appPath, metadata) {
@@ -159,7 +159,6 @@ function xcconfigContents({
   appGroup,
   bundleId,
   widgetKind,
-  urlScheme,
   developmentTeam,
   revision,
   timestamp,
@@ -177,7 +176,6 @@ function xcconfigContents({
     TOKEN_MONITOR_PACKAGE_VERSION: effectivePackageVersion,
     TOKEN_MONITOR_APP_GROUP: appGroup,
     TOKEN_MONITOR_WIDGET_BUNDLE_ID: bundleId,
-    TOKEN_MONITOR_WIDGET_URL_SCHEME: urlScheme,
     TOKEN_MONITOR_WIDGET_KIND: widgetKind,
     TOKEN_MONITOR_WIDGET_SCHEMA_VERSION: String(WIDGET_SCHEMA_VERSION),
     TOKEN_MONITOR_WIDGET_UI_VERSION: String(WIDGET_UI_VERSION),

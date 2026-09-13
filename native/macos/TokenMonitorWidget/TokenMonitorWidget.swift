@@ -8,15 +8,6 @@ enum TokenMonitorWidgetConfiguration {
     static let breakdownKind = "\(kind).breakdown"
     static let quotaKind = "\(kind).quota"
     static let appGroup = Bundle.main.object(forInfoDictionaryKey: "TokenMonitorAppGroup") as? String ?? ""
-    static let urlScheme: String = {
-        let raw = (Bundle.main.object(forInfoDictionaryKey: "TokenMonitorURLScheme") as? String ?? "token-monitor").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard raw.range(of: "^[A-Za-z][A-Za-z0-9+.-]*$", options: .regularExpression) != nil else { return "token-monitor" }
-        return raw.lowercased()
-    }()
-
-    static func url(for page: WidgetPage) -> URL {
-        URL(string: "\(urlScheme)://\(page.rawValue)")!
-    }
 }
 struct TokenMonitorWidget: Widget {
     let kind = TokenMonitorWidgetConfiguration.kind
@@ -28,7 +19,6 @@ struct TokenMonitorWidget: Widget {
             provider: DashboardWidgetTimelineProvider()
         ) { entry in
             TokenMonitorWidgetView(entry: entry)
-                .widgetURL(TokenMonitorWidgetConfiguration.url(for: entry.page))
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
@@ -42,7 +32,6 @@ struct TokenMonitorSummaryWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: TokenMonitorWidgetConfiguration.summaryKind, intent: UsageSummaryWidgetIntent.self, provider: SummaryWidgetTimelineProvider()) { entry in
             TokenMonitorWidgetView(entry: entry)
-                .widgetURL(TokenMonitorWidgetConfiguration.url(for: .overview))
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
@@ -56,7 +45,6 @@ struct TokenMonitorActivityWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: TokenMonitorWidgetConfiguration.activityKind, provider: FixedWidgetTimelineProvider(page: .activity)) { entry in
             TokenMonitorWidgetView(entry: entry)
-                .widgetURL(TokenMonitorWidgetConfiguration.url(for: .activity))
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
@@ -70,7 +58,6 @@ struct TokenMonitorBreakdownWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: TokenMonitorWidgetConfiguration.breakdownKind, intent: BreakdownWidgetIntent.self, provider: BreakdownWidgetTimelineProvider()) { entry in
             TokenMonitorWidgetView(entry: entry)
-                .widgetURL(TokenMonitorWidgetConfiguration.url(for: entry.page))
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
@@ -84,7 +71,6 @@ struct TokenMonitorQuotaWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: TokenMonitorWidgetConfiguration.quotaKind, intent: QuotaWidgetIntent.self, provider: QuotaWidgetTimelineProvider()) { entry in
             TokenMonitorWidgetView(entry: entry)
-                .widgetURL(TokenMonitorWidgetConfiguration.url(for: .quota))
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
@@ -121,10 +107,12 @@ struct TokenMonitorWidgetView: View {
             if let snapshot = entry.snapshot {
                 content(snapshot)
             } else {
-                statusState(
-                    title: WidgetL10n.text("Waiting for data"),
-                    detail: WidgetL10n.text("Open Token Monitor once")
-                )
+                WidgetRefreshButton {
+                    statusState(
+                        title: WidgetL10n.text("Waiting for data"),
+                        detail: WidgetL10n.text("Open Token Monitor once")
+                    )
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -134,12 +122,14 @@ struct TokenMonitorWidgetView: View {
     private func content(_ snapshot: WidgetSnapshot) -> some View {
         if isStale(snapshot) {
             let updatedAt = staleUpdatedAt(snapshot)
-            statusState(
-                title: WidgetL10n.text("Data may be stale"),
-                detail: updatedAt.map {
-                    WidgetL10n.format("Updated %@", $0.formatted(.relative(presentation: .named)))
-                }
-            )
+            WidgetRefreshButton {
+                statusState(
+                    title: WidgetL10n.text("Data may be stale"),
+                    detail: updatedAt.map {
+                        WidgetL10n.format("Updated %@", $0.formatted(.relative(presentation: .named)))
+                    }
+                )
+            }
         } else {
             switch family {
             case .systemLarge:
@@ -152,16 +142,31 @@ struct TokenMonitorWidgetView: View {
                     selectedQuotaProviderIDs: entry.selectedQuotaProviderIDs
                 )
             case .systemMedium:
-                MediumUsageWidgetView(
-                    snapshot: snapshot,
-                    period: entry.period,
-                    page: entry.page,
-                    referenceDate: entry.date,
-                    selectedActivityDate: entry.selectedActivityDate,
-                    selectedQuotaProviderIDs: entry.selectedQuotaProviderIDs
-                )
+                if entry.page == .activity {
+                    MediumUsageWidgetView(
+                        snapshot: snapshot,
+                        period: entry.period,
+                        page: entry.page,
+                        referenceDate: entry.date,
+                        selectedActivityDate: entry.selectedActivityDate,
+                        selectedQuotaProviderIDs: entry.selectedQuotaProviderIDs
+                    )
+                } else {
+                    WidgetRefreshButton {
+                        MediumUsageWidgetView(
+                            snapshot: snapshot,
+                            period: entry.period,
+                            page: entry.page,
+                            referenceDate: entry.date,
+                            selectedActivityDate: entry.selectedActivityDate,
+                            selectedQuotaProviderIDs: entry.selectedQuotaProviderIDs
+                        )
+                    }
+                }
             default:
-                SmallUsageWidgetView(snapshot: snapshot, period: entry.period)
+                WidgetRefreshButton {
+                    SmallUsageWidgetView(snapshot: snapshot, period: entry.period)
+                }
             }
         }
     }
@@ -224,5 +229,32 @@ struct TokenMonitorWidgetView: View {
         case .systemMedium: WidgetDesignTokens.mediumGap
         default: WidgetDesignTokens.smallGap
         }
+    }
+}
+
+struct WidgetRefreshButton<Label: View>: View {
+    let label: Label
+
+    init(@ViewBuilder label: () -> Label) {
+        self.label = label()
+    }
+
+    var body: some View {
+        Button(intent: RefreshWidgetIntent()) {
+            label
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(WidgetL10n.text("Refresh Widget"))
+    }
+}
+
+struct WidgetRefreshBackground: View {
+    var body: some View {
+        WidgetRefreshButton {
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .accessibilityHidden(true)
     }
 }

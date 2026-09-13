@@ -5,7 +5,6 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
   normalizeMacDistributionChannel,
-  normalizeWidgetURLScheme,
   validateAppGroupForDistribution,
   validateAppGroupSyntax
 } = require('./macos-widget-config');
@@ -23,9 +22,8 @@ const PACKAGE_JSON = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'),
 const DEFAULT_APP_ID = String(PACKAGE_JSON.build?.appId || 'com.example.tokenmonitor').trim();
 const DEFAULT_APP_GROUP = 'group.com.example.tokenmonitor';
 const DEFAULT_WIDGET_BUNDLE_ID = `${DEFAULT_APP_ID}.widget`;
-const DEFAULT_URL_SCHEME = 'token-monitor';
 const DEFAULT_WIDGET_KIND = 'com.tokenmonitor.dashboard';
-const WIDGET_UI_VERSION = 39;
+const WIDGET_UI_VERSION = 40;
 const WIDGET_SCHEMA_VERSION = 10;
 const WIDGET_ARCHITECTURES = Object.freeze({
   arm64: Object.freeze({ name: 'arm64', xcodeArch: 'arm64', swiftArch: 'arm64' }),
@@ -185,7 +183,6 @@ function main() {
 
   const appGroup = configuredIdentifier('TOKEN_MONITOR_APP_GROUP', DEFAULT_APP_GROUP);
   const bundleId = configuredIdentifier('TOKEN_MONITOR_WIDGET_BUNDLE_ID', DEFAULT_WIDGET_BUNDLE_ID);
-  const urlScheme = normalizeWidgetURLScheme(process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME, DEFAULT_URL_SCHEME);
   const widgetKind = configuredIdentifier('TOKEN_MONITOR_WIDGET_KIND', DEFAULT_WIDGET_KIND);
   const architecture = resolveWidgetArchitecture();
   const revision = String(process.env.TOKEN_MONITOR_WIDGET_GIT_REVISION || gitRevision()).trim();
@@ -230,7 +227,6 @@ function main() {
     xcconfigLine('TOKEN_MONITOR_PACKAGE_VERSION', versions.packageVersion),
     xcconfigLine('TOKEN_MONITOR_APP_GROUP', appGroup),
     xcconfigLine('TOKEN_MONITOR_WIDGET_BUNDLE_ID', bundleId),
-    xcconfigLine('TOKEN_MONITOR_WIDGET_URL_SCHEME', urlScheme),
     xcconfigLine('TOKEN_MONITOR_WIDGET_KIND', widgetKind),
     xcconfigLine('TOKEN_MONITOR_WIDGET_SCHEMA_VERSION', WIDGET_SCHEMA_VERSION),
     xcconfigLine('TOKEN_MONITOR_WIDGET_UI_VERSION', WIDGET_UI_VERSION),
@@ -292,7 +288,6 @@ function main() {
   fs.writeFileSync(path.join(OUTPUT, 'widget-config.json'), `${JSON.stringify({
     schemaVersion: 1,
     appGroup,
-    urlScheme,
     widgetKind,
     widgetUIVersion: WIDGET_UI_VERSION,
     widgetSchemaVersion: WIDGET_SCHEMA_VERSION,
@@ -313,7 +308,6 @@ module.exports = {
   DEFAULT_APP_GROUP,
   DEFAULT_WIDGET_BUNDLE_ID,
   DEFAULT_WIDGET_KIND,
-  DEFAULT_URL_SCHEME,
   WIDGET_SCHEMA_VERSION,
   WIDGET_UI_VERSION,
   WIDGET_ARCHITECTURES,

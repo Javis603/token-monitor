@@ -69,7 +69,6 @@ test('writes an arm64 development xcconfig with the shared Team App Group', () =
     appGroup: 'ABCDE12345.tokenmonitor',
     bundleId: 'com.javis.tokenmonitor.widget',
     widgetKind: 'com.tokenmonitor.dashboard',
-    urlScheme: 'token-monitor',
     developmentTeam: 'ABCDE12345',
     revision: 'abcdef123456',
     timestamp: '2026-09-13T14:00:00Z',
@@ -89,6 +88,7 @@ test('writes an arm64 development xcconfig with the shared Team App Group', () =
 
 test('keeps the packaged Widget descriptor aligned with the incremental UI build', () => {
   const updated = updatedWidgetConfig({
+    urlScheme: 'token-monitor',
     widgetUIVersion: 1,
     widgetSchemaVersion: 1,
     widgetBundleVersion: '1',
@@ -99,10 +99,11 @@ test('keeps the packaged Widget descriptor aligned with the incremental UI build
     revision: 'abcdef123456',
     timestamp: '2026-09-13T14:00:00Z'
   });
-  assert.equal(updated.widgetUIVersion, 39);
+  assert.equal(updated.widgetUIVersion, 40);
   assert.equal(updated.widgetSchemaVersion, 10);
-  assert.equal(updated.widgetBundleVersion, '39');
+  assert.equal(updated.widgetBundleVersion, '40');
   assert.equal(updated.gitRevision, 'abcdef123456');
   assert.equal(updated.buildTimestamp, '2026-09-13T14:00:00Z');
   assert.equal(updated.marketingVersion, '0.54.0');
+  assert.equal(updated.urlScheme, undefined);
 });

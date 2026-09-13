@@ -44,8 +44,8 @@ function trayToggleAction(settings = {}) {
 // macOS has no per-window taskbar entry, so hideAppIcon is expressed as the
 // accessory activation policy (app.dock.hide()) instead of setSkipTaskbar().
 // It has to be tested before the mainWindowVisible branch: focusExistingWindow()
-// and openMainWindowFromWidget() both pass { mainWindowVisible: true }, and
-// answering 'regular' there would pop the Dock icon back on the next tray click.
+// passes { mainWindowVisible: true }, and answering 'regular' there would pop
+// the Dock icon back on the next tray click.
 function macActivationPolicyMode(settings = {}, state = {}) {
   const normalized = normalizeTrayModeSettings(settings);
   if (normalized.trayMode) return 'accessory';

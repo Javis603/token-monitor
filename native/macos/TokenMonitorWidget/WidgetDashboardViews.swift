@@ -110,55 +110,70 @@ struct LargeDashboardWidgetView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .bottom, spacing: 20) {
-                    WidgetMetricBlock(
-                        snapshot: snapshot,
-                        period: period,
-                        metricSize: WidgetDesignTokens.dashboardMetricSize
-                    )
-                    .layoutPriority(1)
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text(trendCaption)
-                            .font(.caption.weight(.medium))
-                            .monospacedDigit()
-                            .foregroundStyle(WidgetDesignTokens.muted)
-                        SmoothTrendChart(points: snapshot.trend.points)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: WidgetDesignTokens.dashboardTrendHeight)
+            ZStack(alignment: .topLeading) {
+                WidgetRefreshBackground()
+                VStack(alignment: .leading, spacing: 7) {
+                    WidgetRefreshButton {
+                        HStack(alignment: .bottom, spacing: 20) {
+                            WidgetMetricBlock(
+                                snapshot: snapshot,
+                                period: period,
+                                metricSize: WidgetDesignTokens.dashboardMetricSize
+                            )
+                            .layoutPriority(1)
+                            VStack(alignment: .trailing, spacing: 4) {
+                                Text(trendCaption)
+                                    .font(.caption.weight(.medium))
+                                    .monospacedDigit()
+                                    .foregroundStyle(WidgetDesignTokens.muted)
+                                SmoothTrendChart(points: snapshot.trend.points)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: WidgetDesignTokens.dashboardTrendHeight)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .padding(.bottom, 3)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.bottom, 3)
-                }
-                .frame(height: 63, alignment: .top)
+                    .frame(height: 63, alignment: .top)
 
-                Divider().opacity(WidgetDesignTokens.dividerOpacity)
+                    Divider()
+                        .opacity(WidgetDesignTokens.dividerOpacity)
+                        .allowsHitTesting(false)
 
-                DashboardQuotaModule(snapshot: snapshot, selectedProviderIDs: selectedQuotaProviderIDs)
+                    WidgetRefreshButton {
+                        DashboardQuotaModule(snapshot: snapshot, selectedProviderIDs: selectedQuotaProviderIDs)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
                     .frame(height: 76, alignment: .topLeading)
 
-                Divider().opacity(WidgetDesignTokens.dividerOpacity)
+                    Divider()
+                        .opacity(WidgetDesignTokens.dividerOpacity)
+                        .allowsHitTesting(false)
 
-                HStack(alignment: .center, spacing: 12) {
-                    DashboardActivityModule(
-                        snapshot: snapshot,
-                        referenceDate: referenceDate,
-                        selectedActivityDate: selectedActivityDate,
-                        availableWidth: proxy.size.width * 0.44
-                    )
-                    .frame(width: proxy.size.width * 0.44, alignment: .leading)
-                    .frame(maxHeight: .infinity, alignment: .leading)
+                    HStack(alignment: .top, spacing: 12) {
+                        DashboardActivityModule(
+                            snapshot: snapshot,
+                            referenceDate: referenceDate,
+                            selectedActivityDate: selectedActivityDate,
+                            availableWidth: proxy.size.width * 0.44
+                        )
+                        .frame(width: proxy.size.width * 0.44, alignment: .leading)
+                        .frame(maxHeight: .infinity, alignment: .leading)
 
-                    Divider().opacity(WidgetDesignTokens.dividerOpacity)
+                        Divider()
+                            .opacity(WidgetDesignTokens.dividerOpacity)
+                            .allowsHitTesting(false)
 
-                    DashboardBreakdownModule(
-                        title: breakdownTitle,
-                        rows: breakdownRows,
-                        presentation: snapshot.presentation
-                    )
-                    .frame(maxHeight: .infinity, alignment: .leading)
+                        DashboardBreakdownModule(
+                            title: breakdownTitle,
+                            rows: breakdownRows,
+                            presentation: snapshot.presentation
+                        )
+                        .frame(maxHeight: .infinity, alignment: .topLeading)
+                    }
+                    .frame(maxHeight: .infinity, alignment: .topLeading)
                 }
-                .frame(maxHeight: .infinity, alignment: .leading)
             }
         }
     }
@@ -289,35 +304,38 @@ struct DashboardBreakdownModule: View {
 
     var body: some View {
         let visibleRows = Array(rows.prefix(4))
-        VStack(alignment: .leading, spacing: 0) {
-            ModuleTitle(title)
-                .padding(.bottom, 6)
-            if rows.isEmpty {
-                Text(WidgetL10n.text("No data"))
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(visibleRows) { row in
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(spacing: 6) {
-                                WidgetVendorMark(vendorID: row.vendorID, size: 11)
-                                Text(row.label)
-                                    .font(.system(size: WidgetDesignTokens.dashboardRowLabelSize, weight: .semibold))
-                                    .lineLimit(1)
-                                Spacer(minLength: 3)
-                                Text(WidgetFormat.tokens(row.tokens, style: "compact", presentation: presentation))
-                                    .font(.system(size: WidgetDesignTokens.dashboardValueSize, weight: .medium))
-                                    .monospacedDigit()
-                                    .foregroundStyle(.secondary)
+        WidgetRefreshButton {
+            VStack(alignment: .leading, spacing: 0) {
+                ModuleTitle(title)
+                    .padding(.bottom, 6)
+                if rows.isEmpty {
+                    Text(WidgetL10n.text("No data"))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(visibleRows) { row in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    WidgetVendorMark(vendorID: row.vendorID, size: 11)
+                                    Text(row.label)
+                                        .font(.system(size: WidgetDesignTokens.dashboardRowLabelSize, weight: .semibold))
+                                        .lineLimit(1)
+                                    Spacer(minLength: 3)
+                                    Text(WidgetFormat.tokens(row.tokens, style: "compact", presentation: presentation))
+                                        .font(.system(size: WidgetDesignTokens.dashboardValueSize, weight: .medium))
+                                        .monospacedDigit()
+                                        .foregroundStyle(.secondary)
+                                }
+                                PercentageBar(value: row.share, color: WidgetVendorIdentity.color(for: row.vendorID))
                             }
-                            PercentageBar(value: row.share, color: WidgetVendorIdentity.color(for: row.vendorID))
                         }
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 

@@ -1430,138 +1430,70 @@
         }
       }
     },
-    "Expires in %lldd %lldh": {
+    "Expires in %@": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Expires in %lldd %lldh"
+            "value": "Expires in %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 天 %lld 小时后到期"
+            "value": "%@ 后到期"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 天 %lld 小時後到期"
+            "value": "%@ 後到期"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld日%lld時間後に期限切れ"
+            "value": "%@後に期限切れ"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld일 %lld시간 후 만료"
+            "value": "%@ 후 만료"
           }
         }
       }
     },
-    "Expires in %lldh": {
+    "Changes in %@": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Expires in %lldh"
+            "value": "Changes in %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 小时后到期"
+            "value": "%@ 后变更"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 小時後到期"
+            "value": "%@ 後變更"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld時間後に期限切れ"
+            "value": "%@後に変更"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld시간 후 만료"
-          }
-        }
-      }
-    },
-    "Changes in %lldd %lldh": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Changes in %lldd %lldh"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 天 %lld 小时后变更"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 天 %lld 小時後變更"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld日%lld時間後に変更"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld일 %lld시간 후 변경"
-          }
-        }
-      }
-    },
-    "Changes in %lldh": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Changes in %lldh"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 小时后变更"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 小時後變更"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld時間後に変更"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld시간 후 변경"
+            "value": "%@ 후 변경"
           }
         }
       }
@@ -1600,70 +1532,70 @@
         }
       }
     },
-    "Reset in %lldd %lldh": {
+    "Refresh Widget": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reset in %lldd %lldh"
+            "value": "Refresh Widget"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 天 %lld 小时后重置"
+            "value": "刷新小组件"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 天 %lld 小時後重設"
+            "value": "重新整理小工具"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld日%lld時間後にリセット"
+            "value": "ウィジェットを更新"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld일 %lld시간 후 초기화"
+            "value": "위젯 새로고침"
           }
         }
       }
     },
-    "Reset in %lldh": {
+    "Reset in %@": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reset in %lldh"
+            "value": "Reset in %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 小时后重置"
+            "value": "%@ 后重置"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 小時後重設"
+            "value": "%@ 後重設"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld時間後にリセット"
+            "value": "%@後にリセット"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld시간 후 초기화"
+            "value": "%@ 후 초기화"
           }
         }
       }

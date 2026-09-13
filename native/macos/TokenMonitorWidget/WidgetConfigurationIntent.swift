@@ -445,6 +445,10 @@ enum WidgetActivitySelection {
 }
 
 enum WidgetIntentActions {
+    static func refresh(reload: () -> Void) {
+        reload()
+    }
+
     static func selectActivityDay(
         family: WidgetFamilyScope,
         date: String,
@@ -462,6 +466,19 @@ enum WidgetIntentActions {
             store.setSelectedActivityDay(date, for: family)
         }
         reload()
+    }
+}
+
+struct RefreshWidgetIntent: AppIntent {
+    static var title: LocalizedStringResource = "Refresh Widget"
+    static var openAppWhenRun: Bool { false }
+    static var isDiscoverable: Bool { false }
+
+    func perform() async throws -> some IntentResult {
+        WidgetIntentActions.refresh {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
+        return .result()
     }
 }
 

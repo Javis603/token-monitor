@@ -69,7 +69,6 @@ const {
   createBuilderConfig,
   widgetArtifactPaths
 } = require('../../scripts/macos-packaging');
-const { normalizeWidgetURLScheme } = require('../../src/shared/macWidgetConfig');
 const {
   MAC_APP_MIN_VERSION,
   MAC_WIDGET_MIN_VERSION
@@ -492,7 +491,6 @@ test('keeps Widget packaging opt-in and injects artifacts only after a successfu
   assert.equal(normal.sign, undefined);
   assert.equal(normal.extraFiles, undefined);
   assert.equal(normal.extraResources, undefined);
-  assert.equal(normal.extendInfo.CFBundleURLTypes, undefined);
   assert.equal(normal.minimumSystemVersion, MAC_APP_MIN_VERSION);
   assert.equal(packageJson.scripts.predistMac, undefined);
   assert.equal(packageJson.scripts['predist:mac'], undefined);
@@ -515,7 +513,7 @@ test('keeps Widget packaging opt-in and injects artifacts only after a successfu
 
   const mac = widget;
   assert.equal(mac.minimumSystemVersion, MAC_APP_MIN_VERSION);
-  assert.deepEqual(mac.extendInfo.CFBundleURLTypes[0].CFBundleURLSchemes, ['token-monitor']);
+  assert.equal(mac.extendInfo.CFBundleURLTypes, undefined);
   assert.equal(mac.extraFiles[0].to, 'PlugIns/TokenMonitorWidget.appex');
   assert.equal(mac.extraResources[0].to, 'token-monitor-widget.json');
   assert.equal(mac.extraResources[1].to, 'TokenMonitorWidgetReloader');
@@ -604,23 +602,20 @@ test('preserves generic macOS packaging config and fails fast on signing ownersh
   }
 });
 
-test('supports an isolated local Widget URL scheme without changing the release default', () => {
-  assert.match(mainSource, /parseMacWidgetDeepLink\(url, urlScheme\)/);
-  assert.match(widgetSource, /static let urlScheme: String/);
-  assert.match(widgetInfo, /<key>TokenMonitorURLScheme<\/key>/);
+test('packages the Widget without an app-launch deep link', () => {
+  assert.doesNotMatch(mainSource, /parseMacWidgetDeepLink|openMainWindowFromWidget|TOKEN_MONITOR_WIDGET_URL_SCHEME/);
+  assert.doesNotMatch(widgetSource, /\.widgetURL\(|urlScheme/);
+  assert.doesNotMatch(widgetInfo, /TokenMonitorURLScheme/);
   assert.match(packageJson.scripts['pack:mac:widget'], /TOKEN_MONITOR_WIDGET_ENABLED=1/);
 });
 
-test('canonicalizes Widget URL schemes and rejects unsafe values', () => {
-  assert.equal(normalizeWidgetURLScheme('Token-Monitor+Preview'), 'token-monitor+preview');
-  assert.equal(normalizeWidgetURLScheme(''), 'token-monitor');
-  assert.throws(() => normalizeWidgetURLScheme('https://example.test'), /unsupported characters/);
-  assert.throws(() => normalizeWidgetURLScheme('widget scheme'), /unsupported characters/);
-});
-
-test('uses AppIntent configuration and page-specific deep links', () => {
+test('uses AppIntent configuration and in-place refresh interactions', () => {
   assert.match(widgetSource, /AppIntentConfiguration\(/);
-  assert.match(widgetSource, /url\(for: entry\.page\)/);
+  assert.match(widgetSource, /struct WidgetRefreshButton<Label: View>: View/);
+  assert.match(widgetSource, /Button\(intent: RefreshWidgetIntent\(\)\)/);
+  assert.match(widgetIntentSource, /struct RefreshWidgetIntent: AppIntent/);
+  assert.match(widgetIntentSource, /static var openAppWhenRun: Bool \{ false \}/);
+  assert.match(widgetIntentSource, /WidgetCenter\.shared\.reloadAllTimelines\(\)/);
   assert.match(widgetSource, /StaticConfiguration\(kind: TokenMonitorWidgetConfiguration\.activityKind/);
   assert.match(widgetSource, /AppIntentConfiguration\(kind: TokenMonitorWidgetConfiguration\.quotaKind, intent: QuotaWidgetIntent\.self/);
   assert.doesNotMatch(widgetBundleSource, /TokenMonitorLegacyQuotaWidget/);
@@ -706,7 +701,7 @@ test('Widget canvas omits brand and navigation chrome', () => {
   assert.doesNotMatch(widgetIntentSource, /struct CycleWidgetPageIntent: AppIntent/);
   assert.doesNotMatch(widgetSource, /Image\(systemName: "arrow\.up\.right"\)/);
   assert.match(widgetSource, /Text\(entry\.page\.title\)/);
-  assert.match(widgetSource, /\.widgetURL\(TokenMonitorWidgetConfiguration\.url\(for: entry\.page\)\)/);
+  assert.doesNotMatch(widgetSource, /\.widgetURL\(/);
 });
 
 test('each Widget family has a purpose-built composition', () => {
@@ -746,6 +741,8 @@ test('each Widget family has a purpose-built composition', () => {
   assert.match(widgetDashboardSource, /dashboardRowLabelSize/);
   assert.match(widgetDashboardSource, /dashboardValueSize/);
   assert.match(widgetDashboardSource, /dashboardDetailSize/);
+  assert.match(widgetDashboardSource, /HStack\(alignment: \.top, spacing: 12\)/);
+  assert.match(widgetDashboardSource, /DashboardBreakdownModule[\s\S]*alignment: \.topLeading/);
   assert.match(widgetViewModelSource, /dashboardRowLabelSize: CGFloat = 10/);
   assert.match(widgetViewModelSource, /dashboardValueSize: CGFloat = 8\.5/);
   assert.match(widgetViewModelSource, /dashboardDetailSize: CGFloat = 7\.5/);
@@ -775,7 +772,7 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   }
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;/);
-  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 39;/);
+  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 40;/);
   assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 10;/);
   assert.match(widgetDevSource, /fs\.rmSync\(extension, \{ recursive: true, force: true \}\)/);
   assert.match(widgetDevSource, /`TOKEN_MONITOR_MARKETING_VERSION=\$\{targetMarketingVersion\}`/);

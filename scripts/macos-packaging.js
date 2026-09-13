@@ -3,9 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  DEFAULT_WIDGET_URL_SCHEME,
   normalizeMacDistributionChannel,
-  normalizeWidgetURLScheme,
   validateAppGroupForDistribution,
   validateAppGroupSyntax
 } = require('./macos-widget-config');
@@ -75,17 +73,6 @@ function assertWidgetArtifacts(root, options = {}) {
   return paths;
 }
 
-function resolveWidgetUrlScheme(env = process.env, root = path.resolve(__dirname, '..')) {
-  let value = String(env.TOKEN_MONITOR_WIDGET_URL_SCHEME || '').trim();
-  if (!value) {
-    try {
-      const config = JSON.parse(fs.readFileSync(widgetArtifactPaths(root).config, 'utf8'));
-      value = String(config.urlScheme || '').trim();
-    } catch (_) {}
-  }
-  return normalizeWidgetURLScheme(value, DEFAULT_WIDGET_URL_SCHEME);
-}
-
 function localWidgetSigningIdentity(env, appGroup) {
   const explicitIdentity = String(env.TOKEN_MONITOR_MAC_DEVELOPMENT_IDENTITY || '').trim();
   if (explicitIdentity) return explicitIdentity;
@@ -109,7 +96,6 @@ function widgetMacBuildConfig(baseMac = {}, options = {}) {
   }
 
   assertWidgetArtifacts(root, { env });
-  const urlScheme = resolveWidgetUrlScheme(env, root);
   const localDevelopmentSigning = String(env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING || '').trim() === '1';
   const appGroup = String(env.TOKEN_MONITOR_APP_GROUP || 'group.com.example.tokenmonitor').trim();
   const extraFiles = Array.isArray(base.extraFiles)
@@ -140,19 +126,7 @@ function widgetMacBuildConfig(baseMac = {}, options = {}) {
         from: 'build/macos-widget/TokenMonitorWidgetReloader',
         to: 'TokenMonitorWidgetReloader'
       }
-    ],
-    extendInfo: {
-      ...(base.extendInfo || {}),
-      CFBundleURLTypes: [
-        ...(Array.isArray(base.extendInfo?.CFBundleURLTypes)
-          ? base.extendInfo.CFBundleURLTypes
-          : []),
-        {
-          CFBundleURLName: 'token-monitor-widget',
-          CFBundleURLSchemes: [urlScheme]
-        }
-      ]
-    }
+    ]
   };
 }
 
@@ -169,11 +143,9 @@ if (require.main === module && widgetEnabled()) {
 }
 
 module.exports = {
-  DEFAULT_WIDGET_URL_SCHEME,
   assertWidgetArtifacts,
   createBuilderConfig,
   localWidgetSigningIdentity,
-  resolveWidgetUrlScheme,
   widgetArtifactPaths,
   widgetEnabled,
   widgetMacBuildConfig

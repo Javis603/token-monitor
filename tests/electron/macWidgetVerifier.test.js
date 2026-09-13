@@ -13,13 +13,11 @@ const {
 const APP_ID = 'com.javis.tokenmonitor';
 const WIDGET_BUNDLE_ID = 'com.javis.tokenmonitor.widget';
 const WIDGET_KIND = 'com.tokenmonitor.dashboard';
-const URL_SCHEME = 'token-monitor';
 
 function plistForApp() {
   return {
     CFBundleExecutable: 'Token Monitor',
     CFBundleIdentifier: APP_ID,
-    CFBundleURLTypes: [{ CFBundleURLSchemes: [URL_SCHEME] }],
     CFBundleShortVersionString: '0.39.0',
     CFBundleVersion: '0.39.0'
   };
@@ -29,7 +27,6 @@ function plistForWidget(appGroup) {
   return {
     CFBundleIdentifier: WIDGET_BUNDLE_ID,
     TokenMonitorAppGroup: appGroup,
-    TokenMonitorURLScheme: URL_SCHEME,
     TMWidgetKind: WIDGET_KIND,
     CFBundleShortVersionString: '0.39.0',
     CFBundleVersion: '0.39.0'
@@ -59,7 +56,6 @@ function makeBundle({ appGroup, configAppGroup = appGroup, widgetInfoAppGroup = 
   fs.writeFileSync(configPath, `${JSON.stringify({
     appGroup: configAppGroup,
     widgetKind: WIDGET_KIND,
-    urlScheme: URL_SCHEME,
     marketingVersion: '0.39.0',
     bundleVersion: '0.39.0'
   })}\n`);

@@ -227,10 +227,6 @@ function verifyMacWidgetApp({
   if (widgetBundleId && extensionInfo.CFBundleIdentifier !== widgetBundleId) fail('Widget bundle identifier does not match configured value');
   verifyAppGroupSources({ appGroup, config, extensionInfo });
   if (extensionInfo.TMWidgetKind !== config.widgetKind) fail('Widget kind differs between Info.plist and widget config');
-  if (extensionInfo.TokenMonitorURLScheme !== config.urlScheme) fail('Widget URL scheme differs between Info.plist and widget config');
-  const urlTypes = Array.isArray(appInfo.CFBundleURLTypes) ? appInfo.CFBundleURLTypes : [];
-  const schemes = urlTypes.flatMap((entry) => Array.isArray(entry.CFBundleURLSchemes) ? entry.CFBundleURLSchemes : []);
-  if (!schemes.includes(config.urlScheme)) fail('packaged app is missing the Widget URL scheme');
   if (!/^\d+\.\d+(?:\.\d+)?$/.test(String(config.marketingVersion || ''))) fail('invalid marketing version');
   if (!/^\d+(?:\.\d+){0,2}$/.test(String(config.bundleVersion || ''))) fail('invalid bundle version');
   const widgetBundleVersion = String(config.widgetBundleVersion || config.bundleVersion || '');
@@ -296,7 +292,7 @@ function verifyMacWidgetApp({
       fail('embedded provisioning profiles use different Team IDs');
     }
   }
-  return { appPath: resolvedApp, architecture: expectedArch, widgetKind: config.widgetKind, urlScheme: config.urlScheme };
+  return { appPath: resolvedApp, architecture: expectedArch, widgetKind: config.widgetKind };
 }
 
 if (require.main === module) {

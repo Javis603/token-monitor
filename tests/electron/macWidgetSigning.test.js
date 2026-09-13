@@ -10,8 +10,7 @@ const {
   localElectronHelperEntitlements,
   localElectronHelperPaths,
   localElectronHelperSignArgs,
-  localMainAppSignArgs,
-  widgetURLScheme
+  localMainAppSignArgs
 } = require('../../scripts/sign-macos-with-widget');
 
 test('keeps release timestamp and hardened runtime signing defaults', () => {
@@ -125,17 +124,4 @@ test('local main app re-sign keeps its entitlement without release-only flags', 
     '--keychain', '/tmp/test.keychain',
     '/tmp/Token Monitor Widget Dev.app'
   ]);
-});
-
-test('accepts only a safe Widget URL scheme', () => {
-  const previous = process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME;
-  try {
-    process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME = 'token-monitor-widget-dev';
-    assert.equal(widgetURLScheme(), 'token-monitor-widget-dev');
-    process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME = 'bad scheme';
-    assert.throws(() => widgetURLScheme(), /unsupported characters/);
-  } finally {
-    if (previous === undefined) delete process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME;
-    else process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME = previous;
-  }
 });
