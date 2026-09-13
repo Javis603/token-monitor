@@ -74,7 +74,7 @@ test('keeps the packaged Widget descriptor aligned with the incremental UI build
     widgetBundleVersion: '1',
     marketingVersion: '0.54.0'
   });
-  assert.equal(updated.widgetUIVersion, 32);
-  assert.equal(updated.widgetBundleVersion, '32');
+  assert.equal(updated.widgetUIVersion, 33);
+  assert.equal(updated.widgetBundleVersion, '33');
   assert.equal(updated.marketingVersion, '0.54.0');
 });

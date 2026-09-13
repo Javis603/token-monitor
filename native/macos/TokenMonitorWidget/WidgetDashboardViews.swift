@@ -8,27 +8,26 @@ struct SmallUsageWidgetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(period.displayTitle)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(WidgetDesignTokens.muted)
-
-            Spacer(minLength: 7)
-
-            Text(WidgetFormat.tokens(snapshot.overview.totalTokens, style: "compact", presentation: snapshot.presentation))
-                .font(.system(size: 37, weight: .semibold))
-                .monospacedDigit()
-                .foregroundStyle(WidgetDesignTokens.number)
-                .lineLimit(1)
-                .minimumScaleFactor(0.68)
-                .contentTransition(.numericText())
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .offset(x: -1.5)
-
-            if snapshot.presentation.showCost {
-                Text(WidgetFormat.cost(snapshot.overview.costUsd, presentation: snapshot.presentation))
-                    .font(.subheadline.weight(.medium))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(period.displayTitle)
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(WidgetDesignTokens.muted)
-                    .padding(.top, 4)
+
+                Text(WidgetFormat.tokens(snapshot.overview.totalTokens, style: "compact", presentation: snapshot.presentation))
+                    .font(.system(size: 37, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(WidgetDesignTokens.number)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+                    .contentTransition(.numericText())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .offset(x: -1.5)
+
+                if snapshot.presentation.showCost {
+                    Text(WidgetFormat.cost(snapshot.overview.costUsd, presentation: snapshot.presentation))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(WidgetDesignTokens.muted)
+                }
             }
 
             Spacer(minLength: 10)

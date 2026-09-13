@@ -748,6 +748,8 @@ test('each Widget family has a purpose-built composition', () => {
     widgetDashboardSource.indexOf('struct MediumUsageWidgetView')
   );
   assert.match(smallUsageSource, /size: 37, weight: \.semibold/);
+  assert.match(smallUsageSource, /VStack\(alignment: \.leading, spacing: 4\)/);
+  assert.doesNotMatch(smallUsageSource, /Spacer\(minLength: 7\)/);
   assert.match(widgetDashboardSource, /\(width\|height\)=\["'\]1em\["'\]/);
 });
 
@@ -770,7 +772,7 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   }
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;/);
-  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 32;/);
+  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 33;/);
   assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 8;/);
   assert.equal(packageVersion(), packageJson.version);
   assert.match(widgetProject, /MARKETING_VERSION = "\$\(TOKEN_MONITOR_MARKETING_VERSION\)";/);
