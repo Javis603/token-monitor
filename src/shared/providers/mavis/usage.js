@@ -30,7 +30,6 @@
  */
 
 const { execFile } = require('node:child_process');
-const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -109,10 +108,6 @@ function boundedRows(rows, options = {}) {
   return out;
 }
 
-function sourceId(dbPath) {
-  return createHash('sha256').update(path.normalize(String(dbPath || ''))).digest('hex').slice(0, 12);
-}
-
 function resolveMavisDbPath(options = {}) {
   if (options.dbPath) return options.dbPath;
   const fromEnv = process.env.MAVIS_RUNTIME_DB;
@@ -156,7 +151,7 @@ async function readMavisDbRows(dbPath, options = {}) {
   ];
   if (sinceMs > 0) cliArgs.push(String(sinceMs));
 
-  let cliError = null;
+  let cliError;
   try {
     const result = await run('sqlite3', cliArgs, {
       encoding: 'utf8',
@@ -170,18 +165,18 @@ async function readMavisDbRows(dbPath, options = {}) {
     }
     const parsed = stdout ? JSON.parse(stdout) : [];
     return boundedRows(Array.isArray(parsed) ? parsed : [], { maxReadRows });
-  } catch (err) {
-    cliError = err;
-    if (isReadBudgetError(err)) {
-      if (logger) logger(err.message);
-      throw err;
-    }
+  } catch (caught) {
+    cliError = caught;
+  }
+  if (isReadBudgetError(cliError)) {
+    if (logger) logger(cliError.message);
+    throw cliError;
   }
 
   // Fallback: built-in node:sqlite (Node 22.5+, stable since 22.13, no flag
   // needed on 22.15+). Injected via requireFn so tests can stub it.
   const requireFn = options.requireFn || require;
-  let nodeError = null;
+  let nodeError;
   try {
     const { DatabaseSync } = requireFn('node:sqlite');
     const database = new DatabaseSync(dbPath, { readOnly: true });
@@ -195,12 +190,12 @@ async function readMavisDbRows(dbPath, options = {}) {
     } finally {
       database.close();
     }
-  } catch (err) {
-    nodeError = err;
-    if (isReadBudgetError(err)) {
-      if (logger) logger(err.message);
-      throw err;
-    }
+  } catch (caught) {
+    nodeError = caught;
+  }
+  if (isReadBudgetError(nodeError)) {
+    if (logger) logger(nodeError.message);
+    throw nodeError;
   }
 
   const message = `mavis sqlite read failed: sqlite3 CLI: ${cliError?.message || 'unknown'}; node:sqlite: ${nodeError?.message || 'unknown'}`;
@@ -263,39 +258,10 @@ async function collectMavisRows(options = {}) {
 // history buckets instead of being attributed entirely to the day the
 // last turn landed on. Same defect proma's adapter had to fix early on;
 // doing it here from day one.
-function rowKey(row) {
-  const date = row.createdAt ? localDateKey(row.createdAt) : '';
-  return `${row.sessionId}\u0000${date}\u0000${row.model}`;
-}
-
-function mergeIntoByKey(target, row) {
-  const key = rowKey(row);
-  const existing = target.get(key);
-  if (existing) {
-    existing.input += row.input;
-    existing.output += row.output;
-    existing.reasoning += row.reasoning;
-    existing.cacheRead += row.cacheRead;
-    existing.cacheWrite += row.cacheWrite;
-    existing.cost += row.cost;
-    existing.messages += 1;
-    if (row.createdAt && row.createdAt > existing.createdAt) existing.createdAt = row.createdAt;
-    return existing;
-  }
-  target.set(key, {
-    sessionId: row.sessionId,
-    model: row.model,
-    input: row.input,
-    output: row.output,
-    reasoning: row.reasoning,
-    cacheRead: row.cacheRead,
-    cacheWrite: row.cacheWrite,
-    cost: row.cost,
-    messages: 1,
-    createdAt: row.createdAt
-  });
-  return target.get(key);
-}
+//
+// Inlined into buildHistoryGraphFromRows because the per-row merge only
+// runs in that one place; keeping the helper exported for tests would
+// leave it as dead code in production (and trip `no-unused-vars`).
 
 function buildHistoryGraphFromRows(rows) {
   const byDate = new Map();
@@ -482,12 +448,4 @@ module.exports = {
   readMavisDbRows,
   normalizedModelId,
   normalizeDbRow
-};
-
-// Surface the aggregation primitives for tests. Production code goes
-// through buildMavisHistoryGraph / buildMavisPeriods which already use
-// these internally.
-module.exports._internal = {
-  rowKey,
-  mergeIntoByKey
 };
