@@ -72,8 +72,6 @@ struct MediumUsageWidgetView: View {
             MediumBreakdownModule(rows: toolRows, presentation: snapshot.presentation)
         case .models:
             MediumBreakdownModule(rows: modelRows, presentation: snapshot.presentation)
-        case .trend:
-            MediumTrendModule(snapshot: snapshot, period: period)
         }
     }
 
@@ -465,7 +463,7 @@ private struct DashboardQuotaWindowCell: View {
         if window.metric == "credits", let remaining = window.remaining {
             return String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), remaining)
         }
-        if let remaining = window.remainingPercent { return "\(Int(remaining.rounded()))% left" }
+        if let remaining = window.remainingPercent { return WidgetL10n.format("%lld%% left", Int(remaining.rounded())) }
         return "—"
     }
 }
@@ -545,7 +543,7 @@ struct QuotaWindowCell: View {
         if window.metric == "credits", let remaining = window.remaining {
             return String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), remaining)
         }
-        if let remaining = window.remainingPercent { return "\(Int(remaining.rounded()))% left" }
+        if let remaining = window.remainingPercent { return WidgetL10n.format("%lld%% left", Int(remaining.rounded())) }
         return "—"
     }
 }
@@ -580,51 +578,7 @@ struct MediumActivityModule: View {
     private var activitySummary: String {
         let tokens = snapshot.activity.days.reduce(0) { $0 + $1.totalTokens }
         let tokenText = WidgetFormat.tokens(tokens, style: "compact", presentation: snapshot.presentation)
-        return "\(tokenText) tokens · \(snapshot.activity.activeDays) active days"
-    }
-}
-
-struct MediumTrendModule: View {
-    let snapshot: WidgetSnapshot
-    let period: WidgetPeriod
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(period.displayTitle)
-                        .font(.system(size: 9.5, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text(WidgetFormat.tokens(snapshot.overview.totalTokens, style: "compact", presentation: snapshot.presentation))
-                        .font(.system(size: 24, weight: .medium))
-                        .monospacedDigit()
-                }
-                Spacer(minLength: 8)
-                Text(delta)
-                    .font(.system(size: 11, weight: .semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-            SmoothTrendChart(points: snapshot.trend.points)
-                .frame(maxHeight: .infinity)
-            if let start = snapshot.trend.startDate, let end = snapshot.trend.endDate {
-                HStack {
-                    Text(start)
-                    Spacer()
-                    Text(end)
-                }
-                .font(.system(size: 8.5, weight: .medium))
-                .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    private var delta: String {
-        guard let first = snapshot.trend.points.first?.totalTokens,
-              let last = snapshot.trend.points.last?.totalTokens,
-              first > 0 else { return "—" }
-        let percent = Int((Double(last - first) / Double(first) * 100).rounded())
-        return percent > 0 ? "+\(percent)%" : "\(percent)%"
+        return WidgetL10n.format("%@ tokens · %lld active days", tokenText, snapshot.activity.activeDays)
     }
 }
 

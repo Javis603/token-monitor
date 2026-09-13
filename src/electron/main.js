@@ -4555,7 +4555,7 @@ function showPopover() {
 
 function openMainWindowFromWidget() {
   if (!app.isReady()) return;
-  const destination = pendingMacWidgetOpen || { page: 'overview', view: 'home', settings: false };
+  const destination = pendingMacWidgetOpen || { page: 'overview', view: 'home' };
   pendingMacWidgetOpen = null;
   updateRendererViewState({ breakdown: destination.view });
   applyMacActivationPolicy({ mainWindowVisible: true });
@@ -4568,8 +4568,7 @@ function openMainWindowFromWidget() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const sendDestination = () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (destination.settings) mainWindow.webContents.send('settings:open');
-    else mainWindow.webContents.send('view:open', destination.view);
+    mainWindow.webContents.send('view:open', destination.view);
   };
   if (mainWindow.webContents.isLoadingMainFrame()) mainWindow.webContents.once('did-finish-load', sendDestination);
   else sendDestination();

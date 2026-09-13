@@ -76,16 +76,6 @@ struct BreakdownWidgetTimelineProvider: AppIntentTimelineProvider {
     }
 }
 
-struct TrendWidgetTimelineProvider: AppIntentTimelineProvider {
-    func placeholder(in context: Context) -> TokenMonitorEntry { WidgetTimelineFactory.placeholder(page: .trend) }
-    func snapshot(for configuration: TrendWidgetIntent, in context: Context) async -> TokenMonitorEntry {
-        WidgetTimelineFactory.entry(page: .trend, period: configuration.period, context: context, demandFileName: context.isPreview ? nil : WidgetDemandMarker.provisionalFileName)
-    }
-    func timeline(for configuration: TrendWidgetIntent, in context: Context) async -> Timeline<TokenMonitorEntry> {
-        WidgetTimelineFactory.timeline(page: .trend, period: configuration.period, context: context)
-    }
-}
-
 struct DashboardWidgetTimelineProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> TokenMonitorEntry { WidgetTimelineFactory.placeholder(page: .models) }
     func snapshot(for configuration: DashboardWidgetIntent, in context: Context) async -> TokenMonitorEntry {
@@ -114,22 +104,5 @@ struct FixedWidgetTimelineProvider: TimelineProvider {
     }
     func getTimeline(in context: Context, completion: @escaping (Timeline<TokenMonitorEntry>) -> Void) {
         completion(WidgetTimelineFactory.timeline(page: page, period: .day, context: context))
-    }
-}
-
-// Compatibility seam for tests and preview targets that still instantiate the
-// original provider. It is not exposed by the Widget bundle anymore.
-struct TokenMonitorTimelineProvider: AppIntentTimelineProvider {
-    func placeholder(in context: Context) -> TokenMonitorEntry { WidgetTimelineFactory.placeholder(page: .overview) }
-    func snapshot(for configuration: TokenMonitorWidgetConfigurationIntent, in context: Context) async -> TokenMonitorEntry {
-        let period = WidgetPeriodPolicy.effectivePeriod(for: configuration.page, selectedPeriod: configuration.period)
-        return WidgetTimelineFactory.entry(page: configuration.page, period: period, context: context, demandFileName: context.isPreview ? nil : WidgetDemandMarker.provisionalFileName)
-    }
-    func timeline(for configuration: TokenMonitorWidgetConfigurationIntent, in context: Context) async -> Timeline<TokenMonitorEntry> {
-        let period = WidgetPeriodPolicy.effectivePeriod(for: configuration.page, selectedPeriod: configuration.period)
-        return WidgetTimelineFactory.timeline(page: configuration.page, period: period, context: context)
-    }
-    func selectedActivityDate(in snapshot: WidgetSnapshot?, family: WidgetFamily, referenceDate: Date = Date(), store: WidgetPresentationStateStoring = WidgetPresentationStateStore.shared) -> String? {
-        WidgetActivitySelection.resolvedDate(days: snapshot?.activity.days ?? [], family: WidgetFamilyScope(widgetFamily: family), referenceDate: referenceDate, store: store)
     }
 }

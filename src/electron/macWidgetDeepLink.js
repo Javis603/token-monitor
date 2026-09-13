@@ -7,8 +7,7 @@ const PAGE_TO_VIEW = Object.freeze({
   quota: 'limits',
   tools: 'tool',
   models: 'model',
-  activity: 'trends',
-  trend: 'trends'
+  activity: 'trends'
 });
 
 function parseMacWidgetDeepLink(value, scheme = 'token-monitor') {
@@ -17,10 +16,8 @@ function parseMacWidgetDeepLink(value, scheme = 'token-monitor') {
     const url = new URL(String(value || ''));
     if (url.protocol !== `${canonicalScheme}:`) return null;
     const page = String(url.hostname || '').toLowerCase();
-    if (page === 'widget') return { page: 'overview', view: 'home', settings: false };
-    if (page === 'widget-settings') return { page: 'overview', view: 'home', settings: true };
     const view = PAGE_TO_VIEW[page];
-    return view ? { page, view, settings: false } : null;
+    return view ? { page, view } : null;
   } catch (_) {
     return null;
   }

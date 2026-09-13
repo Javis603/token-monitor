@@ -25,8 +25,8 @@ const DEFAULT_APP_GROUP = 'group.com.example.tokenmonitor';
 const DEFAULT_WIDGET_BUNDLE_ID = `${DEFAULT_APP_ID}.widget`;
 const DEFAULT_URL_SCHEME = 'token-monitor';
 const DEFAULT_WIDGET_KIND = 'com.tokenmonitor.dashboard';
-const WIDGET_UI_VERSION = 33;
-const WIDGET_SCHEMA_VERSION = 8;
+const WIDGET_UI_VERSION = 35;
+const WIDGET_SCHEMA_VERSION = 9;
 const WIDGET_ARCHITECTURES = Object.freeze({
   arm64: Object.freeze({ name: 'arm64', xcodeArch: 'arm64', swiftArch: 'arm64' }),
   x64: Object.freeze({ name: 'x64', xcodeArch: 'x86_64', swiftArch: 'x86_64' })
@@ -313,6 +313,7 @@ module.exports = {
   DEFAULT_WIDGET_BUNDLE_ID,
   DEFAULT_WIDGET_KIND,
   DEFAULT_URL_SCHEME,
+  WIDGET_SCHEMA_VERSION,
   WIDGET_UI_VERSION,
   WIDGET_ARCHITECTURES,
   assertWidgetArchitecture,

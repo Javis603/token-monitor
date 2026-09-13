@@ -5,12 +5,22 @@ const test = require('node:test');
 const {
   availableDevelopmentIdentities,
   developmentTeamForAppGroup,
+  hostLaunchEnvironment,
   parseArguments,
   resolveDeveloperDirectory,
   teamIdentifierFromCodesignOutput,
   updatedWidgetConfig,
   xcconfigContents
 } = require('../../scripts/dev-macos-widget');
+
+test('launches the Electron host without inherited run-as-Node mode', () => {
+  assert.deepEqual(hostLaunchEnvironment({
+    ELECTRON_RUN_AS_NODE: '1',
+    TOKEN_MONITOR_APP_GROUP: 'ABCDE12345.tokenmonitor'
+  }), {
+    TOKEN_MONITOR_APP_GROUP: 'ABCDE12345.tokenmonitor'
+  });
+});
 
 test('parses the fast Widget deployment arguments', () => {
   assert.deepEqual(parseArguments([
@@ -75,10 +85,12 @@ test('writes an arm64 development xcconfig with the shared Team App Group', () =
 test('keeps the packaged Widget descriptor aligned with the incremental UI build', () => {
   const updated = updatedWidgetConfig({
     widgetUIVersion: 1,
+    widgetSchemaVersion: 1,
     widgetBundleVersion: '1',
     marketingVersion: '0.54.0'
   });
-  assert.equal(updated.widgetUIVersion, 33);
-  assert.equal(updated.widgetBundleVersion, '33');
+  assert.equal(updated.widgetUIVersion, 35);
+  assert.equal(updated.widgetSchemaVersion, 9);
+  assert.equal(updated.widgetBundleVersion, '35');
   assert.equal(updated.marketingVersion, '0.54.0');
 });

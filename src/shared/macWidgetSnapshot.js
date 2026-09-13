@@ -3,7 +3,7 @@
 const { KNOWN_CLIENTS } = require('./clientTracking');
 const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } = require('./limitProviders');
 
-const MAC_WIDGET_SCHEMA_VERSION = 8;
+const MAC_WIDGET_SCHEMA_VERSION = 9;
 const MAC_WIDGET_FRESHNESS_HEARTBEAT_MS = 5 * 60 * 1000;
 const KNOWN_TOOLS = new Set(KNOWN_CLIENTS.split(',').filter(Boolean));
 const KNOWN_LIMIT_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
@@ -131,22 +131,20 @@ function periodStats(stats, period) {
 
 function buildTools(period) {
   const tokensByTool = period?.clients && typeof period.clients === 'object' ? period.clients : {};
-  const costsByTool = period?.clientCosts && typeof period.clientCosts === 'object' ? period.clientCosts : {};
   const tools = [];
   for (const tool of KNOWN_TOOLS) {
     const totalTokens = Math.round(nonNegativeNumber(tokensByTool[tool]));
-    const costUsd = nonNegativeNumber(costsByTool[tool]);
-    if (totalTokens <= 0 && costUsd <= 0) continue;
-    tools.push({ id: tool, totalTokens, costUsd });
+    if (totalTokens <= 0) continue;
+    tools.push({ id: tool, totalTokens });
   }
   tools.sort((left, right) => (
     right.totalTokens - left.totalTokens
-    || right.costUsd - left.costUsd
     || left.id.localeCompare(right.id)
   ));
   const denominator = tools.reduce((sum, tool) => sum + tool.totalTokens, 0);
   return tools.slice(0, 10).map((tool) => ({
-    ...tool,
+    id: tool.id,
+    totalTokens: tool.totalTokens,
     sharePercent: denominator > 0 ? Math.max(0, Math.min(100, tool.totalTokens / denominator * 100)) : 0
   }));
 }
@@ -172,13 +170,9 @@ function buildLimitWindow(window) {
     kind,
     metric,
     showMeter: window.showMeter !== false,
-    usedPercent,
     remainingPercent,
     resetsAt: normalizedIso(window.resetsAt),
     ...(boundaryKind ? { boundaryKind } : {}),
-    windowMinutes: window.windowMinutes === null || window.windowMinutes === undefined
-      ? null
-      : nonNegativeNumber(window.windowMinutes),
     ...(remaining === null ? {} : { remaining }),
     ...(currency ? { currency } : {}),
     ...(detail ? { detail } : {})
@@ -308,7 +302,6 @@ function providerLabel(provider) {
 
 function buildModels(period) {
   const values = period?.models && typeof period.models === 'object' ? period.models : {};
-  const costs = period?.modelCosts && typeof period.modelCosts === 'object' ? period.modelCosts : {};
   const rowsByName = new Map();
   for (const [rawName, rawTokens] of Object.entries(values)) {
     const displayName = safeDisplayName(rawName);
@@ -318,10 +311,9 @@ function buildModels(period) {
     const existing = rowsByName.get(key);
     if (existing) {
       existing.totalTokens += totalTokens;
-      existing.costUsd += nonNegativeNumber(costs[rawName]);
       existing.displayName = existing.displayName.localeCompare(displayName) <= 0 ? existing.displayName : displayName;
     } else {
-      rowsByName.set(key, { displayName, totalTokens, costUsd: nonNegativeNumber(costs[rawName]), key });
+      rowsByName.set(key, { displayName, totalTokens, key });
     }
   }
   const rows = Array.from(rowsByName.values());
@@ -331,7 +323,6 @@ function buildModels(period) {
     displayName: row.displayName,
     id: `model-${stableHash(row.key)}`,
     totalTokens: row.totalTokens,
-    costUsd: row.costUsd,
     sharePercent: denominator > 0 ? Math.max(0, Math.min(100, row.totalTokens / denominator * 100)) : 0
   }));
 }
@@ -352,8 +343,7 @@ function normalizedDaily(history) {
     if (!date) continue;
     byDate.set(date, {
       date,
-      totalTokens: Math.round(nonNegativeNumber(entry?.tokens)),
-      costUsd: nonNegativeNumber(entry?.cost)
+      totalTokens: Math.round(nonNegativeNumber(entry?.tokens))
     });
   }
   return Array.from(byDate.values()).sort((left, right) => left.date.localeCompare(right.date));
@@ -374,11 +364,10 @@ function addCalendarDays(day, delta) {
   return new Date(timestamp + delta * 86_400_000).toISOString().slice(0, 10);
 }
 
-function buildActivity(history, period) {
+function buildActivity(history) {
   const daily = normalizedDaily(history).slice(-MAC_WIDGET_ACTIVITY_DAYS);
   const peak = daily.reduce((max, day) => Math.max(max, day.totalTokens), 0);
   return {
-    currentPeriod: period,
     activeDays: daily.filter((day) => day.totalTokens > 0).length,
     days: daily.map((day) => ({
       date: day.date,
@@ -395,8 +384,7 @@ function buildTrend(history, options = {}) {
     const today = localDayKey(options.now);
     const livePeriod = options.livePeriod && typeof options.livePeriod === 'object' ? options.livePeriod : {};
     const liveTokens = Math.round(nonNegativeNumber(livePeriod.totalTokens));
-    const liveCost = nonNegativeNumber(livePeriod.costUsd);
-    if (today && (daily.length > 0 || liveTokens > 0 || liveCost > 0)) {
+    if (today && (daily.length > 0 || liveTokens > 0)) {
       const start = addCalendarDays(today, -(TREND_WINDOW_DAYS - 1));
       const byDate = new Map(daily
         .filter((point) => point.date >= start && point.date <= today)
@@ -408,8 +396,7 @@ function buildTrend(history, options = {}) {
         if (!historical) {
           points.push({
             date,
-            totalTokens: date === today ? liveTokens : 0,
-            costUsd: date === today ? liveCost : 0
+            totalTokens: date === today ? liveTokens : 0
           });
           continue;
         }
@@ -418,8 +405,7 @@ function buildTrend(history, options = {}) {
           ...(date === today ? {
             // The graph may already contain part or all of today's usage. Use
             // the greater observation instead of adding live and graph values.
-            totalTokens: Math.max(historical.totalTokens, liveTokens),
-            costUsd: Math.max(historical.costUsd, liveCost)
+            totalTokens: Math.max(historical.totalTokens, liveTokens)
           } : {})
         });
       }
@@ -427,28 +413,20 @@ function buildTrend(history, options = {}) {
       points = [];
     }
   }
-  const peakTokens = points.reduce((max, point) => Math.max(max, point.totalTokens), 0);
   return {
-    startDate: points[0]?.date || null,
-    endDate: points.at(-1)?.date || null,
-    peakTokens,
-    currentTokens: points.at(-1)?.totalTokens || 0,
-    points
+    points: points.map(({ date, totalTokens }) => ({ date, totalTokens }))
   };
 }
 
-function buildPeriodSnapshot(stats, period, generatedAt, history, sourceUpdatedAt, now) {
+function buildPeriodSnapshot(stats, period, history, now) {
   const current = periodStats(stats, period);
   const tools = buildTools(current);
   const models = buildModels(current);
-  const activity = buildActivity(history, period);
+  const activity = buildActivity(history);
   const trend = buildTrend(history, { period, livePeriod: current, now });
   const overview = {
-    currentPeriod: period,
     totalTokens: Math.round(nonNegativeNumber(current.totalTokens)),
-    costUsd: nonNegativeNumber(current.costUsd),
-    primaryTool: tools[0]?.id || null,
-    updatedAt: sourceUpdatedAt || normalizedIso(stats?.updatedAt) || generatedAt
+    costUsd: nonNegativeNumber(current.costUsd)
   };
   return { overview, tools, models, activity, trend };
 }
@@ -469,24 +447,13 @@ function buildPresentation(source = {}) {
   };
 }
 
-function buildStatus({ generatedAt, quota, periods, now, sourceFreshness }) {
+function buildStatus({ now, sourceFreshness }) {
   const sourceUpdatedAt = sourceFreshness.sourceUpdatedAt;
   const sourceTime = sourceUpdatedAt ? Date.parse(sourceUpdatedAt) : now.getTime();
   const dataAgeSeconds = Math.max(0, Math.round((now.getTime() - sourceTime) / 1000));
-  const statuses = quota.map((provider) => provider.status);
   return {
     isStale: sourceFreshness.sourceStale || dataAgeSeconds > 20 * 60,
-    sourceStale: sourceFreshness.sourceStale,
-    dataAgeSeconds,
-    providerConfigured: statuses.some((status) => !['notConfigured', 'disabled'].includes(status)),
-    providerNeedsLogin: statuses.some((status) => status === 'unauthorized'),
-    noData: Object.values(periods).every((period) => (
-      period.overview.totalTokens === 0
-      && period.models.length === 0
-      && period.activity.activeDays === 0
-    )),
-    sourceUpdatedAt,
-    snapshotGeneratedAt: generatedAt
+    sourceUpdatedAt
   };
 }
 
@@ -499,37 +466,22 @@ function buildMacWidgetSnapshot(stats, options = {}) {
   const quota = buildQuota(stats?.limits, options.activeCodexAccount);
   const history = options.history;
   const periods = {
-    day: buildPeriodSnapshot(stats, 'today', generatedAt, history, sourceFreshness.sourceUpdatedAt, safeNow),
-    month: buildPeriodSnapshot(stats, 'month', generatedAt, history, sourceFreshness.sourceUpdatedAt, safeNow),
-    total: buildPeriodSnapshot(stats, 'allTime', generatedAt, history, sourceFreshness.sourceUpdatedAt, safeNow)
+    day: buildPeriodSnapshot(stats, 'today', history, safeNow),
+    month: buildPeriodSnapshot(stats, 'month', history, safeNow),
+    total: buildPeriodSnapshot(stats, 'allTime', history, safeNow)
   };
-  // The top-level mirror is the schemaVersion 1 shape. Every reader from
-  // version 2 on takes `periods.day` and ignores it, so it is pinned to the same
-  // period rather than tracking anything: sourcing it from the app's own
-  // Today/Month/AllTime tab used to rewrite the snapshot and spend a
-  // `WidgetCenter.reloadTimelines()` on a change no widget could render, and
-  // WidgetKit reload budgets are finite. Each widget picks its own period
-  // through the AppIntent instead.
-  const selected = periods.day;
   return {
     schemaVersion: MAC_WIDGET_SCHEMA_VERSION,
     generatedAt,
     periods,
-    overview: selected.overview,
     quota,
-    tools: selected.tools,
-    models: selected.models,
-    activity: selected.activity,
-    trend: selected.trend,
     presentation,
-    status: buildStatus({ generatedAt, quota, periods, now: safeNow, sourceFreshness })
+    status: buildStatus({ now: safeNow, sourceFreshness })
   };
 }
 
 const SNAPSHOT_VOLATILE_KEYS = new Set([
   'generatedAt',
-  'snapshotGeneratedAt',
-  'dataAgeSeconds',
   'updatedAt',
   'sourceUpdatedAt',
   'isStale'
@@ -584,15 +536,11 @@ function stableHash(value) {
 }
 
 function freshnessSignature(snapshot) {
-  return JSON.stringify({
-    isStale: Boolean(snapshot?.status?.isStale),
-    sourceStale: Boolean(snapshot?.status?.sourceStale)
-  });
+  return Boolean(snapshot?.status?.isStale);
 }
 
 function snapshotGeneratedTime(snapshot) {
-  const value = snapshot?.status?.snapshotGeneratedAt || snapshot?.generatedAt;
-  const timestamp = Date.parse(value || '');
+  const timestamp = Date.parse(snapshot?.generatedAt || '');
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 

@@ -8,6 +8,7 @@ const {
   DEFAULT_WIDGET_BUNDLE_ID,
   DEFAULT_WIDGET_KIND,
   DEFAULT_URL_SCHEME,
+  WIDGET_SCHEMA_VERSION,
   WIDGET_UI_VERSION,
   packageVersion,
   widgetVersions
@@ -107,6 +108,7 @@ function updatedWidgetConfig(config) {
   return {
     ...config,
     widgetUIVersion: WIDGET_UI_VERSION,
+    widgetSchemaVersion: WIDGET_SCHEMA_VERSION,
     widgetBundleVersion: String(WIDGET_UI_VERSION)
   };
 }
@@ -259,6 +261,12 @@ function signedTeamIdentifier(bundlePath) {
   return teamIdentifierFromCodesignOutput(`${result.stdout || ''}\n${result.stderr || ''}`);
 }
 
+function hostLaunchEnvironment(env = process.env) {
+  const launchEnvironment = { ...env };
+  delete launchEnvironment.ELECTRON_RUN_AS_NODE;
+  return launchEnvironment;
+}
+
 function signChangedContainer({ appPath, identity, artifacts }) {
   run('codesign', [
     '--force',
@@ -311,7 +319,9 @@ async function signApp({ appPath, identity, config, developmentTeam, artifacts }
 function registerAndLaunch(appPath, config) {
   const reloader = path.join(appPath, 'Contents', 'Resources', 'TokenMonitorWidgetReloader');
   run(reloader, ['--mode', 'register-host']);
-  run('open', [appPath]);
+  // ELECTRON_RUN_AS_NODE is useful for the packaged tokscale shim, but letting
+  // LaunchServices inherit it makes Electron execute the host as plain Node.
+  run('open', [appPath], { env: hostLaunchEnvironment() });
   run(reloader, [config.widgetKind]);
 }
 
@@ -354,6 +364,7 @@ module.exports = {
   availableDevelopmentIdentities,
   developmentTeamForAppGroup,
   findApps,
+  hostLaunchEnvironment,
   parseArguments,
   resolveDeveloperDirectory,
   resolveAppPath,

@@ -1,19 +1,30 @@
 import Foundation
 
 struct WidgetSnapshot: Decodable, Equatable {
+    static let currentSchemaVersion = 9
+
     let schemaVersion: Int
     let generatedAt: Date
-    let overview: WidgetOverview
     let quota: [WidgetQuotaProvider]
-    let tools: [WidgetTool]
-    let models: [WidgetModel]
-    let activity: WidgetActivity
-    let trend: WidgetTrend
     let periods: [WidgetPeriod: WidgetPeriodSnapshot]
     let presentation: WidgetPresentation
     let status: WidgetStatus
+    private let selectedPeriod: WidgetPeriod
 
-    var isEmpty: Bool { status.noData }
+    var overview: WidgetOverview { selectedSnapshot.overview }
+    var tools: [WidgetTool] { selectedSnapshot.tools }
+    var models: [WidgetModel] { selectedSnapshot.models }
+    var activity: WidgetActivity { selectedSnapshot.activity }
+    var trend: WidgetTrend { selectedSnapshot.trend }
+    var isEmpty: Bool {
+        overview.totalTokens == 0 && models.isEmpty && activity.activeDays == 0
+    }
+
+    private var selectedSnapshot: WidgetPeriodSnapshot {
+        // Decoding and the memberwise initializer both enforce the complete
+        // current-schema period set, so selection never fabricates data.
+        periods[selectedPeriod]!
+    }
 
     func isStale(at date: Date, threshold: TimeInterval = 20 * 60) -> Bool {
         status.isStale || date.timeIntervalSince(generatedAt) > threshold
@@ -33,109 +44,60 @@ struct WidgetSnapshot: Decodable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, generatedAt, periods, overview, quota, models, activity, trend, presentation, status
-        case today, tools, limits
+        case schemaVersion, generatedAt, periods, quota, presentation, status
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        generatedAt = try container.decode(Date.self, forKey: .generatedAt)
-        if schemaVersion >= 2 {
-            let decodedPeriods = (try? container.decodeIfPresent([String: WidgetPeriodSnapshot].self, forKey: .periods)) ?? [:]
-            periods = Dictionary(uniqueKeysWithValues: decodedPeriods.compactMap { key, value in
-                guard let period = WidgetPeriod(rawValue: key) else { return nil }
-                return (period, value)
-            })
-            let fallbackOverview = try container.decodeIfPresent(WidgetOverview.self, forKey: .overview) ?? .empty(generatedAt: generatedAt)
-            let fallbackTools = try container.decodeIfPresent([WidgetTool].self, forKey: .tools) ?? []
-            let fallbackModels = normalizeWidgetModels(try container.decodeIfPresent([WidgetModel].self, forKey: .models) ?? [])
-            let fallbackActivity = try container.decodeIfPresent(WidgetActivity.self, forKey: .activity) ?? .empty
-            let fallbackTrend = try container.decodeIfPresent(WidgetTrend.self, forKey: .trend) ?? .empty
-            let initialPeriod = periods[.day] ?? WidgetPeriodSnapshot(
-                overview: fallbackOverview,
-                tools: fallbackTools,
-                models: fallbackModels,
-                activity: fallbackActivity,
-                trend: fallbackTrend
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        guard schemaVersion == Self.currentSchemaVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .schemaVersion,
+                in: container,
+                debugDescription: "Unsupported Widget snapshot schema"
             )
-            overview = initialPeriod.overview
-            tools = initialPeriod.tools
-            models = initialPeriod.models
-            activity = initialPeriod.activity
-            trend = initialPeriod.trend
-            let decodedQuota = (try? container.decodeIfPresent(WidgetQuotaProviderArray.self, forKey: .quota)) ?? nil
-            quota = normalizeQuotaProviders(decodedQuota?.values ?? [])
-            presentation = try container.decodeIfPresent(WidgetPresentation.self, forKey: .presentation) ?? .default
-            status = try container.decodeIfPresent(WidgetStatus.self, forKey: .status)
-                ?? WidgetStatus(isStale: false, sourceUpdatedAt: nil, dataAgeSeconds: 0, providerConfigured: !quota.isEmpty, providerNeedsLogin: false, noData: overview.totalTokens == 0 && models.isEmpty && activity.activeDays == 0)
-        } else {
-            let today = try container.decodeIfPresent(LegacyToday.self, forKey: .today) ?? .empty
-            let decodedLimits = (try? container.decodeIfPresent(WidgetQuotaProviderArray.self, forKey: .limits)) ?? nil
-            let limits = decodedLimits?.values ?? []
-            overview = WidgetOverview(currentPeriod: "today", totalTokens: today.totalTokens, costUsd: today.costUsd, primaryTool: nil, updatedAt: generatedAt)
-            quota = normalizeQuotaProviders(limits)
-            tools = []
-            models = []
-            activity = .empty
-            trend = .empty
-            periods = [:]
-            presentation = .default
-            status = WidgetStatus(isStale: false, sourceUpdatedAt: nil, dataAgeSeconds: 0, providerConfigured: !limits.isEmpty, providerNeedsLogin: limits.contains { $0.status == "unauthorized" }, noData: today.totalTokens == 0 && today.costUsd == 0 && limits.isEmpty)
         }
+        generatedAt = try container.decode(Date.self, forKey: .generatedAt)
+        let decodedPeriods = try container.decode([String: WidgetPeriodSnapshot].self, forKey: .periods)
+        let periodsByKind: [WidgetPeriod: WidgetPeriodSnapshot] = Dictionary(uniqueKeysWithValues: decodedPeriods.compactMap { key, value in
+            guard let period = WidgetPeriod(rawValue: key) else { return nil }
+            return (period, value)
+        })
+        let missingPeriods = WidgetPeriod.allCases.filter { periodsByKind[$0] == nil }
+        guard missingPeriods.isEmpty else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .periods,
+                in: container,
+                debugDescription: "Widget snapshot is missing current-schema periods: \(missingPeriods.map { $0.rawValue }.joined(separator: ", "))"
+            )
+        }
+        periods = periodsByKind
+        quota = try container.decode(WidgetQuotaProviderArray.self, forKey: .quota).values
+        presentation = try container.decode(WidgetPresentation.self, forKey: .presentation)
+        status = try container.decode(WidgetStatus.self, forKey: .status)
+        selectedPeriod = .day
     }
 
-    init(schemaVersion: Int, generatedAt: Date, overview: WidgetOverview, quota: [WidgetQuotaProvider], tools: [WidgetTool] = [], models: [WidgetModel], activity: WidgetActivity, trend: WidgetTrend, periods: [WidgetPeriod: WidgetPeriodSnapshot] = [:], presentation: WidgetPresentation, status: WidgetStatus) {
+    init(schemaVersion: Int, generatedAt: Date, quota: [WidgetQuotaProvider], periods: [WidgetPeriod: WidgetPeriodSnapshot], presentation: WidgetPresentation, status: WidgetStatus, selectedPeriod: WidgetPeriod = .day) {
+        precondition(WidgetPeriod.allCases.allSatisfy { periods[$0] != nil })
         self.schemaVersion = schemaVersion
         self.generatedAt = generatedAt
-        self.overview = overview
         self.quota = quota
-        self.tools = tools
-        self.models = models
-        self.activity = activity
-        self.trend = trend
         self.periods = periods
         self.presentation = presentation
         self.status = status
+        self.selectedPeriod = selectedPeriod
     }
 
     func selecting(_ period: WidgetPeriod) -> WidgetSnapshot {
-        guard let selected = periods[period] else {
-            if period == .day { return self }
-            return WidgetSnapshot(
-                schemaVersion: schemaVersion,
-                generatedAt: generatedAt,
-                overview: WidgetOverview(currentPeriod: period.title.lowercased(), totalTokens: 0, costUsd: 0, primaryTool: nil, updatedAt: generatedAt),
-                quota: quota,
-                tools: [],
-                models: [],
-                activity: WidgetActivity(currentPeriod: period.title.lowercased(), activeDays: 0, days: []),
-                trend: .empty,
-                periods: periods,
-                presentation: presentation,
-                status: WidgetStatus(isStale: status.isStale, sourceStale: status.sourceStale, sourceUpdatedAt: status.sourceUpdatedAt, dataAgeSeconds: status.dataAgeSeconds, providerConfigured: status.providerConfigured, providerNeedsLogin: status.providerNeedsLogin, noData: true)
-            )
-        }
-        return WidgetSnapshot(
+        WidgetSnapshot(
             schemaVersion: schemaVersion,
             generatedAt: generatedAt,
-            overview: selected.overview,
             quota: quota,
-            tools: selected.tools,
-            models: selected.models,
-            activity: selected.activity,
-            trend: selected.trend,
             periods: periods,
             presentation: presentation,
-            status: WidgetStatus(
-                isStale: status.isStale,
-                sourceStale: status.sourceStale,
-                sourceUpdatedAt: status.sourceUpdatedAt,
-                dataAgeSeconds: status.dataAgeSeconds,
-                providerConfigured: status.providerConfigured,
-                providerNeedsLogin: status.providerNeedsLogin,
-                noData: selected.overview.totalTokens == 0 && selected.models.isEmpty && selected.activity.activeDays == 0
-            )
+            status: status,
+            selectedPeriod: period
         )
     }
 
@@ -173,11 +135,11 @@ struct WidgetPeriodSnapshot: Decodable, Equatable {
     private enum CodingKeys: String, CodingKey { case overview, tools, models, activity, trend }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        overview = try c.decodeIfPresent(WidgetOverview.self, forKey: .overview) ?? .empty(generatedAt: .distantPast)
-        tools = try c.decodeIfPresent([WidgetTool].self, forKey: .tools) ?? []
-        models = normalizeWidgetModels(try c.decodeIfPresent([WidgetModel].self, forKey: .models) ?? [])
-        activity = try c.decodeIfPresent(WidgetActivity.self, forKey: .activity) ?? .empty
-        trend = try c.decodeIfPresent(WidgetTrend.self, forKey: .trend) ?? .empty
+        overview = try c.decode(WidgetOverview.self, forKey: .overview)
+        tools = try c.decode([WidgetTool].self, forKey: .tools)
+        models = try c.decode([WidgetModel].self, forKey: .models)
+        activity = try c.decode(WidgetActivity.self, forKey: .activity)
+        trend = try c.decode(WidgetTrend.self, forKey: .trend)
     }
 
     init(overview: WidgetOverview, tools: [WidgetTool] = [], models: [WidgetModel], activity: WidgetActivity, trend: WidgetTrend) {
@@ -190,21 +152,8 @@ struct WidgetPeriodSnapshot: Decodable, Equatable {
 }
 
 struct WidgetOverview: Decodable, Equatable {
-    let currentPeriod: String
     let totalTokens: Int
     let costUsd: Double
-    let primaryTool: String?
-    let updatedAt: Date
-
-    static func empty(generatedAt: Date) -> WidgetOverview {
-        WidgetOverview(currentPeriod: "today", totalTokens: 0, costUsd: 0, primaryTool: nil, updatedAt: generatedAt)
-    }
-}
-
-private struct LegacyToday: Decodable {
-    let totalTokens: Int
-    let costUsd: Double
-    static let empty = LegacyToday(totalTokens: 0, costUsd: 0)
 }
 
 struct WidgetQuotaProvider: Decodable, Equatable, Identifiable {
@@ -239,21 +188,26 @@ struct WidgetQuotaProvider: Decodable, Equatable, Identifiable {
             throw DecodingError.dataCorruptedError(forKey: .provider, in: container, debugDescription: "Widget quota provider is missing an identifier")
         }
         provider = decodedProvider
-        status = container.string(.status, default: "unavailable")
+        status = try container.decode(String.self, forKey: .status)
         updatedAt = try? container.decodeIfPresent(Date.self, forKey: .updatedAt)
         balance = try? container.decodeIfPresent(WidgetQuotaBalance.self, forKey: .balance)
-        windows = (try? container.decodeIfPresent([WidgetLimitWindow].self, forKey: .windows)) ?? []
-        let decodedInstanceId = container.string(.instanceId)
-        instanceId = decodedInstanceId.isEmpty
-            ? widgetQuotaFallbackID(provider: provider)
-            : decodedInstanceId
+        windows = try container.decode([WidgetLimitWindow].self, forKey: .windows)
+        let decodedInstanceId = try container.decode(String.self, forKey: .instanceId)
+        guard !decodedInstanceId.isEmpty else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .instanceId,
+                in: container,
+                debugDescription: "Widget quota provider is missing its current-schema instance identifier"
+            )
+        }
+        instanceId = decodedInstanceId
         displayName = container.optionalString(.displayName)
         accountLabel = container.optionalString(.accountLabel)
         isCurrentAccount = (try? container.decodeIfPresent(Bool.self, forKey: .isCurrentAccount)) ?? false
     }
 
-    init(provider: String, status: String, updatedAt: Date?, windows: [WidgetLimitWindow], balance: WidgetQuotaBalance? = nil, instanceId: String? = nil, displayName: String? = nil, accountLabel: String? = nil, isCurrentAccount: Bool = false) {
-        self.instanceId = instanceId ?? widgetQuotaFallbackID(provider: provider)
+    init(instanceId: String, provider: String, status: String, updatedAt: Date?, windows: [WidgetLimitWindow], balance: WidgetQuotaBalance? = nil, displayName: String? = nil, accountLabel: String? = nil, isCurrentAccount: Bool = false) {
+        self.instanceId = instanceId
         self.displayName = displayName
         self.accountLabel = accountLabel
         self.isCurrentAccount = isCurrentAccount
@@ -264,9 +218,6 @@ struct WidgetQuotaProvider: Decodable, Equatable, Identifiable {
         self.windows = windows
     }
 
-    func withInstanceId(_ value: String) -> WidgetQuotaProvider {
-        WidgetQuotaProvider(provider: provider, status: status, updatedAt: updatedAt, windows: windows, balance: balance, instanceId: value, displayName: displayName, accountLabel: accountLabel, isCurrentAccount: isCurrentAccount)
-    }
 }
 
 struct WidgetQuotaBalance: Decodable, Equatable {
@@ -278,11 +229,9 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
     let kind: String
     let metric: String?
     let showMeter: Bool
-    let usedPercent: Double?
     let remainingPercent: Double?
     let resetsAt: Date?
     let boundaryKind: String?
-    let windowMinutes: Double?
     let remaining: Double?
     let currency: String?
     let detail: String?
@@ -290,10 +239,8 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
 
     init(
         kind: String,
-        usedPercent: Double?,
         remainingPercent: Double?,
         resetsAt: Date?,
-        windowMinutes: Double?,
         boundaryKind: String? = nil,
         metric: String? = nil,
         showMeter: Bool = true,
@@ -304,11 +251,9 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
         self.kind = kind
         self.metric = metric
         self.showMeter = showMeter
-        self.usedPercent = usedPercent
         self.remainingPercent = remainingPercent
         self.resetsAt = resetsAt
         self.boundaryKind = boundaryKind
-        self.windowMinutes = windowMinutes
         self.remaining = remaining
         self.currency = currency
         self.detail = detail
@@ -319,27 +264,21 @@ struct WidgetModel: Decodable, Equatable, Identifiable {
     let modelId: String
     let displayName: String
     let totalTokens: Int
-    let costUsd: Double
     let sharePercent: Double
     var id: String { modelId }
 
-    init(displayName: String, totalTokens: Int, costUsd: Double, sharePercent: Double, id: String? = nil) {
+    init(id: String, displayName: String, totalTokens: Int, sharePercent: Double) {
+        self.modelId = id
         self.displayName = displayName
         self.totalTokens = totalTokens
-        self.costUsd = costUsd
         self.sharePercent = sharePercent
-        self.modelId = id ?? "model-\(stableWidgetHash("\(displayName)|\(totalTokens)|\(costUsd)|\(sharePercent)"))"
     }
 
-    func withModelId(_ value: String) -> WidgetModel {
-        WidgetModel(displayName: displayName, totalTokens: totalTokens, costUsd: costUsd, sharePercent: sharePercent, id: value)
-    }
 }
 
 struct WidgetTool: Decodable, Equatable, Identifiable {
     let id: String
     let totalTokens: Int
-    let costUsd: Double
     let sharePercent: Double
 }
 
@@ -357,26 +296,18 @@ struct WidgetActivityDay: Decodable, Equatable, Identifiable {
 }
 
 struct WidgetActivity: Decodable, Equatable {
-    let currentPeriod: String
     let activeDays: Int
     let days: [WidgetActivityDay]
-    static let empty = WidgetActivity(currentPeriod: "today", activeDays: 0, days: [])
 }
 
 struct WidgetTrendPoint: Decodable, Equatable, Identifiable {
     let date: String
     let totalTokens: Int
-    let costUsd: Double
     var id: String { date }
 }
 
 struct WidgetTrend: Decodable, Equatable {
-    let startDate: String?
-    let endDate: String?
-    let peakTokens: Int
-    let currentTokens: Int
     let points: [WidgetTrendPoint]
-    static let empty = WidgetTrend(startDate: nil, endDate: nil, peakTokens: 0, currentTokens: 0, points: [])
 }
 
 struct WidgetPresentation: Decodable, Equatable {
@@ -393,38 +324,12 @@ struct WidgetPresentation: Decodable, Equatable {
 
 struct WidgetStatus: Decodable, Equatable {
     let isStale: Bool
-    let sourceStale: Bool
     let sourceUpdatedAt: Date?
-    let dataAgeSeconds: Int
-    let providerConfigured: Bool
-    let providerNeedsLogin: Bool
-    let noData: Bool
-
-    init(isStale: Bool, sourceStale: Bool = false, sourceUpdatedAt: Date? = nil, dataAgeSeconds: Int, providerConfigured: Bool, providerNeedsLogin: Bool, noData: Bool) {
-        self.isStale = isStale
-        self.sourceStale = sourceStale
-        self.sourceUpdatedAt = sourceUpdatedAt
-        self.dataAgeSeconds = dataAgeSeconds
-        self.providerConfigured = providerConfigured
-        self.providerNeedsLogin = providerNeedsLogin
-        self.noData = noData
-    }
 }
 
 enum WidgetStalePresentation {
     static func trustedUpdatedAt(for snapshot: WidgetSnapshot) -> Date? {
-        if let sourceUpdatedAt = snapshot.status.sourceUpdatedAt {
-            return sourceUpdatedAt
-        }
-        if snapshot.status.dataAgeSeconds > 0 {
-            return snapshot.generatedAt.addingTimeInterval(-TimeInterval(snapshot.status.dataAgeSeconds))
-        }
-        let overviewUpdatedAt = snapshot.overview.updatedAt
-        guard overviewUpdatedAt.timeIntervalSince1970 > 0,
-              snapshot.generatedAt.timeIntervalSince(overviewUpdatedAt) > 1 else {
-            return nil
-        }
-        return overviewUpdatedAt
+        snapshot.status.sourceUpdatedAt
     }
 }
 
@@ -470,93 +375,54 @@ private struct WidgetQuotaProviderArray: Decodable {
     }
 }
 
-private func stableWidgetHash(_ value: String) -> String {
-    var hash: UInt64 = 0xcbf29ce484222325
-    for byte in value.utf8 {
-        hash ^= UInt64(byte)
-        hash &*= 0x100000001b3
-    }
-    let value = String(hash, radix: 16)
-    return String(repeating: "0", count: max(0, 12 - value.count)) + value
-}
-
-private func widgetQuotaFallbackID(provider: String) -> String {
-    "\(provider)-single"
-}
-
-private func normalizeQuotaProviders(_ providers: [WidgetQuotaProvider]) -> [WidgetQuotaProvider] {
-    var seen: [String: Int] = [:]
-    return providers.map { provider in
-        let occurrence = (seen[provider.instanceId] ?? 0) + 1
-        seen[provider.instanceId] = occurrence
-        guard occurrence > 1 else { return provider }
-        return provider.withInstanceId("\(provider.instanceId)-\(occurrence)")
-    }
-}
-
-private func normalizeWidgetModels(_ models: [WidgetModel]) -> [WidgetModel] {
-    var seen: [String: Int] = [:]
-    return models.map { model in
-        let occurrence = (seen[model.modelId] ?? 0) + 1
-        seen[model.modelId] = occurrence
-        guard occurrence > 1 else { return model }
-        return model.withModelId("\(model.modelId)-\(occurrence)")
-    }
-}
-
 private extension KeyedDecodingContainer {
-    func string(_ key: Key, default fallback: String = "") -> String { (try? decodeIfPresent(String.self, forKey: key)) ?? fallback }
     func optionalString(_ key: Key) -> String? { try? decodeIfPresent(String.self, forKey: key) }
-    func int(_ key: Key, default fallback: Int = 0) -> Int { (try? decodeIfPresent(Int.self, forKey: key)) ?? fallback }
-    func double(_ key: Key, default fallback: Double = 0) -> Double { (try? decodeIfPresent(Double.self, forKey: key)) ?? fallback }
-    func bool(_ key: Key, default fallback: Bool = false) -> Bool { (try? decodeIfPresent(Bool.self, forKey: key)) ?? fallback }
 }
 
 extension WidgetOverview {
-    private enum CodingKeys: String, CodingKey { case currentPeriod, totalTokens, costUsd, primaryTool, updatedAt }
+    private enum CodingKeys: String, CodingKey { case totalTokens, costUsd }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        currentPeriod = c.string(.currentPeriod, default: "today")
-        totalTokens = c.int(.totalTokens)
-        costUsd = c.double(.costUsd)
-        primaryTool = try? c.decodeIfPresent(String.self, forKey: .primaryTool)
-        updatedAt = (try? c.decodeIfPresent(Date.self, forKey: .updatedAt)) ?? .distantPast
+        totalTokens = try c.decode(Int.self, forKey: .totalTokens)
+        costUsd = try c.decode(Double.self, forKey: .costUsd)
     }
 }
 
 extension WidgetLimitWindow {
-    private enum CodingKeys: String, CodingKey { case kind, metric, showMeter, usedPercent, remainingPercent, resetsAt, boundaryKind, windowMinutes, remaining, currency, detail }
+    private enum CodingKeys: String, CodingKey { case kind, metric, showMeter, remainingPercent, resetsAt, boundaryKind, remaining, currency, detail }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        kind = c.string(.kind)
-        let rawMetric = c.string(.metric).lowercased()
+        kind = try c.decode(String.self, forKey: .kind)
+        let rawMetric = (try c.decodeIfPresent(String.self, forKey: .metric) ?? "").lowercased()
         metric = ["credits", "spend"].contains(rawMetric) ? rawMetric : nil
-        showMeter = c.bool(.showMeter, default: true)
-        usedPercent = try? c.decodeIfPresent(Double.self, forKey: .usedPercent)
+        showMeter = try c.decode(Bool.self, forKey: .showMeter)
         remainingPercent = try? c.decodeIfPresent(Double.self, forKey: .remainingPercent)
         resetsAt = try? c.decodeIfPresent(Date.self, forKey: .resetsAt)
-        let rawBoundaryKind = c.string(.boundaryKind).lowercased()
+        let rawBoundaryKind = (try c.decodeIfPresent(String.self, forKey: .boundaryKind) ?? "").lowercased()
         boundaryKind = ["reset", "expiry", "mixed"].contains(rawBoundaryKind) ? rawBoundaryKind : nil
-        windowMinutes = try? c.decodeIfPresent(Double.self, forKey: .windowMinutes)
         remaining = try? c.decodeIfPresent(Double.self, forKey: .remaining)
         currency = try? c.decodeIfPresent(String.self, forKey: .currency)
-        let rawDetail = c.string(.detail).lowercased()
+        let rawDetail = (try c.decodeIfPresent(String.self, forKey: .detail) ?? "").lowercased()
         detail = rawDetail == "unlimited" ? rawDetail : nil
     }
 }
 
 extension WidgetModel {
-    private enum CodingKeys: String, CodingKey { case id, displayName, totalTokens, costUsd, sharePercent }
+    private enum CodingKeys: String, CodingKey { case id, displayName, totalTokens, sharePercent }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        displayName = c.string(.displayName)
-        totalTokens = c.int(.totalTokens)
-        costUsd = c.double(.costUsd)
-        sharePercent = c.double(.sharePercent)
-        let decodedID = c.string(.id)
-        modelId = decodedID.isEmpty
-            ? "model-\(stableWidgetHash("\(displayName)|\(totalTokens)|\(costUsd)|\(sharePercent)"))"
-            : decodedID
+        displayName = try c.decode(String.self, forKey: .displayName)
+        totalTokens = try c.decode(Int.self, forKey: .totalTokens)
+        sharePercent = try c.decode(Double.self, forKey: .sharePercent)
+        let decodedID = try c.decode(String.self, forKey: .id)
+        guard !decodedID.isEmpty else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .id,
+                in: c,
+                debugDescription: "Widget model is missing its current-schema identifier"
+            )
+        }
+        modelId = decodedID
     }
 }
 
@@ -564,41 +430,35 @@ extension WidgetActivityDay {
     private enum CodingKeys: String, CodingKey { case date, intensity, totalTokens }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        date = c.string(.date)
-        intensity = c.int(.intensity)
-        totalTokens = max(0, c.int(.totalTokens))
+        date = try c.decode(String.self, forKey: .date)
+        intensity = try c.decode(Int.self, forKey: .intensity)
+        totalTokens = max(0, try c.decode(Int.self, forKey: .totalTokens))
     }
 }
 
 extension WidgetActivity {
-    private enum CodingKeys: String, CodingKey { case currentPeriod, activeDays, days }
+    private enum CodingKeys: String, CodingKey { case activeDays, days }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        currentPeriod = c.string(.currentPeriod, default: "today")
-        activeDays = c.int(.activeDays)
-        days = (try? c.decodeIfPresent([WidgetActivityDay].self, forKey: .days)) ?? []
+        activeDays = try c.decode(Int.self, forKey: .activeDays)
+        days = try c.decode([WidgetActivityDay].self, forKey: .days)
     }
 }
 
 extension WidgetTrendPoint {
-    private enum CodingKeys: String, CodingKey { case date, totalTokens, costUsd }
+    private enum CodingKeys: String, CodingKey { case date, totalTokens }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        date = c.string(.date)
-        totalTokens = c.int(.totalTokens)
-        costUsd = c.double(.costUsd)
+        date = try c.decode(String.self, forKey: .date)
+        totalTokens = try c.decode(Int.self, forKey: .totalTokens)
     }
 }
 
 extension WidgetTrend {
-    private enum CodingKeys: String, CodingKey { case startDate, endDate, peakTokens, currentTokens, points }
+    private enum CodingKeys: String, CodingKey { case points }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        startDate = try? c.decodeIfPresent(String.self, forKey: .startDate)
-        endDate = try? c.decodeIfPresent(String.self, forKey: .endDate)
-        peakTokens = c.int(.peakTokens)
-        currentTokens = c.int(.currentTokens)
-        points = (try? c.decodeIfPresent([WidgetTrendPoint].self, forKey: .points)) ?? []
+        points = try c.decode([WidgetTrendPoint].self, forKey: .points)
     }
 }
 
@@ -606,28 +466,23 @@ extension WidgetPresentation {
     private enum CodingKeys: String, CodingKey { case currencyCode, currencySymbol, currencyRate, numberStyle, compactTokenUnits, showCost, locale, theme }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        currencyCode = c.string(.currencyCode, default: "USD")
-        currencySymbol = c.string(.currencySymbol, default: "$")
-        currencyRate = c.double(.currencyRate, default: 1)
-        numberStyle = c.string(.numberStyle, default: "compact")
-        compactTokenUnits = c.string(.compactTokenUnits, default: "western")
-        showCost = c.bool(.showCost, default: true)
-        locale = c.string(.locale, default: "auto")
-        theme = c.string(.theme, default: "system")
+        currencyCode = try c.decode(String.self, forKey: .currencyCode)
+        currencySymbol = try c.decode(String.self, forKey: .currencySymbol)
+        currencyRate = try c.decode(Double.self, forKey: .currencyRate)
+        numberStyle = try c.decode(String.self, forKey: .numberStyle)
+        compactTokenUnits = try c.decode(String.self, forKey: .compactTokenUnits)
+        showCost = try c.decode(Bool.self, forKey: .showCost)
+        locale = try c.decode(String.self, forKey: .locale)
+        theme = try c.decode(String.self, forKey: .theme)
     }
 }
 
 extension WidgetStatus {
-    private enum CodingKeys: String, CodingKey { case isStale, sourceStale, sourceUpdatedAt, dataAgeSeconds, providerConfigured, providerNeedsLogin, noData }
+    private enum CodingKeys: String, CodingKey { case isStale, sourceUpdatedAt }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        isStale = c.bool(.isStale)
-        sourceStale = c.bool(.sourceStale, default: false)
+        isStale = try c.decode(Bool.self, forKey: .isStale)
         sourceUpdatedAt = try? c.decodeIfPresent(Date.self, forKey: .sourceUpdatedAt)
-        dataAgeSeconds = c.int(.dataAgeSeconds)
-        providerConfigured = c.bool(.providerConfigured)
-        providerNeedsLogin = c.bool(.providerNeedsLogin)
-        noData = c.bool(.noData)
     }
 }
 
@@ -648,46 +503,38 @@ extension WidgetSnapshot {
     }
 
     static let placeholder = WidgetSnapshot(
-        schemaVersion: 8,
+        schemaVersion: currentSchemaVersion,
         generatedAt: Date(),
-        overview: WidgetOverview(currentPeriod: "today", totalTokens: 27_800_000, costUsd: 14.86, primaryTool: "codex", updatedAt: Date()),
         quota: [
-            WidgetQuotaProvider(provider: "codex", status: "ok", updatedAt: Date(), windows: [WidgetLimitWindow(kind: "weekly", usedPercent: 98, remainingPercent: 2, resetsAt: Date().addingTimeInterval(6 * 86_400), windowMinutes: 10_080)]),
-            WidgetQuotaProvider(provider: "mimo", status: "ok", updatedAt: Date(), windows: [], balance: WidgetQuotaBalance(amount: 3.62, currency: "CNY")),
-            WidgetQuotaProvider(provider: "deepseek", status: "ok", updatedAt: Date(), windows: [], balance: WidgetQuotaBalance(amount: 9.33, currency: "CNY")),
-            WidgetQuotaProvider(provider: "antigravity", status: "notConfigured", updatedAt: Date(), windows: [])
+            WidgetQuotaProvider(instanceId: "codex-single", provider: "codex", status: "ok", updatedAt: Date(), windows: [WidgetLimitWindow(kind: "weekly", remainingPercent: 2, resetsAt: Date().addingTimeInterval(6 * 86_400))]),
+            WidgetQuotaProvider(instanceId: "mimo-single", provider: "mimo", status: "ok", updatedAt: Date(), windows: [], balance: WidgetQuotaBalance(amount: 3.62, currency: "CNY")),
+            WidgetQuotaProvider(instanceId: "deepseek-single", provider: "deepseek", status: "ok", updatedAt: Date(), windows: [], balance: WidgetQuotaBalance(amount: 9.33, currency: "CNY")),
+            WidgetQuotaProvider(instanceId: "antigravity-single", provider: "antigravity", status: "notConfigured", updatedAt: Date(), windows: [])
         ],
-        tools: [
-            WidgetTool(id: "codex", totalTokens: 22_300_000, costUsd: 11.4, sharePercent: 80),
-            WidgetTool(id: "claude", totalTokens: 5_500_000, costUsd: 3.46, sharePercent: 20)
-        ],
-        models: [WidgetModel(displayName: "GPT-5.6", totalTokens: 20_900_000, costUsd: 10, sharePercent: 75), WidgetModel(displayName: "MiMo", totalTokens: 2_900_000, costUsd: 2, sharePercent: 11)],
-        activity: WidgetActivity(currentPeriod: "month", activeDays: 18, days: placeholderActivityDays(count: 28)),
-        trend: WidgetTrend(startDate: "07/04", endDate: "07/17", peakTokens: 4_200_000, currentTokens: 2_800_000, points: (1...14).map { WidgetTrendPoint(date: "\($0)", totalTokens: $0 * 200_000, costUsd: 0) }),
         periods: [
             .day: WidgetPeriodSnapshot(
-                overview: WidgetOverview(currentPeriod: "today", totalTokens: 27_800_000, costUsd: 14.86, primaryTool: "codex", updatedAt: Date()),
-                tools: [WidgetTool(id: "codex", totalTokens: 22_300_000, costUsd: 11.4, sharePercent: 80), WidgetTool(id: "claude", totalTokens: 5_500_000, costUsd: 3.46, sharePercent: 20)],
-                models: [WidgetModel(displayName: "GPT-5.6", totalTokens: 20_900_000, costUsd: 10, sharePercent: 75), WidgetModel(displayName: "MiMo", totalTokens: 2_900_000, costUsd: 2, sharePercent: 11)],
-                activity: WidgetActivity(currentPeriod: "today", activeDays: 1, days: placeholderActivityDays(count: 7)),
-                trend: WidgetTrend(startDate: "07/04", endDate: "07/17", peakTokens: 4_200_000, currentTokens: 2_800_000, points: (1...14).map { WidgetTrendPoint(date: "\($0)", totalTokens: $0 * 200_000, costUsd: 0) })
+                overview: WidgetOverview(totalTokens: 27_800_000, costUsd: 14.86),
+                tools: [WidgetTool(id: "codex", totalTokens: 22_300_000, sharePercent: 80), WidgetTool(id: "claude", totalTokens: 5_500_000, sharePercent: 20)],
+                models: [WidgetModel(id: "model-gpt-5-6", displayName: "GPT-5.6", totalTokens: 20_900_000, sharePercent: 75), WidgetModel(id: "model-mimo", displayName: "MiMo", totalTokens: 2_900_000, sharePercent: 11)],
+                activity: WidgetActivity(activeDays: 1, days: placeholderActivityDays(count: 7)),
+                trend: WidgetTrend(points: (1...14).map { WidgetTrendPoint(date: "\($0)", totalTokens: $0 * 200_000) })
             ),
             .month: WidgetPeriodSnapshot(
-                overview: WidgetOverview(currentPeriod: "month", totalTokens: 61_200_000, costUsd: 237.42, primaryTool: "codex", updatedAt: Date()),
-                tools: [WidgetTool(id: "codex", totalTokens: 48_900_000, costUsd: 190, sharePercent: 80), WidgetTool(id: "claude", totalTokens: 12_300_000, costUsd: 47.42, sharePercent: 20)],
-                models: [WidgetModel(displayName: "GPT-5.6", totalTokens: 44_000_000, costUsd: 120, sharePercent: 72), WidgetModel(displayName: "MiMo", totalTokens: 7_000_000, costUsd: 10, sharePercent: 11)],
-                activity: WidgetActivity(currentPeriod: "month", activeDays: 18, days: placeholderActivityDays(count: 28)),
-                trend: WidgetTrend(startDate: "07/04", endDate: "07/17", peakTokens: 9_200_000, currentTokens: 4_800_000, points: (1...14).map { WidgetTrendPoint(date: "\($0)", totalTokens: $0 * 340_000, costUsd: 0) })
+                overview: WidgetOverview(totalTokens: 61_200_000, costUsd: 237.42),
+                tools: [WidgetTool(id: "codex", totalTokens: 48_900_000, sharePercent: 80), WidgetTool(id: "claude", totalTokens: 12_300_000, sharePercent: 20)],
+                models: [WidgetModel(id: "model-gpt-5-6", displayName: "GPT-5.6", totalTokens: 44_000_000, sharePercent: 72), WidgetModel(id: "model-mimo", displayName: "MiMo", totalTokens: 7_000_000, sharePercent: 11)],
+                activity: WidgetActivity(activeDays: 18, days: placeholderActivityDays(count: 28)),
+                trend: WidgetTrend(points: (1...14).map { WidgetTrendPoint(date: "\($0)", totalTokens: $0 * 340_000) })
             ),
             .total: WidgetPeriodSnapshot(
-                overview: WidgetOverview(currentPeriod: "allTime", totalTokens: 180_000_000, costUsd: 620.15, primaryTool: "codex", updatedAt: Date()),
-                tools: [WidgetTool(id: "codex", totalTokens: 144_000_000, costUsd: 500, sharePercent: 80), WidgetTool(id: "claude", totalTokens: 36_000_000, costUsd: 120.15, sharePercent: 20)],
-                models: [WidgetModel(displayName: "GPT-5.6", totalTokens: 120_000_000, costUsd: 220, sharePercent: 67), WidgetModel(displayName: "MiMo", totalTokens: 30_000_000, costUsd: 38, sharePercent: 17)],
-                activity: WidgetActivity(currentPeriod: "allTime", activeDays: 144, days: placeholderActivityDays(count: 180)),
-                trend: WidgetTrend(startDate: "01/01", endDate: "07/17", peakTokens: 18_200_000, currentTokens: 12_800_000, points: (1...14).map { WidgetTrendPoint(date: "\($0)", totalTokens: $0 * 900_000, costUsd: 0) })
+                overview: WidgetOverview(totalTokens: 180_000_000, costUsd: 620.15),
+                tools: [WidgetTool(id: "codex", totalTokens: 144_000_000, sharePercent: 80), WidgetTool(id: "claude", totalTokens: 36_000_000, sharePercent: 20)],
+                models: [WidgetModel(id: "model-gpt-5-6", displayName: "GPT-5.6", totalTokens: 120_000_000, sharePercent: 67), WidgetModel(id: "model-mimo", displayName: "MiMo", totalTokens: 30_000_000, sharePercent: 17)],
+                activity: WidgetActivity(activeDays: 144, days: placeholderActivityDays(count: 180)),
+                trend: WidgetTrend(points: (1...14).map { WidgetTrendPoint(date: "\($0)", totalTokens: $0 * 900_000) })
             )
         ],
         presentation: .default,
-        status: WidgetStatus(isStale: false, dataAgeSeconds: 30, providerConfigured: true, providerNeedsLogin: false, noData: false)
+        status: WidgetStatus(isStale: false, sourceUpdatedAt: Date())
     )
 }

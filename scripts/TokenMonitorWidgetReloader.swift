@@ -28,7 +28,7 @@ if Array(CommandLine.arguments.dropFirst()) == ["--mode", "register-host"] {
 }
 
 let kind = CommandLine.arguments.dropFirst().first ?? "com.tokenmonitor.dashboard"
-let kinds = [kind, "\(kind).summary", "\(kind).activity", "\(kind).breakdown", "\(kind).quota", "\(kind).quota.v2"]
+let kinds = [kind, "\(kind).summary", "\(kind).activity", "\(kind).breakdown", "\(kind).quota"]
 
 if #available(macOS 14.0, *) {
     for kind in kinds {

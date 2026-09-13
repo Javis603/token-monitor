@@ -5,17 +5,17 @@ const test = require('node:test');
 const { parseMacWidgetDeepLink } = require('../../src/electron/macWidgetDeepLink');
 
 test('maps every Widget page to the matching application area', () => {
-  assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://overview', 'token-monitor-widget-dev'), { page: 'overview', view: 'home', settings: false });
-  assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://quota', 'token-monitor-widget-dev'), { page: 'quota', view: 'limits', settings: false });
-  assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://tools', 'token-monitor-widget-dev'), { page: 'tools', view: 'tool', settings: false });
-  assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://models', 'token-monitor-widget-dev'), { page: 'models', view: 'model', settings: false });
-  assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://activity', 'token-monitor-widget-dev'), { page: 'activity', view: 'trends', settings: false });
-  assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://trend', 'token-monitor-widget-dev'), { page: 'trend', view: 'trends', settings: false });
+  assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://overview', 'token-monitor-widget-dev'), { page: 'overview', view: 'home' });
+  assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://quota', 'token-monitor-widget-dev'), { page: 'quota', view: 'limits' });
+  assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://tools', 'token-monitor-widget-dev'), { page: 'tools', view: 'tool' });
+  assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://models', 'token-monitor-widget-dev'), { page: 'models', view: 'model' });
+  assert.deepEqual(parseMacWidgetDeepLink('token-monitor-widget-dev://activity', 'token-monitor-widget-dev'), { page: 'activity', view: 'trends' });
 });
 
-test('keeps legacy widget links and rejects other schemes or unknown pages', () => {
-  assert.deepEqual(parseMacWidgetDeepLink('token-monitor://widget', 'token-monitor'), { page: 'overview', view: 'home', settings: false });
-  assert.deepEqual(parseMacWidgetDeepLink('token-monitor://widget-settings', 'token-monitor'), { page: 'overview', view: 'home', settings: true });
+test('rejects retired Widget routes, other schemes, and unknown pages', () => {
+  assert.equal(parseMacWidgetDeepLink('token-monitor://widget', 'token-monitor'), null);
+  assert.equal(parseMacWidgetDeepLink('token-monitor://widget-settings', 'token-monitor'), null);
+  assert.equal(parseMacWidgetDeepLink('token-monitor://trend', 'token-monitor'), null);
   assert.equal(parseMacWidgetDeepLink('token-monitor://unknown', 'token-monitor'), null);
   assert.equal(parseMacWidgetDeepLink('token-monitor://overview', 'token-monitor-widget-dev'), null);
 });

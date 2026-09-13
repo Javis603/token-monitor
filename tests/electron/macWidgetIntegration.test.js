@@ -621,9 +621,9 @@ test('uses AppIntent configuration and page-specific deep links', () => {
   assert.match(widgetSource, /AppIntentConfiguration\(kind: TokenMonitorWidgetConfiguration\.quotaKind, intent: QuotaWidgetIntent\.self/);
   assert.doesNotMatch(widgetBundleSource, /TokenMonitorLegacyQuotaWidget/);
   assert.match(widgetBundleSource, /TokenMonitorQuotaWidget\(\)/);
-  assert.match(widgetSource, /static let legacyQuotaKind = "\\\(kind\)\.quota"/);
-  assert.match(widgetSource, /static let quotaKind = "\\\(kind\)\.quota\.v2"/);
-  assert.match(widgetReloaderSource, /"\\\(kind\)\.quota\.v2"/);
+  assert.match(widgetSource, /static let quotaKind = "\\\(kind\)\.quota"/);
+  assert.doesNotMatch(widgetSource, /legacyQuotaKind|\.quota\.v2/);
+  assert.doesNotMatch(widgetReloaderSource, /\.quota\.v2/);
   assert.match(widgetSource, /com\.tokenmonitor\.dashboard/);
 });
 
@@ -634,7 +634,7 @@ test('each Widget configuration exposes only choices that its composition suppor
   );
   const breakdownIntent = widgetIntentSource.slice(
     widgetIntentSource.indexOf('struct BreakdownWidgetIntent'),
-    widgetIntentSource.indexOf('struct TrendWidgetIntent')
+    widgetIntentSource.indexOf('struct DashboardWidgetIntent')
   );
   const dashboardIntent = widgetIntentSource.slice(
     widgetIntentSource.indexOf('struct DashboardWidgetIntent'),
@@ -682,41 +682,26 @@ test('each Widget configuration exposes only choices that its composition suppor
   assert.doesNotMatch(widgetSource, /TOKEN_MONITOR_WIDGET_KIND.*v4|v3-temp|dev/);
 });
 
-test('Widget page empty states are scoped to the selected page', () => {
+test('Widget entry delegates only to the registered purpose-built compositions', () => {
   const contentStart = widgetSource.indexOf('private func content(_ snapshot: WidgetSnapshot)');
-  const contentEnd = widgetSource.indexOf('\n    private func small', contentStart);
+  const contentEnd = widgetSource.indexOf('\n    private func isStale', contentStart);
   const contentSource = widgetSource.slice(contentStart, contentEnd);
-  assert.doesNotMatch(contentSource, /snapshot\.isEmpty/);
 
-  const overviewStart = widgetSource.indexOf('private func overview(');
-  const overviewEnd = widgetSource.indexOf('\n    private func quota(', overviewStart);
-  const overviewSource = widgetSource.slice(overviewStart, overviewEnd);
-  assert.match(overviewSource, /snapshot\.overview\.totalTokens == 0/);
-  assert.match(overviewSource, /snapshot\.models\.isEmpty/);
-  assert.match(overviewSource, /snapshot\.activity\.activeDays == 0/);
-
-  const quotaStart = widgetSource.indexOf('private func quota(');
-  const quotaEnd = widgetSource.indexOf('\n    private func models(', quotaStart);
-  assert.match(widgetSource.slice(quotaStart, quotaEnd), /snapshot\.quota\.count/);
-  const modelsStart = widgetSource.indexOf('private func models(');
-  const modelsEnd = widgetSource.indexOf('\n    private func activity(', modelsStart);
-  assert.match(widgetSource.slice(modelsStart, modelsEnd), /snapshot\.models\.count/);
-  const activityStart = widgetSource.indexOf('private func activity(');
-  const activityEnd = widgetSource.indexOf('\n    private func trend(', activityStart);
-  assert.ok(activityEnd > activityStart);
-  assert.match(widgetSource, /No activity data/);
-  const trendStart = widgetSource.indexOf('private func trend(');
-  const trendEnd = widgetSource.indexOf('\n    private func statusState', trendStart);
-  assert.ok(trendEnd > trendStart);
-  assert.match(widgetSource, /snapshot\.trend\.points\.isEmpty/);
-});
+  assert.match(contentSource, /SmallUsageWidgetView\(snapshot: snapshot, period: entry\.period\)/);
+  assert.match(contentSource, /MediumUsageWidgetView\(/);
+  assert.match(contentSource, /LargeDashboardWidgetView\(/);
+  assert.doesNotMatch(widgetSource, /private func (overview|quota|models|tools|activity|trend)\(/);
+  assert.doesNotMatch(widgetSource, /WidgetContentContext|LargeOverviewListRow|ViewThatFits/);
+  assert.doesNotMatch(widgetIntentSource, /TokenMonitorWidgetConfigurationIntent|TrendWidgetIntent/);
+  assert.doesNotMatch(widgetTimelineSource, /TokenMonitorTimelineProvider|TrendWidgetTimelineProvider/);
+})
 
 test('Widget canvas omits brand and navigation chrome', () => {
   assert.doesNotMatch(widgetSource, /Text\("Σ"\)/);
   assert.doesNotMatch(widgetSource, /struct WidgetPageControl: View/);
   assert.doesNotMatch(widgetIntentSource, /struct CycleWidgetPageIntent: AppIntent/);
   assert.doesNotMatch(widgetSource, /Image\(systemName: "arrow\.up\.right"\)/);
-  assert.match(widgetSource, /Text\(page\.title\)/);
+  assert.match(widgetSource, /Text\(entry\.page\.title\)/);
   assert.match(widgetSource, /\.widgetURL\(TokenMonitorWidgetConfiguration\.url\(for: entry\.page\)\)/);
 });
 
@@ -775,15 +760,15 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   }
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;/);
-  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 33;/);
-  assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 8;/);
+  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 35;/);
+  assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 9;/);
   assert.match(widgetDevSource, /fs\.rmSync\(extension, \{ recursive: true, force: true \}\)/);
   assert.match(widgetDevSource, /`TOKEN_MONITOR_MARKETING_VERSION=\$\{targetMarketingVersion\}`/);
   assert.equal(packageVersion(), packageJson.version);
   assert.match(widgetProject, /MARKETING_VERSION = "\$\(TOKEN_MONITOR_MARKETING_VERSION\)";/);
   assert.match(widgetProject, /CURRENT_PROJECT_VERSION = "\$\(TOKEN_MONITOR_BUNDLE_VERSION\)";/);
   assert.match(widgetBuildSource, /xcconfigLine\('MARKETING_VERSION', versions\.marketingVersion\)/);
-  assert.match(widgetInfo, /<key>TMWidgetSchemaVersion<\/key>\s*<string>8<\/string>/);
+  assert.match(widgetInfo, /<key>TMWidgetSchemaVersion<\/key>\s*<string>9<\/string>/);
   assert.match(widgetInfo, /<key>TMWidgetUIVersion<\/key>\s*<string>\$\(TOKEN_MONITOR_WIDGET_UI_VERSION\)<\/string>/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_UI_VERSION = 0;/);
   assert.match(widgetBuildSource, /xcconfigLine\('TOKEN_MONITOR_WIDGET_UI_VERSION', WIDGET_UI_VERSION\)/);
@@ -866,154 +851,67 @@ test('Widget user-facing strings are localized in five languages', () => {
   )));
 });
 
-test('Widget layout uses system margins and a title-content scaffold without changing kind', () => {
-  assert.match(widgetViewModelSource, /struct WidgetLayoutMetrics/);
-  assert.match(widgetViewModelSource, /struct WidgetScaffoldGeometry/);
-  assert.match(widgetViewModelSource, /static let small = WidgetLayoutMetrics/);
-  assert.match(widgetViewModelSource, /static let medium = WidgetLayoutMetrics/);
-  assert.match(widgetViewModelSource, /static let large = WidgetLayoutMetrics/);
-  assert.equal((widgetViewModelSource.match(/outerTopInset: 0/g) || []).length, 3);
-  assert.equal((widgetViewModelSource.match(/outerBottomInset: 0/g) || []).length, 3);
-  assert.equal((widgetViewModelSource.match(/horizontalInset: 0/g) || []).length, 3);
-  assert.match(widgetViewModelSource, /contentGap: WidgetDesignTokens\.largeGap/);
-  assert.match(widgetSource, /VStack\(spacing: metrics\.contentGap\)/);
-  assert.match(widgetSource, /\.padding\(metrics\.outerInsets\)/);
+test('Widget layout uses system margins without retaining the superseded scaffold', () => {
   assert.doesNotMatch(widgetSource, /\.contentMarginsDisabled\(\)/);
-  assert.match(widgetSource, /ViewThatFits\(in: \.vertical\)/);
-  assert.doesNotMatch(widgetSource, /\.clipped\(\)/);
+  assert.doesNotMatch(widgetSource, /WidgetLayoutMetrics|WidgetScaffoldGeometry|measureWidgetLayoutRegion/);
+  assert.doesNotMatch(widgetViewModelSource, /WidgetLayoutMetrics|WidgetScaffoldGeometry|WidgetListCapacity/);
+  assert.match(widgetSource, /private var statusGap: CGFloat/);
+  assert.match(widgetSource, /WidgetDesignTokens\.largeGap/);
   assert.match(widgetSource, /\.frame\(maxWidth: \.infinity, maxHeight: \.infinity, alignment: \.topLeading\)/);
-  assert.match(widgetSource, /measureWidgetLayoutRegion\(\.header\)/);
-  assert.match(widgetSource, /measureWidgetLayoutRegion\(\.content\)/);
-  assert.doesNotMatch(widgetSource, /measureWidgetLayoutRegion\(\.footer\)/);
-  assert.doesNotMatch(widgetViewModelSource, /footerHeight|pageControlWidth/);
-  assert.match(widgetInfo, /<key>TMWidgetSchemaVersion<\/key>\s*<string>8<\/string>/);
+  assert.match(widgetInfo, /<key>TMWidgetSchemaVersion<\/key>\s*<string>9<\/string>/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
-});
+})
 
-test('Widget scaffold keeps the title outside page content switches', () => {
-  const scaffoldStart = widgetSource.indexOf('private func scaffold<Header: View, Content: View>');
-  const scaffoldEnd = widgetSource.indexOf('\n    private var familyScope', scaffoldStart);
-  assert.ok(scaffoldStart >= 0 && scaffoldEnd > scaffoldStart, 'scaffold should exist');
-  const scaffoldSource = widgetSource.slice(scaffoldStart, scaffoldEnd);
-  const pageBodyStart = widgetSource.indexOf('private func pageBody');
-  const pageBodyEnd = widgetSource.indexOf('\n    private func overview', pageBodyStart);
-  const pageBodySource = widgetSource.slice(pageBodyStart, pageBodyEnd);
-
-  assert.match(scaffoldSource, /header[\s\S]*\.measureWidgetLayoutRegion\(\.header\)/);
-  assert.match(scaffoldSource, /VStack\(spacing: metrics\.contentGap\)/);
-  assert.doesNotMatch(pageBodySource, /header\(/);
-  assert.match(pageBodySource, /GeometryReader \{ proxy in/);
+test('registered Widget families stay fixed to their purpose-built sizes', () => {
+  assert.match(widgetSource, /TokenMonitorSummaryWidget[\s\S]*\.supportedFamilies\(\[\.systemSmall\]\)/);
+  assert.match(widgetSource, /TokenMonitorActivityWidget[\s\S]*\.supportedFamilies\(\[\.systemMedium\]\)/);
+  assert.match(widgetSource, /TokenMonitorBreakdownWidget[\s\S]*\.supportedFamilies\(\[\.systemMedium\]\)/);
+  assert.match(widgetSource, /TokenMonitorQuotaWidget[\s\S]*\.supportedFamilies\(\[\.systemMedium\]\)/);
+  assert.match(widgetSource, /TokenMonitorWidget: Widget[\s\S]*\.supportedFamilies\(\[\.systemLarge\]\)/);
   assert.doesNotMatch(widgetSource, /fixedSize\s*\([^)]*vertical:\s*true/);
   assert.doesNotMatch(widgetSource, /\.offset\(y:\s*-/);
-  assert.match(widgetSource, /TokenMonitorSummaryWidget[\s\S]*\.supportedFamilies\(\[\.systemSmall\]\)/);
-  assert.match(widgetSource, /TokenMonitorBreakdownWidget[\s\S]*\.supportedFamilies\(\[\.systemMedium\]\)/);
-  assert.match(widgetSource, /TokenMonitorWidget: Widget[\s\S]*\.supportedFamilies\(\[\.systemLarge\]\)/);
-});
+})
 
-test('Activity layout adapts density and heatmap size without clipping the scaffold', () => {
-  const activityStart = widgetSource.indexOf('private func activity(_ snapshot: WidgetSnapshot, context: WidgetContentContext)');
-  const activityEnd = widgetSource.indexOf('\n    private func trend', activityStart);
-  assert.ok(activityStart >= 0 && activityEnd > activityStart, 'activity view should exist');
-  const activitySource = widgetSource.slice(activityStart, activityEnd);
-  assert.match(activitySource, /adaptiveContent \{/);
-  assert.match(widgetSource, /private func activityLayout\(/);
-  assert.match(widgetSource, /case \.small: 16/);
-  assert.match(widgetSource, /case \.medium: 14/);
-  assert.match(widgetSource, /case \.large: 26/);
-  assert.match(widgetSource, /private func mediumActivityView\(/);
-  assert.match(widgetSource, /WidgetMediumActivityLayoutPlan\.make\(availableSize: context\.size\)/);
-  assert.match(widgetSource, /HStack\(alignment: \.center, spacing: plan\.spacing\)/);
-  assert.match(widgetSource, /CGSize\(width: plan\.heatmapWidth, height: context\.size\.height\)/);
-  assert.match(widgetSource, /WidgetHeatmapLayoutCalculator\.make\(/);
-  assert.match(widgetSource, /Text\(WidgetL10n\.format\("%lld days", spec\.activeDays\)\)/);
+test('Activity layouts use the current medium and dashboard heatmap compositions', () => {
+  const mediumStart = widgetDashboardSource.indexOf('struct MediumActivityModule');
+  const mediumEnd = widgetDashboardSource.indexOf('struct DashboardActivityModule', mediumStart);
+  const mediumSource = widgetDashboardSource.slice(mediumStart, mediumEnd);
+  const dashboardStart = widgetDashboardSource.indexOf('struct DashboardActivityModule');
+  const dashboardEnd = widgetDashboardSource.indexOf('private struct ActivityHeatmapWithMonthLabels', dashboardStart);
+  const dashboardSource = widgetDashboardSource.slice(dashboardStart, dashboardEnd);
+
+  assert.match(mediumSource, /maxWeeks: 26/);
+  assert.match(mediumSource, /minCellSize: 5\.5/);
+  assert.match(mediumSource, /maxCellSize: 9\.5/);
+  assert.match(mediumSource, /%@ tokens · %lld active days/);
+  assert.match(dashboardSource, /maxWeeks: 16/);
+  assert.match(dashboardSource, /maxCellSize: 7\.5/);
   assert.match(widgetSource, /struct ActivityHeatmap: View/);
   assert.match(widgetSource, /Grid\(horizontalSpacing: layout\.spacing, verticalSpacing: layout\.spacing\)/);
   assert.match(widgetSource, /ForEach\(0\.\.<7, id: \\.self\)/);
-  assert.match(widgetSource, /GridRow \{/);
-  assert.match(widgetSource, /\.frame\(width: layout\.renderedWidth, height: layout\.renderedHeight/);
   assert.match(widgetViewModelSource, /let cellWidth: CGFloat/);
   assert.match(widgetViewModelSource, /let cellHeight: CGFloat/);
-  assert.match(widgetViewModelSource, /struct WidgetMediumActivityLayoutPlan: Equatable/);
-  assert.match(widgetViewModelSource, /let summaryWidth: CGFloat/);
-  assert.match(widgetViewModelSource, /let heatmapWidth: CGFloat/);
-  assert.match(widgetSource, /width: layout\.cellWidth,[\s\S]*height: layout\.cellHeight/);
-  assert.doesNotMatch(widgetSource, /minimumWidthRatio:\s*0\.65/);
-  assert.doesNotMatch(widgetSource, /allowsVerticalOverflow:\s*true/);
-  assert.doesNotMatch(widgetSource, /LazyVGrid/);
-  assert.doesNotMatch(widgetSource, /\.offset\(x:\s*-/);
-  assert.doesNotMatch(widgetSource, /\.padding\(\.leading,\s*-/);
-  assert.doesNotMatch(widgetSource, /rotationEffect/);
-});
+  assert.doesNotMatch(widgetDashboardSource, /WidgetMediumActivityLayoutPlan|minimumWidthRatio:\s*0\.65|allowsVerticalOverflow:\s*true/);
+  assert.doesNotMatch(widgetSource, /LazyVGrid|rotationEffect/);
+})
 
-test('Medium and Large activity cells are App Intent buttons with stable selection details', () => {
+test('Medium and Large activity cells share App Intent selection state', () => {
   const heatmapStart = widgetSource.indexOf('struct ActivityHeatmap: View');
   assert.ok(heatmapStart >= 0, 'activity heatmap should exist');
   const heatmapSource = widgetSource.slice(heatmapStart);
-  const mediumStart = widgetSource.indexOf('private func mediumActivityView(');
-  const mediumEnd = widgetSource.indexOf('\n    private func selectedDayDetail(', mediumStart);
-  const mediumSource = widgetSource.slice(mediumStart, mediumEnd);
 
   assert.match(widgetIntentSource, /struct SelectActivityDayIntent: AppIntent/);
   assert.match(widgetIntentSource, /static var openAppWhenRun: Bool \{ false \}/);
   assert.match(widgetIntentSource, /widget\.presentation\.activity-day/);
   assert.match(heatmapSource, /Button\(intent: SelectActivityDayIntent\(family: family, date: cell\.date\)\)/);
   assert.match(heatmapSource, /if let family, cell\.isSelectable/);
-  assert.doesNotMatch(heatmapSource, /hasActivityData/);
   assert.match(heatmapSource, /\.buttonStyle\(\.plain\)/);
-  assert.match(heatmapSource, /\.overlay \{[\s\S]*\.strokeBorder\(\.primary, lineWidth: 2\)/);
+  assert.match(heatmapSource, /\.strokeBorder\(\.primary, lineWidth: 2\)/);
   assert.doesNotMatch(heatmapSource, /Link\(/, 'cell buttons must not be nested in links');
-  assert.match(widgetSource, /context\.layout == \.large \? \.large : nil/);
-  assert.match(widgetSource, /ActivityHeatmap\(layout: spec, family: \.medium, selectedDate: entry\.selectedActivityDate\)/);
-  assert.match(mediumSource, /selectedDayDetail\(snapshot\)[\s\S]*\.frame\(height: 32/);
-  assert.match(widgetSource, /context\.layout == \.large \{[\s\S]*secondary\(largeActivityCaptionText\(snapshot, layout: spec\)\)/);
-  assert.match(widgetSource, /private func largeActivityCaptionText\([\s\S]*return activityDateRangeText\(layout\)/);
-  assert.doesNotMatch(widgetSource, /selectedDayDetailLine/);
-  assert.match(widgetSource, /WidgetFormat\.tokens\(day\.totalTokens, style: snapshot\.presentation\.numberStyle, presentation: snapshot\.presentation\)/);
-  assert.match(widgetSource, /WidgetActivitySelection\.detailDay\(/);
-  assert.doesNotMatch(widgetSource, /onHover|@State/);
-});
-
-test('Large overview quota and model rows share the same row component', () => {
-  const largeOverviewStart = widgetSource.indexOf('private func largeOverview(');
-  const largeOverviewEnd = widgetSource.indexOf('\n    private func quotaSummary', largeOverviewStart);
-  const largeOverviewSource = widgetSource.slice(largeOverviewStart, largeOverviewEnd);
-  const modelRowsStart = widgetSource.indexOf('private func modelOverviewRows');
-  const modelRowsEnd = widgetSource.indexOf('\n    private func summaryLinkRow', modelRowsStart);
-  const modelRowsSource = widgetSource.slice(modelRowsStart, modelRowsEnd);
-
-  assert.match(widgetSource, /private struct LargeOverviewListRow: View/);
-  assert.match(widgetSource, /struct Model: Equatable/);
-  assert.match(widgetSource, /private let rowHeight: CGFloat = 16/);
-  assert.match(widgetSource, /private let fontSize: CGFloat = 10/);
-  assert.match(largeOverviewSource, /ViewThatFits\(in: \.vertical\)/);
-  assert.match(largeOverviewSource, /quotaLimit: 3, modelLimit: 2, showsMoreRows: true/);
-  assert.match(largeOverviewSource, /quotaLimit: 2, modelLimit: 2, showsMoreRows: true/);
-  assert.match(largeOverviewSource, /quotaLimit: 1, modelLimit: 1, showsMoreRows: false/);
-  assert.match(widgetSource, /\.font\(\.system\(size: fontSize, weight: \.medium\)\)/);
-  assert.match(widgetSource, /\.font\(\.system\(size: fontSize, weight: \.medium, design: \.monospaced\)\)/);
-  assert.match(widgetSource, /\.frame\(height: rowHeight, alignment: \.center\)/);
-  assert.match(largeOverviewSource, /LargeOverviewListRow\(label: row\.label, value: row\.value, style: row\.style\)/);
-  assert.ok((widgetSource.match(/LargeOverviewListRow\(/g) || []).length >= 3);
-  assert.match(modelRowsSource, /LargeOverviewListRow\.Model/);
-  assert.doesNotMatch(modelRowsSource, / · /);
-});
-
-test('Quota and model pages derive row density from measured content height', () => {
-  const quotaStart = widgetSource.indexOf('private func quota(_ snapshot: WidgetSnapshot, context: WidgetContentContext)');
-  const quotaEnd = widgetSource.indexOf('\n    private func models', quotaStart);
-  const modelStart = widgetSource.indexOf('private func models(_ snapshot: WidgetSnapshot, context: WidgetContentContext)');
-  const modelEnd = widgetSource.indexOf('\n    private func activity', modelStart);
-  const quotaPageSource = widgetSource.slice(quotaStart, quotaEnd);
-  const modelPageSource = widgetSource.slice(modelStart, modelEnd);
-
-  assert.match(widgetViewModelSource, /enum WidgetListCapacity/);
-  assert.match(widgetViewModelSource, /for density in \[WidgetContentDensity\.regular, \.compact, \.summary\]/);
-  assert.match(widgetViewModelSource, /availableForRows/);
-  assert.equal((widgetSource.match(/WidgetListCapacity\.plan\(/g) || []).length, 2);
-  assert.equal((widgetSource.match(/availableHeight: context\.size\.height/g) || []).length, 3);
-  assert.doesNotMatch(quotaPageSource, /quotaLimit|modelLimit/);
-  assert.doesNotMatch(modelPageSource, /quotaLimit|modelLimit/);
-});
+  assert.match(widgetDashboardSource, /ActivityHeatmapWithMonthLabels\(layout: layout, family: \.medium/);
+  assert.match(widgetDashboardSource, /ActivityHeatmapWithMonthLabels\(layout: layout, family: \.large/);
+  assert.doesNotMatch(widgetIntentSource, /selectedPeriod|selectedPage|lastConfiguredPage/);
+})
 
 test('macOS Widget integration leaves non-macOS packaging sections unchanged', () => {
   assert.ok(packageJson.build.win);
