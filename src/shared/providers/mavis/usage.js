@@ -240,15 +240,60 @@ function normalizeDbRow(raw) {
   };
 }
 
+// Mavis runtime currently writes `cost_usd = 0` for any row where the model
+// column is NULL (it only fills `cost_usd` when it has a model id to look
+// the rate up against). Token-monitor can recover the cost client-side so
+// the cost panels don't read all-zeros: the runtime-supplied `cost_usd` is
+// always preferred, and only zero rows get the fallback below.
+//
+// Prices follow the mavis public listing in CNY per 1M tokens; we convert
+// to USD with `cnyToUsdRate` so the result lands in the same currency
+// shape as the runtime-supplied cost column. The 512k context boundary
+// is the public mavis tier split (≤ 512k input tokens vs > 512k).
+//
+// This table is intentionally hand-rolled rather than fetched from the
+// mavis runtime, because the mavis CLI does not currently expose its
+// pricing in any other place — if it ever does, the loader can read it
+// at startup and pass via `options.priceTable` (tests already do this).
+const MAVIS_PRICING = Object.freeze({
+  'minimax/MiniMax-M3': {
+    input: { upTo512k: 4.29, over512k: 8.40 },
+    output: { upTo512k: 16.89, over512k: 33.60 },
+    cacheRead: { upTo512k: 9.84, over512k: 1.68 }
+  }
+});
+
+const MAVIS_CONTEXT_TIER_THRESHOLD = 512 * 1024; // 512k input tokens is the mavis public tier boundary
+const MAVIS_DEFAULT_CNY_TO_USD_RATE = 7; // CNY per 1 USD; overridden by options for tests and live FX feeds
+
+function applyPriceFallback(row, options = {}) {
+  if (!row || row.cost > 0) return row;
+  const table = options.priceTable || MAVIS_PRICING;
+  const rate = options.cnyToUsdRate || MAVIS_DEFAULT_CNY_TO_USD_RATE;
+  const modelRates = table[row.model];
+  if (!modelRates) return row;
+  const tier = (row.input + row.cacheRead) > MAVIS_CONTEXT_TIER_THRESHOLD ? 'over512k' : 'upTo512k';
+  // Reasoning tokens are output-side, billed at the output rate.
+  const inputCost = (row.input * modelRates.input[tier]) / 1_000_000;
+  const outputCost = ((row.output + row.reasoning) * modelRates.output[tier]) / 1_000_000;
+  const cacheReadCost = (row.cacheRead * modelRates.cacheRead[tier]) / 1_000_000;
+  // Cache writes are commonly free; fall back to the model rate if mavis ever
+  // prices them. Today the column is unused.
+  const totalCny = inputCost + outputCost + cacheReadCost;
+  return { ...row, cost: totalCny / rate };
+}
+
 async function collectMavisRows(options = {}) {
   const dbPath = options.dbPath || resolveMavisDbPath(options);
   if (!dbPath) return [];
   const read = options.readDbRows || readMavisDbRows;
   const dbRows = await read(dbPath, options);
   const out = [];
+  const applyPrice = options.applyPriceFallback !== false;
   for (const raw of dbRows) {
-    const row = normalizeDbRow(raw);
-    if (row) out.push(row);
+    const normalized = normalizeDbRow(raw);
+    if (!normalized) continue;
+    out.push(applyPrice ? applyPriceFallback(normalized, options) : normalized);
   }
   return out;
 }
@@ -439,6 +484,9 @@ module.exports = {
   MAVIS_AGENT_NAMES,
   MAVIS_READ_MAX_BYTES,
   MAVIS_READ_MAX_ROWS,
+  MAVIS_PRICING,
+  MAVIS_CONTEXT_TIER_THRESHOLD,
+  MAVIS_DEFAULT_CNY_TO_USD_RATE,
   collectMavisRows,
   buildMavisHistoryGraph,
   buildMavisPeriods,
@@ -447,5 +495,6 @@ module.exports = {
   resolveMavisDbPath,
   readMavisDbRows,
   normalizedModelId,
-  normalizeDbRow
+  normalizeDbRow,
+  applyPriceFallback
 };

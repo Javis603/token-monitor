@@ -6,12 +6,16 @@ const test = require('node:test');
 const {
   MAVIS_AGENT_NAMES,
   MAVIS_CLIENT_ID,
+  MAVIS_PRICING,
+  MAVIS_CONTEXT_TIER_THRESHOLD,
+  MAVIS_DEFAULT_CNY_TO_USD_RATE,
   buildMavisHistoryGraph,
   buildMavisPeriods,
   buildTokscaleJson,
   buildHistoryGraphFromRows,
   normalizedModelId,
-  normalizeDbRow
+  normalizeDbRow,
+  applyPriceFallback
 } = require('../../src/shared/providers/mavis/usage');
 
 const { localDate, localMs } = require('../helpers/localTime');
@@ -202,4 +206,110 @@ test('buildMavisPeriods keeps local midnight for today and the 1st of the month 
   assert.equal(periods.month.totalInput, 1 + 2, 'both today rows + Aug are excluded; 9-14 23:59 is before month start');
   assert.equal(periods.allTime.totalInput, 1 + 2 + 4, 'allTime respects allTimeSince=2026-08-01; 7-1 is excluded');
   assert.equal(periods.allTime.entries.length, 1, 'cross-day turns merge under one session+model entry');
+});
+
+test('MAVIS_PRICING carries the public mavis MiniMax-M3 rates', () => {
+  // Public mavis listing for MiniMax-M3 (per the screenshot the user
+  // shared). The tier split is 512k input tokens; rates are in CNY per 1M
+  // tokens. The exported shape is the contract the tests pin against so
+  // any future price change has to land here too.
+  assert.deepEqual(MAVIS_PRICING['minimax/MiniMax-M3'], {
+    input: { upTo512k: 4.29, over512k: 8.40 },
+    output: { upTo512k: 16.89, over512k: 33.60 },
+    cacheRead: { upTo512k: 9.84, over512k: 1.68 }
+  });
+  assert.equal(MAVIS_CONTEXT_TIER_THRESHOLD, 512 * 1024);
+  assert.equal(typeof MAVIS_DEFAULT_CNY_TO_USD_RATE, 'number');
+});
+
+test('applyPriceFallback leaves runtime-supplied cost alone', () => {
+  const out = applyPriceFallback({
+    model: 'minimax/MiniMax-M3',
+    input: 1_000_000,
+    output: 1_000_000,
+    cacheRead: 0,
+    reasoning: 0,
+    cost: 0.5 // runtime wrote a real cost
+  });
+  assert.equal(out.cost, 0.5, 'cost > 0 must pass through untouched');
+});
+
+test('applyPriceFallback recovers cost for zero-cost rows using the public MiniMax-M3 rates', () => {
+  // 100k input + 50k output + 0 cacheRead, ≤ 512k tier: 0.1*4.29 + 0.05*16.89 = 1.2735 CNY,
+  // divided by the default 7 CNY/USD rate ≈ 0.1819 USD.
+  const out = applyPriceFallback({
+    model: 'minimax/MiniMax-M3',
+    input: 100_000,
+    output: 50_000,
+    cacheRead: 0,
+    reasoning: 0,
+    cost: 0
+  });
+  const expectedCny = 0.1 * 4.29 + 0.05 * 16.89;
+  const expectedUsd = expectedCny / 7;
+  assert.ok(Math.abs(out.cost - expectedUsd) < 1e-9, `expected ≈ ${expectedUsd} got ${out.cost}`);
+});
+
+test('applyPriceFallback picks the over-512k tier when input crosses the threshold', () => {
+  // input=600k + cacheRead=0: > 512k → input rate 8.40, output rate 33.60
+  const out = applyPriceFallback({
+    model: 'minimax/MiniMax-M3',
+    input: 600_000,
+    output: 200_000,
+    cacheRead: 0,
+    reasoning: 0,
+    cost: 0
+  });
+  const expectedCny = 0.6 * 8.40 + 0.2 * 33.60;
+  const expectedUsd = expectedCny / 7;
+  assert.ok(Math.abs(out.cost - expectedUsd) < 1e-9, `expected ≈ ${expectedUsd} got ${out.cost}`);
+});
+
+test('applyPriceFallback bills reasoning tokens at the output rate', () => {
+  // reasoning_tokens ride on output pricing per mavis's public listing.
+  // 100k input (≤ 512k) + 1M output + 1M reasoning →
+  // 0.1*4.29 + (1+1)*16.89 = 34.209 CNY / 7 ≈ 4.887 USD.
+  const out = applyPriceFallback({
+    model: 'minimax/MiniMax-M3',
+    input: 100_000,
+    output: 1_000_000,
+    cacheRead: 0,
+    reasoning: 1_000_000,
+    cost: 0
+  });
+  const expectedCny = 0.1 * 4.29 + 2 * 16.89;
+  const expectedUsd = expectedCny / 7;
+  assert.ok(Math.abs(out.cost - expectedUsd) < 1e-9, `expected ≈ ${expectedUsd} got ${out.cost}`);
+});
+
+test('applyPriceFallback returns the row unchanged when the model has no rate card', () => {
+  // Fallback rows are model-`${agent} (model unknown)` etc.; the adapter
+  // can only recover cost when the model id matches a known rate card.
+  const out = applyPriceFallback({
+    model: 'mavis (model unknown)',
+    input: 1_000_000,
+    output: 1_000_000,
+    cacheRead: 0,
+    reasoning: 0,
+    cost: 0
+  });
+  assert.equal(out.cost, 0, 'unknown model rows must stay at zero cost');
+});
+
+test('applyPriceFallback honours an injected rate table and CNY→USD rate', () => {
+  // Tests + downstream hosts that want a different FX can pass both
+  // through options; nothing in the row itself has to change.
+  // 100k input at custom 100 CNY/1M → 10 CNY, cnyToUsdRate=1 → 10 USD.
+  const customTable = {
+    'minimax/MiniMax-M3': {
+      input: { upTo512k: 100, over512k: 200 },
+      output: { upTo512k: 400, over512k: 800 },
+      cacheRead: { upTo512k: 0, over512k: 0 }
+    }
+  };
+  const out = applyPriceFallback(
+    { model: 'minimax/MiniMax-M3', input: 100_000, output: 0, cacheRead: 0, reasoning: 0, cost: 0 },
+    { priceTable: customTable, cnyToUsdRate: 1 }
+  );
+  assert.equal(out.cost, 10);
 });
