@@ -175,23 +175,32 @@ async function readMavisDbRows(dbPath, options = {}) {
 
   // Fallback: built-in node:sqlite (Node 22.5+, stable since 22.13, no flag
   // needed on 22.15+). Injected via requireFn so tests can stub it.
+  //
+  // Wrapped in a `Promise.race` with a hard 5s timeout. In some Electron
+  // builds the `node:sqlite` `DatabaseSync` constructor can block on
+  // shared lock acquisition against a busy runtime, and the iter's
+  // `iterate()` doesn't return until the writer's transaction is
+  // checkpointed. Bounding the wait with a hard timeout means a slow
+  // read surfaces as an error that the collect layer logs and keeps
+  // the last-good anchor for, instead of wedging the entire collect
+  // cycle and blocking every subsequent tick.
   const requireFn = options.requireFn || require;
+  const nodeReadTimeoutMs = options.nodeReadTimeoutMs || 5_000;
   let nodeError;
   try {
-    const { DatabaseSync } = requireFn('node:sqlite');
-    const database = new DatabaseSync(dbPath, { readOnly: true });
-    try {
-      database.exec('PRAGMA busy_timeout = 250');
-      const statement = database.prepare(sql);
-      const bindArgs = sinceMs > 0 ? [...agentNames, sinceMs] : [...agentNames];
-      const iterator = statement.iterate(...bindArgs);
-      const rows = boundedRows(iterator, { maxReadRows });
-      return rows;
-    } finally {
-      database.close();
-    }
+    const result = await Promise.race([
+      readMavisDbRowsNode(dbPath, sql, agentNames, sinceMs, maxReadRows, requireFn),
+      new Promise((_, reject) => setTimeout(
+        () => reject(Object.assign(new Error('node:sqlite read exceeded ' + nodeReadTimeoutMs + 'ms'), { code: 'MAVIS_READ_TIMEOUT' })),
+        nodeReadTimeoutMs
+      ))
+    ]);
+    return result;
   } catch (caught) {
     nodeError = caught;
+    if (caught && caught.code === 'MAVIS_READ_TIMEOUT' && logger) {
+      logger('mavis: ' + caught.message);
+    }
   }
   if (isReadBudgetError(nodeError)) {
     if (logger) logger(nodeError.message);
@@ -201,6 +210,20 @@ async function readMavisDbRows(dbPath, options = {}) {
   const message = `mavis sqlite read failed: sqlite3 CLI: ${cliError?.message || 'unknown'}; node:sqlite: ${nodeError?.message || 'unknown'}`;
   if (logger) logger(message);
   throw new Error(message, { cause: nodeError || cliError });
+}
+
+async function readMavisDbRowsNode(dbPath, sql, agentNames, sinceMs, maxReadRows, requireFn) {
+  const { DatabaseSync } = requireFn('node:sqlite');
+  const database = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    database.exec('PRAGMA busy_timeout = 250');
+    const statement = database.prepare(sql);
+    const bindArgs = sinceMs > 0 ? [...agentNames, sinceMs] : [...agentNames];
+    const iterator = statement.iterate(...bindArgs);
+    return boundedRows(iterator, { maxReadRows });
+  } finally {
+    database.close();
+  }
 }
 
 function normalizedModelId(value, agentName) {
