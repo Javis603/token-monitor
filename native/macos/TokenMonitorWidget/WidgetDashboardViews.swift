@@ -186,10 +186,7 @@ struct LargeDashboardWidgetView: View {
         return percent > 0 ? "+\(percent)%" : "−\(abs(percent))%"
     }
 
-    private var trendCaption: String {
-        guard !snapshot.trend.points.isEmpty else { return "—" }
-        return WidgetL10n.format("%lldD · %@", snapshot.trend.points.count, trendDelta)
-    }
+    private var trendCaption: String { trendDelta }
 }
 
 struct WidgetMetricBlock: View {

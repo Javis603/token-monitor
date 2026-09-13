@@ -117,8 +117,7 @@ test('Widget producers carry lifetime ownership through the sendPush outlet', ()
     'function startHostStats()',
     'function startLocalCollector()',
     'async function startStatsStream(options = {})',
-    'async function refreshFromTray()',
-    'function refreshFromMacWidgetOpen()'
+    'async function refreshFromTray()'
   ]) {
     const start = mainSource.indexOf(signature);
     const end = mainSource.indexOf('\nfunction ', start + signature.length);
@@ -750,8 +749,9 @@ test('each Widget family has a purpose-built composition', () => {
   assert.match(widgetViewModelSource, /dashboardRowLabelSize: CGFloat = 10/);
   assert.match(widgetViewModelSource, /dashboardValueSize: CGFloat = 8\.5/);
   assert.match(widgetViewModelSource, /dashboardDetailSize: CGFloat = 7\.5/);
-  assert.match(widgetDashboardSource, /WidgetL10n\.format\("%lldD · %@", snapshot\.trend\.points\.count, trendDelta\)/);
-  assert.match(widgetActivitySource, /fallback: WidgetL10n\.format\("%lld active days", layout\.activeDays\)/);
+  assert.match(widgetDashboardSource, /private var trendCaption: String \{ trendDelta \}/);
+  assert.doesNotMatch(widgetDashboardSource, /%lldD · %@/);
+  assert.match(widgetActivitySource, /fallback: WidgetL10n\.format\("%lld active days", snapshot\.activity\.activeDays\)/);
   assert.doesNotMatch(widgetDashboardSource, /WidgetFormat\.reset\(/);
   assert.match(widgetDashboardSource, /\(width\|height\)=\["'\]1em\["'\]/);
 });
@@ -775,7 +775,7 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   }
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;/);
-  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 38;/);
+  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 39;/);
   assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 10;/);
   assert.match(widgetDevSource, /fs\.rmSync\(extension, \{ recursive: true, force: true \}\)/);
   assert.match(widgetDevSource, /`TOKEN_MONITOR_MARKETING_VERSION=\$\{targetMarketingVersion\}`/);

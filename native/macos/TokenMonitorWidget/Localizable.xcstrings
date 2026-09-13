@@ -625,13 +625,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 个活跃日"
+            "value": "活跃 %lld 天"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 個活躍日"
+            "value": "活躍 %lld 天"
           }
         },
         "ja": {
@@ -644,40 +644,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "활동 %lld일"
-          }
-        }
-      }
-    },
-    "%lldD · %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$lldD · %2$@"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$lld 天 · %2$@"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$lld 日 · %2$@"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$lld日 · %2$@"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$lld일 · %2$@"
           }
         }
       }
@@ -1373,13 +1339,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ tokens · %lld 个活跃日"
+            "value": "%@ tokens · 活跃 %lld 天"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ tokens · %lld 個活躍日"
+            "value": "%@ tokens · 活躍 %lld 天"
           }
         },
         "ja": {

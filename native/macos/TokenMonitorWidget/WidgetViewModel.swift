@@ -64,10 +64,6 @@ struct WidgetHeatmapLayout: Equatable {
         return 7 * cellHeight + 6 * spacing
     }
 
-    var activeDays: Int {
-        cells.filter { !$0.isFuture && $0.intensity > 0 }.count
-    }
-
     func cell(week: Int, weekday: Int) -> WidgetHeatmapCell? {
         guard week >= 0, week < weekCount, weekday >= 0, weekday < 7 else { return nil }
         return cells[week * 7 + weekday]
