@@ -33,6 +33,10 @@ const widgetDashboardSource = fs.readFileSync(
   path.join(root, 'native', 'macos', 'TokenMonitorWidget', 'WidgetDashboardViews.swift'),
   'utf8'
 );
+const widgetActivitySource = fs.readFileSync(
+  path.join(root, 'native', 'macos', 'TokenMonitorWidget', 'WidgetActivityViews.swift'),
+  'utf8'
+);
 const widgetInfo = fs.readFileSync(
   path.join(root, 'native', 'macos', 'TokenMonitorWidget', 'Info.plist'),
   'utf8'
@@ -713,9 +717,11 @@ test('each Widget family has a purpose-built composition', () => {
   assert.match(widgetDashboardSource, /struct MediumUsageWidgetView: View/);
   assert.match(widgetDashboardSource, /struct LargeDashboardWidgetView: View/);
   assert.match(widgetDashboardSource, /SmoothTrendChart\(points: snapshot\.trend\.points\)/);
+  assert.match(widgetDashboardSource, /SmoothTrendChart\(points: snapshot\.trend\.points\)[\s\S]{0,100}\.frame\(maxWidth: \.infinity\)/);
+  assert.doesNotMatch(widgetDashboardSource, /\.frame\(width: 108, height: 32\)/);
   assert.match(widgetDashboardSource, /DashboardActivityModule\(/);
-  assert.match(widgetDashboardSource, /ActivityHeatmapWithMonthLabels\(/);
-  assert.match(widgetDashboardSource, /maxWeeks: 26/);
+  assert.match(widgetActivitySource, /ActivityHeatmapWithMonthLabels\(/);
+  assert.match(widgetActivitySource, /maxWeeks: 26/);
   assert.match(widgetDashboardSource, /DashboardQuotaProviderRow\([\s\S]{0,160}provider: provider,[\s\S]{0,160}showAccountLabel:/);
   assert.match(widgetDashboardSource, /selectedIDs: selectedProviderIDs,\s*limit: 2/);
   assert.match(widgetDashboardSource, /WidgetVendorMark\(vendorID: row\.vendorID/);
@@ -737,6 +743,9 @@ test('each Widget family has a purpose-built composition', () => {
   assert.match(smallUsageSource, /VStack\(alignment: \.leading, spacing: 4\)/);
   assert.doesNotMatch(smallUsageSource, /Spacer\(minLength: 7\)/);
   assert.match(widgetDashboardSource, /WidgetFormat\.boundary\(window\)/);
+  assert.match(widgetDashboardSource, /dashboardRowLabelSize/);
+  assert.match(widgetDashboardSource, /dashboardValueSize/);
+  assert.match(widgetDashboardSource, /dashboardDetailSize/);
   assert.doesNotMatch(widgetDashboardSource, /WidgetFormat\.reset\(/);
   assert.match(widgetDashboardSource, /\(width\|height\)=\["'\]1em\["'\]/);
 });
@@ -760,7 +769,7 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   }
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;/);
-  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 36;/);
+  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 37;/);
   assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 10;/);
   assert.match(widgetDevSource, /fs\.rmSync\(extension, \{ recursive: true, force: true \}\)/);
   assert.match(widgetDevSource, /`TOKEN_MONITOR_MARKETING_VERSION=\$\{targetMarketingVersion\}`/);
@@ -878,12 +887,12 @@ test('registered Widget families stay fixed to their purpose-built sizes', () =>
 })
 
 test('Activity layouts use the current medium and dashboard heatmap compositions', () => {
-  const mediumStart = widgetDashboardSource.indexOf('struct MediumActivityModule');
-  const mediumEnd = widgetDashboardSource.indexOf('struct DashboardActivityModule', mediumStart);
-  const mediumSource = widgetDashboardSource.slice(mediumStart, mediumEnd);
-  const dashboardStart = widgetDashboardSource.indexOf('struct DashboardActivityModule');
-  const dashboardEnd = widgetDashboardSource.indexOf('private struct ActivityHeatmapWithMonthLabels', dashboardStart);
-  const dashboardSource = widgetDashboardSource.slice(dashboardStart, dashboardEnd);
+  const mediumStart = widgetActivitySource.indexOf('struct MediumActivityModule');
+  const mediumEnd = widgetActivitySource.indexOf('struct DashboardActivityModule', mediumStart);
+  const mediumSource = widgetActivitySource.slice(mediumStart, mediumEnd);
+  const dashboardStart = widgetActivitySource.indexOf('struct DashboardActivityModule');
+  const dashboardEnd = widgetActivitySource.indexOf('private struct ActivitySummaryLabel', dashboardStart);
+  const dashboardSource = widgetActivitySource.slice(dashboardStart, dashboardEnd);
 
   assert.match(mediumSource, /maxWeeks: 26/);
   assert.match(mediumSource, /minCellSize: 5\.5/);
@@ -891,19 +900,19 @@ test('Activity layouts use the current medium and dashboard heatmap compositions
   assert.match(mediumSource, /%@ tokens · %lld active days/);
   assert.match(dashboardSource, /maxWeeks: 16/);
   assert.match(dashboardSource, /maxCellSize: 7\.5/);
-  assert.match(widgetSource, /struct ActivityHeatmap: View/);
-  assert.match(widgetSource, /Grid\(horizontalSpacing: layout\.spacing, verticalSpacing: layout\.spacing\)/);
-  assert.match(widgetSource, /ForEach\(0\.\.<7, id: \\.self\)/);
+  assert.match(widgetActivitySource, /struct ActivityHeatmap: View/);
+  assert.match(widgetActivitySource, /Grid\(horizontalSpacing: layout\.spacing, verticalSpacing: layout\.spacing\)/);
+  assert.match(widgetActivitySource, /ForEach\(0\.\.<7, id: \\.self\)/);
   assert.match(widgetViewModelSource, /let cellWidth: CGFloat/);
   assert.match(widgetViewModelSource, /let cellHeight: CGFloat/);
-  assert.doesNotMatch(widgetDashboardSource, /WidgetMediumActivityLayoutPlan|minimumWidthRatio:\s*0\.65|allowsVerticalOverflow:\s*true/);
-  assert.doesNotMatch(widgetSource, /LazyVGrid|rotationEffect/);
+  assert.doesNotMatch(widgetActivitySource, /WidgetMediumActivityLayoutPlan|minimumWidthRatio:\s*0\.65|allowsVerticalOverflow:\s*true/);
+  assert.doesNotMatch(widgetActivitySource, /LazyVGrid|rotationEffect/);
 })
 
 test('Medium and Large activity cells share App Intent selection state', () => {
-  const heatmapStart = widgetSource.indexOf('struct ActivityHeatmap: View');
+  const heatmapStart = widgetActivitySource.indexOf('struct ActivityHeatmap: View');
   assert.ok(heatmapStart >= 0, 'activity heatmap should exist');
-  const heatmapSource = widgetSource.slice(heatmapStart);
+  const heatmapSource = widgetActivitySource.slice(heatmapStart);
 
   assert.match(widgetIntentSource, /struct SelectActivityDayIntent: AppIntent/);
   assert.match(widgetIntentSource, /static var openAppWhenRun: Bool \{ false \}/);
@@ -913,8 +922,11 @@ test('Medium and Large activity cells share App Intent selection state', () => {
   assert.match(heatmapSource, /\.buttonStyle\(\.plain\)/);
   assert.match(heatmapSource, /\.strokeBorder\(\.primary, lineWidth: 2\)/);
   assert.doesNotMatch(heatmapSource, /Link\(/, 'cell buttons must not be nested in links');
-  assert.match(widgetDashboardSource, /ActivityHeatmapWithMonthLabels\(layout: layout, family: \.medium/);
-  assert.match(widgetDashboardSource, /ActivityHeatmapWithMonthLabels\(layout: layout, family: \.large/);
+  assert.match(widgetActivitySource, /ActivityHeatmapWithMonthLabels\(layout: layout, family: \.medium/);
+  assert.match(widgetActivitySource, /ActivityHeatmapWithMonthLabels\(layout: layout, family: \.large/);
+  assert.match(widgetActivitySource, /WidgetActivitySelection\.selectedDay\(/);
+  assert.match(widgetActivitySource, /%@ · %@ tokens · %@/);
+  assert.match(widgetProject, /WidgetActivityViews\.swift in Sources/);
   assert.doesNotMatch(widgetIntentSource, /selectedPeriod|selectedPage|lastConfiguredPage/);
 })
 

@@ -26,6 +26,7 @@
 		100000000000000000000011 /* WidgetDemandMarker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000011 /* WidgetDemandMarker.swift */; };
 		100000000000000000000012 /* WidgetDashboardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* WidgetDashboardViews.swift */; };
 		100000000000000000000013 /* icons in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000013 /* icons */; };
+		100000000000000000000014 /* WidgetActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000014 /* WidgetActivityViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -48,6 +49,7 @@
 		200000000000000000000011 /* WidgetDemandMarker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetDemandMarker.swift; sourceTree = "<group>"; };
 		200000000000000000000012 /* WidgetDashboardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetDashboardViews.swift; sourceTree = "<group>"; };
 		200000000000000000000013 /* icons */ = {isa = PBXFileReference; lastKnownFileType = folder; name = icons; path = ../../assets/icons; sourceTree = SOURCE_ROOT; };
+		200000000000000000000014 /* WidgetActivityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetActivityViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -92,6 +94,7 @@
 				20000000000000000000000E /* WidgetConfigurationIntent.swift */,
 				20000000000000000000000F /* WidgetViewModel.swift */,
 				200000000000000000000012 /* WidgetDashboardViews.swift */,
+				200000000000000000000014 /* WidgetActivityViews.swift */,
 				200000000000000000000010 /* Localizable.xcstrings */,
 				200000000000000000000007 /* Assets.xcassets */,
 				200000000000000000000013 /* icons */,
@@ -223,6 +226,7 @@
 				10000000000000000000000B /* WidgetConfigurationIntent.swift in Sources */,
 				10000000000000000000000C /* WidgetViewModel.swift in Sources */,
 				100000000000000000000012 /* WidgetDashboardViews.swift in Sources */,
+				100000000000000000000014 /* WidgetActivityViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

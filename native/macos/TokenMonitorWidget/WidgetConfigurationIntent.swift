@@ -408,6 +408,11 @@ enum WidgetActivityDate {
 }
 
 enum WidgetActivitySelection {
+    static func selectedDay(in days: [WidgetActivityDay], selectedDate: String?) -> WidgetActivityDay? {
+        guard let selectedDate else { return nil }
+        return days.first { $0.date == selectedDate }
+    }
+
     static func resolvedDate(
         days: [WidgetActivityDay],
         family: WidgetFamilyScope?,

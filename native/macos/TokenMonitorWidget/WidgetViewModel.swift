@@ -16,6 +16,12 @@ enum WidgetDesignTokens {
     static let largeGap: CGFloat = 8
     static let secondarySize: CGFloat = 10
     static let microSize: CGFloat = 9
+    static let dashboardMetricSize: CGFloat = 36
+    static let dashboardSectionTitleSize: CGFloat = 10
+    static let dashboardRowLabelSize: CGFloat = 11
+    static let dashboardValueSize: CGFloat = 10
+    static let dashboardDetailSize: CGFloat = 8.5
+    static let dashboardTrendHeight: CGFloat = 34
     static let dividerOpacity = 0.14
     static let accent = Color.accentColor
     static let chartBlue = Color(red: 115 / 255, green: 189 / 255, blue: 245 / 255)

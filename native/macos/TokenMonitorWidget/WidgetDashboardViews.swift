@@ -111,17 +111,23 @@ struct LargeDashboardWidgetView: View {
     var body: some View {
         GeometryReader { proxy in
             VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .bottom, spacing: 16) {
-                    WidgetMetricBlock(snapshot: snapshot, period: period, metricSize: 36)
-                    Spacer(minLength: 10)
+                HStack(alignment: .bottom, spacing: 20) {
+                    WidgetMetricBlock(
+                        snapshot: snapshot,
+                        period: period,
+                        metricSize: WidgetDesignTokens.dashboardMetricSize
+                    )
+                    .layoutPriority(1)
                     VStack(alignment: .trailing, spacing: 4) {
                         Text(trendDelta)
                             .font(.caption.weight(.medium))
                             .monospacedDigit()
                             .foregroundStyle(WidgetDesignTokens.muted)
                         SmoothTrendChart(points: snapshot.trend.points)
-                            .frame(width: 108, height: 32)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: WidgetDesignTokens.dashboardTrendHeight)
                     }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.bottom, 3)
                 }
                 .frame(height: 63, alignment: .top)
@@ -295,11 +301,11 @@ struct DashboardBreakdownModule: View {
                             HStack(spacing: 6) {
                                 WidgetVendorMark(vendorID: row.vendorID, size: 11)
                                 Text(row.label)
-                                    .font(.caption.weight(.semibold))
+                                    .font(.system(size: WidgetDesignTokens.dashboardRowLabelSize, weight: .semibold))
                                     .lineLimit(1)
                                 Spacer(minLength: 3)
                                 Text(WidgetFormat.tokens(row.tokens, style: "compact", presentation: presentation))
-                                    .font(.caption2.weight(.medium))
+                                    .font(.system(size: WidgetDesignTokens.dashboardValueSize, weight: .medium))
                                     .monospacedDigit()
                                     .foregroundStyle(.secondary)
                             }
@@ -393,12 +399,12 @@ private struct DashboardQuotaProviderRow: View {
                 HStack(spacing: 5) {
                     WidgetVendorMark(vendorID: provider.provider, size: 12)
                     Text(provider.displayName ?? WidgetFormat.provider(provider.provider))
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: WidgetDesignTokens.dashboardRowLabelSize, weight: .semibold))
                         .lineLimit(1)
                 }
                 if showAccountLabel, let accountLabel = provider.accountLabel, !accountLabel.isEmpty {
                     Text(accountLabel)
-                        .font(.system(size: 8, weight: .medium))
+                        .font(.system(size: WidgetDesignTokens.dashboardDetailSize, weight: .medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
@@ -436,12 +442,12 @@ private struct DashboardQuotaWindowCell: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(WidgetFormat.windowTitle(window.kind))
-                    .font(.system(size: 8.5, weight: .medium))
+                    .font(.system(size: WidgetDesignTokens.dashboardValueSize, weight: .medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 2)
                 Text(value)
-                    .font(.system(size: 8.5, weight: .semibold))
+                    .font(.system(size: WidgetDesignTokens.dashboardValueSize, weight: .semibold))
                     .monospacedDigit()
                     .lineLimit(1)
             }
@@ -450,7 +456,7 @@ private struct DashboardQuotaWindowCell: View {
             }
             if window.resetsAt != nil {
                 Text(WidgetFormat.boundary(window))
-                    .font(.system(size: 7.5, weight: .regular))
+                    .font(.system(size: WidgetDesignTokens.dashboardDetailSize))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
@@ -548,146 +554,6 @@ struct QuotaWindowCell: View {
     }
 }
 
-struct MediumActivityModule: View {
-    let snapshot: WidgetSnapshot
-    let referenceDate: Date
-    let selectedActivityDate: String?
-    let availableSize: CGSize
-
-    var body: some View {
-        let layout = WidgetHeatmapLayoutCalculator.make(
-            days: snapshot.activity.days,
-            referenceDate: referenceDate,
-            availableSize: CGSize(width: availableSize.width, height: max(60, availableSize.height - 42)),
-            maxWeeks: 26,
-            minCellSize: 5.5,
-            maxCellSize: 9.5,
-            spacing: 2.5
-        )
-        VStack(alignment: .leading, spacing: 8) {
-            ActivityHeatmapWithMonthLabels(layout: layout, family: .medium, selectedDate: selectedActivityDate)
-                .frame(maxWidth: .infinity, alignment: .center)
-            Text(activitySummary)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-    }
-
-    private var activitySummary: String {
-        let tokens = snapshot.activity.days.reduce(0) { $0 + $1.totalTokens }
-        let tokenText = WidgetFormat.tokens(tokens, style: "compact", presentation: snapshot.presentation)
-        return WidgetL10n.format("%@ tokens · %lld active days", tokenText, snapshot.activity.activeDays)
-    }
-}
-
-struct DashboardActivityModule: View {
-    let snapshot: WidgetSnapshot
-    let referenceDate: Date
-    let selectedActivityDate: String?
-    let availableWidth: CGFloat
-
-    var body: some View {
-        let layout = WidgetHeatmapLayoutCalculator.make(
-            days: snapshot.activity.days,
-            referenceDate: referenceDate,
-            availableSize: CGSize(width: availableWidth, height: 64),
-            maxWeeks: 16,
-            minCellSize: 5,
-            maxCellSize: 7.5,
-            spacing: 2.25
-        )
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                ModuleTitle(WidgetL10n.text("Activity"))
-                Spacer(minLength: 8)
-                Text(WidgetL10n.format("%lld days", layout.activeDays))
-                    .font(.system(size: 9, weight: .medium))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-            ActivityHeatmapWithMonthLabels(layout: layout, family: .large, selectedDate: selectedActivityDate)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    }
-}
-
-private struct ActivityHeatmapWithMonthLabels: View {
-    let layout: WidgetHeatmapLayout
-    let family: WidgetFamilyScope
-    let selectedDate: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            ActivityHeatmap(layout: layout, family: family, selectedDate: selectedDate)
-            HeatmapMonthLabels(layout: layout)
-        }
-        .frame(width: layout.renderedWidth, alignment: .leading)
-    }
-}
-
-private struct HeatmapMonthLabels: View {
-    let layout: WidgetHeatmapLayout
-
-    var body: some View {
-        ZStack(alignment: .leading) {
-            ForEach(markers) { marker in
-                Text(marker.title)
-                    .font(.system(size: 8, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .offset(x: min(markerOffset(marker.week), max(0, layout.renderedWidth - 22)))
-            }
-        }
-        .frame(width: layout.renderedWidth, height: 10, alignment: .leading)
-        .clipped()
-        .accessibilityHidden(true)
-    }
-
-    private var markers: [HeatmapMonthMarker] {
-        var result: [HeatmapMonthMarker] = []
-        var previousMonth: String?
-
-        for week in 0..<layout.weekCount {
-            let monthKeys = (0..<7).compactMap { weekday in
-                layout.cell(week: week, weekday: weekday)?.date.split(separator: "-").prefix(2).joined(separator: "-")
-            }
-            let monthKey = previousMonth.flatMap { previous in
-                monthKeys.first(where: { $0 != previous })
-            } ?? monthKeys.first
-            guard let monthKey else { continue }
-            if monthKey != previousMonth {
-                result.append(HeatmapMonthMarker(week: week, title: monthTitle(monthKey)))
-                previousMonth = monthKey
-            }
-        }
-        return result
-    }
-
-    private func markerOffset(_ week: Int) -> CGFloat {
-        CGFloat(week) * (layout.cellWidth + layout.spacing)
-    }
-
-    private func monthTitle(_ key: String) -> String {
-        let parts = key.split(separator: "-")
-        guard parts.count == 2,
-              let year = Int(parts[0]),
-              let month = Int(parts[1]),
-              let date = Calendar.current.date(from: DateComponents(year: year, month: month, day: 1))
-        else { return key }
-        return date.formatted(.dateTime.month(.abbreviated))
-    }
-}
-
-private struct HeatmapMonthMarker: Identifiable {
-    let week: Int
-    let title: String
-
-    var id: Int { week }
-}
-
 struct ModuleTitle: View {
     let title: String
 
@@ -697,7 +563,7 @@ struct ModuleTitle: View {
 
     var body: some View {
         Text(title.uppercased())
-            .font(.caption2.weight(.medium))
+            .font(.system(size: WidgetDesignTokens.dashboardSectionTitleSize, weight: .medium))
             .foregroundStyle(WidgetDesignTokens.muted)
     }
 }

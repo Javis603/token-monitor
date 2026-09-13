@@ -297,6 +297,20 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertEqual(store.selectedActivityDay(for: .large), "2026-07-17")
     }
 
+    func testSelectedActivityDayResolvesItsSnapshotMetrics() {
+        let days = [
+            WidgetActivityDay(date: "2026-07-16", intensity: 2, totalTokens: 12_000_000, costUsd: 4.25),
+            WidgetActivityDay(date: "2026-07-17", intensity: 4, totalTokens: 37_400_000, costUsd: 9.75)
+        ]
+
+        XCTAssertEqual(
+            WidgetActivitySelection.selectedDay(in: days, selectedDate: "2026-07-17"),
+            days[1]
+        )
+        XCTAssertNil(WidgetActivitySelection.selectedDay(in: days, selectedDate: nil))
+        XCTAssertNil(WidgetActivitySelection.selectedDay(in: days, selectedDate: "2026-07-18"))
+    }
+
     func testActivityDayStateClearsInvalidDates() {
         let suite = "token-monitor-widget-invalid-activity-day-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
