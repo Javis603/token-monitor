@@ -158,7 +158,6 @@ const clientDisplayPreferencesApi = window.TokenMonitorClientDisplayPreferences;
 const settingsListFilterApi = window.TokenMonitorSettingsListFilter;
 const customPricingFormApi = window.TokenMonitorCustomPricingForm;
 const viewDisplayPreferencesApi = window.TokenMonitorViewDisplayPreferences;
-const preferenceDragSortApi = window.TokenMonitorPreferenceDragSort;
 const verticalDragSortApi = window.TokenMonitorVerticalDragSort;
 const rowDragControllerApi = window.TokenMonitorRowDragController;
 const homeOverviewApi = window.TokenMonitorHomeOverview;
@@ -346,7 +345,6 @@ state.projectSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
-let preferenceDrag = null;
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
@@ -10250,19 +10248,6 @@ function preferenceRows(kind) {
   return Array.from(list?.querySelectorAll(selector) || []);
 }
 
-function preferenceOrder(kind) {
-  const attr = preferenceItemAttribute(kind);
-  return preferenceRows(kind).map((row) => row.dataset[attr]).filter(Boolean);
-}
-
-function preferenceRowRects(kind) {
-  const attr = preferenceItemAttribute(kind);
-  return preferenceRows(kind).map((row) => {
-    const rect = row.getBoundingClientRect();
-    return { id: row.dataset[attr], top: rect.top, bottom: rect.bottom };
-  });
-}
-
 function applyPreferenceOrder(kind, order) {
   const list = preferenceListForKind(kind);
   if (!list) return;
@@ -10270,75 +10255,16 @@ function applyPreferenceOrder(kind, order) {
   const rowsById = new Map(preferenceRows(kind).map((row) => [row.dataset[attr], row]));
   for (const id of order || []) {
     const row = rowsById.get(id);
-    if (row) list.appendChild(row);
+    if (!row) continue;
+    list.appendChild(row);
+    const companionId = kind === 'view'
+      ? ({ home: 'homeSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', status: 'serviceProvidersContainer' })[id]
+      : kind === 'homeModule'
+        ? ({ limits: 'homeLimitProviderContainer', trends: 'homeActivitySettingsContainer' })[id]
+        : '';
+    const companion = companionId ? document.getElementById(companionId) : null;
+    if (companion) list.appendChild(companion);
   }
-}
-
-function finishPreferenceDrag() {
-  setPreferencePointerListeners(false);
-  document.querySelectorAll('.is-dragging').forEach((row) => row.classList.remove('is-dragging'));
-  preferenceDrag = null;
-}
-
-function applyPreferenceLiveOrder(kind, clientY) {
-  if (!preferenceDrag) return -1;
-  const currentOrder = preferenceOrder(kind);
-  const nextOrder = preferenceDragSortApi.reorderItemsFromClientY(currentOrder, preferenceRowRects(kind), preferenceDrag.id, clientY);
-  if (nextOrder.join(',') !== currentOrder.join(',')) {
-    applyPreferenceOrder(kind, nextOrder);
-    preferenceDrag.changed = true;
-  }
-  preferenceDrag.order = nextOrder;
-  return nextOrder;
-}
-
-function startPreferenceDrag(event, kind, id) {
-  if (event.currentTarget.disabled) return;
-  event.preventDefault();
-  const order = preferenceOrder(kind);
-  preferenceDrag = { kind, id, pointerId: event.pointerId, originalOrder: order, order, changed: false, handle: event.currentTarget };
-  event.currentTarget.setPointerCapture?.(event.pointerId);
-  event.currentTarget.closest('[data-client], [data-provider], [data-view], [data-status-provider], [data-home-module], [data-home-limit-provider]')?.classList.add('is-dragging');
-  setPreferencePointerListeners(true);
-  applyPreferenceLiveOrder(kind, event.clientY);
-}
-
-function setPreferencePointerListeners(active) {
-  const method = active ? 'addEventListener' : 'removeEventListener';
-  window[method]('pointermove', onPreferencePointerMove, true);
-  window[method]('pointerup', onPreferencePointerUp, true);
-  window[method]('pointercancel', onPreferencePointerCancel, true);
-}
-
-function releasePreferencePointer(pointerId) {
-  const handle = preferenceDrag?.handle;
-  if (handle?.hasPointerCapture?.(pointerId)) {
-    handle.releasePointerCapture(pointerId);
-  }
-}
-
-function onPreferencePointerMove(event) {
-  if (!preferenceDrag || preferenceDrag.pointerId !== event.pointerId) return;
-  event.preventDefault();
-  applyPreferenceLiveOrder(preferenceDrag.kind, event.clientY);
-}
-
-function onPreferencePointerUp(event) {
-  if (!preferenceDrag || preferenceDrag.pointerId !== event.pointerId) return;
-  event.preventDefault();
-  const { kind } = preferenceDrag;
-  const order = applyPreferenceLiveOrder(kind, event.clientY) || preferenceDrag.order;
-  const changed = preferenceDrag.changed;
-  releasePreferencePointer(event.pointerId);
-  finishPreferenceDrag();
-  if (changed) void onPreferenceOrderCommit(kind, order);
-}
-
-function onPreferencePointerCancel(event) {
-  if (!preferenceDrag || preferenceDrag.pointerId !== event.pointerId) return;
-  applyPreferenceOrder(preferenceDrag.kind, preferenceDrag.originalOrder);
-  releasePreferencePointer(event.pointerId);
-  finishPreferenceDrag();
 }
 
 function createPreferenceOrderHandle({ kind, id, label, count }) {
@@ -10357,9 +10283,124 @@ function createPreferenceOrderHandle({ kind, id, label, count }) {
   handle.setAttribute('aria-label', handle.title);
   handle.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Home End');
   handle.disabled = count <= 1;
-  handle.addEventListener('pointerdown', (event) => startPreferenceDrag(event, kind, id));
+  // Main-screen lists keep the handle as both the visible reorder affordance
+  // and the only pointer/keyboard entry point. The row listener below still
+  // delegates the gesture to the shared controller.
   handle.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, kind, id));
   return handle;
+}
+
+const VIEW_PREFERENCE_SUBGROUPS = {
+  home: ['homeSettingsExpanded', 'homeSettingsContainer'],
+  trends: ['trendSettingsExpanded', 'trendSettingsContainer'],
+  project: ['projectSettingsExpanded', 'projectSettingsContainer'],
+  status: ['serviceProvidersExpanded', 'serviceProvidersContainer']
+};
+
+const HOME_MODULE_SUBGROUPS = {
+  limits: ['homeLimitSettingsExpanded', 'homeLimitProviderContainer'],
+  trends: ['homeActivitySettingsExpanded', 'homeActivitySettingsContainer']
+};
+
+function expandedPreferenceSubgroups(definitions) {
+  return Object.entries(definitions)
+    .filter(([, [stateKey]]) => Boolean(state[stateKey]))
+    .map(([id]) => id)
+    .join(',');
+}
+
+function setPreferenceSubgroupsExpanded(definitions, rowSelector, value) {
+  const expanded = new Set(String(value || '').split(',').filter(Boolean));
+  const dataKey = rowSelector === '.view-preference-row' ? 'view' : 'homeModule';
+  for (const [id, [stateKey, containerId]] of Object.entries(definitions)) {
+    const open = expanded.has(id);
+    state[stateKey] = open;
+    const row = Array.from(document.querySelectorAll(rowSelector)).find((candidate) => candidate.dataset[dataKey] === id);
+    const toggle = row?.querySelector('.view-subgroup-toggle');
+    toggle?.classList.toggle('is-expanded', open);
+    toggle?.setAttribute('aria-expanded', String(open));
+    document.getElementById(containerId)?.classList.toggle('hidden', !open);
+  }
+}
+
+function togglePreferenceSubgroup(definitions, rowSelector, id) {
+  const expanded = new Set(expandedPreferenceSubgroups(definitions).split(',').filter(Boolean));
+  if (expanded.has(id)) expanded.delete(id);
+  else expanded.add(id);
+  setPreferenceSubgroupsExpanded(definitions, rowSelector, Array.from(expanded).join(','));
+}
+
+function setViewPreferenceExpanded(value) {
+  setPreferenceSubgroupsExpanded(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', value);
+}
+
+function setHomeModulePreferenceExpanded(value) {
+  setPreferenceSubgroupsExpanded(HOME_MODULE_SUBGROUPS, '.home-module-preference-row', value);
+}
+
+// Main-screen rows retain their six-dot handle as the only drag surface while
+// using the same thresholded controller as Collection and AI Tool Limits.
+// Visibility/configuration controls and nested panels keep their own gestures.
+const MAIN_PREFERENCE_DRAG_EXCLUDED = 'button:not(.preference-order-handle), input, select, textarea, a, label, .accordion-animated-container';
+
+function createMainPreferenceRowDrag({ kind, rowSelector, idKey, settingKey, getExpanded, setExpanded }) {
+  return rowDragControllerApi.createRowDragController({
+    dragSort: verticalDragSortApi,
+    getList: () => preferenceListForKind(kind),
+    getScrollPanel: () => els.settingsPanel,
+    rowSelector,
+    idKey,
+    dragExcluded: MAIN_PREFERENCE_DRAG_EXCLUDED,
+    dragStartSelector: '.preference-order-handle',
+    getExpanded,
+    setExpanded,
+    applyOrder: (order) => applyPreferenceOrder(kind, order),
+    preserveScroll: preserveSettingsPanelScroll,
+    mirrorOrder: (order) => {
+      const value = order.join(',');
+      state.settings = { ...state.settings, [settingKey]: value };
+      return value;
+    },
+    persistOrder: (_order, _id, value) => void saveSettings({ [settingKey]: value }),
+    requestRender: () => renderViewPreferences()
+  });
+}
+
+const viewPreferenceRowDrag = createMainPreferenceRowDrag({
+  kind: 'view',
+  rowSelector: '.view-preference-row[data-view]',
+  idKey: 'view',
+  settingKey: 'viewDisplayOrder',
+  getExpanded: () => expandedPreferenceSubgroups(VIEW_PREFERENCE_SUBGROUPS),
+  setExpanded: setViewPreferenceExpanded
+});
+
+const homeModulePreferenceRowDrag = createMainPreferenceRowDrag({
+  kind: 'homeModule',
+  rowSelector: '.home-module-preference-row[data-home-module]',
+  idKey: 'homeModule',
+  settingKey: 'homeModuleOrder',
+  getExpanded: () => expandedPreferenceSubgroups(HOME_MODULE_SUBGROUPS),
+  setExpanded: setHomeModulePreferenceExpanded
+});
+
+const homeLimitProviderRowDrag = createMainPreferenceRowDrag({
+  kind: 'homeLimitProvider',
+  rowSelector: '.home-limit-provider-row[data-home-limit-provider]',
+  idKey: 'homeLimitProvider',
+  settingKey: 'homeLimitProviderOrder'
+});
+
+const statusProviderRowDrag = createMainPreferenceRowDrag({
+  kind: 'statusProvider',
+  rowSelector: '.status-provider-row[data-status-provider]',
+  idKey: 'statusProvider',
+  settingKey: 'serviceProviderDisplayOrder'
+});
+
+function deferMainPreferenceRender() {
+  return [viewPreferenceRowDrag, homeModulePreferenceRowDrag, homeLimitProviderRowDrag, statusProviderRowDrag]
+    .some((controller) => controller.deferRender());
 }
 
 // The limit provider list drags from the whole row instead of a handle. The
@@ -10383,14 +10424,17 @@ const limitProviderRowDrag = rowDragControllerApi.createRowDragController({
   applyOrder: (order) => applyPreferenceOrder('provider', order),
   preserveScroll: preserveSettingsPanelScroll,
   mirrorOrder: (order) => { state.settings = { ...state.settings, limitProviderOrder: order.join(',') }; },
-  // Saved directly rather than through `onPreferenceOrderCommit`, whose no-op
-  // guard compares against the value `mirrorOrder` just wrote and would drop it.
+  // Saved directly because the controller has already mirrored the order into
+  // local state before a deferred repaint can run.
   persistOrder: (order) => void saveSettings({ limitProviderOrder: order.join(',') }),
   requestRender: () => renderLimitProviderCheckboxes()
 });
 
 function renderViewPreferences() {
   if (!els.viewDisplayList) return;
+  // Every list under Main Screen shares this render path. A settings or stats
+  // repaint during a drag is held until the controller lands or aborts.
+  if (deferMainPreferenceRender()) return;
   const hidden = hiddenViewSet();
   const orderValue = effectiveViewDisplayOrderValue();
   const views = viewDisplayPreferencesApi.orderedViews(VIEW_DISPLAY_OPTIONS, orderValue);
@@ -10438,6 +10482,7 @@ function renderViewPreferences() {
     actions.className = 'tool-preference-actions';
     actions.append(visibility, handle);
     row.append(name, actions);
+    row.addEventListener('pointerdown', (event) => viewPreferenceRowDrag.startRowDrag(event, id));
     els.viewDisplayList.appendChild(row);
     if (id === 'home') {
       row.classList.add('has-subgroup');
@@ -10451,13 +10496,7 @@ function renderViewPreferences() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => {
-        state.homeSettingsExpanded = !state.homeSettingsExpanded;
-        toggle.classList.toggle('is-expanded', state.homeSettingsExpanded);
-        toggle.setAttribute('aria-expanded', String(Boolean(state.homeSettingsExpanded)));
-        const container = document.getElementById('homeSettingsContainer');
-        if (container) container.classList.toggle('hidden', !state.homeSettingsExpanded);
-      });
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
       actions.insertBefore(toggle, visibility);
 
       const listContainer = document.createElement('div');
@@ -10481,13 +10520,7 @@ function renderViewPreferences() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => {
-        state.trendSettingsExpanded = !state.trendSettingsExpanded;
-        toggle.classList.toggle('is-expanded', state.trendSettingsExpanded);
-        toggle.setAttribute('aria-expanded', String(Boolean(state.trendSettingsExpanded)));
-        const container = document.getElementById('trendSettingsContainer');
-        if (container) container.classList.toggle('hidden', !state.trendSettingsExpanded);
-      });
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
       actions.insertBefore(toggle, visibility);
       
       const listContainer = document.createElement('div');
@@ -10511,13 +10544,7 @@ function renderViewPreferences() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => {
-        state.projectSettingsExpanded = !state.projectSettingsExpanded;
-        toggle.classList.toggle('is-expanded', state.projectSettingsExpanded);
-        toggle.setAttribute('aria-expanded', String(Boolean(state.projectSettingsExpanded)));
-        const container = document.getElementById('projectSettingsContainer');
-        if (container) container.classList.toggle('hidden', !state.projectSettingsExpanded);
-      });
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
       actions.insertBefore(toggle, visibility);
 
       const listContainer = document.createElement('div');
@@ -10541,13 +10568,7 @@ function renderViewPreferences() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => {
-        state.serviceProvidersExpanded = !state.serviceProvidersExpanded;
-        toggle.classList.toggle('is-expanded', state.serviceProvidersExpanded);
-        toggle.setAttribute('aria-expanded', String(Boolean(state.serviceProvidersExpanded)));
-        const container = document.getElementById('serviceProvidersContainer');
-        if (container) container.classList.toggle('hidden', !state.serviceProvidersExpanded);
-      });
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
       actions.insertBefore(toggle, actions.firstChild);
       
       const listContainer = document.createElement('div');
@@ -10682,6 +10703,7 @@ function renderHomeLimitProviderList() {
     actions.className = 'tool-preference-actions';
     actions.append(visibility, handle);
     row.append(labelGroup, actions);
+    row.addEventListener('pointerdown', (event) => homeLimitProviderRowDrag.startRowDrag(event, id));
     wrap.append(row);
   }
   return wrap;
@@ -10748,21 +10770,7 @@ function renderHomeSettingsList() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       configure.append(toggleIcon);
-      configure.addEventListener('click', () => {
-        if (id === 'limits') {
-          state.homeLimitSettingsExpanded = !state.homeLimitSettingsExpanded;
-          configure.classList.toggle('is-expanded', state.homeLimitSettingsExpanded);
-          configure.setAttribute('aria-expanded', String(Boolean(state.homeLimitSettingsExpanded)));
-          const container = document.getElementById('homeLimitProviderContainer');
-          if (container) container.classList.toggle('hidden', !state.homeLimitSettingsExpanded);
-          return;
-        }
-        state.homeActivitySettingsExpanded = !state.homeActivitySettingsExpanded;
-        configure.classList.toggle('is-expanded', state.homeActivitySettingsExpanded);
-        configure.setAttribute('aria-expanded', String(Boolean(state.homeActivitySettingsExpanded)));
-        const container = document.getElementById('homeActivitySettingsContainer');
-        if (container) container.classList.toggle('hidden', !state.homeActivitySettingsExpanded);
-      });
+      configure.addEventListener('click', () => togglePreferenceSubgroup(HOME_MODULE_SUBGROUPS, '.home-module-preference-row', id));
       actions.append(configure);
     }
     const visibility = document.createElement('button');
@@ -10776,6 +10784,7 @@ function renderHomeSettingsList() {
     const handle = createPreferenceOrderHandle({ kind: 'homeModule', id, label, count: modules.length });
     actions.append(visibility, handle);
     row.append(name, actions);
+    row.addEventListener('pointerdown', (event) => homeModulePreferenceRowDrag.startRowDrag(event, id));
     wrap.append(row);
     if (id === 'limits') {
       const listContainer = document.createElement('div');
@@ -11026,6 +11035,7 @@ function renderServiceProviderList() {
     actions.className = 'tool-preference-actions';
     actions.append(visibility, handle);
     row.append(name, actions);
+    row.addEventListener('pointerdown', (event) => statusProviderRowDrag.startRowDrag(event, id));
     wrap.append(row);
   }
   return wrap;
@@ -12591,32 +12601,6 @@ async function onPreferenceReorder(kind, id, targetIndex) {
   else if (kind === 'homeLimitProvider') await onHomeLimitProviderReorder(id, targetIndex);
   else if (kind === 'statusProvider') await onServiceProviderReorder(id, targetIndex);
   else await onLimitProviderReorder(id, targetIndex);
-}
-
-// Only the handle-based lists commit through here; the two whole-row lists save
-// from their own drag wiring, because this compares against the value they have
-// already mirrored into `state.settings` and would read the write as a no-op.
-async function onPreferenceOrderCommit(kind, order) {
-  const value = (order || []).join(',');
-  if (kind === 'view') {
-    const current = viewDisplayPreferencesApi.normalizeViewDisplayOrder(effectiveViewDisplayOrderValue(), VIEW_DISPLAY_OPTIONS).join(',');
-    if (value !== current) await saveSettings({ viewDisplayOrder: value });
-    return;
-  }
-  if (kind === 'homeModule') {
-    const current = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS).join(',');
-    if (value !== current) await saveSettings({ homeModuleOrder: value });
-    return;
-  }
-  if (kind === 'homeLimitProvider') {
-    const current = limitProviderOrderApi.normalizeLimitProviderOrder(homeLimitProviderOrderValue(), LIMIT_PROVIDERS).join(',');
-    if (value !== current) await saveSettings({ homeLimitProviderOrder: value });
-    return;
-  }
-  if (kind === 'statusProvider') {
-    const current = serviceStatusProviderPreferencesApi.normalizeOrder(state.settings?.serviceProviderDisplayOrder, SERVICE_PROVIDER_OPTIONS).join(',');
-    if (value !== current) await saveSettings({ serviceProviderDisplayOrder: value });
-  }
 }
 
 function onPreferenceOrderKeydown(event, kind, id) {

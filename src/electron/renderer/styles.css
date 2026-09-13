@@ -2517,13 +2517,6 @@ span.settings-note.settings-item-desc {
   opacity: 0.34;
   cursor: default;
 }
-.view-preference-row.is-dragging,
-.home-module-preference-row.is-dragging,
-.home-limit-provider-row.is-dragging {
-  background: rgba(var(--accent-rgb), 0.08);
-  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.28);
-  opacity: 0.9;
-}
 .reset-appearance-button {
   /* Glyph label, same reason as .tool-header-action. */
   font-size: 16px;
@@ -5648,6 +5641,56 @@ html.is-windows .limit-live-badge {
   gap: 8px;
 }
 .status-provider-row.is-hidden .tool-preference-name { opacity: 0.45; }
+
+/* Main Screen starts pointer reordering from the six-dot handles, while the
+   rows use the same transform choreography as Collection and AI Tool Limits. */
+.view-preference-row,
+.home-module-preference-row,
+.home-limit-provider-row,
+.status-provider-row {
+  position: relative;
+  touch-action: pan-y;
+  transform: translateY(calc(var(--drag-y, 0px) + var(--drag-shift, 0px)));
+  transition:
+    transform 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+.view-preference-row.dragging,
+.home-module-preference-row.dragging,
+.home-limit-provider-row.dragging,
+.status-provider-row.dragging {
+  z-index: 2;
+  background: rgba(var(--panel-rgb), 0.96);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.62);
+  cursor: grabbing;
+  scale: 1.02;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+  will-change: transform;
+}
+.view-preference-row.dragging .preference-order-handle,
+.home-module-preference-row.dragging .preference-order-handle,
+.home-limit-provider-row.dragging .preference-order-handle,
+.status-provider-row.dragging .preference-order-handle { cursor: grabbing; }
+#viewDisplayList.is-landing > .view-preference-row,
+.home-settings-list.is-landing > .home-module-preference-row,
+.home-limit-provider-list.is-landing > .home-limit-provider-row,
+.status-provider-list.is-landing > .status-provider-row {
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+#viewDisplayList.drag-active > .view-preference-row:not(.dragging),
+.home-settings-list.drag-active > .home-module-preference-row:not(.dragging),
+.home-limit-provider-list.drag-active > .home-limit-provider-row:not(.dragging),
+.status-provider-list.drag-active > .status-provider-row:not(.dragging) { opacity: 0.78; }
+#viewDisplayList.is-reordering > .accordion-animated-container,
+.home-settings-list.is-reordering > .accordion-animated-container { transition: none; }
 .service-status-empty {
   padding: 12px 0;
   color: var(--muted);
@@ -7045,6 +7088,10 @@ html.is-windows .limit-live-badge {
   .tray-composer-item { transition: none; }
   .settings-panel .limit-provider-row { transition: none; }
   .tool-preference-row { transition: none; }
+  .view-preference-row,
+  .home-module-preference-row,
+  .home-limit-provider-row,
+  .status-provider-row { transition: none; }
   .tool-preference-main .cursor-disclosure-icon { transition: none; }
 }
 
