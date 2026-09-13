@@ -39,7 +39,7 @@ function normalizeTimeMetrics(value) {
 
 // Tokscale emits these clients' reasoning as a disjoint JSON bucket. History
 // uses the same reasoning-inclusive public output convention as usage.js.
-const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'codex', 'dsh']);
+const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'codex', 'droid', 'dsh']);
 
 function hasDisjointReasoning(client) {
   return TOKSCALE_DISJOINT_REASONING_CLIENTS.has(String(client).trim().toLowerCase());

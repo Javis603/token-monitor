@@ -1699,6 +1699,11 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const xdgHome = xdgDataHome(home);
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
+  // Droid (Factory): tokscale reads the home-relative ~/.factory/sessions tree on
+  // every platform (clients.rs PathRoot::Home). The Factory desktop app is an
+  // Electron shell over the same bundled droid kernel and keeps no session data
+  // of its own, so this one root covers both.
+  add('droid', ['droid-sessions', path.join(home, '.factory', 'sessions')]);
   // Tokscale resolves these two caches differently and the split is deliberate
   // upstream, so mirror it rather than picking whichever looks tidier:
   //   cursor.rs      — `home_dir().join(".config/tokscale/cursor-cache")`, a
