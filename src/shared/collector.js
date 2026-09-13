@@ -64,6 +64,10 @@ const {
   qoderCnDataPaths,
   resolveQoderCnPricing
 } = require('./providers/qodercn/usage');
+// Mavis (MiniMax Code) — reads ~/.minimax/v2/sqlite/runtime-state.sqlite via a
+// locallyParsed adapter, same lane as proma / qodercn. Cost is the runtime's
+// `cost_usd` column, so we don't need a pricing resolver here.
+const { buildMavisHistoryGraph, buildMavisPeriods, collectMavisRows } = require('./providers/mavis/usage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 const {
@@ -964,6 +968,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
   }
+  if (options.mavisGraph) {
+    rawGraphs.push(options.mavisGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.mavisGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -1069,6 +1077,9 @@ async function collectUsageOnce(options) {
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
+  // Mavis (MiniMax Code) is locallyParsed like proma / qodercn; the
+  // includes* flag gates its collect branch below.
+  const includesMavis = normalizedClients.split(',').includes('mavis');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -1097,6 +1108,12 @@ async function collectUsageOnce(options) {
   let promaPricing = null;
   let qoderCnPeriods = null;
   let qoderCnRows = null;
+  // Mavis (MiniMax Code) — same shape as the proma / qodercn locals. We don't
+  // need a separate period-read-failure flag: buildMavisPeriods() already
+  // throws on a hard read failure, which the catch below surfaces through
+  // options.logger and the next anchor / snapshot keeps the last good state.
+  let mavisPeriods = null;
+  let mavisRows = null;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
   const emitProgress = (periods) => {
@@ -1170,6 +1187,25 @@ async function collectUsageOnce(options) {
         qoderCnPeriods = options.qoderCnFallbackPeriods || null;
       }
     }
+    if (includesMavis && (!targetRequested || targetClients.includes('mavis'))) {
+      // Mavis is read locally and never goes through the tokscale client
+      // filter (locallyParsed: true). The adapter handles its own
+      // sqlite3-CLI / node:sqlite fallback inside readMavisDbRows and
+      // throws on a hard read failure — we surface the error and skip
+      // the partition so the next tick can try again with a fresh
+      // DB handle.
+      try {
+        mavisRows = await collectMavisRows({ logger: options.logger });
+        const mavisJson = await buildMavisPeriods({ now: collectedAt, allTimeSince, rows: mavisRows });
+        mavisPeriods = {
+          today: extractUsageFromTokscale(mavisJson.today),
+          month: extractUsageFromTokscale(mavisJson.month),
+          allTime: extractUsageFromTokscale(mavisJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`mavis parse failed: ${err.message}`);
+      }
+    }
     throwIfAborted(options.signal);
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
@@ -1216,6 +1252,7 @@ async function collectUsageOnce(options) {
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
       if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
+      if (mavisPeriods) freshPartitions.mavis = mavisPeriods.today;
       if (qoderCnPeriodReadFailed && anchor.todayPartitions?.qodercn) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
@@ -1287,6 +1324,12 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, qoderCnPeriods.month);
       allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), qodercn: qoderCnPeriods.today };
+    }
+    if (mavisPeriods && !anchorUsed) {
+      today = mergePeriods(today, mavisPeriods.today);
+      month = mergePeriods(month, mavisPeriods.month);
+      allTime = mergePeriods(allTime, mavisPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), mavis: mavisPeriods.today };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1500,11 +1543,29 @@ async function collectUsageOnce(options) {
     const historyQoderCnGraph = qoderCnHistoryReadFailed
       ? options.qoderCnHistoryFallbackGraph
       : qoderCnGraph;
+    // Mavis history graph: reuse the period scan's full rows when present
+    // (non-anchored ticks), or read full rows just for the graph on anchored
+    // ticks. mavis doesn't need a pricing resolver — its `cost_usd` is the
+    // source of truth — so this stays single-pass.
+    let mavisHistoryGraph = null;
+    let mavisHistoryReadFailed = false;
+    if (includesMavis) {
+      try {
+        const rows = (mavisRows && mavisRows.length > 0 && mavisRows[0].createdAt && mavisRows[0].createdAt < Date.now() - 30 * 60_000)
+          ? mavisRows
+          : await collectMavisRows({ logger: options.logger });
+        mavisHistoryGraph = await buildMavisHistoryGraph({ rows });
+      } catch (err) {
+        mavisHistoryReadFailed = true;
+        if (typeof options.logger === 'function') options.logger(`mavis history parse failed: ${err.message}`);
+      }
+    }
     throwIfAborted(options.signal);
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
       qoderCnGraph: historyQoderCnGraph || null,
+      mavisGraph: !mavisHistoryReadFailed ? mavisHistoryGraph : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1845,6 +1906,19 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // Qoder CN — SQLite DB under the platform Application Support dir.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform: process.platform, env: process.env });
   add('qodercn', ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]));
+  // Mavis (MiniMax Code) — single SQLite DB at
+  // ~/.minimax/v2/sqlite/runtime-state.sqlite. `dir` is the parent so
+  // chokidar still wakes the collector when the DB file is replaced, and
+  // `sourcePath` is the file itself so the diagnostics panel can show
+  // its size + mtime under the mavis-sqlite check.
+  add(
+    'mavis',
+    [
+      'mavis-sqlite',
+      path.join(home, '.minimax', 'v2', 'sqlite'),
+      path.join(home, '.minimax', 'v2', 'sqlite', 'runtime-state.sqlite')
+    ]
+  );
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
     resolveReasonixStatsDir({ env: process.env, homeDir: home, platform: process.platform, cwdDir: process.cwd() })
