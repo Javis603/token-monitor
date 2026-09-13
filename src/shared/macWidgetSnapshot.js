@@ -3,7 +3,7 @@
 const { KNOWN_CLIENTS } = require('./clientTracking');
 const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } = require('./limitProviders');
 
-const MAC_WIDGET_SCHEMA_VERSION = 9;
+const MAC_WIDGET_SCHEMA_VERSION = 10;
 const MAC_WIDGET_FRESHNESS_HEARTBEAT_MS = 5 * 60 * 1000;
 const KNOWN_TOOLS = new Set(KNOWN_CLIENTS.split(',').filter(Boolean));
 const KNOWN_LIMIT_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
@@ -131,20 +131,24 @@ function periodStats(stats, period) {
 
 function buildTools(period) {
   const tokensByTool = period?.clients && typeof period.clients === 'object' ? period.clients : {};
+  const costsByTool = period?.clientCosts && typeof period.clientCosts === 'object' ? period.clientCosts : {};
   const tools = [];
   for (const tool of KNOWN_TOOLS) {
     const totalTokens = Math.round(nonNegativeNumber(tokensByTool[tool]));
-    if (totalTokens <= 0) continue;
-    tools.push({ id: tool, totalTokens });
+    const costUsd = nonNegativeNumber(costsByTool[tool]);
+    if (totalTokens <= 0 && costUsd <= 0) continue;
+    tools.push({ id: tool, totalTokens, costUsd });
   }
   tools.sort((left, right) => (
     right.totalTokens - left.totalTokens
+    || right.costUsd - left.costUsd
     || left.id.localeCompare(right.id)
   ));
   const denominator = tools.reduce((sum, tool) => sum + tool.totalTokens, 0);
   return tools.slice(0, 10).map((tool) => ({
     id: tool.id,
     totalTokens: tool.totalTokens,
+    costUsd: tool.costUsd,
     sharePercent: denominator > 0 ? Math.max(0, Math.min(100, tool.totalTokens / denominator * 100)) : 0
   }));
 }
@@ -170,9 +174,13 @@ function buildLimitWindow(window) {
     kind,
     metric,
     showMeter: window.showMeter !== false,
+    usedPercent,
     remainingPercent,
     resetsAt: normalizedIso(window.resetsAt),
     ...(boundaryKind ? { boundaryKind } : {}),
+    windowMinutes: window.windowMinutes === null || window.windowMinutes === undefined
+      ? null
+      : nonNegativeNumber(window.windowMinutes),
     ...(remaining === null ? {} : { remaining }),
     ...(currency ? { currency } : {}),
     ...(detail ? { detail } : {})
@@ -302,6 +310,7 @@ function providerLabel(provider) {
 
 function buildModels(period) {
   const values = period?.models && typeof period.models === 'object' ? period.models : {};
+  const costs = period?.modelCosts && typeof period.modelCosts === 'object' ? period.modelCosts : {};
   const rowsByName = new Map();
   for (const [rawName, rawTokens] of Object.entries(values)) {
     const displayName = safeDisplayName(rawName);
@@ -311,9 +320,10 @@ function buildModels(period) {
     const existing = rowsByName.get(key);
     if (existing) {
       existing.totalTokens += totalTokens;
+      existing.costUsd += nonNegativeNumber(costs[rawName]);
       existing.displayName = existing.displayName.localeCompare(displayName) <= 0 ? existing.displayName : displayName;
     } else {
-      rowsByName.set(key, { displayName, totalTokens, key });
+      rowsByName.set(key, { displayName, totalTokens, costUsd: nonNegativeNumber(costs[rawName]), key });
     }
   }
   const rows = Array.from(rowsByName.values());
@@ -323,6 +333,7 @@ function buildModels(period) {
     displayName: row.displayName,
     id: `model-${stableHash(row.key)}`,
     totalTokens: row.totalTokens,
+    costUsd: row.costUsd,
     sharePercent: denominator > 0 ? Math.max(0, Math.min(100, row.totalTokens / denominator * 100)) : 0
   }));
 }
@@ -343,7 +354,8 @@ function normalizedDaily(history) {
     if (!date) continue;
     byDate.set(date, {
       date,
-      totalTokens: Math.round(nonNegativeNumber(entry?.tokens))
+      totalTokens: Math.round(nonNegativeNumber(entry?.tokens)),
+      costUsd: nonNegativeNumber(entry?.cost)
     });
   }
   return Array.from(byDate.values()).sort((left, right) => left.date.localeCompare(right.date));
@@ -372,7 +384,8 @@ function buildActivity(history) {
     days: daily.map((day) => ({
       date: day.date,
       intensity: peak > 0 ? Math.max(0, Math.min(4, Math.ceil(day.totalTokens / peak * 4))) : 0,
-      totalTokens: day.totalTokens
+      totalTokens: day.totalTokens,
+      costUsd: day.costUsd
     }))
   };
 }
@@ -384,7 +397,8 @@ function buildTrend(history, options = {}) {
     const today = localDayKey(options.now);
     const livePeriod = options.livePeriod && typeof options.livePeriod === 'object' ? options.livePeriod : {};
     const liveTokens = Math.round(nonNegativeNumber(livePeriod.totalTokens));
-    if (today && (daily.length > 0 || liveTokens > 0)) {
+    const liveCost = nonNegativeNumber(livePeriod.costUsd);
+    if (today && (daily.length > 0 || liveTokens > 0 || liveCost > 0)) {
       const start = addCalendarDays(today, -(TREND_WINDOW_DAYS - 1));
       const byDate = new Map(daily
         .filter((point) => point.date >= start && point.date <= today)
@@ -396,7 +410,8 @@ function buildTrend(history, options = {}) {
         if (!historical) {
           points.push({
             date,
-            totalTokens: date === today ? liveTokens : 0
+            totalTokens: date === today ? liveTokens : 0,
+            costUsd: date === today ? liveCost : 0
           });
           continue;
         }
@@ -405,7 +420,8 @@ function buildTrend(history, options = {}) {
           ...(date === today ? {
             // The graph may already contain part or all of today's usage. Use
             // the greater observation instead of adding live and graph values.
-            totalTokens: Math.max(historical.totalTokens, liveTokens)
+            totalTokens: Math.max(historical.totalTokens, liveTokens),
+            costUsd: Math.max(historical.costUsd, liveCost)
           } : {})
         });
       }
@@ -414,7 +430,7 @@ function buildTrend(history, options = {}) {
     }
   }
   return {
-    points: points.map(({ date, totalTokens }) => ({ date, totalTokens }))
+    points: points.map(({ date, totalTokens, costUsd }) => ({ date, totalTokens, costUsd }))
   };
 }
 
@@ -470,6 +486,9 @@ function buildMacWidgetSnapshot(stats, options = {}) {
     month: buildPeriodSnapshot(stats, 'month', history, safeNow),
     total: buildPeriodSnapshot(stats, 'allTime', history, safeNow)
   };
+  // This is a bounded, privacy-safe Widget contract rather than a copy of the
+  // full App stats. Preserve normalized source metrics that can support future
+  // Widget compositions even when today's views do not render every one.
   return {
     schemaVersion: MAC_WIDGET_SCHEMA_VERSION,
     generatedAt,

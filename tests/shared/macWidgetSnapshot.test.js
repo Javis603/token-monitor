@@ -83,7 +83,7 @@ function aggregateDevice(deviceId, sourceTime, totalTokens = 42) {
   };
 }
 
-test('builds schema v9 periods, quota and presentation', () => {
+test('builds schema v10 periods, quota and presentation', () => {
   const snapshot = buildSnapshot(sampleStats(), {
     now: NOW,
     presentation: {
@@ -93,34 +93,38 @@ test('builds schema v9 periods, quota and presentation', () => {
   });
 
   assert.equal(snapshot.schemaVersion, MAC_WIDGET_SCHEMA_VERSION);
-  assert.equal(MAC_WIDGET_SCHEMA_VERSION, 9);
+  assert.equal(MAC_WIDGET_SCHEMA_VERSION, 10);
   assert.deepEqual(snapshot.periods.day.overview, {
     totalTokens: 1_200_000, costUsd: 1.25
   });
   assert.equal(snapshot.periods.day.overview.totalTokens, 1_200_000);
   assert.equal(snapshot.periods.month.overview.totalTokens, 9_000_000);
   assert.equal(snapshot.periods.total.overview.totalTokens, 20_000_000);
-  assert.deepEqual(snapshot.periods.day.tools.map((tool) => [tool.id, tool.totalTokens]), [
-    ['codex', 1_000_000], ['claude', 200_000]
+  assert.deepEqual(snapshot.periods.day.tools.map((tool) => [tool.id, tool.totalTokens, tool.costUsd]), [
+    ['codex', 1_000_000, 1], ['claude', 200_000, 0.25]
   ]);
   assert.ok(Math.abs(snapshot.periods.day.tools[0].sharePercent - (100 / 1.2)) < Number.EPSILON * 100);
   assert.ok(Math.abs(snapshot.periods.day.tools[1].sharePercent - (100 / 6)) < Number.EPSILON * 100);
   assert.deepEqual(snapshot.quota[0].windows[0], {
     kind: 'weekly', metric: null, showMeter: true,
+    usedPercent: 35,
     remainingPercent: 65,
-    resetsAt: '2026-07-20T00:00:00.000Z'
+    resetsAt: '2026-07-20T00:00:00.000Z',
+    windowMinutes: null
   });
-  assert.deepEqual(snapshot.periods.day.models.map((model) => [model.displayName, model.totalTokens, model.sharePercent]), [
-    ['gpt-5.6', 900_000, 75], ['MiMo V2 Pro', 300_000, 25]
+  assert.deepEqual(snapshot.periods.day.models.map((model) => [model.displayName, model.totalTokens, model.costUsd, model.sharePercent]), [
+    ['gpt-5.6', 900_000, 1, 75], ['MiMo V2 Pro', 300_000, 0.25, 25]
   ]);
   assert.equal(snapshot.periods.day.activity.activeDays, 3);
   assert.deepEqual(snapshot.periods.day.activity.days.map((day) => day.intensity), [2, 4, 1]);
   assert.deepEqual(snapshot.periods.day.activity.days.map((day) => day.totalTokens), [100, 200, 50]);
+  assert.deepEqual(snapshot.periods.day.activity.days.map((day) => day.costUsd), [0.1, 0.2, 0.05]);
   assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.date), [
     '2026-07-11', '2026-07-12', '2026-07-13', '2026-07-14',
     '2026-07-15', '2026-07-16', '2026-07-17'
   ]);
   assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.totalTokens), [0, 0, 0, 0, 100, 200, 1_200_000]);
+  assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.costUsd), [0, 0, 0, 0, 0.1, 0.2, 1.25]);
   assert.deepEqual(snapshot.presentation, {
     currencyCode: 'CNY', currencySymbol: '¥', currencyRate: 7.1,
     numberStyle: 'compact', compactTokenUnits: 'localized', showCost: true, locale: 'zh-CN', theme: 'custom'
@@ -220,7 +224,7 @@ test('shares the complete provider allowlist and preserves credit window display
   assert.deepEqual(snapshot.quota.map((provider) => provider.provider), ['openrouter', 'thirdparty']);
   assert.deepEqual(byProvider.get('openrouter').windows[0], {
     kind: 'billing', metric: 'credits', showMeter: false,
-    remainingPercent: null, resetsAt: null,
+    usedPercent: null, remainingPercent: null, resetsAt: null, windowMinutes: null,
     remaining: 12.5, currency: 'USD'
   });
   assert.equal(byProvider.get('thirdparty').windows[0].metric, null);
@@ -328,7 +332,7 @@ test('merges model display-name collisions before calculating shares', () => {
   } }, { now: NOW });
   assert.equal(snapshot.periods.day.models.length, 1);
   assert.equal(snapshot.periods.day.models[0].totalTokens, 30);
-  assert.equal(Object.hasOwn(snapshot.periods.day.models[0], 'costUsd'), false);
+  assert.equal(snapshot.periods.day.models[0].costUsd, 3);
   assert.equal(snapshot.periods.day.models[0].sharePercent, 100);
   assert.match(snapshot.periods.day.models[0].id, /^model-/);
 });
@@ -462,13 +466,13 @@ test('accepts only real UTC calendar dates and lets the last duplicate date win'
     '2024-02-29', '2026-02-28', '2026-03-01'
   ]);
   assert.deepEqual(snapshot.periods.day.trend.points.find((point) => point.date === '2026-02-28'), {
-    date: '2026-02-28', totalTokens: 8
+    date: '2026-02-28', totalTokens: 8, costUsd: 0.8
   });
 });
 
 test('returns a complete empty schema and stale status for missing or old data', () => {
   const empty = buildSnapshot({}, { now: NOW });
-  assert.equal(empty.schemaVersion, 9);
+  assert.equal(empty.schemaVersion, 10);
   assert.equal(empty.periods.day.overview.totalTokens, 0);
   assert.equal(empty.periods.month.overview.totalTokens, 0);
   assert.equal(empty.periods.total.overview.totalTokens, 0);
@@ -528,7 +532,7 @@ test('normalizes invalid values, statuses, names, and percentages', () => {
   assert.equal(snapshot.quota[0].status, 'error');
   assert.deepEqual(snapshot.quota[0].windows[0], {
     kind: 'session', metric: null, showMeter: true,
-    remainingPercent: 0, resetsAt: null
+    usedPercent: 100, remainingPercent: 0, resetsAt: null, windowMinutes: 0
   });
 });
 
@@ -603,7 +607,7 @@ test('uses explicit allowlists so secrets, identities and raw history never ente
   for (const value of sensitive) assert.equal(serialized.includes(value), false);
   assert.equal(serialized.endsWith('\n'), true);
   const parsed = JSON.parse(serialized);
-  assert.equal(parsed.schemaVersion, 9);
+  assert.equal(parsed.schemaVersion, 10);
   assert.equal(parsed.quota.find((provider) => provider.provider === 'codex').accountLabel, 'p***e@example.com');
   assert.deepEqual(parsed.quota.find((provider) => provider.provider === 'mimo').balance, {
     amount: 3.62,

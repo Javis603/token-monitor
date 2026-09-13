@@ -1,7 +1,7 @@
 import Foundation
 
 struct WidgetSnapshot: Decodable, Equatable {
-    static let currentSchemaVersion = 9
+    static let currentSchemaVersion = 10
 
     let schemaVersion: Int
     let generatedAt: Date
@@ -229,9 +229,11 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
     let kind: String
     let metric: String?
     let showMeter: Bool
+    let usedPercent: Double?
     let remainingPercent: Double?
     let resetsAt: Date?
     let boundaryKind: String?
+    let windowMinutes: Double?
     let remaining: Double?
     let currency: String?
     let detail: String?
@@ -239,8 +241,10 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
 
     init(
         kind: String,
+        usedPercent: Double? = nil,
         remainingPercent: Double?,
         resetsAt: Date?,
+        windowMinutes: Double? = nil,
         boundaryKind: String? = nil,
         metric: String? = nil,
         showMeter: Bool = true,
@@ -251,9 +255,11 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
         self.kind = kind
         self.metric = metric
         self.showMeter = showMeter
+        self.usedPercent = usedPercent
         self.remainingPercent = remainingPercent
         self.resetsAt = resetsAt
         self.boundaryKind = boundaryKind
+        self.windowMinutes = windowMinutes
         self.remaining = remaining
         self.currency = currency
         self.detail = detail
@@ -264,13 +270,15 @@ struct WidgetModel: Decodable, Equatable, Identifiable {
     let modelId: String
     let displayName: String
     let totalTokens: Int
+    let costUsd: Double
     let sharePercent: Double
     var id: String { modelId }
 
-    init(id: String, displayName: String, totalTokens: Int, sharePercent: Double) {
+    init(id: String, displayName: String, totalTokens: Int, costUsd: Double = 0, sharePercent: Double) {
         self.modelId = id
         self.displayName = displayName
         self.totalTokens = totalTokens
+        self.costUsd = costUsd
         self.sharePercent = sharePercent
     }
 
@@ -279,19 +287,29 @@ struct WidgetModel: Decodable, Equatable, Identifiable {
 struct WidgetTool: Decodable, Equatable, Identifiable {
     let id: String
     let totalTokens: Int
+    let costUsd: Double
     let sharePercent: Double
+
+    init(id: String, totalTokens: Int, costUsd: Double = 0, sharePercent: Double) {
+        self.id = id
+        self.totalTokens = totalTokens
+        self.costUsd = costUsd
+        self.sharePercent = sharePercent
+    }
 }
 
 struct WidgetActivityDay: Decodable, Equatable, Identifiable {
     let date: String
     let intensity: Int
     let totalTokens: Int
+    let costUsd: Double
     var id: String { date }
 
-    init(date: String, intensity: Int, totalTokens: Int = 0) {
+    init(date: String, intensity: Int, totalTokens: Int = 0, costUsd: Double = 0) {
         self.date = date
         self.intensity = intensity
         self.totalTokens = max(0, totalTokens)
+        self.costUsd = max(0, costUsd)
     }
 }
 
@@ -303,7 +321,14 @@ struct WidgetActivity: Decodable, Equatable {
 struct WidgetTrendPoint: Decodable, Equatable, Identifiable {
     let date: String
     let totalTokens: Int
+    let costUsd: Double
     var id: String { date }
+
+    init(date: String, totalTokens: Int, costUsd: Double = 0) {
+        self.date = date
+        self.totalTokens = totalTokens
+        self.costUsd = max(0, costUsd)
+    }
 }
 
 struct WidgetTrend: Decodable, Equatable {
@@ -389,17 +414,19 @@ extension WidgetOverview {
 }
 
 extension WidgetLimitWindow {
-    private enum CodingKeys: String, CodingKey { case kind, metric, showMeter, remainingPercent, resetsAt, boundaryKind, remaining, currency, detail }
+    private enum CodingKeys: String, CodingKey { case kind, metric, showMeter, usedPercent, remainingPercent, resetsAt, boundaryKind, windowMinutes, remaining, currency, detail }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         kind = try c.decode(String.self, forKey: .kind)
         let rawMetric = (try c.decodeIfPresent(String.self, forKey: .metric) ?? "").lowercased()
         metric = ["credits", "spend"].contains(rawMetric) ? rawMetric : nil
         showMeter = try c.decode(Bool.self, forKey: .showMeter)
+        usedPercent = try? c.decodeIfPresent(Double.self, forKey: .usedPercent)
         remainingPercent = try? c.decodeIfPresent(Double.self, forKey: .remainingPercent)
         resetsAt = try? c.decodeIfPresent(Date.self, forKey: .resetsAt)
         let rawBoundaryKind = (try c.decodeIfPresent(String.self, forKey: .boundaryKind) ?? "").lowercased()
         boundaryKind = ["reset", "expiry", "mixed"].contains(rawBoundaryKind) ? rawBoundaryKind : nil
+        windowMinutes = try? c.decodeIfPresent(Double.self, forKey: .windowMinutes)
         remaining = try? c.decodeIfPresent(Double.self, forKey: .remaining)
         currency = try? c.decodeIfPresent(String.self, forKey: .currency)
         let rawDetail = (try c.decodeIfPresent(String.self, forKey: .detail) ?? "").lowercased()
@@ -408,11 +435,12 @@ extension WidgetLimitWindow {
 }
 
 extension WidgetModel {
-    private enum CodingKeys: String, CodingKey { case id, displayName, totalTokens, sharePercent }
+    private enum CodingKeys: String, CodingKey { case id, displayName, totalTokens, costUsd, sharePercent }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         displayName = try c.decode(String.self, forKey: .displayName)
         totalTokens = try c.decode(Int.self, forKey: .totalTokens)
+        costUsd = try c.decode(Double.self, forKey: .costUsd)
         sharePercent = try c.decode(Double.self, forKey: .sharePercent)
         let decodedID = try c.decode(String.self, forKey: .id)
         guard !decodedID.isEmpty else {
@@ -426,13 +454,25 @@ extension WidgetModel {
     }
 }
 
+extension WidgetTool {
+    private enum CodingKeys: String, CodingKey { case id, totalTokens, costUsd, sharePercent }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        totalTokens = try c.decode(Int.self, forKey: .totalTokens)
+        costUsd = try c.decode(Double.self, forKey: .costUsd)
+        sharePercent = try c.decode(Double.self, forKey: .sharePercent)
+    }
+}
+
 extension WidgetActivityDay {
-    private enum CodingKeys: String, CodingKey { case date, intensity, totalTokens }
+    private enum CodingKeys: String, CodingKey { case date, intensity, totalTokens, costUsd }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         date = try c.decode(String.self, forKey: .date)
         intensity = try c.decode(Int.self, forKey: .intensity)
         totalTokens = max(0, try c.decode(Int.self, forKey: .totalTokens))
+        costUsd = max(0, try c.decode(Double.self, forKey: .costUsd))
     }
 }
 
@@ -446,11 +486,12 @@ extension WidgetActivity {
 }
 
 extension WidgetTrendPoint {
-    private enum CodingKeys: String, CodingKey { case date, totalTokens }
+    private enum CodingKeys: String, CodingKey { case date, totalTokens, costUsd }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         date = try c.decode(String.self, forKey: .date)
         totalTokens = try c.decode(Int.self, forKey: .totalTokens)
+        costUsd = max(0, try c.decode(Double.self, forKey: .costUsd))
     }
 }
 
