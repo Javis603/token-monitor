@@ -274,7 +274,18 @@ function applyPriceFallback(row, options = {}) {
   if (!row || row.cost > 0) return row;
   const table = options.priceTable || MAVIS_PRICING;
   const rate = options.cnyToUsdRate || MAVIS_DEFAULT_CNY_TO_USD_RATE;
-  const modelRates = table[row.model];
+  // Try the explicit model id first. Mavis runtime currently only
+  // ships one model (minimax/MiniMax-M3), so the public listing has
+  // exactly one rate card and any "X (model unknown)" fallback row
+  // — where the runtime left the model column NULL and token-monitor
+  // fabricated a placeholder from the agent name — should still
+  // bill at that same card. The display label stays as
+  // "${agent} (model unknown)" so the UI doesn't claim a real model
+  // id it doesn't have; only the cost column is recovered.
+  let modelRates = table[row.model];
+  if (!modelRates && row.model && row.model.endsWith(' (model unknown)')) {
+    modelRates = table['minimax/MiniMax-M3'];
+  }
   if (!modelRates) return row;
   const tier = (row.input + row.cacheRead) > MAVIS_CONTEXT_TIER_THRESHOLD ? 'over512k' : 'upTo512k';
   // Reasoning tokens are output-side, billed at the output rate.

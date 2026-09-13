@@ -282,18 +282,41 @@ test('applyPriceFallback bills reasoning tokens at the output rate', () => {
   assert.ok(Math.abs(out.cost - expectedUsd) < 1e-9, `expected ≈ ${expectedUsd} got ${out.cost}`);
 });
 
-test('applyPriceFallback returns the row unchanged when the model has no rate card', () => {
-  // Fallback rows are model-`${agent} (model unknown)` etc.; the adapter
-  // can only recover cost when the model id matches a known rate card.
+test('applyPriceFallback bills "X (model unknown)" rows at the M3 rate card', () => {
+  // Mavis runtime currently leaves the model column NULL on ~90% of
+  // rows. Token-monitor's `normalizedModelId` then fabricates a
+  // placeholder like "mavis (model unknown)" so the breakdown view
+  // still has something to render. The runtime only ships M3 today,
+  // so the right answer is to bill these placeholder rows at the M3
+  // rate card even though the display label is a placeholder — the
+  // cost column is recovered, the model column stays honest.
+  // 100k input (≤ 512k) + 50k output: 0.1*2.10 + 0.05*8.40 = 0.63 CNY / 7 ≈ 0.09 USD.
   const out = applyPriceFallback({
     model: 'mavis (model unknown)',
+    input: 100_000,
+    output: 50_000,
+    cacheRead: 0,
+    reasoning: 0,
+    cost: 0
+  });
+  const expectedCny = 0.1 * 2.10 + 0.05 * 8.40;
+  const expectedUsd = expectedCny / 7;
+  assert.ok(Math.abs(out.cost - expectedUsd) < 1e-9, `expected ≈ ${expectedUsd} got ${out.cost}`);
+});
+
+test('applyPriceFallback returns the row unchanged when neither model nor M3 placeholder matches', () => {
+  // A truly unknown model — e.g. a future mavis that ships a second
+  // model whose placeholder doesn't end in "(model unknown)" — must
+  // not be silently billed at M3.
+  const out = applyPriceFallback({
+    model: 'some-future-model',
     input: 1_000_000,
     output: 1_000_000,
     cacheRead: 0,
     reasoning: 0,
     cost: 0
   });
-  assert.equal(out.cost, 0, 'unknown model rows must stay at zero cost');
+  assert.equal(out.cost, 0, 'non-placeholder, non-M3 models must stay at zero cost');
 });
 
 test('applyPriceFallback honours an injected rate table and CNY→USD rate', () => {
