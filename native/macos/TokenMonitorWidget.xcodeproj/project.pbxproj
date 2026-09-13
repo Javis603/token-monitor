@@ -273,6 +273,7 @@
 				TOKEN_MONITOR_WIDGET_BUNDLE_ID = com.example.tokenmonitor.widget;
 				TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;
 				TOKEN_MONITOR_WIDGET_KIND = com.tokenmonitor.dashboard;
+				TOKEN_MONITOR_WIDGET_SCHEMA_VERSION = 0;
 				TOKEN_MONITOR_WIDGET_UI_VERSION = 0;
 			};
 			name = Debug;
@@ -310,6 +311,7 @@
 				TOKEN_MONITOR_WIDGET_BUNDLE_ID = com.example.tokenmonitor.widget;
 				TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;
 				TOKEN_MONITOR_WIDGET_KIND = com.tokenmonitor.dashboard;
+				TOKEN_MONITOR_WIDGET_SCHEMA_VERSION = 0;
 				TOKEN_MONITOR_WIDGET_UI_VERSION = 0;
 			};
 			name = Release;

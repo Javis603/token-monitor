@@ -232,6 +232,7 @@ function main() {
     xcconfigLine('TOKEN_MONITOR_WIDGET_BUNDLE_ID', bundleId),
     xcconfigLine('TOKEN_MONITOR_WIDGET_URL_SCHEME', urlScheme),
     xcconfigLine('TOKEN_MONITOR_WIDGET_KIND', widgetKind),
+    xcconfigLine('TOKEN_MONITOR_WIDGET_SCHEMA_VERSION', WIDGET_SCHEMA_VERSION),
     xcconfigLine('TOKEN_MONITOR_WIDGET_UI_VERSION', WIDGET_UI_VERSION),
     xcconfigLine('TOKEN_MONITOR_WIDGET_ARCH', architecture.name),
     xcconfigLine('TOKEN_MONITOR_WIDGET_GIT_REVISION', revision),

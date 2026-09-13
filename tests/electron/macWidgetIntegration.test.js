@@ -768,9 +768,11 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   assert.match(widgetProject, /MARKETING_VERSION = "\$\(TOKEN_MONITOR_MARKETING_VERSION\)";/);
   assert.match(widgetProject, /CURRENT_PROJECT_VERSION = "\$\(TOKEN_MONITOR_BUNDLE_VERSION\)";/);
   assert.match(widgetBuildSource, /xcconfigLine\('MARKETING_VERSION', versions\.marketingVersion\)/);
-  assert.match(widgetInfo, /<key>TMWidgetSchemaVersion<\/key>\s*<string>9<\/string>/);
+  assert.match(widgetInfo, /<key>TMWidgetSchemaVersion<\/key>\s*<string>\$\(TOKEN_MONITOR_WIDGET_SCHEMA_VERSION\)<\/string>/);
   assert.match(widgetInfo, /<key>TMWidgetUIVersion<\/key>\s*<string>\$\(TOKEN_MONITOR_WIDGET_UI_VERSION\)<\/string>/);
+  assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_SCHEMA_VERSION = 0;/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_UI_VERSION = 0;/);
+  assert.match(widgetBuildSource, /xcconfigLine\('TOKEN_MONITOR_WIDGET_SCHEMA_VERSION', WIDGET_SCHEMA_VERSION\)/);
   assert.match(widgetBuildSource, /xcconfigLine\('TOKEN_MONITOR_WIDGET_UI_VERSION', WIDGET_UI_VERSION\)/);
 });
 
@@ -858,7 +860,7 @@ test('Widget layout uses system margins without retaining the superseded scaffol
   assert.match(widgetSource, /private var statusGap: CGFloat/);
   assert.match(widgetSource, /WidgetDesignTokens\.largeGap/);
   assert.match(widgetSource, /\.frame\(maxWidth: \.infinity, maxHeight: \.infinity, alignment: \.topLeading\)/);
-  assert.match(widgetInfo, /<key>TMWidgetSchemaVersion<\/key>\s*<string>9<\/string>/);
+  assert.match(widgetInfo, /<key>TMWidgetSchemaVersion<\/key>\s*<string>\$\(TOKEN_MONITOR_WIDGET_SCHEMA_VERSION\)<\/string>/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
 })
 
