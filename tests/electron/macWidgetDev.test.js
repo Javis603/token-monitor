@@ -71,12 +71,17 @@ test('writes an arm64 development xcconfig with the shared Team App Group', () =
     widgetKind: 'com.tokenmonitor.dashboard',
     urlScheme: 'token-monitor',
     developmentTeam: 'ABCDE12345',
+    revision: 'abcdef123456',
+    timestamp: '2026-09-13T14:00:00Z',
     packageVersion: '0.54.0',
     marketingVersion: '0.54.0'
   });
   assert.match(output, /TOKEN_MONITOR_APP_GROUP = ABCDE12345\.tokenmonitor/);
   assert.match(output, /TOKEN_MONITOR_WIDGET_BUNDLE_ID = com\.javis\.tokenmonitor\.widget/);
   assert.match(output, /TOKEN_MONITOR_WIDGET_ARCH = arm64/);
+  assert.match(output, /TOKEN_MONITOR_WIDGET_SCHEMA_VERSION = 10/);
+  assert.match(output, /TOKEN_MONITOR_WIDGET_GIT_REVISION = abcdef123456/);
+  assert.match(output, /TOKEN_MONITOR_WIDGET_BUILD_TIMESTAMP = 2026-09-13T14:00:00Z/);
   assert.match(output, /DEVELOPMENT_TEAM = ABCDE12345/);
   assert.match(output, /TOKEN_MONITOR_MARKETING_VERSION = 0\.54\.0/);
   assert.match(output, /TOKEN_MONITOR_PACKAGE_VERSION = 0\.54\.0/);
@@ -87,10 +92,17 @@ test('keeps the packaged Widget descriptor aligned with the incremental UI build
     widgetUIVersion: 1,
     widgetSchemaVersion: 1,
     widgetBundleVersion: '1',
+    gitRevision: 'old',
+    buildTimestamp: 'old',
     marketingVersion: '0.54.0'
+  }, {
+    revision: 'abcdef123456',
+    timestamp: '2026-09-13T14:00:00Z'
   });
   assert.equal(updated.widgetUIVersion, 36);
   assert.equal(updated.widgetSchemaVersion, 10);
   assert.equal(updated.widgetBundleVersion, '36');
+  assert.equal(updated.gitRevision, 'abcdef123456');
+  assert.equal(updated.buildTimestamp, '2026-09-13T14:00:00Z');
   assert.equal(updated.marketingVersion, '0.54.0');
 });

@@ -318,6 +318,8 @@ module.exports = {
   WIDGET_UI_VERSION,
   WIDGET_ARCHITECTURES,
   assertWidgetArchitecture,
+  buildTimestamp,
+  gitRevision,
   packageVersion,
   widgetBundleVersion,
   widgetVersions,

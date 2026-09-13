@@ -10,6 +10,8 @@ const {
   DEFAULT_URL_SCHEME,
   WIDGET_SCHEMA_VERSION,
   WIDGET_UI_VERSION,
+  buildTimestamp,
+  gitRevision,
   packageVersion,
   widgetVersions
 } = require('./build-macos-widget');
@@ -104,20 +106,22 @@ function readWidgetConfig(appPath) {
   };
 }
 
-function updatedWidgetConfig(config) {
+function updatedWidgetConfig(config, metadata) {
   return {
     ...config,
     widgetUIVersion: WIDGET_UI_VERSION,
     widgetSchemaVersion: WIDGET_SCHEMA_VERSION,
-    widgetBundleVersion: String(WIDGET_UI_VERSION)
+    widgetBundleVersion: String(WIDGET_UI_VERSION),
+    gitRevision: metadata.revision,
+    buildTimestamp: metadata.timestamp
   };
 }
 
-function refreshPackagedWidgetConfig(appPath) {
+function refreshPackagedWidgetConfig(appPath, metadata) {
   const configPath = path.join(appPath, 'Contents', 'Resources', 'token-monitor-widget.json');
   const current = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   const temporaryPath = `${configPath}.tmp`;
-  fs.writeFileSync(temporaryPath, `${JSON.stringify(updatedWidgetConfig(current), null, 2)}\n`, { mode: 0o600 });
+  fs.writeFileSync(temporaryPath, `${JSON.stringify(updatedWidgetConfig(current, metadata), null, 2)}\n`, { mode: 0o600 });
   fs.renameSync(temporaryPath, configPath);
 }
 
@@ -157,6 +161,8 @@ function xcconfigContents({
   widgetKind,
   urlScheme,
   developmentTeam,
+  revision,
+  timestamp,
   packageVersion: targetPackageVersion,
   marketingVersion: targetMarketingVersion
 }) {
@@ -173,8 +179,11 @@ function xcconfigContents({
     TOKEN_MONITOR_WIDGET_BUNDLE_ID: bundleId,
     TOKEN_MONITOR_WIDGET_URL_SCHEME: urlScheme,
     TOKEN_MONITOR_WIDGET_KIND: widgetKind,
+    TOKEN_MONITOR_WIDGET_SCHEMA_VERSION: String(WIDGET_SCHEMA_VERSION),
     TOKEN_MONITOR_WIDGET_UI_VERSION: String(WIDGET_UI_VERSION),
     TOKEN_MONITOR_WIDGET_ARCH: 'arm64',
+    TOKEN_MONITOR_WIDGET_GIT_REVISION: revision,
+    TOKEN_MONITOR_WIDGET_BUILD_TIMESTAMP: timestamp,
     DEVELOPMENT_TEAM: developmentTeam
   };
   return `${Object.entries(values).map(([key, value]) => `${key} = ${String(value).replaceAll('\n', '')}`).join('\n')}\n`;
@@ -190,7 +199,7 @@ function ensureSigningArtifacts() {
   return artifacts;
 }
 
-function buildWidget(config, developmentTeam) {
+function buildWidget(config, developmentTeam, metadata) {
   fs.mkdirSync(DEV_OUTPUT, { recursive: true });
   const fallbackVersions = widgetVersions(packageVersion());
   const targetPackageVersion = config.packageVersion || fallbackVersions.packageVersion;
@@ -200,7 +209,8 @@ function buildWidget(config, developmentTeam) {
     ...config,
     packageVersion: targetPackageVersion,
     marketingVersion: targetMarketingVersion,
-    developmentTeam
+    developmentTeam,
+    ...metadata
   }), { mode: 0o600 });
   const developerDirectory = resolveDeveloperDirectory();
   const extension = path.join(
@@ -334,14 +344,18 @@ async function main(argv = process.argv.slice(2)) {
   const developmentTeam = developmentTeamForAppGroup(config.appGroup);
   const identity = resolveDevelopmentIdentity(args.identity);
   const artifacts = ensureSigningArtifacts();
+  const metadata = {
+    revision: gitRevision(),
+    timestamp: buildTimestamp()
+  };
 
   console.log(`[mac-widget-dev] incrementally building Widget for ${path.relative(ROOT, appPath)}`);
   const buildStartedAt = Date.now();
-  const extension = buildWidget(config, developmentTeam);
+  const extension = buildWidget(config, developmentTeam, metadata);
   const buildElapsed = Date.now() - buildStartedAt;
   stopRunningWidgetProcesses();
   installExtension(extension, appPath);
-  refreshPackagedWidgetConfig(appPath);
+  refreshPackagedWidgetConfig(appPath, metadata);
   console.log(`[mac-widget-dev] signing app and extension with ${identity}`);
   const signingStartedAt = Date.now();
   const signingMode = await signApp({ appPath, identity, config, developmentTeam, artifacts });
