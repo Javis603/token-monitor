@@ -750,6 +750,8 @@ test('each Widget family has a purpose-built composition', () => {
   assert.match(smallUsageSource, /size: 37, weight: \.semibold/);
   assert.match(smallUsageSource, /VStack\(alignment: \.leading, spacing: 4\)/);
   assert.doesNotMatch(smallUsageSource, /Spacer\(minLength: 7\)/);
+  assert.match(widgetDashboardSource, /WidgetFormat\.boundary\(window\)/);
+  assert.doesNotMatch(widgetDashboardSource, /WidgetFormat\.reset\(/);
   assert.match(widgetDashboardSource, /\(width\|height\)=\["'\]1em\["'\]/);
 });
 

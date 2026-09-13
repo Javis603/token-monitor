@@ -450,8 +450,8 @@ private struct DashboardQuotaWindowCell: View {
             if window.showMeter, let remaining = window.remainingPercent {
                 PercentageBar(value: remaining, color: color)
             }
-            if let resetsAt = window.resetsAt {
-                Text(WidgetFormat.reset(resetsAt))
+            if window.resetsAt != nil {
+                Text(WidgetFormat.boundary(window))
                     .font(.system(size: 7.5, weight: .regular))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -530,8 +530,8 @@ struct QuotaWindowCell: View {
             if window.showMeter, let remaining = window.remainingPercent {
                 PercentageBar(value: remaining, color: color)
             }
-            if let resetsAt = window.resetsAt {
-                Text(WidgetFormat.reset(resetsAt))
+            if window.resetsAt != nil {
+                Text(WidgetFormat.boundary(window))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
