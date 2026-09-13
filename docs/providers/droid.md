@@ -1,11 +1,11 @@
 ---
-summary: "Factory Droid provider notes: one kernel behind the CLI and desktop app, its session metadata sources, usage flush timing, and what is deliberately not supported."
+summary: "Factory Droid provider notes: one kernel behind the CLI and desktop app, its session metadata sources, token collection, and API-key-backed Factory limits."
 read_when:
   - Changing or debugging Droid session discovery, titles, timestamps or project attribution
   - Investigating Droid usage that is missing from, or zero in, the widget
   - Touching providers/droid/sessionMetadata.js or the droid-sessions source root
   - Considering FACTORY_HOME_OVERRIDE or custom scan paths for relocated Droid data
-  - Considering a Factory (`factory`) limits provider, OAuth discovery, or a second scanner for the same sessions
+  - Changing Factory (`factory`) limits or API-key handling
 ---
 
 # Factory Droid provider
@@ -32,23 +32,42 @@ and an optional `factoryCredits` (Factory Standard Credits) that tokscale's acco
 ## Naming and identity: `droid` tracks, `factory` bills
 
 - The tracked client id is `droid` — tokscale's name and the agent product's own. The vendor and
-  billing plane are `factory` (`api.factory.ai`, `app.factory.ai`), so a future limits provider
-  registers as `factory` under `providers/factory/`; this folder stays usage-side only.
+  billing plane are `factory` (`api.factory.ai`, `app.factory.ai`), so the limits provider registers
+  as `factory` under `providers/factory/`. `providers/droid/` remains usage/metadata-only, while
+  `providers/factory/` remains limits-only.
 - The kernel is shared, and so is the data: a future `factory` tracked client scanning
   `~/.factory/sessions` would double-count every session. Usage collection stays solely under
   `droid`; a `factory` provider is quota/balance only.
-- Auth overlaps by design — one login serves the CLI and the desktop app. droid keeps login
-  tokens in one of three stores (`auth.v2.keyring` via keytar, `auth.v2.loginkeychain`,
-  `auth.v2.file`); the loginkeychain variant is a plain local file, so token material is
-  locally readable. API keys live in plain `~/.factory/.env` (`FACTORY_API_KEY`). Whether a
-  future provider may read the loginkeychain at all is the open question on PR #682; the
-  API-key file is the safe floor.
+- Factory limits use a `FACTORY_API_KEY` explicitly saved in Token Monitor, supplied through the
+  process environment, or read from Droid's plaintext `~/.factory/.env`; an auto-discovered key
+  is used only in memory and is never copied into Token Monitor's credential store.
 
 | Data plane | Read by | Source |
 | --- | --- | --- |
 | Token usage (periods, dashboard, history) | the shared usage collector, through `tokscale` | `*.settings.json`, parsed by tokscale's droid scanner |
 | Session metadata (title, activity times, project) | collector enrichment | tokscale's `sessions` array plus both session-index generations through `providers/droid/sessionMetadata.js` |
+| Factory plan limits and extra-usage balance | the `factory` limits provider | Factory HTTPS APIs authenticated by `FACTORY_API_KEY` |
 | Session Detail (per-turn breakdown) | — deliberately unsupported, see below | — |
+
+## Factory limits are a separate data plane
+
+The `factory` provider does not rescan session files. It calls `/api/app/auth/me` for identity and
+plan metadata, then prefers `/api/billing/limits`. Token-rate-limit accounts expose Standard
+5-hour, weekly, and monthly windows, optional Core windows, and an optional USD extra-usage
+balance. Accounts still on the older billing model fall back to
+`/api/organization/subscription/usage?useCache=true`, which exposes Standard and Premium usage for
+the current billing period.
+
+The response gate follows the strongest available evidence instead of depending on an optional
+mode flag: a `limits.standard` pool selects the current token-rate-limit shape; its absence falls
+back to the legacy route. The current Factory CLI and web UI confirm the limits pools,
+`usedPercent`, reset fields, balance, and both routes. The legacy `userId` query parameter and
+`totalAllowance` / `usedRatio` bucket fields are compatibility assumptions inherited from the
+working CodexBar integration, so their parsing stays optional and null-safe.
+
+The credential boundary follows the existing owner-approved local-discovery pattern: a readable
+provider-owned configuration file may supply an in-memory key, and only a key explicitly entered
+in Token Monitor is persisted by Token Monitor.
 
 ## Usage flows through tokscale only
 

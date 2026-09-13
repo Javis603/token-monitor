@@ -200,6 +200,7 @@ test('localized READMEs disclose the LM Studio server-log tracking boundary', ()
 // The table's icon id is not always the provider id (a tool row is named after
 // its artwork), and GLM/GLM Team share one row, so the two are bridged here.
 const README_ICON_TO_LIMIT_PROVIDERS = {
+  droid: ['factory'],
   xai: ['grok'],
   'mimo-code': ['mimo'],
   zcode: ['zai', 'zaiteam']
