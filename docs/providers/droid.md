@@ -67,7 +67,10 @@ working CodexBar integration, so their parsing stays optional and null-safe.
 
 The credential boundary follows the existing owner-approved local-discovery pattern: a readable
 provider-owned configuration file may supply an in-memory key, and only a key explicitly entered
-in Token Monitor is persisted by Token Monitor.
+in Token Monitor is persisted by Token Monitor. Droid's own credential material — the
+`auth.v2.loginkeychain` / keyring stores — stays out of bounds: providers never read or decrypt
+another tool's credentials (issue #586 precedent), so OAuth-login users create an `fk-` API key
+instead.
 
 ## Usage flows through tokscale only
 
