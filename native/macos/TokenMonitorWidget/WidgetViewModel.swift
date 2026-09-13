@@ -714,6 +714,7 @@ enum WidgetFormat {
         switch value.lowercased() {
         case "claude": "Claude"
         case "codex": "Codex"
+        case "factory": "Factory Droid"
         case "opencode": "OpenCode"
         case "cursor": "Cursor"
         case "antigravity": "Antigravity"

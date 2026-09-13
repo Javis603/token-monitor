@@ -77,6 +77,7 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   deepseek: ['deepseekApiKey'],
   minimax: ['minimaxApiKey'],
   copilot: ['copilotApiToken', 'copilotEnterpriseHost'],
+  factory: ['factoryApiKey'],
   zai: ['zaiApiKey', 'zaiApiRegion'],
   zaiteam: ['zaiTeamApiKey', 'zaiTeamOrganizationId', 'zaiTeamProjectId'],
   volcengine: [
@@ -179,6 +180,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     minimaxApiKey: settings.minimaxApiKey || '',
     copilotApiToken: settings.copilotApiToken || '',
     copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
+    factoryApiKey: settings.factoryApiKey || '',
     zaiApiKey: settings.zaiApiKey || '',
     zaiApiRegion: settings.zaiApiRegion || 'global',
     zaiTeamApiKey: settings.zaiTeamApiKey || '',

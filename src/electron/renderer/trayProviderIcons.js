@@ -10,6 +10,7 @@
     'claude-brand': '../../../assets/icons/claude.svg',
     codex: '../../../assets/icons/tray-codex.svg',
     chatgpt: '../../../assets/icons/codex.svg',
+    factory: '../../../assets/icons/droid.svg',
     hermes: '../../../assets/icons/hermes-agent.svg',
     kimi: '../../../assets/icons/kimi.svg',
     mimo: '../../../assets/icons/xiaomi.svg',

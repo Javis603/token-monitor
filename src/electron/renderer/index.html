@@ -933,6 +933,30 @@
                 <div id="minimaxErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
+            <div id="factoryAccountGroup" class="settings-group cursor-account-group">
+              <button id="factorySettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="factorySettingsDetails">
+                <span data-i18n="settings.factory.title">Factory Droid Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="factoryAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="factorySettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="factoryOpenBrowser" data-i18n="settings.factory.openBrowser">Open Factory billing</button>
+                  <button id="factoryLogoutButton" class="hidden" data-i18n="settings.factory.clearApiKey">Clear key</button>
+                  <button id="factoryRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="factoryManualPanel">
+                  <p class="settings-note" data-i18n="settings.factory.note">Factory API keys are detected from the environment or Droid's .env file. You can also save one here.</p>
+                  <input id="factoryApiKeyInput" type="password" spellcheck="false" placeholder="fk-..." data-i18n-placeholder="settings.factory.apiKeyPlaceholder" />
+                  <div class="settings-actions">
+                    <button id="factoryApiKeySubmit" data-i18n="settings.factory.saveApiKey">Save API key</button>
+                  </div>
+                </div>
+                <div id="factoryErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
             <div id="zaiAccountGroup" class="settings-group cursor-account-group">
               <button id="zaiSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="zaiSettingsDetails">
                 <span data-i18n="settings.zai.title">Z.ai Account</span>

@@ -20,6 +20,7 @@
   const PROVIDER_SOURCE_LABELS = {
     claude: { oauth: 'OAuth', cli: 'CLI', web: 'Web' },
     codex: { rpc: 'RPC' },
+    factory: { api: 'API' },
     cursor: { web: 'Web' },
     antigravity: { oauth: 'OAuth', rpc: 'RPC' },
     opencode: { local: 'Local', web: 'Web', api: 'API' },
@@ -54,6 +55,7 @@
   const CAPABILITY_TAGS = {
     claude: ['Auto', 'OAuth/CLI', 'Web'],
     codex: ['Auto', 'OAuth/App/CLI'],
+    factory: ['Auto', 'API key'],
     cursor: ['Auto', 'Web'],
     antigravity: ['Auto', 'OAuth/App/CLI'],
     opencode: ['Auto', 'API/Web'],
@@ -306,7 +308,7 @@
     if (status === 'unauthorized') {
       if (providerName === 'kimi') return { label: 'Update credential', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Update credential', tone: 'setup' };
-      return providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
+      return providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
         ? { label: 'Update API key', tone: 'setup' }
         : providerName === 'qoder' || providerName === 'trae'
           ? { label: 'Sign in again', tone: 'setup' }
@@ -323,7 +325,7 @@
       if (providerName === 'antigravity') return { label: 'Not set up', tone: 'setup' };
       if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama' || providerName === 'alibaba') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
-      if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi') return { label: 'Add API key', tone: 'setup' };
+      if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi') return { label: 'Add API key', tone: 'setup' };
       if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };
       if (providerName === 'kiro') return { label: 'Run kiro-cli login', tone: 'setup' };
       return { label: 'Not set up', tone: 'setup' };

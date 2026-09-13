@@ -735,7 +735,7 @@ test('API key account entries share styling and Copilot uses the folded token en
   const css = readRendererFile('styles.css');
 
   const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
-  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#traeManualPanel',\n\s*'#zedManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#kimiManualPanel'/);
+  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#factoryManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#traeManualPanel',\n\s*'#zedManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#kimiManualPanel'/);
   assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
 
@@ -743,14 +743,14 @@ test('API key account entries share styling and Copilot uses the folded token en
   // one blanket rule, so what is worth asserting here is that every provider has
   // such a line and that none of them ship visible.
   const html = readRendererFile('index.html');
-  for (const provider of ['deepseek', 'minimax', 'zai', 'zaiteam', 'volcengine', 'qoder', 'trae', 'zed', 'commandcode', 'ollama', 'kimi', 'copilot']) {
+  for (const provider of ['deepseek', 'minimax', 'factory', 'zai', 'zaiteam', 'volcengine', 'qoder', 'trae', 'zed', 'commandcode', 'ollama', 'kimi', 'copilot']) {
     assert.match(html, new RegExp(`id="${provider}ErrorMessage"[^>]*class="[^"]*hidden"`), provider);
   }
-  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#traeManualPanel,\n#zedManualPanel,\n#commandcodeManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#zedManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner,\n#alibabaManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#factoryManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#traeManualPanel,\n#zedManualPanel,\n#commandcodeManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#factoryManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#zedManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner,\n#alibabaManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#traeManualPanel input,\n#zedManualPanel textarea,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#alibabaManualPanel textarea,\n#alibabaManualPanel select,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#traeManualPanel input,\n#zedManualPanel textarea,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#factoryManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#traeManualPanel input,\n#zedManualPanel textarea,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#alibabaManualPanel textarea,\n#alibabaManualPanel select,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
+  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#factoryManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#traeManualPanel input,\n#zedManualPanel textarea,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
 
   assert.match(css, /\.thirdparty-field :is\(input, select\)\s*\{[\s\S]*?font-size: 12px;/);
 });
@@ -1274,6 +1274,25 @@ test('Z.ai global and BigModel CN browser links are allowlisted', () => {
   const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
   assert.match(allowlist, /parsed\.hostname === 'z\.ai' \|\| parsed\.hostname === 'www\.z\.ai'/);
   assert.match(allowlist, /parsed\.hostname === 'bigmodel\.cn' \|\| parsed\.hostname === 'www\.bigmodel\.cn'/);
+});
+
+test('Factory account panel uses an API key and opens the allowlisted billing page', () => {
+  const html = readRendererFile('index.html');
+  assert.match(html, /<div id="factoryAccountGroup"[\s\S]*?<input id="factoryApiKeyInput" type="password"[\s\S]*?<button id="factoryApiKeySubmit"/);
+
+  const app = readRendererFile('app.js');
+  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
+  assert.match(setupBody, /saveSettings\(\{ factoryApiKey: input\.value \}\)/);
+  assert.match(setupBody, /saveSettings\(\{ factoryApiKey: '' \}\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(factoryPlatformUrl\(\)\)/);
+  const urlBody = functionBody(app, 'factoryPlatformUrl', 'zaiteamPlatformUrl');
+  assert.match(urlBody, /return 'https:\/\/app\.factory\.ai\/settings\/billing';/);
+
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
+  assert.match(allowlist, /parsed\.hostname === 'app\.factory\.ai'[\s\S]*parsed\.pathname\.startsWith\('\/settings\/billing'\)/);
+  const normalizeKey = functionBody(main, 'normalizeFactoryApiKey', 'currentFactoryApiKey');
+  assert.doesNotMatch(normalizeKey, /factoryEnvApiKey/);
 });
 
 test('opencode status env account avoids saved profile names', () => {

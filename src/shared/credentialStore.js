@@ -18,6 +18,7 @@ const CREDENTIAL_SETTING_PATHS = Object.freeze({
   deepseekApiKey: ['providers', 'deepseek', 'apiKey'],
   minimaxApiKey: ['providers', 'minimax', 'apiKey'],
   copilotApiToken: ['providers', 'copilot', 'apiToken'],
+  factoryApiKey: ['providers', 'factory', 'apiKey'],
   zaiApiKey: ['providers', 'zai', 'apiKey'],
   zaiTeamApiKey: ['providers', 'zaiTeam', 'apiKey'],
   zaiTeamOrganizationId: ['providers', 'zaiTeam', 'organizationId'],

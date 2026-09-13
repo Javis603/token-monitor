@@ -70,6 +70,7 @@ function iconKindFor(rowData, breakdown) {
 const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   claude: 'claudeAccountGroup',
   codex: 'codexAccountGroup',
+  factory: 'factoryAccountGroup',
   opencode: 'opencodeCookieGroup',
   cursor: 'cursorAccountGroup',
   antigravity: 'antigravityAccountGroup',
@@ -93,6 +94,7 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
 const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   claude: 'claudeAccountStatus',
   codex: 'codexAccountStatus',
+  factory: 'factoryAccountStatus',
   opencode: 'opencodeCookieStatus',
   cursor: 'cursorAccountStatus',
   antigravity: 'antigravityAccountStatus',
@@ -146,6 +148,12 @@ const TRAY_ICON_PROVIDERS = [
 const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.id).join(',');
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
 const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentation;
+
+function limitProviderColor(providerId) {
+  if (providerId === 'factory') return clientColors.droid;
+  if (providerId === 'mimo') return clientColors.xiaomi;
+  return clientColors[providerId] || clientColors.default;
+}
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
 const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
@@ -300,7 +308,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '' };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '' };
 state.zedAccountExpanded = false;
 state.zedPendingCheckSince = 0;
 state.toolDetailMode = 'tokens';
@@ -6517,7 +6525,7 @@ function renderLimits() {
   }
   for (const { id, label } of rows) {
     const visibleProviders = visibleProviderEntries.get(id) || [{ provider: id, status: 'disabled', windows: [] }];
-    const color = id === 'mimo' ? clientColors.xiaomi : (clientColors[id] || clientColors.default);
+    const color = limitProviderColor(id);
     if (id === 'claude' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderClaudeAccountGroup(label, visibleProviders, color));
       continue;
@@ -7680,7 +7688,7 @@ function homeLimitRows() {
     providerOptions,
     enabledProviderIds: Array.from(enabled),
     hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet()),
-    colors: clientColors,
+    colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
     accountColor: (provider, id, fallbackColor) => (
@@ -10116,6 +10124,7 @@ function syncSettingsForm() {
   renderDeepseekStatus();
   renderMinimaxStatus();
   renderExternalProviderStatus('claude');
+  renderExternalProviderStatus('factory');
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
@@ -13647,6 +13656,7 @@ function renderStatsUpdate() {
   renderDeepseekStatus();
   renderMinimaxStatus();
   renderExternalProviderStatus('claude');
+  renderExternalProviderStatus('factory');
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
@@ -15599,6 +15609,11 @@ const externalLimitAccountConfig = {
     sourceKey: 'zaiApiKeySource',
     pendingKey: 'zaiPendingCheckSince'
   },
+  factory: {
+    configuredKey: 'factoryCredentialConfigured',
+    sourceKey: 'factoryCredentialSource',
+    pendingKey: 'factoryPendingCheckSince'
+  },
   zaiteam: {
     configuredKey: 'zaiTeamApiKeyConfigured',
     sourceKey: 'zaiTeamApiKeySource',
@@ -15778,6 +15793,10 @@ function zaiPlatformUrl() {
   return region === 'bigmodel-cn'
     ? 'https://bigmodel.cn/coding-plan/personal/usage'
     : 'https://z.ai/manage-apikey/coding-plan/personal/my-plan';
+}
+
+function factoryPlatformUrl() {
+  return 'https://app.factory.ai/settings/billing';
 }
 
 function zaiteamPlatformUrl() {
@@ -17853,6 +17872,53 @@ function setupCursorAccountUI() {
     });
   }
 
+  const factoryToggle = document.getElementById('factorySettingsToggle');
+  if (factoryToggle) {
+    factoryToggle.addEventListener('click', () => setExternalAccountExpanded('factory', !state.factoryAccountExpanded));
+    setExternalAccountExpanded('factory', false);
+    renderExternalProviderStatus('factory');
+
+    document.getElementById('factoryOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal(factoryPlatformUrl());
+    });
+
+    document.getElementById('factoryLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ factoryApiKey: '' });
+      clearExternalProviderCheckPending('factory');
+      clearExternalProviderPendingStatus('factory');
+      renderExternalProviderStatus('factory');
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('factoryRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('factoryApiKeySubmit').addEventListener('click', async () => {
+      const input = document.getElementById('factoryApiKeyInput');
+      const errorEl = document.getElementById('factoryErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(input.value || '').trim()) {
+        errorEl.textContent = t('settings.factory.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('factory');
+        await saveSettings({ factoryApiKey: input.value });
+        input.value = '';
+        renderExternalProviderStatus('factory');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('factory', !externalProviderAccountLinked('factory'));
+        renderExternalProviderStatus('factory');
+      } catch (err) {
+        clearExternalProviderCheckPending('factory');
+        errorEl.textContent = t('settings.factory.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
   const zaiToggle = document.getElementById('zaiSettingsToggle');
   if (zaiToggle) {
     const zaiApiRegionInput = document.getElementById('zaiApiRegionInput');
@@ -18825,6 +18891,7 @@ function initSettingsAnimationWrappers() {
     '#opencodeManualPanel',
     '#deepseekManualPanel',
     '#minimaxManualPanel',
+    '#factoryManualPanel',
     '#zaiManualPanel',
     '#zaiteamManualPanel',
     '#volcengineManualPanel',
