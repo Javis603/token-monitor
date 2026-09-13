@@ -97,7 +97,9 @@ function readWidgetConfig(appPath) {
     appGroup: String(config.appGroup || '').trim(),
     bundleId: String(process.env.TOKEN_MONITOR_WIDGET_BUNDLE_ID || DEFAULT_WIDGET_BUNDLE_ID).trim(),
     widgetKind: String(config.widgetKind || DEFAULT_WIDGET_KIND).trim(),
-    urlScheme: String(config.urlScheme || DEFAULT_URL_SCHEME).trim()
+    urlScheme: String(config.urlScheme || DEFAULT_URL_SCHEME).trim(),
+    packageVersion: String(config.packageVersion || config.marketingVersion || '').trim(),
+    marketingVersion: String(config.marketingVersion || config.packageVersion || '').trim()
   };
 }
 
@@ -147,14 +149,24 @@ function resolveDevelopmentIdentity(explicitIdentity) {
   throw new Error('More than one Apple Development identity was found. Pass --identity to choose one.');
 }
 
-function xcconfigContents({ appGroup, bundleId, widgetKind, urlScheme, developmentTeam }) {
+function xcconfigContents({
+  appGroup,
+  bundleId,
+  widgetKind,
+  urlScheme,
+  developmentTeam,
+  packageVersion: targetPackageVersion,
+  marketingVersion: targetMarketingVersion
+}) {
   const versions = widgetVersions(packageVersion());
+  const effectivePackageVersion = targetPackageVersion || versions.packageVersion;
+  const effectiveMarketingVersion = targetMarketingVersion || versions.marketingVersion;
   const values = {
     CURRENT_PROJECT_VERSION: String(WIDGET_UI_VERSION),
-    MARKETING_VERSION: versions.marketingVersion,
+    MARKETING_VERSION: effectiveMarketingVersion,
     TOKEN_MONITOR_BUNDLE_VERSION: String(WIDGET_UI_VERSION),
-    TOKEN_MONITOR_MARKETING_VERSION: versions.marketingVersion,
-    TOKEN_MONITOR_PACKAGE_VERSION: versions.packageVersion,
+    TOKEN_MONITOR_MARKETING_VERSION: effectiveMarketingVersion,
+    TOKEN_MONITOR_PACKAGE_VERSION: effectivePackageVersion,
     TOKEN_MONITOR_APP_GROUP: appGroup,
     TOKEN_MONITOR_WIDGET_BUNDLE_ID: bundleId,
     TOKEN_MONITOR_WIDGET_URL_SCHEME: urlScheme,
@@ -178,9 +190,28 @@ function ensureSigningArtifacts() {
 
 function buildWidget(config, developmentTeam) {
   fs.mkdirSync(DEV_OUTPUT, { recursive: true });
+  const fallbackVersions = widgetVersions(packageVersion());
+  const targetPackageVersion = config.packageVersion || fallbackVersions.packageVersion;
+  const targetMarketingVersion = config.marketingVersion || fallbackVersions.marketingVersion;
   const xcconfigPath = path.join(DEV_OUTPUT, 'development.xcconfig');
-  fs.writeFileSync(xcconfigPath, xcconfigContents({ ...config, developmentTeam }), { mode: 0o600 });
+  fs.writeFileSync(xcconfigPath, xcconfigContents({
+    ...config,
+    packageVersion: targetPackageVersion,
+    marketingVersion: targetMarketingVersion,
+    developmentTeam
+  }), { mode: 0o600 });
   const developerDirectory = resolveDeveloperDirectory();
+  const extension = path.join(
+    DERIVED_DATA,
+    'Build',
+    'Products',
+    BUILD_CONFIGURATION,
+    'TokenMonitorWidget.appex'
+  );
+  // Xcode does not always invalidate a generated Info.plist when only the
+  // injected xcconfig values change. Recreate the product bundle while keeping
+  // DerivedData's compiled Swift objects so fast deployment remains incremental.
+  fs.rmSync(extension, { recursive: true, force: true });
   run('xcodebuild', [
     '-project', PROJECT,
     '-scheme', 'TokenMonitorWidget',
@@ -194,6 +225,8 @@ function buildWidget(config, developmentTeam) {
     'CODE_SIGN_STYLE=Automatic',
     'CODE_SIGN_IDENTITY=Apple Development',
     `DEVELOPMENT_TEAM=${developmentTeam}`,
+    `TOKEN_MONITOR_PACKAGE_VERSION=${targetPackageVersion}`,
+    `TOKEN_MONITOR_MARKETING_VERSION=${targetMarketingVersion}`,
     'ARCHS=arm64',
     'ONLY_ACTIVE_ARCH=YES'
   ], {
@@ -201,13 +234,6 @@ function buildWidget(config, developmentTeam) {
       ? { ...process.env, DEVELOPER_DIR: developerDirectory }
       : process.env
   });
-  const extension = path.join(
-    DERIVED_DATA,
-    'Build',
-    'Products',
-    BUILD_CONFIGURATION,
-    'TokenMonitorWidget.appex'
-  );
   if (!fs.existsSync(extension)) throw new Error(`Built Widget extension not found: ${extension}`);
   return extension;
 }

@@ -60,12 +60,16 @@ test('writes an arm64 development xcconfig with the shared Team App Group', () =
     bundleId: 'com.javis.tokenmonitor.widget',
     widgetKind: 'com.tokenmonitor.dashboard',
     urlScheme: 'token-monitor',
-    developmentTeam: 'ABCDE12345'
+    developmentTeam: 'ABCDE12345',
+    packageVersion: '0.54.0',
+    marketingVersion: '0.54.0'
   });
   assert.match(output, /TOKEN_MONITOR_APP_GROUP = ABCDE12345\.tokenmonitor/);
   assert.match(output, /TOKEN_MONITOR_WIDGET_BUNDLE_ID = com\.javis\.tokenmonitor\.widget/);
   assert.match(output, /TOKEN_MONITOR_WIDGET_ARCH = arm64/);
   assert.match(output, /DEVELOPMENT_TEAM = ABCDE12345/);
+  assert.match(output, /TOKEN_MONITOR_MARKETING_VERSION = 0\.54\.0/);
+  assert.match(output, /TOKEN_MONITOR_PACKAGE_VERSION = 0\.54\.0/);
 });
 
 test('keeps the packaged Widget descriptor aligned with the incremental UI build', () => {

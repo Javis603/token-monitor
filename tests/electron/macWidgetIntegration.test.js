@@ -42,6 +42,7 @@ const widgetProject = fs.readFileSync(
   'utf8'
 );
 const widgetBuildSource = fs.readFileSync(path.join(root, 'scripts', 'build-macos-widget.js'), 'utf8');
+const widgetDevSource = fs.readFileSync(path.join(root, 'scripts', 'dev-macos-widget.js'), 'utf8');
 const widgetReloaderSource = fs.readFileSync(
   path.join(root, 'scripts', 'TokenMonitorWidgetReloader.swift'),
   'utf8'
@@ -776,6 +777,8 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;/);
   assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 33;/);
   assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 8;/);
+  assert.match(widgetDevSource, /fs\.rmSync\(extension, \{ recursive: true, force: true \}\)/);
+  assert.match(widgetDevSource, /`TOKEN_MONITOR_MARKETING_VERSION=\$\{targetMarketingVersion\}`/);
   assert.equal(packageVersion(), packageJson.version);
   assert.match(widgetProject, /MARKETING_VERSION = "\$\(TOKEN_MONITOR_MARKETING_VERSION\)";/);
   assert.match(widgetProject, /CURRENT_PROJECT_VERSION = "\$\(TOKEN_MONITOR_BUNDLE_VERSION\)";/);
