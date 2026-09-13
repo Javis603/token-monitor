@@ -18,9 +18,11 @@ enum WidgetDesignTokens {
     static let microSize: CGFloat = 9
     static let dashboardMetricSize: CGFloat = 36
     static let dashboardSectionTitleSize: CGFloat = 10
-    static let dashboardRowLabelSize: CGFloat = 11
-    static let dashboardValueSize: CGFloat = 10
-    static let dashboardDetailSize: CGFloat = 8.5
+    // Preserve the original dashboard quota density across both quota and
+    // breakdown rows so one section never forces the other to truncate.
+    static let dashboardRowLabelSize: CGFloat = 10
+    static let dashboardValueSize: CGFloat = 8.5
+    static let dashboardDetailSize: CGFloat = 7.5
     static let dashboardTrendHeight: CGFloat = 34
     static let dividerOpacity = 0.14
     static let accent = Color.accentColor

@@ -362,7 +362,7 @@ function normalizedDaily(history) {
 }
 
 const MAC_WIDGET_ACTIVITY_DAYS = 182;
-const TREND_WINDOW_DAYS = 7;
+const TREND_WINDOW_DAYS = 14;
 
 function localDayKey(date) {
   const value = date instanceof Date ? date : new Date(date || Date.now());

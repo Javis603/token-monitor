@@ -120,11 +120,17 @@ test('builds schema v10 periods, quota and presentation', () => {
   assert.deepEqual(snapshot.periods.day.activity.days.map((day) => day.totalTokens), [100, 200, 50]);
   assert.deepEqual(snapshot.periods.day.activity.days.map((day) => day.costUsd), [0.1, 0.2, 0.05]);
   assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.date), [
-    '2026-07-11', '2026-07-12', '2026-07-13', '2026-07-14',
+    '2026-07-04', '2026-07-05', '2026-07-06', '2026-07-07',
+    '2026-07-08', '2026-07-09', '2026-07-10', '2026-07-11',
+    '2026-07-12', '2026-07-13', '2026-07-14',
     '2026-07-15', '2026-07-16', '2026-07-17'
   ]);
-  assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.totalTokens), [0, 0, 0, 0, 100, 200, 1_200_000]);
-  assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.costUsd), [0, 0, 0, 0, 0.1, 0.2, 1.25]);
+  assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.totalTokens), [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 200, 1_200_000
+  ]);
+  assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.costUsd), [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.1, 0.2, 1.25
+  ]);
   assert.deepEqual(snapshot.presentation, {
     currencyCode: 'CNY', currencySymbol: '¥', currencyRate: 7.1,
     numberStyle: 'compact', compactTokenUnits: 'localized', showCost: true, locale: 'zh-CN', theme: 'custom'
@@ -404,14 +410,14 @@ test('keeps up to ten provider and model rows for adaptive widget capacity', () 
   assert.equal(snapshot.periods.day.models.length, 10);
 });
 
-test('keeps real 28, 90, and 180 day activity ranges, caps at 182, and keeps DAY trend at 7 dates', () => {
+test('keeps real 28, 90, and 180 day activity ranges, caps at 182, and keeps DAY trend at 14 dates', () => {
   for (const count of [28, 90, 180]) {
     const daily = dailyHistory(count);
     const snapshot = buildSnapshot({ history: { daily } }, { now: NOW });
     assert.equal(snapshot.periods.day.activity.days.length, count);
     assert.equal(snapshot.periods.day.activity.days[0].date, daily[0].date);
     assert.equal(snapshot.periods.day.activity.days.at(-1).date, daily.at(-1).date);
-    assert.equal(snapshot.periods.day.trend.points.length, 7);
+    assert.equal(snapshot.periods.day.trend.points.length, 14);
   }
 
   const daily = dailyHistory(190, '2025-12-01');
@@ -419,10 +425,10 @@ test('keeps real 28, 90, and 180 day activity ranges, caps at 182, and keeps DAY
   assert.equal(snapshot.periods.day.activity.days.length, 182);
   assert.equal(snapshot.periods.day.activity.days[0].date, daily[8].date);
   assert.equal(snapshot.periods.day.activity.days.at(-1).date, daily.at(-1).date);
-  assert.equal(snapshot.periods.day.trend.points.length, 7);
+  assert.equal(snapshot.periods.day.trend.points.length, 14);
 });
 
-test('builds a local seven-day Widget trend from live usage without double counting history', () => {
+test('builds a local fourteen-day Widget trend from live usage without double counting history', () => {
   const now = new Date(2026, 7, 6, 12, 0, 0);
   const stats = {
     periods: {
@@ -438,13 +444,19 @@ test('builds a local seven-day Widget trend from live usage without double count
   const snapshot = buildSnapshot(stats, { now });
 
   assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.date), [
-    '2026-07-31', '2026-08-01', '2026-08-02', '2026-08-03',
+    '2026-07-24', '2026-07-25', '2026-07-26', '2026-07-27',
+    '2026-07-28', '2026-07-29', '2026-07-30', '2026-07-31',
+    '2026-08-01', '2026-08-02', '2026-08-03',
     '2026-08-04', '2026-08-05', '2026-08-06'
   ]);
-  assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.totalTokens), [0, 210, 0, 0, 0, 123, 99]);
+  assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.totalTokens), [
+    0, 0, 0, 0, 0, 0, 0, 0, 210, 0, 0, 0, 123, 99
+  ]);
 
   const liveOnly = buildSnapshot({ periods: { today: { totalTokens: 99, costUsd: 0.9 } } }, { now });
-  assert.deepEqual(liveOnly.periods.day.trend.points.map((point) => point.totalTokens), [0, 0, 0, 0, 0, 0, 99]);
+  assert.deepEqual(liveOnly.periods.day.trend.points.map((point) => point.totalTokens), [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 99
+  ]);
   assert.equal(snapshot.periods.month.trend.points.length, 2);
   assert.equal(snapshot.periods.total.trend.points.length, 2);
   assert.equal(snapshot.periods.month.models[0].sharePercent, 100);

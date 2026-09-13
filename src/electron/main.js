@@ -466,6 +466,7 @@ function normalizeHomeLimitAccountCount(value) {
 }
 
 let pendingMacWidgetOpen = null;
+let macWidgetOpenRefreshInFlight = null;
 app.on('open-url', (event, url) => {
   const urlScheme = macWidgetConfiguration()?.urlScheme || 'token-monitor';
   const destination = parseMacWidgetDeepLink(url, urlScheme);
@@ -4572,6 +4573,7 @@ function openMainWindowFromWidget() {
   };
   if (mainWindow.webContents.isLoadingMainFrame()) mainWindow.webContents.once('did-finish-load', sendDestination);
   else sendDestination();
+  void refreshFromMacWidgetOpen();
   if (settings?.trayMode && tray) {
     showPopover();
     return;
@@ -4581,6 +4583,26 @@ function openMainWindowFromWidget() {
   // A collapsed bubble would otherwise swallow the navigation we just sent.
   if (floatingBubbleState.collapsed) expandFloatingBubble();
   else mainWindow.show();
+}
+
+function refreshFromMacWidgetOpen() {
+  if (macWidgetOpenRefreshInFlight) return macWidgetOpenRefreshInFlight;
+  const widgetProducerOwner = captureMacWidgetProducerOwner();
+  macWidgetOpenRefreshInFlight = (async () => {
+    try {
+      const stats = await fetchStats({ force: true });
+      // A local collector publishes its own completed tick. Remote Hub reads do
+      // not, so bridge only a distinct response into the app and Widget paths.
+      if (stats && stats !== latestStats) {
+        sendPush({ event: 'stats', data: { stats, mode, reason: 'widget-open' } }, { widgetProducerOwner });
+      }
+    } catch (error) {
+      console.warn(`[mac-widget] refresh after open failed: ${error.message}`);
+    } finally {
+      macWidgetOpenRefreshInFlight = null;
+    }
+  })();
+  return macWidgetOpenRefreshInFlight;
 }
 
 function hidePopover() {

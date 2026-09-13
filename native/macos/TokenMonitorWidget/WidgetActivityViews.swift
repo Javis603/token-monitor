@@ -143,7 +143,7 @@ struct DashboardActivityModule: View {
             ActivitySummaryLabel(
                 snapshot: snapshot,
                 selectedDate: selectedActivityDate,
-                fallback: WidgetL10n.format("%lld days", layout.activeDays),
+                fallback: WidgetL10n.format("%lld active days", layout.activeDays),
                 includesCost: false
             )
             .font(.system(size: WidgetDesignTokens.dashboardDetailSize, weight: .medium))

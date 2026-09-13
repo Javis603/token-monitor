@@ -119,7 +119,7 @@ struct LargeDashboardWidgetView: View {
                     )
                     .layoutPriority(1)
                     VStack(alignment: .trailing, spacing: 4) {
-                        Text(trendDelta)
+                        Text(trendCaption)
                             .font(.caption.weight(.medium))
                             .monospacedDigit()
                             .foregroundStyle(WidgetDesignTokens.muted)
@@ -184,6 +184,11 @@ struct LargeDashboardWidgetView: View {
         let percent = Int((Double(last - first) / Double(first) * 100).rounded())
         if percent == 0 { return "0%" }
         return percent > 0 ? "+\(percent)%" : "−\(abs(percent))%"
+    }
+
+    private var trendCaption: String {
+        guard !snapshot.trend.points.isEmpty else { return "—" }
+        return WidgetL10n.format("%lldD · %@", snapshot.trend.points.count, trendDelta)
     }
 }
 

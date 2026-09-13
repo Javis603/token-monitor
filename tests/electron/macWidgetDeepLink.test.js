@@ -39,4 +39,12 @@ test('a widget click rebuilds the window instead of dropping the event', () => {
   // it can take focus, and a collapsed bubble would hide the view we just sent.
   assert.match(body, /applyMacActivationPolicy\(\{ mainWindowVisible: true \}\)/);
   assert.match(body, /if \(floatingBubbleState\.collapsed\) expandFloatingBubble\(\);/);
+  assert.match(body, /void refreshFromMacWidgetOpen\(\);/);
+
+  const refreshStart = main.indexOf('function refreshFromMacWidgetOpen()');
+  const refreshBody = main.slice(refreshStart, main.indexOf('\nfunction ', refreshStart + 1));
+  assert.match(refreshBody, /if \(macWidgetOpenRefreshInFlight\) return macWidgetOpenRefreshInFlight;/);
+  assert.match(refreshBody, /fetchStats\(\{ force: true \}\)/);
+  assert.doesNotMatch(refreshBody, /forceHistory|forceSelfSync/);
+  assert.match(refreshBody, /reason: 'widget-open'/);
 });

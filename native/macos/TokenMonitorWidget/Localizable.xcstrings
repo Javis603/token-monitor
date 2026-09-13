@@ -614,36 +614,70 @@
         }
       }
     },
-    "%lld days": {
+    "%lld active days": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld days"
+            "value": "%lld active days"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 天"
+            "value": "%lld 个活跃日"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 天"
+            "value": "%lld 個活躍日"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 日"
+            "value": "アクティブ %lld 日"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld일"
+            "value": "활동 %lld일"
+          }
+        }
+      }
+    },
+    "%lldD · %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lldD · %2$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld 天 · %2$@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld 日 · %2$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld日 · %2$@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld일 · %2$@"
           }
         }
       }
