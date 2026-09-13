@@ -239,6 +239,10 @@ function buildWidget(config, developmentTeam, metadata) {
     `DEVELOPMENT_TEAM=${developmentTeam}`,
     `TOKEN_MONITOR_PACKAGE_VERSION=${targetPackageVersion}`,
     `TOKEN_MONITOR_MARKETING_VERSION=${targetMarketingVersion}`,
+    `TOKEN_MONITOR_WIDGET_SCHEMA_VERSION=${WIDGET_SCHEMA_VERSION}`,
+    `TOKEN_MONITOR_WIDGET_UI_VERSION=${WIDGET_UI_VERSION}`,
+    `TOKEN_MONITOR_WIDGET_GIT_REVISION=${metadata.revision}`,
+    `TOKEN_MONITOR_WIDGET_BUILD_TIMESTAMP=${metadata.timestamp}`,
     'ARCHS=arm64',
     'ONLY_ACTIVE_ARCH=YES'
   ], {

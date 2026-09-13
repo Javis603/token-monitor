@@ -764,6 +764,9 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 10;/);
   assert.match(widgetDevSource, /fs\.rmSync\(extension, \{ recursive: true, force: true \}\)/);
   assert.match(widgetDevSource, /`TOKEN_MONITOR_MARKETING_VERSION=\$\{targetMarketingVersion\}`/);
+  assert.match(widgetDevSource, /`TOKEN_MONITOR_WIDGET_SCHEMA_VERSION=\$\{WIDGET_SCHEMA_VERSION\}`/);
+  assert.match(widgetDevSource, /`TOKEN_MONITOR_WIDGET_GIT_REVISION=\$\{metadata\.revision\}`/);
+  assert.match(widgetDevSource, /`TOKEN_MONITOR_WIDGET_BUILD_TIMESTAMP=\$\{metadata\.timestamp\}`/);
   assert.equal(packageVersion(), packageJson.version);
   assert.match(widgetProject, /MARKETING_VERSION = "\$\(TOKEN_MONITOR_MARKETING_VERSION\)";/);
   assert.match(widgetProject, /CURRENT_PROJECT_VERSION = "\$\(TOKEN_MONITOR_BUNDLE_VERSION\)";/);
