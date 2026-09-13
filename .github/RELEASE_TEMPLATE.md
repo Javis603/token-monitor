@@ -4,24 +4,27 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Unsloth Studio usage:** Adds tracking for Unsloth Studio to the usage views and breakdowns. (#606)
-- **Alibaba Cloud Token Plan limits:** Adds quota tracking for Team and Personal plans on the mainland and international consoles. (#604)
+- **Custom scan paths:** Adds extra session folders for supported tools through **Settings → Collection → expand a tool → Add path**, covering records outside the default locations. (#674)
+- **Session activity and projects:** Adds activity times across discoverable sessions and project attribution when the workspace folder can be identified. (#676)
+- **Factory Droid usage:** Supports token usage from Droid CLI and Factory desktop sessions. (#682)
+- **Volcengine Agent Plan:** Reads personal Agent Plan quotas automatically from the locally signed-in arkcli account on this computer when explicit Volcengine credentials are not configured. (#655)
 
 ### Improved
-- **Codex reset forecasts:** Shows the latest reset type as Regular reset or Banked reset when available. (#610)
+- **Hub sync bandwidth:** Reduces repeated full statistics transfers for Node and Cloudflare Worker Hubs while keeping older clients compatible. (#649)
 
 ### Fixed
-- **Settings overlay:** Fixes the main view and live stats pausing while Settings is open. (#609)
-- **Titlebar controls:** Fixes hover controls overlapping the period tabs or staying open after pointer actions. (#608)
+- **Codex scheduled resets:** Shows an announced reset schedule instead of leaving the earlier forecast visible. (#679)
+- **DeepSeek Harness sessions on Windows:** Switches to the latest versioned transcript even when it is created rapidly, so usage and details do not remain pinned to older data. (#680)
+- **Pi-family sessions:** Avoids double-counting copied responses across forked or continued Pi, Senpi, and Omp session files.
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.54.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.54.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.54.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-Setup-0.54.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.54.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.54.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -59,24 +62,27 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **Unsloth Studio 用量：** 新增追踪支持，可在用量视图和明细中查看。（#606）
-- **Alibaba Cloud Token Plan 额度：** 新增中国站与国际站的团队版与个人版额度追踪。（#604）
+- **自定义扫描路径：** 可通过**“设置”→“采集”→展开工具→“添加路径”**为支持的工具添加额外 session 文件夹，读取不在默认位置的记录。（#674）
+- **会话时间与项目：** 为可发现的会话补充活动时间；能识别工作区文件夹时，也会归入对应项目。（#676）
+- **Factory Droid 用量：** 支持统计 Droid CLI 与 Factory 桌面版 session 的 Token 用量。（#682）
+- **Volcengine Agent Plan：** 未配置 Volcengine 凭据时，可自动读取本机 arkcli 当前登录个人账号的 Agent Plan 额度。（#655）
 
 ### 改进
-- **Codex 重置预测：** 有可用信息时，显示最近一次重置的类型为 Regular reset 或 Banked reset。（#610）
+- **Hub 同步流量：** 减少 Node 与 Cloudflare Worker Hub 重复传输完整统计数据，同时保持旧版客户端兼容。（#649）
 
 ### 修复
-- **设置面板：** 修复打开设置后主界面暂停更新的问题。（#609）
-- **标题栏控件：** 修复悬停控件遮挡时间范围标签，或在鼠标操作后仍保持打开的问题。（#608）
+- **Codex 计划重置：** 收到重置排期公告后会显示该排期，不再停留在先前的预测状态。（#679）
+- **Windows DeepSeek Harness 会话：** 快速生成版本化对话记录时也会切换到最新记录，避免用量与详情停留在旧数据。（#680）
+- **Pi 系列会话：** Pi、Senpi 与 Omp 分叉或续接 session 文件中的已复制响应不再重复计入用量。
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.54.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.54.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.54.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-Setup-0.54.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.54.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.54.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -109,7 +115,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.53.0...v0.54.0">v0.53.0...v0.54.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.56.0...v0.57.0">v0.56.0...v0.57.0</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -127,24 +133,27 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **Unsloth Studio 用量：** 新增追蹤支援，可在用量檢視與明細中查看。（#606）
-- **Alibaba Cloud Token Plan 額度：** 新增中國站與國際站的團隊版與個人版額度追蹤。（#604）
+- **自訂掃描路徑：** 可透過**「設定」→「採集」→展開工具→「新增路徑」**為支援的工具加入額外 session 資料夾，讀取不在預設位置的記錄。（#674）
+- **工作階段時間與專案：** 為可找到的工作階段補上活動時間；能識別工作區資料夾時，也會歸入對應專案。（#676）
+- **Factory Droid 用量：** 支援統計 Droid CLI 與 Factory 桌面版 session 的 Token 用量。（#682）
+- **Volcengine Agent Plan：** 未設定 Volcengine 憑證時，可自動讀取本機 arkcli 目前登入個人帳號的 Agent Plan 額度。（#655）
 
 ### 改進
-- **Codex 重置預測：** 有可用資訊時，顯示最近一次重置的類型為 Regular reset 或 Banked reset。（#610）
+- **Hub 同步流量：** 減少 Node 與 Cloudflare Worker Hub 重複傳輸完整統計資料，同時保持舊版用戶端相容。（#649）
 
 ### 修復
-- **設定面板：** 修復開啟設定後主畫面暫停更新的問題。（#609）
-- **標題列控制項：** 修復懸停控制項遮住時間範圍分頁，或在滑鼠操作後仍保持開啟的問題。（#608）
+- **Codex 排程重設：** 收到重設排程公告後會顯示該排程，不再停留在先前的預測狀態。（#679）
+- **Windows DeepSeek Harness 工作階段：** 快速產生版本化對話記錄時也會切換至最新記錄，避免用量與詳情停留在舊資料。（#680）
+- **Pi 系列工作階段：** Pi、Senpi 與 Omp 分支或接續 session 檔案中的已複製回應不再重複計入用量。
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.54.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.54.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.54.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-Setup-0.54.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.54.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.54.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
 
 </details>
 
@@ -157,24 +166,27 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ko:start -->
 ### 추가
-- **Unsloth Studio 사용량:** 사용량 보기와 상세 내역에서 확인할 수 있도록 추적을 지원합니다. (#606)
-- **Alibaba Cloud Token Plan 할당량:** 중국 사이트와 글로벌 사이트의 팀 및 개인 플랜 할당량 추적을 지원합니다. (#604)
+- **사용자 지정 스캔 경로:** **설정 → 수집 → 도구 펼치기 → 경로 추가**에서 지원 도구별로 세션 폴더를 추가하여 기본 위치 밖의 기록을 읽을 수 있습니다. (#674)
+- **세션 시간 및 프로젝트:** 탐색 가능한 세션에 활동 시간을 표시하고, 작업 공간 폴더를 식별할 수 있으면 해당 프로젝트에 연결합니다. (#676)
+- **Factory Droid 사용량:** Droid CLI와 Factory 데스크톱 세션의 토큰 사용량을 지원합니다. (#682)
+- **Volcengine Agent Plan:** Volcengine 자격 증명을 직접 설정하지 않은 경우 이 컴퓨터의 arkcli에 로그인된 개인 계정에서 Agent Plan 할당량을 자동으로 읽습니다. (#655)
 
 ### 개선
-- **Codex 리셋 예측:** 가능한 경우 최근 리셋 유형을 Regular reset 또는 Banked reset으로 표시합니다. (#610)
+- **Hub 동기화 트래픽:** 이전 클라이언트 호환성을 유지하면서 Node 및 Cloudflare Worker Hub의 반복적인 전체 통계 전송을 줄였습니다. (#649)
 
 ### 수정
-- **설정 오버레이:** 설정을 열어 둔 동안 메인 화면과 실시간 사용량 업데이트가 멈추던 문제를 수정했습니다. (#609)
-- **제목 표시줄 컨트롤:** 기간 탭을 가리거나 포인터 조작 후에도 열린 상태로 남던 문제를 수정했습니다. (#608)
+- **Codex 예약 리셋:** 리셋 일정이 공지되면 이전 예측 대신 공지된 일정을 표시합니다. (#679)
+- **Windows의 DeepSeek Harness 세션:** 버전이 지정된 대화 기록이 빠르게 생성되어도 최신 기록으로 전환되어 사용량과 상세 정보가 이전 데이터에 머무르지 않습니다. (#680)
+- **Pi 계열 세션:** 포크하거나 이어서 진행한 Pi, Senpi 및 Omp 세션 파일에 복사된 응답이 중복 집계되지 않습니다.
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.54.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.54.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.54.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-Setup-0.54.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.54.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.54.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
 
 </details>
 
@@ -187,24 +199,27 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **Unsloth Studioの使用量：** 使用量ビューと内訳で確認できるよう追跡に対応しました。（#606）
-- **Alibaba Cloud Token Planのクォータ：** 中国サイトと国際サイトのチーム・個人プランのクォータ追跡に対応しました。（#604）
+- **カスタムスキャンパス：** **設定 → 収集 → ツールを展開 → パスを追加**から、対応ツールごとに追加のセッションフォルダーを指定し、既定の場所にない記録を読み込めます。（#674）
+- **セッション時刻とプロジェクト：** 検出可能なセッションにアクティビティ時刻を表示し、ワークスペースフォルダーを識別できる場合は該当プロジェクトに関連付けます。（#676）
+- **Factory Droid の使用量：** Droid CLI と Factory デスクトップのセッションで Token 使用量を集計できます。（#682）
+- **Volcengine Agent Plan：** Volcengine の認証情報を明示的に設定していない場合、このコンピューターで arkcli にログイン中の個人アカウントから Agent Plan のクォータを自動取得します。（#655）
 
 ### 改善
-- **Codexリセット予測：** 情報が利用できる場合、最新のリセット種別をRegular resetまたはBanked resetとして表示します。（#610）
+- **Hub 同期トラフィック：** 旧バージョンのクライアントとの互換性を保ちながら、Node および Cloudflare Worker Hub による完全な統計データの重複送信を減らしました。（#649）
 
 ### 修正
-- **設定オーバーレイ：** 設定を開いている間、メイン画面とリアルタイムの使用量の更新が止まる問題を修正しました。（#609）
-- **タイトルバーのコントロール：** ホバー時のコントロールが期間タブに重なったり、ポインター操作後も開いたままになったりする問題を修正しました。（#608）
+- **Codex の予定リセット：** リセット予定が告知されると、以前の予測ではなく告知された予定を表示します。（#679）
+- **Windows の DeepSeek Harness セッション：** バージョン付きの会話記録が短時間に作成されても最新の記録へ切り替わり、使用量や詳細が古いデータのまま残りません。（#680）
+- **Pi 系セッション：** フォークまたは継続した Pi、Senpi、Omp のセッションファイルにコピーされた応答を重複計上しません。
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.54.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.54.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.54.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-Setup-0.54.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.54.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.54.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.54.0/Token-Monitor-0.54.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
 
 </details>
 

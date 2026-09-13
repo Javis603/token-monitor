@@ -5,7 +5,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { archivedSessionCount, sessionBreakdownIncomplete, sessionIdLabel, sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
+const {
+  applyBreakdownRowSemantics,
+  archivedSessionCount,
+  groupBackgroundReviewRows,
+  handleBreakdownRowKeydown,
+  sessionBreakdownIncomplete,
+  sessionIdLabel,
+  sessionRowsForPeriod
+} = require('../../src/electron/renderer/sessionRows');
 
 const clientLabels = { claude: 'Claude Code', codex: 'Codex' };
 const clientColors = { claude: '#cc7c5e', codex: '#49a3b0', default: '#6ab4f0' };
@@ -83,6 +91,154 @@ test('session rows fall back to month and day for older activity', () => {
 
   assert.equal(rows[0].subtitle, '05/29 23:08');
   assert.equal(rows[0].detail, '214c24d5-aaaa-bbbb-cccc-f87e');
+});
+
+test('session rows group client and model apart from activity metadata', () => {
+  const [row] = sessionRowsForPeriod({ sessions: {
+    'codex:titled': {
+      client: 'codex',
+      sessionId: 'titled',
+      title: '修復 session detail',
+      totalTokens: 120,
+      models: { 'gpt-5.6-sol': 120 },
+      messageCount: 4,
+      lastUsedAt: localIso(2026, 5, 30, 12, 7)
+    }
+  } }, {
+    clientLabels,
+    clientColors,
+    now: new Date(2026, 4, 30, 12, 30)
+  });
+
+  assert.equal(row.name, '修復 session detail');
+  assert.equal(row.subtitle, 'Codex · gpt-5.6-sol');
+  assert.equal(row.activity, '12:07 · 4 msgs');
+  assert.equal(row.detail, 'titled');
+});
+
+test('Codex merged rollout labels contain UUIDs only', () => {
+  const first = '01a084ff-20ff-7563-beb4-045b31e5a47a';
+  const second = '01a0876b-d178-7be2-a485-529a745ea1b0';
+  assert.equal(
+    sessionIdLabel(`rollout-2026-09-10T02-33-00-${first}_rollout-2026-09-10T02-40-00-${second}`),
+    `${first} · ${second}`
+  );
+});
+
+test('background review sessions collapse into one interactive aggregate row with newest-run context', () => {
+  const rows = sessionRowsForPeriod({ sessions: {
+    'codex:ordinary': {
+      client: 'codex', sessionId: 'ordinary', totalTokens: 100,
+      models: { 'gpt-5.6-sol': 100 }, lastUsedAt: localIso(2026, 5, 30, 12, 30)
+    },
+    'codex:review-a': {
+      client: 'codex', sessionId: 'review-a', totalTokens: 20, costUsd: 0.1,
+      sessionKind: 'background-review', models: { 'codex-auto-review': 20 },
+      lastUsedAt: localIso(2026, 5, 30, 12, 20)
+    },
+    'codex:review-b': {
+      client: 'codex', sessionId: 'review-b', totalTokens: 30, costUsd: 0.2,
+      sessionKind: 'background-review', models: { 'gpt-5.6-sol': 30 },
+      lastUsedAt: localIso(2026, 5, 30, 12, 10)
+    }
+  } }, { clientLabels, clientColors, now: new Date(2026, 4, 30, 12, 30) });
+
+  const collapsed = groupBackgroundReviewRows(rows, {
+    label: 'Background reviews',
+    countLabel: (count) => `Sessions: ${count}`,
+    summaryLabel: ({ latestTime, latestValue }) => `${latestTime} · ${latestValue}`,
+    now: new Date(2026, 4, 30, 12, 30)
+  });
+  assert.deepEqual(collapsed.map((row) => row.key), [
+    'session:codex:ordinary',
+    'session-group:codex-auto-review'
+  ]);
+  assert.equal(collapsed[1].value, 50);
+  assert.equal(collapsed[1].kind, 'summary');
+  assert.ok(Math.abs(collapsed[1].cost - 0.3) < 1e-9);
+  assert.equal(collapsed[1].barValue, 50);
+  assert.equal(collapsed[1].subtitle, '12:20 · 20');
+  assert.equal(collapsed[1].detail, 'Sessions: 2');
+  assert.equal(collapsed[1].reviewGroup, true);
+  assert.deepEqual(collapsed[1].backgroundReviewRows.map((row) => row.key), [
+    'session:codex:review-a',
+    'session:codex:review-b'
+  ]);
+  assert.equal(Object.hasOwn(collapsed[1], 'sessionGroupExpanded'), false);
+  assert.equal(Object.hasOwn(collapsed[1], 'sessionDetailAvailable'), false);
+});
+
+test('model name alone does not hide an ordinary Codex session in background reviews', () => {
+  const rows = sessionRowsForPeriod({ sessions: {
+    'codex:user-selected-review-model': {
+      client: 'codex',
+      sessionId: 'user-selected-review-model',
+      totalTokens: 20,
+      models: { 'codex-auto-review': 20 },
+      lastUsedAt: localIso(2026, 5, 30, 12, 20)
+    }
+  } }, { clientLabels, clientColors, now: new Date(2026, 4, 30, 12, 30) });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].backgroundReview, undefined);
+  assert.deepEqual(groupBackgroundReviewRows(rows).map((row) => row.key), [
+    'session:codex:user-selected-review-model'
+  ]);
+});
+
+test('breakdown row semantics keep sessions keyboard-accessible without changing accordion ownership', () => {
+  class FakeElement {
+    constructor() { this.attributes = new Map(); }
+    getAttribute(name) { return this.attributes.get(name) ?? null; }
+    hasAttribute(name) { return this.attributes.has(name); }
+    removeAttribute(name) { this.attributes.delete(name); }
+    setAttribute(name, value) { this.attributes.set(name, String(value)); }
+  }
+
+  const row = new FakeElement();
+  const rowHead = new FakeElement();
+  applyBreakdownRowSemantics(row, rowHead, {
+    interactive: true,
+    hasAccordion: false,
+    ariaLabel: 'Codex session'
+  });
+  assert.equal(row.getAttribute('role'), 'button');
+  assert.equal(row.getAttribute('tabindex'), '0');
+  assert.equal(row.getAttribute('aria-label'), 'Codex session');
+  assert.equal(rowHead.hasAttribute('role'), false);
+
+  applyBreakdownRowSemantics(row, rowHead, {
+    interactive: false,
+    hasAccordion: true,
+    expanded: true,
+    ariaLabel: 'Codex, Total tokens: 10'
+  });
+  assert.equal(row.hasAttribute('role'), false);
+  assert.equal(rowHead.getAttribute('role'), 'button');
+  assert.equal(rowHead.getAttribute('tabindex'), '0');
+  assert.equal(rowHead.getAttribute('aria-expanded'), 'true');
+  assert.equal(rowHead.getAttribute('aria-label'), 'Codex, Total tokens: 10');
+});
+
+test('breakdown row keyboard activation handles Enter and Space', () => {
+  let clicks = 0;
+  let prevented = 0;
+  const row = { click: () => { clicks += 1; } };
+  const target = {
+    closest: (selector) => selector === '.row[role="button"]' ? row : null
+  };
+
+  assert.equal(handleBreakdownRowKeydown({
+    key: 'Enter', target, preventDefault: () => { prevented += 1; }
+  }), true);
+  assert.equal(handleBreakdownRowKeydown({
+    key: ' ', target, preventDefault: () => { prevented += 1; }
+  }), true);
+  assert.equal(handleBreakdownRowKeydown({
+    key: 'Escape', target, preventDefault: () => { prevented += 1; }
+  }), false);
+  assert.equal(clicks, 2);
+  assert.equal(prevented, 2);
 });
 
 test('Reasonix native rows reuse the common session schema without a native accordion', () => {
@@ -288,13 +444,20 @@ test('session breakdown marks only periods affected by bounded sync detail', () 
   assert.equal(sessionBreakdownIncomplete({}, 'month'), false);
 });
 
-test('session layout keeps page chrome consistent and lets details wrap', () => {
+test('session layout keeps page chrome consistent and scrolls long labels on one line', () => {
   const styles = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'styles.css'), 'utf8');
+  const renderer = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
 
   assert.doesNotMatch(styles, /\.shell\.session-mode\s*\{[^}]*gap:/);
   assert.doesNotMatch(styles, /\.shell\.session-mode \.total-panel/);
   assert.doesNotMatch(styles, /\.shell\.session-mode \.total-number/);
   assert.doesNotMatch(styles, /\.shell\.session-mode \.cost/);
   assert.doesNotMatch(styles, /\.shell\.session-mode \.row-title\s*\{[^}]*white-space:\s*normal;/s);
-  assert.match(styles, /\.shell\.session-mode \.row-detail\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/s);
+  assert.match(styles, /\.shell\.session-mode \.row-detail\s*\{[^}]*white-space:\s*nowrap;/s);
+  assert.match(styles, /\.shell\.session-mode \.row-title\.is-hover-scrolling,/);
+  assert.match(styles, /\.shell\.session-mode \.row-detail\.is-hover-scrolling\s*\{[^}]*text-overflow:\s*clip;/s);
+  assert.match(styles, /\.shell\.session-mode \.session-row \.row-metrics::after,[^{]+\{[^}]*position:\s*absolute;[^}]*bottom:\s*0;/s);
+  assert.match(renderer, /class="row-activity"/);
+  assert.match(renderer, /function setHoverMarqueeText\([^]*?element\.removeAttribute\('title'\);\n}/);
+  assert.doesNotMatch(renderer, /function setHoverMarqueeText\([^]*?element\.title\s*=/);
 });

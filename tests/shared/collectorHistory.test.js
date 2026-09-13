@@ -478,6 +478,35 @@ test('collectHistoryOnce falls back to the current graph when archive persistenc
   assert.match(messages.at(-1), /daily history archive failed: disk full/);
 });
 
+for (const [label, content] of [['blank', ' \n'], ['malformed JSON', '{"days":']]) {
+  test(`collectHistoryOnce falls back safely when the archive is ${label}`, async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-archive-'));
+    const archivePath = path.join(directory, 'daily-history-archive.json');
+    fs.writeFileSync(archivePath, content, 'utf8');
+    const before = fs.readFileSync(archivePath);
+    const messages = [];
+    const statuses = [];
+    try {
+      const history = await collectHistoryOnce({
+        clients: 'claude',
+        todayKey: '2026-06-07',
+        dailyHistoryArchiveEnabled: true,
+        dailyHistoryArchiveOptions: { path: archivePath },
+        logger: (message) => messages.push(message),
+        onHistoryStatus: (status) => statuses.push(status),
+        runGraph: async () => SAMPLE_GRAPH
+      });
+      assert.equal(history.daily[0].tokens, 30);
+      assert.match(messages.at(-1), /daily history archive failed:/);
+      assert.equal(statuses.at(-1).failureCode, 'daily-history-archive-failed');
+      assert.equal(statuses.at(-1).successAt, null);
+      assert.deepEqual(fs.readFileSync(archivePath), before);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+}
+
 test('collectHistoryOnce preserves a lazy archive ownership guard until write time', async () => {
   let canWrite = true;
   let writes = 0;

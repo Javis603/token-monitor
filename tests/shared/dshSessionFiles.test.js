@@ -12,7 +12,11 @@ const {
   decodeFirstFrameText,
   decodeSessionText,
   dshSessionFiles,
+  dshSessionLogRank,
+  indexDshSessionHeaders,
+  isDshSessionLogName,
   readDshSessionHeader,
+  readDshSessionTitle,
   resolveDshSessionsRoot,
   scanZstdFrames,
   zstdAvailable
@@ -238,6 +242,144 @@ test('decodeSessionText reads raw .jsonl without decompression', () => {
   assert.equal(text, '{"type":"session"}\n');
 });
 
+test('readDshSessionTitle folds and preserves the latest persisted title', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-'));
+  const file = path.join(root, 'session.jsonl');
+  try {
+    const persistedTitle = `Renamed title ${'x'.repeat(200)}`;
+    fs.writeFileSync(file, [
+      JSON.stringify({ type: 'session', id: 's1' }),
+      JSON.stringify({ type: 'session/title', seq: 1, data: { title: '  First\n title  ' } }),
+      JSON.stringify({ type: 'user/message', seq: 2, data: { content: 'private prompt' } }),
+      JSON.stringify({ type: 'session/title', seq: 3, data: { title: persistedTitle } }),
+      ''
+    ].join('\n'));
+
+    const state = readDshSessionTitle(file);
+    assert.equal(state.title, persistedTitle);
+    assert.equal(state.offset, state.size);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('readDshSessionTitle never derives a title from conversation text', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-private-'));
+  const file = path.join(root, 'session.jsonl');
+  try {
+    fs.writeFileSync(file, [
+      JSON.stringify({ type: 'session', id: 's1' }),
+      JSON.stringify({ type: 'user/message', seq: 1, data: { content: [{ type: 'text', text: 'Private prompt' }] } }),
+      JSON.stringify({ type: 'session/title-llm-request', seq: 2, data: { messages: [{ text: 'Private prompt' }] } }),
+      ''
+    ].join('\n'));
+
+    assert.equal(readDshSessionTitle(file).title, '');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('readDshSessionTitle reuses the append boundary after checking content continuity', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-append-'));
+  const file = path.join(root, 'session.jsonl');
+  const realReadSync = fs.readSync;
+  try {
+    fs.writeFileSync(file, `${JSON.stringify({ type: 'session/title', seq: 1, data: { title: 'Initial' } })}\n`);
+    const first = readDshSessionTitle(file);
+    const appended = `${JSON.stringify({ type: 'session/title', seq: 2, data: { title: 'Updated' } })}\n`;
+    fs.appendFileSync(file, appended);
+
+    const reads = [];
+    fs.readSync = (fd, buffer, offset, length, position) => {
+      reads.push({ length, position });
+      return realReadSync(fd, buffer, offset, length, position);
+    };
+    const second = readDshSessionTitle(file, first);
+
+    assert.equal(second.title, 'Updated');
+    assert.equal(reads.filter(({ length, position }) => (
+      length === Buffer.byteLength(appended) && position === first.offset
+    )).length, 1);
+  } finally {
+    fs.readSync = realReadSync;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('readDshSessionTitle folds appended zstd frames without re-decoding the prefix', { skip: !hasZstd }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-zstd-'));
+  const file = path.join(root, 'session.jsonl.zstd');
+  try {
+    const firstFrame = zlib.zstdCompressSync(Buffer.from(
+      `${JSON.stringify({ type: 'session/title', seq: 1, data: { title: 'Initial' } })}\n`,
+      'utf8'
+    ));
+    fs.writeFileSync(file, firstFrame);
+    const first = readDshSessionTitle(file);
+    assert.equal(first.title, 'Initial');
+    assert.equal(first.offset, firstFrame.length);
+
+    const secondFrame = zlib.zstdCompressSync(Buffer.from(
+      `${JSON.stringify({ type: 'session/title', seq: 2, data: { title: 'Updated' } })}\n`,
+      'utf8'
+    ));
+    fs.appendFileSync(file, secondFrame);
+    const second = readDshSessionTitle(file, first);
+    assert.equal(second.title, 'Updated');
+    assert.equal(second.offset, firstFrame.length + secondFrame.length);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('readDshSessionTitle resets latest-wins state after a same-size rewrite', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-rewrite-'));
+  const file = path.join(root, 'session.jsonl');
+  try {
+    const event = (title) => `${JSON.stringify({ type: 'session/title', data: { title } })}\n`;
+    fs.writeFileSync(file, event('First title'));
+    const first = readDshSessionTitle(file);
+    fs.writeFileSync(file, event('Other title'));
+    const nextMtime = new Date(first.mtimeMs + 1000);
+    fs.utimesSync(file, nextMtime, nextMtime);
+
+    const second = readDshSessionTitle(file, first);
+    assert.equal(second.title, 'Other title');
+    assert.equal(second.offset, second.size);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('readDshSessionTitle refolds a larger in-place rewrite instead of treating it as an append', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-larger-rewrite-'));
+  const file = path.join(root, 'session.jsonl');
+  try {
+    const event = (title, paddingBytes) => [
+      JSON.stringify({ type: 'session', id: 's1' }),
+      JSON.stringify({ type: 'session/title', data: { title } }),
+      JSON.stringify({ type: 'assistant/message', data: { content: 'x'.repeat(paddingBytes) } }),
+      '',
+      's'.repeat(64 * 1024)
+    ].join('\n');
+    fs.writeFileSync(file, event('Title A', 160 * 1024));
+    const first = readDshSessionTitle(file);
+    // Keep the old file's final 64 KiB identical: a tail-only check would still
+    // misclassify this as an append and skip the new title near the front.
+    fs.writeFileSync(file, event('Title B', 192 * 1024));
+    const nextMtime = new Date(first.mtimeMs + 1000);
+    fs.utimesSync(file, nextMtime, nextMtime);
+    assert.ok(fs.statSync(file).size > first.size);
+
+    const second = readDshSessionTitle(file, first);
+    assert.equal(second.title, 'Title B');
+    assert.equal(second.offset, second.size - (64 * 1024));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // A header's first zstd frame is always tiny in practice (a small JSON
 // record), but if a compressed frame ever exceeded the 64KB bounded
 // head-read, falling back to a full read keeps the session discoverable
@@ -275,4 +417,54 @@ test('readDshSessionHeader falls back to the directory name when the header cann
   const found = readDshSessionHeader(filePath);
   assert.equal(found?.id, 'session-unreadable-header');
   assert.equal(found?.createdAt, undefined);
+});
+
+// A v3 harness re-encodes a session into `session.v3.jsonl.zstd` rather than
+// rotating the unversioned file, so a fixed name list stopped seeing every
+// session written after the upgrade — no aggregate usage and no openable
+// session detail. The version segment is matched generically, so the next
+// rename is a segment rather than a code path.
+test('dshSessionFiles accepts a versioned transcript name and rejects near-misses', () => {
+  assert.equal(isDshSessionLogName('session.jsonl'), true);
+  assert.equal(isDshSessionLogName('session.jsonl.zstd'), true);
+  assert.equal(isDshSessionLogName('session.v3.jsonl.zstd'), true);
+  assert.equal(isDshSessionLogName('session.v12.jsonl'), true);
+  assert.equal(isDshSessionLogName('session.jsonl.lock'), false);
+  assert.equal(isDshSessionLogName('audit.jsonl'), false);
+  assert.equal(isDshSessionLogName('session.v3.jsonl.zstd.tmp'), false);
+  assert.equal(isDshSessionLogName('session.3.jsonl.zstd'), false);
+  assert.ok(dshSessionLogRank('session.v3.jsonl.zstd') > dshSessionLogRank('session.jsonl.zstd'));
+  assert.ok(dshSessionLogRank('session.v12.jsonl') > dshSessionLogRank('session.v3.jsonl.zstd'));
+});
+
+test('dshSessionFiles lists a session live versioned transcript before its pre-upgrade copy', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-files-v3-'));
+  const dir = path.join(root, 'projA', 'session-1');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'session.jsonl.zstd'), Buffer.alloc(0));
+  fs.writeFileSync(path.join(dir, 'session.v3.jsonl.zstd'), Buffer.alloc(0));
+
+  // Order matters: every caller that stops at the first match (session detail)
+  // must land on the file the harness is still writing.
+  assert.deepEqual(dshSessionFiles(root), [
+    path.join(dir, 'session.v3.jsonl.zstd'),
+    path.join(dir, 'session.jsonl.zstd')
+  ]);
+});
+
+test('indexDshSessionHeaders prefers the versioned transcript of a session', { skip: !hasZstd }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-index-v3-'));
+  const dir = path.join(root, 'projA', 'session-1');
+  fs.mkdirSync(dir, { recursive: true });
+  const versioned = path.join(dir, 'session.v3.jsonl.zstd');
+  fs.writeFileSync(versioned, zlib.zstdCompressSync(Buffer.from(
+    `${JSON.stringify({ type: 'session', id: 'session-1', createdAt: 1750000000000 })}\n`,
+    'utf8'
+  )));
+  // The pre-upgrade copy has no createdAt: a stale re-encode must not shadow it.
+  fs.writeFileSync(path.join(dir, 'session.jsonl'), `${JSON.stringify({ type: 'session', id: 'session-1' })}\n`);
+
+  const index = indexDshSessionHeaders({ sessionsRoot: root });
+  assert.equal(index.get('session-1').filePath, versioned, 'the live transcript must win over the stale copy');
+  assert.equal(index.get('session-1').createdAt, 1750000000000);
 });

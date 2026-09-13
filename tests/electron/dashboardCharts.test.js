@@ -60,6 +60,7 @@ test('modelVendorFor maps families and modelColor falls back deterministically',
   assert.equal(modelVendorFor('k3-agent-swarm'), 'kimi');
   assert.equal(modelVendorFor('doubao-seed-1.6'), 'doubao');
   assert.equal(modelVendorFor('hy3'), 'hunyuan');
+  assert.equal(modelVendorFor('hy4-preview'), 'hunyuan');
   assert.equal(modelVendorFor('hunyuan-t1'), 'hunyuan');
   assert.equal(modelColor('claude-opus'), clientColors.claude);
   assert.equal(modelColor('hy3'), clientColors.hunyuan);

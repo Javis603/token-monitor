@@ -33,7 +33,7 @@
     kiro: { cli: 'CLI' },
     zai: { api: 'API' },
     zaiteam: { api: 'API' },
-    volcengine: { api: 'API' },
+    volcengine: { api: 'API', cli: 'arkcli' },
     qoder: { web: 'Web' },
     trae: { api: 'Web' },
     workbuddy: { local: 'Local', api: 'API' },
@@ -65,9 +65,9 @@
     copilot: ['Manual login', 'API'],
     zed: ['Manual login', 'Web'],
     kiro: ['Auto', 'CLI'],
-    zai: ['Coding Plan', 'API key'],
+    zai: ['Auto', 'Coding Plan', 'API key'],
     zaiteam: ['Team Plan', 'API key'],
-    volcengine: ['Coding/Agent Plan', 'API key'],
+    volcengine: ['Auto', 'API key', 'CLI'],
     qoder: ['Manual login', 'Web'],
     trae: ['Manual login', 'Web'],
     workbuddy: ['Auto', 'Desktop app'],
@@ -133,6 +133,14 @@
 
   function limitProviderPlanDisplayLabel(providerOrId, value) {
     const label = limitProviderDisplayLabel(value);
+    if (providerId(providerOrId) === 'zai') {
+      // Subscription names arrive as "GLM Coding Lite/Pro/Max" (ZCode's own
+      // formatPlanName concatenates exactly this). The provider heading
+      // already supplies "GLM", so only the tier remains. Z.ai-prefixed
+      // names and the ZCode plan names pass through untouched — the prefix
+      // is only stripped when it repeats the heading.
+      return label.replace(/^GLM\s+Coding\s+/iu, '').trim() || label;
+    }
     if (providerId(providerOrId) !== 'zed') return label;
     // Zed's API returns canonical names such as "Zed Student" and "Zed Pro".
     // The provider heading already supplies "Zed", so keep only the meaningful
@@ -227,6 +235,9 @@
   }
 
   function limitProviderCompactWindowLabel(providerOrId, window, visibleWindows = []) {
+    if (providerId(providerOrId) === 'zai' && normalizeId(window?.kind) === 'daily') {
+      return String(window?.label || '').trim();
+    }
     if (providerId(providerOrId) !== 'antigravity') return '';
     const labels = (visibleWindows || []).map((candidate) => antigravityQuotaWindow(candidate)?.groupLabel || '');
     const currentLabel = antigravityQuotaWindow(window)?.groupLabel || '';

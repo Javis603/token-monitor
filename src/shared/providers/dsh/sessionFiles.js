@@ -22,6 +22,7 @@
  */
 
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const zlib = require('node:zlib');
@@ -50,8 +51,60 @@ function readFileHead(filePath, bytes = HEADER_READ_BYTES) {
 }
 
 const DSH_SESSION_LOG_NAMES = new Set(['session.jsonl', 'session.jsonl.zstd']);
+// A transcript's file name is optional-versioned: the pair above is what DSH
+// wrote up to v2, but a v3+ harness re-encodes the same session into a NEW file
+// (`session.v3.jsonl.zstd`) instead of rotating the old one — which is why a
+// fixed name list silently stopped finding live sessions (2026-09-10: a full
+// day of deepseek-v4.1-flash usage missing from the widget before its tokscale
+// vendor and Session Detail discovery were updated). Matching the version
+// segment generically lets discovery select the canonical live artifact. The
+// detail parser then reads recognized event shapes best-effort; accepting the
+// filename is deliberately not a promise that every future event semantic is
+// understood.
+// Matches the harness's own `session.v<N>.<ext>` convention (observed: v3) rather
+// than any `session.<something>` sibling, so an unrelated file dropped into a
+// session directory cannot be mistaken for a transcript. A future rename that
+// stops being numeric would have to widen this pattern.
+const DSH_SESSION_LOG_PATTERN = /^session(?:\.v\d+)?\.jsonl(?:\.zstd)?$/;
+
+function isDshSessionLogName(name) {
+  const value = String(name || '');
+  return DSH_SESSION_LOG_NAMES.has(value) || DSH_SESSION_LOG_PATTERN.test(value);
+}
+
+// Higher rank = preferred when one session directory holds several transcripts.
+// A v3 upgrade leaves the pre-upgrade file in place next to the re-encoded one,
+// so the versioned file is the live transcript and has to win the first match.
+function dshSessionLogRank(name) {
+  if (!isDshSessionLogName(name)) return -1;
+  // dsh spells positive generations with the `v` prefix
+  // (`session.v3.jsonl.zstd`); the number orders two transcripts of one
+  // session using the same discovery contract as the pinned tokscale build.
+  const versioned = /^session\.v(\d+)\.jsonl/.exec(String(name || ''));
+  return versioned ? Number(versioned[1]) : 0;
+}
+
+function sortDshSessionLogNames(names) {
+  return names.sort((a, b) => (dshSessionLogRank(b) - dshSessionLogRank(a)) || (a < b ? -1 : a > b ? 1 : 0));
+}
+
+function preferredDshSessionFileInDirectory(dir) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (_) {
+    return null;
+  }
+  const names = entries
+    .filter((entry) => entry.isFile() && isDshSessionLogName(entry.name))
+    .map((entry) => entry.name);
+  sortDshSessionLogNames(names);
+  return names.length > 0 ? path.join(dir, names[0]) : null;
+}
 const DSH_SESSION_DIR_DEPTH = 2; // <root>/<project>/<session>/<artifact>
 const ZSTD_MAGIC = 0xFD2FB528;
+const DSH_SESSION_TITLE_READ_BYTES = 256 * 1024;
+const DSH_SESSION_CONTINUITY_BYTES = 64 * 1024;
 
 function resolveDshSessionsRoot(options = {}) {
   const platform = options.platform || process.platform;
@@ -73,7 +126,11 @@ function resolveDshSessionsRoot(options = {}) {
 }
 
 function dshSessionFiles(root) {
-  const files = [];
+  // Collected per directory so a session holding several transcripts yields its
+  // live one first: every caller that stops at the first match (session detail,
+  // the header index) then reads the same file, while callers that aggregate
+  // usage walk all of them and dedupe by event.
+  const byDir = new Map();
   const stack = [{ dir: root, depth: 0 }];
   while (stack.length > 0) {
     const { dir, depth } = stack.pop();
@@ -86,10 +143,17 @@ function dshSessionFiles(root) {
     for (const entry of entries) {
       if (entry.isDirectory()) {
         if (depth < DSH_SESSION_DIR_DEPTH) stack.push({ dir: path.join(dir, entry.name), depth: depth + 1 });
-      } else if (entry.isFile() && DSH_SESSION_LOG_NAMES.has(entry.name)) {
-        files.push(path.join(dir, entry.name));
+      } else if (entry.isFile() && isDshSessionLogName(entry.name)) {
+        const names = byDir.get(dir);
+        if (names) names.push(entry.name);
+        else byDir.set(dir, [entry.name]);
       }
     }
+  }
+  const files = [];
+  for (const [dir, names] of byDir) {
+    sortDshSessionLogNames(names);
+    for (const name of names) files.push(path.join(dir, name));
   }
   return files;
 }
@@ -175,8 +239,7 @@ function decodeZstdBuffer(buffer, frames) {
   return { text, decodedEnd, stoppedOnError: false };
 }
 
-function decodeSessionText(filePath, buffer) {
-  if (!filePath.endsWith('.jsonl.zstd')) return buffer.toString('utf8');
+function decodeZstdText(buffer) {
   const frames = scanZstdFrames(buffer);
   const decoded = decodeZstdBuffer(buffer, frames);
   // The first content-corrupt complete frame is the recovery boundary: nothing
@@ -184,7 +247,7 @@ function decodeSessionText(filePath, buffer) {
   // recovery could still read — tokscale's streaming decoder stops at the same
   // first decode error, so records past the corruption must not be resurrected
   // through tail recovery.
-  if (decoded.stoppedOnError) return decoded.text;
+  if (decoded.stoppedOnError) return { text: decoded.text, consumed: decoded.decodedEnd };
   let text = decoded.text;
   // A live transcript is scanned mid-write routinely, so the trailing frame is
   // often torn. dsh's own reader (decompressZstdPrefix with ZSTD_e_flush) and
@@ -192,8 +255,8 @@ function decodeSessionText(filePath, buffer) {
   // managed to write out completely, dropping only the fragment at the cut.
   // zlib's finishFlush reproduces that at block granularity: it emits every
   // fully-decoded block in the torn tail, and the per-line JSON parse
-  // downstream skips the remainder. Scoped to decodeSessionText (not the
-  // header-only decodeFirstFrameText), which already returns '' for a torn
+  // downstream skips the remainder. The header-only decodeFirstFrameText path
+  // deliberately does not use this recovery and still returns '' for a torn
   // first frame.
   const tailStart = decoded.decodedEnd;
   if (tailStart < buffer.length) {
@@ -207,7 +270,156 @@ function decodeSessionText(filePath, buffer) {
       }
     }
   }
-  return text;
+  return { text, consumed: decoded.decodedEnd };
+}
+
+function decodeSessionText(filePath, buffer) {
+  if (!filePath.endsWith('.jsonl.zstd')) return buffer.toString('utf8');
+  return decodeZstdText(buffer).text;
+}
+
+function persistedDshSessionTitle(value) {
+  return typeof value === 'string' && value.length > 0 ? value : '';
+}
+
+function foldDshSessionTitle(text, initialTitle = '') {
+  let title = persistedDshSessionTitle(initialTitle);
+  for (const line of String(text || '').split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let event;
+    try { event = JSON.parse(line); } catch (_) { continue; }
+    if (event?.type !== 'session/title') continue;
+    const nextTitle = persistedDshSessionTitle(event.data?.title);
+    if (nextTitle) title = nextTitle;
+  }
+  return title;
+}
+
+function dshSessionFileIdentity(stat) {
+  return `${String(stat.dev ?? '')}:${String(stat.ino ?? '')}`;
+}
+
+function hashDshSessionRange(hash, fd, start, length) {
+  const buffer = Buffer.allocUnsafe(length);
+  let offset = 0;
+  while (offset < length) {
+    const bytesRead = fs.readSync(fd, buffer, offset, length - offset, start + offset);
+    if (bytesRead <= 0) throw new Error('DSH transcript changed during continuity read');
+    offset += bytesRead;
+  }
+  hash.update(buffer);
+}
+
+function readDshSessionContinuity(fd, size) {
+  const hash = crypto.createHash('sha256');
+  const headLength = Math.min(size, DSH_SESSION_CONTINUITY_BYTES);
+  hashDshSessionRange(hash, fd, 0, headLength);
+  const tailStart = Math.max(headLength, size - DSH_SESSION_CONTINUITY_BYTES);
+  hashDshSessionRange(hash, fd, tailStart, size - tailStart);
+  return {
+    size,
+    hash: hash.digest('hex')
+  };
+}
+
+function dshSessionContinuityMatches(fd, previous, previousSize) {
+  const continuity = previous?.continuity;
+  if (!continuity || continuity.size !== previousSize
+    || typeof continuity.hash !== 'string') return false;
+  return readDshSessionContinuity(fd, previousSize).hash === continuity.hash;
+}
+
+function decodeSessionAppend(filePath, buffer) {
+  if (!filePath.endsWith('.jsonl.zstd')) {
+    // Only advance over newline-complete JSONL records. A final partial record
+    // is re-read after the next append instead of being cached as consumed.
+    const lastNewline = buffer.lastIndexOf(0x0a);
+    const consumed = lastNewline < 0 ? 0 : lastNewline + 1;
+    return { text: buffer.subarray(0, consumed).toString('utf8'), consumed };
+  }
+
+  return decodeZstdText(buffer);
+}
+
+// DSH titles are durable `session/title` events and use latest-wins folding.
+// Retain the last complete JSONL/zstd boundary and decode only new bytes when
+// the previous file identity and bounded head/tail fingerprint still match. Any
+// replacement or rewrite resets the fold, while a torn final record/frame
+// remains eligible for retry.
+function readDshSessionTitle(filePath, previous = {}) {
+  let stat;
+  try { stat = fs.statSync(filePath); } catch (_) { return { title: '', offset: 0, size: 0, mtimeMs: 0 }; }
+  const size = Number(stat.size) || 0;
+  const mtimeMs = Number(stat.mtimeMs) || 0;
+  const identity = dshSessionFileIdentity(stat);
+  const previousSize = Number(previous.size) || 0;
+  const previousMtimeMs = Number(previous.mtimeMs) || 0;
+  if (size === previousSize && mtimeMs === previousMtimeMs
+    && identity === previous.identity && previous.continuity) return previous;
+
+  const previousOffset = Number(previous.offset);
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const appendOnly = size > previousSize && identity === previous.identity
+      && Number.isSafeInteger(previousOffset) && previousOffset >= 0 && previousOffset <= previousSize
+      && dshSessionContinuityMatches(fd, previous, previousSize);
+    const start = appendOnly ? previousOffset : 0;
+    let title = persistedDshSessionTitle(appendOnly ? previous.title : '');
+    const isZstd = filePath.endsWith('.jsonl.zstd');
+    let position = start;
+    let consumed = 0;
+    let pending = Buffer.alloc(0);
+    let stoppedOnError = false;
+    while (position < size && !stoppedOnError) {
+      const length = Math.min(DSH_SESSION_TITLE_READ_BYTES, size - position);
+      const chunk = Buffer.allocUnsafe(length);
+      const bytesRead = fs.readSync(fd, chunk, 0, length, position);
+      if (bytesRead <= 0) break;
+      position += bytesRead;
+      const data = chunk.subarray(0, bytesRead);
+      pending = pending.length > 0 ? Buffer.concat([pending, data]) : data;
+
+      if (isZstd) {
+        const decoded = decodeZstdBuffer(pending, scanZstdFrames(pending));
+        title = foldDshSessionTitle(decoded.text, title);
+        consumed += decoded.decodedEnd;
+        pending = pending.subarray(decoded.decodedEnd);
+        stoppedOnError = decoded.stoppedOnError;
+      } else {
+        const lastNewline = pending.lastIndexOf(0x0a);
+        if (lastNewline >= 0) {
+          const complete = lastNewline + 1;
+          title = foldDshSessionTitle(pending.subarray(0, complete).toString('utf8'), title);
+          consumed += complete;
+          pending = pending.subarray(complete);
+        }
+      }
+    }
+    if (filePath.endsWith('.jsonl.zstd') && !stoppedOnError && pending.length > 0) {
+      // A live final frame may be torn but still contain complete JSONL rows.
+      // Fold those rows now, while retaining the frame boundary for replay.
+      title = foldDshSessionTitle(decodeSessionAppend(filePath, pending).text, title);
+    }
+    return {
+      title,
+      offset: start + consumed,
+      size,
+      mtimeMs,
+      identity,
+      continuity: readDshSessionContinuity(fd, size)
+    };
+  } catch (_) {
+    // Do not cache a failed read as though this file revision were observed;
+    // preserving the older fingerprint makes the next tick retry it.
+    return previous && typeof previous === 'object'
+      ? previous
+      : { title: '', offset: 0, size: 0, mtimeMs: 0 };
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) {}
+    }
+  }
 }
 
 // DSH appends one zstd frame per flush, and the leading `session` header is
@@ -273,7 +485,9 @@ function indexDshSessionHeaders(options = {}) {
   const index = new Map();
   for (const filePath of dshSessionFiles(root)) {
     const header = readDshSessionHeader(filePath);
-    if (header) index.set(header.id, { filePath, createdAt: header.createdAt });
+    // First wins: dshSessionFiles() lists a session's live transcript first, and a
+    // v3 upgrade leaves an older re-encode of the same id right beside it.
+    if (header && !index.has(header.id)) index.set(header.id, { filePath, createdAt: header.createdAt });
   }
   return index;
 }
@@ -281,11 +495,16 @@ function indexDshSessionHeaders(options = {}) {
 module.exports = {
   DSH_SESSION_DIR_DEPTH,
   DSH_SESSION_LOG_NAMES,
+  DSH_SESSION_LOG_PATTERN,
   decodeFirstFrameText,
   decodeSessionText,
   dshSessionFiles,
+  dshSessionLogRank,
   indexDshSessionHeaders,
+  isDshSessionLogName,
+  preferredDshSessionFileInDirectory,
   readDshSessionHeader,
+  readDshSessionTitle,
   resolveDshSessionsRoot,
   scanZstdFrames,
   zstdAvailable

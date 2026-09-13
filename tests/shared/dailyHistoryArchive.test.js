@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -380,6 +383,165 @@ test('live snapshot keeps model-less remainder under its original client', () =>
 
 function dayObservation(archive, date) {
   return Object.values(archive.liveDays[date].observations)[0];
+}
+
+function withArchiveFile(content, callback) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-archive-'));
+  const archivePath = path.join(directory, 'daily-history-archive.json');
+  fs.writeFileSync(archivePath, content, 'utf8');
+  try {
+    return callback(archivePath);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+for (const [name, retain] of [
+  ['retainDailyHistory', (options) => retainDailyHistory(graph('2026-08-05', [
+    client('claude', 'opus', 120, 4.8, 6)
+  ]), options)],
+  ['retainLiveDailyHistory', (options) => retainLiveDailyHistory(livePeriod(120, 1.2), options)]
+]) {
+  test(`${name} treats only a missing archive as empty`, () => {
+    withArchiveFile('   \n', (archivePath) => {
+      assert.throws(
+        () => retain({ path: archivePath, todayKey: '2026-08-05' }),
+        (error) => error.message.includes(archivePath) && error.message.includes('empty')
+      );
+      assert.equal(fs.readFileSync(archivePath, 'utf8'), '   \n');
+    });
+
+    withArchiveFile('{"days":', (archivePath) => {
+      assert.throws(
+        () => retain({ path: archivePath, todayKey: '2026-08-05' }),
+        (error) => error.message.includes(archivePath) && error.cause instanceof SyntaxError
+      );
+      assert.equal(fs.readFileSync(archivePath, 'utf8'), '{"days":');
+    });
+
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-archive-'));
+    const archivePath = path.join(directory, 'missing.json');
+    try {
+      assert.doesNotThrow(() => retain({ path: archivePath, todayKey: '2026-08-05' }));
+      assert.equal(fs.existsSync(archivePath), true);
+      const created = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+      assert.ok(created.days?.['2026-08-05'] || created.liveDays?.['2026-08-05']);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const [name, retain] of [
+  ['retainDailyHistory', (options) => retainDailyHistory(graph('2026-08-05', [
+    client('claude', 'opus', 120, 4.8, 6)
+  ]), options)],
+  ['retainLiveDailyHistory', (options) => retainLiveDailyHistory(livePeriod(120, 1.2), options)]
+]) {
+  test(`${name} leaves the archive untouched when the prewrite rebase read fails`, () => {
+    const initial = captureDailyHistoryArchive({}, graph('2026-08-04', [
+      client('codex', 'gpt', 50, 2, 3)
+    ]), { todayKey: '2026-08-05' });
+    withArchiveFile(`${JSON.stringify(initial)}\n`, (archivePath) => {
+      const before = fs.readFileSync(archivePath);
+      const beforeMtime = fs.statSync(archivePath).mtimeMs;
+      let writeChecks = 0;
+      let writes = 0;
+      let failedMtime;
+      const options = {
+        path: archivePath,
+        todayKey: '2026-08-05',
+        writeEnabled: () => {
+          writeChecks += 1;
+          if (writeChecks === 1) {
+            fs.writeFileSync(archivePath, '{"days":', 'utf8');
+            failedMtime = fs.statSync(archivePath).mtimeMs;
+          }
+          return true;
+        },
+        writeJsonAtomic: () => { writes += 1; }
+      };
+      assert.throws(() => retain(options), (error) => error.cause instanceof SyntaxError);
+      const failedBytes = fs.readFileSync(archivePath, 'utf8');
+      assert.equal(failedBytes, '{"days":');
+      assert.notEqual(failedBytes, before.toString('utf8'));
+      assert.equal(failedMtime >= beforeMtime, true);
+      assert.equal(writes, 0);
+      assert.equal(fs.readFileSync(archivePath, 'utf8'), failedBytes);
+      assert.equal(fs.statSync(archivePath).mtimeMs, failedMtime);
+
+      const repaired = captureDailyHistoryArchive({}, graph('2026-08-04', [
+        client('codex', 'gpt', 50, 2, 3)
+      ]), { todayKey: '2026-08-05' });
+      fs.writeFileSync(archivePath, `${JSON.stringify(repaired)}\n`, 'utf8');
+      assert.doesNotThrow(() => retain({ path: archivePath, todayKey: '2026-08-05' }));
+      const recovered = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+      assert.ok(recovered.days['2026-08-04']);
+      assert.ok(recovered.days['2026-08-05'] || recovered.liveDays?.['2026-08-05']);
+    });
+  });
+}
+
+test('strict archive reader rejects invalid container shapes while preserving compatibility', () => {
+  withArchiveFile('null', (archivePath) => {
+    assert.throws(() => retainDailyHistory([], { path: archivePath }), (error) => error.message.includes('root'));
+  });
+  withArchiveFile('{"days":[]}', (archivePath) => {
+    assert.throws(() => retainDailyHistory([], { path: archivePath }), (error) => error.message.includes('days'));
+  });
+  assert.doesNotThrow(() => retainDailyHistory([], { readJson: () => ({}) }));
+});
+
+const ioRetainCases = [
+  ['retainDailyHistory', (options) => retainDailyHistory(graph('2026-08-05', [
+    client('claude', 'opus', 120, 4.8, 6)
+  ]), options)],
+  ['retainLiveDailyHistory', (options) => retainLiveDailyHistory(livePeriod(120, 1.2), options)]
+];
+
+for (const [name, retain] of ioRetainCases) {
+  for (const [phase, failingRead] of [['initial', 1], ['prewrite rebase', 2]]) {
+    for (const code of ['EACCES', 'EBUSY', 'EPERM']) {
+      test(`${name} propagates ${code} from the ${phase} archive read`, (t) => {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-archive-'));
+        const archivePath = path.join(directory, 'daily-history-archive.json');
+        const initial = captureDailyHistoryArchive({}, graph('2026-08-04', [
+          client('codex', 'gpt', 50, 2, 3)
+        ]), { todayKey: '2026-08-05' });
+        const before = Buffer.from(`${JSON.stringify(initial)}\n`);
+        fs.writeFileSync(archivePath, before);
+        const beforeMtime = fs.statSync(archivePath).mtimeMs;
+        const originalReadFileSync = fs.readFileSync;
+        let reads = 0;
+        let writes = 0;
+        const readError = Object.assign(new Error(code), { code });
+        t.mock.method(fs, 'readFileSync', (filePath, encoding) => {
+          if (filePath === archivePath && ++reads === failingRead) throw readError;
+          return originalReadFileSync(filePath, encoding);
+        });
+        try {
+          assert.throws(
+            () => retain({
+              path: archivePath,
+              todayKey: '2026-08-05',
+              writeJsonAtomic: () => { writes += 1; }
+            }),
+            (error) => error === readError
+          );
+          assert.equal(writes, 0);
+          assert.deepEqual(originalReadFileSync(archivePath), before);
+          assert.equal(fs.statSync(archivePath).mtimeMs, beforeMtime);
+          t.mock.restoreAll();
+          assert.doesNotThrow(() => retain({ path: archivePath, todayKey: '2026-08-05' }));
+          const recovered = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+          assert.deepEqual(recovered.days['2026-08-04'], initial.days['2026-08-04']);
+          assert.ok(recovered.days?.['2026-08-05'] || recovered.liveDays?.['2026-08-05']);
+        } finally {
+          fs.rmSync(directory, { recursive: true, force: true });
+        }
+      });
+    }
+  }
 }
 
 test('retainLiveDailyHistory persists only a higher live snapshot', () => {

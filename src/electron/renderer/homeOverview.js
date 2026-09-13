@@ -104,6 +104,7 @@
                 : finiteNumber(window.remaining),
               currency: credits ? balanceDisplay.creditsCurrency(account, window) : '',
               resetsAt: window.resetsAt,
+              ...(window.boundaryKind ? { boundaryKind: window.boundaryKind } : {}),
               resetDescription: window.resetDescription || '',
               value: window.value || '',
               planStatus: window.planStatus || '',

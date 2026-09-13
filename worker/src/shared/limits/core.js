@@ -11,6 +11,7 @@ const VALID_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
 const VALID_STATUSES = new Set(['ok', 'disabled', 'notConfigured', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error']);
 const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
 const VALID_LIMIT_WINDOW_SOURCES = new Set(['web', 'local']);
+const VALID_LIMIT_BOUNDARY_KINDS = new Set(['reset', 'expiry', 'mixed']);
 const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'ide', 'managed', 'unknown']);
 const VALID_ACTION_REQUIREMENTS = new Set(['accountVerification']);
 const WINDOW_ORDER = ['session', 'daily', 'weekly', 'billing'];
@@ -109,6 +110,11 @@ function normalizeWindowKind(value) {
   return null;
 }
 
+function normalizeLimitBoundaryKind(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return VALID_LIMIT_BOUNDARY_KINDS.has(raw) ? raw : '';
+}
+
 function normalizeWindowLabel(value) {
   const raw = String(value || '').trim();
   if (!raw || raw.length > 32) return '';
@@ -175,11 +181,13 @@ function normalizeLimitWindow(input) {
   const remaining = numberOrNull(input.remaining);
   const usedPercent = percentFromWindow(input, used, limit);
   const limitId = normalizeWindowLimitId(input.limitId ?? input.limit_id);
+  const boundaryKind = normalizeLimitBoundaryKind(input.boundaryKind ?? input.boundary_kind);
   return {
     kind,
     ...(metric ? { metric } : {}),
     ...(source ? { source } : {}),
     ...(limitId ? { limitId } : {}),
+    ...(boundaryKind ? { boundaryKind } : {}),
     ...(input.additional === true ? { additional: true } : {}),
     label: normalizeWindowLabel(input.label || input.displayLabel || input.title),
     used,

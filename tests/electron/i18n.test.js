@@ -161,6 +161,8 @@ test('tool health copy stays compact and describes snapshots, not liveness', () 
     '正常 7 · 待查 5 · 未安裝 9'
   );
   assert.equal(translate('zh-TW', 'settings.tools.health.source'), '來源');
+  assert.equal(translate('zh-TW', 'settings.tools.health.addCustomSource'), '新增路徑');
+  assert.equal(translate('zh-TW', 'settings.tools.health.removeCustomSource'), '移除自訂來源');
   assert.equal(translate('zh-TW', 'settings.tools.health.sync'), '採集');
   assert.equal(translate('zh-TW', 'settings.tools.health.usage'), '用量');
   assert.equal(translate('en', 'settings.tools.health.sync.pending'), 'Sync pending');
@@ -193,6 +195,13 @@ test('tray limit labels describe remaining quota instead of ambiguous worst wind
   assert.equal(translate('zh-CN', 'settings.tray.barsWindow'), '额度条：任一额度剩余最少');
   assert.equal(translate('ko', 'settings.tray.barsAllSessions'), '한도 바: 처음 두 도구의 주요 한도');
   assert.equal(translate('ko', 'settings.tray.limitsAllSessions'), '한도: 처음 두 도구의 주요 한도 (12% · 34%)');
+});
+
+test('live rate tray labels are translated in every bundled locale', () => {
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+    assert.notEqual(translate(locale, 'settings.tray.liveTokenRate'), 'settings.tray.liveTokenRate');
+    assert.notEqual(translate(locale, 'trayMenu.content.liveTokenRate'), 'trayMenu.content.liveTokenRate');
+  }
 });
 
 test('window shortcut labels stay concise in Chinese', () => {

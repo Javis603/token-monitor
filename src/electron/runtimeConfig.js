@@ -8,6 +8,7 @@ const {
   parseLimitProviders
 } = require('../shared/limits/collector');
 const { normalizeSyncUploadIntervalMs } = require('../shared/syncUploadInterval');
+const { normalizeCustomScanPaths } = require('../shared/customScanPaths');
 
 const DEFAULT_ALL_TIME_SINCE = '2024-01-01';
 
@@ -30,6 +31,7 @@ const MODE_STRUCTURAL_KEYS = Object.freeze([
 ]);
 const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'clients',
+  'customScanPaths',
   'allTimeSince',
   'collectionIntervalMs',
   'collectionMode',
@@ -44,6 +46,7 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
 // Values arrive from usageConfigFromSettings() after mode-specific normalization.
 const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
   'clients',
+  'customScanPaths',
   'allTimeSince',
   'intervalMs',
   'historyEnabled',
@@ -120,6 +123,7 @@ function normalizeAllTimeSince(value, fallback = DEFAULT_ALL_TIME_SINCE) {
 function usageConfigFromSettings(settings = {}, context = {}) {
   return {
     clients: clientsCsvForSetting(settings.clients),
+    customScanPaths: normalizeCustomScanPaths(settings.customScanPaths),
     allTimeSince: normalizeAllTimeSince(settings.allTimeSince),
     commandTimeoutMs: Number(context.commandTimeoutMs || 120 * 1000),
     deviceId: settings.deviceId || context.defaultDeviceId,

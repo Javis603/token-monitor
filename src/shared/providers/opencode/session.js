@@ -106,6 +106,24 @@ function readSessionMetaForHome(sessionIds, home, deps = {}) {
   return readSessionMeta(sessionIds, { ...deps, dbPaths: discoverDbPaths(scopedEnv) });
 }
 
+function resolveSessionMetadata(sessionIds, context) {
+  const { deps, home, projectIdentity, resolveProjects } = context;
+  const readMetadata = deps.readOpencodeMeta || (deps.scopedHome
+    ? (ids) => readSessionMetaForHome(ids, home, deps.opencodeDeps)
+    : (ids) => readSessionMeta(ids, deps.opencodeDeps));
+  const result = new Map();
+  for (const [sessionId, meta] of readMetadata(sessionIds)) {
+    const startedAt = meta.startedAt || '';
+    const lastUsedAt = meta.lastUsedAt || startedAt;
+    const identity = resolveProjects ? projectIdentity(meta.projectPath) : {};
+    const title = String(meta.title || '').trim();
+    if (startedAt || lastUsedAt || identity.projectId || title) {
+      result.set(sessionId, { startedAt, lastUsedAt, ...identity, title });
+    }
+  }
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Session detail events (neutral shape consumed by sessionDetail.js)
 // ---------------------------------------------------------------------------
@@ -199,4 +217,4 @@ function readSessionEvents(sessionId, deps = {}) {
   return empty;
 }
 
-module.exports = { readSessionMeta, readSessionMetaForHome, readSessionEvents };
+module.exports = { readSessionMeta, readSessionMetaForHome, readSessionEvents, resolveSessionMetadata };

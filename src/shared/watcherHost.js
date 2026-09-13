@@ -39,7 +39,9 @@ function createInProcessWatcherHost(config = {}, handlers = {}) {
   const { watcherOptions, watchIgnoreMatcher } = require('./collector');
   const watcher = chokidar.watch(
     config.dirs,
-    watcherOptions(config.usePolling === true, watchIgnoreMatcher(config.clients))
+    watcherOptions(config.usePolling === true, watchIgnoreMatcher(config.clients, {
+      customScanPaths: config.customScanPaths
+    }))
   );
   watcher.on('all', (event, filePath) => handlers.onEvent?.(event, filePath));
   watcher.on('error', (error) => handlers.onError?.(error));

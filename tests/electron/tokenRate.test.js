@@ -11,6 +11,10 @@ const tokenRatePresentation = fs.readFileSync(path.join(rendererDir, 'tokenRateP
 const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
 const tokenRateApi = require(path.join(rendererDir, 'tokenRatePresentation.js'));
+const trayLayout = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'trayLayout.js'), 'utf8');
+const trayComposer = fs.readFileSync(path.join(rendererDir, 'trayComposer.js'), 'utf8');
+const i18n = fs.readFileSync(path.join(rendererDir, 'i18n.js'), 'utf8');
+const traySource = fs.readFileSync(path.join(rendererDir, '..', 'tray.js'), 'utf8');
 
 const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
 
@@ -102,6 +106,295 @@ test('the burn reading reads zero without throughput data', () => {
   assert.equal(tokenBurnPerMinute({ totalTokens: 9000 }), 0);
   assert.equal(tokenBurnPerMinute({ timedTokens: 4500, timedDurationMs: 0 }), 0);
   assert.equal(tokenBurnPerMinute(undefined), 0);
+});
+
+test('live rate is derived from one successful snapshot delta', () => {
+  let now = 1000;
+  const tracker = tokenRateApi.createLiveTokenRateTracker({ now: () => now });
+  assert.equal(tracker.observe({ timedTokens: 1000, timedOutputTokens: 100, timedDurationMs: 2000 }), null);
+
+  now = 2500;
+  const sample = tracker.observe({ timedTokens: 1600, timedOutputTokens: 148, timedDurationMs: 3200 });
+  assert.equal(sample.speed, 40);
+  assert.equal(sample.burn, 30000);
+  assert.equal(sample.sampledAt, 2500);
+  assert.equal(sample.timedTokens, 600);
+  assert.equal(sample.timedOutputTokens, 48);
+  assert.equal(sample.timedDurationMs, 1200);
+  assert.equal(tracker.value('speed'), 40);
+  assert.equal(tracker.value('burn'), 30000);
+});
+
+test('duplicate live snapshots retain the last sample without making it look fresh', () => {
+  let now = 100;
+  const tracker = tokenRateApi.createLiveTokenRateTracker({ now: () => now });
+  tracker.observe({ timedTokens: 10, timedOutputTokens: 2, timedDurationMs: 100 });
+  now = 200;
+  const first = tracker.observe({ timedTokens: 30, timedOutputTokens: 10, timedDurationMs: 500 });
+  now = 5000;
+  const duplicate = tracker.observe({ timedTokens: 30, timedOutputTokens: 10, timedDurationMs: 500 });
+  assert.equal(duplicate, first);
+  assert.equal(duplicate.sampledAt, 200);
+  assert.equal(duplicate.revision, 1);
+});
+
+test('live rate resets on counter regression and waits for a fresh delta', () => {
+  const tracker = tokenRateApi.createLiveTokenRateTracker({ now: () => 100 });
+  tracker.observe({ timedTokens: 100, timedOutputTokens: 20, timedDurationMs: 1000 });
+  assert.ok(tracker.observe({ timedTokens: 200, timedOutputTokens: 40, timedDurationMs: 1500 }));
+
+  assert.equal(tracker.observe({ timedTokens: 5, timedOutputTokens: 1, timedDurationMs: 20 }), null);
+  assert.equal(tracker.getSample(), null);
+  assert.equal(tracker.observe({ timedTokens: 5, timedOutputTokens: 1, timedDurationMs: 20 }), null);
+  const recovered = tracker.observe({ timedTokens: 65, timedOutputTokens: 13, timedDurationMs: 620 });
+  assert.equal(recovered.speed, 20);
+  assert.equal(recovered.burn, 6000);
+});
+
+test('live rate waits for two complete timing snapshots', () => {
+  const tracker = tokenRateApi.createLiveTokenRateTracker({ now: () => 100 });
+  assert.equal(tracker.observe({ totalTokens: 5000 }), null);
+  assert.equal(tracker.observe({ timedTokens: 5000, timedOutputTokens: 500, timedDurationMs: 5000 }), null);
+  const sample = tracker.observe({ timedTokens: 5060, timedOutputTokens: 512, timedDurationMs: 5600 });
+  assert.equal(sample.speed, 20);
+  assert.equal(sample.burn, 6000);
+});
+
+test('normalized legacy timing defaults never become a live-rate baseline', () => {
+  const tracker = tokenRateApi.createLiveTokenRateTracker({ now: () => 100 });
+  const legacy = {
+    capabilities: { throughput: false },
+    timedTokens: 0,
+    timedOutputTokens: 0,
+    timedDurationMs: 0
+  };
+  assert.equal(tracker.observe(legacy), null);
+  assert.equal(tracker.observe({ timedTokens: 5000, timedOutputTokens: 500, timedDurationMs: 5000 }), null);
+});
+
+test('an incomplete timing snapshot clears a stale live sample and baseline', () => {
+  const tracker = tokenRateApi.createLiveTokenRateTracker({ now: () => 100 });
+  tracker.observe({ timedTokens: 10, timedOutputTokens: 2, timedDurationMs: 100 });
+  assert.ok(tracker.observe({ timedTokens: 30, timedOutputTokens: 10, timedDurationMs: 500 }));
+  assert.equal(tracker.observe({ totalTokens: 1000 }), null);
+  assert.equal(tracker.getSample(), null);
+  assert.equal(tracker.observe({ timedTokens: 1000, timedOutputTokens: 100, timedDurationMs: 1000 }), null);
+});
+
+test('live rate ignores untimed changes but keeps the baseline current', () => {
+  const tracker = tokenRateApi.createLiveTokenRateTracker();
+  tracker.observe({ timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 });
+  assert.equal(tracker.observe({ timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 }), null);
+  assert.equal(tracker.getSample(), null);
+  const sample = tracker.observe({ timedTokens: 120, timedOutputTokens: 24, timedDurationMs: 600 });
+  assert.equal(sample.speed, 40);
+  assert.equal(sample.burn, 12000);
+});
+
+test('live rate sums active device samples, then retains the last value dimmed for three minutes', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now, activeMs: 8000, clearMs: 180000 });
+  const baseA = { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 100 };
+  const baseB = { timedTokens: 200, timedOutputTokens: 20, timedDurationMs: 1000 };
+  tracker.reset([
+    { id: 'device:a', period: baseA },
+    { id: 'device:b', period: baseB }
+  ]);
+  assert.equal(tracker.getSample(), null);
+
+  now = 100;
+  const first = tracker.observe([
+    { id: 'device:a', period: { timedTokens: 160, timedOutputTokens: 22, timedDurationMs: 700 } },
+    { id: 'device:b', period: baseB }
+  ]);
+  assert.equal(first.changed, true);
+  assert.deepEqual(first.sample, {
+    speed: 20,
+    burn: 6000,
+    sampledAt: 100,
+    expiresAt: 8100,
+    deviceCount: 1,
+    revision: 1,
+    idle: false
+  });
+
+  now = 200;
+  const second = tracker.observe([
+    { id: 'device:a', period: { timedTokens: 160, timedOutputTokens: 22, timedDurationMs: 700 } },
+    { id: 'device:b', period: { timedTokens: 320, timedOutputTokens: 50, timedDurationMs: 2000 } }
+  ]);
+  assert.equal(second.changed, true);
+  assert.deepEqual(second.sample, {
+    speed: 50,
+    burn: 13200,
+    sampledAt: 200,
+    expiresAt: 8100,
+    deviceCount: 2,
+    revision: 2,
+    idle: false
+  });
+  assert.equal(tracker.nextExpiryAt(), 8100);
+
+  now = 8100;
+  assert.deepEqual(tracker.getSample(), {
+    speed: 30,
+    burn: 7200,
+    sampledAt: 200,
+    expiresAt: 8200,
+    deviceCount: 1,
+    revision: 2,
+    idle: false
+  });
+  now = 8200;
+  assert.deepEqual(tracker.getSample(), {
+    speed: 30,
+    burn: 7200,
+    sampledAt: 200,
+    expiresAt: 180200,
+    deviceCount: 1,
+    revision: 2,
+    idle: true
+  });
+  assert.equal(tracker.nextExpiryAt(), 180200);
+  now = 180200;
+  assert.equal(tracker.getSample(), null);
+  assert.equal(tracker.nextExpiryAt(), null);
+});
+
+test('live rate removes a missing device sample while retaining the other device', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now, activeMs: 8000 });
+  tracker.reset([
+    { id: 'device:a', period: { timedTokens: 10, timedOutputTokens: 2, timedDurationMs: 100 } },
+    { id: 'device:b', period: { timedTokens: 20, timedOutputTokens: 4, timedDurationMs: 200 } }
+  ]);
+  now = 100;
+  tracker.observe([
+    { id: 'device:a', period: { timedTokens: 70, timedOutputTokens: 14, timedDurationMs: 700 } },
+    { id: 'device:b', period: { timedTokens: 80, timedOutputTokens: 16, timedDurationMs: 800 } }
+  ]);
+
+  now = 200;
+  const result = tracker.observe([
+    { id: 'device:b', period: { timedTokens: 80, timedOutputTokens: 16, timedDurationMs: 800 } }
+  ]);
+  assert.equal(result.changed, true);
+  assert.equal(result.sample.deviceCount, 1);
+  assert.equal(result.sample.speed, 20);
+  assert.equal(result.sample.burn, 6000);
+});
+
+test('live rate retains the last aggregate when its only device becomes stale', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now, activeMs: 8000, clearMs: 180000 });
+  tracker.reset([
+    { id: 'device:a', period: { timedTokens: 10, timedOutputTokens: 2, timedDurationMs: 100 } }
+  ]);
+  now = 100;
+  tracker.observe([
+    { id: 'device:a', period: { timedTokens: 70, timedOutputTokens: 14, timedDurationMs: 700 } }
+  ]);
+
+  now = 200;
+  assert.deepEqual(tracker.observe([]), {
+    changed: true,
+    sample: {
+      speed: 20,
+      burn: 6000,
+      sampledAt: 100,
+      expiresAt: 180100,
+      deviceCount: 1,
+      revision: 1,
+      idle: true
+    }
+  });
+  now = 180100;
+  assert.equal(tracker.getSample(), null);
+});
+
+test('live rate group revisions stay monotonic across scope resets', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now, activeMs: 8000 });
+  tracker.reset([
+    { id: 'device:a', period: { timedTokens: 10, timedOutputTokens: 2, timedDurationMs: 100 } }
+  ]);
+  now = 100;
+  assert.equal(tracker.observe([
+    { id: 'device:a', period: { timedTokens: 70, timedOutputTokens: 14, timedDurationMs: 700 } }
+  ]).sample.revision, 1);
+
+  tracker.reset([
+    { id: 'device:b', period: { timedTokens: 20, timedOutputTokens: 4, timedDurationMs: 200 } }
+  ]);
+  assert.equal(tracker.getSample(), null);
+  now = 200;
+  assert.equal(tracker.observe([
+    { id: 'device:b', period: { timedTokens: 80, timedOutputTokens: 16, timedDurationMs: 800 } }
+  ]).sample.revision, 2);
+});
+
+test('live rate selects every active hub device or only this device by scope', () => {
+  const aggregate = { timedTokens: 9000, timedOutputTokens: 900, timedDurationMs: 9000 };
+  const local = { timedTokens: 120, timedOutputTokens: 24, timedDurationMs: 600 };
+  const other = { timedTokens: 300, timedOutputTokens: 60, timedDurationMs: 1500 };
+  const stale = { timedTokens: 600, timedOutputTokens: 120, timedDurationMs: 3000 };
+  const stats = {
+    periods: { today: aggregate },
+    devices: [
+      { deviceId: 'other', periods: { today: other } },
+      { deviceId: 'this-device', periods: { today: local } },
+      { deviceId: 'stale', stale: true, periods: { today: stale } }
+    ]
+  };
+
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'client'), {
+    entries: [
+      { id: 'device:other', period: other },
+      { id: 'device:this-device', period: local }
+    ],
+    source: 'devices:all'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'host', 'all'), {
+    entries: [
+      { id: 'device:other', period: other },
+      { id: 'device:this-device', period: local }
+    ],
+    source: 'devices:all'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'client', 'device'), {
+    entries: [{ id: 'device:this-device', period: local }],
+    source: 'device:this-device'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'missing', 'client', 'device'), {
+    entries: [],
+    source: 'device:missing'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'local'), {
+    entries: [{ id: 'device:this-device', period: local }],
+    source: 'device:this-device'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'missing', 'local'), {
+    entries: [{ id: 'device:missing', period: aggregate }],
+    source: 'device:missing'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods({ periods: { today: aggregate }, devices: [] }, 'this-device', 'local'), {
+    entries: [{ id: 'device:this-device', period: aggregate }],
+    source: 'device:this-device'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods({
+    periods: { today: aggregate },
+    devices: [{ deviceId: 'old-device', periods: { today: other } }]
+  }, 'this-device', 'local'), {
+    entries: [{ id: 'device:this-device', period: aggregate }],
+    source: 'device:this-device'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods({
+    periods: { today: aggregate },
+    devices: [{ deviceId: 'old-device', periods: { today: other } }]
+  }, 'this-device', 'client', 'device'), {
+    entries: [],
+    source: 'device:this-device'
+  });
 });
 
 test('holding the title mark accelerates from the real rate and keeps rising', () => {
@@ -293,6 +586,97 @@ test('the reveal mode is a persisted setting that defaults to speed', () => {
   const appIndex = html.indexOf('<script src="app.js"></script>');
   assert.notEqual(presentationIndex, -1);
   assert.ok(presentationIndex < appIndex);
+});
+
+test('the live footer rate is opt-in, accessible, and shares the persisted mode', () => {
+  assert.match(main, /showLiveTokenRate: false,/);
+  assert.match(main, /liveTokenRateScope: 'all',/);
+  assert.match(main, /merged\.showLiveTokenRate = parseBoolean\(merged\.showLiveTokenRate, false\)/);
+  assert.match(main, /merged\.liveTokenRateScope = normalizeLiveTokenRateScope\(merged\.liveTokenRateScope\)/);
+  assert.match(main, /showLiveTokenRate: parseBoolean\(patch\.showLiveTokenRate \?\? settings\.showLiveTokenRate, false\)/);
+  assert.match(main, /liveTokenRateScope: normalizeLiveTokenRateScope\(patch\.liveTokenRateScope \?\? settings\.liveTokenRateScope\)/);
+  assert.match(html, /id="showLiveTokenRateInput" type="checkbox"/);
+  assert.match(html, /id="liveTokenRateScopeRow" class="settings-item hidden"/);
+  assert.match(html, /id="liveTokenRateScopeInput"/);
+  assert.match(html, /<option value="all"[^>]*>All devices<\/option><option value="device"[^>]*>This device<\/option>/);
+  assert.match(html, /<button id="liveTokenRate" class="live-token-rate hidden is-idle" type="button"[^>]*aria-label=/);
+  assert.match(app, /showLiveTokenRateInput: document\.getElementById\('showLiveTokenRateInput'\)/);
+  assert.match(app, /liveTokenRateScopeInput: document\.getElementById\('liveTokenRateScopeInput'\)/);
+  assert.match(app, /showLiveTokenRate: Boolean\(els\.showLiveTokenRateInput\.checked\)/);
+  assert.match(app, /liveTokenRateScope: els\.liveTokenRateScopeInput\?\.value === 'device' \? 'device' : 'all'/);
+  assert.match(app, /els\.showLiveTokenRateInput\.checked = state\.settings\.showLiveTokenRate === true/);
+  assert.match(app, /els\.liveTokenRateScopeInput\.value = state\.settings\.liveTokenRateScope === 'device' \? 'device' : 'all'/);
+  assert.match(app, /els\.liveTokenRate\?\.addEventListener\('click', toggleTokenRateMode\)/);
+  assert.match(app, /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);\s*observeLiveTokenRate\(state\.stats\);/);
+  assert.match(app, /observeLiveTokenRate\(nextStats\);\s*state\.stats = nextStats;/);
+  assert.match(app, /createLiveTokenRateGroupTracker\([\s\S]*activeMs: LIVE_TOKEN_RATE_ACTIVE_MS[\s\S]*\)/);
+  assert.match(app, /const LIVE_TOKEN_RATE_ACTIVE_MS = 8000;/);
+  assert.match(app, /const LIVE_TOKEN_RATE_CLEAR_MS = 3 \* 60 \* 1000;/);
+  assert.match(app, /clearMs: LIVE_TOKEN_RATE_CLEAR_MS/);
+  assert.match(app, /selectLiveTokenRatePeriods\([\s\S]*stats,[\s\S]*state\.settings\?\.deviceId,[\s\S]*state\.settings\?\.hubMode,[\s\S]*effectiveLiveTokenRateScope\(\)[\s\S]*\)/);
+  assert.match(app, /return syncMode && state\.settings\?\.liveTokenRateScope !== 'device' \? 'all' : 'device';/);
+  assert.match(app, /function observeLiveTokenRate\(stats\) \{\s*if \(state\.settings\?\.showLiveTokenRate !== true\) return;/);
+  assert.match(app, /const result = liveTokenRateTracker\.observe\(selection\.entries\);\s*if \(!result\.changed\) return;\s*scheduleLiveTokenRateExpiry\(\);/);
+  assert.match(app, /const idle = !sample \|\| sample\.idle === true;/);
+  assert.match(app, /idle && sample[\s\S]*home\.liveTokenRate\.burnIdleTitle[\s\S]*home\.liveTokenRate\.speedIdleTitle/);
+  assert.match(app, /els\.liveTokenRate\.tabIndex = enabled && !obscured \? 0 : -1;/);
+  assert.match(app, /els\.liveTokenRate\.setAttribute\('aria-hidden', String\(!enabled \|\| obscured\)\);/);
+  assert.match(app, /if \(!enabled\) resetLiveTokenRateTracking\(\);/);
+  assert.match(app, /if \(state\.settings\.showLiveTokenRate\) observeLiveTokenRate\(state\.stats\);/);
+  assert.match(app, /els\.liveTokenRateScopeInput\?\.addEventListener\('change'/);
+  assert.match(css, /\.live-token-rate-icon[\s\S]*icons\/actions\/zap\.svg/);
+  assert.match(css, /--view-switcher-max-width: min\(112px, max\(0px, calc\(50% - 66px\)\)\)/);
+  assert.match(css, /\.footer\.live-token-rate-obscured \.live-token-rate,[\s\S]*visibility: hidden;/);
+});
+
+test('compact display surfaces can render live rates independently of the footer setting', () => {
+  assert.match(trayLayout, /'liveTokenRate'/);
+  assert.match(trayLayout, /rateMode: 'speed'/);
+  assert.match(trayLayout, /rateScope: 'all'/);
+  assert.match(trayLayout, /options\.liveTokenRates\?\./);
+  assert.match(trayLayout, /available: Boolean\(sample && sample\.idle !== true\)/);
+  assert.match(trayComposer, /styles: \['percent',[\s\S]*'liveTokenRate'/);
+  assert.match(trayComposer, /function liveTokenRateEditor\(item, rowIndex = 0\)/);
+  assert.match(trayComposer, /for \(const style of group\.styles\)/);
+  assert.match(trayComposer, /function textMetricChoices\(\)/);
+  assert.match(trayComposer, /const metrics = textMetricChoices\(\)/);
+  assert.match(trayComposer, /if \(metric === 'liveTokenRate'\) \{[\s\S]*liveTokenRateEditor\(item, rowIndex\)/);
+  assert.match(trayComposer, /rateMode\.speed/);
+  assert.match(trayComposer, /rateScope\.device/);
+  assert.match(main, /const TRAY_CONTENT_VALUES = new Set\([\s\S]*'liveTokenRate'/);
+  assert.doesNotMatch(main, /FLOATING_BUBBLE_CONTENT_VALUES/);
+  assert.match(main, /floatingBubbleContent: normalizeTrayContent\([^\n]+, 'icon'\)/);
+  assert.match(main, /const trayImageMode = \(mode === 'limitsAllSessions'[\s\S]*mode === 'liveTokenRate'/);
+  assert.match(traySource, /\['liveTokenRate', 'trayMenu\.content\.liveTokenRate'\]/);
+  assert.match(app, /const displayLiveTokenRateTrackers = new Map\(\)/);
+  assert.match(app, /const BUBBLE_CONTENT_VALUES = \[[^\n]*'liveTokenRate'/);
+  assert.match(app, /function observeDisplayLiveTokenRates\(stats\)/);
+  assert.match(app, /floatingBubbleEnabled === true/);
+  assert.match(app, /floatingBubbleCustomLayout/);
+  assert.match(app, /trayLayoutApi\.liveTokenRateItemsForSurfaces\(\[/);
+  assert.match(app, /function liveTokenRateTrayLayout\(\)/);
+  assert.match(app, /if \(mode === 'liveTokenRate'\) \{[\s\S]*liveTokenRateTrayLayout\(\)/);
+  assert.match(app, /if \(isSettingsSurfaceVisible\(\)\) refreshTrayComposers\(\)/);
+  assert.match(app, /state\.stats = nextStats;\s*observeDisplayLiveTokenRates\(nextStats\)/);
+  assert.match(app, /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);\s*observeLiveTokenRate\(state\.stats\);\s*observeDisplayLiveTokenRates\(state\.stats\)/);
+  assert.match(app, /liveTokenRates: options\.liveTokenRates \|\| displayLiveTokenRateSamples\(\)/);
+  assert.match(app, /renderFloatingBubbleContent\(\);\s*if \(isSettingsSurfaceVisible\(\)\) refreshTrayComposers\(\)/);
+  assert.match(app, /trayContentInput\.value = \['tokens',[\s\S]*'liveTokenRate'/);
+  const bubbleOptions = html.slice(html.indexOf('id="floatingBubbleContentInput"'), html.indexOf('id="floatingBubbleComposer"'));
+  const trayOptions = html.slice(html.indexOf('id="trayContentInput"'), html.indexOf('id="trayComposer"'));
+  assert.match(bubbleOptions, /<option value="liveTokenRate" data-i18n="settings\.tray\.liveTokenRate">/);
+  assert.match(trayOptions, /<option value="liveTokenRate" data-i18n="settings\.tray\.liveTokenRate">/);
+  assert.equal((i18n.match(/'trayComposer\.style\.liveTokenRate'/g) || []).length, 5);
+});
+
+test('the live footer rate uses matched timed deltas rather than scan wall time', () => {
+  const source = tokenRateSource().replace(/^\s*\/\/.*$/gm, '');
+  const trackerBody = source.slice(source.indexOf('function createLiveTokenRateTracker('));
+  assert.match(trackerBody, /timedOutputTokens: current\.timedOutputTokens - baseline\.timedOutputTokens/);
+  assert.match(trackerBody, /timedDurationMs: current\.timedDurationMs - baseline\.timedDurationMs/);
+  assert.match(trackerBody, /speed: tokenRatePerSecond\(delta\)/);
+  assert.match(trackerBody, /burn: tokenBurnPerMinute\(delta\)/);
+  assert.doesNotMatch(trackerBody, /setInterval/);
 });
 
 test('every element that reveals on hover is also clickable and shows a pointer', () => {
