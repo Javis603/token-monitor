@@ -209,14 +209,14 @@ test('buildMavisPeriods keeps local midnight for today and the 1st of the month 
 });
 
 test('MAVIS_PRICING carries the public mavis MiniMax-M3 rates', () => {
-  // Public mavis listing for MiniMax-M3 (per the screenshot the user
-  // shared). The tier split is 512k input tokens; rates are in CNY per 1M
-  // tokens. The exported shape is the contract the tests pin against so
-  // any future price change has to land here too.
+  // Public mavis listing for MiniMax-M3, standard tier, "永久五折"
+  // (permanent 50% off). The tier split is 512k input tokens; rates are
+  // in CNY per 1M tokens. The exported shape is the contract the tests
+  // pin against so any future price change has to land here too.
   assert.deepEqual(MAVIS_PRICING['minimax/MiniMax-M3'], {
-    input: { upTo512k: 4.29, over512k: 8.40 },
-    output: { upTo512k: 16.89, over512k: 33.60 },
-    cacheRead: { upTo512k: 9.84, over512k: 1.68 }
+    input: { upTo512k: 2.10, over512k: 4.20 },
+    output: { upTo512k: 8.40, over512k: 16.80 },
+    cacheRead: { upTo512k: 0.42, over512k: 0.84 }
   });
   assert.equal(MAVIS_CONTEXT_TIER_THRESHOLD, 512 * 1024);
   assert.equal(typeof MAVIS_DEFAULT_CNY_TO_USD_RATE, 'number');
@@ -235,8 +235,8 @@ test('applyPriceFallback leaves runtime-supplied cost alone', () => {
 });
 
 test('applyPriceFallback recovers cost for zero-cost rows using the public MiniMax-M3 rates', () => {
-  // 100k input + 50k output + 0 cacheRead, ≤ 512k tier: 0.1*4.29 + 0.05*16.89 = 1.2735 CNY,
-  // divided by the default 7 CNY/USD rate ≈ 0.1819 USD.
+  // 100k input + 50k output + 0 cacheRead, ≤ 512k tier: 0.1*2.10 + 0.05*8.40 = 0.63 CNY,
+  // divided by the default 7 CNY/USD rate ≈ 0.09 USD.
   const out = applyPriceFallback({
     model: 'minimax/MiniMax-M3',
     input: 100_000,
@@ -245,13 +245,13 @@ test('applyPriceFallback recovers cost for zero-cost rows using the public MiniM
     reasoning: 0,
     cost: 0
   });
-  const expectedCny = 0.1 * 4.29 + 0.05 * 16.89;
+  const expectedCny = 0.1 * 2.10 + 0.05 * 8.40;
   const expectedUsd = expectedCny / 7;
   assert.ok(Math.abs(out.cost - expectedUsd) < 1e-9, `expected ≈ ${expectedUsd} got ${out.cost}`);
 });
 
 test('applyPriceFallback picks the over-512k tier when input crosses the threshold', () => {
-  // input=600k + cacheRead=0: > 512k → input rate 8.40, output rate 33.60
+  // input=600k + cacheRead=0: > 512k → input rate 4.20, output rate 16.80
   const out = applyPriceFallback({
     model: 'minimax/MiniMax-M3',
     input: 600_000,
@@ -260,7 +260,7 @@ test('applyPriceFallback picks the over-512k tier when input crosses the thresho
     reasoning: 0,
     cost: 0
   });
-  const expectedCny = 0.6 * 8.40 + 0.2 * 33.60;
+  const expectedCny = 0.6 * 4.20 + 0.2 * 16.80;
   const expectedUsd = expectedCny / 7;
   assert.ok(Math.abs(out.cost - expectedUsd) < 1e-9, `expected ≈ ${expectedUsd} got ${out.cost}`);
 });
@@ -268,7 +268,7 @@ test('applyPriceFallback picks the over-512k tier when input crosses the thresho
 test('applyPriceFallback bills reasoning tokens at the output rate', () => {
   // reasoning_tokens ride on output pricing per mavis's public listing.
   // 100k input (≤ 512k) + 1M output + 1M reasoning →
-  // 0.1*4.29 + (1+1)*16.89 = 34.209 CNY / 7 ≈ 4.887 USD.
+  // 0.1*2.10 + (1+1)*8.40 = 17.01 CNY / 7 ≈ 2.43 USD.
   const out = applyPriceFallback({
     model: 'minimax/MiniMax-M3',
     input: 100_000,
@@ -277,7 +277,7 @@ test('applyPriceFallback bills reasoning tokens at the output rate', () => {
     reasoning: 1_000_000,
     cost: 0
   });
-  const expectedCny = 0.1 * 4.29 + 2 * 16.89;
+  const expectedCny = 0.1 * 2.10 + 2 * 8.40;
   const expectedUsd = expectedCny / 7;
   assert.ok(Math.abs(out.cost - expectedUsd) < 1e-9, `expected ≈ ${expectedUsd} got ${out.cost}`);
 });

@@ -246,10 +246,14 @@ function normalizeDbRow(raw) {
 // the cost panels don't read all-zeros: the runtime-supplied `cost_usd` is
 // always preferred, and only zero rows get the fallback below.
 //
-// Prices follow the mavis public listing in CNY per 1M tokens; we convert
-// to USD with `cnyToUsdRate` so the result lands in the same currency
-// shape as the runtime-supplied cost column. The 512k context boundary
-// is the public mavis tier split (≤ 512k input tokens vs > 512k).
+// Prices follow the mavis public listing (CNY per 1M tokens, standard
+// tier "永久五折" / permanent 50% off); we convert to USD with
+// `cnyToUsdRate` so the result lands in the same currency shape as the
+// runtime-supplied cost column. The 512k context boundary is the public
+// mavis tier split (≤ 512k input tokens vs > 512k). The "priority" tier
+// (1.5x standard) is a per-request service-tier flag the mavis runtime
+// currently does not surface in the SQLite store, so we deliberately do
+// not model it here.
 //
 // This table is intentionally hand-rolled rather than fetched from the
 // mavis runtime, because the mavis CLI does not currently expose its
@@ -257,9 +261,9 @@ function normalizeDbRow(raw) {
 // at startup and pass via `options.priceTable` (tests already do this).
 const MAVIS_PRICING = Object.freeze({
   'minimax/MiniMax-M3': {
-    input: { upTo512k: 4.29, over512k: 8.40 },
-    output: { upTo512k: 16.89, over512k: 33.60 },
-    cacheRead: { upTo512k: 9.84, over512k: 1.68 }
+    input: { upTo512k: 2.10, over512k: 4.20 },
+    output: { upTo512k: 8.40, over512k: 16.80 },
+    cacheRead: { upTo512k: 0.42, over512k: 0.84 }
   }
 });
 
