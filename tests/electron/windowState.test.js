@@ -13,6 +13,7 @@ const {
   rebuildWindowBounds,
   restoreWindowMaximized,
   restoreWindowMaximizedForReveal,
+  sameWindowBounds,
   setWindowMaximizable,
   shouldPersistWindowBounds,
   shouldRestoreWindowMaximized,
@@ -92,6 +93,13 @@ test('does not focus an inactive maximized replacement window', () => {
   assert.equal(restoreWindowMaximizedForReveal(window, { windowMaximized: true }, { restoreMaximized: true, inactive: true }), true);
   assert.equal(state.maximized, true);
   assert.equal(state.focused, undefined);
+});
+
+test('sameWindowBounds is exported for setBounds no-ops', () => {
+  const bounds = { x: 40, y: 50, width: 360, height: 700 };
+  assert.equal(sameWindowBounds(bounds, { ...bounds }), true);
+  assert.equal(sameWindowBounds(bounds, { ...bounds, y: 0 }), false);
+  assert.equal(sameWindowBounds(null, bounds), false);
 });
 
 test('persists changed bounds and maximization state in one save', () => {

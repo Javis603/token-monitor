@@ -34,11 +34,13 @@ const {
 const { createElectronLimitsFetch } = require('./limitsFetch');
 const {
   expandedBoundsForCollapse,
+  isWindowMaximized,
   normalWindowBounds,
   persistWindowState,
   rebuildWindowBounds,
   restoreWindowMaximized,
   restoreWindowMaximizedForReveal,
+  sameWindowBounds,
   setWindowMaximizable,
   shouldPersistWindowBounds,
   shouldTrackWindowMaximized,
@@ -352,7 +354,31 @@ const {
   normalizeInitialRendererViewState,
   moveFloatingBubbleBounds
 } = require('./floatingBubble');
+const {
+  TOP_EDGE_ANIMATION_FRAME_MS,
+  TOP_EDGE_ANIMATION_MS,
+  TOP_EDGE_HIDE_DEBOUNCE_MS,
+  TOP_EDGE_MOVE_IDLE_MS,
+  TOP_EDGE_POINTER_POLL_MS,
+  TOP_EDGE_STARTUP_GRACE_MS,
+  canUseTopEdgeHide,
+  cursorHitsWindow,
+  displayForTopEdge,
+  expandedTopEdgeBounds,
+  hiddenTopEdgeBounds,
+  interpolatedTopEdgeBounds,
+  isNearTopEdge,
+  shouldDockToTopEdge,
+  shouldHideDockedTopEdgeWindow,
+  shouldRevealDockedTopEdgeWindow,
+  shouldSkipFloatingBubbleAutoCollapse,
+  shouldUndockFromTopEdge
+} = require('./topEdgeHide');
 const { applyWindowsChrome } = require('./windowsChrome');
+const {
+  nudgeWindowsWindowByY,
+  setWindowsDwmTransitionsEnabled
+} = require('./windowsWindowMove');
 const { setMoveToActiveSpace } = require('./macosSpaceBehavior');
 const {
   WINDOWS_BACKDROP_ACCENT,
@@ -518,6 +544,8 @@ function defaultSettings() {
     floatingBubbleContent: 'icon',
     floatingBubbleCustomLayout: createDefaultTrayLayout(),
     floatingBubbleBounds: null,
+    topEdgeHideEnabled: false,
+    topEdgeHideDocked: false,
     lastViewState: { period: 'today', breakdown: 'tool' },
     discordRpcEnabled: false,
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
@@ -2182,6 +2210,10 @@ function collapseFloatingBubble(plan) {
 }
 
 function maybeCollapseFloatingBubble(bounds) {
+  if (shouldSkipFloatingBubbleAutoCollapse({
+    enabled: canUseTopEdgeHide(settings),
+    docked: topEdgeHideState.docked
+  })) return false;
   // The display comes from where the window actually sits, but the bounds the
   // plan remembers as "expanded" must be the normal ones: collapsing a
   // maximized window would otherwise persist the whole screen as its size.
@@ -2247,6 +2279,10 @@ function expandFloatingBubble(options = {}) {
 function scheduleFloatingBubbleAutoCollapse() {
   stopFloatingBubbleAutoCollapseTimer();
   if (!canUseFloatingBubble(settings) || floatingBubbleState.collapsed) return;
+  if (shouldSkipFloatingBubbleAutoCollapse({
+    enabled: canUseTopEdgeHide(settings),
+    docked: topEdgeHideState.docked
+  })) return;
   floatingBubbleAutoCollapseTimer = setTimeout(() => {
     floatingBubbleAutoCollapseTimer = null;
     if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isFocused()) return;
@@ -2271,8 +2307,446 @@ function syncFloatingBubbleAvailability() {
   sendFloatingBubbleState();
 }
 
+const topEdgeHideState = {
+  docked: false,
+  hidden: false,
+  expandedBounds: null,
+  applyingBounds: false,
+  moving: false,
+  pointerTimer: null,
+  hideTimer: null,
+  moveIdleTimer: null,
+  applyingBoundsTimer: null,
+  animationTimer: null,
+  animationGeneration: 0,
+  startupGraceUntil: 0
+};
+
+function displayMatchingTopEdge(bounds) {
+  return displayForTopEdge(bounds, (rect) => screen.getDisplayMatching(rect)) || displayForBounds(bounds);
+}
+
+function persistTopEdgeDocked(docked) {
+  const next = docked === true;
+  if (settings.topEdgeHideDocked === next) return;
+  settings.topEdgeHideDocked = next;
+  saveSettings();
+}
+
+function prefersReducedMotionForWindow() {
+  try {
+    return motionPreferenceApi.shouldReduceMotion(
+      settings?.reduceMotion,
+      nativeTheme.prefersReducedMotion === true
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function stopTopEdgePointerTracking() {
+  if (topEdgeHideState.pointerTimer) {
+    clearInterval(topEdgeHideState.pointerTimer);
+    topEdgeHideState.pointerTimer = null;
+  }
+}
+
+function cancelScheduledTopEdgeHide() {
+  if (topEdgeHideState.hideTimer) {
+    clearTimeout(topEdgeHideState.hideTimer);
+    topEdgeHideState.hideTimer = null;
+  }
+}
+
+function stopTopEdgeHideTimers() {
+  stopTopEdgePointerTracking();
+  cancelScheduledTopEdgeHide();
+  if (topEdgeHideState.moveIdleTimer) {
+    clearTimeout(topEdgeHideState.moveIdleTimer);
+    topEdgeHideState.moveIdleTimer = null;
+  }
+  cancelTopEdgeBoundsAnimation();
+  if (topEdgeHideState.applyingBoundsTimer) {
+    clearTimeout(topEdgeHideState.applyingBoundsTimer);
+    topEdgeHideState.applyingBoundsTimer = null;
+  }
+  topEdgeHideState.applyingBounds = false;
+  topEdgeHideState.moving = false;
+}
+
+function syncTopEdgePointerTracking() {
+  if (
+    topEdgeHideState.docked &&
+    canUseTopEdgeHide(settings) &&
+    mainWindow &&
+    !mainWindow.isDestroyed()
+  ) {
+    if (!topEdgeHideState.pointerTimer) {
+      topEdgeHideState.pointerTimer = setInterval(evaluateTopEdgePointer, TOP_EDGE_POINTER_POLL_MS);
+    }
+    return;
+  }
+  stopTopEdgePointerTracking();
+}
+
+function cancelTopEdgeBoundsAnimation(restoreTransitions = true) {
+  topEdgeHideState.animationGeneration += 1;
+  if (topEdgeHideState.animationTimer) {
+    clearTimeout(topEdgeHideState.animationTimer);
+    topEdgeHideState.animationTimer = null;
+  }
+  if (restoreTransitions && mainWindow && !mainWindow.isDestroyed()) {
+    setWindowsDwmTransitionsEnabled(mainWindow, true);
+  }
+}
+
+function applyTopEdgeBounds(target, options = {}) {
+  if (!mainWindow || mainWindow.isDestroyed() || !target) return false;
+  const current = mainWindow.getBounds();
+  if (sameWindowBounds(current, target)) return false;
+  cancelTopEdgeBoundsAnimation(false);
+  if (topEdgeHideState.applyingBoundsTimer) {
+    clearTimeout(topEdgeHideState.applyingBoundsTimer);
+    topEdgeHideState.applyingBoundsTimer = null;
+  }
+  topEdgeHideState.applyingBounds = true;
+  const generation = topEdgeHideState.animationGeneration;
+  const sizeUnchanged = current.width === target.width && current.height === target.height;
+  const releaseApplyingBounds = () => {
+    if (generation !== topEdgeHideState.animationGeneration) return;
+    topEdgeHideState.animationTimer = null;
+    topEdgeHideState.applyingBoundsTimer = null;
+    setWindowsDwmTransitionsEnabled(mainWindow, true);
+    topEdgeHideState.applyingBounds = false;
+    syncTaskbarZOrder();
+  };
+  const finish = () => {
+    releaseApplyingBounds();
+    if (typeof options.onDone === 'function') options.onDone();
+  };
+  const syncElectronBounds = (bounds) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try {
+      if (sizeUnchanged && typeof mainWindow.setPosition === 'function') {
+        mainWindow.setPosition(Math.round(bounds.x), Math.round(bounds.y), false);
+        return;
+      }
+      mainWindow.setBounds(bounds);
+    } catch (_) {
+      try { mainWindow.setBounds(target); } catch (__) {}
+    }
+  };
+  let lastY = Math.round(current.y);
+  const locked = {
+    x: Math.round(current.x),
+    width: current.width,
+    height: current.height
+  };
+  const commitFrame = (bounds) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const y = Math.round(bounds.y);
+    if (y === lastY) return;
+    const fromRect = { ...locked, y: lastY };
+    const toRect = { ...locked, y };
+    lastY = y;
+    if (sizeUnchanged && nudgeWindowsWindowByY(mainWindow, fromRect, toRect, screen)) return;
+    syncElectronBounds({ ...locked, y });
+  };
+  const animate = options.animate === true && !prefersReducedMotionForWindow();
+  setWindowsDwmTransitionsEnabled(mainWindow, false);
+  const destination = { ...locked, y: Math.round(target.y) };
+  if (!animate) {
+    syncElectronBounds(destination);
+    if (typeof options.onDone === 'function') options.onDone();
+    topEdgeHideState.applyingBoundsTimer = setTimeout(releaseApplyingBounds, 50);
+    return true;
+  }
+  const from = { ...locked, y: Math.round(current.y) };
+  const startedAt = performance.now();
+  const tick = () => {
+    if (generation !== topEdgeHideState.animationGeneration) return;
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      finish();
+      return;
+    }
+    const elapsed = performance.now() - startedAt;
+    const t = elapsed / TOP_EDGE_ANIMATION_MS;
+    if (t >= 1) {
+      syncElectronBounds(destination);
+      finish();
+      return;
+    }
+    commitFrame(interpolatedTopEdgeBounds(from, destination, t));
+    const delay = Math.max(0, (Math.floor(elapsed / TOP_EDGE_ANIMATION_FRAME_MS) + 1) * TOP_EDGE_ANIMATION_FRAME_MS - elapsed);
+    topEdgeHideState.animationTimer = setTimeout(tick, delay);
+  };
+  topEdgeHideState.animationTimer = setTimeout(tick, TOP_EDGE_ANIMATION_FRAME_MS);
+  return true;
+}
+
+function cursorInsideMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  try {
+    if (typeof screen.getCursorScreenPoint !== 'function') return false;
+    return cursorHitsWindow(screen.getCursorScreenPoint(), mainWindow.getBounds());
+  } catch (_) {
+    return false;
+  }
+}
+
+function hideTopEdgeWindow() {
+  if (!mainWindow || mainWindow.isDestroyed() || !topEdgeHideState.docked || topEdgeHideState.hidden) return false;
+  if (!canUseTopEdgeHide(settings) || floatingBubbleState.collapsed) return false;
+  if (isWindowMaximized(mainWindow)) return false;
+  if (cursorInsideMainWindow() || topEdgeHideState.moving) return false;
+  const expanded = topEdgeHideState.expandedBounds ||
+    expandedTopEdgeBounds(mainWindow.getBounds(), displayMatchingTopEdge(mainWindow.getBounds()), process.platform);
+  const display = displayMatchingTopEdge(expanded || mainWindow.getBounds());
+  const hidden = hiddenTopEdgeBounds(expanded, display, process.platform);
+  if (!expanded || !hidden) return false;
+  topEdgeHideState.expandedBounds = expanded;
+  topEdgeHideState.hidden = true;
+  persistWindowBounds(expanded);
+  const moved = applyTopEdgeBounds(hidden, {
+    animate: true,
+    onDone: () => applyWindowSettings()
+  });
+  if (!moved) applyWindowSettings();
+  return true;
+}
+
+function scheduleTopEdgeHideAutoHide() {
+  if (topEdgeHideState.hideTimer) return;
+  topEdgeHideState.hideTimer = setTimeout(() => {
+    topEdgeHideState.hideTimer = null;
+    hideTopEdgeWindow();
+  }, TOP_EDGE_HIDE_DEBOUNCE_MS);
+}
+
+function revealTopEdgeHide(options = {}) {
+  if (!mainWindow || mainWindow.isDestroyed() || !topEdgeHideState.docked) return false;
+  cancelScheduledTopEdgeHide();
+  const current = mainWindow.getBounds();
+  const expandedSource = topEdgeHideState.expandedBounds || current;
+  const display = displayMatchingTopEdge(expandedSource);
+  const expanded = expandedTopEdgeBounds(expandedSource, display, process.platform);
+  if (expanded) topEdgeHideState.expandedBounds = expanded;
+  const wasHidden = topEdgeHideState.hidden;
+  topEdgeHideState.hidden = false;
+  const finishReveal = () => {
+    applyWindowSettings();
+    if (options.focus !== false) {
+      if (typeof mainWindow.isMinimized === 'function' && mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+    }
+    if (options.focus !== false) mainWindow.focus();
+  };
+  if (expanded && (wasHidden || options.forceBounds === true)) {
+    const moved = applyTopEdgeBounds(expanded, {
+      animate: options.animate !== false,
+      onDone: finishReveal
+    });
+    if (!moved) finishReveal();
+    return true;
+  }
+  finishReveal();
+  return true;
+}
+
+function dockTopEdge(bounds) {
+  if (!mainWindow || mainWindow.isDestroyed() || !canUseTopEdgeHide(settings)) return false;
+  if (floatingBubbleState.collapsed || isWindowMaximized(mainWindow)) return false;
+  const source = bounds || mainWindow.getBounds();
+  const display = displayMatchingTopEdge(source);
+  const expanded = expandedTopEdgeBounds(source, display, process.platform);
+  if (!expanded) return false;
+  topEdgeHideState.docked = true;
+  topEdgeHideState.hidden = false;
+  topEdgeHideState.expandedBounds = expanded;
+  persistTopEdgeDocked(true);
+  applyTopEdgeBounds(expanded, { animate: false });
+  persistWindowBounds(expanded);
+  applyWindowSettings();
+  syncTopEdgePointerTracking();
+  return true;
+}
+
+function undockTopEdge() {
+  cancelScheduledTopEdgeHide();
+  const wasHidden = topEdgeHideState.hidden;
+  const expanded = topEdgeHideState.expandedBounds;
+  topEdgeHideState.docked = false;
+  topEdgeHideState.hidden = false;
+  topEdgeHideState.expandedBounds = null;
+  topEdgeHideState.startupGraceUntil = 0;
+  persistTopEdgeDocked(false);
+  stopTopEdgePointerTracking();
+  if (wasHidden && expanded && mainWindow && !mainWindow.isDestroyed()) {
+    applyTopEdgeBounds(expanded, { animate: false });
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) applyWindowSettings();
+}
+
+function evaluateTopEdgePointer() {
+  // Hit-test in the main process against current bounds. Renderer mouseleave is
+  // unreliable once only a 6 DIP strip remains on screen; getCursorScreenPoint()
+  // still sees that strip in the same DIP space as setBounds, including HiDPI.
+  if (!topEdgeHideState.docked || !canUseTopEdgeHide(settings)) return;
+  if (!mainWindow || mainWindow.isDestroyed() || floatingBubbleState.collapsed) return;
+  if (Date.now() < topEdgeHideState.startupGraceUntil) return;
+  if (topEdgeHideState.moving || topEdgeHideState.applyingBounds) return;
+  const inside = cursorInsideMainWindow();
+  const maximized = isWindowMaximized(mainWindow);
+  if (shouldRevealDockedTopEdgeWindow({
+    docked: true,
+    hidden: topEdgeHideState.hidden,
+    cursorInside: inside
+  })) {
+    cancelScheduledTopEdgeHide();
+    revealTopEdgeHide({ focus: false });
+    return;
+  }
+  if (shouldHideDockedTopEdgeWindow({
+    enabled: true,
+    docked: true,
+    hidden: topEdgeHideState.hidden,
+    cursorInside: inside,
+    moving: false,
+    maximized
+  })) {
+    scheduleTopEdgeHideAutoHide();
+    return;
+  }
+  cancelScheduledTopEdgeHide();
+}
+
+function onTopEdgeMoveIdle() {
+  if (topEdgeHideState.moveIdleTimer) {
+    clearTimeout(topEdgeHideState.moveIdleTimer);
+    topEdgeHideState.moveIdleTimer = null;
+  }
+  topEdgeHideState.moving = false;
+  if (!mainWindow || mainWindow.isDestroyed() || topEdgeHideState.applyingBounds) return;
+  if (!canUseTopEdgeHide(settings) || floatingBubbleState.collapsed) return;
+  if (isWindowMaximized(mainWindow) || topEdgeHideState.hidden) return;
+  const bounds = mainWindow.getBounds();
+  const display = displayMatchingTopEdge(bounds);
+  if (topEdgeHideState.docked) {
+    if (shouldUndockFromTopEdge(bounds, display, process.platform)) undockTopEdge();
+    else dockTopEdge(bounds);
+    evaluateTopEdgePointer();
+    return;
+  }
+  if (shouldDockToTopEdge({
+    bounds,
+    display,
+    settings,
+    maximized: false,
+    floatingBubbleCollapsed: floatingBubbleState.collapsed,
+    platform: process.platform
+  })) {
+    dockTopEdge(bounds);
+  }
+}
+
+function onTopEdgeWindowMoved() {
+  if (topEdgeHideState.applyingBounds) return;
+  if (!canUseTopEdgeHide(settings) || floatingBubbleState.collapsed) return;
+  if (isWindowMaximized(mainWindow)) return;
+  if (topEdgeHideState.hidden) return;
+  topEdgeHideState.moving = true;
+  cancelScheduledTopEdgeHide();
+  if (topEdgeHideState.moveIdleTimer) clearTimeout(topEdgeHideState.moveIdleTimer);
+  topEdgeHideState.moveIdleTimer = setTimeout(onTopEdgeMoveIdle, TOP_EDGE_MOVE_IDLE_MS);
+}
+
+function onTopEdgeWindowResized() {
+  if (topEdgeHideState.applyingBounds || !topEdgeHideState.docked) return;
+  if (!mainWindow || mainWindow.isDestroyed() || topEdgeHideState.hidden) return;
+  const bounds = mainWindow.getBounds();
+  const display = displayMatchingTopEdge(bounds);
+  const expanded = expandedTopEdgeBounds(bounds, display, process.platform);
+  if (expanded) topEdgeHideState.expandedBounds = expanded;
+}
+
+function maybeDockTopEdgeInsteadOfMaximize(win) {
+  if (!canUseTopEdgeHide(settings) || floatingBubbleState.collapsed) return false;
+  if (!win || win.isDestroyed()) return false;
+  const normal = typeof win.getNormalBounds === 'function' ? win.getNormalBounds() : null;
+  const candidate = normal || (typeof win.getBounds === 'function' ? win.getBounds() : null);
+  const display = displayMatchingTopEdge(candidate);
+  if (!isNearTopEdge(candidate, display, process.platform)) return false;
+  suspendWindowMaximized(win);
+  dockTopEdge(candidate);
+  return true;
+}
+
+function restoreTopEdgeHideOnStartup() {
+  if (!canUseTopEdgeHide(settings) || settings.topEdgeHideDocked !== true) return;
+  if (!mainWindow || mainWindow.isDestroyed() || floatingBubbleState.collapsed) return;
+  if (isWindowMaximized(mainWindow)) return;
+  if (topEdgeHideState.docked) {
+    syncTopEdgePointerTracking();
+    if (!topEdgeHideState.hidden && topEdgeHideState.expandedBounds) {
+      applyTopEdgeBounds(topEdgeHideState.expandedBounds, { animate: false });
+    }
+    return;
+  }
+  const bounds = mainWindow.getBounds();
+  const display = displayMatchingTopEdge(bounds);
+  const expanded = expandedTopEdgeBounds(bounds, display, process.platform);
+  if (!expanded) return;
+  topEdgeHideState.docked = true;
+  topEdgeHideState.hidden = false;
+  topEdgeHideState.expandedBounds = expanded;
+  topEdgeHideState.startupGraceUntil = Date.now() + TOP_EDGE_STARTUP_GRACE_MS;
+  applyTopEdgeBounds(expanded, { animate: false });
+  persistWindowBounds(expanded);
+  applyWindowSettings();
+  syncTopEdgePointerTracking();
+}
+
+function maybeDockTopEdgeFromCurrentBounds() {
+  if (topEdgeHideState.docked || topEdgeHideState.hidden) return false;
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (!canUseTopEdgeHide(settings) || floatingBubbleState.collapsed) return false;
+  if (isWindowMaximized(mainWindow)) return false;
+  const bounds = mainWindow.getBounds();
+  const display = displayMatchingTopEdge(bounds);
+  if (!shouldDockToTopEdge({
+    bounds,
+    display,
+    settings,
+    maximized: false,
+    floatingBubbleCollapsed: floatingBubbleState.collapsed,
+    platform: process.platform
+  })) return false;
+  return dockTopEdge(bounds);
+}
+
+function syncTopEdgeHideAvailability() {
+  if (!canUseTopEdgeHide(settings)) {
+    if (topEdgeHideState.docked || topEdgeHideState.hidden || settings.topEdgeHideDocked) {
+      undockTopEdge();
+    } else {
+      stopTopEdgeHideTimers();
+    }
+    return;
+  }
+  if (settings.topEdgeHideDocked === true && !topEdgeHideState.docked) {
+    restoreTopEdgeHideOnStartup();
+    return;
+  }
+  // Enabling the setting must adopt a window already sitting in the snap zone.
+  // Docking otherwise waits for a move-idle, so a top-aligned widget would stay
+  // undocked until the user dragged it off and back.
+  maybeDockTopEdgeFromCurrentBounds();
+  syncTopEdgePointerTracking();
+}
+
 function persistBoundsSoon() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (topEdgeHideState.applyingBounds) return;
   if (!shouldPersistWindowBounds(mainWindow)) {
     stopPersistBoundsTimer();
     return;
@@ -2288,6 +2762,11 @@ function persistBoundsSoon() {
       // Popover x/y is anchored to the tray icon each open; only the size carries over.
       if (prev.width === next.width && prev.height === next.height) return;
       settings.windowBounds = { ...prev, width: next.width, height: next.height };
+    } else if (topEdgeHideState.hidden && topEdgeHideState.expandedBounds) {
+      const expanded = topEdgeHideState.expandedBounds;
+      if (prev.x === expanded.x && prev.y === expanded.y &&
+        prev.width === expanded.width && prev.height === expanded.height) return;
+      settings.windowBounds = expanded;
     } else if (floatingBubbleState.collapsed && floatingBubbleState.expandedBounds) {
       floatingBubbleState.collapsedBounds = next;
       const display = displayForBounds(next);
@@ -2543,6 +3022,8 @@ function readSettings() {
     merged.floatingBubbleTrigger = merged.floatingBubbleTrigger === 'hover' ? 'hover' : 'click';
     merged.floatingBubbleContent = normalizeTrayContent(merged.floatingBubbleContent, 'icon');
     merged.floatingBubbleCustomLayout = normalizeTrayLayout(merged.floatingBubbleCustomLayout);
+    merged.topEdgeHideEnabled = parseBoolean(merged.topEdgeHideEnabled, false);
+    merged.topEdgeHideDocked = parseBoolean(merged.topEdgeHideDocked, false);
     merged.trayCustomLayout = normalizeTrayLayout(merged.trayCustomLayout);
     merged.showTrayProviderBadge = parseBoolean(merged.showTrayProviderBadge, false);
     merged.windowToggleShortcut = normalizeWindowToggleShortcut(merged.windowToggleShortcut);
@@ -2817,15 +3298,23 @@ function applyWindowSettings() {
     return;
   }
   const behavior = describeWindowBehavior(settings);
+  const topEdgeHidden = topEdgeHideState.hidden === true;
   mainWindow.setAlwaysOnTop(behavior.alwaysOnTop, floatingAlwaysOnTopLevel());
-  if (typeof mainWindow.setMovable === 'function') mainWindow.setMovable(behavior.draggable);
-  if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(behavior.resizable);
+  if (typeof mainWindow.setMovable === 'function') mainWindow.setMovable(behavior.draggable && !topEdgeHidden);
+  if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(behavior.resizable && !topEdgeHidden);
   if (typeof mainWindow.setIgnoreMouseEvents === 'function') {
     mainWindow.setIgnoreMouseEvents(behavior.mousePassthrough);
   }
-  if (typeof mainWindow.setFocusable === 'function') mainWindow.setFocusable(behavior.focusable);
-  if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(skipTaskbarForSettings(settings));
-  if (!behavior.focusable && typeof mainWindow.blur === 'function') mainWindow.blur();
+  if (typeof mainWindow.setFocusable === 'function') {
+    mainWindow.setFocusable(behavior.focusable && !topEdgeHidden);
+  }
+  if (typeof mainWindow.setSkipTaskbar === 'function') {
+    mainWindow.setSkipTaskbar(topEdgeHidden || skipTaskbarForSettings(settings));
+  }
+  if (typeof mainWindow.setHiddenInMissionControl === 'function') {
+    mainWindow.setHiddenInMissionControl(topEdgeHidden || Boolean(settings.trayMode));
+  }
+  if ((!behavior.focusable || topEdgeHidden) && typeof mainWindow.blur === 'function') mainWindow.blur();
   syncTaskbarZOrder();
 }
 
@@ -4570,7 +5059,10 @@ function openMainWindowFromWidget() {
   applyMacSpaceBehavior(false);
   // A collapsed bubble would otherwise swallow the navigation we just sent.
   if (floatingBubbleState.collapsed) expandFloatingBubble();
-  else mainWindow.show();
+  else {
+    revealTopEdgeHide({ focus: true });
+    mainWindow.show();
+  }
 }
 
 function hidePopover() {
@@ -4596,8 +5088,9 @@ function focusExistingWindow() {
     applyMacSpaceBehavior(false);
     if (floatingBubbleState.collapsed) expandFloatingBubble();
     else {
+      revealTopEdgeHide({ focus: true });
       mainWindow.show();
-      restoreWindowMaximized(mainWindow, settings);
+      if (!topEdgeHideState.docked) restoreWindowMaximized(mainWindow, settings);
     }
   }
 }
@@ -5052,6 +5545,10 @@ function unregisterWindowToggleShortcut() {
 
 function handleWindowToggleShortcut() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (topEdgeHideState.hidden) {
+    revealTopEdgeHide({ focus: true });
+    return;
+  }
   const action = windowToggleShortcutAction({
     trayMode: Boolean(settings?.trayMode),
     floatingBubbleCollapsed: Boolean(floatingBubbleState.collapsed),
@@ -5122,6 +5619,7 @@ function setWindowPresentationFromMenu(value) {
     settings.trayMode = true;
     saveSettings();
     syncFloatingBubbleAvailability();
+    syncTopEdgeHideAvailability();
     enterTrayMode();
     pushSettingsToRenderer();
     return;
@@ -5138,6 +5636,7 @@ function setWindowPresentationFromMenu(value) {
     applyWindowSettings();
     focusExistingWindow();
   }
+  syncTopEdgeHideAvailability();
   pushSettingsToRenderer();
 }
 
@@ -6277,6 +6776,7 @@ function createWindow(boundsOverride, options = {}) {
       if (settings?.trayMode) suspendWindowMaximized(win);
       return;
     }
+    if (maybeDockTopEdgeInsteadOfMaximize(win)) return;
     stopPersistBoundsTimer();
     persistWindowState(settings, saveSettings, normalWindowBounds(win), true);
   });
@@ -6284,6 +6784,7 @@ function createWindow(boundsOverride, options = {}) {
     if (!shouldTrackWindowMaximized(settings, floatingBubbleState)) return;
     persistWindowState(settings, saveSettings, normalWindowBounds(win), false);
     persistBoundsSoon();
+    onTopEdgeMoveIdle();
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
@@ -6298,14 +6799,31 @@ function createWindow(boundsOverride, options = {}) {
   applyNativeMaterial();
   win.on('focus', () => {
     stopFloatingBubbleAutoCollapseTimer();
+    cancelScheduledTopEdgeHide();
+    // Alt+Tab / unexpected activation must not expand a docked hide. Hover and
+    // explicit paths (shortcut, tray, widget) call revealTopEdgeHide themselves.
+    if (topEdgeHideState.hidden && typeof win.blur === 'function') win.blur();
   });
   win.on('blur', () => {
     nudgeTaskbarZOrder();
     if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) hidePopover();
-    else if (!quitRequested) scheduleFloatingBubbleAutoCollapse();
+    else if (!quitRequested) {
+      scheduleFloatingBubbleAutoCollapse();
+      evaluateTopEdgePointer();
+    }
   });
-  win.on('resized', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
-  win.on('moved', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
+  win.on('resized', () => {
+    if (topEdgeHideState.applyingBounds) return;
+    persistBoundsSoon();
+    syncTaskbarZOrder();
+    onTopEdgeWindowResized();
+  });
+  win.on('moved', () => {
+    if (topEdgeHideState.applyingBounds) return;
+    persistBoundsSoon();
+    syncTaskbarZOrder();
+    onTopEdgeWindowMoved();
+  });
   win.on('show', syncTaskbarZOrder);
   win.on('restore', syncTaskbarZOrder);
   win.on('hide', stopTaskbarZOrderKeeper);
@@ -6324,6 +6842,9 @@ function createWindow(boundsOverride, options = {}) {
   });
   win.webContents.on('before-input-event', handleZoomShortcut);
   win.on('show', () => sendMainWindowVisibility(win));
+  if (!collapsedFloatingBubble) {
+    win.once('show', () => restoreTopEdgeHideOnStartup());
+  }
   win.on('hide', () => sendMainWindowVisibility(win));
   win.on('minimize', () => sendMainWindowVisibility(win));
   win.on('restore', () => sendMainWindowVisibility(win));
@@ -6519,7 +7040,9 @@ async function cursorStatusValue({ discover = false } = {}) {
 
 function rebuildWindow() {
   if (!mainWindow) return;
-  const bounds = rebuildWindowBounds(mainWindow, floatingBubbleState);
+  const bounds = (topEdgeHideState.docked && topEdgeHideState.expandedBounds)
+    ? topEdgeHideState.expandedBounds
+    : rebuildWindowBounds(mainWindow, floatingBubbleState);
   const wasFocused = mainWindow.isFocused();
   const old = mainWindow;
   floatingBubbleState.collapsed = false;
@@ -6528,6 +7051,8 @@ function rebuildWindow() {
   floatingBubbleState.expandedBounds = null;
   floatingBubbleState.suppressNextCollapse = false;
   stopFloatingBubbleAutoCollapseTimer();
+  topEdgeHideState.hidden = false;
+  stopTopEdgePointerTracking();
   old.removeAllListeners('close');
   // Build the new window first so total window count never drops to 0
   // (otherwise window-all-closed fires and quits the app on Windows).
@@ -6545,6 +7070,18 @@ app.whenReady().then(() => {
   // icon we have already handed to the shell, so the renderer has to recompose
   // it — nothing else in the app would notice the change.
   nativeTheme.on('updated', () => { void pushSystemUiThemeAfterChange(); });
+  screen.on('display-metrics-changed', () => {
+    if (!topEdgeHideState.docked || !mainWindow || mainWindow.isDestroyed()) return;
+    const source = topEdgeHideState.expandedBounds || mainWindow.getBounds();
+    const display = displayMatchingTopEdge(source);
+    const expanded = expandedTopEdgeBounds(source, display, process.platform);
+    if (!expanded) return;
+    topEdgeHideState.expandedBounds = expanded;
+    applyTopEdgeBounds(
+      topEdgeHideState.hidden ? hiddenTopEdgeBounds(expanded, display, process.platform) : expanded,
+      { animate: false }
+    );
+  });
   const widgetRuntime = macWidgetRuntimeSupport({
     platform: process.platform,
     osRelease: process.platform === 'darwin' ? os.release() : ''
@@ -6679,6 +7216,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.openrouterProfiles;
     delete normalizedPatch.thirdPartyProfiles;
     delete normalizedPatch.customModelPricing;
+    delete normalizedPatch.topEdgeHideDocked;
     // Subscriptions go through subscriptions:save, which knows whether this
     // device owns the list or shares it with a hub. The explicit fields further
     // down are what actually hold the line — they are applied after the spread
@@ -6762,6 +7300,8 @@ app.whenReady().then(() => {
       ),
       tokenRateMode: normalizeTokenRateMode(patch.tokenRateMode ?? settings.tokenRateMode),
       floatingBubbleEnabled: parseBoolean(patch.floatingBubbleEnabled ?? settings.floatingBubbleEnabled, false),
+      topEdgeHideEnabled: parseBoolean(patch.topEdgeHideEnabled ?? settings.topEdgeHideEnabled, false),
+      topEdgeHideDocked: parseBoolean(settings.topEdgeHideDocked, false),
       discordRpcEnabled: patch.discordRpcEnabled ?? settings.discordRpcEnabled ?? false,
       limitsEnabled: parseBoolean(patch.limitsEnabled ?? settings.limitsEnabled, true),
       // Sourced from settings only, never from the patch: subscriptions:save is
@@ -6902,6 +7442,7 @@ app.whenReady().then(() => {
     ) && latestStats) updateDiscordRpcDisplay(latestStats);
     applyWindowSettings();
     syncFloatingBubbleAvailability();
+    syncTopEdgeHideAvailability();
     const nextNativeMaterial = nativeBlurEnabled();
     const nextWindowsBackdrop = normalizeWindowsBackdropMode(settings?.windowsBackdrop);
     const windowsBackdropChanged = previousWindowsBackdrop !== nextWindowsBackdrop
@@ -8272,6 +8813,7 @@ app.on('before-quit', () => {
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
   stopTaskbarZOrderKeeper();
+  stopTopEdgeHideTimers();
   unregisterWindowToggleShortcut();
   electronWorkbuddyLocalAuth.dispose();
   if (skipForcedQuit) return;
