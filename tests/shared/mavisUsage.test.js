@@ -498,3 +498,81 @@ test('MAVIS_READER_WORKER_FILENAME 指向真实存在的 worker 文件', () => {
   const workerPath = path.join(usageDir, MAVIS_READER_WORKER_FILENAME);
   assert.ok(fs.existsSync(workerPath), `worker script missing: ${workerPath}`);
 });
+
+test('readMavisDbRows 走 sinceMs > 0 时 CLI 收到的 SQL 包含 `ts >= ?`', async () => {
+  // 增量读的关键路径：readMavisDbRows 根据 sinceMs > 0 切换到带 ts >= ?
+  // 的 SQL，并通过 CLI 把 sinceMs 作为最后参数追加。Mock execFile 看
+  // 实际传给 sqlite3 的命令行。
+  let captured = null;
+  const fakeExec = (cmd, args) => {
+    captured = { cmd, args };
+    return Promise.resolve({ stdout: '[]' });
+  };
+  const todayStart = 1_700_000_000_000;
+  const { readMavisDbRows } = require('../../src/shared/providers/mavis/usage');
+  await readMavisDbRows('fake.db', {
+    sinceMs: todayStart,
+    agentNames: ['mavis'],
+    execFile: fakeExec
+  });
+  assert.ok(captured, 'mock execFile 应该被调用');
+  const sqlArg = captured.args.find((a) => /SELECT/i.test(String(a)));
+  assert.ok(sqlArg, 'CLI args 必须包含 SQL 语句');
+  assert.ok(/ts\s*>=\s*\?/i.test(sqlArg), `sinceMs > 0 必须用增量 SQL,实际: ${sqlArg.substring(0, 200)}`);
+  assert.ok(captured.args.includes(String(todayStart)), 'CLI args 必须包含 sinceMs 作为最后参数');
+});
+
+test('readMavisDbRows 走 sinceMs = 0 时 CLI 收到的 SQL 不含 `ts >= ?`', async () => {
+  let captured = null;
+  const fakeExec = (cmd, args) => {
+    captured = { cmd, args };
+    return Promise.resolve({ stdout: '[]' });
+  };
+  const { readMavisDbRows } = require('../../src/shared/providers/mavis/usage');
+  await readMavisDbRows('fake.db', {
+    sinceMs: 0,
+    agentNames: ['mavis'],
+    execFile: fakeExec
+  });
+  assert.ok(captured, 'mock execFile 应该被调用');
+  const sqlArg = captured.args.find((a) => /SELECT/i.test(String(a)));
+  assert.ok(sqlArg, 'CLI args 必须包含 SQL 语句');
+  assert.ok(!/ts\s*>=\s*\?/i.test(sqlArg), `sinceMs = 0 不能用增量 SQL,实际: ${sqlArg.substring(0, 200)}`);
+});
+
+test('readMavisDbRows 的 SQL 投影不再选 reasoning_tokens / cache_write_tokens', async () => {
+  // pi-agent runtime 这两个字段始终 0，SQL 投影去掉了，row payload 更小。
+  let captured = null;
+  const fakeExec = (cmd, args) => {
+    captured = { cmd, args };
+    return Promise.resolve({ stdout: '[]' });
+  };
+  const { readMavisDbRows } = require('../../src/shared/providers/mavis/usage');
+  await readMavisDbRows('fake.db', {
+    sinceMs: 0,
+    agentNames: ['mavis'],
+    execFile: fakeExec
+  });
+  const sqlArg = captured.args.find((a) => /SELECT/i.test(String(a)));
+  assert.ok(sqlArg);
+  assert.ok(!/reasoning_tokens/i.test(sqlArg), `reasoning_tokens 必须从投影中去除,实际: ${sqlArg.substring(0, 300)}`);
+  assert.ok(!/cache_write_tokens/i.test(sqlArg), `cache_write_tokens 必须从投影中去除,实际: ${sqlArg.substring(0, 300)}`);
+});
+
+test('normalizeDbRow 缺 reasoning_tokens / cache_write_tokens 时默认 0', () => {
+  // SQL 投影已经去掉这两个始终为 0 的字段，但 worker 跨版本兼容、或者
+  // 未来 runtime 重新写入这两列时，normalizeDbRow 必须把 undefined 当 0。
+  const out = normalizeDbRow({
+    ts: 1,
+    session_id: 'mvs_test',
+    agent_name: 'mavis',
+    model: null,
+    input_tokens: 100,
+    output_tokens: 50,
+    cache_read_tokens: 1000,
+    cost_usd: 0
+    // 注意：没有 reasoning_tokens / cache_write_tokens
+  });
+  assert.equal(out.reasoning, 0, 'reasoning 缺省字段必须为 0');
+  assert.equal(out.cacheWrite, 0, 'cacheWrite 缺省字段必须为 0');
+});

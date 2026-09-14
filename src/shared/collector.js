@@ -67,7 +67,7 @@ const {
 // Mavis (MiniMax Code) — reads ~/.minimax/v2/sqlite/runtime-state.sqlite via a
 // locallyParsed adapter, same lane as proma / qodercn. Cost is the runtime's
 // `cost_usd` column, so we don't need a pricing resolver here.
-const { buildMavisHistoryGraph, buildMavisPeriods, collectMavisRows } = require('./providers/mavis/usage');
+const { buildMavisHistoryGraph, buildMavisPeriods, collectMavisRows, MAVIS_HOME } = require('./providers/mavis/usage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 const {
@@ -1194,8 +1194,21 @@ async function collectUsageOnce(options) {
       // throws on a hard read failure — we surface the error and skip
       // the partition so the next tick can try again with a fresh
       // DB handle.
+      //
+      // PI-agent SQLite averages ~3–50 new rows per 5-minute tick (the
+      // runtime writes at p50=6s / p90=29s intervals). When the today
+      // anchor is alive we only need those new rows to patch today's
+      // partition; the month / allTime buckets are kept on the anchor
+      // untouched (`!anchorUsed` is the gate that merges them in). A
+      // `sinceMs = todayStart` read cuts IO from "every row in the
+      // table" (currently ~4k rows, growing) to "rows since local
+      // midnight". Cold-start / full-scan ticks still pull the whole
+      // table so month + allTime can be rebuilt from scratch.
+      const mavisSinceMs = anchorUsed
+        ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime()
+        : undefined;
       try {
-        mavisRows = await collectMavisRows({ logger: options.logger });
+        mavisRows = await collectMavisRows({ logger: options.logger, sinceMs: mavisSinceMs });
         const mavisJson = await buildMavisPeriods({ now: collectedAt, allTimeSince, rows: mavisRows });
         mavisPeriods = {
           today: extractUsageFromTokscale(mavisJson.today),
@@ -2100,6 +2113,19 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
     const existingNativeRoots = nativeRoots.filter(dirExists);
     if (existingNativeRoots.length > 0) {
       rootsByClient.reasonix = [...new Set([...(rootsByClient.reasonix || []), ...existingNativeRoots])];
+    }
+  }
+  // Mavis (MiniMax Code) writes token usage to a parse-local SQLite at
+  // ~/.minimax/v2/sqlite/runtime-state.sqlite. Watching the parent
+  // directory lets chokidar wake us on every runtime commit (the
+  // *.sqlite-wal / *.sqlite-shm sidecars fire too — that's fine, our
+  // attribution tolerates multiple events per tick — but we still want
+  // the actual DB file to be in the list so a vacuum/replace never goes
+  // unnoticed).
+  if (enabled.has('mavis')) {
+    const mavisHome = MAVIS_HOME;
+    if (dirExists(mavisHome)) {
+      rootsByClient.mavis = [...new Set([...(rootsByClient.mavis || []), mavisHome])];
     }
   }
   return rootsByClient;

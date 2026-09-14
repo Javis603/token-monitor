@@ -59,10 +59,16 @@ const MAVIS_READ_BUDGET_ERROR = 'MAVIS_READ_BUDGET_EXCEEDED';
 // applied in SQL so the JSON payload stays small; the `framework_type`
 // predicate is currently a no-op (always 'pi-agent') but kept so that
 // any future rows from a non-mavis framework are excluded cheaply.
+// `reasoning_tokens` and `cache_write_tokens` are always 0 in the pi-agent
+// runtime (verified: 0 rows out of ~4k). Drop them from the projection so
+// the worker postMessage payload stays smaller and the row construction
+// in the worker doesn't have to coerce always-zero values. The host still
+// defaults them to 0 in normalizeDbRow when older worker payloads land
+// (handy if a future runtime ever does populate them).
 const MAVIS_USAGE_SQL = `
 SELECT ts, session_id, agent_name, model,
-  input_tokens, output_tokens, reasoning_tokens,
-  cache_read_tokens, cache_write_tokens, cost_usd
+  input_tokens, output_tokens,
+  cache_read_tokens, cost_usd
 FROM ${MAVIS_TABLE}
 WHERE framework_type = 'pi-agent'
   AND agent_name IN (PLACEHOLDER_AGENTS)
@@ -71,8 +77,8 @@ ORDER BY ts
 
 const MAVIS_USAGE_SINCE_SQL = `
 SELECT ts, session_id, agent_name, model,
-  input_tokens, output_tokens, reasoning_tokens,
-  cache_read_tokens, cache_write_tokens, cost_usd
+  input_tokens, output_tokens,
+  cache_read_tokens, cost_usd
 FROM ${MAVIS_TABLE}
 WHERE framework_type = 'pi-agent'
   AND agent_name IN (PLACEHOLDER_AGENTS)

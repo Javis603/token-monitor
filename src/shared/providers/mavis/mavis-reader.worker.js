@@ -88,9 +88,12 @@ async function run() {
         model: row.model == null ? null : String(row.model),
         input_tokens: Number(row.input_tokens) || 0,
         output_tokens: Number(row.output_tokens) || 0,
-        reasoning_tokens: Number(row.reasoning_tokens) || 0,
+        // reasoning_tokens / cache_write_tokens: the pi-agent runtime has
+        // never written a non-zero value for either (verified over ~4k
+        // rows), so the SQL projection drops them. We leave them off the
+        // payload entirely — the host defaults them to 0 in normalizeDbRow
+        // if it ever sees an older payload that still carries them.
         cache_read_tokens: Number(row.cache_read_tokens) || 0,
-        cache_write_tokens: Number(row.cache_write_tokens) || 0,
         cost_usd: Number(row.cost_usd) || 0,
       });
       if (rowCount > cap) {
