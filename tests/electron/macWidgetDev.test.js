@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
 const {
   availableDevelopmentIdentities,
@@ -130,7 +131,8 @@ test('preserves the packaged Widget bundle identifier unless the environment ove
 
 test('reads a legacy packaged Widget bundle identifier from the extension plist', () => {
   const calls = [];
-  const bundleId = extensionBundleIdentifier('/tmp/Token Monitor.app', {
+  const appPath = path.join(path.sep, 'tmp', 'Token Monitor.app');
+  const bundleId = extensionBundleIdentifier(appPath, {
     existsSync: () => true,
     spawnSync: (command, args) => {
       calls.push([command, args]);
@@ -139,5 +141,8 @@ test('reads a legacy packaged Widget bundle identifier from the extension plist'
   });
   assert.equal(bundleId, 'com.example.legacy.widget');
   assert.equal(calls[0][0], '/usr/bin/plutil');
-  assert.match(calls[0][1].at(-1), /TokenMonitorWidget\.appex\/Contents\/Info\.plist$/);
+  assert.equal(
+    calls[0][1].at(-1),
+    path.join(appPath, 'Contents', 'PlugIns', 'TokenMonitorWidget.appex', 'Contents', 'Info.plist')
+  );
 });
