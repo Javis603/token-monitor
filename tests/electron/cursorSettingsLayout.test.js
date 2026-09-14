@@ -36,7 +36,8 @@ function declaration(rule, property) {
 }
 
 function functionBody(source, name, nextName) {
-  const start = source.indexOf(`function ${name}(`);
+  const asyncStart = source.indexOf(`async function ${name}(`);
+  const start = asyncStart === -1 ? source.indexOf(`function ${name}(`) : asyncStart;
   assert.notEqual(start, -1, `${name} function should exist`);
   const end = source.indexOf(`function ${nextName}(`, start);
   assert.notEqual(end, -1, `${nextName} function should follow ${name}`);
@@ -1082,9 +1083,9 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   assert.match(setupBody, /saveSettings\(\{ claudeWebCookie: '' \}\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(claudePlatformUrl\(\)\)/);
   const statusBody = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
-  assert.match(statusBody, /const canClearConfiguredClaude = providerName === 'claude' && configured;/);
+  assert.match(statusBody, /const canClearConfiguredCredential = source === 'settings' && configured;/);
   assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked\)/);
-  assert.match(statusBody, /source !== 'settings' \|\| \(!linked && !canClearConfiguredClaude\)/);
+  assert.match(statusBody, /logoutBtn\.classList\.toggle\('hidden', !canClearConfiguredCredential\)/);
   const urlBody = functionBody(app, 'claudePlatformUrl', 'selectedQoderSite');
   assert.match(urlBody, /return 'https:\/\/claude\.ai\/settings\/usage';/);
 
@@ -1276,23 +1277,188 @@ test('Z.ai global and BigModel CN browser links are allowlisted', () => {
   assert.match(allowlist, /parsed\.hostname === 'bigmodel\.cn' \|\| parsed\.hostname === 'www\.bigmodel\.cn'/);
 });
 
-test('Factory account panel uses an API key and opens the allowlisted billing page', () => {
+test('Factory account panel validates an API key before saving and opens the allowlisted billing page', () => {
   const html = readRendererFile('index.html');
   assert.match(html, /<div id="factoryAccountGroup"[\s\S]*?<input id="factoryApiKeyInput" type="password"[\s\S]*?<button id="factoryApiKeySubmit"/);
+  assert.match(html, /automatically detects FACTORY_API_KEY[\s\S]*To use a different Factory API key instead[\s\S]*used only to query Factory plan quotas and Extra Usage balance/);
 
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /saveSettings\(\{ factoryApiKey: input\.value \}\)/);
+  assert.match(setupBody, /const validation = await window\.tokenMonitor\.factory\.validateApiKey\(input\.value\);[\s\S]*?if \(!validation\?\.ok\) \{[\s\S]*?factoryApiKeyValidationError\(validation\);[\s\S]*?return;[\s\S]*?await saveSettings\(\{ factoryApiKey: input\.value \}\)/);
+  assert.match(setupBody, /submit\.disabled = true;[\s\S]*?submit\.textContent = t\('settings\.common\.checking'\);[\s\S]*?finally \{[\s\S]*?submit\.disabled = false;[\s\S]*?submit\.textContent = t\('settings\.factory\.saveApiKey'\)/);
   assert.match(setupBody, /saveSettings\(\{ factoryApiKey: '' \}\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(factoryPlatformUrl\(\)\)/);
   const urlBody = functionBody(app, 'factoryPlatformUrl', 'zaiteamPlatformUrl');
   assert.match(urlBody, /return 'https:\/\/app\.factory\.ai\/settings\/billing';/);
 
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
+  assert.match(preload, /validateApiKey: \(apiKey\) => ipcRenderer\.invoke\('factory:validateApiKey', apiKey\)/);
+  assert.match(main, /ipcMain\.handle\('factory:validateApiKey', \(_event, raw\) => validateFactoryApiKey\(raw\)\)/);
   const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
   assert.match(allowlist, /parsed\.hostname === 'app\.factory\.ai'[\s\S]*parsed\.pathname\.startsWith\('\/settings\/billing'\)/);
   const normalizeKey = functionBody(main, 'normalizeFactoryApiKey', 'currentFactoryApiKey');
   assert.doesNotMatch(normalizeKey, /factoryEnvApiKey/);
+  assert.equal(runMainFunction(
+    main,
+    'currentFactoryApiKey',
+    'normalizeSecretSetting',
+    'currentFactoryApiKey()',
+    {
+      settings: { factoryApiKey: '' },
+      factoryEnvApiKey: () => 'auto-detected-key',
+      process: { env: {} }
+    }
+  ), 'auto-detected-key');
+});
+
+test('Factory API key validation accepts only a successful provider probe', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const valid = await runMainFunction(
+    main,
+    'validateFactoryApiKey',
+    'normalizeSecretSetting',
+    `validateFactoryApiKey(' fk-live ', {
+      normalizeApiKey: value => value.trim(),
+      providerDeps: { transport: 'electron' },
+      fetchLimits: async (options, deps) => ({
+        status: options.factoryApiKey === 'fk-live' && deps.transport === 'electron' ? 'ok' : 'unavailable'
+      })
+    })`
+  );
+  assert.equal(valid.ok, true);
+  assert.equal(valid.status, 'ok');
+
+  const invalid = await runMainFunction(
+    main,
+    'validateFactoryApiKey',
+    'normalizeSecretSetting',
+    `validateFactoryApiKey('1', {
+      normalizeApiKey: value => value.trim(),
+      providerDeps: {},
+      fetchLimits: async () => {
+        const error = new Error('rejected');
+        error.status = 'unauthorized';
+        throw error;
+      }
+    })`
+  );
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.status, 'unauthorized');
+});
+
+test('Factory API key validation errors distinguish invalid, rate-limited, and unavailable checks', () => {
+  const app = readRendererFile('app.js');
+  const messages = runRendererFunctions(
+    app,
+    ['factoryApiKeyValidationError'],
+    `[
+      factoryApiKeyValidationError({ status: 'unauthorized' }),
+      factoryApiKeyValidationError({ status: 'sourceRateLimited' }),
+      factoryApiKeyValidationError({ status: 'unavailable' })
+    ]`,
+    { t: key => key }
+  );
+  assert.deepEqual(Array.from(messages), [
+    'settings.factory.validationInvalid',
+    'settings.factory.validationRateLimited',
+    'settings.factory.validationUnavailable'
+  ]);
+
+  const i18n = readRendererFile('i18n.js');
+  for (const key of [
+    'settings.factory.validationInvalid',
+    'settings.factory.validationRateLimited',
+    'settings.factory.validationUnavailable'
+  ]) {
+    assert.equal(i18n.match(new RegExp(`'${key.replaceAll('.', '\\.')}':`, 'g'))?.length, 5);
+  }
+});
+
+test('Factory identifies environment and Droid .env credentials separately', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const settingsBody = functionBody(main, 'settingsForRenderer', 'systemDarkTrayUi');
+  assert.match(settingsBody, /resolveFactoryAutomaticApiKey\(\{\}, \{ env: process\.env \}\)/);
+  assert.match(settingsBody, /settings\?\.factoryApiKey \? 'settings' : factoryAutomaticCredential\.source/);
+
+  const app = readRendererFile('app.js');
+  const labels = runRendererFunctions(
+    app,
+    ['apiKeyAccountStatusText'],
+    "[apiKeyAccountStatusText('factory', { status: 'ok' }, true, 'env'), apiKeyAccountStatusText('factory', { status: 'ok' }, true, 'droid-env')]",
+    {
+      limitProviderPresentationApi: { apiKeyAccountStatus: () => 'linked' },
+      t: key => key
+    }
+  );
+  assert.deepEqual(Array.from(labels), ['settings.factory.statusEnv', 'settings.factory.statusDroidEnv']);
+
+  const i18n = readRendererFile('i18n.js');
+  assert.equal((i18n.match(/'settings\.factory\.statusDroidEnv'/g) || []).length, 5);
+});
+
+test('Factory keeps a saved-key Clear action available after validation fails', () => {
+  const app = readRendererFile('app.js');
+  const elements = new Map();
+  for (const suffix of ['AccountStatus', 'OpenBrowser', 'LogoutButton', 'RefreshButton', 'ManualPanel', 'ErrorMessage']) {
+    const classes = new Set(['hidden']);
+    elements.set(`factory${suffix}`, {
+      classList: {
+        add: (...names) => names.forEach(name => classes.add(name)),
+        remove: (...names) => names.forEach(name => classes.delete(name)),
+        toggle: (name, force) => {
+          if (force) classes.add(name);
+          else classes.delete(name);
+        },
+        contains: name => classes.has(name)
+      },
+      textContent: ''
+    });
+  }
+
+  const settings = {
+    factoryCredentialConfigured: true,
+    factoryCredentialSource: 'settings'
+  };
+  let status = 'unauthorized';
+  const render = () => runRendererFunctions(
+    app,
+    ['renderExternalProviderStatus'],
+    "renderExternalProviderStatus('factory')",
+    {
+      externalLimitAccountConfig: {
+        factory: {
+          configuredKey: 'factoryCredentialConfigured',
+          sourceKey: 'factoryCredentialSource',
+          pendingKey: 'factoryPendingCheckSince'
+        }
+      },
+      state: { settings, factoryPendingCheckSince: 0 },
+      document: { getElementById: id => elements.get(id) || null },
+      externalProviderForAccount: () => ({ provider: 'factory', status }),
+      externalProviderAccountLinked: () => false,
+      limitProviderEnabled: () => true,
+      setCursorStatusText: () => {},
+      apiKeyAccountStatusText: () => '',
+      t: key => key,
+      renderSettingsSummaries: () => {},
+      setExternalAccountExpanded: () => {},
+      renderVolcengineAgentOverrideState: () => {},
+      updateQoderUsagePageHint: () => {},
+      alibabaSavedVariant: () => ''
+    }
+  );
+
+  for (status of ['unauthorized', 'unavailable']) {
+    render();
+    assert.equal(elements.get('factoryLogoutButton').classList.contains('hidden'), false, `${status} saved key should remain clearable`);
+  }
+
+  for (const source of ['env', 'droid-env']) {
+    settings.factoryCredentialSource = source;
+    render();
+    assert.equal(elements.get('factoryLogoutButton').classList.contains('hidden'), true, `${source} credentials must not expose Clear`);
+  }
 });
 
 test('opencode status env account avoids saved profile names', () => {
@@ -2778,7 +2944,8 @@ test('a ZCode-discovered GLM login reads as connected, not API-key configured', 
   const statusBody = functionBody(app, 'apiKeyAccountStatusText', 'minimaxPlatformUrl');
   // The linked pill picks the OAuth-style key only for a zcode-auto source;
   // pasted and env keys keep their existing API-key pills.
-  assert.match(statusBody, /providerName === 'zai' && source === 'zcode-auto' \? 'settings\.zai\.statusLinked'/);
+  assert.match(statusBody, /providerName === 'zai' && source === 'zcode-auto'[\s\S]*\? 'settings\.zai\.statusLinked'/);
+  assert.match(statusBody, /providerName === 'factory' && source === 'droid-env'/);
   assert.match(statusBody, /source === 'env' \? `settings\.\$\{providerName\}\.statusEnv` : `settings\.\$\{providerName\}\.statusSet`/);
 
   const i18n = readRendererFile('i18n.js');

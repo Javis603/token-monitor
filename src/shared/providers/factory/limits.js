@@ -35,13 +35,11 @@ function readFactoryFile(filePath, description, deps = {}) {
   });
 }
 
-function factoryEnvApiKey(options = {}, deps = {}) {
+function resolveFactoryAutomaticApiKey(options = {}, deps = {}) {
   const env = deps.env || process.env;
-  const explicit = cleanSecret(options.factoryApiKey);
-  if (explicit) return explicit;
   for (const name of FACTORY_API_KEY_NAMES) {
     const value = cleanSecret(env[name]);
-    if (value) return value;
+    if (value) return { apiKey: value, source: 'env' };
   }
   try {
     const source = readFactoryFile(
@@ -53,10 +51,16 @@ function factoryEnvApiKey(options = {}, deps = {}) {
       const match = line.match(/^\s*(?:export\s+)?FACTORY_API_KEY\s*=\s*(.*?)\s*$/u);
       if (!match) continue;
       const value = cleanSecret(match[1].replace(/\s+#.*$/u, ''));
-      if (value) return value;
+      if (value) return { apiKey: value, source: 'droid-env' };
     }
   } catch (_) {}
-  return '';
+  return { apiKey: '', source: '' };
+}
+
+function factoryEnvApiKey(options = {}, deps = {}) {
+  const explicit = cleanSecret(options.factoryApiKey);
+  if (explicit) return explicit;
+  return resolveFactoryAutomaticApiKey(options, deps).apiKey;
 }
 
 function factoryWindow(window, { kind, label, windowMinutes, now, additional = false, limitId = '' }) {
@@ -287,5 +291,6 @@ module.exports = {
   fetchFactoryLimits,
   fetchFactoryWithToken,
   parseFactoryLegacyUsage,
-  parseFactoryTokenRateLimits
+  parseFactoryTokenRateLimits,
+  resolveFactoryAutomaticApiKey
 };

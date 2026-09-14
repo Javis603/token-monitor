@@ -10,7 +10,8 @@ const { hashKey } = require('../../src/shared/hashKey');
 const {
   factoryEnvApiKey,
   factoryLegacyPercent,
-  fetchFactoryLimits
+  fetchFactoryLimits,
+  resolveFactoryAutomaticApiKey
 } = require('../../src/shared/providers/factory/limits');
 
 function jsonResponse(status, body) {
@@ -60,6 +61,10 @@ test('Factory token-rate API uses the explicit key and maps identity, quotas, an
     return jsonResponse(404, {});
   };
 
+  assert.deepEqual(
+    resolveFactoryAutomaticApiKey({ homeDir }, { env: { FACTORY_API_KEY: 'env-key' }, homeDir }),
+    { apiKey: 'env-key', source: 'env' }
+  );
   assert.equal(factoryEnvApiKey({ homeDir }, { env: { FACTORY_API_KEY: 'env-key' }, homeDir }), 'env-key');
   const result = await fetchFactoryLimits({ factoryApiKey: " 'settings-key' ", homeDir }, {
     env: { FACTORY_API_KEY: 'env-key' },
@@ -96,6 +101,11 @@ test('Factory API key from Droid .env reads legacy usage', async (t) => {
   const factoryDir = path.join(homeDir, '.factory');
   fs.mkdirSync(factoryDir);
   fs.writeFileSync(path.join(factoryDir, '.env'), "  export FACTORY_API_KEY='factory-api-key' # Droid key\n");
+
+  assert.deepEqual(
+    resolveFactoryAutomaticApiKey({ homeDir }, { env: {}, homeDir }),
+    { apiKey: 'factory-api-key', source: 'droid-env' }
+  );
 
   assert.equal(factoryLegacyPercent({ userTokens: 250, totalAllowance: 1000, usedRatio: 0 }), 25);
   assert.equal(factoryLegacyPercent({ totalAllowance: 1e20, usedRatio: 25 }), 25);
@@ -147,6 +157,7 @@ test('Factory refuses an oversized local .env and does not read Droid auth files
   fs.writeFileSync(path.join(factoryDir, '.env'), Buffer.alloc((256 * 1024) + 1, 65));
   fs.writeFileSync(path.join(factoryDir, 'auth.v2.loginkeychain'), JSON.stringify({ accessToken: 'oauth-token' }));
 
+  assert.deepEqual(resolveFactoryAutomaticApiKey({ homeDir }, { env: {}, homeDir }), { apiKey: '', source: '' });
   assert.equal(factoryEnvApiKey({ homeDir }, { env: {}, homeDir }), '');
   let fetchCalls = 0;
   const result = await fetchFactoryLimits({ homeDir }, {

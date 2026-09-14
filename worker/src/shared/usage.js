@@ -50,7 +50,7 @@ const SESSION_TEXT_KEYS = [
   'name', 'preview', 'firstUserMessage', 'first_user_message',
   'customTitle', 'custom_title', 'aiTitle', 'ai_title'
 ];
-const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'minimax']);
+const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'factory', 'minimax']);
 
 function asNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;

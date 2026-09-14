@@ -21,7 +21,7 @@ const { parseKiroUsage, fetchKiroLimits } = kiroLimits;
 const zaiLimits = require('../providers/zai/limits');
 const { zaiToken, zaiRegion, fetchZaiLimits } = zaiLimits;
 const factoryLimits = require('../providers/factory/limits');
-const { factoryEnvApiKey, fetchFactoryLimits } = factoryLimits;
+const { factoryEnvApiKey, fetchFactoryLimits, resolveFactoryAutomaticApiKey } = factoryLimits;
 const zaiTeamLimits = require('../providers/zaiteam/limits');
 const { fetchZaiTeamLimits, zaiTeamToken } = zaiTeamLimits;
 const volcengineLimits = require('../providers/volcengine/limits');
@@ -321,6 +321,7 @@ module.exports = {
   zaiToken,
   factoryEnvApiKey,
   fetchFactoryLimits,
+  resolveFactoryAutomaticApiKey,
   zaiRegion,
   fetchZaiLimits,
   zaiTeamToken,

@@ -15732,7 +15732,11 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
   if (accountStatus === 'linked') {
     // A ZCode-discovered login is an OAuth-style link, not a pasted API key,
     // so it reads as connected the way Zed's linked sessions do.
-    const linkedKey = providerName === 'zai' && source === 'zcode-auto' ? 'settings.zai.statusLinked' : null;
+    const linkedKey = providerName === 'zai' && source === 'zcode-auto'
+      ? 'settings.zai.statusLinked'
+      : providerName === 'factory' && source === 'droid-env'
+        ? 'settings.factory.statusDroidEnv'
+        : null;
     return t(linkedKey || (source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`));
   }
   if (accountStatus === 'invalid') return t(`settings.${providerName}.statusInvalid`);
@@ -15892,6 +15896,14 @@ function ollamaValidationError(provider) {
   return t('settings.ollama.validationUnavailable');
 }
 
+function factoryApiKeyValidationError(provider) {
+  if (provider?.status === 'unauthorized') return t('settings.factory.validationInvalid');
+  if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
+    return t('settings.factory.validationRateLimited');
+  }
+  return t('settings.factory.validationUnavailable');
+}
+
 function renderExternalProviderStatus(providerName) {
   const config = externalLimitAccountConfig[providerName];
   const statusEl = document.getElementById(`${providerName}AccountStatus`);
@@ -15948,8 +15960,8 @@ function renderExternalProviderStatus(providerName) {
     manualPanel.classList.remove('hidden');
     openBtn.classList.remove('hidden');
   }
-  const canClearConfiguredClaude = providerName === 'claude' && configured;
-  logoutBtn.classList.toggle('hidden', source !== 'settings' || (!linked && !canClearConfiguredClaude));
+  const canClearConfiguredCredential = source === 'settings' && configured;
+  logoutBtn.classList.toggle('hidden', !canClearConfiguredCredential);
   refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();
 }
@@ -17881,14 +17893,25 @@ function setupCursorAccountUI() {
     document.getElementById('factoryApiKeySubmit').addEventListener('click', async () => {
       const input = document.getElementById('factoryApiKeyInput');
       const errorEl = document.getElementById('factoryErrorMessage');
+      const submit = document.getElementById('factoryApiKeySubmit');
       errorEl.classList.add('hidden');
       if (!String(input.value || '').trim()) {
         errorEl.textContent = t('settings.factory.statusNotSet');
         errorEl.classList.remove('hidden');
         return;
       }
+      submit.disabled = true;
+      submit.textContent = t('settings.common.checking');
       try {
         markExternalProviderCheckPending('factory');
+        const validation = await window.tokenMonitor.factory.validateApiKey(input.value);
+        if (!validation?.ok) {
+          clearExternalProviderCheckPending('factory');
+          renderExternalProviderStatus('factory');
+          errorEl.textContent = factoryApiKeyValidationError(validation);
+          errorEl.classList.remove('hidden');
+          return;
+        }
         await saveSettings({ factoryApiKey: input.value });
         input.value = '';
         renderExternalProviderStatus('factory');
@@ -17899,6 +17922,9 @@ function setupCursorAccountUI() {
         clearExternalProviderCheckPending('factory');
         errorEl.textContent = t('settings.factory.saveFailed', { message: err.message });
         errorEl.classList.remove('hidden');
+      } finally {
+        submit.disabled = false;
+        submit.textContent = t('settings.factory.saveApiKey');
       }
     });
   }
