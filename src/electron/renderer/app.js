@@ -70,48 +70,48 @@ function iconKindFor(rowData, breakdown) {
 const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   claude: 'claudeAccountGroup',
   codex: 'codexAccountGroup',
-  factory: 'factoryAccountGroup',
   opencode: 'opencodeCookieGroup',
   cursor: 'cursorAccountGroup',
   antigravity: 'antigravityAccountGroup',
+  factory: 'factoryAccountGroup',
   kimi: 'kimiAccountGroup',
-  zed: 'zedAccountGroup',
   copilot: 'copilotAccountGroup',
+  zed: 'zedAccountGroup',
+  commandcode: 'commandcodeAccountGroup',
   mimo: 'mimoAccountGroup',
   zai: 'zaiAccountGroup',
   zaiteam: 'zaiteamAccountGroup',
+  qoder: 'qoderAccountGroup',
   deepseek: 'deepseekAccountGroup',
   openrouter: 'openrouterAccountGroup',
   minimax: 'minimaxAccountGroup',
   volcengine: 'volcengineAccountGroup',
-  qoder: 'qoderAccountGroup',
-  trae: 'traeAccountGroup',
-  commandcode: 'commandcodeAccountGroup',
   ollama: 'ollamaAccountGroup',
+  trae: 'traeAccountGroup',
   alibaba: 'alibabaAccountGroup',
   thirdparty: 'thirdpartyAccountGroup'
 };
 const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   claude: 'claudeAccountStatus',
   codex: 'codexAccountStatus',
-  factory: 'factoryAccountStatus',
   opencode: 'opencodeCookieStatus',
   cursor: 'cursorAccountStatus',
   antigravity: 'antigravityAccountStatus',
+  factory: 'factoryAccountStatus',
   kimi: 'kimiAccountStatus',
-  zed: 'zedAccountStatus',
   copilot: 'copilotApiTokenStatus',
+  zed: 'zedAccountStatus',
+  commandcode: 'commandcodeAccountStatus',
   mimo: 'mimoAccountStatus',
   zai: 'zaiAccountStatus',
   zaiteam: 'zaiteamAccountStatus',
+  qoder: 'qoderAccountStatus',
   deepseek: 'deepseekApiKeyStatus',
   openrouter: 'openrouterStatus',
   minimax: 'minimaxApiKeyStatus',
   volcengine: 'volcengineAccountStatus',
-  qoder: 'qoderAccountStatus',
-  trae: 'traeAccountStatus',
-  commandcode: 'commandcodeAccountStatus',
   ollama: 'ollamaAccountStatus',
+  trae: 'traeAccountStatus',
   alibaba: 'alibabaAccountStatus',
   thirdparty: 'thirdpartyStatus'
 };
@@ -15588,35 +15588,15 @@ const externalLimitAccountConfig = {
     sourceKey: 'claudeWebCookieSource',
     pendingKey: 'claudePendingCheckSince'
   },
-  zai: {
-    configuredKey: 'zaiApiKeyConfigured',
-    sourceKey: 'zaiApiKeySource',
-    pendingKey: 'zaiPendingCheckSince'
-  },
   factory: {
     configuredKey: 'factoryCredentialConfigured',
     sourceKey: 'factoryCredentialSource',
     pendingKey: 'factoryPendingCheckSince'
   },
-  zaiteam: {
-    configuredKey: 'zaiTeamApiKeyConfigured',
-    sourceKey: 'zaiTeamApiKeySource',
-    pendingKey: 'zaiteamPendingCheckSince'
-  },
-  volcengine: {
-    configuredKey: 'volcengineCredentialsConfigured',
-    sourceKey: 'volcengineCredentialsSource',
-    pendingKey: 'volcenginePendingCheckSince'
-  },
-  qoder: {
-    configuredKey: 'qoderCookieConfigured',
-    sourceKey: 'qoderCookieSource',
-    pendingKey: 'qoderPendingCheckSince'
-  },
-  trae: {
-    configuredKey: 'traeAccessTokenConfigured',
-    sourceKey: 'traeAccessTokenSource',
-    pendingKey: 'traePendingCheckSince'
+  kimi: {
+    configuredKey: 'kimiCredentialConfigured',
+    sourceKey: 'kimiCredentialSource',
+    pendingKey: 'kimiPendingCheckSince'
   },
   zed: {
     configuredKey: 'zedCookieConfigured',
@@ -15628,15 +15608,35 @@ const externalLimitAccountConfig = {
     sourceKey: 'commandcodeCookieSource',
     pendingKey: 'commandcodePendingCheckSince'
   },
-  kimi: {
-    configuredKey: 'kimiCredentialConfigured',
-    sourceKey: 'kimiCredentialSource',
-    pendingKey: 'kimiPendingCheckSince'
+  zai: {
+    configuredKey: 'zaiApiKeyConfigured',
+    sourceKey: 'zaiApiKeySource',
+    pendingKey: 'zaiPendingCheckSince'
+  },
+  zaiteam: {
+    configuredKey: 'zaiTeamApiKeyConfigured',
+    sourceKey: 'zaiTeamApiKeySource',
+    pendingKey: 'zaiteamPendingCheckSince'
+  },
+  qoder: {
+    configuredKey: 'qoderCookieConfigured',
+    sourceKey: 'qoderCookieSource',
+    pendingKey: 'qoderPendingCheckSince'
+  },
+  volcengine: {
+    configuredKey: 'volcengineCredentialsConfigured',
+    sourceKey: 'volcengineCredentialsSource',
+    pendingKey: 'volcenginePendingCheckSince'
   },
   ollama: {
     configuredKey: 'ollamaCookieConfigured',
     sourceKey: 'ollamaCookieSource',
     pendingKey: 'ollamaPendingCheckSince'
+  },
+  trae: {
+    configuredKey: 'traeAccessTokenConfigured',
+    sourceKey: 'traeAccessTokenSource',
+    pendingKey: 'traePendingCheckSince'
   },
   alibaba: {
     configuredKey: 'alibabaCookieConfigured',
@@ -18897,20 +18897,20 @@ function initSettingsAnimationWrappers() {
     '.hub-mode-fields',
     '.presence-feature-body',
     '#claudeManualPanel',
-    '#cursorManualPanel',
     '#opencodeManualPanel',
-    '#deepseekManualPanel',
-    '#minimaxManualPanel',
+    '#cursorManualPanel',
     '#factoryManualPanel',
-    '#zaiManualPanel',
-    '#zaiteamManualPanel',
-    '#volcengineManualPanel',
-    '#qoderManualPanel',
-    '#traeManualPanel',
+    '#kimiManualPanel',
     '#zedManualPanel',
     '#commandcodeManualPanel',
-    '#kimiManualPanel',
+    '#zaiManualPanel',
+    '#zaiteamManualPanel',
+    '#qoderManualPanel',
+    '#deepseekManualPanel',
+    '#minimaxManualPanel',
+    '#volcengineManualPanel',
     '#ollamaManualPanel',
+    '#traeManualPanel',
     '#alibabaManualPanel'
   ].join(', ');
 

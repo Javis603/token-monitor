@@ -3513,13 +3513,13 @@ html.is-windows .settings-panel select option {
 }
 .row-icon-claude     { -webkit-mask-image: url(../../../assets/icons/claude.svg);        mask-image: url(../../../assets/icons/claude.svg); }
 .row-icon-codex      { -webkit-mask-image: url(../../../assets/icons/codex.svg);         mask-image: url(../../../assets/icons/codex.svg); }
-.row-icon-droid      { -webkit-mask-image: url(../../../assets/icons/droid.svg);         mask-image: url(../../../assets/icons/droid.svg); }
-.row-icon-factory    { -webkit-mask-image: url(../../../assets/icons/droid.svg);         mask-image: url(../../../assets/icons/droid.svg); }
 .row-icon-hermes     { -webkit-mask-image: url(../../../assets/icons/hermes-agent.svg);  mask-image: url(../../../assets/icons/hermes-agent.svg); }
 .row-icon-gemini     { -webkit-mask-image: url(../../../assets/icons/gemini.svg);        mask-image: url(../../../assets/icons/gemini.svg); }
 .row-icon-cursor     { -webkit-mask-image: url(../../../assets/icons/cursor.svg);        mask-image: url(../../../assets/icons/cursor.svg); }
 .row-icon-antigravity { -webkit-mask-image: url(../../../assets/icons/antigravity.svg);   mask-image: url(../../../assets/icons/antigravity.svg); }
 .row-icon-cline      { -webkit-mask-image: url(../../../assets/icons/cline.svg);         mask-image: url(../../../assets/icons/cline.svg); }
+.row-icon-droid      { -webkit-mask-image: url(../../../assets/icons/droid.svg);         mask-image: url(../../../assets/icons/droid.svg); }
+.row-icon-factory    { -webkit-mask-image: url(../../../assets/icons/droid.svg);         mask-image: url(../../../assets/icons/droid.svg); }
 .row-icon-kimi       { -webkit-mask-image: url(../../../assets/icons/kimi.svg);          mask-image: url(../../../assets/icons/kimi.svg); }
 .row-icon-grok       { -webkit-mask-image: url(../../../assets/icons/xai.svg);           mask-image: url(../../../assets/icons/xai.svg); }
 .row-icon-copilot    { -webkit-mask-image: url(../../../assets/icons/copilot.svg);       mask-image: url(../../../assets/icons/copilot.svg); }
@@ -5364,49 +5364,69 @@ html.is-windows .limit-live-badge {
 }
 
 #claudeManualPanel,
-#cursorManualPanel,
 #opencodeManualPanel,
-#deepseekManualPanel,
-#minimaxManualPanel,
+#cursorManualPanel,
 #factoryManualPanel,
-#zaiManualPanel,
-#zaiteamManualPanel,
-#volcengineManualPanel,
-#qoderManualPanel,
-#traeManualPanel,
+#kimiManualPanel,
+#copilotManualPanel,
 #zedManualPanel,
 #commandcodeManualPanel,
-#ollamaManualPanel,
 #mimoManualPanel,
-#kimiManualPanel,
-#copilotManualPanel {
+#zaiManualPanel,
+#zaiteamManualPanel,
+#qoderManualPanel,
+#deepseekManualPanel,
+#minimaxManualPanel,
+#volcengineManualPanel,
+#ollamaManualPanel,
+#traeManualPanel {
   min-width: 0;
 }
 #claudeManualPanel > .accordion-animation-inner,
-#cursorManualPanel > .accordion-animation-inner,
 #opencodeManualPanel > .accordion-animation-inner,
-#deepseekManualPanel > .accordion-animation-inner,
-#minimaxManualPanel > .accordion-animation-inner,
+#cursorManualPanel > .accordion-animation-inner,
 #factoryManualPanel > .accordion-animation-inner,
-#zaiManualPanel > .accordion-animation-inner,
-#zaiteamManualPanel > .accordion-animation-inner,
-#volcengineManualPanel > .accordion-animation-inner,
-#qoderManualPanel > .accordion-animation-inner,
-#traeManualPanel > .accordion-animation-inner,
+#kimiManualPanel > .accordion-animation-inner,
 #zedManualPanel > .accordion-animation-inner,
 #commandcodeManualPanel > .accordion-animation-inner,
-#ollamaManualPanel > .accordion-animation-inner,
 #mimoManualPanel > .accordion-animation-inner,
-#kimiManualPanel > .accordion-animation-inner,
+#zaiManualPanel > .accordion-animation-inner,
+#zaiteamManualPanel > .accordion-animation-inner,
+#qoderManualPanel > .accordion-animation-inner,
+#deepseekManualPanel > .accordion-animation-inner,
+#minimaxManualPanel > .accordion-animation-inner,
+#volcengineManualPanel > .accordion-animation-inner,
+#ollamaManualPanel > .accordion-animation-inner,
+#traeManualPanel > .accordion-animation-inner,
 #alibabaManualPanel > .accordion-animation-inner {
   display: grid;
   min-width: 0;
   gap: 8px;
 }
 #claudeManualPanel textarea,
-#cursorManualPanel textarea,
 #opencodeManualPanel textarea,
+#cursorManualPanel textarea,
+#factoryManualPanel input,
+#kimiManualPanel input,
+#kimiManualPanel textarea,
+#copilotManualDetails input,
+#zedManualPanel textarea,
+#commandcodeManualPanel textarea,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
+#zaiManualPanel input,
+#zaiApiRegionInput,
+#zaiteamManualPanel input,
+#qoderManualPanel textarea,
+#qoderManualPanel select,
+#deepseekManualPanel input,
 #openrouterApiKeyInput,
+#minimaxManualPanel input,
+#volcengineManualPanel input,
+#ollamaManualPanel textarea,
+#traeManualPanel input,
+#alibabaManualPanel textarea,
+#alibabaManualPanel select,
 #thirdpartyPlatformInput,
 #thirdpartyModeInput,
 #thirdpartyAuthModeInput,
@@ -5419,34 +5439,30 @@ html.is-windows .limit-live-badge {
 #thirdpartyUsedPathInput,
 #thirdpartyTotalPathInput,
 #thirdpartyCurrencyInput,
-#thirdpartyDivisorInput,
-#deepseekManualPanel input,
-#minimaxManualPanel input,
-#factoryManualPanel input,
-#zaiManualPanel input,
-#zaiteamManualPanel input,
-#zaiApiRegionInput,
-#volcengineManualPanel input,
-#qoderManualPanel textarea,
-#qoderManualPanel select,
-#traeManualPanel input,
-#zedManualPanel textarea,
-#commandcodeManualPanel textarea,
-#ollamaManualPanel textarea,
-#mimoManualPanel input,
-#mimoManualPanel textarea,
-#kimiManualPanel input,
-#kimiManualPanel textarea,
-#alibabaManualPanel textarea,
-#alibabaManualPanel select,
-#copilotManualDetails input {
+#thirdpartyDivisorInput {
   width: 100%;
   font-size: 12px;
 }
 #claudeManualPanel textarea,
-#cursorManualPanel textarea,
 #opencodeManualPanel textarea,
+#cursorManualPanel textarea,
+#factoryManualPanel input,
+#kimiManualPanel input,
+#kimiManualPanel textarea,
+#copilotManualDetails input,
+#zedManualPanel textarea,
+#commandcodeManualPanel textarea,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
+#zaiManualPanel input,
+#zaiteamManualPanel input,
+#qoderManualPanel textarea,
+#deepseekManualPanel input,
 #openrouterApiKeyInput,
+#minimaxManualPanel input,
+#volcengineManualPanel input,
+#ollamaManualPanel textarea,
+#traeManualPanel input,
 #thirdpartyBaseUrlInput,
 #thirdpartyAccessTokenInput,
 #thirdpartyUserIdInput,
@@ -5456,23 +5472,7 @@ html.is-windows .limit-live-badge {
 #thirdpartyUsedPathInput,
 #thirdpartyTotalPathInput,
 #thirdpartyCurrencyInput,
-#thirdpartyDivisorInput,
-#deepseekManualPanel input,
-#minimaxManualPanel input,
-#factoryManualPanel input,
-#zaiManualPanel input,
-#zaiteamManualPanel input,
-#volcengineManualPanel input,
-#qoderManualPanel textarea,
-#traeManualPanel input,
-#zedManualPanel textarea,
-#commandcodeManualPanel textarea,
-#ollamaManualPanel textarea,
-#mimoManualPanel input,
-#mimoManualPanel textarea,
-#kimiManualPanel input,
-#kimiManualPanel textarea,
-#copilotManualDetails input {
+#thirdpartyDivisorInput {
   font-family: monospace;
 }
 .link-button {

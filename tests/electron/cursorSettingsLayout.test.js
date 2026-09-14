@@ -736,7 +736,7 @@ test('API key account entries share styling and Copilot uses the folded token en
   const css = readRendererFile('styles.css');
 
   const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
-  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#factoryManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#traeManualPanel',\n\s*'#zedManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#kimiManualPanel'/);
+  assert.match(animationBody, /'#factoryManualPanel',\n\s*'#kimiManualPanel',\n\s*'#zedManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#qoderManualPanel',\n\s*'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#ollamaManualPanel',\n\s*'#traeManualPanel',\n\s*'#alibabaManualPanel'/);
   assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
 
@@ -747,11 +747,23 @@ test('API key account entries share styling and Copilot uses the folded token en
   for (const provider of ['deepseek', 'minimax', 'factory', 'zai', 'zaiteam', 'volcengine', 'qoder', 'trae', 'zed', 'commandcode', 'ollama', 'kimi', 'copilot']) {
     assert.match(html, new RegExp(`id="${provider}ErrorMessage"[^>]*class="[^"]*hidden"`), provider);
   }
-  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#factoryManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#traeManualPanel,\n#zedManualPanel,\n#commandcodeManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#factoryManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#zedManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner,\n#alibabaManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#factoryManualPanel,\n#kimiManualPanel,\n#copilotManualPanel,\n#zedManualPanel,\n#commandcodeManualPanel,\n#mimoManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#qoderManualPanel,\n#deepseekManualPanel,\n#minimaxManualPanel,\n#volcengineManualPanel,\n#ollamaManualPanel,\n#traeManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#factoryManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner,\n#zedManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#alibabaManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#factoryManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#traeManualPanel input,\n#zedManualPanel textarea,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#alibabaManualPanel textarea,\n#alibabaManualPanel select,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#factoryManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#traeManualPanel input,\n#zedManualPanel textarea,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
+  {
+    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes("#factoryManualPanel input") && match[2].includes("font-size: 12px;"));
+    assert.ok(rule, 'shared credential input style should exist');
+    for (const selector of ["#factoryManualPanel input", "#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", "#zedManualPanel textarea", "#commandcodeManualPanel textarea", "#mimoManualPanel input", "#mimoManualPanel textarea", "#zaiManualPanel input", "#zaiApiRegionInput", "#zaiteamManualPanel input", "#qoderManualPanel textarea", "#qoderManualPanel select", "#deepseekManualPanel input", "#minimaxManualPanel input", "#volcengineManualPanel input", "#ollamaManualPanel textarea", "#traeManualPanel input", "#alibabaManualPanel textarea", "#alibabaManualPanel select"]) {
+      assert.ok(rule[1].split(',').map((value) => value.trim()).includes(selector), selector);
+    }
+  }
+  {
+    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes("#factoryManualPanel input") && match[2].includes("font-family: monospace;"));
+    assert.ok(rule, 'shared credential input style should exist');
+    for (const selector of ["#factoryManualPanel input", "#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", "#zedManualPanel textarea", "#commandcodeManualPanel textarea", "#mimoManualPanel input", "#mimoManualPanel textarea", "#zaiManualPanel input", "#zaiteamManualPanel input", "#qoderManualPanel textarea", "#deepseekManualPanel input", "#minimaxManualPanel input", "#volcengineManualPanel input", "#ollamaManualPanel textarea", "#traeManualPanel input"]) {
+      assert.ok(rule[1].split(',').map((value) => value.trim()).includes(selector), selector);
+    }
+  }
 
   assert.match(css, /\.thirdparty-field :is\(input, select\)\s*\{[\s\S]*?font-size: 12px;/);
 });
