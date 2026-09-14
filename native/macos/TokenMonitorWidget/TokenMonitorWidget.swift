@@ -140,6 +140,7 @@ struct TokenMonitorWidgetView: View {
                     page: entry.page,
                     referenceDate: entry.date,
                     selectedActivityDate: entry.selectedActivityDate,
+                    quotaMode: entry.quotaMode,
                     selectedQuotaProviderIDs: entry.selectedQuotaProviderIDs
                 )
             case .systemMedium:
@@ -150,6 +151,7 @@ struct TokenMonitorWidgetView: View {
                         page: entry.page,
                         referenceDate: entry.date,
                         selectedActivityDate: entry.selectedActivityDate,
+                        quotaMode: entry.quotaMode,
                         selectedQuotaProviderIDs: entry.selectedQuotaProviderIDs
                     )
                 } else {
@@ -160,6 +162,7 @@ struct TokenMonitorWidgetView: View {
                             page: entry.page,
                             referenceDate: entry.date,
                             selectedActivityDate: entry.selectedActivityDate,
+                            quotaMode: entry.quotaMode,
                             selectedQuotaProviderIDs: entry.selectedQuotaProviderIDs
                         )
                     }
@@ -173,35 +176,11 @@ struct TokenMonitorWidgetView: View {
     }
 
     private func isStale(_ snapshot: WidgetSnapshot) -> Bool {
-        if family == .systemLarge {
-            return WidgetQuotaFreshness.isDashboardStale(
-                snapshot: snapshot,
-                selectedIDs: entry.selectedQuotaProviderIDs,
-                at: entry.date
-            )
-        }
-        guard entry.page == .quota else { return snapshot.isStale(at: entry.date) }
-        return WidgetQuotaFreshness.isStale(
-            snapshot: snapshot,
-            selectedIDs: entry.selectedQuotaProviderIDs,
-            at: entry.date
-        )
+        snapshot.isStale(at: entry.date)
     }
 
     private func staleUpdatedAt(_ snapshot: WidgetSnapshot) -> Date? {
-        if family == .systemLarge {
-            return WidgetQuotaFreshness.dashboardOldestUpdatedAt(
-                in: snapshot,
-                selectedIDs: entry.selectedQuotaProviderIDs
-            )
-        }
-        guard entry.page == .quota else {
-            return WidgetStalePresentation.trustedUpdatedAt(for: snapshot)
-        }
-        return WidgetQuotaFreshness.oldestUpdatedAt(
-            in: snapshot,
-            selectedIDs: entry.selectedQuotaProviderIDs
-        ) ?? WidgetStalePresentation.trustedUpdatedAt(for: snapshot)
+        WidgetStalePresentation.trustedUpdatedAt(for: snapshot)
     }
 
     private func statusState(title: String, detail: String?) -> some View {

@@ -47,6 +47,7 @@ struct MediumUsageWidgetView: View {
     let page: WidgetPage
     let referenceDate: Date
     let selectedActivityDate: String?
+    let quotaMode: WidgetQuotaMode
     let selectedQuotaProviderIDs: [String]
 
     var body: some View {
@@ -67,7 +68,12 @@ struct MediumUsageWidgetView: View {
                 availableSize: availableSize
             )
         case .quota:
-            MediumQuotaModule(snapshot: snapshot, selectedProviderIDs: selectedQuotaProviderIDs)
+            MediumQuotaModule(
+                snapshot: snapshot,
+                referenceDate: referenceDate,
+                mode: quotaMode,
+                selectedProviderIDs: selectedQuotaProviderIDs
+            )
         case .tools:
             MediumBreakdownModule(rows: toolRows, presentation: snapshot.presentation)
         case .models:
@@ -106,6 +112,7 @@ struct LargeDashboardWidgetView: View {
     let page: WidgetPage
     let referenceDate: Date
     let selectedActivityDate: String?
+    let quotaMode: WidgetQuotaMode
     let selectedQuotaProviderIDs: [String]
 
     var body: some View {
@@ -142,7 +149,12 @@ struct LargeDashboardWidgetView: View {
                         .allowsHitTesting(false)
 
                     WidgetRefreshButton {
-                        DashboardQuotaModule(snapshot: snapshot, selectedProviderIDs: selectedQuotaProviderIDs)
+                        DashboardQuotaModule(
+                            snapshot: snapshot,
+                            referenceDate: referenceDate,
+                            mode: quotaMode,
+                            selectedProviderIDs: selectedQuotaProviderIDs
+                        )
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
                     .frame(height: 80, alignment: .topLeading)
@@ -334,13 +346,17 @@ struct DashboardBreakdownModule: View {
 
 struct MediumQuotaModule: View {
     let snapshot: WidgetSnapshot
+    let referenceDate: Date
+    let mode: WidgetQuotaMode
     let selectedProviderIDs: [String]
 
     var body: some View {
         let providers = WidgetQuotaSelectionResolver.providers(
             in: snapshot,
+            mode: mode,
             selectedIDs: selectedProviderIDs,
-            limit: 2
+            limit: 2,
+            at: referenceDate
         )
         Group {
             if providers.isEmpty {
@@ -353,7 +369,8 @@ struct MediumQuotaModule: View {
                     ForEach(providers) { provider in
                         QuotaProviderRow(
                             provider: provider,
-                            showAccountLabel: shouldShowAccountLabel(for: provider)
+                            showAccountLabel: shouldShowAccountLabel(for: provider),
+                            isStale: WidgetQuotaFreshness.isStale(provider, at: referenceDate)
                         )
                     }
                 }
@@ -369,13 +386,17 @@ struct MediumQuotaModule: View {
 
 struct DashboardQuotaModule: View {
     let snapshot: WidgetSnapshot
+    let referenceDate: Date
+    let mode: WidgetQuotaMode
     let selectedProviderIDs: [String]
 
     var body: some View {
         let providers = WidgetQuotaSelectionResolver.providers(
             in: snapshot,
+            mode: mode,
             selectedIDs: selectedProviderIDs,
-            limit: 2
+            limit: 2,
+            at: referenceDate
         )
         VStack(alignment: .leading, spacing: 4) {
             ModuleTitle(WidgetL10n.text("Quota"))
@@ -388,7 +409,8 @@ struct DashboardQuotaModule: View {
                     ForEach(providers) { provider in
                         DashboardQuotaProviderRow(
                             provider: provider,
-                            showAccountLabel: shouldShowAccountLabel(for: provider)
+                            showAccountLabel: shouldShowAccountLabel(for: provider),
+                            isStale: WidgetQuotaFreshness.isStale(provider, at: referenceDate)
                         )
                     }
                 }
@@ -403,17 +425,26 @@ struct DashboardQuotaModule: View {
 }
 
 private struct DashboardQuotaProviderRow: View {
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     let provider: WidgetQuotaProvider
     let showAccountLabel: Bool
+    let isStale: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 5) {
-                    WidgetVendorMark(vendorID: provider.provider, size: 12)
+                    WidgetVendorMark(vendorID: provider.provider, size: 12, isMuted: isStale)
                     Text(provider.displayName ?? WidgetFormat.provider(provider.provider))
                         .font(.system(size: WidgetDesignTokens.dashboardRowLabelSize, weight: .semibold))
+                        .foregroundStyle(isStale ? WidgetDesignTokens.muted : Color.primary)
                         .lineLimit(1)
+                    if isStale, differentiateWithoutColor {
+                        Image(systemName: "clock.badge.exclamationmark")
+                            .font(.system(size: WidgetDesignTokens.dashboardDetailSize, weight: .semibold))
+                            .foregroundStyle(WidgetDesignTokens.muted)
+                            .accessibilityHidden(true)
+                    }
                 }
                 if showAccountLabel, let accountLabel = provider.accountLabel, !accountLabel.isEmpty {
                     Text(accountLabel)
@@ -430,7 +461,8 @@ private struct DashboardQuotaProviderRow: View {
                     ForEach(Array(provider.windows.prefix(2))) { window in
                         DashboardQuotaWindowCell(
                             window: window,
-                            color: WidgetVendorIdentity.color(for: provider.provider)
+                            color: WidgetVendorIdentity.color(for: provider.provider),
+                            isStale: isStale
                         )
                     }
                 }
@@ -444,12 +476,15 @@ private struct DashboardQuotaProviderRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(isStale ? WidgetL10n.text("Data may be stale") : "")
     }
 }
 
 private struct DashboardQuotaWindowCell: View {
     let window: WidgetLimitWindow
     let color: Color
+    let isStale: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -461,11 +496,12 @@ private struct DashboardQuotaWindowCell: View {
                 Spacer(minLength: 2)
                 Text(value)
                     .font(.system(size: WidgetDesignTokens.dashboardValueSize, weight: .semibold))
+                    .foregroundStyle(isStale ? WidgetDesignTokens.muted : Color.primary)
                     .monospacedDigit()
                     .lineLimit(1)
             }
             if window.showMeter, let remaining = window.remainingPercent {
-                PercentageBar(value: remaining, color: color)
+                PercentageBar(value: remaining, color: isStale ? WidgetDesignTokens.muted : color)
             }
             if window.resetsAt != nil {
                 Text(WidgetFormat.boundary(window))
@@ -488,15 +524,18 @@ private struct DashboardQuotaWindowCell: View {
 }
 
 struct QuotaProviderRow: View {
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     let provider: WidgetQuotaProvider
     let showAccountLabel: Bool
+    let isStale: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 7) {
-                WidgetVendorMark(vendorID: provider.provider, size: 13)
+                WidgetVendorMark(vendorID: provider.provider, size: 13, isMuted: isStale)
                 Text(provider.displayName ?? WidgetFormat.provider(provider.provider))
                     .font(.caption.weight(.semibold))
+                    .foregroundStyle(isStale ? WidgetDesignTokens.muted : Color.primary)
                     .lineLimit(1)
                 if showAccountLabel, let accountLabel = provider.accountLabel, !accountLabel.isEmpty {
                     Text(accountLabel)
@@ -504,6 +543,12 @@ struct QuotaProviderRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
+                }
+                if isStale, differentiateWithoutColor {
+                    Image(systemName: "clock.badge.exclamationmark")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(WidgetDesignTokens.muted)
+                        .accessibilityHidden(true)
                 }
                 Spacer(minLength: 6)
                 if provider.windows.isEmpty {
@@ -516,18 +561,25 @@ struct QuotaProviderRow: View {
             if !provider.windows.isEmpty {
                 HStack(alignment: .top, spacing: 14) {
                     ForEach(Array(provider.windows.prefix(2))) { window in
-                        QuotaWindowCell(window: window, color: WidgetVendorIdentity.color(for: provider.provider))
+                        QuotaWindowCell(
+                            window: window,
+                            color: WidgetVendorIdentity.color(for: provider.provider),
+                            isStale: isStale
+                        )
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(isStale ? WidgetL10n.text("Data may be stale") : "")
     }
 }
 
 struct QuotaWindowCell: View {
     let window: WidgetLimitWindow
     let color: Color
+    let isStale: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -540,12 +592,13 @@ struct QuotaWindowCell: View {
                 Spacer(minLength: 4)
                 Text(value)
                     .font(.caption2.weight(.semibold))
+                    .foregroundStyle(isStale ? WidgetDesignTokens.muted : Color.primary)
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
             if window.showMeter, let remaining = window.remainingPercent {
-                PercentageBar(value: remaining, color: color)
+                PercentageBar(value: remaining, color: isStale ? WidgetDesignTokens.muted : color)
             }
             if window.resetsAt != nil {
                 Text(WidgetFormat.boundary(window))
@@ -632,6 +685,7 @@ enum WidgetVendorIdentity {
 struct WidgetVendorMark: View {
     let vendorID: String
     let size: CGFloat
+    var isMuted = false
 
     var body: some View {
         Group {
@@ -644,7 +698,7 @@ struct WidgetVendorMark: View {
                 Circle()
             }
         }
-        .foregroundStyle(.primary.opacity(0.88))
+        .foregroundStyle(isMuted ? WidgetDesignTokens.muted : Color.primary.opacity(0.88))
         .frame(width: size, height: size)
         .accessibilityHidden(true)
     }

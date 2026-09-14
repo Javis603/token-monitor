@@ -123,90 +123,122 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertEqual(snapshot.quota.map(\.provider), ["codex", "claude"])
     }
 
-    func testQuotaSelectionUsesConfiguredAccountsInsteadOfIncidentalSortOrder() throws {
+    func testCustomQuotaSelectionNeverFallsBackToUnselectedAccounts() throws {
         let snapshot = try decode("""
         {
           "schemaVersion":10,
           "generatedAt":"2026-07-17T09:00:00Z",
           "periods":{"day":{}},
           "quota":[
-            {"provider":"antigravity","instanceId":"antigravity-a","status":"ok","windows":[]},
-            {"provider":"claude","instanceId":"claude-a","status":"ok","windows":[]},
-            {"provider":"codex","instanceId":"codex-a","status":"ok","windows":[]}
+            {"provider":"antigravity","instanceId":"antigravity-a","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","windows":[]},
+            {"provider":"claude","instanceId":"claude-a","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","windows":[]},
+            {"provider":"codex","instanceId":"codex-a","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","windows":[]}
           ]
         }
         """)
+        let renderedAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T09:00:00Z"))
 
         XCTAssertEqual(
             WidgetQuotaSelectionResolver.providers(
                 in: snapshot,
+                mode: .custom,
                 selectedIDs: ["codex-a", "antigravity-a"],
-                limit: 2
+                limit: 2,
+                at: renderedAt
             ).map(\.provider),
             ["codex", "antigravity"]
         )
         XCTAssertEqual(
-            WidgetQuotaSelectionResolver.providers(in: snapshot, selectedIDs: [], limit: 2).map(\.provider),
-            ["antigravity", "claude"]
+            WidgetQuotaSelectionResolver.providers(
+                in: snapshot,
+                mode: .custom,
+                selectedIDs: ["missing", "claude-a"],
+                limit: 2,
+                at: renderedAt
+            ).map(\.provider),
+            ["claude"]
+        )
+        XCTAssertTrue(
+            WidgetQuotaSelectionResolver.providers(
+                in: snapshot,
+                mode: .custom,
+                selectedIDs: ["missing", WidgetQuotaSelectionID.currentCodexAccount],
+                limit: 2,
+                at: renderedAt
+            ).isEmpty
         )
     }
 
-    func testQuotaFreshnessUsesOldestSelectedProviderTimestamp() throws {
+    func testAutomaticQuotaSelectionPrefersFreshAvailableDataAndFallsBackToStaleData() throws {
         let snapshot = try decode("""
         {
           "schemaVersion":10,
           "generatedAt":"2026-07-17T09:30:00.000Z",
           "periods":{"day":{}},
           "quota":[
-            {"provider":"antigravity","instanceId":"antigravity-a","status":"ok","updatedAt":"2026-07-17T09:29:00.000Z","windows":[]},
-            {"provider":"claude","instanceId":"claude-a","status":"ok","updatedAt":"2026-07-17T08:00:00.000Z","windows":[]}
-          ],
-          "status":{"isStale":false,"sourceUpdatedAt":"2026-07-17T09:29:00.000Z","noData":true}
+            {"provider":"antigravity","instanceId":"antigravity-a","status":"unavailable","updatedAt":"2026-07-17T09:29:00.000Z","windows":[{"kind":"weekly","showMeter":true,"remainingPercent":90}]},
+            {"provider":"claude","instanceId":"claude-a","status":"ok","updatedAt":"2026-07-17T08:00:00.000Z","windows":[{"kind":"weekly","showMeter":true,"remainingPercent":80}]},
+            {"provider":"codex","instanceId":"codex-a","status":"ok","updatedAt":"2026-07-17T09:29:00.000Z","windows":[{"kind":"weekly","showMeter":true,"remainingPercent":70}]},
+            {"provider":"cursor","instanceId":"cursor-a","status":"ok","updatedAt":null,"windows":[{"kind":"weekly","showMeter":true,"remainingPercent":60}]}
+          ]
         }
         """)
         let renderedAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T09:30:00Z"))
 
-        XCTAssertFalse(
-            WidgetQuotaFreshness.isStale(
-                snapshot: snapshot,
-                selectedIDs: ["antigravity-a"],
+        XCTAssertEqual(
+            WidgetQuotaSelectionResolver.providers(
+                in: snapshot,
+                mode: .automatic,
+                selectedIDs: [],
+                limit: 3,
                 at: renderedAt
-            )
+            ).map(\.provider),
+            ["codex", "claude", "cursor"]
+        )
+    }
+
+    func testQuotaFreshnessTreatsMissingTimestampAsStalePerProvider() throws {
+        let renderedAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T09:30:00Z"))
+        let fresh = WidgetQuotaProvider(
+            instanceId: "fresh",
+            provider: "codex",
+            status: "ok",
+            updatedAt: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T09:29:00Z")),
+            windows: []
+        )
+        let stale = WidgetQuotaProvider(
+            instanceId: "stale",
+            provider: "claude",
+            status: "ok",
+            updatedAt: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T08:00:00Z")),
+            windows: []
+        )
+        let unknown = WidgetQuotaProvider(
+            instanceId: "unknown",
+            provider: "cursor",
+            status: "ok",
+            updatedAt: nil,
+            windows: []
+        )
+        let unavailable = WidgetQuotaProvider(
+            instanceId: "unavailable",
+            provider: "antigravity",
+            status: "unavailable",
+            updatedAt: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T09:29:00Z")),
+            windows: []
+        )
+
+        XCTAssertFalse(
+            WidgetQuotaFreshness.isStale(fresh, at: renderedAt)
         )
         XCTAssertTrue(
-            WidgetQuotaFreshness.isStale(
-                snapshot: snapshot,
-                selectedIDs: ["antigravity-a", "claude-a"],
-                at: renderedAt
-            )
-        )
-        XCTAssertEqual(
-            WidgetQuotaFreshness.oldestUpdatedAt(
-                in: snapshot,
-                selectedIDs: ["antigravity-a", "claude-a"]
-            ),
-            try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T08:00:00Z"))
-        )
-        XCTAssertFalse(
-            WidgetQuotaFreshness.isDashboardStale(
-                snapshot: snapshot,
-                selectedIDs: ["antigravity-a"],
-                at: renderedAt
-            )
+            WidgetQuotaFreshness.isStale(stale, at: renderedAt)
         )
         XCTAssertTrue(
-            WidgetQuotaFreshness.isDashboardStale(
-                snapshot: snapshot,
-                selectedIDs: ["antigravity-a", "claude-a"],
-                at: renderedAt
-            )
+            WidgetQuotaFreshness.isStale(unknown, at: renderedAt)
         )
-        XCTAssertEqual(
-            WidgetQuotaFreshness.dashboardOldestUpdatedAt(
-                in: snapshot,
-                selectedIDs: ["antigravity-a", "claude-a"]
-            ),
-            try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T08:00:00Z"))
+        XCTAssertTrue(
+            WidgetQuotaFreshness.isStale(unavailable, at: renderedAt)
         )
     }
 
@@ -484,6 +516,53 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
                 store: store,
                 timeZone: .gmt
             )
+        )
+    }
+
+    func testActivitySelectionCoverageMatchesEachRenderedFamily() throws {
+        let suite = "token-monitor-widget-family-activity-coverage-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WidgetPresentationStateStore(defaults: defaults)
+        let reference = try utcDate("2026-07-17")
+        let days = [
+            WidgetActivityDay(date: "2026-01-01", intensity: 1, totalTokens: 1),
+            WidgetActivityDay(date: "2026-07-17", intensity: 1, totalTokens: 1)
+        ]
+
+        store.setSelectedActivityDay("2026-03-28", for: .large)
+        XCTAssertNil(
+            WidgetActivitySelection.resolvedDate(
+                days: days,
+                family: .large,
+                referenceDate: reference,
+                store: store,
+                timeZone: .gmt
+            )
+        )
+
+        store.setSelectedActivityDay("2026-03-29", for: .large)
+        XCTAssertEqual(
+            WidgetActivitySelection.resolvedDate(
+                days: days,
+                family: .large,
+                referenceDate: reference,
+                store: store,
+                timeZone: .gmt
+            ),
+            "2026-03-29"
+        )
+
+        store.setSelectedActivityDay("2026-03-28", for: .medium)
+        XCTAssertEqual(
+            WidgetActivitySelection.resolvedDate(
+                days: days,
+                family: .medium,
+                referenceDate: reference,
+                store: store,
+                timeZone: .gmt
+            ),
+            "2026-03-28"
         )
     }
 

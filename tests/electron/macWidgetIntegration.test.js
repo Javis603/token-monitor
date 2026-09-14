@@ -672,6 +672,7 @@ test('each Widget configuration exposes only choices that its composition suppor
   assert.doesNotMatch(breakdownIntent, /Display Page/);
   assert.match(dashboardIntent, /@Parameter\(title: "Breakdown", default: \.models\)/);
   assert.match(dashboardIntent, /@Parameter\(title: "Period", default: \.day\)/);
+  assert.match(dashboardIntent, /@Parameter\(title: "Quota Mode", default: \.automatic\)/);
   assert.match(dashboardIntent, /@Parameter\(title: "Quota 1"\)/);
   assert.match(dashboardIntent, /@Parameter\(title: "Quota 2"\)/);
   const quotaIntent = widgetIntentSource.slice(
@@ -680,6 +681,10 @@ test('each Widget configuration exposes only choices that its composition suppor
   );
   assert.match(quotaIntent, /var primaryQuota: WidgetQuotaSelection\?/);
   assert.match(quotaIntent, /var secondaryQuota: WidgetSecondaryQuotaSelection\?/);
+  assert.match(quotaIntent, /@Parameter\(title: "Quota Mode", default: \.automatic\)/);
+  assert.match(widgetIntentSource, /enum WidgetQuotaMode: String, AppEnum, CaseIterable/);
+  assert.match(widgetIntentSource, /\.automatic: DisplayRepresentation\(title: "Automatic"\)/);
+  assert.match(widgetIntentSource, /\.custom: DisplayRepresentation\(title: "Custom"\)/);
   assert.match(widgetIntentSource, /func defaultResult\(\) async -> WidgetQuotaSelection\?/);
   assert.match(widgetIntentSource, /func defaultResult\(\) async -> WidgetSecondaryQuotaSelection\?/);
   assert.match(widgetIntentSource, /filter \{ \$0\.id != WidgetQuotaSelectionID\.currentCodexAccount \}[\s\S]*\.dropFirst\(\)[\s\S]*\.first/);
@@ -738,11 +743,14 @@ test('each Widget family has a purpose-built composition', () => {
   assert.doesNotMatch(widgetDashboardSource, /\.frame\(width: 108, height: 32\)/);
   assert.match(widgetDashboardSource, /DashboardActivityModule\(/);
   assert.match(widgetActivitySource, /ActivityHeatmapWithMonthLabels\(/);
-  assert.match(widgetActivitySource, /maxWeeks: 26/);
+  assert.match(widgetActivitySource, /maxWeeks: WidgetActivityCoverage\.maxWeeks\(for: \.medium\)/);
   assert.match(widgetDashboardSource, /DashboardQuotaProviderRow\([\s\S]{0,160}provider: provider,[\s\S]{0,160}showAccountLabel:/);
-  assert.match(widgetDashboardSource, /selectedIDs: selectedProviderIDs,\s*limit: 2/);
+  assert.match(widgetDashboardSource, /mode: mode,\s*selectedIDs: selectedProviderIDs,\s*limit: 2,/);
+  assert.match(widgetDashboardSource, /WidgetQuotaFreshness\.isStale\(provider, at: referenceDate\)/);
+  assert.match(widgetDashboardSource, /isMuted: isStale/);
+  assert.match(widgetDashboardSource, /accessibilityDifferentiateWithoutColor/);
   assert.match(widgetDashboardSource, /WidgetVendorMark\(vendorID: row\.vendorID/);
-  assert.match(widgetDashboardSource, /QuotaWindowCell\(window: window/);
+  assert.match(widgetDashboardSource, /QuotaWindowCell\(\s*window: window/);
   const mediumBreakdownSource = widgetDashboardSource.slice(
     widgetDashboardSource.indexOf('struct MediumBreakdownModule'),
     widgetDashboardSource.indexOf('struct BreakdownRow')
@@ -795,7 +803,7 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   }
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;/);
-  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 44;/);
+  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 45;/);
   assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 10;/);
   assert.match(widgetDevSource, /fs\.rmSync\(extension, \{ recursive: true, force: true \}\)/);
   assert.match(widgetDevSource, /`TOKEN_MONITOR_MARKETING_VERSION=\$\{targetMarketingVersion\}`/);
@@ -905,6 +913,9 @@ test('Widget user-facing strings are localized in five languages', () => {
   }
   for (const key of [
     'Breakdown',
+    'Quota Mode',
+    'Automatic',
+    'Custom',
     'Quota 1',
     'Quota 2',
     'Quota Account',
@@ -913,8 +924,8 @@ test('Widget user-facing strings are localized in five languages', () => {
     'Usage Breakdown',
     'Choose a tool or model breakdown and its period.',
     'Dashboard',
-    'Choose the dashboard period and breakdown.',
-    'Choose up to two quota accounts to keep visible.'
+    'Choose the dashboard period, breakdown, and quota display mode.',
+    'Show quota accounts automatically or choose up to two.'
   ]) {
     assert.ok(widgetLocalization.strings[key], `missing Widget configuration localization for ${key}`);
   }
@@ -951,11 +962,11 @@ test('Activity layouts use the current medium and dashboard heatmap compositions
   const dashboardEnd = widgetActivitySource.indexOf('private struct ActivitySummaryLabel', dashboardStart);
   const dashboardSource = widgetActivitySource.slice(dashboardStart, dashboardEnd);
 
-  assert.match(mediumSource, /maxWeeks: 26/);
+  assert.match(mediumSource, /maxWeeks: WidgetActivityCoverage\.maxWeeks\(for: \.medium\)/);
   assert.match(mediumSource, /minCellSize: 5\.5/);
   assert.match(mediumSource, /maxCellSize: 9\.5/);
   assert.match(mediumSource, /%@ tokens · %lld active days/);
-  assert.match(dashboardSource, /maxWeeks: 16/);
+  assert.match(dashboardSource, /maxWeeks: WidgetActivityCoverage\.maxWeeks\(for: \.large\)/);
   assert.match(dashboardSource, /maxCellSize: 7\.5/);
   assert.match(widgetActivitySource, /struct ActivityHeatmap: View/);
   assert.match(widgetActivitySource, /Grid\(horizontalSpacing: layout\.spacing, verticalSpacing: layout\.spacing\)/);

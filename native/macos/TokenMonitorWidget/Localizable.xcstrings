@@ -11,6 +11,33 @@
         "ko": { "stringUnit": { "state": "translated", "value": "분석" } }
       }
     },
+    "Quota Mode": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Quota Mode" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度模式" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度模式" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータモード" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 모드" } }
+      }
+    },
+    "Automatic": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Automatic" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "自动" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "自動" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "自動" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "자동" } }
+      }
+    },
+    "Custom": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Custom" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "自定义" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "自訂" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "カスタム" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "사용자 지정" } }
+      }
+    },
     "Quota 1": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Quota 1" } },
@@ -83,22 +110,22 @@
         "ko": { "stringUnit": { "state": "translated", "value": "대시보드" } }
       }
     },
-    "Choose the dashboard period and breakdown.": {
+    "Choose the dashboard period, breakdown, and quota display mode.": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Choose the dashboard period and breakdown." } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择仪表盘的统计周期和明细。" } },
-        "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇儀表板的統計週期和明細。" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "ダッシュボードの期間と内訳を選択します。" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "대시보드의 기간과 분석을 선택합니다." } }
+        "en": { "stringUnit": { "state": "translated", "value": "Choose the dashboard period, breakdown, and quota display mode." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择仪表盘的统计周期、明细和额度显示模式。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇儀表板的統計週期、明細和額度顯示模式。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ダッシュボードの期間、内訳、クォータ表示モードを選択します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "대시보드의 기간, 분석 및 할당량 표시 모드를 선택합니다." } }
       }
     },
-    "Choose up to two quota accounts to keep visible.": {
+    "Show quota accounts automatically or choose up to two.": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Choose up to two quota accounts to keep visible." } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择最多两个要持续显示的额度账户。" } },
-        "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇最多兩個要持續顯示的額度帳號。" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "常に表示するクォータアカウントを2つまで選択します。" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "계속 표시할 할당량 계정을 최대 두 개 선택합니다." } }
+        "en": { "stringUnit": { "state": "translated", "value": "Show quota accounts automatically or choose up to two." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "自动显示额度账户，或选择最多两个账户。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "自動顯示額度帳號，或選擇最多兩個帳號。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータアカウントを自動表示するか、最大2つ選択します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 계정을 자동으로 표시하거나 최대 2개를 선택합니다." } }
       }
     },
     "Token Monitor Dashboard": {

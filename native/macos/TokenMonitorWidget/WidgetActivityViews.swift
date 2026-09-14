@@ -95,7 +95,7 @@ struct MediumActivityModule: View {
             days: snapshot.activity.days,
             referenceDate: referenceDate,
             availableSize: CGSize(width: availableSize.width, height: max(60, availableSize.height - 42)),
-            maxWeeks: 26,
+            maxWeeks: WidgetActivityCoverage.maxWeeks(for: .medium),
             minCellSize: 5.5,
             maxCellSize: 9.5,
             spacing: 2.5
@@ -137,7 +137,7 @@ struct DashboardActivityModule: View {
             days: snapshot.activity.days,
             referenceDate: referenceDate,
             availableSize: CGSize(width: availableWidth, height: 64),
-            maxWeeks: 16,
+            maxWeeks: WidgetActivityCoverage.maxWeeks(for: .large),
             minCellSize: 5,
             maxCellSize: 7.5,
             spacing: 2.25

@@ -303,8 +303,21 @@ enum WidgetHeatmapLayoutCalculator {
 }
 
 enum WidgetQuotaSelectionResolver {
-    static func providers(in snapshot: WidgetSnapshot, selectedIDs: [String], limit: Int) -> [WidgetQuotaProvider] {
-        guard !selectedIDs.isEmpty else { return Array(snapshot.quota.prefix(limit)) }
+    static func providers(
+        in snapshot: WidgetSnapshot,
+        mode: WidgetQuotaMode,
+        selectedIDs: [String],
+        limit: Int,
+        at date: Date
+    ) -> [WidgetQuotaProvider] {
+        guard mode == .custom else {
+            let ranked = snapshot.quota.enumerated().sorted { left, right in
+                let leftRank = automaticRank(left.element, at: date)
+                let rightRank = automaticRank(right.element, at: date)
+                return leftRank == rightRank ? left.offset < right.offset : leftRank < rightRank
+            }
+            return Array(ranked.prefix(limit).map(\.element))
+        }
         let providersByID = Dictionary(uniqueKeysWithValues: snapshot.quota.map { ($0.instanceId, $0) })
         var seenProviderIDs = Set<String>()
         let selected = selectedIDs.compactMap { id -> WidgetQuotaProvider? in
@@ -314,57 +327,26 @@ enum WidgetQuotaSelectionResolver {
             guard let provider, seenProviderIDs.insert(provider.instanceId).inserted else { return nil }
             return provider
         }
-        return Array((selected.isEmpty ? snapshot.quota : selected).prefix(limit))
+        return Array(selected.prefix(limit))
+    }
+
+    private static func automaticRank(_ provider: WidgetQuotaProvider, at date: Date) -> Int {
+        let hasQuotaData = provider.balance != nil || !provider.windows.isEmpty
+        let isAvailable = provider.status == "ok"
+        let isStale = WidgetQuotaFreshness.isStale(provider, at: date)
+        return (hasQuotaData ? 0 : 4) + (isAvailable ? 0 : 2) + (isStale ? 1 : 0)
     }
 }
 
 enum WidgetQuotaFreshness {
-    static func oldestUpdatedAt(
-        in snapshot: WidgetSnapshot,
-        selectedIDs: [String],
-        limit: Int = 2
-    ) -> Date? {
-        WidgetQuotaSelectionResolver.providers(
-            in: snapshot,
-            selectedIDs: selectedIDs,
-            limit: limit
-        )
-        .compactMap(\.updatedAt)
-        .min()
-    }
-
     static func isStale(
-        snapshot: WidgetSnapshot,
-        selectedIDs: [String],
+        _ provider: WidgetQuotaProvider,
         at date: Date,
         threshold: TimeInterval = 20 * 60
     ) -> Bool {
-        guard let updatedAt = oldestUpdatedAt(in: snapshot, selectedIDs: selectedIDs) else {
-            return snapshot.isStale(at: date, threshold: threshold)
-        }
+        guard provider.status == "ok" else { return true }
+        guard let updatedAt = provider.updatedAt else { return true }
         return date.timeIntervalSince(updatedAt) > threshold
-    }
-
-    static func isDashboardStale(
-        snapshot: WidgetSnapshot,
-        selectedIDs: [String],
-        at date: Date,
-        threshold: TimeInterval = 20 * 60
-    ) -> Bool {
-        snapshot.isStale(at: date, threshold: threshold)
-            || isStale(snapshot: snapshot, selectedIDs: selectedIDs, at: date, threshold: threshold)
-    }
-
-    static func dashboardOldestUpdatedAt(
-        in snapshot: WidgetSnapshot,
-        selectedIDs: [String]
-    ) -> Date? {
-        [
-            WidgetStalePresentation.trustedUpdatedAt(for: snapshot),
-            oldestUpdatedAt(in: snapshot, selectedIDs: selectedIDs)
-        ]
-        .compactMap { $0 }
-        .min()
     }
 }
 

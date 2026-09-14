@@ -38,6 +38,17 @@ enum WidgetBreakdown: String, AppEnum, CaseIterable {
     }
 }
 
+enum WidgetQuotaMode: String, AppEnum, CaseIterable {
+    case automatic
+    case custom
+
+    static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Quota Mode")
+    static let caseDisplayRepresentations: [WidgetQuotaMode: DisplayRepresentation] = [
+        .automatic: DisplayRepresentation(title: "Automatic"),
+        .custom: DisplayRepresentation(title: "Custom")
+    ]
+}
+
 struct UsageSummaryWidgetIntent: WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Usage Summary"
     static let description = IntentDescription("Choose the usage period shown by this widget.")
@@ -59,13 +70,16 @@ struct BreakdownWidgetIntent: WidgetConfigurationIntent {
 
 struct DashboardWidgetIntent: WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Dashboard"
-    static let description = IntentDescription("Choose the dashboard period and breakdown.")
+    static let description = IntentDescription("Choose the dashboard period, breakdown, and quota display mode.")
 
     @Parameter(title: "Period", default: .day)
     var period: WidgetPeriod
 
     @Parameter(title: "Breakdown", default: .models)
     var breakdown: WidgetBreakdown
+
+    @Parameter(title: "Quota Mode", default: .automatic)
+    var quotaMode: WidgetQuotaMode
 
     @Parameter(title: "Quota 1")
     var primaryQuota: WidgetQuotaSelection?
@@ -76,7 +90,10 @@ struct DashboardWidgetIntent: WidgetConfigurationIntent {
 
 struct QuotaWidgetIntent: WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Quota"
-    static let description = IntentDescription("Choose up to two quota accounts to keep visible.")
+    static let description = IntentDescription("Show quota accounts automatically or choose up to two.")
+
+    @Parameter(title: "Quota Mode", default: .automatic)
+    var quotaMode: WidgetQuotaMode
 
     @Parameter(title: "Quota 1")
     var primaryQuota: WidgetQuotaSelection?
@@ -430,7 +447,7 @@ enum WidgetActivitySelection {
             store.clearSelectedActivityDay(for: family)
             return nil
         }
-        let maxWeeks = 26
+        let maxWeeks = WidgetActivityCoverage.maxWeeks(for: family)
         let reference = WidgetActivityDate.startOfDay(referenceDate, timeZone: timeZone)
         let gridStart = WidgetActivityDate.addingDays(
             -(maxWeeks - 1) * 7,
@@ -442,6 +459,15 @@ enum WidgetActivitySelection {
             return nil
         }
         return selectedDate
+    }
+}
+
+enum WidgetActivityCoverage {
+    static func maxWeeks(for family: WidgetFamilyScope) -> Int {
+        switch family {
+        case .medium: 26
+        case .large: 16
+        }
     }
 }
 

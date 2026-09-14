@@ -6,12 +6,13 @@ struct TokenMonitorEntry: TimelineEntry {
     let page: WidgetPage
     let period: WidgetPeriod
     let selectedActivityDate: String?
+    let quotaMode: WidgetQuotaMode
     let selectedQuotaProviderIDs: [String]
 }
 
 private enum WidgetTimelineFactory {
     static func placeholder(page: WidgetPage, period: WidgetPeriod = .day) -> TokenMonitorEntry {
-        TokenMonitorEntry(date: Date(), snapshot: WidgetSnapshot.placeholder.selecting(period), page: page, period: period, selectedActivityDate: nil, selectedQuotaProviderIDs: [])
+        TokenMonitorEntry(date: Date(), snapshot: WidgetSnapshot.placeholder.selecting(period), page: page, period: period, selectedActivityDate: nil, quotaMode: .automatic, selectedQuotaProviderIDs: [])
     }
 
     static func entry(
@@ -19,6 +20,7 @@ private enum WidgetTimelineFactory {
         period: WidgetPeriod,
         context: TimelineProviderContext,
         demandFileName: String? = nil,
+        quotaMode: WidgetQuotaMode = .automatic,
         selectedQuotaProviderIDs: [String] = []
     ) -> TokenMonitorEntry {
         let now = Date()
@@ -37,11 +39,11 @@ private enum WidgetTimelineFactory {
             referenceDate: now,
             store: WidgetPresentationStateStore.shared
         )
-        return TokenMonitorEntry(date: now, snapshot: snapshot, page: page, period: period, selectedActivityDate: selectedActivityDate, selectedQuotaProviderIDs: selectedQuotaProviderIDs)
+        return TokenMonitorEntry(date: now, snapshot: snapshot, page: page, period: period, selectedActivityDate: selectedActivityDate, quotaMode: quotaMode, selectedQuotaProviderIDs: selectedQuotaProviderIDs)
     }
 
-    static func timeline(page: WidgetPage, period: WidgetPeriod, context: TimelineProviderContext, selectedQuotaProviderIDs: [String] = []) -> Timeline<TokenMonitorEntry> {
-        let entry = entry(page: page, period: period, context: context, demandFileName: WidgetDemandMarker.fileName, selectedQuotaProviderIDs: selectedQuotaProviderIDs)
+    static func timeline(page: WidgetPage, period: WidgetPeriod, context: TimelineProviderContext, quotaMode: WidgetQuotaMode = .automatic, selectedQuotaProviderIDs: [String] = []) -> Timeline<TokenMonitorEntry> {
+        let entry = entry(page: page, period: period, context: context, demandFileName: WidgetDemandMarker.fileName, quotaMode: quotaMode, selectedQuotaProviderIDs: selectedQuotaProviderIDs)
         return Timeline(entries: [entry], policy: .after(entry.date.addingTimeInterval(15 * 60)))
     }
 
@@ -79,20 +81,20 @@ struct BreakdownWidgetTimelineProvider: AppIntentTimelineProvider {
 struct DashboardWidgetTimelineProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> TokenMonitorEntry { WidgetTimelineFactory.placeholder(page: .models) }
     func snapshot(for configuration: DashboardWidgetIntent, in context: Context) async -> TokenMonitorEntry {
-        WidgetTimelineFactory.entry(page: configuration.breakdown.page, period: configuration.period, context: context, demandFileName: context.isPreview ? nil : WidgetDemandMarker.provisionalFileName, selectedQuotaProviderIDs: WidgetTimelineFactory.quotaIDs(configuration.primaryQuota?.id, configuration.secondaryQuota?.id))
+        WidgetTimelineFactory.entry(page: configuration.breakdown.page, period: configuration.period, context: context, demandFileName: context.isPreview ? nil : WidgetDemandMarker.provisionalFileName, quotaMode: configuration.quotaMode, selectedQuotaProviderIDs: WidgetTimelineFactory.quotaIDs(configuration.primaryQuota?.id, configuration.secondaryQuota?.id))
     }
     func timeline(for configuration: DashboardWidgetIntent, in context: Context) async -> Timeline<TokenMonitorEntry> {
-        WidgetTimelineFactory.timeline(page: configuration.breakdown.page, period: configuration.period, context: context, selectedQuotaProviderIDs: WidgetTimelineFactory.quotaIDs(configuration.primaryQuota?.id, configuration.secondaryQuota?.id))
+        WidgetTimelineFactory.timeline(page: configuration.breakdown.page, period: configuration.period, context: context, quotaMode: configuration.quotaMode, selectedQuotaProviderIDs: WidgetTimelineFactory.quotaIDs(configuration.primaryQuota?.id, configuration.secondaryQuota?.id))
     }
 }
 
 struct QuotaWidgetTimelineProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> TokenMonitorEntry { WidgetTimelineFactory.placeholder(page: .quota) }
     func snapshot(for configuration: QuotaWidgetIntent, in context: Context) async -> TokenMonitorEntry {
-        WidgetTimelineFactory.entry(page: .quota, period: .day, context: context, demandFileName: context.isPreview ? nil : WidgetDemandMarker.provisionalFileName, selectedQuotaProviderIDs: WidgetTimelineFactory.quotaIDs(configuration.primaryQuota?.id, configuration.secondaryQuota?.id))
+        WidgetTimelineFactory.entry(page: .quota, period: .day, context: context, demandFileName: context.isPreview ? nil : WidgetDemandMarker.provisionalFileName, quotaMode: configuration.quotaMode, selectedQuotaProviderIDs: WidgetTimelineFactory.quotaIDs(configuration.primaryQuota?.id, configuration.secondaryQuota?.id))
     }
     func timeline(for configuration: QuotaWidgetIntent, in context: Context) async -> Timeline<TokenMonitorEntry> {
-        WidgetTimelineFactory.timeline(page: .quota, period: .day, context: context, selectedQuotaProviderIDs: WidgetTimelineFactory.quotaIDs(configuration.primaryQuota?.id, configuration.secondaryQuota?.id))
+        WidgetTimelineFactory.timeline(page: .quota, period: .day, context: context, quotaMode: configuration.quotaMode, selectedQuotaProviderIDs: WidgetTimelineFactory.quotaIDs(configuration.primaryQuota?.id, configuration.secondaryQuota?.id))
     }
 }
 
