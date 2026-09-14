@@ -183,6 +183,16 @@ test('local ad-hoc verification does not require a TeamIdentifier', (t) => {
   assert.doesNotThrow(() => verifyFixture(bundle, { appGroup, includeTeamIdentifier: false }));
 });
 
+test('local verification rejects ad-hoc signing for a Team App Group', (t) => {
+  const appGroup = 'ABCDE12345.tokenmonitor';
+  const bundle = makeBundle({ appGroup });
+  t.after(() => fs.rmSync(bundle.root, { recursive: true, force: true }));
+  assert.throws(() => verifyFixture(bundle, {
+    appGroup,
+    includeTeamIdentifier: false
+  }), /main app TeamIdentifier \(missing\) does not authorize Team App Group/);
+});
+
 test('local verification permits a Widget-only build revision for descriptor reindexing', (t) => {
   const appGroup = 'group.com.example.tokenmonitor';
   const bundle = makeBundle({ appGroup });

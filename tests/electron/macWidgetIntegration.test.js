@@ -542,6 +542,28 @@ test('uses an Apple Development identity for Team App Groups in local Widget bui
     }).mac;
     assert.equal(mac.identity, 'Apple Development');
 
+    const inferredTeam = createBuilderConfig({
+      baseConfig: packageJson.build,
+      env: {
+        TOKEN_MONITOR_WIDGET_ENABLED: '1',
+        TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING: '1',
+        TOKEN_MONITOR_APP_GROUP: 'ABCDE12345.tokenmonitor'
+      },
+      root: artifactRoot
+    }).mac;
+    assert.equal(inferredTeam.identity, 'Apple Development');
+
+    assert.throws(() => createBuilderConfig({
+      baseConfig: packageJson.build,
+      env: {
+        TOKEN_MONITOR_WIDGET_ENABLED: '1',
+        TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING: '1',
+        TOKEN_MONITOR_APP_GROUP: 'ABCDE12345.tokenmonitor',
+        DEVELOPMENT_TEAM: 'ZZZZZ99999'
+      },
+      root: artifactRoot
+    }), /prefix does not match DEVELOPMENT_TEAM/);
+
     const explicit = createBuilderConfig({
       baseConfig: packageJson.build,
       env: {
@@ -772,7 +794,7 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   }
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;/);
-  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 41;/);
+  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 42;/);
   assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 10;/);
   assert.match(widgetDevSource, /fs\.rmSync\(extension, \{ recursive: true, force: true \}\)/);
   assert.match(widgetDevSource, /`TOKEN_MONITOR_MARKETING_VERSION=\$\{targetMarketingVersion\}`/);
@@ -866,6 +888,20 @@ test('Widget user-facing strings are localized in five languages', () => {
   assert.ok(Object.values(widgetLocalization.strings.Unlimited.localizations).every((localization) => (
     localization.stringUnit.value === 'Unlimited'
   )));
+  for (const key of [
+    'Token Monitor Dashboard',
+    'Usage, quota, breakdown, and activity in one dashboard.',
+    'Token Monitor Summary',
+    'Tokens, cost, and a compact trend.',
+    'Token Monitor Activity',
+    'Your recent activity heatmap.',
+    'Token Monitor Breakdown',
+    'Compare tools or models for one period.',
+    'Token Monitor Quota',
+    'Subscription windows and reset times.'
+  ]) {
+    assert.ok(widgetLocalization.strings[key], `missing Widget Gallery localization for ${key}`);
+  }
 });
 
 test('Widget layout uses system margins without retaining the superseded scaffold', () => {

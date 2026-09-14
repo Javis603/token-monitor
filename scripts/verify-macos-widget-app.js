@@ -162,6 +162,19 @@ function verifyFormalCodeSignature({ appPath, extensionPath, appGroup, developme
   return { appSignature, widgetSignature };
 }
 
+function verifyTeamAppGroupSignature({ appPath, extensionPath, appGroup, execFileSyncImpl, spawnSyncImpl }) {
+  const expectedTeam = appGroup.slice(0, 10);
+  const appSignature = readCodesignMetadata(appPath, execFileSyncImpl, spawnSyncImpl);
+  const widgetSignature = readCodesignMetadata(extensionPath, execFileSyncImpl, spawnSyncImpl);
+  if (appSignature.teamIdentifier !== expectedTeam) {
+    fail(`main app TeamIdentifier ${appSignature.teamIdentifier || '(missing)'} does not authorize Team App Group ${appGroup}`);
+  }
+  if (widgetSignature.teamIdentifier !== expectedTeam) {
+    fail(`Widget extension TeamIdentifier ${widgetSignature.teamIdentifier || '(missing)'} does not authorize Team App Group ${appGroup}`);
+  }
+  return { appSignature, widgetSignature };
+}
+
 function verifyWidgetAppStructure(appPath) {
   const contents = path.join(appPath, 'Contents');
   const extension = path.join(contents, 'PlugIns', 'TokenMonitorWidget.appex');
@@ -264,6 +277,14 @@ function verifyMacWidgetApp({
         execFileSyncImpl,
         spawnSyncImpl
       });
+    } else if (isTeamPrefixedAppGroup(appGroup)) {
+      verifyTeamAppGroupSignature({
+        appPath: resolvedApp,
+        extensionPath: paths.extension,
+        appGroup,
+        execFileSyncImpl,
+        spawnSyncImpl
+      });
     }
     if (distributionBuild && !localDevelopmentSigning) {
       try {
@@ -332,6 +353,7 @@ module.exports = {
   verifyLocalElectronHelpers,
   verifyAppGroupSources,
   verifyFormalCodeSignature,
+  verifyTeamAppGroupSignature,
   verifyMacWidgetApp,
   verifyWidgetAppStructure
 };

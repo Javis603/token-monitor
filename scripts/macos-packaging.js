@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const {
+  isTeamPrefixedAppGroup,
   normalizeMacDistributionChannel,
   validateAppGroupForDistribution,
   validateAppGroupSyntax
@@ -78,7 +79,11 @@ function localWidgetSigningIdentity(env, appGroup) {
   if (explicitIdentity) return explicitIdentity;
 
   const developmentTeam = String(env.DEVELOPMENT_TEAM || '').trim();
-  if (developmentTeam && String(appGroup || '').startsWith(`${developmentTeam}.`)) {
+  const normalizedAppGroup = String(appGroup || '').trim();
+  if (isTeamPrefixedAppGroup(normalizedAppGroup)) {
+    if (developmentTeam && !normalizedAppGroup.startsWith(`${developmentTeam}.`)) {
+      throw new Error('TOKEN_MONITOR_APP_GROUP prefix does not match DEVELOPMENT_TEAM');
+    }
     return 'Apple Development';
   }
   return '-';

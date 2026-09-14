@@ -103,9 +103,9 @@ test('keeps the packaged Widget descriptor aligned with the incremental UI build
   }, {
     widgetBundleId: 'com.example.custom.widget'
   });
-  assert.equal(updated.widgetUIVersion, 41);
+  assert.equal(updated.widgetUIVersion, 42);
   assert.equal(updated.widgetSchemaVersion, 10);
-  assert.equal(updated.widgetBundleVersion, '41');
+  assert.equal(updated.widgetBundleVersion, '42');
   assert.equal(updated.gitRevision, 'abcdef123456');
   assert.equal(updated.buildTimestamp, '2026-09-13T14:00:00Z');
   assert.equal(updated.marketingVersion, '0.54.0');

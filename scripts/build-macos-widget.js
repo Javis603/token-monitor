@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
+  isTeamPrefixedAppGroup,
   normalizeMacDistributionChannel,
   validateAppGroupForDistribution,
   validateAppGroupSyntax
@@ -23,7 +24,7 @@ const DEFAULT_APP_ID = String(PACKAGE_JSON.build?.appId || 'com.example.tokenmon
 const DEFAULT_APP_GROUP = 'group.com.example.tokenmonitor';
 const DEFAULT_WIDGET_BUNDLE_ID = `${DEFAULT_APP_ID}.widget`;
 const DEFAULT_WIDGET_KIND = 'com.tokenmonitor.dashboard';
-const WIDGET_UI_VERSION = 41;
+const WIDGET_UI_VERSION = 42;
 const WIDGET_SCHEMA_VERSION = 10;
 const WIDGET_ARCHITECTURES = Object.freeze({
   arm64: Object.freeze({ name: 'arm64', xcodeArch: 'arm64', swiftArch: 'arm64' }),
@@ -214,7 +215,9 @@ function main() {
     });
   }
   if (localDevelopmentSigning && !distributionBuild) {
-    console.log('[mac-widget] Local ad-hoc preview does not validate production App Group authorization.');
+    console.log(isTeamPrefixedAppGroup(appGroup)
+      ? '[mac-widget] Local Team App Group preview requires Apple Development signing.'
+      : '[mac-widget] Local ad-hoc preview does not validate production App Group authorization.');
   }
   fs.rmSync(OUTPUT, { recursive: true, force: true });
   fs.mkdirSync(OUTPUT, { recursive: true });

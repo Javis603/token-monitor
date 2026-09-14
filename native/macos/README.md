@@ -13,7 +13,7 @@ The committed defaults are non-personal placeholders. Ordinary macOS packaging d
 
 They leave `TOKEN_MONITOR_WIDGET_ENABLED` unset/disabled and therefore do not require Widget artifacts or Widget identifiers. Only the explicit `pack:mac:widget` and `dist:mac:widget*` entries enable the Widget.
 
-For a local unsigned or ad-hoc preview, use the example identifiers and `TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING=1`. This mode does not validate production App Group authorization and must not be used as evidence that a formal distribution build is provisioned. A Team-prefixed App Group plus its matching `DEVELOPMENT_TEAM` instead selects an Apple Development identity, because an ad-hoc host and extension cannot reliably access that App Group. Set `TOKEN_MONITOR_MAC_DEVELOPMENT_IDENTITY` only when more than one Apple Development identity is installed.
+For a local unsigned or ad-hoc preview, use the example identifiers and `TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING=1`. This mode does not validate production App Group authorization and must not be used as evidence that a formal distribution build is provisioned. A Team-prefixed App Group instead selects an Apple Development identity automatically, because an ad-hoc host and extension cannot access that App Group; when `DEVELOPMENT_TEAM` is also set, its value must match the App Group prefix. Set `TOKEN_MONITOR_MAC_DEVELOPMENT_IDENTITY` only when more than one Apple Development identity is installed.
 
 For a formal Widget distribution, configure all of the following without committing their values:
 

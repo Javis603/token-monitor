@@ -2,6 +2,96 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "Token Monitor Dashboard": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Dashboard" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 仪表盘" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 儀表板" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor ダッシュボード" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 대시보드" } }
+      }
+    },
+    "Usage, quota, breakdown, and activity in one dashboard.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Usage, quota, breakdown, and activity in one dashboard." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "在一个仪表盘中查看用量、额度、明细和活动。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "在一個儀表板中查看用量、額度、明細和活動。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "使用量、クォータ、内訳、アクティビティを1つのダッシュボードで確認できます。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "사용량, 할당량, 분석 및 활동을 하나의 대시보드에서 확인합니다." } }
+      }
+    },
+    "Token Monitor Summary": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Summary" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 摘要" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 摘要" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor サマリー" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 요약" } }
+      }
+    },
+    "Tokens, cost, and a compact trend.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Tokens, cost, and a compact trend." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "令牌数、费用和简洁趋势。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token 數、費用和簡潔趨勢。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "トークン、コスト、コンパクトな推移。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "토큰, 비용 및 간결한 추세입니다." } }
+      }
+    },
+    "Token Monitor Activity": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Activity" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 活动" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 活動" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor アクティビティ" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 활동" } }
+      }
+    },
+    "Your recent activity heatmap.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Your recent activity heatmap." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "你最近的活动热力图。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "你最近的活動熱力圖。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "最近のアクティビティヒートマップ。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "최근 활동 히트맵입니다." } }
+      }
+    },
+    "Token Monitor Breakdown": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Breakdown" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 明细" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 明細" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor 内訳" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 분석" } }
+      }
+    },
+    "Compare tools or models for one period.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Compare tools or models for one period." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "比较一个周期内的工具或模型。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "比較一個期間內的工具或模型。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "1つの期間のツールまたはモデルを比較します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "한 기간의 도구 또는 모델을 비교합니다." } }
+      }
+    },
+    "Token Monitor Quota": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Quota" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 额度" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 額度" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor クォータ" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 할당량" } }
+      }
+    },
+    "Subscription windows and reset times.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Subscription windows and reset times." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "订阅窗口和重置时间。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "訂閱視窗和重設時間。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "サブスクリプション期間とリセット時刻。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "구독 기간과 초기화 시간입니다." } }
+      }
+    },
     "Current Account": {
       "localizations": {
         "en": {
