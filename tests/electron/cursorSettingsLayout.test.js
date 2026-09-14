@@ -1277,7 +1277,7 @@ test('Z.ai global and BigModel CN browser links are allowlisted', () => {
   assert.match(allowlist, /parsed\.hostname === 'bigmodel\.cn' \|\| parsed\.hostname === 'www\.bigmodel\.cn'/);
 });
 
-test('Factory account panel validates an API key before saving and opens the allowlisted billing page', () => {
+test('Factory account panel validates an API key before saving and opens the allowlisted API keys page', () => {
   const html = readRendererFile('index.html');
   assert.match(html, /<div id="factoryAccountGroup"[\s\S]*?<input id="factoryApiKeyInput" type="password"[\s\S]*?<button id="factoryApiKeySubmit"/);
   assert.match(html, /automatically detects FACTORY_API_KEY[\s\S]*To use a different Factory API key instead[\s\S]*used only to query Factory plan quotas and Extra Usage balance/);
@@ -1289,14 +1289,14 @@ test('Factory account panel validates an API key before saving and opens the all
   assert.match(setupBody, /saveSettings\(\{ factoryApiKey: '' \}\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(factoryPlatformUrl\(\)\)/);
   const urlBody = functionBody(app, 'factoryPlatformUrl', 'zaiteamPlatformUrl');
-  assert.match(urlBody, /return 'https:\/\/app\.factory\.ai\/settings\/billing';/);
+  assert.match(urlBody, /return 'https:\/\/app\.factory\.ai\/settings\/api-keys';/);
 
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
   assert.match(preload, /validateApiKey: \(apiKey\) => ipcRenderer\.invoke\('factory:validateApiKey', apiKey\)/);
   assert.match(main, /ipcMain\.handle\('factory:validateApiKey', \(_event, raw\) => validateFactoryApiKey\(raw\)\)/);
   const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
-  assert.match(allowlist, /parsed\.hostname === 'app\.factory\.ai'[\s\S]*parsed\.pathname\.startsWith\('\/settings\/billing'\)/);
+  assert.match(allowlist, /parsed\.hostname === 'app\.factory\.ai'[\s\S]*parsed\.pathname\.startsWith\('\/settings\/api-keys'\)/);
   const normalizeKey = functionBody(main, 'normalizeFactoryApiKey', 'currentFactoryApiKey');
   assert.doesNotMatch(normalizeKey, /factoryEnvApiKey/);
   assert.equal(runMainFunction(

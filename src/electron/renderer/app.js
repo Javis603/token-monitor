@@ -15784,7 +15784,7 @@ function zaiPlatformUrl() {
 }
 
 function factoryPlatformUrl() {
-  return 'https://app.factory.ai/settings/billing';
+  return 'https://app.factory.ai/settings/api-keys';
 }
 
 function zaiteamPlatformUrl() {

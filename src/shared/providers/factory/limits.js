@@ -89,7 +89,7 @@ function factoryWindow(window, { kind, label, windowMinutes, now, additional = f
 }
 
 function parseFactoryTokenRateLimits(body, now = Date.now()) {
-  if (!body?.limits?.standard) return null;
+  if (body?.usesTokenRateLimitsBilling !== true || !body?.limits?.standard) return null;
   const windows = [];
   const appendPool = (pool, prefix, additional) => {
     if (!pool || typeof pool !== 'object') return;
@@ -202,6 +202,7 @@ async function factoryFetchJson(baseUrl, route, token, deps = {}) {
         Accept: 'application/json',
         'Content-Type': 'application/json',
         Origin: FACTORY_APP_BASE_URL,
+        Referer: `${FACTORY_APP_BASE_URL}/`,
         'x-factory-client': 'web-app'
       },
       signal

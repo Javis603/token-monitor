@@ -34,6 +34,7 @@ test('Factory token-rate API uses the explicit key and maps identity, quotas, an
   const fetch = async (url, init) => {
     urls.push(url);
     assert.equal(init.headers.Authorization, 'Bearer settings-key');
+    assert.equal(init.headers.Referer, 'https://app.factory.ai/');
     if (url.endsWith('/api/app/auth/me')) {
       return jsonResponse(200, {
         organization: { name: 'Factory Team', subscription: { factoryTier: 'team' } },
@@ -42,7 +43,7 @@ test('Factory token-rate API uses the explicit key and maps identity, quotas, an
     }
     if (url.endsWith('/api/billing/limits')) {
       return jsonResponse(200, {
-        usesTokenRateLimitsBilling: false,
+        usesTokenRateLimitsBilling: true,
         limits: {
           standard: {
             fiveHour: { usedPercent: 12.5, secondsRemaining: 1800 },
@@ -95,7 +96,7 @@ test('Factory token-rate API uses the explicit key and maps identity, quotas, an
   assert.equal(JSON.stringify(result).includes('settings-key'), false);
 });
 
-test('Factory API key from Droid .env reads legacy usage', async (t) => {
+test('Factory follows legacy usage when the billing flag is false despite prefilled standard limits', async (t) => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-limits-'));
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
   const factoryDir = path.join(homeDir, '.factory');
@@ -119,7 +120,14 @@ test('Factory API key from Droid .env reads legacy usage', async (t) => {
       });
     }
     if (url.endsWith('/api/billing/limits')) {
-      return jsonResponse(200, { usesTokenRateLimitsBilling: false });
+      return jsonResponse(200, {
+        usesTokenRateLimitsBilling: false,
+        limits: {
+          standard: {
+            fiveHour: { usedPercent: 99, secondsRemaining: 60 }
+          }
+        }
+      });
     }
     if (url.includes('/api/organization/subscription/usage')) {
       return jsonResponse(200, {

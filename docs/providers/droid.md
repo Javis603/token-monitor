@@ -58,9 +58,10 @@ balance. Accounts still on the older billing model fall back to
 `/api/organization/subscription/usage?useCache=true`, which exposes Standard and Premium usage for
 the current billing period.
 
-The response gate follows the strongest available evidence instead of depending on an optional
-mode flag: a `limits.standard` pool selects the current token-rate-limit shape; its absence falls
-back to the legacy route. The current Factory CLI and web UI confirm the limits pools,
+The response gate follows Factory's explicit billing-mode signal: only
+`usesTokenRateLimitsBilling: true` together with a `limits.standard` pool selects the current
+token-rate-limit shape; a false or missing flag falls back to the legacy route even when rollout
+fields are already present. The current Factory CLI and web UI confirm the limits pools,
 `usedPercent`, reset fields, balance, and both routes. The legacy `userId` query parameter and
 `totalAllowance` / `usedRatio` bucket fields are compatibility assumptions inherited from the
 working CodexBar integration, so their parsing stays optional and null-safe.
@@ -69,8 +70,8 @@ The credential boundary follows the existing owner-approved local-discovery patt
 provider-owned configuration file may supply an in-memory key, and only a key explicitly entered
 in Token Monitor is persisted by Token Monitor. Droid's own credential material — the
 `auth.v2.loginkeychain` / keyring stores — stays out of bounds: providers never read or decrypt
-another tool's credentials (issue #586 precedent), so OAuth-login users create an `fk-` API key
-instead.
+another tool's credentials (issue #586 precedent), so OAuth-login users create an `fk-` API key at
+`https://app.factory.ai/settings/api-keys` instead.
 
 ## Usage flows through tokscale only
 
