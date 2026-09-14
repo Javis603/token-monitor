@@ -388,7 +388,7 @@ test('keeps day, month and total model data independent', () => {
   assert.deepEqual(snapshot.periods.total.models.map((model) => model.displayName), ['total-model']);
 });
 
-test('keeps up to ten provider and model rows for adaptive widget capacity', () => {
+test('keeps every known provider row selectable while model display stays capped', () => {
   const stats = sampleStats();
   const providerIds = [
     'codex', 'claude', 'cursor', 'antigravity', 'opencode', 'deepseek',
@@ -404,8 +404,59 @@ test('keeps up to ten provider and model rows for adaptive widget capacity', () 
   );
 
   const snapshot = buildSnapshot(stats, { now: NOW });
-  assert.equal(snapshot.quota.length, 10);
+  assert.equal(snapshot.quota.length, providerIds.length);
   assert.equal(snapshot.periods.day.models.length, 10);
+});
+
+test('keeps third-party profiles after the first ten quota rows with recognizable names', () => {
+  const leadingProviders = [
+    'antigravity', 'claude', 'codex', 'codex', 'codex',
+    'commandcode', 'copilot', 'cursor', 'deepseek', 'openrouter'
+  ].map((provider, index) => ({
+    provider,
+    accountKey: `${provider}-${index}`,
+    status: 'ok',
+    windows: [{ kind: 'weekly', remainingPercent: 80 }]
+  }));
+  const snapshot = buildSnapshot({
+    limits: { providers: [
+      ...leadingProviders,
+      {
+        provider: 'thirdparty', accountKey: 'gptnb', accountName: 'GPTNB', status: 'ok',
+        balance: { amount: 39.5, currency: 'USD', allTimeSpend: 140.52 },
+        windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 39.5, currency: 'USD' }]
+      },
+      {
+        provider: 'thirdparty', accountKey: 'niba', accountName: 'Niba', status: 'ok',
+        balance: { amount: 1903411.84, currency: 'USD', allTimeSpend: 26589.65 },
+        windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 1903411.84, currency: 'USD' }]
+      }
+    ] }
+  }, { now: NOW });
+
+  const thirdParty = snapshot.quota.filter((provider) => provider.provider === 'thirdparty');
+  assert.equal(snapshot.quota.length, 12);
+  assert.deepEqual(thirdParty.map((provider) => provider.accountLabel), ['GPTNB', 'Niba']);
+  assert.deepEqual(thirdParty.map((provider) => provider.balance.allTimeSpend), [140.52, 26589.65]);
+  assert.deepEqual(thirdParty.map((provider) => provider.windows[0].currency), ['USD', 'USD']);
+});
+
+test('preserves spend amounts and currency for native quota formatting', () => {
+  const snapshot = buildSnapshot({
+    limits: { providers: [{
+      provider: 'claude', status: 'ok',
+      windows: [{
+        kind: 'billing', metric: 'spend', label: 'Usage credits',
+        used: 2.35, limit: 20, currency: 'USD', showMeter: true
+      }]
+    }] }
+  }, { now: NOW });
+
+  assert.deepEqual(snapshot.quota[0].windows[0], {
+    kind: 'billing', label: 'Usage credits', metric: 'spend', showMeter: true,
+    usedPercent: null, remainingPercent: null, resetsAt: null, windowMinutes: null,
+    used: 2.35, currency: 'USD'
+  });
 });
 
 test('keeps real 28, 90, and 180 day activity ranges, caps at 182, and keeps DAY trend at 7 dates', () => {

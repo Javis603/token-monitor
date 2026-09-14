@@ -352,6 +352,52 @@ enum WidgetQuotaFreshness {
     }
 }
 
+enum WidgetQuotaPresentation {
+    static func windows(
+        for provider: WidgetQuotaProvider,
+        limit: Int,
+        reserveBalanceSlot: Bool = true
+    ) -> [WidgetLimitWindow] {
+        guard limit > 0 else { return [] }
+
+        let regular = provider.windows.filter { $0.metric != "credits" && $0.metric != "spend" }
+        let credits = provider.windows.first { $0.metric == "credits" } ?? provider.balance.map {
+            WidgetLimitWindow(
+                kind: "billing",
+                remainingPercent: nil,
+                resetsAt: nil,
+                metric: "credits",
+                showMeter: false,
+                remaining: $0.amount,
+                currency: $0.currency,
+                label: "Balance"
+            )
+        }
+        let spend = provider.windows.first { $0.metric == "spend" } ?? provider.balance?.allTimeSpend.map {
+            WidgetLimitWindow(
+                kind: "billing",
+                remainingPercent: nil,
+                resetsAt: nil,
+                metric: "spend",
+                showMeter: false,
+                used: $0,
+                currency: provider.balance?.currency,
+                label: "Spend"
+            )
+        }
+
+        let regularLimit = reserveBalanceSlot && credits != nil ? max(0, limit - 1) : limit
+        var result = Array(regular.prefix(regularLimit))
+        if let credits, result.count < limit { result.append(credits) }
+        if let spend, result.count < limit { result.append(spend) }
+        if result.count < limit {
+            let selectedIDs = Set(result.map(\.id))
+            result.append(contentsOf: provider.windows.filter { !selectedIDs.contains($0.id) }.prefix(limit - result.count))
+        }
+        return result
+    }
+}
+
 enum WidgetFormat {
     static func tokens(_ value: Int, style: String = "compact") -> String {
         tokens(value, style: style, unitSystem: "western", locale: "auto")
@@ -473,42 +519,48 @@ enum WidgetFormat {
             return WidgetL10n.text("Unlimited")
         }
         if let balance = provider.balance, balance.amount.isFinite {
-            let symbol = switch balance.currency.uppercased() {
-            case "CNY": "¥"
-            case "USD": "$"
-            case "TWD": "NT$"
-            case "HKD": "HK$"
-            case "CREDITS": ""
-            default: "\(balance.currency.uppercased()) "
-            }
-            let amount = String(
-                format: "%.2f",
-                locale: Locale(identifier: "en_US_POSIX"),
-                balance.amount
-            )
-            return WidgetL10n.format("%@ left", "\(symbol)\(amount)")
+            return WidgetL10n.format("%@ left", quotaAmount(balance.amount, currency: balance.currency))
         }
         if let window = provider.windows.first,
            window.metric == "credits",
            let remaining = window.remaining,
            remaining.isFinite {
-            let currency = switch window.currency?.uppercased() {
-            case "CNY": "¥"
-            case "USD": "$"
-            case "TWD": "NT$"
-            case "HKD": "HK$"
-            case "CREDITS": ""
-            case .some(let value): "\(value) "
-            case .none: ""
-            }
-            let amount = String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), remaining)
-            return WidgetL10n.format("%@ left", "\(currency)\(amount)")
+            return WidgetL10n.format("%@ left", quotaAmount(remaining, currency: window.currency))
         }
         if provider.windows.first?.metric != "credits",
            let remaining = provider.windows.first?.remainingPercent {
             return WidgetL10n.format("%lld%% left", Int(remaining.rounded()))
         }
         return provider.displayStatus
+    }
+
+    static func windowValue(_ window: WidgetLimitWindow) -> String {
+        if window.metric == "credits", window.detail == "unlimited" {
+            return WidgetL10n.text("Unlimited")
+        }
+        if window.metric == "credits", let remaining = window.remaining, remaining.isFinite {
+            return quotaAmount(remaining, currency: window.currency)
+        }
+        if window.metric == "spend", let used = window.used, used.isFinite {
+            return quotaAmount(used, currency: window.currency)
+        }
+        if let remaining = window.remainingPercent, remaining.isFinite {
+            return WidgetL10n.format("%lld%% left", Int(remaining.rounded()))
+        }
+        return "—"
+    }
+
+    private static func quotaAmount(_ value: Double, currency: String?) -> String {
+        let amount = String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), value)
+        return switch currency?.uppercased() {
+        case "CNY": "¥\(amount)"
+        case "USD": "$\(amount)"
+        case "TWD": "NT$\(amount)"
+        case "HKD": "HK$\(amount)"
+        case "CREDITS": "\(amount) credits"
+        case .some(let code) where !code.isEmpty: "\(code) \(amount)"
+        default: amount
+        }
     }
 
     static func boundary(_ window: WidgetLimitWindow) -> String {

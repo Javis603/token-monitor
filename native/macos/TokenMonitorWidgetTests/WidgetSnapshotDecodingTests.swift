@@ -383,6 +383,80 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             )),
             "HK$9.33 left"
         )
+        XCTAssertEqual(
+            WidgetFormat.quotaValue(WidgetQuotaProvider(
+                instanceId: "workbuddy-single",
+                provider: "workbuddy",
+                status: "ok",
+                updatedAt: nil,
+                windows: [],
+                balance: WidgetQuotaBalance(amount: 63, currency: "CREDITS")
+            )),
+            "63.00 credits left"
+        )
+    }
+
+    func testQuotaWindowValuePreservesCurrencyAndSpendSemantics() {
+        let usd = WidgetLimitWindow(
+            kind: "billing", remainingPercent: nil, resetsAt: nil,
+            metric: "credits", showMeter: false, remaining: 12.5, currency: "USD"
+        )
+        let credits = WidgetLimitWindow(
+            kind: "billing", remainingPercent: nil, resetsAt: nil,
+            metric: "credits", showMeter: false, remaining: 63, currency: "CREDITS"
+        )
+        let spend = WidgetLimitWindow(
+            kind: "billing", remainingPercent: nil, resetsAt: nil,
+            metric: "spend", showMeter: false, used: 2.35, currency: "USD"
+        )
+        let percentage = WidgetLimitWindow(kind: "weekly", remainingPercent: 53, resetsAt: nil)
+
+        XCTAssertEqual(WidgetFormat.windowValue(usd), "$12.50")
+        XCTAssertEqual(WidgetFormat.windowValue(credits), "63.00 credits")
+        XCTAssertEqual(WidgetFormat.windowValue(spend), "$2.35")
+        XCTAssertEqual(WidgetFormat.windowValue(percentage), "53% left")
+    }
+
+    func testQuotaPresentationKeepsBalanceAlongsideQuotaWindows() {
+        let claude = WidgetQuotaProvider(
+            instanceId: "claude-single",
+            provider: "claude",
+            status: "ok",
+            updatedAt: nil,
+            windows: [
+                WidgetLimitWindow(kind: "session", remainingPercent: 89, resetsAt: nil),
+                WidgetLimitWindow(kind: "weekly", remainingPercent: 68, resetsAt: nil),
+                WidgetLimitWindow(
+                    kind: "billing", remainingPercent: nil, resetsAt: nil,
+                    metric: "spend", showMeter: false, used: 2.35, currency: "USD", label: "Usage credits"
+                )
+            ],
+            balance: WidgetQuotaBalance(amount: 113.44, currency: "USD")
+        )
+        let full = WidgetQuotaPresentation.windows(for: claude, limit: 3)
+        let dashboard = WidgetQuotaPresentation.windows(
+            for: claude,
+            limit: 2,
+            reserveBalanceSlot: false
+        )
+
+        XCTAssertEqual(full.map(\.metric), [nil, nil, "credits"])
+        XCTAssertEqual(full.map(WidgetFormat.windowValue), ["89% left", "68% left", "$113.44"])
+        XCTAssertEqual(dashboard.map(\.metric), [nil, nil])
+        XCTAssertEqual(dashboard.map(WidgetFormat.windowValue), ["89% left", "68% left"])
+
+        let thirdParty = WidgetQuotaProvider(
+            instanceId: "thirdparty-gptnb",
+            provider: "thirdparty",
+            status: "ok",
+            updatedAt: nil,
+            windows: [],
+            balance: WidgetQuotaBalance(amount: 39.5, currency: "USD", allTimeSpend: 140.52),
+            accountLabel: "GPTNB"
+        )
+        let thirdPartyWindows = WidgetQuotaPresentation.windows(for: thirdParty, limit: 3)
+        XCTAssertEqual(thirdPartyWindows.map(\.metric), ["credits", "spend"])
+        XCTAssertEqual(thirdPartyWindows.map(WidgetFormat.windowValue), ["$39.50", "$140.52"])
     }
 
     func testQuotaWindowDecodesTypedLifecycleBoundaries() throws {

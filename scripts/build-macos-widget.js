@@ -24,7 +24,7 @@ const DEFAULT_APP_ID = String(PACKAGE_JSON.build?.appId || 'com.example.tokenmon
 const DEFAULT_APP_GROUP = 'group.com.example.tokenmonitor';
 const DEFAULT_WIDGET_BUNDLE_ID = `${DEFAULT_APP_ID}.widget`;
 const DEFAULT_WIDGET_KIND = 'com.tokenmonitor.dashboard';
-const WIDGET_UI_VERSION = 45;
+const WIDGET_UI_VERSION = 47;
 const WIDGET_SCHEMA_VERSION = 10;
 const WIDGET_ARCHITECTURES = Object.freeze({
   arm64: Object.freeze({ name: 'arm64', xcodeArch: 'arm64', swiftArch: 'arm64' }),

@@ -223,6 +223,13 @@ struct WidgetQuotaProvider: Decodable, Equatable, Identifiable {
 struct WidgetQuotaBalance: Decodable, Equatable {
     let amount: Double
     let currency: String
+    let allTimeSpend: Double?
+
+    init(amount: Double, currency: String, allTimeSpend: Double? = nil) {
+        self.amount = amount
+        self.currency = currency
+        self.allTimeSpend = allTimeSpend
+    }
 }
 
 struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
@@ -236,6 +243,7 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
     let boundaryKind: String?
     let windowMinutes: Double?
     let remaining: Double?
+    let used: Double?
     let currency: String?
     let detail: String?
     var id: String { "\(kind)|\(label ?? "")" }
@@ -250,6 +258,7 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
         metric: String? = nil,
         showMeter: Bool = true,
         remaining: Double? = nil,
+        used: Double? = nil,
         currency: String? = nil,
         detail: String? = nil,
         label: String? = nil
@@ -264,6 +273,7 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
         self.boundaryKind = boundaryKind
         self.windowMinutes = windowMinutes
         self.remaining = remaining
+        self.used = used
         self.currency = currency
         self.detail = detail
     }
@@ -417,7 +427,7 @@ extension WidgetOverview {
 }
 
 extension WidgetLimitWindow {
-    private enum CodingKeys: String, CodingKey { case kind, label, metric, showMeter, usedPercent, remainingPercent, resetsAt, boundaryKind, windowMinutes, remaining, currency, detail }
+    private enum CodingKeys: String, CodingKey { case kind, label, metric, showMeter, usedPercent, remainingPercent, resetsAt, boundaryKind, windowMinutes, remaining, used, currency, detail }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         kind = try c.decode(String.self, forKey: .kind)
@@ -432,6 +442,7 @@ extension WidgetLimitWindow {
         boundaryKind = ["reset", "expiry", "mixed"].contains(rawBoundaryKind) ? rawBoundaryKind : nil
         windowMinutes = try? c.decodeIfPresent(Double.self, forKey: .windowMinutes)
         remaining = try? c.decodeIfPresent(Double.self, forKey: .remaining)
+        used = try? c.decodeIfPresent(Double.self, forKey: .used)
         currency = try? c.decodeIfPresent(String.self, forKey: .currency)
         let rawDetail = (try c.decodeIfPresent(String.self, forKey: .detail) ?? "").lowercased()
         detail = rawDetail == "unlimited" ? rawDetail : nil

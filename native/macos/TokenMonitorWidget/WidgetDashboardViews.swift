@@ -456,9 +456,14 @@ private struct DashboardQuotaProviderRow: View {
             }
             .frame(width: 92, alignment: .leading)
 
-            if !provider.windows.isEmpty {
+            let visibleWindows = WidgetQuotaPresentation.windows(
+                for: provider,
+                limit: 2,
+                reserveBalanceSlot: false
+            )
+            if !visibleWindows.isEmpty {
                 HStack(alignment: .top, spacing: 10) {
-                    ForEach(Array(provider.windows.prefix(2))) { window in
+                    ForEach(visibleWindows) { window in
                         DashboardQuotaWindowCell(
                             window: window,
                             color: WidgetVendorIdentity.color(for: provider.provider),
@@ -514,12 +519,7 @@ private struct DashboardQuotaWindowCell: View {
     }
 
     private var value: String {
-        if window.metric == "credits", window.detail == "unlimited" { return WidgetL10n.text("Unlimited") }
-        if window.metric == "credits", let remaining = window.remaining {
-            return String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), remaining)
-        }
-        if let remaining = window.remainingPercent { return WidgetL10n.format("%lld%% left", Int(remaining.rounded())) }
-        return "—"
+        WidgetFormat.windowValue(window)
     }
 }
 
@@ -531,6 +531,7 @@ struct QuotaProviderRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
+            let visibleWindows = WidgetQuotaPresentation.windows(for: provider, limit: 3)
             HStack(spacing: 7) {
                 WidgetVendorMark(vendorID: provider.provider, size: 13, isMuted: isStale)
                 Text(provider.displayName ?? WidgetFormat.provider(provider.provider))
@@ -551,16 +552,16 @@ struct QuotaProviderRow: View {
                         .accessibilityHidden(true)
                 }
                 Spacer(minLength: 6)
-                if provider.windows.isEmpty {
+                if visibleWindows.isEmpty {
                     Text(WidgetFormat.quotaValue(provider))
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
             }
-            if !provider.windows.isEmpty {
+            if !visibleWindows.isEmpty {
                 HStack(alignment: .top, spacing: 14) {
-                    ForEach(Array(provider.windows.prefix(2))) { window in
+                    ForEach(visibleWindows) { window in
                         QuotaWindowCell(
                             window: window,
                             color: WidgetVendorIdentity.color(for: provider.provider),
@@ -611,12 +612,7 @@ struct QuotaWindowCell: View {
     }
 
     private var value: String {
-        if window.metric == "credits", window.detail == "unlimited" { return WidgetL10n.text("Unlimited") }
-        if window.metric == "credits", let remaining = window.remaining {
-            return String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), remaining)
-        }
-        if let remaining = window.remainingPercent { return WidgetL10n.format("%lld%% left", Int(remaining.rounded())) }
-        return "—"
+        WidgetFormat.windowValue(window)
     }
 }
 

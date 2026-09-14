@@ -99,8 +99,8 @@ function safeDisplayName(value, fallback = '') {
 
 // Widget snapshots live in an App Group container, so account identity must be
 // useful for disambiguation without copying the full email address across the
-// process boundary. Keep this deliberately narrower than the renderer's
-// configurable account-label presentation: WidgetKit always receives a mask.
+// process boundary. Email identities are always masked; user-chosen profile
+// names pass through the same path/URL/control-character filter as row labels.
 function maskedWidgetEmail(value) {
   const email = String(value || '').trim().toLowerCase();
   const at = email.lastIndexOf('@');
@@ -183,6 +183,7 @@ function buildLimitWindow(window, providerId) {
   const metricValue = String(window.metric || '').trim().toLowerCase();
   const metric = VALID_LIMIT_WINDOW_METRICS.has(metricValue) ? metricValue : null;
   const remaining = optionalFiniteNumber(window.remaining);
+  const used = optionalFiniteNumber(window.used);
   const rawCurrency = String(window.currency || '').trim().toUpperCase();
   const currency = /^[A-Z]{3,8}$/.test(rawCurrency) ? rawCurrency : null;
   const rawDetail = String(window.detail || '').trim().toLowerCase();
@@ -203,6 +204,7 @@ function buildLimitWindow(window, providerId) {
       ? null
       : nonNegativeNumber(window.windowMinutes),
     ...(remaining === null ? {} : { remaining }),
+    ...(used === null ? {} : { used }),
     ...(currency ? { currency } : {}),
     ...(detail ? { detail } : {})
   };
@@ -214,7 +216,12 @@ function buildProviderBalance(provider) {
   const amount = optionalFiniteNumber(source.amount);
   const currency = String(source.currency || '').trim().toUpperCase();
   if (amount === null || (!Object.hasOwn(CURRENCIES, currency) && currency !== 'CREDITS')) return null;
-  return { amount, currency };
+  const allTimeSpend = optionalFiniteNumber(source.allTimeSpend);
+  return {
+    amount,
+    currency,
+    ...(allTimeSpend === null ? {} : { allTimeSpend })
+  };
 }
 
 function isCanonicalCodexWindow(providerId, window) {
@@ -239,7 +246,7 @@ function buildQuota(limits, activeCodexAccount) {
     if (!provider || typeof provider !== 'object') continue;
     const providerId = String(provider.provider || '').trim().toLowerCase();
     if (!KNOWN_LIMIT_PROVIDERS.has(providerId)) continue;
-    const windows = Array.isArray(provider.windows)
+    const rawWindows = Array.isArray(provider.windows)
       ? provider.windows
         .filter((window) => isCanonicalCodexWindow(providerId, window))
         .map((window) => buildLimitWindow(window, providerId))
@@ -247,8 +254,17 @@ function buildQuota(limits, activeCodexAccount) {
         .slice(0, 2)
       : [];
     const balance = buildProviderBalance(provider);
+    const windows = rawWindows.map((window) => (
+      !window.currency
+        && balance?.currency
+        && (window.metric === 'credits' || window.metric === 'spend')
+        ? { ...window, currency: balance.currency }
+        : window
+    ));
     const accountKey = String(provider.accountKey || '').trim();
-    const accountLabel = maskedWidgetEmail(provider.accountEmail);
+    const accountLabel = maskedWidgetEmail(provider.accountEmail)
+      || safeDisplayName(provider.accountName)
+      || safeDisplayName(provider.accountLabel);
     const source = String(provider.source || '').trim().toLowerCase();
     const sourceDetail = String(provider.sourceDetail || '').trim().toLowerCase();
     const stableRecord = {
@@ -320,7 +336,7 @@ function buildQuota(limits, activeCodexAccount) {
       || left.provider.localeCompare(right.provider)
       || left._providerOrdinal - right._providerOrdinal
       || left.instanceId.localeCompare(right.instanceId);
-  }).map(({ _providerOrdinal, ...provider }) => provider).slice(0, 10);
+  }).map(({ _providerOrdinal, ...provider }) => provider);
 }
 
 // The name the widget actually shows: buildQuota stamps it onto every row as
