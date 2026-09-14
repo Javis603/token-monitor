@@ -5805,7 +5805,6 @@ html.is-windows .limit-live-badge {
 
 .model-alias-form label { display: grid; gap: 4px; min-width: 0; }
 .model-alias-form input { width: 100%; min-width: 0; box-sizing: border-box; }
-.model-alias-example { overflow-wrap: anywhere; }
 
 
 
