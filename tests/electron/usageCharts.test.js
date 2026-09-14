@@ -321,6 +321,13 @@ test('liveRateLineSvg renders one polyline per continuous run of samples', () =>
   assert.match(svg, /viewBox="0 0 300 60"/);
   assert.match(svg, /class="live-rate-line" d="M0,40 L150,10"/);
   assert.match(svg, /class="live-rate-line" d="M250,25"/);
+  // Straight segments stay straight with more than two points — no smoothing.
+  const multi = liveRateLineSvg({
+    width: 300,
+    height: 60,
+    segments: [[{ x: 0, y: 40, value: 10 }, { x: 150, y: 10, value: 40 }, { x: 300, y: 40, value: 10 }]]
+  });
+  assert.match(multi, /class="live-rate-line" d="M0,40 L150,10 L300,40"/);
   // No idle data means no path, but the frame still renders.
   assert.doesNotMatch(liveRateLineSvg({ width: 300, height: 60, segments: [] }), /class="live-rate-line"/);
 });

@@ -787,11 +787,10 @@ test('the live-rate line chart bridges across idle gaps and maps x by sample tim
     height: 60,
     segments: [[{ x: 0, y: 40, value: 10 }, { x: 100, y: 20, value: 30 }, { x: 200, y: 30, value: 20 }]]
   }, { title: 'Now 20 tok/s' });
-  // Three or more points draw a Catmull-Rom smoothed cubic curve; the curve ends
-  // on the exact sample points even though the stroke wiggles between them.
-  assert.match(model, /class="live-rate-line" d="M0,40 C16\.67,36\.67 66\.67,21\.67 100,20 C133\.33,18\.33 183\.33,28\.33 200,30"/);
+  // Samples draw as a plain polyline — no smoothing.
+  assert.match(model, /class="live-rate-line" d="M0,40 L100,20 L200,30"/);
   assert.match(model, /<title>Now 20 tok\/s<\/title>/);
-  // Fewer than three points keep the plain polyline fallback.
+  // Fewer than three points draw the same plain polyline.
   const pair = charts.liveRateLineSvg({
     width: 300,
     height: 60,
