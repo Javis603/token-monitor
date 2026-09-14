@@ -15,7 +15,10 @@ const {
   buildHistoryGraphFromRows,
   normalizedModelId,
   normalizeDbRow,
-  applyPriceFallback
+  applyPriceFallback,
+  readMavisDbRowsNode,
+  runMavisReaderWorker,
+  MAVIS_READER_WORKER_FILENAME
 } = require('../../src/shared/providers/mavis/usage');
 
 const { localDate, localMs } = require('../helpers/localTime');
@@ -335,4 +338,163 @@ test('applyPriceFallback honours an injected rate table and CNY→USD rate', () 
     { priceTable: customTable, cnyToUsdRate: 1 }
   );
   assert.equal(out.cost, 10);
+});
+
+// ----------------------------------------------------------------------------
+// mavis-reader.worker.js 单元 + 集成测试
+// ----------------------------------------------------------------------------
+//
+// 核心目标：worker_threads 读 SQLite 不能阻塞调用方的事件循环。我们用
+// 两条线验证：
+//
+//   1) `runMavisReaderWorker` 启动真正的 worker，读一个临时 SQLite，
+//      检查返回的 row 形状跟 fork 的 `normalizeDbRow` 完全一致。
+//   2) `readMavisDbRowsNode` 接受 injected `execWorker`，跑 fake
+//      worker（不开真进程），验证主流程不会因为 worker crash 而挂住。
+//
+// 我们不试图在测试里触发"SQLite 真锁住 mavis runtime"，因为那需要
+// 另一个长跑进程对真实 DB 持写锁，CI 跑不出来。压测放到本地的
+// Test-MavisWorkerStress.js，由用户在自己机器上验证主线程心跳。
+
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
+
+function createTempMavisDb() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mavis-test-'));
+  const dbPath = path.join(dir, 'runtime-state.sqlite');
+  const db = new DatabaseSync(dbPath);
+  db.exec(`
+    CREATE TABLE local_runtime_token_usage (
+      id INTEGER PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      agent_name TEXT NOT NULL,
+      framework_type TEXT NOT NULL,
+      turn_id TEXT,
+      model TEXT,
+      ts INTEGER NOT NULL,
+      input_tokens INTEGER NOT NULL,
+      output_tokens INTEGER NOT NULL,
+      reasoning_tokens INTEGER NOT NULL,
+      cache_read_tokens INTEGER NOT NULL,
+      cache_write_tokens INTEGER NOT NULL,
+      cost_usd REAL,
+      raw TEXT
+    )
+  `);
+  const stmt = db.prepare(`
+    INSERT INTO local_runtime_token_usage
+    (session_id, agent_name, framework_type, turn_id, model, ts,
+     input_tokens, output_tokens, reasoning_tokens,
+     cache_read_tokens, cache_write_tokens, cost_usd, raw)
+    VALUES (?, ?, 'pi-agent', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  // 三行：1 个 M3 行（cost 已知），1 个 NULL model 行（cost=0），1 个 coder 行
+  const base = Date.now();
+  stmt.run('mvs_a', 'mavis', 't1', 'minimax/MiniMax-M3', base, 1000, 200, 0, 100, 0, 0.0005, '{"a":1}');
+  stmt.run('mvs_a', 'mavis', 't2', null, base + 1000, 500, 100, 0, 0, 0, 0, '{"b":2}');
+  stmt.run('mvs_b', 'coder', 't3', 'minimax/MiniMax-M3', base + 2000, 2000, 1000, 50, 500, 0, 0.0012, '{"c":3}');
+  db.close();
+  return { dbPath, dir };
+}
+
+const FORK_USAGE_SQL = `
+SELECT ts, session_id, agent_name, model,
+  input_tokens, output_tokens, reasoning_tokens,
+  cache_read_tokens, cache_write_tokens, cost_usd
+FROM local_runtime_token_usage
+WHERE framework_type = 'pi-agent'
+  AND agent_name IN (?,?,?,?,?,?)
+ORDER BY ts
+`.trim();
+
+test('runMavisReaderWorker 真正起 worker 读临时 SQLite，返回的 rows 形状对得上 normalizeDbRow', async () => {
+  const { dbPath, dir } = createTempMavisDb();
+  try {
+    const rows = await runMavisReaderWorker(
+      dbPath,
+      FORK_USAGE_SQL,
+      ['mavis', 'coder', 'explore', 'general', 'verifier', 'worker'],
+      0, // sinceMs
+      100, // maxReadRows
+      {} // options（默认 requireFn）
+    );
+    assert.equal(rows.length, 3, '应读到 3 行');
+    // 第一行：M3、cost_usd=0.0005、agent=mavis
+    assert.equal(rows[0].session_id, 'mvs_a');
+    assert.equal(rows[0].agent_name, 'mavis');
+    assert.equal(rows[0].model, 'minimax/MiniMax-M3');
+    assert.equal(rows[0].input_tokens, 1000);
+    assert.equal(rows[0].output_tokens, 200);
+    assert.equal(rows[0].cache_read_tokens, 100);
+    assert.equal(rows[0].cost_usd, 0.0005);
+    // 第二行：model NULL
+    assert.equal(rows[1].model, null);
+    assert.equal(rows[1].input_tokens, 500);
+    // 第三行：coder
+    assert.equal(rows[2].agent_name, 'coder');
+    assert.equal(rows[2].output_tokens, 1000);
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* ignore */ }
+  }
+});
+
+test('runMavisReaderWorker 在 dbPath 不存在时干净报错，不污染主进程', async () => {
+  const missing = path.join(os.tmpdir(), 'no-such-mavis-' + Date.now() + '.sqlite');
+  await assert.rejects(
+    () => runMavisReaderWorker(
+      missing,
+      FORK_USAGE_SQL,
+      ['mavis'],
+      0,
+      100,
+      {}
+    ),
+    (err) => {
+      // node:sqlite 抛的错可能包装了底层 syscall；至少要带个错误信息
+      assert.ok(err instanceof Error, '必须 reject Error');
+      assert.ok(err.message && err.message.length > 0, '必须带错误信息');
+      return true;
+    }
+  );
+});
+
+test('readMavisDbRowsNode 通过 injected execWorker 走 mock，避免真起 worker', async () => {
+  // 这个测试关键在于：即便 mock execWorker 抛错，readMavisDbRowsNode 也
+  // 应该 reject 而不是 hang。验证 worker 路径下的错误传递通畅。
+  const fakeRows = [
+    { ts: 1, session_id: 'mvs_test', agent_name: 'mavis', model: 'minimax/MiniMax-M3',
+      input_tokens: 1, output_tokens: 1, reasoning_tokens: 0,
+      cache_read_tokens: 0, cache_write_tokens: 0, cost_usd: 0 }
+  ];
+  const fakeExec = async () => fakeRows;
+  // 把 mock 函数挂到 requireFn 上，让 readMavisDbRowsNode 优先用 mock
+  const requireFn = Object.assign(() => ({}), { __execWorker: fakeExec });
+  const result = await readMavisDbRowsNode(
+    'fake-path',
+    FORK_USAGE_SQL,
+    ['mavis'],
+    0,
+    100,
+    requireFn
+  );
+  assert.equal(result.length, 1);
+  assert.equal(result[0].session_id, 'mvs_test');
+});
+
+test('readMavisDbRowsNode 通过 injected execWorker 把 worker error 透传成 reject', async () => {
+  const fakeExec = async () => { throw new Error('synthetic worker boom'); };
+  const requireFn = Object.assign(() => ({}), { __execWorker: fakeExec });
+  await assert.rejects(
+    () => readMavisDbRowsNode('fake-path', FORK_USAGE_SQL, ['mavis'], 0, 100, requireFn),
+    /synthetic worker boom/
+  );
+});
+
+test('MAVIS_READER_WORKER_FILENAME 指向真实存在的 worker 文件', () => {
+  // 这个名字会出现在 asar 里，CI 跑 lint + repack 时需要它真的存在。
+  const usageDir = path.resolve(__dirname, '..', '..', 'src', 'shared', 'providers', 'mavis');
+  const workerPath = path.join(usageDir, MAVIS_READER_WORKER_FILENAME);
+  assert.ok(fs.existsSync(workerPath), `worker script missing: ${workerPath}`);
 });

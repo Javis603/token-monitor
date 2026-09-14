@@ -212,18 +212,101 @@ async function readMavisDbRows(dbPath, options = {}) {
   throw new Error(message, { cause: nodeError || cliError });
 }
 
+// Path to the worker script that owns the `node:sqlite` read path.
+// We resolve it relative to this file so the same code works whether
+// token-monitor is running from a normal Node module layout or from
+// inside an asar archive (Electron rewrites __dirname to the asar path
+// at runtime, which is what we want).
+const MAVIS_READER_WORKER_FILENAME = 'mavis-reader.worker.js';
+
+// Spawns a fresh Worker that runs `mavis-reader.worker.js`, sends it the
+// SQL + bind args, and resolves with the rows (or rejects with the worker's
+// error message). The worker uses its own V8 isolate so a busy SQLite
+// writer cannot wedge the Electron main isolate — even when the read
+// itself takes minutes, the host keeps ticking. Each call gets a brand
+// new worker because a wedged worker can never recover: terminating it
+// is the only safe cleanup, and a new worker per query is cheap (~25 ms
+// of cold-start overhead) compared to the 5-minute collect interval.
+//
+// `options.execWorker` is injected by tests so they can stub out the
+// real `worker_threads.Worker` constructor; production callers always
+// go through the real implementation.
+function runMavisReaderWorker(dbPath, sql, agentNames, sinceMs, maxReadRows, options) {
+  const requireFn = (options && options.requireFn) || require;
+  const workerThreads = requireFn('node:worker_threads');
+  const path = requireFn('node:path');
+  const workerPath = path.join(__dirname, MAVIS_READER_WORKER_FILENAME);
+  const bindArgs = sinceMs > 0 ? [...agentNames, sinceMs] : [...agentNames];
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let worker;
+
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (worker) {
+        // Best-effort terminate; we don't await because the host has
+        // already decided what to do with the result. Terminating
+        // releases the SQLite handle inside the worker even when the
+        // read itself was hung on a busy writer.
+        try { worker.terminate(); } catch (_) { /* ignore */ }
+      }
+      fn(value);
+    };
+
+    try {
+      worker = new workerThreads.Worker(workerPath, {
+        workerData: {
+          dbPath,
+          sql,
+          bindArgs,
+          maxReadRows,
+          busyTimeoutMs: 250,
+        },
+      });
+    } catch (e) {
+      finish(reject, e);
+      return;
+    }
+
+    worker.on('message', (msg) => {
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'done') {
+        finish(resolve, msg.rows || []);
+      } else if (msg.type === 'error') {
+        finish(reject, new Error(msg.error || 'mavis worker reported an error'));
+      }
+    });
+
+    worker.on('error', (err) => {
+      finish(reject, err instanceof Error ? err : new Error(String(err)));
+    });
+
+    worker.on('exit', (code) => {
+      // `done` / `error` already settled the promise; only act if we
+      // somehow exited without a message (e.g. the worker crashed
+      // during module load).
+      if (settled) return;
+      if (code !== 0) {
+        finish(reject, new Error(`mavis reader worker exited with code ${code}`));
+      } else {
+        finish(reject, new Error('mavis reader worker exited without producing a result'));
+      }
+    });
+  });
+}
+
 async function readMavisDbRowsNode(dbPath, sql, agentNames, sinceMs, maxReadRows, requireFn) {
-  const { DatabaseSync } = requireFn('node:sqlite');
-  const database = new DatabaseSync(dbPath, { readOnly: true });
-  try {
-    database.exec('PRAGMA busy_timeout = 250');
-    const statement = database.prepare(sql);
-    const bindArgs = sinceMs > 0 ? [...agentNames, sinceMs] : [...agentNames];
-    const iterator = statement.iterate(...bindArgs);
-    return boundedRows(iterator, { maxReadRows });
-  } finally {
-    database.close();
-  }
+  // Delegate to a worker_threads worker instead of calling node:sqlite
+  // on the main isolate. The previous "Promise.race + 5s timeout" guard
+  // didn't actually help when `DatabaseSync` and `stmt.iterate()` are
+  // synchronous native calls that lock V8 — the timer never gets to
+  // fire. Spawning a worker moves the lock off our isolate entirely.
+  // Test code injects `execWorker` to avoid the real worker spawn.
+  const execWorker = (requireFn && requireFn.__execWorker) || runMavisReaderWorker;
+  const rows = await execWorker(dbPath, sql, agentNames, sinceMs, maxReadRows, { requireFn });
+  return boundedRows(rows, { maxReadRows });
 }
 
 function normalizedModelId(value, agentName) {
@@ -532,6 +615,9 @@ module.exports = {
   buildHistoryGraphFromRows,
   resolveMavisDbPath,
   readMavisDbRows,
+  readMavisDbRowsNode,
+  runMavisReaderWorker,
+  MAVIS_READER_WORKER_FILENAME,
   normalizedModelId,
   normalizeDbRow,
   applyPriceFallback
