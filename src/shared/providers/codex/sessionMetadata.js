@@ -12,6 +12,14 @@ const TITLE_MAX_CODE_POINTS = 96;
 const QUERY_CHUNK_SIZE = 400;
 const THREAD_ID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
+// T3 Code is a separate Codex client that keeps its own thread catalog. It runs
+// the same Codex harness, so the rollout transcript under `~/.codex/sessions` is
+// shared, but T3 never writes the display title back to the Codex thread row.
+// The generated title lives only in T3's own store, joined to the Codex thread id
+// through its per-thread provider cursor, so a reader that only looks at the
+// Codex database sees the first user message and never T3's title.
+const T3_DEFAULT_TITLES = new Set(['new thread', 'start a new conversation']);
+
 function cleanText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -38,6 +46,32 @@ function codexHomeDir(options = {}) {
     if (configured) return path.resolve(configured);
   }
   return path.join(homeDir, '.codex');
+}
+
+// T3 Code is another Codex client: it drives the same harness and shared
+// rollout transcripts, but keeps its own thread catalog and never writes the
+// generated title back to the Codex thread row. Its runtime state lives under a
+// base directory of its own, with the server database one level below in
+// `userdata` (a dev-server run writes to `dev` instead).
+function t3HomeDir(options = {}) {
+  const homeDir = options.homeDir || os.homedir();
+  const env = options.env || process.env;
+  if (options.useEnvRoot !== false) {
+    const configured = cleanText(env.T3CODE_HOME);
+    if (configured) return path.resolve(configured);
+  }
+  return path.join(homeDir, '.t3');
+}
+
+function discoverT3DbPaths(options = {}) {
+  if (Array.isArray(options.t3DbPaths)) {
+    return [...new Set(options.t3DbPaths.map(String).filter(Boolean))];
+  }
+  const root = t3HomeDir(options);
+  return [...new Set([
+    path.join(root, 'userdata', 'state.sqlite'),
+    path.join(root, 'dev', 'state.sqlite')
+  ])];
 }
 
 function versionedDbFiles(dir, deps = {}) {
@@ -108,6 +142,11 @@ function readSessionMeta(sessionIds, deps = {}) {
   if (ids.length === 0) return out;
   const sqliteMod = resolveSqlite(deps);
   if (!sqliteMod) return out;
+  const titleSourceById = deps.titleSourceById instanceof Map ? deps.titleSourceById : null;
+  // Ids whose title came from `name` (an app-generated title) rather than from
+  // `title` (the first user message). Kept beside the returned map rather than
+  // inside it so the row contract stays a plain `title`.
+  const generatedTitleIds = new Set();
 
   const candidatesBySession = new Map(ids.map((id) => [id, threadIdCandidates(id)]));
   const candidateIds = [...new Set([...candidatesBySession.values()].flat())];
@@ -134,7 +173,9 @@ function readSessionMeta(sessionIds, deps = {}) {
             continue;
           }
           const title = titleForRow(row);
-          if (title) metaByThreadId.set(id, { title });
+          if (!title) continue;
+          metaByThreadId.set(id, { title });
+          if (cleanText(row.name)) generatedTitleIds.add(id);
         }
       }
     } catch (_) { /* skip missing, locked, or older databases */ } finally {
@@ -142,8 +183,14 @@ function readSessionMeta(sessionIds, deps = {}) {
     }
   }
   for (const [sessionId, candidates] of candidatesBySession) {
-    const meta = candidates.map((id) => metaByThreadId.get(id)).find(Boolean);
-    if (meta) out.set(sessionId, meta);
+    const matched = candidates.find((id) => metaByThreadId.has(id));
+    if (!matched) continue;
+    out.set(sessionId, metaByThreadId.get(matched));
+    // A background-review row carries no title; leave its source unset so a
+    // caller does not treat the classification as a title it may replace.
+    if (titleSourceById && !metaByThreadId.get(matched).sessionKind) {
+      titleSourceById.set(sessionId, generatedTitleIds.has(matched));
+    }
   }
   return out;
 }
@@ -152,18 +199,110 @@ function readSessionMetaForHome(sessionIds, homeDir, deps = {}) {
   return readSessionMeta(sessionIds, { ...deps, homeDir, useEnvRoot: false });
 }
 
+// The title T3 Code generated for a Codex thread, keyed by the Codex thread id.
+// T3 stores its own thread row (whose id is unrelated to Codex's) and joins it to
+// the Codex thread through the runtime cursor it resumes with, so the join is
+// cursor -> Codex thread id -> display title. T3's placeholder title for a
+// never-titled thread is not an answer.
+function readT3SessionMeta(sessionIds, deps = {}) {
+  const ids = [...new Set(Array.from(sessionIds || []).map(String).filter(Boolean))];
+  const out = new Map();
+  if (ids.length === 0) return out;
+  // A parenthesized left-hand side keeps `FROM` on its own line for the
+  // schema-introspecting tests that expect a single select expression there.
+  const cursorThreadId = "(json_extract(r.resume_cursor_json, '$.threadId'))";
+  const sqliteMod = resolveSqlite(deps);
+  if (!sqliteMod) return out;
+  // Most machines do not run T3 at all, and a full tick can carry thousands of
+  // sessions. Confirming the store exists before expanding every id into its
+  // candidates keeps that case at one stat per known path; a missing store is
+  // the same fail-closed answer the open below would give.
+  const dbPaths = discoverT3DbPaths(deps).filter((dbPath) => {
+    try { return fs.statSync(dbPath).isFile(); } catch (_) { return false; }
+  });
+  if (dbPaths.length === 0) return out;
+  // Tokscale reports rollouts as `rollout-<timestamp>-<uuid>` and merged
+  // rollouts by concatenating them, while T3 stores the bare Codex thread id.
+  // Match on the ids each session could carry, exactly as the Codex reader does.
+  const candidatesBySession = new Map(ids.map((id) => [id, threadIdCandidates(id)]));
+  const candidateIds = [...new Set([...candidatesBySession.values()].flat())];
+  const titleByThreadId = new Map();
+
+  for (const dbPath of dbPaths) {
+    let db;
+    try {
+      db = openDb(dbPath, sqliteMod);
+      const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => String(row.name)));
+      if (!tables.has('projection_threads') || !tables.has('provider_session_runtime')) continue;
+      const columns = new Set(db.prepare('PRAGMA table_info(projection_threads)').all().map((column) => String(column.name)));
+      if (!columns.has('title')) continue;
+      // Older T3 stores have no soft-delete column; absence of the column is
+      // not the same as a thread being deleted, so the filter is omitted.
+      const liveOnly = columns.has('deleted_at') ? 't.deleted_at IS NULL AND ' : '';
+      // T3 also drives other providers; only its Codex threads share id space
+      // with the sessions being resolved here.
+      const runtimeColumns = new Set(db.prepare('PRAGMA table_info(provider_session_runtime)').all().map((column) => String(column.name)));
+      const codexOnly = runtimeColumns.has('provider_name') ? "r.provider_name = 'codex' AND " : '';
+      for (let offset = 0; offset < candidateIds.length; offset += QUERY_CHUNK_SIZE) {
+        const chunk = candidateIds.slice(offset, offset + QUERY_CHUNK_SIZE).filter((id) => !titleByThreadId.has(id));
+        if (chunk.length === 0) continue;
+        const placeholders = chunk.map(() => '?').join(',');
+        const sql = `SELECT ${cursorThreadId} AS cursorThreadId, t.title AS title
+                     FROM projection_threads t
+                     JOIN provider_session_runtime r ON r.thread_id = t.thread_id
+                     WHERE ${liveOnly}${codexOnly}${cursorThreadId} IN (${placeholders})`;
+        for (const row of db.prepare(sql).all(...chunk)) {
+          const threadId = cleanText(row.cursorThreadId);
+          if (!threadId || titleByThreadId.has(threadId)) continue;
+          const title = cleanSessionTitle(row.title);
+          if (!title || T3_DEFAULT_TITLES.has(title.toLowerCase())) continue;
+          titleByThreadId.set(threadId, title);
+        }
+      }
+    } catch (_) { /* skip missing, locked, or incompatible databases */ } finally {
+      if (db) { try { db.close(); } catch (_) {} }
+    }
+  }
+  for (const [sessionId, candidates] of candidatesBySession) {
+    const title = candidates.map((id) => titleByThreadId.get(id)).find(Boolean);
+    if (title) out.set(sessionId, { title });
+  }
+  return out;
+}
+
 function resolveSessionMetadata(sessionIds, context) {
   const { deps, home, metadata } = context;
   const result = new Map();
+  // Which ids already carry an app-generated Codex title. T3's title is a
+  // better answer than the first user message a prompt-derived `title` gives,
+  // but a real Codex title still wins over T3's.
+  const generatedTitleById = new Map();
   const readMetadata = deps.readCodexMeta || (deps.scopedHome
-    ? (ids) => readSessionMetaForHome(ids, home, deps.codexDeps)
+    ? (ids) => readSessionMetaForHome(ids, home, { ...(deps.codexDeps || {}), titleSourceById: generatedTitleById })
     : (ids) => readSessionMeta(ids, {
       ...(deps.codexDeps || {}),
+      titleSourceById: generatedTitleById,
       homeDir: home,
       env: deps.env
     }));
   for (const [sessionId, meta] of readMetadata(sessionIds)) {
     result.set(sessionId, { ...(metadata.get(`codex:${sessionId}`) || {}), ...meta });
+  }
+
+  const readT3Metadata = deps.readT3Meta || (deps.scopedHome
+    ? (ids) => readT3SessionMeta(ids, { ...(deps.codexDeps || {}), homeDir: home, useEnvRoot: false })
+    : (ids) => readT3SessionMeta(ids, {
+      ...(deps.codexDeps || {}),
+      homeDir: home,
+      env: deps.env
+    }));
+  for (const [sessionId, meta] of readT3Metadata(sessionIds)) {
+    const resolved = result.get(sessionId) || {};
+    // Never overwrite a title the Codex store itself generated; do replace the
+    // prompt-derived fallback, which is exactly the case T3 improves on.
+    if (resolved.title && generatedTitleById.get(sessionId)) continue;
+    if (!meta.title || meta.title === resolved.title) continue;
+    result.set(sessionId, { ...resolved, title: meta.title });
   }
 
   const codexHome = codexHomeDir({
@@ -199,9 +338,12 @@ module.exports = {
   TITLE_MAX_CODE_POINTS,
   cleanSessionTitle,
   codexHomeDir,
+  t3HomeDir,
+  discoverT3DbPaths,
   discoverDbPaths,
   threadIdCandidates,
   readSessionMeta,
+  readT3SessionMeta,
   readSessionMetaForHome,
   resolveSessionMetadata
 };
