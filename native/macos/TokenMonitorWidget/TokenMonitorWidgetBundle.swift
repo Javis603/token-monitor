@@ -5,5 +5,9 @@ import WidgetKit
 struct TokenMonitorWidgetBundle: WidgetBundle {
     var body: some Widget {
         TokenMonitorWidget()
+        TokenMonitorSummaryWidget()
+        TokenMonitorActivityWidget()
+        TokenMonitorBreakdownWidget()
+        TokenMonitorQuotaWidget()
     }
 }

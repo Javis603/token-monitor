@@ -15,8 +15,8 @@ const { localIso } = require('../helpers/localTime');
 
 // The trend series is bucketed by *local* calendar day, so the clock has to be
 // stated in local time: `2026-07-17T08:30:00.000Z` is already the 16th at UTC-10
-// and the trend then ends a day early. The freshness stamps below move with it,
-// because `status.dataAgeSeconds` is the distance between the two.
+// and the trend then ends a day early. The freshness stamps below move with it
+// so the source age stays five minutes in every time zone.
 const NOW = localIso(2026, 7, 17, 8, 30);
 const SOURCE_UPDATED_AT = localIso(2026, 7, 17, 8, 25);
 
@@ -83,7 +83,7 @@ function aggregateDevice(deviceId, sourceTime, totalTokens = 42) {
   };
 }
 
-test('builds schema v6 overview, quota, models, activity, trend and presentation', () => {
+test('builds schema v10 periods, quota and presentation', () => {
   const snapshot = buildSnapshot(sampleStats(), {
     now: NOW,
     presentation: {
@@ -93,37 +93,46 @@ test('builds schema v6 overview, quota, models, activity, trend and presentation
   });
 
   assert.equal(snapshot.schemaVersion, MAC_WIDGET_SCHEMA_VERSION);
-  assert.equal(MAC_WIDGET_SCHEMA_VERSION, 6);
-  assert.deepEqual(snapshot.overview, {
-    currentPeriod: 'today', totalTokens: 1_200_000, costUsd: 1.25,
-    primaryTool: 'codex', updatedAt: SOURCE_UPDATED_AT
+  assert.equal(MAC_WIDGET_SCHEMA_VERSION, 10);
+  assert.deepEqual(snapshot.periods.day.overview, {
+    totalTokens: 1_200_000, costUsd: 1.25
   });
   assert.equal(snapshot.periods.day.overview.totalTokens, 1_200_000);
   assert.equal(snapshot.periods.month.overview.totalTokens, 9_000_000);
   assert.equal(snapshot.periods.total.overview.totalTokens, 20_000_000);
-  assert.deepEqual(snapshot.quota[0].windows[0], {
-    kind: 'weekly', metric: null, showMeter: true,
-    usedPercent: 35, remainingPercent: 65,
-    resetsAt: '2026-07-20T00:00:00.000Z', windowMinutes: null
-  });
-  assert.deepEqual(snapshot.models.map((model) => [model.displayName, model.totalTokens, model.sharePercent]), [
-    ['gpt-5.6', 900_000, 75], ['MiMo V2 Pro', 300_000, 25]
+  assert.deepEqual(snapshot.periods.day.tools.map((tool) => [tool.id, tool.totalTokens, tool.costUsd]), [
+    ['codex', 1_000_000, 1], ['claude', 200_000, 0.25]
   ]);
-  assert.equal(snapshot.activity.activeDays, 3);
-  assert.deepEqual(snapshot.activity.days.map((day) => day.intensity), [2, 4, 1]);
-  assert.deepEqual(snapshot.activity.days.map((day) => day.totalTokens), [100, 200, 50]);
-  assert.deepEqual(snapshot.trend.points.map((point) => point.date), [
+  assert.ok(Math.abs(snapshot.periods.day.tools[0].sharePercent - (100 / 1.2)) < Number.EPSILON * 100);
+  assert.ok(Math.abs(snapshot.periods.day.tools[1].sharePercent - (100 / 6)) < Number.EPSILON * 100);
+  assert.deepEqual(snapshot.quota[0].windows[0], {
+    kind: 'weekly', label: 'Weekly', metric: null, showMeter: true,
+    usedPercent: 35,
+    remainingPercent: 65,
+    resetsAt: '2026-07-20T00:00:00.000Z',
+    windowMinutes: null
+  });
+  assert.deepEqual(snapshot.periods.day.models.map((model) => [model.displayName, model.totalTokens, model.costUsd, model.sharePercent]), [
+    ['gpt-5.6', 900_000, 1, 75], ['MiMo V2 Pro', 300_000, 0.25, 25]
+  ]);
+  assert.equal(snapshot.periods.day.activity.activeDays, 3);
+  assert.deepEqual(snapshot.periods.day.activity.days.map((day) => day.intensity), [2, 4, 1]);
+  assert.deepEqual(snapshot.periods.day.activity.days.map((day) => day.totalTokens), [100, 200, 50]);
+  assert.deepEqual(snapshot.periods.day.activity.days.map((day) => day.costUsd), [0.1, 0.2, 0.05]);
+  assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.date), [
     '2026-07-11', '2026-07-12', '2026-07-13', '2026-07-14',
     '2026-07-15', '2026-07-16', '2026-07-17'
   ]);
-  assert.deepEqual(snapshot.trend.points.map((point) => point.totalTokens), [0, 0, 0, 0, 100, 200, 1_200_000]);
-  assert.equal(snapshot.trend.currentTokens, 1_200_000);
-  assert.equal(snapshot.trend.peakTokens, 1_200_000);
+  assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.totalTokens), [
+    0, 0, 0, 0, 100, 200, 1_200_000
+  ]);
+  assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.costUsd), [
+    0, 0, 0, 0, 0.1, 0.2, 1.25
+  ]);
   assert.deepEqual(snapshot.presentation, {
     currencyCode: 'CNY', currencySymbol: '¥', currencyRate: 7.1,
     numberStyle: 'compact', compactTokenUnits: 'localized', showCost: true, locale: 'zh-CN', theme: 'custom'
   });
-  assert.equal(snapshot.status.noData, false);
   assert.equal(snapshot.status.isStale, false);
 });
 
@@ -218,7 +227,7 @@ test('shares the complete provider allowlist and preserves credit window display
 
   assert.deepEqual(snapshot.quota.map((provider) => provider.provider), ['openrouter', 'thirdparty']);
   assert.deepEqual(byProvider.get('openrouter').windows[0], {
-    kind: 'billing', metric: 'credits', showMeter: false,
+    kind: 'billing', label: 'Monthly', metric: 'credits', showMeter: false,
     usedPercent: null, remainingPercent: null, resetsAt: null, windowMinutes: null,
     remaining: 12.5, currency: 'USD'
   });
@@ -249,7 +258,7 @@ test('preserves WorkBuddy finite credits and unlimited detail for the native wid
   assert.equal(Object.hasOwn(unlimited.quota[0].windows[0], 'remaining'), false);
 });
 
-test('keeps multi-account provider identities stable without exporting account details', () => {
+test('keeps multi-account provider identities stable with masked email labels', () => {
   const stats = {
     limits: { providers: [
       {
@@ -266,11 +275,16 @@ test('keeps multi-account provider identities stable without exporting account d
       }
     ]}
   };
-  const first = buildSnapshot(stats, { now: NOW });
+  const first = buildSnapshot(stats, {
+    now: NOW,
+    activeCodexAccount: { accountKey: 'workspace-b', accountEmail: 'b@example.com' }
+  });
   stats.limits.providers[0].windows[0].remainingPercent = 65;
   const second = buildSnapshot(stats, { now: NOW });
 
-  assert.deepEqual(first.quota.map((provider) => provider.displayName), ['Codex 1', 'Codex 2']);
+  assert.deepEqual(first.quota.map((provider) => provider.displayName), ['Codex', 'Codex']);
+  assert.deepEqual(first.quota.map((provider) => provider.accountLabel), ['a***@example.com', 'b***@example.com']);
+  assert.deepEqual(first.quota.map((provider) => provider.isCurrentAccount || false), [false, true]);
   assert.equal(new Set(first.quota.map((provider) => provider.instanceId)).size, 2);
   assert.deepEqual(first.quota.map((provider) => provider.instanceId), second.quota.map((provider) => provider.instanceId));
   for (const privateValue of ['workspace-a', 'workspace-b', 'a@example.com', 'b@example.com', 'auth.json', 'secret-a', 'private-a']) {
@@ -320,11 +334,11 @@ test('merges model display-name collisions before calculating shares', () => {
   const snapshot = buildSnapshot({ periods: {
     today: { models: { 'GPT-5.6': 10, 'gpt-5.6': 20 }, modelCosts: { 'GPT-5.6': 1, 'gpt-5.6': 2 } }
   } }, { now: NOW });
-  assert.equal(snapshot.models.length, 1);
-  assert.equal(snapshot.models[0].totalTokens, 30);
-  assert.equal(snapshot.models[0].costUsd, 3);
-  assert.equal(snapshot.models[0].sharePercent, 100);
-  assert.match(snapshot.models[0].id, /^model-/);
+  assert.equal(snapshot.periods.day.models.length, 1);
+  assert.equal(snapshot.periods.day.models[0].totalTokens, 30);
+  assert.equal(snapshot.periods.day.models[0].costUsd, 3);
+  assert.equal(snapshot.periods.day.models[0].sharePercent, 100);
+  assert.match(snapshot.periods.day.models[0].id, /^model-/);
 });
 
 test('preserves a zero balance and omits missing, non-finite, or unsupported balances', () => {
@@ -345,7 +359,7 @@ test('preserves a zero balance and omits missing, non-finite, or unsupported bal
   }
 });
 
-test('pins the legacy top-level mirror to day and keeps every period addressable', () => {
+test('publishes only independently addressable periods', () => {
   // The app's own Today/Month/AllTime tab must not reach the snapshot: each
   // widget picks its period through the AppIntent, so anything that tracked the
   // app's tab would rewrite the file and spend a reload budget on a change no
@@ -354,10 +368,11 @@ test('pins the legacy top-level mirror to day and keeps every period addressable
     now: NOW,
     presentation: { defaultPeriod: 'month', currencyCode: 'USD' }
   });
-  assert.equal(snapshot.overview.currentPeriod, 'today');
-  assert.equal(snapshot.overview.totalTokens, 1_200_000);
-  assert.equal(snapshot.presentation.defaultPeriod, undefined);
   assert.equal(snapshot.periods.day.overview.totalTokens, 1_200_000);
+  assert.equal(snapshot.presentation.defaultPeriod, undefined);
+  for (const legacyMirror of ['overview', 'tools', 'models', 'activity', 'trend']) {
+    assert.equal(Object.hasOwn(snapshot, legacyMirror), false);
+  }
   assert.equal(snapshot.periods.month.overview.totalTokens, 9_000_000);
   assert.equal(snapshot.periods.total.overview.totalTokens, 20_000_000);
 });
@@ -373,7 +388,7 @@ test('keeps day, month and total model data independent', () => {
   assert.deepEqual(snapshot.periods.total.models.map((model) => model.displayName), ['total-model']);
 });
 
-test('keeps up to ten provider and model rows for adaptive widget capacity', () => {
+test('keeps every known provider row selectable while model display stays capped', () => {
   const stats = sampleStats();
   const providerIds = [
     'codex', 'claude', 'cursor', 'antigravity', 'opencode', 'deepseek',
@@ -389,26 +404,77 @@ test('keeps up to ten provider and model rows for adaptive widget capacity', () 
   );
 
   const snapshot = buildSnapshot(stats, { now: NOW });
-  assert.equal(snapshot.quota.length, 10);
-  assert.equal(snapshot.models.length, 10);
+  assert.equal(snapshot.quota.length, providerIds.length);
+  assert.equal(snapshot.periods.day.models.length, 10);
+});
+
+test('keeps third-party profiles after the first ten quota rows with recognizable names', () => {
+  const leadingProviders = [
+    'antigravity', 'claude', 'codex', 'codex', 'codex',
+    'commandcode', 'copilot', 'cursor', 'deepseek', 'openrouter'
+  ].map((provider, index) => ({
+    provider,
+    accountKey: `${provider}-${index}`,
+    status: 'ok',
+    windows: [{ kind: 'weekly', remainingPercent: 80 }]
+  }));
+  const snapshot = buildSnapshot({
+    limits: { providers: [
+      ...leadingProviders,
+      {
+        provider: 'thirdparty', accountKey: 'gptnb', accountName: 'GPTNB', status: 'ok',
+        balance: { amount: 39.5, currency: 'USD', allTimeSpend: 140.52 },
+        windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 39.5, currency: 'USD' }]
+      },
+      {
+        provider: 'thirdparty', accountKey: 'niba', accountName: 'Niba', status: 'ok',
+        balance: { amount: 1903411.84, currency: 'USD', allTimeSpend: 26589.65 },
+        windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 1903411.84, currency: 'USD' }]
+      }
+    ] }
+  }, { now: NOW });
+
+  const thirdParty = snapshot.quota.filter((provider) => provider.provider === 'thirdparty');
+  assert.equal(snapshot.quota.length, 12);
+  assert.deepEqual(thirdParty.map((provider) => provider.accountLabel), ['GPTNB', 'Niba']);
+  assert.deepEqual(thirdParty.map((provider) => provider.balance.allTimeSpend), [140.52, 26589.65]);
+  assert.deepEqual(thirdParty.map((provider) => provider.windows[0].currency), ['USD', 'USD']);
+});
+
+test('preserves spend amounts and currency for native quota formatting', () => {
+  const snapshot = buildSnapshot({
+    limits: { providers: [{
+      provider: 'claude', status: 'ok',
+      windows: [{
+        kind: 'billing', metric: 'spend', label: 'Usage credits',
+        used: 2.35, limit: 20, currency: 'USD', showMeter: true
+      }]
+    }] }
+  }, { now: NOW });
+
+  assert.deepEqual(snapshot.quota[0].windows[0], {
+    kind: 'billing', label: 'Usage credits', metric: 'spend', showMeter: true,
+    usedPercent: null, remainingPercent: null, resetsAt: null, windowMinutes: null,
+    used: 2.35, currency: 'USD'
+  });
 });
 
 test('keeps real 28, 90, and 180 day activity ranges, caps at 182, and keeps DAY trend at 7 dates', () => {
   for (const count of [28, 90, 180]) {
     const daily = dailyHistory(count);
     const snapshot = buildSnapshot({ history: { daily } }, { now: NOW });
-    assert.equal(snapshot.activity.days.length, count);
-    assert.equal(snapshot.activity.days[0].date, daily[0].date);
-    assert.equal(snapshot.activity.days.at(-1).date, daily.at(-1).date);
-    assert.equal(snapshot.trend.points.length, 7);
+    assert.equal(snapshot.periods.day.activity.days.length, count);
+    assert.equal(snapshot.periods.day.activity.days[0].date, daily[0].date);
+    assert.equal(snapshot.periods.day.activity.days.at(-1).date, daily.at(-1).date);
+    assert.equal(snapshot.periods.day.trend.points.length, 7);
   }
 
   const daily = dailyHistory(190, '2025-12-01');
   const snapshot = buildSnapshot({ history: { daily } }, { now: NOW });
-  assert.equal(snapshot.activity.days.length, 182);
-  assert.equal(snapshot.activity.days[0].date, daily[8].date);
-  assert.equal(snapshot.activity.days.at(-1).date, daily.at(-1).date);
-  assert.equal(snapshot.trend.points.length, 7);
+  assert.equal(snapshot.periods.day.activity.days.length, 182);
+  assert.equal(snapshot.periods.day.activity.days[0].date, daily[8].date);
+  assert.equal(snapshot.periods.day.activity.days.at(-1).date, daily.at(-1).date);
+  assert.equal(snapshot.periods.day.trend.points.length, 7);
 });
 
 test('builds a local seven-day Widget trend from live usage without double counting history', () => {
@@ -430,14 +496,86 @@ test('builds a local seven-day Widget trend from live usage without double count
     '2026-07-31', '2026-08-01', '2026-08-02', '2026-08-03',
     '2026-08-04', '2026-08-05', '2026-08-06'
   ]);
-  assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.totalTokens), [0, 210, 0, 0, 0, 123, 99]);
+  assert.deepEqual(snapshot.periods.day.trend.points.map((point) => point.totalTokens), [
+    0, 210, 0, 0, 0, 123, 99
+  ]);
 
   const liveOnly = buildSnapshot({ periods: { today: { totalTokens: 99, costUsd: 0.9 } } }, { now });
-  assert.deepEqual(liveOnly.periods.day.trend.points.map((point) => point.totalTokens), [0, 0, 0, 0, 0, 0, 99]);
-  assert.equal(snapshot.periods.month.trend.points.length, 2);
-  assert.equal(snapshot.periods.total.trend.points.length, 2);
+  assert.deepEqual(liveOnly.periods.day.trend.points.map((point) => point.totalTokens), [
+    0, 0, 0, 0, 0, 0, 99
+  ]);
+  assert.deepEqual(snapshot.periods.month.trend.points.map((point) => point.date), [
+    '2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06'
+  ]);
+  assert.deepEqual(snapshot.periods.month.trend.points.map((point) => point.totalTokens), [
+    210, 0, 0, 0, 123, 99
+  ]);
+  assert.deepEqual(snapshot.periods.total.trend.points, [{
+    date: '2026-08', totalTokens: 333, costUsd: 3.6
+  }]);
   assert.equal(snapshot.periods.month.models[0].sharePercent, 100);
   assert.equal(snapshot.periods.total.models[0].sharePercent, 100);
+});
+
+test('keeps MONTH inside the current calendar month and buckets TOTAL by month', () => {
+  const snapshot = buildSnapshot({
+    periods: {
+      today: { totalTokens: 40, costUsd: 0.4 },
+      month: { totalTokens: 400, costUsd: 4 },
+      allTime: { totalTokens: 4_000, costUsd: 40 }
+    },
+    history: {
+      daily: [
+        { date: '2026-07-31', tokens: 900, cost: 9 },
+        { date: '2026-08-01', tokens: 100, cost: 1 },
+        { date: '2026-08-05', tokens: 200, cost: 2 }
+      ],
+      monthly: [
+        { month: '2026-06', tokens: 1_000, cost: 10 },
+        { month: '2026-07', tokens: 2_000, cost: 20 }
+      ]
+    }
+  }, { now: new Date(2026, 7, 6, 12, 0, 0) });
+
+  assert.deepEqual(snapshot.periods.month.trend.points.map((point) => point.date), [
+    '2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06'
+  ]);
+  assert.deepEqual(snapshot.periods.month.trend.points.map((point) => point.totalTokens), [
+    100, 0, 0, 0, 200, 40
+  ]);
+  assert.deepEqual(snapshot.periods.total.trend.points, [
+    { date: '2026-06', totalTokens: 1_000, costUsd: 10 },
+    { date: '2026-07', totalTokens: 2_000, costUsd: 20 },
+    { date: '2026-08', totalTokens: 400, costUsd: 4 }
+  ]);
+});
+
+test('preserves safe limit window names and uses App-aligned compact fallbacks', () => {
+  const snapshot = buildSnapshot({ limits: { providers: [
+    {
+      provider: 'antigravity', status: 'ok', windows: [
+        { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 90 },
+        { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 80 }
+      ]
+    },
+    {
+      provider: 'copilot', status: 'ok', windows: [
+        { kind: 'billing', label: 'Premium requests', remainingPercent: 70 },
+        { kind: 'billing', label: 'Chat messages', remainingPercent: 60 }
+      ]
+    },
+    {
+      provider: 'commandcode', status: 'ok', windows: [
+        { kind: 'session', remainingPercent: 50 },
+        { kind: 'weekly', label: 'private@example.com', remainingPercent: 40 }
+      ]
+    }
+  ] } }, { now: NOW });
+  const byProvider = new Map(snapshot.quota.map((provider) => [provider.provider, provider]));
+
+  assert.deepEqual(byProvider.get('antigravity').windows.map((window) => window.label), ['5-hour', 'Weekly']);
+  assert.deepEqual(byProvider.get('copilot').windows.map((window) => window.label), ['Premium requests', 'Chat messages']);
+  assert.deepEqual(byProvider.get('commandcode').windows.map((window) => window.label), ['5-hour', 'Weekly']);
 });
 
 test('accepts only real UTC calendar dates and lets the last duplicate date win', () => {
@@ -451,28 +589,29 @@ test('accepts only real UTC calendar dates and lets the last duplicate date win'
     { date: '2026-01-01T00:00:00Z', tokens: 99, cost: 9.9 }
   ] } }, { now: '2026-03-01T12:00:00.000Z' });
 
-  assert.deepEqual(snapshot.activity.days.map((day) => day.date), [
+  assert.deepEqual(snapshot.periods.day.activity.days.map((day) => day.date), [
     '2024-02-29', '2026-02-28', '2026-03-01'
   ]);
-  assert.deepEqual(snapshot.trend.points.find((point) => point.date === '2026-02-28'), {
+  assert.deepEqual(snapshot.periods.day.trend.points.find((point) => point.date === '2026-02-28'), {
     date: '2026-02-28', totalTokens: 8, costUsd: 0.8
   });
 });
 
 test('returns a complete empty schema and stale status for missing or old data', () => {
   const empty = buildSnapshot({}, { now: NOW });
-  assert.equal(empty.schemaVersion, 6);
-  assert.equal(empty.overview.totalTokens, 0);
+  assert.equal(empty.schemaVersion, 10);
   assert.equal(empty.periods.day.overview.totalTokens, 0);
   assert.equal(empty.periods.month.overview.totalTokens, 0);
   assert.equal(empty.periods.total.overview.totalTokens, 0);
   assert.deepEqual(empty.quota, []);
-  assert.deepEqual(empty.models, []);
-  assert.equal(empty.status.noData, true);
+  assert.deepEqual(empty.periods.day.tools, []);
+  assert.deepEqual(empty.periods.day.models, []);
+  assert.deepEqual(Object.keys(empty.status).sort(), [
+    'isStale', 'sourceUpdatedAt'
+  ]);
 
   const stale = buildSnapshot({ updatedAt: localIso(2026, 7, 17, 7, 0) }, { now: NOW });
   assert.equal(stale.status.isStale, true);
-  assert.equal(stale.status.dataAgeSeconds, 5400);
 });
 
 test('derives Widget freshness from real Hub device sources instead of aggregate updatedAt', () => {
@@ -492,19 +631,14 @@ test('derives Widget freshness from real Hub device sources instead of aggregate
   assert.equal(oldStats.devices[0].stale, true);
   assert.equal(resolveWidgetSourceFreshness(oldStats, new Date(now)).sourceUpdatedAt, '2026-07-17T09:00:00.000Z');
   const oldSnapshot = buildSnapshot(oldStats, { now: '2026-07-17T10:00:00.000Z' });
-  assert.equal(oldSnapshot.status.sourceStale, true);
   assert.equal(oldSnapshot.status.isStale, true);
   assert.equal(oldSnapshot.status.sourceUpdatedAt, '2026-07-17T09:00:00.000Z');
-  assert.equal(oldSnapshot.overview.updatedAt, '2026-07-17T09:00:00.000Z');
 
   const mixedSnapshot = buildSnapshot(mixedStats, { now: '2026-07-17T10:00:00.000Z' });
-  assert.equal(mixedSnapshot.status.sourceStale, false);
   assert.equal(mixedSnapshot.status.isStale, false);
   assert.equal(mixedSnapshot.status.sourceUpdatedAt, '2026-07-17T09:55:00.000Z');
-  assert.equal(mixedSnapshot.overview.updatedAt, '2026-07-17T09:55:00.000Z');
 
   const allStaleSnapshot = buildSnapshot(allStaleStats, { now: '2026-07-17T10:00:00.000Z' });
-  assert.equal(allStaleSnapshot.status.sourceStale, true);
   assert.equal(allStaleSnapshot.status.isStale, true);
 });
 
@@ -520,11 +654,11 @@ test('normalizes invalid values, statuses, names, and percentages', () => {
       { kind: 'unknown', usedPercent: 10 }
     ] }] }
   }, { now: NOW });
-  assert.equal(snapshot.overview.totalTokens, 0);
-  assert.deepEqual(snapshot.models.map((model) => model.displayName), ['safe-model']);
+  assert.equal(snapshot.periods.day.overview.totalTokens, 0);
+  assert.deepEqual(snapshot.periods.day.models.map((model) => model.displayName), ['safe-model']);
   assert.equal(snapshot.quota[0].status, 'error');
   assert.deepEqual(snapshot.quota[0].windows[0], {
-    kind: 'session', metric: null, showMeter: true,
+    kind: 'session', label: 'Session', metric: null, showMeter: true,
     usedPercent: 100, remainingPercent: 0, resetsAt: null, windowMinutes: 0
   });
 });
@@ -548,10 +682,10 @@ test('normalizes negative or invalid activity totals to zero', () => {
     { date: '2026-07-17', tokens: 37_400_000 }
   ] } }, { now: NOW });
 
-  assert.deepEqual(snapshot.activity.days.map((day) => day.totalTokens), [0, 0, 37_400_000]);
+  assert.deepEqual(snapshot.periods.day.activity.days.map((day) => day.totalTokens), [0, 0, 37_400_000]);
 });
 
-test('keeps missing percentages absent instead of coercing them to zero or one hundred', () => {
+test('keeps missing remaining percentages absent instead of coercing them to zero', () => {
   const snapshot = buildSnapshot({
     limits: { providers: [{
       provider: 'codex',
@@ -563,9 +697,7 @@ test('keeps missing percentages absent instead of coercing them to zero or one h
     }] }
   }, { now: NOW });
 
-  assert.equal(snapshot.quota[0].windows[0].usedPercent, null);
   assert.equal(snapshot.quota[0].windows[0].remainingPercent, null);
-  assert.equal(snapshot.quota[0].windows[1].usedPercent, null);
   assert.equal(snapshot.quota[0].windows[1].remainingPercent, null);
 });
 
@@ -602,7 +734,8 @@ test('uses explicit allowlists so secrets, identities and raw history never ente
   for (const value of sensitive) assert.equal(serialized.includes(value), false);
   assert.equal(serialized.endsWith('\n'), true);
   const parsed = JSON.parse(serialized);
-  assert.equal(parsed.schemaVersion, 6);
+  assert.equal(parsed.schemaVersion, 10);
+  assert.equal(parsed.quota.find((provider) => provider.provider === 'codex').accountLabel, 'p***e@example.com');
   assert.deepEqual(parsed.quota.find((provider) => provider.provider === 'mimo').balance, {
     amount: 3.62,
     currency: 'CNY'
@@ -665,15 +798,16 @@ test('keeps diagnostics, health, subscriptions, sync failures and sensitive fiel
   }
 });
 
-test('provider status summarizes configuration and login requirements without identity', () => {
+test('quota status preserves provider states without private account identity', () => {
   const snapshot = buildSnapshot({
     limits: { providers: [
       { provider: 'codex', status: 'unauthorized', accountKey: 'private-key' },
       { provider: 'claude', status: 'notConfigured' }
     ] }
   }, { now: NOW });
-  assert.equal(snapshot.status.providerConfigured, true);
-  assert.equal(snapshot.status.providerNeedsLogin, true);
+  assert.deepEqual(snapshot.quota.map(({ provider, status }) => [provider, status]), [
+    ['claude', 'notConfigured'], ['codex', 'unauthorized']
+  ]);
   assert.equal(JSON.stringify(snapshot).includes('private-key'), false);
 });
 
