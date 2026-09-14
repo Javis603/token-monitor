@@ -202,28 +202,35 @@ function projectHistory(history, resolve, fallbackModels) {
   return result;
 }
 
-function aliasPlan(modelIds, aliases) {
+// Automatic grouping is opt-in (`modelAliasAutoMerge`). It stays off by default
+// because the only time it acts is when two spellings of one model are both present,
+// which is also the case where the difference between them can be real — two supply
+// channels for the same model, billed separately. Manual aliases are unaffected by
+// the setting: an alias the user typed is always applied.
+function aliasPlan(modelIds, aliases, autoMerge) {
   const explicit = normalizeModelAliases(aliases);
-  const automatic = inferModelAliases(modelIds);
+  const automatic = autoMerge ? inferModelAliases(modelIds) : {};
   return {
     explicit,
     automatic,
     active: Object.keys(explicit).length > 0 || Object.keys(automatic).length > 0,
-    resolve: createModelAliasResolver(explicit, modelIds)
+    resolve: createModelAliasResolver(explicit, autoMerge ? modelIds : [])
   };
 }
 
-function projectModelAliasHistory(history, aliases) {
+// Collecting the observed model ids walks the whole payload, so it is skipped
+// outright when automatic grouping is off — which is the default path.
+function projectModelAliasHistory(history, aliases, options = {}) {
   if (!history || typeof history !== 'object') return history;
-  const modelIds = [...collectHistoryModelIds(history)];
-  const plan = aliasPlan(modelIds, aliases);
+  const autoMerge = options.autoMerge === true;
+  const plan = aliasPlan(autoMerge ? [...collectHistoryModelIds(history)] : [], aliases, autoMerge);
   return plan.active ? projectHistory(history, plan.resolve) : history;
 }
 
-function projectModelAliasStats(stats, aliases) {
+function projectModelAliasStats(stats, aliases, options = {}) {
   if (!stats || typeof stats !== 'object') return stats;
-  const sourceIds = [...collectStatsModelIds(stats)];
-  const plan = aliasPlan(sourceIds, aliases);
+  const autoMerge = options.autoMerge === true;
+  const plan = aliasPlan(autoMerge ? [...collectStatsModelIds(stats)] : [], aliases, autoMerge);
   if (!plan.active) return stats;
 
   const projectRecord = (record) => {

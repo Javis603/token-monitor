@@ -9,7 +9,7 @@ const {
   projectModelAliasHistory
 } = require('../../src/electron/modelAliasPresentation');
 
-test('observed provider, separator, case and Claude Code variants merge automatically', () => {
+test('observed provider, separator and case variants merge; vendor suffixes do not', () => {
   const models = [
     'anthropic/claude-opus-5',
     'claude-opus-5',
@@ -22,13 +22,15 @@ test('observed provider, separator, case and Claude Code variants merge automati
   ];
   const resolve = createModelAliasResolver({}, models);
   assert.equal(resolve('anthropic/claude-opus-5'), 'claude-opus-5');
-  assert.equal(resolve('claude-opus-5-cc'), 'claude-opus-5');
   assert.equal(resolve('openrouter/anthropic/Claude.Sonnet_4.5'), 'claude-sonnet-4-5');
   assert.equal(resolve('gpt-5.5-pro'), 'gpt-5.5-pro');
   assert.equal(resolve('claude-sonnet-4-5-20260901'), 'claude-sonnet-4-5-20260901');
+  // `-cc` marks a supply channel in someone else's naming convention, not a spelling
+  // of the same id. Folding it is one manual alias away, which is where tokscale's
+  // own modelAliases leaves it too.
+  assert.equal(resolve('claude-opus-5-cc'), 'claude-opus-5-cc');
   assert.deepEqual(inferModelAliases(models), {
     'anthropic/claude-opus-5': 'claude-opus-5',
-    'claude-opus-5-cc': 'claude-opus-5',
     'openrouter/anthropic/Claude.Sonnet_4.5': 'claude-sonnet-4-5'
   });
 });
@@ -83,7 +85,7 @@ test('automatic folding covers live, nested and historical model maps without ch
     }
   };
   const source = structuredClone(stats);
-  const projected = projectModelAliasStats(stats, {});
+  const projected = projectModelAliasStats(stats, {}, { autoMerge: true });
   assert.deepEqual(projected.periods.today.models, {
     'claude-opus-5': 30,
     'claude-sonnet-4-5': 30
@@ -115,9 +117,45 @@ test('history-only duplicate evidence is enough to fold daily, monthly and favor
     }],
     summary: { totalTokens: 30, totalCost: 3, favoriteModel: 'anthropic/claude-opus-5' }
   };
-  const projected = projectModelAliasHistory(history, {});
+  const projected = projectModelAliasHistory(history, {}, { autoMerge: true });
   assert.deepEqual(projected.daily[0].perModel, {
     'claude-opus-5': { tokens: 30, cost: 3, unclassifiedTokens: 0 }
   });
   assert.equal(projected.summary.favoriteModel, 'claude-opus-5');
+});
+
+test('automatic grouping is opt-in and manual aliases apply either way', () => {
+  const stats = {
+    periods: { today: { models: { 'anthropic/claude-opus-5': 10, 'claude-opus-5': 20 } } }
+  };
+  // Default: two spellings of one model stay apart until the user asks for grouping.
+  assert.strictEqual(projectModelAliasStats(stats, {}), stats);
+  assert.deepEqual(
+    projectModelAliasStats(stats, {}, { autoMerge: false }).periods.today.models,
+    { 'anthropic/claude-opus-5': 10, 'claude-opus-5': 20 }
+  );
+  assert.deepEqual(
+    projectModelAliasStats(stats, {}, { autoMerge: true }).periods.today.models,
+    { 'claude-opus-5': 30 }
+  );
+  // A typed alias is not gated on the setting.
+  assert.deepEqual(
+    projectModelAliasStats(stats, { 'anthropic/claude-opus-5': 'claude-opus-5' }).periods.today.models,
+    { 'claude-opus-5': 30 }
+  );
+});
+
+test('a history projection is opt-in the same way', () => {
+  const history = {
+    daily: [{ date: '2026-09-12', perModel: { 'anthropic/claude-opus-5': { tokens: 10 }, 'claude-opus-5': { tokens: 20 } } }],
+    monthly: [],
+    summary: { totalTokens: 30, favoriteModel: 'claude-opus-5' }
+  };
+  assert.strictEqual(projectModelAliasHistory(history, {}), history);
+  assert.deepEqual(
+    projectModelAliasHistory(history, {}, { autoMerge: true }).daily[0].perModel,
+    // unclassifiedTokens is re-derived because the fixture carries no component
+    // breakdown, which is the existing merge rule rather than anything opt-in.
+    { 'claude-opus-5': { tokens: 30, unclassifiedTokens: 30 } }
+  );
 });

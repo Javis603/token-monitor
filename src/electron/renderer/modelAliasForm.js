@@ -6,7 +6,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorModelAliasForm = api;
 })(typeof window !== 'undefined' ? window : null, function createModelAliasFormApi(aliasesApi) {
-  function createModelAliasForm({ document, t, getAliases, saveAliases }) {
+  function createModelAliasForm({ document, t, getAliases, getAutoMerge, saveAliases }) {
     const el = (suffix) => document.getElementById(`modelAliases${suffix}`);
     let editingAlias;
     let busy = false;
@@ -46,7 +46,12 @@
     }
     function render() {
       const entries = Object.entries(aliasesApi.normalizeModelAliases(getAliases()));
-      el('Status').textContent = entries.length ? t('settings.modelAliases.count', { count: entries.length }) : t('settings.modelAliases.none');
+      // The pill must not read as "automatic" when automatic grouping is off, which
+      // is the default: with no manual aliases that would claim work nothing is doing.
+      const automatic = typeof getAutoMerge === 'function' && getAutoMerge();
+      el('Status').textContent = entries.length
+        ? t('settings.modelAliases.count', { count: entries.length })
+        : t(automatic ? 'settings.modelAliases.none' : 'settings.modelAliases.off');
       el('List').replaceChildren();
       for (const [alias, canonical] of entries) {
         const row = document.createElement('div');

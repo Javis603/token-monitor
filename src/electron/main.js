@@ -539,6 +539,7 @@ function defaultSettings() {
     allTimeSince: process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01',
     customModelPricing: [],
     modelAliases: {},
+    modelAliasAutoMerge: false,
     limitsEnabled: parseBoolean(process.env.TOKEN_MONITOR_LIMITS_ENABLED, true),
     limitProviders: parseLimitProviders(process.env.TOKEN_MONITOR_LIMIT_PROVIDERS).join(','),
     limitProviderOrder: defaultLimitProviderOrder(),
@@ -2492,6 +2493,7 @@ function readSettings() {
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
     merged.modelAliases = normalizeModelAliases(merged.modelAliases);
+    merged.modelAliasAutoMerge = parseBoolean(merged.modelAliasAutoMerge, false);
     merged.interfaceFontFamily = fontSettingsApi.normalizeFontFamily(merged.interfaceFontFamily);
     merged.displayFontFamily = fontSettingsApi.normalizeFontFamily(merged.displayFontFamily);
     merged.tokenRateMode = normalizeTokenRateMode(merged.tokenRateMode);
@@ -2892,7 +2894,7 @@ function electronPresentationStats(stats) {
     localDeviceId: settings?.deviceId,
     syncActive: mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim()),
     opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
-  }), settings?.modelAliases);
+  }), settings?.modelAliases, { autoMerge: settings?.modelAliasAutoMerge === true });
 }
 let trayCodexPendingSince = 0;
 let trayCodexSwitchInFlight = false;
@@ -4065,6 +4067,7 @@ function captureMacWidgetWork({ stats, owner }) {
       : null,
     presentation: macWidgetPresentation(),
     modelAliases: Object.freeze(normalizeModelAliases(settings?.modelAliases)),
+    modelAliasAutoMerge: settings?.modelAliasAutoMerge === true,
     snapshotPath: widget.snapshotPath,
     widgetKind: widget.widgetKind
   };
@@ -4101,7 +4104,7 @@ function ensureMacWidgetSnapshotController() {
       snapshotPath: work.snapshotPath,
       snapshotOptions: {
         presentation: work.presentation,
-        history: projectModelAliasHistory(history, work.modelAliases)
+        history: projectModelAliasHistory(history, work.modelAliases, { autoMerge: work.modelAliasAutoMerge })
       },
       logger: (message) => console.warn(message)
     }),
@@ -6448,7 +6451,7 @@ async function getDashboardHistory(options = {}) {
     fixedPeriods: fixedPeriodHistoryMeta({
       source
     })
-  }, settings?.modelAliases);
+  }, settings?.modelAliases, { autoMerge: settings?.modelAliasAutoMerge === true });
 }
 
 let cursorStatusCache = { value: null, at: 0 };
@@ -6722,6 +6725,7 @@ app.whenReady().then(() => {
       liveTokenRateScope: normalizeLiveTokenRateScope(patch.liveTokenRateScope ?? settings.liveTokenRateScope),
       compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
       modelAliases: normalizeModelAliases(patch.modelAliases ?? settings.modelAliases),
+      modelAliasAutoMerge: parseBoolean(patch.modelAliasAutoMerge ?? settings.modelAliasAutoMerge, false),
       interfaceFontFamily: fontSettingsApi.normalizeFontFamily(
         patch.interfaceFontFamily ?? settings.interfaceFontFamily
       ),
@@ -6942,7 +6946,8 @@ app.whenReady().then(() => {
       // therefore may not send another frame after this local-only setting changes.
       refreshLimitStatsPresentation();
     }
-    if (JSON.stringify(settings.modelAliases) !== JSON.stringify(previousSettingsState.modelAliases)) {
+    if (JSON.stringify(settings.modelAliases) !== JSON.stringify(previousSettingsState.modelAliases)
+      || settings.modelAliasAutoMerge !== previousSettingsState.modelAliasAutoMerge) {
       // No collection/pricing refresh: regroup the cached source immediately,
       // including when the hub is offline. Revision decoration invalidates the
       // main renderer's full-history caches; the dashboard has its own event.

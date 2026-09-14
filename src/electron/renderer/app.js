@@ -10106,6 +10106,8 @@ function syncSettingsForm() {
   renderSettingsAppUpdateRow();
   renderCodexAccounts();
   renderCustomPricing();
+  const modelAliasesAutoInput = document.getElementById('modelAliasesAutoInput');
+  if (modelAliasesAutoInput) modelAliasesAutoInput.checked = state.settings?.modelAliasAutoMerge === true;
   modelAliasForm?.syncSettings();
   renderCursorStatus();
 }
@@ -16957,7 +16959,13 @@ function setupModelAliasesUI() {
   modelAliasForm = window.TokenMonitorModelAliasForm.createModelAliasForm({
     document, t,
     getAliases: () => state.settings?.modelAliases || {},
+    getAutoMerge: () => state.settings?.modelAliasAutoMerge === true,
     saveAliases: (modelAliases) => saveSettings({ modelAliases })
+  });
+  const auto = document.getElementById('modelAliasesAutoInput');
+  auto?.addEventListener('change', async () => {
+    await saveSettings({ modelAliasAutoMerge: auto.checked });
+    modelAliasForm?.syncSettings();
   });
 }
 

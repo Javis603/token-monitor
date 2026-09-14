@@ -70,16 +70,6 @@
     return result;
   }
 
-  function identityKey(model, observedKeys) {
-    const key = modelIdentityKey(model);
-    const withoutClaudeCodeSuffix = key.startsWith('claude-') && key.endsWith('-cc')
-      ? key.slice(0, -3)
-      : '';
-    return withoutClaudeCodeSuffix && observedKeys.has(withoutClaudeCodeSuffix)
-      ? withoutClaudeCodeSuffix
-      : key;
-  }
-
   function compareCanonicalCandidates(left, right, identity) {
     const rank = (model) => {
       const leaf = modelLeaf(model);
@@ -103,14 +93,20 @@
     return 0;
   }
 
+  // Collapse spellings of one model that are BOTH present in the payload: a group of
+  // one is left alone. Two things are deliberately out of scope, because each would
+  // decide on the user's behalf that a distinction they can see does not matter:
+  // renaming a lone `<provider>/<model>` to its last segment (the prefix is often
+  // which supply channel, and therefore which bill, the tokens came from), and
+  // folding vendor-specific suffixes such as a reseller's `-cc`. Both are one manual
+  // alias away, which is also where tokscale's own `modelAliases` leaves them.
   function inferModelAliases(modelIds) {
     const models = discoveredModelIds(modelIds);
     if (models.length < 2) return {};
 
-    const observedKeys = new Set(models.map(modelIdentityKey).filter(Boolean));
     const groups = new Map();
     for (const model of models) {
-      const key = identityKey(model, observedKeys);
+      const key = modelIdentityKey(model);
       if (!key) continue;
       const group = groups.get(key) || [];
       group.push(model);

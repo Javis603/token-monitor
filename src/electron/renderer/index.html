@@ -570,8 +570,15 @@
                 </span>
               </button>
               <div id="modelAliasesSettingsDetails" class="cursor-settings-details hidden">
-                <p class="settings-note" data-i18n="settings.modelAliases.note">Equivalent provider-qualified and separator variants are merged automatically in this app's views. Add an alias only when the automatic matcher cannot prove two names are equivalent. Costs, source logs, sync and exports are unchanged.</p>
-                <p class="settings-note" data-i18n="settings.modelAliases.matching">Automatic matching keeps dated versions, tiers and model variants distinct. Manual mappings apply once and can override a specific reported ID.</p>
+                <p class="settings-note" data-i18n="settings.modelAliases.note">Group model names that mean the same model in this app's views. Costs, source logs, sync and exports are unchanged, and removing a mapping restores the separate groups.</p>
+                <label class="checkbox-label settings-item">
+                  <span class="settings-item-text">
+                    <span class="settings-item-title" data-i18n="settings.modelAliases.autoLabel">Group duplicate model names</span>
+                  </span>
+                  <input id="modelAliasesAutoInput" type="checkbox" aria-describedby="modelAliasesAutoDescription" />
+                  <span id="modelAliasesAutoDescription" class="settings-item-desc" data-i18n="settings.modelAliases.autoDesc">Only merges when the same model is reported under two spellings at once, such as a provider-qualified name next to the bare one. A name that appears only one way is left alone.</span>
+                </label>
+                <p class="settings-note" data-i18n="settings.modelAliases.matching">Dated versions, tiers and model variants stay distinct either way. Add a manual alias for anything the automatic grouping leaves apart — including renaming a single provider-qualified name.</p>
                 <p class="settings-note model-alias-example">anthropic/claude-opus-5 → claude-opus-5</p>
                 <div id="modelAliasesList" class="managed-account-list"></div>
                 <div class="settings-actions">

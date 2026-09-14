@@ -19,23 +19,29 @@ function mainFunction(name, dependencies) {
 
 test('Electron presentation applies aliases after limit projection without changing cached stats', () => {
   const raw = { periods: { today: { models: { 'anthropic/claude-opus-5': 20, 'claude-opus-5': 30 }, modelCosts: { 'anthropic/claude-opus-5': 8, 'claude-opus-5': 1 }, totalTokens: 50, costUsd: 9 } } };
-  const settings = { modelAliases: aliases };
+  const settings = { modelAliases: aliases, modelAliasAutoMerge: false };
   const project = mainFunction('electronPresentationStats', { settings, mode: 'local', projectLimitStatsForDisplay: (stats) => stats });
   assert.deepEqual(project(raw).periods.today.models, { 'claude-opus-5': 50 });
   assert.equal(project(raw).periods.today.costUsd, 9);
   settings.modelAliases = {};
+  assert.deepEqual(project(raw).periods.today.models, { 'anthropic/claude-opus-5': 20, 'claude-opus-5': 30 });
+  settings.modelAliasAutoMerge = true;
   assert.deepEqual(project(raw).periods.today.models, { 'claude-opus-5': 50 });
   assert.equal(raw.periods.today.models['anthropic/claude-opus-5'], 20);
 });
 
 test('complete dashboard history uses local mappings for offline and multi-device history', async () => {
   const raw = { daily: [{ date: '2026-09-10', perModel: { 'anthropic/claude-opus-5': { tokens: 20, cost: 8 }, 'claude-opus-5': { tokens: 30, cost: 1 } } }], monthly: [], summary: {} };
-  const settings = { modelAliases: aliases };
+  const settings = { modelAliases: aliases, modelAliasAutoMerge: false };
   const getHistory = mainFunction('getDashboardHistory', { settings, historyResolverOptions: () => ({}), resolveCompleteHistoryWithDevices: async () => ({ history: raw, deviceHistories: [{ deviceId: 'one', history: raw }] }), getCompleteHistory: async () => raw, completeHistorySource: () => 'remote', fixedPeriodHistoryMeta: () => ({ source: 'remote' }) });
   const projected = await getHistory({ includeDevices: true });
   assert.deepEqual(projected.daily[0].perModel, { 'claude-opus-5': { tokens: 50, cost: 9, unclassifiedTokens: 50 } });
   assert.deepEqual(projected.deviceHistories[0].history.daily[0].perModel, projected.daily[0].perModel);
+  // Clearing the manual alias stops the grouping; turning automatic grouping on
+  // restores it from the duplicate evidence in the same history.
   settings.modelAliases = {};
+  assert.deepEqual((await getHistory()).daily[0].perModel, raw.daily[0].perModel);
+  settings.modelAliasAutoMerge = true;
   assert.deepEqual((await getHistory()).daily[0].perModel, {
     'claude-opus-5': { tokens: 50, cost: 9, unclassifiedTokens: 50 }
   });
