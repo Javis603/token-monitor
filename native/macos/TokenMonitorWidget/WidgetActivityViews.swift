@@ -144,7 +144,7 @@ struct DashboardActivityModule: View {
         )
         ZStack(alignment: .topLeading) {
             WidgetRefreshBackground()
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 9) {
                 WidgetRefreshButton {
                     ModuleTitle(WidgetL10n.text("Activity"))
                 }

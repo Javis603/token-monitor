@@ -16,7 +16,7 @@ enum WidgetDesignTokens {
     static let largeGap: CGFloat = 8
     static let secondarySize: CGFloat = 10
     static let microSize: CGFloat = 9
-    static let dashboardMetricSize: CGFloat = 40
+    static let dashboardMetricSize: CGFloat = 42
     static let dashboardSectionTitleSize: CGFloat = 10
     // Preserve the original dashboard quota density across both quota and
     // breakdown rows so one section never forces the other to truncate.
@@ -29,6 +29,16 @@ enum WidgetDesignTokens {
     static let chartBlue = Color(red: 115 / 255, green: 189 / 255, blue: 245 / 255)
     static let number = Color(red: 243 / 255, green: 251 / 255, blue: 247 / 255)
     static let muted = Color(red: 163 / 255, green: 173 / 255, blue: 187 / 255)
+}
+
+enum WidgetTrendChange {
+    static func label(for points: [WidgetTrendPoint]) -> String {
+        guard let first = points.first(where: { $0.totalTokens > 0 })?.totalTokens,
+              let last = points.last?.totalTokens else { return "—" }
+        let percent = Int(((Double(last) - Double(first)) / Double(first) * 100).rounded())
+        if percent == 0 { return "0%" }
+        return percent > 0 ? "+\(percent)%" : "−\(abs(percent))%"
+    }
 }
 
 struct WidgetHeatmapCell: Equatable, Identifiable {

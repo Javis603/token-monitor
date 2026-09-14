@@ -1,6 +1,28 @@
 import XCTest
 
 final class WidgetSnapshotDecodingTests: XCTestCase {
+    func testTrendChangeSkipsLeadingZeroBuckets() {
+        XCTAssertEqual(
+            WidgetTrendChange.label(for: [
+                WidgetTrendPoint(date: "2026-03", totalTokens: 0),
+                WidgetTrendPoint(date: "2026-04", totalTokens: 100),
+                WidgetTrendPoint(date: "2026-05", totalTokens: 25)
+            ]),
+            "−75%"
+        )
+        XCTAssertEqual(
+            WidgetTrendChange.label(for: [
+                WidgetTrendPoint(date: "2026-04", totalTokens: 100),
+                WidgetTrendPoint(date: "2026-05", totalTokens: 165)
+            ]),
+            "+65%"
+        )
+        XCTAssertEqual(
+            WidgetTrendChange.label(for: [WidgetTrendPoint(date: "2026-04", totalTokens: 0)]),
+            "—"
+        )
+    }
+
     func testDecodesCurrentSchemaFromPeriods() throws {
         let snapshot = try decode("""
         {

@@ -2,6 +2,105 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "Breakdown": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Breakdown" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "明细" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "明細" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "内訳" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "분석" } }
+      }
+    },
+    "Quota 1": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Quota 1" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度 1" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度 1" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータ 1" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 1" } }
+      }
+    },
+    "Quota 2": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Quota 2" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度 2" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度 2" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータ 2" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 2" } }
+      }
+    },
+    "Quota Account": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Quota Account" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度账户" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度帳號" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータアカウント" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 계정" } }
+      }
+    },
+    "Usage Summary": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Usage Summary" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "用量摘要" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "用量摘要" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "使用量サマリー" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "사용량 요약" } }
+      }
+    },
+    "Choose the usage period shown by this widget.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose the usage period shown by this widget." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择此小组件显示的用量周期。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇此小工具顯示的用量週期。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "このウィジェットに表示する使用期間を選択します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "이 위젯에 표시할 사용량 기간을 선택합니다." } }
+      }
+    },
+    "Usage Breakdown": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Usage Breakdown" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "用量明细" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "用量明細" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "使用量の内訳" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "사용량 분석" } }
+      }
+    },
+    "Choose a tool or model breakdown and its period.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose a tool or model breakdown and its period." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择工具或模型明细及其统计周期。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇工具或模型明細及其統計週期。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ツールまたはモデルの内訳と期間を選択します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "도구 또는 모델 분석과 기간을 선택합니다." } }
+      }
+    },
+    "Dashboard": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Dashboard" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "仪表盘" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "儀表板" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ダッシュボード" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "대시보드" } }
+      }
+    },
+    "Choose the dashboard period and breakdown.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose the dashboard period and breakdown." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择仪表盘的统计周期和明细。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇儀表板的統計週期和明細。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ダッシュボードの期間と内訳を選択します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "대시보드의 기간과 분석을 선택합니다." } }
+      }
+    },
+    "Choose up to two quota accounts to keep visible.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose up to two quota accounts to keep visible." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择最多两个要持续显示的额度账户。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇最多兩個要持續顯示的額度帳號。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "常に表示するクォータアカウントを2つまで選択します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "계속 표시할 할당량 계정을 최대 두 개 선택합니다." } }
+      }
+    },
     "Token Monitor Dashboard": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Dashboard" } },

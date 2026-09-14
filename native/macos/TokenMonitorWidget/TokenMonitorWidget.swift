@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import WidgetKit
 
@@ -22,8 +23,8 @@ struct TokenMonitorWidget: Widget {
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
-        .configurationDisplayName("Token Monitor Dashboard")
-        .description("Usage, quota, breakdown, and activity in one dashboard.")
+        .configurationDisplayName(LocalizedStringResource("Token Monitor Dashboard"))
+        .description(LocalizedStringResource("Usage, quota, breakdown, and activity in one dashboard."))
         .supportedFamilies([.systemLarge])
     }
 }
@@ -35,8 +36,8 @@ struct TokenMonitorSummaryWidget: Widget {
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
-        .configurationDisplayName("Token Monitor Summary")
-        .description("Tokens, cost, and a compact trend.")
+        .configurationDisplayName(LocalizedStringResource("Token Monitor Summary"))
+        .description(LocalizedStringResource("Tokens, cost, and a compact trend."))
         .supportedFamilies([.systemSmall])
     }
 }
@@ -48,8 +49,8 @@ struct TokenMonitorActivityWidget: Widget {
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
-        .configurationDisplayName("Token Monitor Activity")
-        .description("Your recent activity heatmap.")
+        .configurationDisplayName(LocalizedStringResource("Token Monitor Activity"))
+        .description(LocalizedStringResource("Your recent activity heatmap."))
         .supportedFamilies([.systemMedium])
     }
 }
@@ -61,8 +62,8 @@ struct TokenMonitorBreakdownWidget: Widget {
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
-        .configurationDisplayName("Token Monitor Breakdown")
-        .description("Compare tools or models for one period.")
+        .configurationDisplayName(LocalizedStringResource("Token Monitor Breakdown"))
+        .description(LocalizedStringResource("Compare tools or models for one period."))
         .supportedFamilies([.systemMedium])
     }
 }
@@ -74,8 +75,8 @@ struct TokenMonitorQuotaWidget: Widget {
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
-        .configurationDisplayName("Token Monitor Quota")
-        .description("Subscription windows and reset times.")
+        .configurationDisplayName(LocalizedStringResource("Token Monitor Quota"))
+        .description(LocalizedStringResource("Subscription windows and reset times."))
         .supportedFamilies([.systemMedium])
     }
 }

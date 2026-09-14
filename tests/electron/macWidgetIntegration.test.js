@@ -765,6 +765,7 @@ test('each Widget family has a purpose-built composition', () => {
   assert.match(widgetDashboardSource, /dashboardDetailSize/);
   assert.match(widgetDashboardSource, /HStack\(alignment: \.top, spacing: 12\)/);
   assert.match(widgetDashboardSource, /DashboardBreakdownModule[\s\S]*alignment: \.topLeading/);
+  assert.match(widgetViewModelSource, /dashboardMetricSize: CGFloat = 42/);
   assert.match(widgetViewModelSource, /dashboardRowLabelSize: CGFloat = 10/);
   assert.match(widgetViewModelSource, /dashboardValueSize: CGFloat = 8\.5/);
   assert.match(widgetViewModelSource, /dashboardDetailSize: CGFloat = 7\.5/);
@@ -794,7 +795,7 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   }
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;/);
-  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 42;/);
+  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 43;/);
   assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 10;/);
   assert.match(widgetDevSource, /fs\.rmSync\(extension, \{ recursive: true, force: true \}\)/);
   assert.match(widgetDevSource, /`TOKEN_MONITOR_MARKETING_VERSION=\$\{targetMarketingVersion\}`/);
@@ -902,6 +903,23 @@ test('Widget user-facing strings are localized in five languages', () => {
   ]) {
     assert.ok(widgetLocalization.strings[key], `missing Widget Gallery localization for ${key}`);
   }
+  for (const key of [
+    'Breakdown',
+    'Quota 1',
+    'Quota 2',
+    'Quota Account',
+    'Usage Summary',
+    'Choose the usage period shown by this widget.',
+    'Usage Breakdown',
+    'Choose a tool or model breakdown and its period.',
+    'Dashboard',
+    'Choose the dashboard period and breakdown.',
+    'Choose up to two quota accounts to keep visible.'
+  ]) {
+    assert.ok(widgetLocalization.strings[key], `missing Widget configuration localization for ${key}`);
+  }
+  assert.match(widgetSource, /configurationDisplayName\(LocalizedStringResource\("Token Monitor Dashboard"\)\)/);
+  assert.match(widgetSource, /description\(LocalizedStringResource\("Usage, quota, breakdown, and activity in one dashboard\."\)\)/);
 });
 
 test('Widget layout uses system margins without retaining the superseded scaffold', () => {

@@ -112,7 +112,7 @@ struct LargeDashboardWidgetView: View {
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
                 WidgetRefreshBackground()
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 8) {
                     WidgetRefreshButton {
                         HStack(alignment: .bottom, spacing: 20) {
                             WidgetMetricBlock(
@@ -135,7 +135,7 @@ struct LargeDashboardWidgetView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
-                    .frame(height: 72, alignment: .top)
+                    .frame(height: 76, alignment: .top)
 
                     Divider()
                         .opacity(WidgetDesignTokens.dividerOpacity)
@@ -145,7 +145,7 @@ struct LargeDashboardWidgetView: View {
                         DashboardQuotaModule(snapshot: snapshot, selectedProviderIDs: selectedQuotaProviderIDs)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
-                    .frame(height: 76, alignment: .topLeading)
+                    .frame(height: 80, alignment: .topLeading)
 
                     Divider()
                         .opacity(WidgetDesignTokens.dividerOpacity)
@@ -192,14 +192,7 @@ struct LargeDashboardWidgetView: View {
         }
     }
 
-    private var trendDelta: String {
-        guard let first = snapshot.trend.points.first?.totalTokens,
-              let last = snapshot.trend.points.last?.totalTokens,
-              first > 0 else { return "—" }
-        let percent = Int((Double(last - first) / Double(first) * 100).rounded())
-        if percent == 0 { return "0%" }
-        return percent > 0 ? "+\(percent)%" : "−\(abs(percent))%"
-    }
+    private var trendDelta: String { WidgetTrendChange.label(for: snapshot.trend.points) }
 
     private var trendCaption: String { trendDelta }
 }
@@ -313,9 +306,9 @@ struct DashboardBreakdownModule: View {
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.secondary)
                 } else {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 5) {
                         ForEach(visibleRows) { row in
-                            VStack(alignment: .leading, spacing: 3) {
+                            VStack(alignment: .leading, spacing: 4) {
                                 HStack(spacing: 6) {
                                     WidgetVendorMark(vendorID: row.vendorID, size: 11)
                                     Text(row.label)
