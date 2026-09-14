@@ -197,6 +197,33 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         )
     }
 
+    func testAutomaticQuotaSelectionKeepsStableOrderWithinFreshAccounts() throws {
+        let snapshot = try decode("""
+        {
+          "schemaVersion":10,
+          "generatedAt":"2026-07-17T09:30:00.000Z",
+          "periods":{"day":{}},
+          "quota":[
+            {"provider":"claude","instanceId":"claude-a","status":"ok","updatedAt":"2026-07-17T09:15:00.000Z","windows":[{"kind":"weekly","showMeter":true,"remainingPercent":80}]},
+            {"provider":"codex","instanceId":"codex-a","status":"ok","updatedAt":"2026-07-17T09:29:00.000Z","windows":[{"kind":"weekly","showMeter":true,"remainingPercent":70}]},
+            {"provider":"cursor","instanceId":"cursor-a","status":"ok","updatedAt":"2026-07-17T09:28:00.000Z","windows":[{"kind":"weekly","showMeter":true,"remainingPercent":60}]}
+          ]
+        }
+        """)
+        let renderedAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T09:30:00Z"))
+
+        XCTAssertEqual(
+            WidgetQuotaSelectionResolver.providers(
+                in: snapshot,
+                mode: .automatic,
+                selectedIDs: [],
+                limit: 2,
+                at: renderedAt
+            ).map(\.provider),
+            ["claude", "codex"]
+        )
+    }
+
     func testQuotaFreshnessTreatsMissingTimestampAsStalePerProvider() throws {
         let renderedAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T09:30:00Z"))
         let fresh = WidgetQuotaProvider(

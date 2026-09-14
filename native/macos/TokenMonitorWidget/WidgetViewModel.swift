@@ -314,6 +314,8 @@ enum WidgetQuotaSelectionResolver {
             let ranked = snapshot.quota.enumerated().sorted { left, right in
                 let leftRank = automaticRank(left.element, at: date)
                 let rightRank = automaticRank(right.element, at: date)
+                // Provider refreshes finish at different times. Keep snapshot order
+                // within the same health class so Automatic does not churn accounts.
                 return leftRank == rightRank ? left.offset < right.offset : leftRank < rightRank
             }
             return Array(ranked.prefix(limit).map(\.element))

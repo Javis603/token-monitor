@@ -810,6 +810,10 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   assert.match(widgetDevSource, /`TOKEN_MONITOR_WIDGET_SCHEMA_VERSION=\$\{WIDGET_SCHEMA_VERSION\}`/);
   assert.match(widgetDevSource, /`TOKEN_MONITOR_WIDGET_GIT_REVISION=\$\{metadata\.revision\}`/);
   assert.match(widgetDevSource, /`TOKEN_MONITOR_WIDGET_BUILD_TIMESTAMP=\$\{metadata\.timestamp\}`/);
+  const signIndex = widgetDevSource.indexOf('const signingMode = await signApp');
+  const verifyTeamIndex = widgetDevSource.indexOf('verifyTeamAppGroupSignature({', signIndex);
+  const launchIndex = widgetDevSource.indexOf('registerAndLaunch(appPath, config);', verifyTeamIndex);
+  assert.ok(signIndex >= 0 && verifyTeamIndex > signIndex && launchIndex > verifyTeamIndex);
   assert.equal(packageVersion(), packageJson.version);
   assert.match(widgetProject, /MARKETING_VERSION = "\$\(TOKEN_MONITOR_MARKETING_VERSION\)";/);
   assert.match(widgetProject, /CURRENT_PROJECT_VERSION = "\$\(TOKEN_MONITOR_BUNDLE_VERSION\)";/);

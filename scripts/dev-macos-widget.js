@@ -15,6 +15,7 @@ const {
   widgetVersions
 } = require('./build-macos-widget');
 const { widgetArtifactPaths } = require('./macos-packaging');
+const { verifyTeamAppGroupSignature } = require('./verify-macos-widget-app');
 
 const ROOT = path.resolve(__dirname, '..');
 const PROJECT = path.join(ROOT, 'native', 'macos', 'TokenMonitorWidget.xcodeproj');
@@ -383,12 +384,17 @@ async function main(argv = process.argv.slice(2)) {
   const extension = buildWidget(config, developmentTeam, metadata);
   const buildElapsed = Date.now() - buildStartedAt;
   stopRunningWidgetProcesses();
-  installExtension(extension, appPath);
+  const installedExtension = installExtension(extension, appPath);
   refreshPackagedWidgetConfig(appPath, metadata, config);
   console.log(`[mac-widget-dev] signing app and extension with ${identity}`);
   const signingStartedAt = Date.now();
   const signingMode = await signApp({ appPath, identity, config, developmentTeam, artifacts });
   const signingElapsed = Date.now() - signingStartedAt;
+  verifyTeamAppGroupSignature({
+    appPath,
+    extensionPath: installedExtension,
+    appGroup: config.appGroup
+  });
   registerAndLaunch(appPath, config);
   console.log(
     `[mac-widget-dev] deployed and relaunched in ${((Date.now() - startedAt) / 1000).toFixed(1)}s `
