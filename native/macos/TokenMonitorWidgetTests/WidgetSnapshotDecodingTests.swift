@@ -147,6 +147,27 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             ),
             try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T08:00:00Z"))
         )
+        XCTAssertFalse(
+            WidgetQuotaFreshness.isDashboardStale(
+                snapshot: snapshot,
+                selectedIDs: ["antigravity-a"],
+                at: renderedAt
+            )
+        )
+        XCTAssertTrue(
+            WidgetQuotaFreshness.isDashboardStale(
+                snapshot: snapshot,
+                selectedIDs: ["antigravity-a", "claude-a"],
+                at: renderedAt
+            )
+        )
+        XCTAssertEqual(
+            WidgetQuotaFreshness.dashboardOldestUpdatedAt(
+                in: snapshot,
+                selectedIDs: ["antigravity-a", "claude-a"]
+            ),
+            try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T08:00:00Z"))
+        )
     }
 
     func testCurrentSchemaDecodesMaskedAccountLabelsAndTypedQuotaWindows() throws {
@@ -165,6 +186,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             "updatedAt":"2026-07-17T08:59:00.000Z",
             "windows":[{
               "kind":"billing",
+              "label":"Premium requests",
               "metric":"credits",
               "showMeter":false,
               "usedPercent":35,
@@ -182,6 +204,8 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertEqual(provider.displayName, "Codex")
         XCTAssertEqual(provider.accountLabel, "a***e@example.com")
         XCTAssertTrue(provider.isCurrentAccount)
+        XCTAssertEqual(provider.windows.first?.label, "Premium requests")
+        XCTAssertEqual(WidgetFormat.windowTitle(try XCTUnwrap(provider.windows.first)), "Premium requests")
         XCTAssertEqual(provider.windows.first?.metric, "credits")
         XCTAssertEqual(provider.windows.first?.usedPercent, 35)
         XCTAssertEqual(provider.windows.first?.windowMinutes, 10_080)
@@ -315,7 +339,10 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             days[1]
         )
         XCTAssertNil(WidgetActivitySelection.selectedDay(in: days, selectedDate: nil))
-        XCTAssertNil(WidgetActivitySelection.selectedDay(in: days, selectedDate: "2026-07-18"))
+        XCTAssertEqual(
+            WidgetActivitySelection.selectedDay(in: days, selectedDate: "2026-07-18"),
+            WidgetActivityDay(date: "2026-07-18", intensity: 0, totalTokens: 0, costUsd: 0)
+        )
     }
 
     func testActivityDayStateClearsInvalidDates() {

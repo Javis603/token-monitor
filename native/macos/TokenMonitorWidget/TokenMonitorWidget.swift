@@ -172,6 +172,13 @@ struct TokenMonitorWidgetView: View {
     }
 
     private func isStale(_ snapshot: WidgetSnapshot) -> Bool {
+        if family == .systemLarge {
+            return WidgetQuotaFreshness.isDashboardStale(
+                snapshot: snapshot,
+                selectedIDs: entry.selectedQuotaProviderIDs,
+                at: entry.date
+            )
+        }
         guard entry.page == .quota else { return snapshot.isStale(at: entry.date) }
         return WidgetQuotaFreshness.isStale(
             snapshot: snapshot,
@@ -181,6 +188,12 @@ struct TokenMonitorWidgetView: View {
     }
 
     private func staleUpdatedAt(_ snapshot: WidgetSnapshot) -> Date? {
+        if family == .systemLarge {
+            return WidgetQuotaFreshness.dashboardOldestUpdatedAt(
+                in: snapshot,
+                selectedIDs: entry.selectedQuotaProviderIDs
+            )
+        }
         guard entry.page == .quota else {
             return WidgetStalePresentation.trustedUpdatedAt(for: snapshot)
         }

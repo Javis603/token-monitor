@@ -95,18 +95,43 @@ function resolveAppPath(value) {
 function readWidgetConfig(appPath) {
   const configPath = path.join(appPath, 'Contents', 'Resources', 'token-monitor-widget.json');
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  const envBundleId = String(process.env.TOKEN_MONITOR_WIDGET_BUNDLE_ID || '').trim();
+  const configBundleId = String(config.widgetBundleId || '').trim();
   return {
     appGroup: String(config.appGroup || '').trim(),
-    bundleId: String(process.env.TOKEN_MONITOR_WIDGET_BUNDLE_ID || DEFAULT_WIDGET_BUNDLE_ID).trim(),
+    bundleId: resolveWidgetBundleId({
+      envValue: envBundleId,
+      configValue: configBundleId,
+      extensionValue: envBundleId || configBundleId ? '' : extensionBundleIdentifier(appPath)
+    }),
     widgetKind: String(config.widgetKind || DEFAULT_WIDGET_KIND).trim(),
     packageVersion: String(config.packageVersion || config.marketingVersion || '').trim(),
     marketingVersion: String(config.marketingVersion || config.packageVersion || '').trim()
   };
 }
 
-function updatedWidgetConfig(config, metadata) {
+function resolveWidgetBundleId({ envValue, configValue, extensionValue } = {}) {
+  return String(envValue || configValue || extensionValue || DEFAULT_WIDGET_BUNDLE_ID).trim();
+}
+
+function extensionBundleIdentifier(appPath, options = {}) {
+  const infoPath = path.join(
+    appPath,
+    'Contents', 'PlugIns', 'TokenMonitorWidget.appex', 'Contents', 'Info.plist'
+  );
+  const existsSync = options.existsSync || fs.existsSync;
+  if (!existsSync(infoPath)) return '';
+  const spawn = options.spawnSync || spawnSync;
+  const result = spawn('/usr/bin/plutil', [
+    '-extract', 'CFBundleIdentifier', 'raw', '-o', '-', infoPath
+  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  return result.status === 0 ? String(result.stdout || '').trim() : '';
+}
+
+function updatedWidgetConfig(config, metadata, options = {}) {
   const updated = {
     ...config,
+    widgetBundleId: String(options.widgetBundleId || config.widgetBundleId || '').trim() || undefined,
     widgetUIVersion: WIDGET_UI_VERSION,
     widgetSchemaVersion: WIDGET_SCHEMA_VERSION,
     widgetBundleVersion: String(WIDGET_UI_VERSION),
@@ -117,11 +142,13 @@ function updatedWidgetConfig(config, metadata) {
   return updated;
 }
 
-function refreshPackagedWidgetConfig(appPath, metadata) {
+function refreshPackagedWidgetConfig(appPath, metadata, config) {
   const configPath = path.join(appPath, 'Contents', 'Resources', 'token-monitor-widget.json');
   const current = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   const temporaryPath = `${configPath}.tmp`;
-  fs.writeFileSync(temporaryPath, `${JSON.stringify(updatedWidgetConfig(current, metadata), null, 2)}\n`, { mode: 0o600 });
+  fs.writeFileSync(temporaryPath, `${JSON.stringify(updatedWidgetConfig(current, metadata, {
+    widgetBundleId: config.bundleId
+  }), null, 2)}\n`, { mode: 0o600 });
   fs.renameSync(temporaryPath, configPath);
 }
 
@@ -357,7 +384,7 @@ async function main(argv = process.argv.slice(2)) {
   const buildElapsed = Date.now() - buildStartedAt;
   stopRunningWidgetProcesses();
   installExtension(extension, appPath);
-  refreshPackagedWidgetConfig(appPath, metadata);
+  refreshPackagedWidgetConfig(appPath, metadata, config);
   console.log(`[mac-widget-dev] signing app and extension with ${identity}`);
   const signingStartedAt = Date.now();
   const signingMode = await signApp({ appPath, identity, config, developmentTeam, artifacts });
@@ -382,8 +409,11 @@ module.exports = {
   findApps,
   hostLaunchEnvironment,
   parseArguments,
+  extensionBundleIdentifier,
+  readWidgetConfig,
   resolveDeveloperDirectory,
   resolveAppPath,
+  resolveWidgetBundleId,
   teamIdentifierFromCodesignOutput,
   updatedWidgetConfig,
   xcconfigContents

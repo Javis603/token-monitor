@@ -23,7 +23,7 @@ const DEFAULT_APP_ID = String(PACKAGE_JSON.build?.appId || 'com.example.tokenmon
 const DEFAULT_APP_GROUP = 'group.com.example.tokenmonitor';
 const DEFAULT_WIDGET_BUNDLE_ID = `${DEFAULT_APP_ID}.widget`;
 const DEFAULT_WIDGET_KIND = 'com.tokenmonitor.dashboard';
-const WIDGET_UI_VERSION = 40;
+const WIDGET_UI_VERSION = 41;
 const WIDGET_SCHEMA_VERSION = 10;
 const WIDGET_ARCHITECTURES = Object.freeze({
   arm64: Object.freeze({ name: 'arm64', xcodeArch: 'arm64', swiftArch: 'arm64' }),
@@ -288,6 +288,7 @@ function main() {
   fs.writeFileSync(path.join(OUTPUT, 'widget-config.json'), `${JSON.stringify({
     schemaVersion: 1,
     appGroup,
+    widgetBundleId: bundleId,
     widgetKind,
     widgetUIVersion: WIDGET_UI_VERSION,
     widgetSchemaVersion: WIDGET_SCHEMA_VERSION,

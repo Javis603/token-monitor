@@ -227,6 +227,7 @@ struct WidgetQuotaBalance: Decodable, Equatable {
 
 struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
     let kind: String
+    let label: String?
     let metric: String?
     let showMeter: Bool
     let usedPercent: Double?
@@ -237,7 +238,7 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
     let remaining: Double?
     let currency: String?
     let detail: String?
-    var id: String { kind }
+    var id: String { "\(kind)|\(label ?? "")" }
 
     init(
         kind: String,
@@ -250,9 +251,11 @@ struct WidgetLimitWindow: Decodable, Equatable, Identifiable {
         showMeter: Bool = true,
         remaining: Double? = nil,
         currency: String? = nil,
-        detail: String? = nil
+        detail: String? = nil,
+        label: String? = nil
     ) {
         self.kind = kind
+        self.label = label
         self.metric = metric
         self.showMeter = showMeter
         self.usedPercent = usedPercent
@@ -414,10 +417,11 @@ extension WidgetOverview {
 }
 
 extension WidgetLimitWindow {
-    private enum CodingKeys: String, CodingKey { case kind, metric, showMeter, usedPercent, remainingPercent, resetsAt, boundaryKind, windowMinutes, remaining, currency, detail }
+    private enum CodingKeys: String, CodingKey { case kind, label, metric, showMeter, usedPercent, remainingPercent, resetsAt, boundaryKind, windowMinutes, remaining, currency, detail }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         kind = try c.decode(String.self, forKey: .kind)
+        label = c.optionalString(.label)
         let rawMetric = (try c.decodeIfPresent(String.self, forKey: .metric) ?? "").lowercased()
         metric = ["credits", "spend"].contains(rawMetric) ? rawMetric : nil
         showMeter = try c.decode(Bool.self, forKey: .showMeter)

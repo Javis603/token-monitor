@@ -16,7 +16,7 @@ enum WidgetDesignTokens {
     static let largeGap: CGFloat = 8
     static let secondarySize: CGFloat = 10
     static let microSize: CGFloat = 9
-    static let dashboardMetricSize: CGFloat = 36
+    static let dashboardMetricSize: CGFloat = 40
     static let dashboardSectionTitleSize: CGFloat = 10
     // Preserve the original dashboard quota density across both quota and
     // breakdown rows so one section never forces the other to truncate.
@@ -315,6 +315,28 @@ enum WidgetQuotaFreshness {
         }
         return date.timeIntervalSince(updatedAt) > threshold
     }
+
+    static func isDashboardStale(
+        snapshot: WidgetSnapshot,
+        selectedIDs: [String],
+        at date: Date,
+        threshold: TimeInterval = 20 * 60
+    ) -> Bool {
+        snapshot.isStale(at: date, threshold: threshold)
+            || isStale(snapshot: snapshot, selectedIDs: selectedIDs, at: date, threshold: threshold)
+    }
+
+    static func dashboardOldestUpdatedAt(
+        in snapshot: WidgetSnapshot,
+        selectedIDs: [String]
+    ) -> Date? {
+        [
+            WidgetStalePresentation.trustedUpdatedAt(for: snapshot),
+            oldestUpdatedAt(in: snapshot, selectedIDs: selectedIDs)
+        ]
+        .compactMap { $0 }
+        .min()
+    }
 }
 
 enum WidgetFormat {
@@ -508,12 +530,15 @@ enum WidgetFormat {
         return visible.isEmpty ? "1m" : visible.joined(separator: " ")
     }
 
-    static func windowTitle(_ value: String) -> String {
-        switch value.lowercased() {
+    static func windowTitle(_ window: WidgetLimitWindow) -> String {
+        if let label = window.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
+            return label
+        }
+        return switch window.kind.lowercased() {
         case "session", "five_hour", "five-hour", "5h", "5-hour": "Session"
         case "weekly", "week", "7d", "seven_day", "seven-day": "Weekly"
         case "monthly", "month": "Monthly"
-        default: value.replacingOccurrences(of: "_", with: " ").capitalized
+        default: window.kind.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
 }

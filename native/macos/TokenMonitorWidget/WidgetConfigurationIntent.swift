@@ -411,6 +411,7 @@ enum WidgetActivitySelection {
     static func selectedDay(in days: [WidgetActivityDay], selectedDate: String?) -> WidgetActivityDay? {
         guard let selectedDate else { return nil }
         return days.first { $0.date == selectedDate }
+            ?? WidgetActivityDay(date: selectedDate, intensity: 0, totalTokens: 0, costUsd: 0)
     }
 
     static func resolvedDate(

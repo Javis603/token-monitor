@@ -13,6 +13,9 @@ const KNOWN_LIMIT_STATUSES = new Set([
 ]);
 const KNOWN_WINDOW_KINDS = new Set(['session', 'daily', 'weekly', 'billing']);
 const KNOWN_LIMIT_BOUNDARY_KINDS = new Set(['reset', 'expiry', 'mixed']);
+const FIVE_HOUR_WINDOW_PROVIDERS = new Set([
+  'alibaba', 'antigravity', 'commandcode', 'kimi', 'volcengine', 'zai', 'zaiteam'
+]);
 const CURRENCIES = Object.freeze({ USD: '$', TWD: 'NT$', HKD: 'HK$', CNY: '¥' });
 
 function finiteNumber(value, fallback = 0) {
@@ -153,7 +156,23 @@ function buildTools(period) {
   }));
 }
 
-function buildLimitWindow(window) {
+function widgetWindowLabel(providerId, window, kind) {
+  const explicit = safeDisplayName(window?.label);
+  if (explicit) {
+    if (providerId === 'antigravity') {
+      if (kind === 'session' && /\s+5-hour$/i.test(explicit)) return '5-hour';
+      if (kind === 'weekly' && /\s+weekly$/i.test(explicit)) return 'Weekly';
+    }
+    return explicit;
+  }
+  if (kind === 'session') return FIVE_HOUR_WINDOW_PROVIDERS.has(providerId) ? '5-hour' : 'Session';
+  if (kind === 'daily') return 'Daily';
+  if (kind === 'weekly') return 'Weekly';
+  if (kind === 'billing') return 'Monthly';
+  return '';
+}
+
+function buildLimitWindow(window, providerId) {
   if (!window || typeof window !== 'object') return null;
   const kind = String(window.kind || '').trim().toLowerCase();
   if (!KNOWN_WINDOW_KINDS.has(kind)) return null;
@@ -170,8 +189,10 @@ function buildLimitWindow(window) {
   const detail = rawDetail === 'unlimited' ? rawDetail : null;
   const rawBoundaryKind = String(window.boundaryKind || '').trim().toLowerCase();
   const boundaryKind = KNOWN_LIMIT_BOUNDARY_KINDS.has(rawBoundaryKind) ? rawBoundaryKind : '';
+  const label = widgetWindowLabel(providerId, window, kind);
   return {
     kind,
+    ...(label ? { label } : {}),
     metric,
     showMeter: window.showMeter !== false,
     usedPercent,
@@ -221,7 +242,7 @@ function buildQuota(limits, activeCodexAccount) {
     const windows = Array.isArray(provider.windows)
       ? provider.windows
         .filter((window) => isCanonicalCodexWindow(providerId, window))
-        .map(buildLimitWindow)
+        .map((window) => buildLimitWindow(window, providerId))
         .filter(Boolean)
         .slice(0, 2)
       : [];
@@ -361,6 +382,21 @@ function normalizedDaily(history) {
   return Array.from(byDate.values()).sort((left, right) => left.date.localeCompare(right.date));
 }
 
+function normalizedMonthly(history) {
+  const monthly = Array.isArray(history?.monthly) ? history.monthly : [];
+  const byMonth = new Map();
+  for (const entry of monthly) {
+    const month = String(entry?.month || '').trim();
+    if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month)) continue;
+    byMonth.set(month, {
+      date: month,
+      totalTokens: Math.round(nonNegativeNumber(entry?.tokens)),
+      costUsd: nonNegativeNumber(entry?.cost)
+    });
+  }
+  return Array.from(byMonth.values()).sort((left, right) => left.date.localeCompare(right.date));
+}
+
 const MAC_WIDGET_ACTIVITY_DAYS = 182;
 const TREND_WINDOW_DAYS = 7;
 
@@ -392,10 +428,10 @@ function buildActivity(history) {
 
 function buildTrend(history, options = {}) {
   const daily = normalizedDaily(history);
-  let points = daily.slice(-28);
+  let points = [];
   if (options.period === 'today') {
     const today = localDayKey(options.now);
-    const livePeriod = options.livePeriod && typeof options.livePeriod === 'object' ? options.livePeriod : {};
+    const livePeriod = options.todayPeriod && typeof options.todayPeriod === 'object' ? options.todayPeriod : {};
     const liveTokens = Math.round(nonNegativeNumber(livePeriod.totalTokens));
     const liveCost = nonNegativeNumber(livePeriod.costUsd);
     if (today && (daily.length > 0 || liveTokens > 0 || liveCost > 0)) {
@@ -428,6 +464,62 @@ function buildTrend(history, options = {}) {
     } else {
       points = [];
     }
+  } else if (options.period === 'month') {
+    const today = localDayKey(options.now);
+    if (today) {
+      const start = `${today.slice(0, 7)}-01`;
+      const byDate = new Map(daily
+        .filter((point) => point.date >= start && point.date <= today)
+        .map((point) => [point.date, point]));
+      const liveToday = options.todayPeriod && typeof options.todayPeriod === 'object' ? options.todayPeriod : {};
+      for (let date = start; date && date <= today; date = addCalendarDays(date, 1)) {
+        const historical = byDate.get(date);
+        points.push({
+          date,
+          totalTokens: date === today
+            ? Math.max(historical?.totalTokens || 0, Math.round(nonNegativeNumber(liveToday.totalTokens)))
+            : historical?.totalTokens || 0,
+          costUsd: date === today
+            ? Math.max(historical?.costUsd || 0, nonNegativeNumber(liveToday.costUsd))
+            : historical?.costUsd || 0
+        });
+      }
+    }
+  } else if (options.period === 'allTime') {
+    const monthly = normalizedMonthly(history);
+    const byMonth = new Map();
+    for (const point of daily) {
+      const month = point.date.slice(0, 7);
+      const existing = byMonth.get(month) || { date: month, totalTokens: 0, costUsd: 0 };
+      existing.totalTokens += point.totalTokens;
+      existing.costUsd += point.costUsd;
+      byMonth.set(month, existing);
+    }
+    // The persisted Widget cache carries complete monthly aggregates and a
+    // bounded daily window. Merge the two so recent months can fill a missing
+    // aggregate without double-counting months already represented by both.
+    for (const point of monthly) {
+      const recent = byMonth.get(point.date);
+      byMonth.set(point.date, {
+        date: point.date,
+        totalTokens: Math.max(point.totalTokens, recent?.totalTokens || 0),
+        costUsd: Math.max(point.costUsd, recent?.costUsd || 0)
+      });
+    }
+    points = Array.from(byMonth.values())
+      .sort((left, right) => left.date.localeCompare(right.date));
+    const currentMonth = localDayKey(options.now).slice(0, 7);
+    const liveMonth = options.monthPeriod && typeof options.monthPeriod === 'object' ? options.monthPeriod : {};
+    if (currentMonth && (points.length > 0 || nonNegativeNumber(liveMonth.totalTokens) > 0)) {
+      const current = points.find((point) => point.date === currentMonth);
+      const replacement = {
+        date: currentMonth,
+        totalTokens: Math.max(current?.totalTokens || 0, Math.round(nonNegativeNumber(liveMonth.totalTokens))),
+        costUsd: Math.max(current?.costUsd || 0, nonNegativeNumber(liveMonth.costUsd))
+      };
+      points = [...points.filter((point) => point.date !== currentMonth), replacement]
+        .sort((left, right) => left.date.localeCompare(right.date));
+    }
   }
   return {
     points: points.map(({ date, totalTokens, costUsd }) => ({ date, totalTokens, costUsd }))
@@ -439,7 +531,12 @@ function buildPeriodSnapshot(stats, period, history, now) {
   const tools = buildTools(current);
   const models = buildModels(current);
   const activity = buildActivity(history);
-  const trend = buildTrend(history, { period, livePeriod: current, now });
+  const trend = buildTrend(history, {
+    period,
+    todayPeriod: periodStats(stats, 'today'),
+    monthPeriod: periodStats(stats, 'month'),
+    now
+  });
   const overview = {
     totalTokens: Math.round(nonNegativeNumber(current.totalTokens)),
     costUsd: nonNegativeNumber(current.costUsd)

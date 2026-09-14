@@ -5,8 +5,10 @@ const test = require('node:test');
 const {
   availableDevelopmentIdentities,
   developmentTeamForAppGroup,
+  extensionBundleIdentifier,
   hostLaunchEnvironment,
   parseArguments,
+  resolveWidgetBundleId,
   resolveDeveloperDirectory,
   teamIdentifierFromCodesignOutput,
   updatedWidgetConfig,
@@ -98,12 +100,44 @@ test('keeps the packaged Widget descriptor aligned with the incremental UI build
   }, {
     revision: 'abcdef123456',
     timestamp: '2026-09-13T14:00:00Z'
+  }, {
+    widgetBundleId: 'com.example.custom.widget'
   });
-  assert.equal(updated.widgetUIVersion, 40);
+  assert.equal(updated.widgetUIVersion, 41);
   assert.equal(updated.widgetSchemaVersion, 10);
-  assert.equal(updated.widgetBundleVersion, '40');
+  assert.equal(updated.widgetBundleVersion, '41');
   assert.equal(updated.gitRevision, 'abcdef123456');
   assert.equal(updated.buildTimestamp, '2026-09-13T14:00:00Z');
   assert.equal(updated.marketingVersion, '0.54.0');
+  assert.equal(updated.widgetBundleId, 'com.example.custom.widget');
   assert.equal(updated.urlScheme, undefined);
+});
+
+test('preserves the packaged Widget bundle identifier unless the environment overrides it', () => {
+  assert.equal(resolveWidgetBundleId({
+    configValue: 'com.example.custom.widget',
+    extensionValue: 'com.example.extension.widget'
+  }), 'com.example.custom.widget');
+  assert.equal(resolveWidgetBundleId({
+    envValue: 'com.example.override.widget',
+    configValue: 'com.example.custom.widget',
+    extensionValue: 'com.example.extension.widget'
+  }), 'com.example.override.widget');
+  assert.equal(resolveWidgetBundleId({
+    extensionValue: 'com.example.extension.widget'
+  }), 'com.example.extension.widget');
+});
+
+test('reads a legacy packaged Widget bundle identifier from the extension plist', () => {
+  const calls = [];
+  const bundleId = extensionBundleIdentifier('/tmp/Token Monitor.app', {
+    existsSync: () => true,
+    spawnSync: (command, args) => {
+      calls.push([command, args]);
+      return { status: 0, stdout: 'com.example.legacy.widget\n' };
+    }
+  });
+  assert.equal(bundleId, 'com.example.legacy.widget');
+  assert.equal(calls[0][0], '/usr/bin/plutil');
+  assert.match(calls[0][1].at(-1), /TokenMonitorWidget\.appex\/Contents\/Info\.plist$/);
 });

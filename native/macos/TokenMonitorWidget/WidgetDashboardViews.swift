@@ -135,7 +135,7 @@ struct LargeDashboardWidgetView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
-                    .frame(height: 63, alignment: .top)
+                    .frame(height: 72, alignment: .top)
 
                     Divider()
                         .opacity(WidgetDesignTokens.dividerOpacity)
@@ -461,7 +461,7 @@ private struct DashboardQuotaWindowCell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(WidgetFormat.windowTitle(window.kind))
+                Text(WidgetFormat.windowTitle(window))
                     .font(.system(size: WidgetDesignTokens.dashboardValueSize, weight: .medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -539,7 +539,7 @@ struct QuotaWindowCell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(WidgetFormat.windowTitle(window.kind))
+                Text(WidgetFormat.windowTitle(window))
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

@@ -106,7 +106,7 @@ test('builds schema v10 periods, quota and presentation', () => {
   assert.ok(Math.abs(snapshot.periods.day.tools[0].sharePercent - (100 / 1.2)) < Number.EPSILON * 100);
   assert.ok(Math.abs(snapshot.periods.day.tools[1].sharePercent - (100 / 6)) < Number.EPSILON * 100);
   assert.deepEqual(snapshot.quota[0].windows[0], {
-    kind: 'weekly', metric: null, showMeter: true,
+    kind: 'weekly', label: 'Weekly', metric: null, showMeter: true,
     usedPercent: 35,
     remainingPercent: 65,
     resetsAt: '2026-07-20T00:00:00.000Z',
@@ -227,7 +227,7 @@ test('shares the complete provider allowlist and preserves credit window display
 
   assert.deepEqual(snapshot.quota.map((provider) => provider.provider), ['openrouter', 'thirdparty']);
   assert.deepEqual(byProvider.get('openrouter').windows[0], {
-    kind: 'billing', metric: 'credits', showMeter: false,
+    kind: 'billing', label: 'Monthly', metric: 'credits', showMeter: false,
     usedPercent: null, remainingPercent: null, resetsAt: null, windowMinutes: null,
     remaining: 12.5, currency: 'USD'
   });
@@ -453,10 +453,78 @@ test('builds a local seven-day Widget trend from live usage without double count
   assert.deepEqual(liveOnly.periods.day.trend.points.map((point) => point.totalTokens), [
     0, 0, 0, 0, 0, 0, 99
   ]);
-  assert.equal(snapshot.periods.month.trend.points.length, 2);
-  assert.equal(snapshot.periods.total.trend.points.length, 2);
+  assert.deepEqual(snapshot.periods.month.trend.points.map((point) => point.date), [
+    '2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06'
+  ]);
+  assert.deepEqual(snapshot.periods.month.trend.points.map((point) => point.totalTokens), [
+    210, 0, 0, 0, 123, 99
+  ]);
+  assert.deepEqual(snapshot.periods.total.trend.points, [{
+    date: '2026-08', totalTokens: 333, costUsd: 3.6
+  }]);
   assert.equal(snapshot.periods.month.models[0].sharePercent, 100);
   assert.equal(snapshot.periods.total.models[0].sharePercent, 100);
+});
+
+test('keeps MONTH inside the current calendar month and buckets TOTAL by month', () => {
+  const snapshot = buildSnapshot({
+    periods: {
+      today: { totalTokens: 40, costUsd: 0.4 },
+      month: { totalTokens: 400, costUsd: 4 },
+      allTime: { totalTokens: 4_000, costUsd: 40 }
+    },
+    history: {
+      daily: [
+        { date: '2026-07-31', tokens: 900, cost: 9 },
+        { date: '2026-08-01', tokens: 100, cost: 1 },
+        { date: '2026-08-05', tokens: 200, cost: 2 }
+      ],
+      monthly: [
+        { month: '2026-06', tokens: 1_000, cost: 10 },
+        { month: '2026-07', tokens: 2_000, cost: 20 }
+      ]
+    }
+  }, { now: new Date(2026, 7, 6, 12, 0, 0) });
+
+  assert.deepEqual(snapshot.periods.month.trend.points.map((point) => point.date), [
+    '2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06'
+  ]);
+  assert.deepEqual(snapshot.periods.month.trend.points.map((point) => point.totalTokens), [
+    100, 0, 0, 0, 200, 40
+  ]);
+  assert.deepEqual(snapshot.periods.total.trend.points, [
+    { date: '2026-06', totalTokens: 1_000, costUsd: 10 },
+    { date: '2026-07', totalTokens: 2_000, costUsd: 20 },
+    { date: '2026-08', totalTokens: 400, costUsd: 4 }
+  ]);
+});
+
+test('preserves safe limit window names and uses App-aligned compact fallbacks', () => {
+  const snapshot = buildSnapshot({ limits: { providers: [
+    {
+      provider: 'antigravity', status: 'ok', windows: [
+        { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 90 },
+        { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 80 }
+      ]
+    },
+    {
+      provider: 'copilot', status: 'ok', windows: [
+        { kind: 'billing', label: 'Premium requests', remainingPercent: 70 },
+        { kind: 'billing', label: 'Chat messages', remainingPercent: 60 }
+      ]
+    },
+    {
+      provider: 'commandcode', status: 'ok', windows: [
+        { kind: 'session', remainingPercent: 50 },
+        { kind: 'weekly', label: 'private@example.com', remainingPercent: 40 }
+      ]
+    }
+  ] } }, { now: NOW });
+  const byProvider = new Map(snapshot.quota.map((provider) => [provider.provider, provider]));
+
+  assert.deepEqual(byProvider.get('antigravity').windows.map((window) => window.label), ['5-hour', 'Weekly']);
+  assert.deepEqual(byProvider.get('copilot').windows.map((window) => window.label), ['Premium requests', 'Chat messages']);
+  assert.deepEqual(byProvider.get('commandcode').windows.map((window) => window.label), ['5-hour', 'Weekly']);
 });
 
 test('accepts only real UTC calendar dates and lets the last duplicate date win', () => {
@@ -539,7 +607,7 @@ test('normalizes invalid values, statuses, names, and percentages', () => {
   assert.deepEqual(snapshot.periods.day.models.map((model) => model.displayName), ['safe-model']);
   assert.equal(snapshot.quota[0].status, 'error');
   assert.deepEqual(snapshot.quota[0].windows[0], {
-    kind: 'session', metric: null, showMeter: true,
+    kind: 'session', label: 'Session', metric: null, showMeter: true,
     usedPercent: 100, remainingPercent: 0, resetsAt: null, windowMinutes: 0
   });
 });
