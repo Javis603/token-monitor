@@ -14,6 +14,7 @@ const { LIMIT_PROVIDER_CATALOG: LIMIT_PROVIDERS, LIMIT_PROVIDER_IDS } = window.T
 const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
+const usageCostPolicyApi = window.TokenMonitorUsageCostPolicy;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const fontSettingsApi = window.TokenMonitorFontSettings;
@@ -2634,6 +2635,8 @@ function toolRowsForPeriod(period) {
 function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRankingMetric) {
   const modelRows = periodAttributionRows(period, period?.models, period?.modelCosts).map(({ key: model, value, cost, unattributed }) => ({
     key: model,
+    subtitle: Object.hasOwn(period?.excludedModelCosts || {}, model)
+      ? t('settings.codex.webCosts.excluded', { cost: formatCost(period.excludedModelCosts[model]) }) : '',
     name: model === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : model,
     value,
     cost,
@@ -2686,7 +2689,12 @@ function projectRowsForPeriod(period) {
     unknownClientLabel: t('projects.unknownTool'),
     nativeProjects: state.stats?.nativeProjects?.[state.period] || {},
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
-  });
+  }).map((row) => ({
+    ...row,
+    subtitle: period?.costPolicyIncomplete
+      ? t('settings.codex.webCosts.incomplete')
+      : row.subtitle
+  }));
 }
 
 function rowsForPeriod(period) {
@@ -8370,6 +8378,12 @@ function render() {
     return;
   }
   if (!state.stats) return;
+  const costNote = document.getElementById('usageCostPolicyNote');
+  if (costNote) {
+    costNote.hidden = !state.stats.costPolicyActive;
+    costNote.textContent = t(state.stats.costPolicyIncomplete
+      ? 'settings.codex.webCosts.incomplete' : 'settings.codex.webCosts.active');
+  }
   els.toolDetailFooter.classList.add('hidden');
   syncLiveTokenRateFooterState();
   renderSessionUsageArchiveStatus();
@@ -11192,7 +11206,7 @@ function sameRenderedNode(current, next) {
   if (current.tagName !== next.tagName || current.className !== next.className) return false;
   const currentAction = current.dataset?.healthAction || '';
   const nextAction = next.dataset?.healthAction || '';
-  return currentAction === nextAction;
+  return currentAction === nextAction && current.dataset?.costRule === next.dataset?.costRule;
 }
 
 function patchRenderedNode(current, next) {
@@ -11206,6 +11220,10 @@ function patchRenderedNode(current, next) {
   for (const name of next.getAttributeNames()) {
     const value = next.getAttribute(name);
     if (current.getAttribute(name) !== value) current.setAttribute(name, value);
+  }
+  if (current.tagName === 'INPUT') {
+    current.checked = next.checked;
+    current.disabled = next.disabled;
   }
   const currentChildren = Array.from(current.childNodes);
   const nextChildren = Array.from(next.childNodes);
@@ -11589,6 +11607,7 @@ function clientHealthPanel(detail, clientId) {
   // pads every collapsed row in the list.
   const box = document.createElement('div');
   box.className = 'tool-health-inner';
+  if (clientId === 'codex') box.append(codexWebCostSettings());
   inner.append(box);
   const groups = document.createElement('div');
   groups.className = 'tool-health-groups';
@@ -11601,6 +11620,49 @@ function clientHealthPanel(detail, clientId) {
   }
   box.append(groups, clientHealthActions(clientId, detail));
   return inner;
+}
+
+function codexWebCostSettings() {
+  const section = document.createElement('section');
+  section.className = 'codex-web-cost-settings';
+  const heading = document.createElement('h4');
+  heading.className = 'tool-health-group-title';
+  heading.textContent = t('settings.codex.webCosts.title');
+  const note = document.createElement('p');
+  note.className = 'settings-note';
+  note.textContent = t('settings.codex.webCosts.description');
+  section.append(heading, note);
+  const rule = usageCostPolicyApi.codexWebCostRule(state.settings?.usageCostRules);
+  const models = new Set(['chatgpt-web/pro', 'chatgpt-web/extra-high', ...Object.keys(rule.models)]);
+  for (const period of Object.values(state.stats?.periods || {})) {
+    for (const model of new Set([...Object.keys(period.clientModels?.codex || {}), ...Object.keys(period.clientModelCosts?.codex || {})])) {
+      if (model.startsWith('chatgpt-web/')) models.add(model);
+    }
+  }
+  const addToggle = (model) => {
+    const label = document.createElement('label');
+    label.className = 'checkbox-label settings-item';
+    const text = document.createElement('span');
+    text.textContent = model || t('settings.codex.webCosts.include');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.dataset.costRule = model || 'master';
+    input.checked = model ? rule.models[model] !== false : rule.included;
+    input.disabled = Boolean(model && !rule.included);
+    input.addEventListener('change', async () => {
+      input.disabled = true;
+      try {
+        const patch = model ? { models: { [model]: input.checked } } : { included: input.checked };
+        await saveSettings({ usageCostRules: usageCostPolicyApi.updateCodexWebCostRule(state.settings?.usageCostRules, patch) });
+      } catch (_) {}
+      finally { refillOpenClientHealthPanel(); }
+    });
+    label.append(text, input);
+    section.append(label);
+  };
+  addToggle('');
+  for (const model of [...models].sort()) addToggle(model);
+  return section;
 }
 
 function localWslStatus() {
@@ -11744,6 +11806,7 @@ function toolPreferenceRenderSignature() {
       state.settings?.locale || state.settings?.language || '',
       state.settings?.currency || '',
       state.settings?.compactTokenUnits || '',
+      state.settings?.usageCostRules || [],
       JSON.stringify(state.settings?.customScanPaths || {})
     ],
     query: toolPreferenceQuery(),

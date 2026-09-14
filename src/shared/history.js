@@ -102,6 +102,7 @@ function parseGraphResult(raw) {
     if (!date) continue;
     const perClient = {};
     const perModel = {};
+    const clientModelCosts = {};
     let tokens = 0;
     let cost = 0;
     let messages = 0;
@@ -117,6 +118,11 @@ function parseGraphResult(raw) {
       const model = String(c.modelId || c.model || c.model_id || 'unknown');
       const t = sumTokens(c.tokens, client);
       const cst = num(c.cost);
+      if (!['__proto__', 'constructor', 'prototype'].includes(client)
+        && !['__proto__', 'constructor', 'prototype'].includes(model)) {
+        const costs = clientModelCosts[client] || (clientModelCosts[client] = {});
+        costs[model] = num(costs[model]) + cst;
+      }
       const cacheRead = num(c.tokens?.cacheRead ?? c.tokens?.cache_read);
       const cacheWrite = num(c.tokens?.cacheWrite ?? c.tokens?.cache_write);
       const output = sumOutputTokens(c.tokens, client);
@@ -195,7 +201,8 @@ function parseGraphResult(raw) {
       tokenComponentsAvailable,
       activeTimeMs: num(row.activeTimeMs ?? row.active_time_ms),
       perClient,
-      perModel
+      perModel,
+      ...(Object.keys(clientModelCosts).length ? { clientModelCosts } : {})
     });
   }
   const timeMetrics = normalizeTimeMetrics(raw?.timeMetrics ?? raw?.time_metrics);
@@ -316,6 +323,36 @@ function activeTimeTotal(days) {
   return (Array.isArray(days) ? days : []).reduce((sum, day) => sum + num(day.activeTimeMs), 0);
 }
 
+// Keep the joint cost attribution, not just independent tool/model totals.
+// Local display policies can then exclude a model for one tool without changing
+// another tool's use of the same id. Old wire records remain valid; do not
+// manufacture a split for their ambiguous, mixed-tool rows.
+function addCostAttribution(target, source) {
+  const clients = Object.keys(source.perClient || {});
+  const matrix = source.clientModelCosts || (clients.length === 1 && source.perModel
+    ? { [clients[0]]: Object.fromEntries(Object.entries(source.perModel).map(([model, value]) => [model, num(value.cost)])) }
+    : null);
+  if (!matrix || source.clientModelCostsIncomplete) {
+    if (num(source.cost) > 0) target.clientModelCostsIncomplete = true;
+  }
+  if (!matrix) return;
+  target.clientModelCosts ||= {};
+  for (const [client, models] of Object.entries(matrix)) {
+    if (['__proto__', 'constructor', 'prototype'].includes(client)) continue;
+    const costs = target.clientModelCosts[client] || (target.clientModelCosts[client] = {});
+    for (const [model, cost] of Object.entries(models || {})) {
+      if (['__proto__', 'constructor', 'prototype'].includes(model)) continue;
+      costs[model] = num(costs[model]) + num(cost);
+    }
+  }
+}
+
+function costAttributionSummary(rows) {
+  const result = {};
+  for (const row of rows) addCostAttribution(result, row);
+  return result;
+}
+
 function monthlyRollup(days) {
   const byMonth = new Map();
   for (const d of (Array.isArray(days) ? days : [])) {
@@ -325,6 +362,7 @@ function monthlyRollup(days) {
     m.tokens += num(d.tokens); m.cost += num(d.cost); m.activeTimeMs += num(d.activeTimeMs);
     addPerClient(m.perClient, d.perClient);
     addPerModel(m.perModel, d.perModel);
+    addCostAttribution(m, d);
     byMonth.set(month, m);
   }
   return [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
@@ -387,6 +425,7 @@ function normalizeHistory(graphData, options = {}) {
       totalTokens, totalCost, activeDays, currentStreak, longestStreak,
       peakDayTokens, favoriteModel: favoriteModelOf(full), messages,
       activeTimeMs,
+      ...costAttributionSummary(full),
       ...(timeMetrics ? { timeMetrics } : {})
     }
   };
@@ -411,6 +450,7 @@ function mergeDailyMaps(histories) {
       cur.tokenComponentsAvailable = cur.tokenComponentsAvailable && d.tokenComponentsAvailable === true;
       addPerClient(cur.perClient, d.perClient, true);
       addPerModel(cur.perModel, d.perModel, true);
+      addCostAttribution(cur, d);
       byDate.set(d.date, cur);
     }
   }
@@ -425,6 +465,7 @@ function mergeMonthlyMaps(histories) {
       cur.tokens += num(m.tokens); cur.cost += num(m.cost); cur.activeTimeMs += num(m.activeTimeMs);
       addPerClient(cur.perClient, m.perClient);
       addPerModel(cur.perModel, m.perModel);
+      addCostAttribution(cur, m);
       byMonth.set(m.month, cur);
     }
   }
@@ -463,7 +504,8 @@ function mergeHistories(histories, options = {}) {
     monthly,
     summary: {
       totalTokens, totalCost, activeDays, currentStreak, longestStreak,
-      peakDayTokens, favoriteModel, messages, activeTimeMs
+      peakDayTokens, favoriteModel, messages, activeTimeMs,
+      ...costAttributionSummary(monthly)
     }
   };
 }
@@ -483,8 +525,12 @@ function historyPreview(history, options = {}) {
   const dailyDays = Number.isFinite(options.dailyDays) ? options.dailyDays : 30;
   const monthlyMonths = Number.isFinite(options.monthlyMonths) ? options.monthlyMonths : 12;
   const h = coerceHistory(history);
-  const daily = h.daily.slice(-dailyDays).map((d) => ({ date: d.date, tokens: num(d.tokens), cost: num(d.cost), activeTimeMs: num(d.activeTimeMs) }));
-  const monthly = h.monthly.slice(-monthlyMonths).map((m) => ({ month: m.month, tokens: num(m.tokens), cost: num(m.cost), activeTimeMs: num(m.activeTimeMs) }));
+  const attribution = (row) => ({
+    ...(row.clientModelCosts ? { clientModelCosts: row.clientModelCosts } : {}),
+    ...(row.clientModelCostsIncomplete ? { clientModelCostsIncomplete: true } : {})
+  });
+  const daily = h.daily.slice(-dailyDays).map((d) => ({ date: d.date, tokens: num(d.tokens), cost: num(d.cost), activeTimeMs: num(d.activeTimeMs), ...attribution(d) }));
+  const monthly = h.monthly.slice(-monthlyMonths).map((m) => ({ month: m.month, tokens: num(m.tokens), cost: num(m.cost), activeTimeMs: num(m.activeTimeMs), ...attribution(m) }));
   return { daily, monthly, summary: h.summary };
 }
 

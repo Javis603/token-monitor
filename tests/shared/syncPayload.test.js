@@ -4,6 +4,86 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { SYNC_PAYLOAD_BUDGET_BYTES, postSyncPayload, serializeSyncPayload, syncPayload } = require('../../src/shared/syncPayload');
+const { normalizeHistory, parseGraphResult } = require('../../src/shared/history');
+
+function costAttributionSummary(days = 1) {
+  const contributions = Array.from({ length: days }, (_, day) => ({
+    date: new Date(Date.UTC(2025, 8, 17 + day)).toISOString().slice(0, 10),
+    clients: Array.from({ length: 100 }, (_, index) => ({
+      client: `tool${Math.floor(index / 10)}`,
+      modelId: `model-long-version-2026-${index % 10}`,
+      tokens: { input: 1 }, cost: 1
+    }))
+  }));
+  return {
+    deviceId: 'cost-attribution',
+    today: { totalTokens: 100, costUsd: 100, sessions: { keep: { totalTokens: 100, costUsd: 100 } } },
+    month: { totalTokens: 100, costUsd: 100, sessions: { keep: { totalTokens: 100, costUsd: 100 } } },
+    allTime: { totalTokens: 100 * days, costUsd: 100 * days, projects: { keep: { label: 'Keep', tokens: 100 * days, costUsd: 100 * days } } },
+    history: normalizeHistory(parseGraphResult({ contributions }), { todayKey: '2026-09-11' })
+  };
+}
+
+test('small sync payloads retain exact history cost attribution in every tier', () => {
+  const summary = costAttributionSummary();
+  const before = structuredClone(summary);
+  const { payload } = serializeSyncPayload(summary);
+  for (const row of [...payload.history.daily, ...payload.history.monthly, payload.history.summary]) {
+    assert.equal(row.clientModelCosts.tool0['model-long-version-2026-0'], 1);
+    assert.notEqual(row.clientModelCostsIncomplete, true);
+  }
+  assert.deepEqual(summary, before);
+});
+
+test('cost matrices yield to the sync budget before session or project identities', () => {
+  const summary = costAttributionSummary();
+  const before = structuredClone(summary);
+  const full = serializeSyncPayload(summary, { maxBytes: Number.MAX_SAFE_INTEGER });
+  const compact = serializeSyncPayload(summary, { maxBytes: full.bytes - 1 });
+  assert.ok(compact.bytes < full.bytes);
+  assert.ok(compact.payload.today.sessions.keep);
+  assert.ok(compact.payload.month.sessions.keep);
+  assert.ok(compact.payload.allTime.projects.keep);
+  for (const row of [...compact.payload.history.daily, ...compact.payload.history.monthly, compact.payload.history.summary]) {
+    assert.equal(Object.hasOwn(row, 'clientModelCosts'), false);
+    assert.equal(row.clientModelCostsIncomplete, true);
+  }
+  assert.equal(compact.payload.history.summary.totalCost, 100);
+  assert.equal(compact.payload.history.daily[0].perModel['model-long-version-2026-0'].cost, 10);
+  assert.equal(compact.payload.history.monthly[0].perClient.tool0.cost, 10);
+  assert.deepEqual(summary, before);
+});
+
+test('a formerly uploadable year of history remains within the 1 MiB ingest boundary', () => {
+  const summary = costAttributionSummary(360);
+  const raw = structuredClone(summary);
+  const { payload, bytes } = serializeSyncPayload(summary);
+  assert.ok(bytes <= SYNC_PAYLOAD_BUDGET_BYTES, `payload is ${bytes} bytes`);
+  assert.equal(payload.history.daily.length, 360);
+  assert.equal(payload.history.summary.totalTokens, 36000);
+  assert.equal(payload.history.summary.totalCost, 36000);
+  assert.equal(payload.history.summary.clientModelCostsIncomplete, true);
+  assert.ok(payload.today.sessions.keep);
+  assert.ok(payload.month.sessions.keep);
+  assert.ok(payload.allTime.projects.keep);
+  assert.deepEqual(summary, raw);
+});
+
+test('a server 413 retries without optional cost matrices while retaining raw local history', async () => {
+  const summary = costAttributionSummary();
+  const before = structuredClone(summary);
+  const bodies = [];
+  const { response, retried } = await postSyncPayload(async (_url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return { status: bodies.length === 1 ? 413 : 200, async arrayBuffer() { return new ArrayBuffer(0); } };
+  }, 'http://hub/api/ingest', { summary });
+  assert.equal(response.status, 200);
+  assert.equal(retried, true);
+  assert.ok(bodies[0].history.summary.clientModelCosts);
+  assert.equal(Object.hasOwn(bodies[1].history.summary, 'clientModelCosts'), false);
+  assert.equal(bodies[1].history.summary.clientModelCostsIncomplete, true);
+  assert.deepEqual(summary, before);
+});
 
 test('syncPayload preserves nullish inputs', () => {
   assert.equal(syncPayload(null), null);

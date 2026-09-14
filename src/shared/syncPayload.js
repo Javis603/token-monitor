@@ -68,6 +68,22 @@ function historyWithoutTokenComponents(history) {
   };
 }
 
+function historyWithoutCostAttribution(history) {
+  if (!history || typeof history !== 'object') return history;
+  const strip = (row) => {
+    if (!row || typeof row !== 'object' || !hasOwn(row, 'clientModelCosts')) return row;
+    const result = { ...row, clientModelCostsIncomplete: true };
+    delete result.clientModelCosts;
+    return result;
+  };
+  return {
+    ...history,
+    ...(Array.isArray(history.daily) ? { daily: history.daily.map(strip) } : {}),
+    ...(Array.isArray(history.monthly) ? { monthly: history.monthly.map(strip) } : {}),
+    ...(history.summary ? { summary: strip(history.summary) } : {})
+  };
+}
+
 function projectEntries(period) {
   return period?.projects && typeof period.projects === 'object'
     ? Object.keys(period.projects).length
@@ -191,7 +207,8 @@ function sessionsWithoutReasonix(sessions) {
 
 function buildSyncPayload(summary, {
   omitAllTimeProjects = false,
-  omitHistoryTokenComponents = false
+  omitHistoryTokenComponents = false,
+  omitHistoryCostAttribution = false
 } = {}) {
   if (!summary || typeof summary !== 'object') return summary;
   const payload = { ...summary, limits: syncLimits(summary.limits) };
@@ -199,6 +216,9 @@ function buildSyncPayload(summary, {
     payload.history = historyForSync(summary.history, summary.periodWindows);
     if (omitHistoryTokenComponents) {
       payload.history = historyWithoutTokenComponents(payload.history);
+    }
+    if (omitHistoryCostAttribution) {
+      payload.history = historyWithoutCostAttribution(payload.history);
     }
   }
   // Reasonix native sessions are a local-only view. They contain provider
@@ -245,7 +265,8 @@ function serializeSyncPayload(summary, options = {}) {
   const buildOptions = {
     ...options,
     omitAllTimeProjects: options.omitAllTimeProjects === true,
-    omitHistoryTokenComponents: options.omitHistoryTokenComponents === true
+    omitHistoryTokenComponents: options.omitHistoryTokenComponents === true,
+    omitHistoryCostAttribution: options.omitHistoryCostAttribution === true
   };
   let payload = buildSyncPayload(summary, buildOptions);
   if (!payload || typeof payload !== 'object') {
@@ -253,6 +274,15 @@ function serializeSyncPayload(summary, options = {}) {
     return { payload, body, bytes: body ? Buffer.byteLength(body, 'utf8') : 0 };
   }
   let body = JSON.stringify(payload);
+  if (Buffer.byteLength(body, 'utf8') > maxBytes && payload.history && typeof payload.history === 'object') {
+    // This optional matrix can be much larger than the independent tool/model
+    // totals. Shed it before existing component/session/project detail, in all
+    // history tiers so previews cannot imply complete lifetime attribution.
+    // The raw local history and every token/cost total remain unchanged.
+    buildOptions.omitHistoryCostAttribution = true;
+    payload = buildSyncPayload(summary, buildOptions);
+    body = JSON.stringify(payload);
+  }
   if (Buffer.byteLength(body, 'utf8') > maxBytes && payload.history && typeof payload.history === 'object') {
     // Component detail is additive. Never let it evict an existing project/session
     // payload or turn a previously uploadable History V1 record into a 413.
@@ -306,6 +336,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
   const retrySerialized = response.status === 413
     ? serializeSyncPayload(summary, {
         omitHistoryTokenComponents: true,
+        omitHistoryCostAttribution: true,
         omitAllTimeProjects: true
       })
     : null;
@@ -315,7 +346,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
     try { await response.arrayBuffer(); } catch (_) { /* best-effort drain before retry */ }
     serialized = retrySerialized;
     if (typeof logger === 'function') {
-      logger('hub rejected the payload; retrying once without additive History components or all-time projects');
+      logger('hub rejected the payload; retrying once without additive History detail or all-time projects');
     }
     response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   }
