@@ -11,6 +11,14 @@ const read = (file) => fs.readFileSync(path.join(rootDir, file), 'utf8');
 
 const localizedReadmes = ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md'];
 
+const nativeWidgetLineupClaims = {
+  'README.md': 'Small Summary; Medium Activity, Breakdown, and Quota; and a Large Dashboard',
+  'README.zh-TW.md': '小型用量摘要，中型活動、明細和額度，以及大型儀表板',
+  'README.zh-CN.md': '小号用量摘要，中号活动、明细和额度，以及大号仪表盘',
+  'README.ja.md': '小サイズの使用量サマリー、中サイズのアクティビティ・内訳・クォータ、大サイズのダッシュボード',
+  'README.ko.md': '소형 사용량 요약, 중형 활동·분석·할당량, 대형 대시보드'
+};
+
 // The supported-tools table is what a reader can actually verify, so the prose counts are
 // checked against it — not against LIMIT_PROVIDER_IDS, where zai/zaiteam are two ids but
 // share one table row.
@@ -172,6 +180,12 @@ test('localized READMEs list the same supported tools', () => {
     const text = read(file);
     assert.deepEqual(supportedToolCounts(text, file), baseline, file);
     assert.deepEqual(supportedToolIds(text, file), supportedToolIdOrder, file);
+  }
+});
+
+test('localized READMEs describe the current native macOS Widget lineup', () => {
+  for (const [file, claim] of Object.entries(nativeWidgetLineupClaims)) {
+    assert.ok(read(file).includes(claim), `${file}: native macOS Widget lineup is stale`);
   }
 });
 
