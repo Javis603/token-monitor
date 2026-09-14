@@ -32,10 +32,29 @@ enum WidgetDesignTokens {
 }
 
 enum WidgetTrendChange {
+    static func label(for snapshot: WidgetSnapshot, period: WidgetPeriod) -> String {
+        guard period == .total else { return label(for: snapshot.trend.points) }
+        guard let totalTokens = snapshot.periods[.total]?.overview.totalTokens,
+              let currentMonthTokens = snapshot.periods[.month]?.overview.totalTokens else { return "—" }
+        return totalGrowthLabel(totalTokens: totalTokens, currentMonthTokens: currentMonthTokens)
+    }
+
     static func label(for points: [WidgetTrendPoint]) -> String {
         guard let first = points.first(where: { $0.totalTokens > 0 })?.totalTokens,
               let last = points.last?.totalTokens else { return "—" }
-        let percent = Int(((Double(last) - Double(first)) / Double(first) * 100).rounded())
+        return label(percent: (Double(last) - Double(first)) / Double(first) * 100)
+    }
+
+    static func totalGrowthLabel(totalTokens: Int, currentMonthTokens: Int) -> String {
+        guard totalTokens > 0 else { return "—" }
+        let boundedMonthTokens = min(max(0, currentMonthTokens), totalTokens)
+        let previousTotal = totalTokens - boundedMonthTokens
+        guard previousTotal > 0 else { return "—" }
+        return label(percent: Double(boundedMonthTokens) / Double(previousTotal) * 100)
+    }
+
+    private static func label(percent rawPercent: Double) -> String {
+        let percent = Int(rawPercent.rounded())
         if percent == 0 { return "0%" }
         return percent > 0 ? "+\(percent)%" : "−\(abs(percent))%"
     }

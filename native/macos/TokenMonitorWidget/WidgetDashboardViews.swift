@@ -192,7 +192,7 @@ struct LargeDashboardWidgetView: View {
         }
     }
 
-    private var trendDelta: String { WidgetTrendChange.label(for: snapshot.trend.points) }
+    private var trendDelta: String { WidgetTrendChange.label(for: snapshot, period: period) }
 
     private var trendCaption: String { trendDelta }
 }

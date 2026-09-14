@@ -23,6 +23,24 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         )
     }
 
+    func testTotalTrendChangeMeasuresCurrentMonthGrowthAgainstPreviousTotal() {
+        XCTAssertEqual(
+            WidgetTrendChange.totalGrowthLabel(
+                totalTokens: 24_489_640_445,
+                currentMonthTokens: 3_115_874_699
+            ),
+            "+15%"
+        )
+        XCTAssertEqual(
+            WidgetTrendChange.totalGrowthLabel(totalTokens: 24_489_640_445, currentMonthTokens: 0),
+            "0%"
+        )
+        XCTAssertEqual(
+            WidgetTrendChange.totalGrowthLabel(totalTokens: 3_115_874_699, currentMonthTokens: 3_115_874_699),
+            "—"
+        )
+    }
+
     func testDecodesCurrentSchemaFromPeriods() throws {
         let snapshot = try decode("""
         {
