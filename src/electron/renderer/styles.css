@@ -3487,13 +3487,68 @@ html.is-windows .settings-panel select option {
 }
 
 .row { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid rgba(var(--line-rgb), 0.12); }
-.breakdown.large-session-list .session-row {
-  contain-intrinsic-block-size: auto 72px;
+.session-pager-host {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
 }
-.breakdown.large-session-list.large-session-list-ready .session-row {
-  content-visibility: auto;
-  contain: layout paint style;
+.session-pager {
+  display: grid;
+  width: min(220px, 100%);
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  align-items: center;
+  min-height: 24px;
+  margin-inline: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
+.session-page-status {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  line-height: 1;
+  opacity: 0.78;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-page-button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.72;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+.session-page-button:hover:not(:disabled) {
+  color: var(--text);
+  opacity: 1;
+}
+.session-page-button:focus-visible {
+  box-shadow: inset 0 -1px 0 rgba(var(--accent-rgb), 0.58);
+  color: var(--text);
+  opacity: 1;
+}
+.session-page-button:disabled { cursor: default; opacity: 0.28; }
+.session-page-icon {
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+  mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+}
+.session-page-next .session-page-icon { transform: rotate(180deg); }
 .row-head { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
 .row-name { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 8px; color: var(--text); }
 .dot {

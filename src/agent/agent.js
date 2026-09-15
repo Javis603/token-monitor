@@ -20,9 +20,9 @@ const {
   applySessionUsageArchive,
   captureSessionUsageArchive,
   readSessionUsageArchive,
-  sessionUsageArchiveDate,
-  writeSessionUsageArchive
+  sessionUsageArchiveDate
 } = require('../shared/sessionUsageArchive');
+const { createSessionUsageArchiveStore } = require('../shared/sessionUsageArchiveStore');
 
 loadDotEnv();
 const args = parseArgs(process.argv.slice(2));
@@ -96,24 +96,27 @@ const limitsOptions = {
   opencodeCookie
 };
 let sessionUsageArchive;
+const sessionUsageArchiveStore = dryRun ? null : createSessionUsageArchiveStore();
 
 function summaryWithSessionUsageArchive(summary, now = new Date()) {
   let visibleSummary = summary;
   if (sessionUsageArchiveEnabled) {
     const archiveDate = sessionUsageArchiveDate(summary, now);
-    const previous = sessionUsageArchive || readSessionUsageArchive();
-    const next = captureSessionUsageArchive(previous, summary, archiveDate);
-    if (!dryRun && JSON.stringify(next) !== JSON.stringify(previous)) {
-      try {
-        writeSessionUsageArchive(next);
-        sessionUsageArchive = next;
-      } catch (error) {
-        console.error(`[session-archive] write failed: ${error.message}`);
-      }
-    } else if (!dryRun) {
-      sessionUsageArchive = next;
+    if (dryRun) {
+      sessionUsageArchive = captureSessionUsageArchive(
+        sessionUsageArchive || readSessionUsageArchive(),
+        summary,
+        archiveDate
+      );
+    } else {
+      const result = sessionUsageArchiveStore.capture(summary, archiveDate);
+      sessionUsageArchive = result.archive;
+      if (result.error) console.error(`[session-archive] write failed: ${result.error.message}`);
     }
-    visibleSummary = applySessionUsageArchive(summary, next, { now: archiveDate });
+    visibleSummary = applySessionUsageArchive(summary, sessionUsageArchive, {
+      now: archiveDate,
+      canonical: !dryRun
+    });
   }
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
 }
@@ -161,7 +164,10 @@ async function main() {
   // Claim archive ownership before either a one-shot or long-running scan so
   // Electron can yield before its history read-modify-write reaches disk.
   let runtimeHandle = null;
-  if (!dryRun) registerPidFile(() => runtimeHandle?.stop());
+  if (!dryRun) registerPidFile(() => {
+    runtimeHandle?.stop();
+    sessionUsageArchiveStore.close();
+  });
   const runtimeOptions = {
     envelope: { deviceId, agentVersion: appVersion(), agentRuntime: 'headless-agent' },
     usageOptions,
@@ -173,7 +179,11 @@ async function main() {
     onError: (error, reason) => console.error(`[${new Date().toISOString()}] (${reason}) ${error.message}`)
   };
   if (once) {
-    await runAgentOnce(runtimeOptions);
+    try {
+      await runAgentOnce(runtimeOptions);
+    } finally {
+      sessionUsageArchiveStore?.close();
+    }
     return;
   }
   runtimeHandle = runAgent(runtimeOptions);
