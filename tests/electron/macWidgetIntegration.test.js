@@ -933,8 +933,12 @@ test('Widget user-facing strings are localized in five languages', () => {
   ]) {
     assert.ok(widgetLocalization.strings[key], `missing Widget configuration localization for ${key}`);
   }
-  assert.match(widgetSource, /configurationDisplayName\(LocalizedStringResource\("Token Monitor Dashboard"\)\)/);
-  assert.match(widgetSource, /description\(LocalizedStringResource\("Usage, quota, breakdown, and activity in one dashboard\."\)\)/);
+  assert.match(widgetSource, /configurationDisplayName\("Token Monitor Dashboard"\)/);
+  assert.match(widgetSource, /description\("Usage, quota, breakdown, and activity in one dashboard\."\)/);
+  // A `LocalizedStringResource` argument only resolves on newer SDKs; keep the
+  // literal form so the Widget compiles at the macOS 14 deployment target.
+  assert.doesNotMatch(widgetSource, /configurationDisplayName\(LocalizedStringResource/);
+  assert.doesNotMatch(widgetSource, /\.description\(LocalizedStringResource/);
 });
 
 test('Widget layout uses system margins without retaining the superseded scaffold', () => {

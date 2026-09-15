@@ -9,9 +9,8 @@ The committed defaults are non-personal placeholders. Ordinary macOS packaging d
 - `npm run pack`
 - `npm run dist:mac`
 - `npm run dist:mac:x64`
-- the Release workflow
 
-They leave `TOKEN_MONITOR_WIDGET_ENABLED` unset/disabled and therefore do not require Widget artifacts or Widget identifiers. Only the explicit `pack:mac:widget` and `dist:mac:widget*` entries enable the Widget.
+They leave `TOKEN_MONITOR_WIDGET_ENABLED` unset/disabled and therefore do not require Widget artifacts or Widget identifiers. Only the explicit `pack:mac:widget` and `dist:mac:widget*` entries enable the Widget. The official Release workflow selects `dist:mac:widget` and `dist:mac:widget:x64`, so its signed macOS artifacts include the Widget while the ordinary commands remain available as a fallback.
 
 For a local unsigned or ad-hoc preview, use the example identifiers and `TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING=1`. This mode does not validate production App Group authorization and must not be used as evidence that a formal distribution build is provisioned. A Team-prefixed App Group instead selects an Apple Development identity automatically, because an ad-hoc host and extension cannot access that App Group; when `DEVELOPMENT_TEAM` is also set, its value must match the App Group prefix. Set `TOKEN_MONITOR_MAC_DEVELOPMENT_IDENTITY` only when more than one Apple Development identity is installed.
 
@@ -25,6 +24,8 @@ For a formal Widget distribution, configure all of the following without committ
 - `TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE` — extension provisioning profile for the same App Group.
 - `DEVELOPMENT_TEAM` — Apple Developer Team ID used by Xcode when signing is enabled.
 - `TOKEN_MONITOR_WIDGET_KIND` — stable WidgetKit kind shared by the extension and reload helper.
+
+The official Release workflow requires a `group.*` App Group. It reads `TOKEN_MONITOR_APP_GROUP`, `TOKEN_MONITOR_WIDGET_BUNDLE_ID`, `TOKEN_MONITOR_WIDGET_KIND`, and `DEVELOPMENT_TEAM` from GitHub Actions repository variables and fails before building when any is missing or the App Group is not `group.*`. Store the main-app and extension profiles as the base64-encoded Actions secrets `TOKEN_MONITOR_APP_PROVISIONING_PROFILE_BASE64` and `TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE_BASE64`; the workflow decodes them into temporary files and exports the profile paths expected by the build. Team-prefixed App Groups remain supported by manual distribution commands but are not accepted by the official Release workflow. Signing certificates and notarization credentials remain in Actions secrets.
 
 The Widget bundle identifier must be inside the configured Electron app identifier namespace. App Groups must use either the `group.<name>` form or the `<10-character-DEVELOPMENT_TEAM>.<name>` form; the latter requires an explicit matching `DEVELOPMENT_TEAM`. A `group.*` App Group requires both provisioning profiles, and those profiles must be non-development Developer ID profiles (`get-task-allow=false`, `ProvisionsAllDevices=true`, and no `ProvisionedDevices`). The build fails before signing when required production values, identifiers, channel, or profiles are invalid.
 
