@@ -291,8 +291,6 @@ There are two places to configure Token Monitor; day-to-day use only needs the f
 
 See the [configuration reference](docs/configuration.md) for every setting and all environment variables.
 
-**Model aliases** group IDs that mean the same model in local views. Optional automatic grouping merges provider-qualified and separator variants when both spellings are present; manual mappings cover everything else. Costs and stored, synced, or exported IDs remain unchanged. See the [model alias guide](docs/model-aliases.md).
-
 ## Privacy
 
 Token Monitor processes usage logs locally and sends no analytics or telemetry to the project maintainer. Network access occurs only for documented or user-enabled features. See the [privacy policy](docs/privacy.md) for the data used by updates, provider integrations, Discord Rich Presence, and optional multi-device sync.
