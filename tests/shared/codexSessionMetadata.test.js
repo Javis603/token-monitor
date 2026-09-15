@@ -168,7 +168,9 @@ test('discovers the newest state database first and honors CODEX_HOME', () => {
 });
 
 test('T3CODE_HOME expands a leading tilde the way T3 Code itself does', () => {
-  const home = path.join(path.sep, 'home', 'someone');
+  // Build the home from the running platform's filesystem root so it is already
+  // absolute on Windows too (`D:\home\someone`), which `path.resolve` preserves.
+  const home = path.join(path.parse(process.cwd()).root, 'home', 'someone');
   const t3Root = (value) => metadata.t3HomeDir({ homeDir: home, env: { T3CODE_HOME: value } });
 
   // T3 resolves `resolve(expandHomePath(raw.trim()))`, so these land in home.
@@ -179,7 +181,8 @@ test('T3CODE_HOME expands a leading tilde the way T3 Code itself does', () => {
   // `path.join` normalizes it the same way T3's own `resolve()` step would.
   assert.equal(metadata.expandHomePath('~\\custom-t3', home), `${home}\\custom-t3`);
   // An absolute path is left alone.
-  assert.equal(t3Root(path.join(path.sep, 'srv', 't3')), path.join(path.sep, 'srv', 't3'));
+  const absolute = path.join(path.parse(process.cwd()).root, 'srv', 't3');
+  assert.equal(t3Root(absolute), absolute);
   // A bare `~` inside a longer segment is a literal directory name, not home.
   assert.equal(metadata.expandHomePath('~x', home), '~x');
   assert.equal(metadata.expandHomePath('a/~/b', home), 'a/~/b');
