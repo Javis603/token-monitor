@@ -653,7 +653,7 @@ test('tray main-process actions surface refresh errors and expand a collapsed bu
   assert.match(refreshAction, /catch \(error\)[\s\S]*?showTrayRefreshError\(error\?\.message \|\| error\)/);
   assert.match(refreshAction, /return runTrayMenuAction\(\{[\s\S]*?trayRefreshInFlight = value;[\s\S]*?refreshContextMenu: refreshTrayContextMenu/);
   assert.match(codexSwitchAction, /return runTrayMenuAction\(\{[\s\S]*?trayCodexSwitchInFlight = value;[\s\S]*?refreshContextMenu: refreshTrayContextMenu/);
-  assert.match(source, /if \(value === 'tray'\)[\s\S]*?saveSettings\(\);\s*syncFloatingBubbleAvailability\(\);\s*enterTrayMode\(\);/);
+  assert.match(source, /if \(value === 'tray'\)[\s\S]*?saveSettings\(\);\s*syncFloatingBubbleAvailability\(\);\s*syncTopEdgeHideAvailability\(\);\s*enterTrayMode\(\);/);
 });
 
 test('usage tray icon picks the top token client for day and total token modes', () => {

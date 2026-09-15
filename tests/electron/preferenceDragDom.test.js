@@ -446,9 +446,19 @@ test('main section holds views; appearance is its own section; window holds beha
   assert.doesNotMatch(windowGroup, /settings\.display\.windowTitle/);
   assert.doesNotMatch(windowGroup, /<div class="settings-group-header"><span data-i18n="settings\.display\.windowTitle">/);
   assert.doesNotMatch(windowGroup, /id="floatingBubbleInput"/);
+  assert.doesNotMatch(windowGroup, /id="topEdgeHideInput"/);
 
   const presenceGroup = windowSection.slice(presenceIndex);
   assert.match(presenceGroup, /id="floatingBubbleInput"/);
+  assert.match(presenceGroup, /id="topEdgeHideInput"/);
+  assert.ok(
+    presenceGroup.indexOf('id="floatingBubbleInput"') < presenceGroup.indexOf('id="topEdgeHideInput"'),
+    'top-edge hide should sit beside Floating Bubble'
+  );
+  assert.ok(
+    presenceGroup.indexOf('id="topEdgeHideInput"') < presenceGroup.indexOf('id="showTrayIconInput"'),
+    'top-edge hide should precede the tray icon toggle'
+  );
   assert.match(presenceGroup, /id="showTrayIconInput"/);
   assert.match(presenceGroup, /id="trayModeInput"/);
   assert.equal((presenceGroup.match(/value="limitsAllSessions"/g) || []).length, 2);
