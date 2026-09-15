@@ -32,9 +32,11 @@ function createSessionUsageArchiveStore(options = {}) {
   const legacyPath = sessionUsageArchivePath(options);
   const Database = options.DatabaseSync || DatabaseSync;
   const existsSync = options.existsSync || fs.existsSync;
+  const readFileSync = options.readFileSync || fs.readFileSync;
   const unlinkSync = options.unlinkSync || fs.unlinkSync;
   let database = null;
   let archive = null;
+  let archiveSource = null;
   let revision = 0;
   const pendingKeys = new Set();
 
@@ -78,7 +80,7 @@ function createSessionUsageArchiveStore(options = {}) {
   function migrateLegacyArchive() {
     if (metadataValue('legacy-migrated') === '1') return;
     const legacy = existsSync(legacyPath)
-      ? readSessionUsageArchive({ ...options, path: legacyPath })
+      ? normalizeSessionUsageArchive(JSON.parse(readFileSync(legacyPath, 'utf8')))
       : normalizeSessionUsageArchive({});
     archive = legacy;
     const keys = Object.keys(legacy.sessions);
@@ -96,9 +98,11 @@ function createSessionUsageArchiveStore(options = {}) {
       if (count !== keys.length) throw new Error(`session archive migration count mismatch (${count}/${keys.length})`);
       database.exec('COMMIT');
       revision = keys.length > 0 ? 1 : 0;
+      archiveSource = 'database';
     } catch (error) {
       try { database.exec('ROLLBACK'); } catch (_) {}
       archive = null;
+      archiveSource = null;
       throw error;
     }
     if (existsSync(legacyPath)) {
@@ -137,7 +141,6 @@ function createSessionUsageArchiveStore(options = {}) {
       }
       if (!storedVersion) setMetadataValue('schema-version', SESSION_ARCHIVE_DATABASE_VERSION);
       migrateLegacyArchive();
-      revision = Number(metadataValue('revision') || 0);
       return database;
     } catch (error) {
       try { database.close(); } catch (_) {}
@@ -157,12 +160,14 @@ function createSessionUsageArchiveStore(options = {}) {
 
   function loadRows() {
     ensureDatabase();
-    if (!archive) {
+    if (archiveSource !== 'database') {
       archive = normalizeSessionUsageArchive({});
       for (const row of database.prepare('SELECT session_key, entry_json FROM sessions').all()) {
         const entry = parseRow(row);
         if (entry) archive.sessions[row.session_key] = entry;
       }
+      revision = Number(metadataValue('revision') || 0);
+      archiveSource = 'database';
     }
     return archive;
   }
@@ -202,10 +207,11 @@ function createSessionUsageArchiveStore(options = {}) {
       archive = existsSync(legacyPath)
         ? readSessionUsageArchive({ ...options, path: legacyPath })
         : normalizeSessionUsageArchive({});
+      archiveSource = 'legacy';
       return archive;
     }
     ensureDatabase();
-    if (!archive) loadRows();
+    loadRows();
     const storedRevision = Number(metadataValue('revision') || 0);
     if (storedRevision > revision) {
       for (const row of database.prepare(`
@@ -252,6 +258,7 @@ function createSessionUsageArchiveStore(options = {}) {
   function clear() {
     close();
     archive = normalizeSessionUsageArchive({});
+    archiveSource = null;
     revision = 0;
     pendingKeys.clear();
     let removed = false;

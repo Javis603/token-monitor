@@ -30,6 +30,15 @@ function summary(totalTokens = 100) {
   }]));
 }
 
+function migrationMarker(options) {
+  const database = new DatabaseSync(sessionUsageArchiveDatabasePath(options), { readOnly: true });
+  try {
+    return database.prepare("SELECT value FROM metadata WHERE key = 'legacy-migrated'").get()?.value;
+  } finally {
+    database.close();
+  }
+}
+
 test('migrates the legacy JSON only after verified row storage', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -65,6 +74,23 @@ test('persists and refreshes only revised session rows between processes', (t) =
   reader.close();
 });
 
+test('reopening a reader keeps its archive revision instead of skipping newer rows', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const writer = createSessionUsageArchiveStore(options);
+  const reader = createSessionUsageArchiveStore(options);
+
+  writer.capture(summary(100), new Date('2026-09-15T08:00:00.000Z'));
+  assert.equal(reader.read().sessions['codex:one'].periods.allTime.totalTokens, 100);
+  reader.close();
+  writer.capture(summary(125), new Date('2026-09-15T08:01:00.000Z'));
+
+  assert.equal(reader.refresh().sessions['codex:one'].periods.allTime.totalTokens, 125);
+  writer.close();
+  reader.close();
+});
+
 test('read-only refresh leaves legacy migration to the active writer', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -77,6 +103,66 @@ test('read-only refresh leaves legacy migration to the active writer', (t) => {
   assert.equal(fs.existsSync(sessionUsageArchiveDatabasePath(options)), false);
   assert.equal(fs.existsSync(path.join(dir, 'session-usage-archive.json')), true);
   reader.close();
+});
+
+test('a reader reloads SQLite after serving legacy during another writer migration', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  writeSessionUsageArchive(
+    captureSessionUsageArchive({}, summary(100), new Date('2026-09-15T08:00:00.000Z')),
+    options
+  );
+  const reader = createSessionUsageArchiveStore(options);
+  const writer = createSessionUsageArchiveStore(options);
+
+  assert.equal(reader.refresh().sessions['codex:one'].periods.allTime.totalTokens, 100);
+  assert.equal(writer.capture(summary(125), new Date('2026-09-15T08:01:00.000Z')).error, null);
+  assert.equal(reader.refresh().sessions['codex:one'].periods.allTime.totalTokens, 125);
+
+  writer.close();
+  reader.close();
+});
+
+test('malformed legacy JSON cannot be marked as migrated or removed', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const legacyPath = path.join(dir, 'session-usage-archive.json');
+  fs.writeFileSync(legacyPath, '{"version":1,"sessions":');
+  const store = createSessionUsageArchiveStore(options);
+
+  assert.throws(() => store.read(), SyntaxError);
+  assert.equal(fs.existsSync(legacyPath), true);
+  assert.equal(migrationMarker(options), undefined);
+  store.close();
+});
+
+test('legacy read errors cannot be marked as migrated or remove the source', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const legacyPath = path.join(dir, 'session-usage-archive.json');
+  writeSessionUsageArchive(
+    captureSessionUsageArchive({}, summary(), new Date('2026-09-15T08:00:00.000Z')),
+    options
+  );
+  const store = createSessionUsageArchiveStore({
+    ...options,
+    readFileSync: (filePath, encoding) => {
+      if (filePath === legacyPath) {
+        const error = new Error('permission denied');
+        error.code = 'EACCES';
+        throw error;
+      }
+      return fs.readFileSync(filePath, encoding);
+    }
+  });
+
+  assert.throws(() => store.read(), { code: 'EACCES' });
+  assert.equal(fs.existsSync(legacyPath), true);
+  assert.equal(migrationMarker(options), undefined);
+  store.close();
 });
 
 test('read-only refresh does not claim an SQLite file before its migration commits', (t) => {
