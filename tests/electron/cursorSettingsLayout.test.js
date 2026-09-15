@@ -177,6 +177,7 @@ test('Cursor account header uses the shared linked-account summary', () => {
 test('Cursor settings use the shared multi-account rows and inline add flow', () => {
   const html = readRendererFile('index.html');
   const details = html.match(/<div id="cursorSettingsDetails"[\s\S]*?<div id="cursorErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  assert.match(details, /id="cursorDeviceUsageInput"/);
   assert.match(details, /id="cursorAddAccountButton" class="opencode-add-summary"[^>]*aria-expanded="false"[^>]*aria-controls="cursorManualDetails"/);
   assert.match(details, /<svg class="add-icon"/);
   assert.doesNotMatch(details, /cursorRefreshButton|>Refresh<|>重新整理</);

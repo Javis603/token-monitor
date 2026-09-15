@@ -309,8 +309,9 @@ test('every source-root id the collector emits is in the allowlist', () => {
   const roots = clientSourceRoots(KNOWN_CLIENTS, {
     customScanPaths: { codex: [path.resolve('tmp', 'codex-extra')] }
   });
+  const deviceRoots = clientSourceRoots('cursor', { cursorUsageSource: 'device' });
   const emitted = new Set();
-  for (const entries of Object.values(roots)) {
+  for (const entries of [...Object.values(roots), deviceRoots.cursor || []]) {
     for (const { id, dir } of entries) {
       assert.equal(typeof dir, 'string');
       assert.ok(dir.length > 0, `${id} must resolve to a path`);
