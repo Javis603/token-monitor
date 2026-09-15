@@ -1634,8 +1634,12 @@ function cherryStudioTranscriptRoots({ homeDir, platform = process.platform, env
   ];
 }
 
-function xdgDataHome(home) {
-  return nonBlankEnvPath('XDG_DATA_HOME', path.join(home, '.local', 'share'));
+// `env` is threaded through rather than read off process.env here: every other
+// resolver in clientSourceRoots() takes the caller's injected env, and a scan of
+// this function that reached for the real environment would resolve a different
+// root than the one its caller passed in.
+function xdgDataHome(home, env = process.env) {
+  return nonBlankEnvPath('XDG_DATA_HOME', path.join(home, '.local', 'share'), env);
 }
 
 // Where tokscale looks for captured `codex exec --json` output. Both defaults
@@ -1766,7 +1770,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // at the profile while the scan read the $HOME tree, so Amp could show
   // `detected` next to usage collected from another directory.
   const tokscaleHome = tokscaleHomeDir({ env, platform, homeDir: home });
-  const xdgHome = xdgDataHome(tokscaleHome);
+  const xdgHome = xdgDataHome(tokscaleHome, env);
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
   // Amp (Sourcegraph / AmpCode): tokscale reads the XDG-data root on every

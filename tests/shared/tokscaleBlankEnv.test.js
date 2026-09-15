@@ -51,7 +51,7 @@ test('a blank value is dropped from the tokscale environment, a real one is kept
   const kept = tokscaleEnvWithBlanksDropped({ XDG_DATA_HOME: '/custom/share' });
   assert.equal(kept.XDG_DATA_HOME, '/custom/share', 'a real override must still reach the subprocess');
 });
-+
+
 // Tokscale's effective home is not always the Win32 profile: paths.rs
 // home_dir() prefers an absolute native $HOME on Windows, and a normal scan
 // passes no --home so the scanner receives exactly that value. Deriving the XDG
@@ -87,15 +87,15 @@ test('the XDG fallback follows an absolute native HOME on Windows, like the scan
     );
   }
 
-  // An explicit XDG_DATA_HOME still outranks the home entirely. It goes on
-  // process.env because xdgDataHome() reads the real environment (the way every
-  // XDG root does); installSourceEnvGuard clears it between tests.
-  process.env.XDG_DATA_HOME = 'E:\\xdg';
+  // An explicit XDG_DATA_HOME still outranks the home entirely, and it is read
+  // from the caller's env rather than process.env like every other resolver here.
   assert.equal(
-    clientSourceRoots('amp', options).amp[0].dir,
+    clientSourceRoots('amp', {
+      ...options,
+      env: { HOME: portable, XDG_DATA_HOME: 'E:\\xdg' }
+    }).amp[0].dir,
     path.join('E:\\xdg', 'amp', 'threads')
   );
-  delete process.env.XDG_DATA_HOME;
 
   // Non-Windows platforms ignore HOME for the profile, matching home_dir().
   assert.equal(
@@ -174,4 +174,44 @@ test('a blank XDG_DATA_HOME resolves a usable root for Token Monitor', () => {
     assert.deepEqual(roots, [{ id: 'amp-threads', dir: expected }]);
     assert.deepEqual(clientWatchCandidates('amp', { homeDir: home, platform: 'linux' }).amp, [expected]);
   }
+});
+
+test('an injected env wins over process.env for the XDG data root', () => {
+  // Every resolver in clientSourceRoots() takes the caller's env, so a root that
+  // read process.env instead would resolve somewhere the caller never asked for
+  // — and the source health check would then disagree with the watcher and the
+  // scan. Start with two deliberately different values so the assertion proves
+  // which environment won.
+  assert.equal(process.env.XDG_DATA_HOME, undefined, 'guard should have cleared the real variable');
+  process.env.XDG_DATA_HOME = '/tmp/process-xdg';
+
+  const options = {
+    homeDir: '/tmp/injected-home',
+    platform: 'linux',
+    env: { HOME: '/tmp/injected-home', XDG_DATA_HOME: '/tmp/injected-xdg' }
+  };
+
+  assert.equal(
+    clientSourceRoots('amp', options).amp[0].dir,
+    path.join('/tmp/injected-xdg', 'amp', 'threads')
+  );
+  assert.deepEqual(
+    clientWatchCandidates('amp', options).amp,
+    [path.join('/tmp/injected-xdg', 'amp', 'threads')]
+  );
+
+  // The other PathRoot::XdgData clients read the same injected value rather than
+  // silently falling back to the home.
+  assert.equal(
+    clientSourceRoots('opencode', options).opencode[0].dir,
+    path.join('/tmp/injected-xdg', 'opencode')
+  );
+
+  // A blank injected XDG value is still unset, and must not leak the real
+  // environment's non-blank value back in.
+  const blankInjected = { ...options, env: { HOME: '/tmp/injected-home', XDG_DATA_HOME: '   ' } };
+  assert.equal(
+    clientSourceRoots('amp', blankInjected).amp[0].dir,
+    path.join('/tmp/injected-home', '.local', 'share', 'amp', 'threads')
+  );
 });
