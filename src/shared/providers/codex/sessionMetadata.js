@@ -54,6 +54,11 @@ function codexHomeDir(options = {}) {
 // base directory of its own, with the server database one level below in
 // `userdata` (a dev-server run writes to `dev` instead).
 //
+// Only the installed layouts are covered: the default home and an explicit
+// `T3CODE_HOME`. A T3 dev run inside a linked git worktree keeps its state in
+// that worktree's own `.t3`, which is not reachable from the home directory;
+// those sessions simply keep the Codex fallback title.
+//
 // T3 expands a leading `~` against the user's home before resolving the base
 // directory, so `T3CODE_HOME=~/t3-alt` means the home directory rather than a
 // literal `~` directory under the working directory. Mirror its rule exactly:
@@ -141,6 +146,15 @@ function titleForRow(row) {
   return '';
 }
 
+// Whether the chosen title actually came from `name`, the app-generated field,
+// rather than from the `title` first-user-message fallback. `name` can clean down
+// to nothing (for example a value that only held an attachment), in which case the
+// fallback is what is displayed and a caller holding a better generated title of
+// its own may still replace it.
+function isGeneratedTitle(row) {
+  return Boolean(cleanSessionTitle(row.name));
+}
+
 function selectExpression(columns, name) {
   return columns.has(name) ? `COALESCE(${name}, '') AS ${name}` : `'' AS ${name}`;
 }
@@ -190,7 +204,7 @@ function readSessionMeta(sessionIds, deps = {}) {
           const title = titleForRow(row);
           if (!title) continue;
           metaByThreadId.set(id, { title });
-          if (cleanText(row.name)) generatedTitleIds.add(id);
+          if (isGeneratedTitle(row)) generatedTitleIds.add(id);
         }
       }
     } catch (_) { /* skip missing, locked, or older databases */ } finally {

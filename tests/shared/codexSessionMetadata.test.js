@@ -226,6 +226,18 @@ test('title cleaning is Unicode-safe and bounded', () => {
   assert.match(cleaned, /…$/);
 });
 
+maybe('a name that cleans away is not treated as a generated title', () => {
+  const id = '01a0a091-18da-7123-b874-e75d66eaae9c';
+  // `cleanText(name)` is non-empty here, but `cleanSessionTitle(name)` strips it to
+  // nothing, so the displayed title is the `title` fallback and T3 may still win.
+  const file = makeDb([{ id, name: '[@image.png](file:///private/a.png)', title: 'first user message' }]);
+  const sources = new Map();
+  const rows = metadata.readSessionMeta([id], { dbPaths: [file], sqlite, titleSourceById: sources });
+
+  assert.deepEqual(rows.get(id), { title: 'first user message' });
+  assert.equal(sources.get(id), false);
+});
+
 maybe('the T3 title outranks a prompt-derived Codex label but never a generated one', () => {
   const promptTitled = '01a0a091-18da-7123-b874-e75d66eaae9c';
   const appTitled = '01a0a0d2-3da6-7151-9e15-7673a4b40d1f';
