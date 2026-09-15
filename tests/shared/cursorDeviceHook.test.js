@@ -12,6 +12,7 @@ const {
   HOOK_MARKER,
   appendCursorDeviceRecord,
   cursorDeviceLogPath,
+  hookCommand,
   installCursorDeviceHook,
   recordFromPayload,
   uninstallCursorDeviceHook
@@ -88,6 +89,18 @@ test('appendCursorDeviceRecord writes jsonl and the hook CLI fail-opens', () => 
   assert.equal(result.status, 0);
   assert.equal(result.stdout.trim(), '{}');
   assert.equal(fs.readFileSync(logPath, 'utf8').trim().split('\n').length, 1);
+});
+
+test('hookCommand quotes Windows paths without a dangling backslash escape', () => {
+  const command = hookCommand({
+    dest: 'C:\\Users\\alice\\.cursor\\hooks\\token-monitor-cursor-device.js',
+    execPath: 'C:\\Program Files\\nodejs\\node.exe',
+    isElectron: false
+  });
+  assert.equal(
+    command,
+    '"C:/Program Files/nodejs/node.exe" "C:/Users/alice/.cursor/hooks/token-monitor-cursor-device.js"'
+  );
 });
 
 test('installCursorDeviceHook registers stop hooks without dropping unrelated commands', () => {

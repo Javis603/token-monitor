@@ -97,7 +97,7 @@ function appendCursorDeviceRecord(record, options = {}) {
 }
 
 function quote(value) {
-  return `"${String(value).replace(/"/g, '\\"')}"`;
+  return JSON.stringify(String(value).replace(/\\/g, '/'));
 }
 
 function cursorHome(options = {}) {
