@@ -571,13 +571,15 @@
               </button>
               <div id="modelAliasesSettingsDetails" class="cursor-settings-details hidden">
                 <p class="settings-note" data-i18n="settings.modelAliases.note">Show different names for the same model as one row.</p>
-                <label class="checkbox-label settings-item">
-                  <span class="settings-item-text">
-                    <span class="settings-item-title" data-i18n="settings.modelAliases.autoLabel">Merge duplicate model names</span>
-                  </span>
-                  <input id="modelAliasesAutoInput" type="checkbox" aria-describedby="modelAliasesAutoDescription" />
-                  <span id="modelAliasesAutoDescription" class="settings-item-desc" data-i18n="settings.modelAliases.autoDesc">Only merges when the same model appears under two spellings at once, such as anthropic/claude-opus-5 → claude-opus-5.</span>
-                </label>
+                <div class="settings-item">
+                  <span id="modelAliasesGroupingLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.modelAliases.grouping">Automatic grouping</span></span>
+                  <div class="inline-options" role="radiogroup" aria-labelledby="modelAliasesGroupingLabel">
+                    <label class="inline-option"><input type="radio" name="modelAliasGrouping" value="off" id="modelAliasGroupingOff" /><span data-i18n="settings.modelAliases.groupingOff">Off</span></label>
+                    <label class="inline-option"><input type="radio" name="modelAliasGrouping" value="duplicates" id="modelAliasGroupingDuplicates" /><span data-i18n="settings.modelAliases.groupingDuplicates">Merge duplicates</span></label>
+                    <label class="inline-option"><input type="radio" name="modelAliasGrouping" value="prefix" id="modelAliasGroupingPrefix" /><span data-i18n="settings.modelAliases.groupingPrefix">Strip prefixes</span></label>
+                  </div>
+                  <span class="settings-item-desc model-alias-example" data-i18n="settings.modelAliases.groupingDesc">Merge duplicates only handles a model reported under two spellings at once. Strip prefixes removes the provider name before the / in every model name, for example anthropic/claude-opus-5 → claude-opus-5.</span>
+                </div>
                 <div id="modelAliasesList" class="managed-account-list"></div>
                 <div class="settings-actions">
                   <button id="modelAliasesAddButton" type="button" data-i18n="settings.modelAliases.add">Add alias</button>

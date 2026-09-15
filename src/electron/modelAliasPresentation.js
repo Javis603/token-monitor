@@ -2,6 +2,7 @@
 
 const {
   normalizeModelAliases,
+  normalizeModelAliasGrouping,
   inferModelAliases,
   createModelAliasResolver
 } = require('./renderer/modelAliases');
@@ -312,19 +313,20 @@ function projectHistory(history, resolve, semantics) {
   return result;
 }
 
-// Automatic grouping is opt-in (`modelAliasAutoMerge`). It stays off by default
-// because the only time it acts is when two spellings of one model are both present,
-// which is also the case where the difference between them can be real — two supply
-// channels for the same model, billed separately. Manual aliases are unaffected by
-// the setting: an alias the user typed is always applied.
-function aliasPlan(modelIds, aliases, autoMerge) {
+// Automatic grouping is opt-in (`modelAliasGrouping`, default 'off'). 'duplicates'
+// only acts when two spellings of one model are both present — which is also the case
+// where the difference between them can be real, two supply channels for the same
+// model billed separately — so it is a choice rather than a default. 'prefix' goes
+// further and shortens a provider-qualified name that stands alone. Manual aliases
+// are outside the setting: an alias the user typed is always applied.
+function aliasPlan(modelIds, aliases, grouping) {
   const explicit = normalizeModelAliases(aliases);
-  const automatic = autoMerge ? inferModelAliases(modelIds) : {};
+  const automatic = inferModelAliases(modelIds, grouping);
   return {
     explicit,
     automatic,
     active: Object.keys(explicit).length > 0 || Object.keys(automatic).length > 0,
-    resolve: createModelAliasResolver(explicit, autoMerge ? modelIds : [])
+    resolve: createModelAliasResolver(explicit, modelIds, grouping)
   };
 }
 
@@ -332,15 +334,15 @@ function aliasPlan(modelIds, aliases, autoMerge) {
 // outright when automatic grouping is off — which is the default path.
 function projectModelAliasHistory(history, aliases, options = {}) {
   if (!history || typeof history !== 'object') return history;
-  const autoMerge = options.autoMerge === true;
-  const plan = aliasPlan(autoMerge ? [...collectHistoryModelIds(history)] : [], aliases, autoMerge);
+  const grouping = normalizeModelAliasGrouping(options.grouping);
+  const plan = aliasPlan(grouping === 'off' ? [] : [...collectHistoryModelIds(history)], aliases, grouping);
   return plan.active ? projectHistory(history, plan.resolve, 'aggregate') : history;
 }
 
 function projectModelAliasStats(stats, aliases, options = {}) {
   if (!stats || typeof stats !== 'object') return stats;
-  const autoMerge = options.autoMerge === true;
-  const plan = aliasPlan(autoMerge ? [...collectStatsModelIds(stats)] : [], aliases, autoMerge);
+  const grouping = normalizeModelAliasGrouping(options.grouping);
+  const plan = aliasPlan(grouping === 'off' ? [] : [...collectStatsModelIds(stats)], aliases, grouping);
   if (!plan.active) return stats;
 
   const projectRecord = (record) => {
@@ -402,6 +404,7 @@ function projectModelAliasStats(stats, aliases, options = {}) {
 
 module.exports = {
   normalizeModelAliases,
+  normalizeModelAliasGrouping,
   inferModelAliases,
   createModelAliasResolver,
   projectModelAliasStats,

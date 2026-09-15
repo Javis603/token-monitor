@@ -5,6 +5,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorModelAliases = api;
 })(typeof window !== 'undefined' ? window : null, function createModelAliasesApi() {
+  const GROUPING_MODES = ['off', 'duplicates', 'prefix'];
   const MAX_ALIASES = 4096;
   const MAX_DISCOVERED_MODELS = 16384;
   const MAX_MODEL_ID_LENGTH = 256;
@@ -38,6 +39,11 @@
       && alias.length <= MAX_MODEL_ID_LENGTH
       && canonical.length <= MAX_MODEL_ID_LENGTH
       && matchKey(alias) !== matchKey(canonical);
+  }
+
+  function normalizeModelAliasGrouping(value) {
+    const mode = text(value).toLowerCase();
+    return GROUPING_MODES.includes(mode) ? mode : 'off';
   }
 
   function normalizeModelAliases(value) {
@@ -93,16 +99,18 @@
     return 0;
   }
 
-  // Collapse spellings of one model that are BOTH present in the payload: a group of
-  // one is left alone. Two things are deliberately out of scope, because each would
-  // decide on the user's behalf that a distinction they can see does not matter:
-  // renaming a lone `<provider>/<model>` to its last segment (the prefix is often
-  // which supply channel, and therefore which bill, the tokens came from), and
-  // folding vendor-specific suffixes such as a reseller's `-cc`. Both are one manual
-  // alias away, which is also where tokscale's own `modelAliases` leaves them.
-  function inferModelAliases(modelIds) {
+  // 'duplicates' collapses spellings of one model that are BOTH present in the
+  // payload; a group of one is left alone, because a lone `<provider>/<model>` says
+  // nothing about whether the prefix is redundant — it is often which supply channel,
+  // and therefore which bill, the tokens came from. 'prefix' is the same pass without
+  // that guard, for users who would rather read the short name everywhere. Neither
+  // folds vendor-specific suffixes such as a reseller's `-cc`: that is one manual
+  // alias away, which is also where tokscale's own `modelAliases` leaves it.
+  function inferModelAliases(modelIds, grouping) {
+    const mode = normalizeModelAliasGrouping(grouping);
+    if (mode === 'off') return {};
     const models = discoveredModelIds(modelIds);
-    if (models.length < 2) return {};
+    if (models.length < (mode === 'prefix' ? 1 : 2)) return {};
 
     const groups = new Map();
     for (const model of models) {
@@ -115,7 +123,7 @@
 
     const aliases = [];
     for (const [identity, group] of groups) {
-      if (group.length < 2) continue;
+      if (mode !== 'prefix' && group.length < 2) continue;
       const canonical = modelLeaf([...group].sort((a, b) => compareCanonicalCandidates(a, b, identity))[0]);
       for (const model of group) {
         if (model === canonical) continue;
@@ -126,13 +134,13 @@
     return Object.fromEntries(aliases);
   }
 
-  function createModelAliasResolver(value, modelIds = []) {
+  function createModelAliasResolver(value, modelIds = [], grouping = 'duplicates') {
     const explicit = new Map(
       Object.entries(normalizeModelAliases(value))
         .map(([alias, canonical]) => [matchKey(alias), canonical])
     );
     const automatic = new Map(
-      Object.entries(inferModelAliases(modelIds))
+      Object.entries(inferModelAliases(modelIds, grouping))
         .map(([alias, canonical]) => [matchKey(alias), canonical])
     );
 
@@ -165,6 +173,7 @@
 
   return {
     normalizeModelAliases,
+    normalizeModelAliasGrouping,
     inferModelAliases,
     createModelAliasResolver,
     upsertModelAlias

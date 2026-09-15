@@ -675,6 +675,8 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   gap: 2px;
 }
 .settings-item-title { color: var(--text); }
+.model-alias-example { overflow-wrap: anywhere; }
+
 .settings-item-desc,
 p.settings-note.settings-item-desc,
 span.settings-note.settings-item-desc {

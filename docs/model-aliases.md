@@ -11,13 +11,17 @@ Model aliases group those IDs in this app's views. Two ways to get there, and bo
 
 ## Automatic grouping (off by default)
 
-**Settings → Collection → Model aliases → Group duplicate model names.**
+**Settings → Collection → Model aliases → Automatic grouping**, with three settings:
 
-It is evidence-based: it only merges when the same model is present under two spellings *at once*. It compares the terminal segment of the ID, ignoring case and `.`, `_`, spaces and `-`. Dated builds, reasoning tiers, model sizes, quantization labels and other suffixes stay separate.
+| | |
+|---|---|
+| **Off** | Only manual aliases apply. |
+| **Merge duplicates** | Groups a model that is present under two spellings *at once* — a provider-qualified ID beside its bare form, or names differing only in case and separators. An ID that appears only one way is left alone. |
+| **Strip prefixes** | The same pass without that last restriction: a provider-qualified ID is shortened to its final segment even when nothing else matches it. A superset of **Merge duplicates** — it never splits what that mode joined. |
 
-An ID that appears only one way is left alone. `commandcode/deepseek-v4.1-flash` on its own keeps its prefix, because nothing in the data shows the prefix is redundant — and a provider prefix is frequently which supply channel, and therefore which bill, the tokens came from. The same reasoning is why it is off by default: the only moment automatic grouping acts is the moment two channels are both present, which is also when the difference between them can be real.
+Both modes compare the terminal segment of the ID, ignoring case and `.`, `_`, spaces and `-`. Dated builds, reasoning tiers, model sizes, quantization labels and vendor-specific suffixes such as a reseller's `-cc` stay separate in every mode; add a mapping for those.
 
-Vendor-specific suffixes such as a reseller's `-cc` are likewise not folded automatically. Add a mapping for those.
+**Merge duplicates** is not the default, and the reason is worth stating: the only moment it acts is the moment two spellings are both present, which is also when the difference between them can be real — a provider prefix is frequently which supply channel, and therefore which bill, the tokens came from. **Strip prefixes** discards that distinction on purpose, which is why it is a separate choice rather than a refinement.
 
 ## Manual aliases
 
@@ -29,7 +33,7 @@ The left side is the reported model ID; the right side is the group to display i
 
 Aliases apply to model, tool, session and project breakdowns, the macOS widget, trends, retained history and usage received from other devices. Tokens, already-calculated costs and token components are added within the resulting group. Tool, device and provider identities are not renamed, and no model is re-priced.
 
-Manual mappings are stored as `modelAliases` in the desktop `settings.json` and the toggle as `modelAliasAutoMerge`; neither is sent to the hub. Source logs, collected records, archive and delta anchors, sync payloads, custom-pricing identities and lossless exports keep the original model IDs. Turning the toggle off, or removing a mapping, rebuilds the view from those original IDs without a rescan.
+Manual mappings are stored as `modelAliases` in the desktop `settings.json` and the mode as `modelAliasGrouping`; neither is sent to the hub. Source logs, collected records, archive and delta anchors, sync payloads, custom-pricing identities and lossless exports keep the original model IDs. Returning the mode to **Off**, or removing a mapping, rebuilds the view from those original IDs without a rescan.
 
 ## Relationship to Tokscale
 

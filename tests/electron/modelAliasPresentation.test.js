@@ -24,7 +24,7 @@ test('empty or malformed alias settings are a no-op until automatic grouping is 
   for (const input of [undefined, null, [], 'x', {}, { x: 3, ' ': 'x', y: '' }]) {
     assert.deepEqual(normalizeModelAliases(input), {});
     assert.strictEqual(projectModelAliasStats(stats, input), stats);
-    assert.deepEqual(projectModelAliasStats(stats, input, { autoMerge: true }).periods.today.models, {
+    assert.deepEqual(projectModelAliasStats(stats, input, { grouping: 'duplicates' }).periods.today.models, {
       'claude-opus-5': 70,
       'gpt-5.5-pro': 30
     });
@@ -61,7 +61,7 @@ test('projection conserves priced totals and components in every period, client,
   assert.deepEqual(projected.nativeProjects.today.p1.models, { 'claude-opus-5': 70 });
   assert.deepEqual(projected.limits, stats.limits);
   assert.deepEqual(stats, before);
-  assert.deepEqual(projectModelAliasStats(stats, {}, { autoMerge: true }).periods.today.models, { 'claude-opus-5': 70, 'gpt-5.5-pro': 30 });
+  assert.deepEqual(projectModelAliasStats(stats, {}, { grouping: 'duplicates' }).periods.today.models, { 'claude-opus-5': 70, 'gpt-5.5-pro': 30 });
   assert.deepEqual(projectModelAliasStats(stats, { 'anthropic/claude-opus-5': 'separate' }).periods.today.models, { separate: 40, 'claude-opus-5': 30, 'gpt-5.5-pro': 30 });
 });
 
