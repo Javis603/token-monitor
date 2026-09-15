@@ -1758,7 +1758,15 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // (`{home}/.local/share/kiro-cli/data.sqlite3`, scanner.rs), so following XDG
   // there would watch a directory it never reads. The split is upstream's, not
   // an oversight — check clients.rs before adding or removing a root here.
-  const xdgHome = xdgDataHome(home);
+  // The XDG fallback hangs off Tokscale's *effective* home, not the Win32
+  // profile. A normal scan passes no --home, so the CLI hands the scanner
+  // `paths::home_dir()`, and on Windows that returns an absolute native $HOME
+  // in preference to the user profile (paths.rs home_dir()). Deriving the
+  // fallback from os.homedir() instead pointed the watcher and the health check
+  // at the profile while the scan read the $HOME tree, so Amp could show
+  // `detected` next to usage collected from another directory.
+  const tokscaleHome = tokscaleHomeDir({ env, platform, homeDir: home });
+  const xdgHome = xdgDataHome(tokscaleHome);
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
   // Amp (Sourcegraph / AmpCode): tokscale reads the XDG-data root on every
@@ -1784,7 +1792,6 @@ function clientSourceRoots(clientsCsv, options = {}) {
   //                    routed that way on purpose so an isolated profile covers
   //                    the sync cache too.
   const tokscaleConfigRoot = tokscaleConfigDir({ env, platform, homeDir: home });
-  const tokscaleHome = tokscaleHomeDir({ env, platform, homeDir: home });
   add('cursor', ['tokscale-cursor-cache', path.join(tokscaleHome, '.config', 'tokscale', 'cursor-cache')]);
   add('antigravity', ['tokscale-antigravity-cache', path.join(tokscaleConfigRoot, 'antigravity-cache')]);
   // A whitespace-only KIMI_CODE_HOME counts as unset, matching tokscale: it

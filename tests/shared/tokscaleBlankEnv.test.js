@@ -20,8 +20,9 @@ const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 
 // These are exactly the keys the helper is allowed to touch. XDG_CACHE_HOME is
 // absent on purpose: it goes through the `dirs` crate, which already follows the
-// spec. TOKSCALE_CONFIG_DIR is absent because both sides agree a blank value
-// counts as set.
+// spec. TOKSCALE_CONFIG_DIR is absent because both sides already agree on it —
+// an empty value is unset, while any non-empty value (whitespace included) is
+// an override — so there is nothing to reconcile.
 const BLANK_SENSITIVE_KEYS = ['XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'TOKSCALE_HEADLESS_DIR'];
 
 installSourceEnvGuard(test);
@@ -50,6 +51,59 @@ test('a blank value is dropped from the tokscale environment, a real one is kept
   const kept = tokscaleEnvWithBlanksDropped({ XDG_DATA_HOME: '/custom/share' });
   assert.equal(kept.XDG_DATA_HOME, '/custom/share', 'a real override must still reach the subprocess');
 });
++
+// Tokscale's effective home is not always the Win32 profile: paths.rs
+// home_dir() prefers an absolute native $HOME on Windows, and a normal scan
+// passes no --home so the scanner receives exactly that value. Deriving the XDG
+// fallback from os.homedir() therefore pointed the watcher and the health check
+// at the profile while the scan read the $HOME tree — usage collected from one
+// directory, source health observing another. These pin the fix.
+test('the XDG fallback follows an absolute native HOME on Windows, like the scan does', () => {
+  const profile = 'C:\\Users\\me';
+  const portable = 'D:\\portable-home';
+  const options = { homeDir: profile, env: { HOME: portable }, platform: 'win32' };
+  // path.join, not path.win32.join: the collector builds roots with the host
+  // module while branching on the `platform` option, which is the convention the
+  // existing Cursor/Antigravity Windows cases follow.
+  const expected = path.join(portable, '.local', 'share', 'amp', 'threads');
+
+  assert.equal(clientSourceRoots('amp', options).amp[0].dir, expected);
+  assert.deepEqual(clientWatchCandidates('amp', options).amp, [expected], 'the watcher must observe the scanned tree');
+
+  // The other PathRoot::XdgData clients hang off the same fallback, so they move
+  // together rather than only Amp being corrected.
+  assert.equal(
+    clientSourceRoots('opencode', options).opencode[0].dir,
+    path.join(portable, '.local', 'share', 'opencode')
+  );
+
+  // A drive-relative or POSIX-shaped HOME is not a path Win32 can use, so the
+  // profile still wins — the same rule home_dir() applies.
+  for (const unusable of ['C:temp', '/home/user', '   ']) {
+    assert.equal(
+      clientSourceRoots('amp', { ...options, env: { HOME: unusable } }).amp[0].dir,
+      path.join(profile, '.local', 'share', 'amp', 'threads'),
+      `HOME=${JSON.stringify(unusable)} must not win over the profile`
+    );
+  }
+
+  // An explicit XDG_DATA_HOME still outranks the home entirely. It goes on
+  // process.env because xdgDataHome() reads the real environment (the way every
+  // XDG root does); installSourceEnvGuard clears it between tests.
+  process.env.XDG_DATA_HOME = 'E:\\xdg';
+  assert.equal(
+    clientSourceRoots('amp', options).amp[0].dir,
+    path.join('E:\\xdg', 'amp', 'threads')
+  );
+  delete process.env.XDG_DATA_HOME;
+
+  // Non-Windows platforms ignore HOME for the profile, matching home_dir().
+  assert.equal(
+    clientSourceRoots('amp', { homeDir: '/home/u', env: { HOME: '/elsewhere' }, platform: 'linux' }).amp[0].dir,
+    path.join('/home/u', '.local', 'share', 'amp', 'threads')
+  );
+});
+
 
 test('the helper returns the original object when nothing needs dropping', () => {
   // Identity matters: tokscaleCommand() hands process.env straight through on
