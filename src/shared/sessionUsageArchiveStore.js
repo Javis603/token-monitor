@@ -116,6 +116,7 @@ function createSessionUsageArchiveStore(options = {}) {
     `).all(sinceRevision)) {
       const entry = parseRow(row);
       if (entry) archive.sessions[row.session_key] = entry;
+      else delete archive.sessions[row.session_key];
     }
   }
 
@@ -283,6 +284,7 @@ function createSessionUsageArchiveStore(options = {}) {
       `).all(revision)) {
         const entry = parseRow(row);
         if (entry) archive.sessions[row.session_key] = entry;
+        else delete archive.sessions[row.session_key];
       }
       revision = storedRevision;
     }

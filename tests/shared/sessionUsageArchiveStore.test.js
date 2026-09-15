@@ -568,6 +568,36 @@ test('persisted prune frontiers prevent stale writers from restoring expired per
   stale.close();
 });
 
+test('incremental replay treats fully pruned session rows as tombstones', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const current = createSessionUsageArchiveStore(options);
+  const refreshed = createSessionUsageArchiveStore(options);
+  const rebased = createSessionUsageArchiveStore(options);
+  const oldDate = new Date(2026, 8, 15, 8, 0);
+  const newDate = new Date(2026, 8, 16, 8, 0);
+
+  current.capture(summary(100, 'one', ['today']), oldDate);
+  refreshed.read(new Date(2026, 8, 15, 8, 1));
+  rebased.read(new Date(2026, 8, 15, 8, 2));
+
+  current.read(newDate);
+  assert.equal(refreshed.refresh().sessions['codex:one'], undefined);
+
+  assert.equal(rebased.capture(
+    summary(125, 'one', ['allTime']),
+    new Date(2026, 8, 16, 8, 1)
+  ).error, null);
+  const retained = current.refresh().sessions['codex:one'].periods;
+  assert.equal(retained.today, undefined);
+  assert.equal(retained.allTime.totalTokens, 125);
+
+  current.close();
+  refreshed.close();
+  rebased.close();
+});
+
 test('clear removes SQLite sidecars and any legacy archive', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
