@@ -18,11 +18,13 @@ const { applyProjectRollups } = require('../shared/usage');
 const { runAgent, runAgentOnce } = require('./runtime');
 const {
   applySessionUsageArchive,
-  captureSessionUsageArchive,
-  readSessionUsageArchive,
-  sessionUsageArchiveDate
+  sessionUsageArchiveDate,
+  updateSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
-const { createSessionUsageArchiveStore } = require('../shared/sessionUsageArchiveStore');
+const {
+  createSessionUsageArchiveStore,
+  readSessionUsageArchiveSnapshot
+} = require('../shared/sessionUsageArchiveStore');
 
 loadDotEnv();
 const args = parseArgs(process.argv.slice(2));
@@ -103,11 +105,11 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
   if (sessionUsageArchiveEnabled) {
     const archiveDate = sessionUsageArchiveDate(summary, now);
     if (dryRun) {
-      sessionUsageArchive = captureSessionUsageArchive(
-        sessionUsageArchive || readSessionUsageArchive(),
+      sessionUsageArchive = updateSessionUsageArchive(
+        sessionUsageArchive || readSessionUsageArchiveSnapshot(),
         summary,
         archiveDate
-      );
+      ).archive;
     } else {
       const result = sessionUsageArchiveStore.capture(summary, archiveDate);
       sessionUsageArchive = result.archive;

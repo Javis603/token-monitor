@@ -27,6 +27,63 @@ function removeIfPresent(filePath, unlinkSync = fs.unlinkSync) {
   }
 }
 
+function parseArchiveRow(row) {
+  try {
+    const normalized = normalizeSessionUsageArchive({ sessions: { [row.session_key]: JSON.parse(row.entry_json) } });
+    return normalized.sessions[row.session_key] || Object.values(normalized.sessions)[0] || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function readMigratedArchiveSnapshot(options = {}) {
+  const databasePath = sessionUsageArchiveDatabasePath(options);
+  const Database = options.DatabaseSync || DatabaseSync;
+  const existsSync = options.existsSync || fs.existsSync;
+  if (!existsSync(databasePath)) return null;
+
+  let database = null;
+  try {
+    database = new Database(databasePath, { readOnly: true });
+    const rows = database.prepare(`
+      SELECT key, value
+      FROM metadata
+      WHERE key IN ('schema-version', 'legacy-migrated', 'pruned-day', 'pruned-month')
+    `).all();
+    const metadata = new Map(rows.map((row) => [row.key, row.value]));
+    if (Number(metadata.get('schema-version')) !== SESSION_ARCHIVE_DATABASE_VERSION
+      || metadata.get('legacy-migrated') !== '1') return null;
+
+    const archive = normalizeSessionUsageArchive({});
+    if (metadata.get('pruned-day')) archive.prunedDay = metadata.get('pruned-day');
+    if (metadata.get('pruned-month')) archive.prunedMonth = metadata.get('pruned-month');
+    for (const row of database.prepare('SELECT session_key, entry_json FROM sessions').all()) {
+      const entry = parseArchiveRow(row);
+      if (entry) archive.sessions[row.session_key] = entry;
+    }
+    return archive;
+  } catch (_) {
+    return null;
+  } finally {
+    try { database?.close(); } catch (_) {}
+  }
+}
+
+function readSessionUsageArchiveSnapshot(options = {}) {
+  const migrated = readMigratedArchiveSnapshot(options);
+  if (migrated) return migrated;
+
+  const legacyPath = sessionUsageArchivePath(options);
+  const existsSync = options.existsSync || fs.existsSync;
+  if (!existsSync(legacyPath)) {
+    return readMigratedArchiveSnapshot(options) || normalizeSessionUsageArchive({});
+  }
+
+  const legacy = readSessionUsageArchive({ ...options, path: legacyPath });
+  if (!existsSync(legacyPath)) return readMigratedArchiveSnapshot(options) || legacy;
+  return legacy;
+}
+
 function createSessionUsageArchiveStore(options = {}) {
   const databasePath = sessionUsageArchiveDatabasePath(options);
   const legacyPath = sessionUsageArchivePath(options);
@@ -153,12 +210,7 @@ function createSessionUsageArchiveStore(options = {}) {
   }
 
   function parseRow(row) {
-    try {
-      const normalized = normalizeSessionUsageArchive({ sessions: { [row.session_key]: JSON.parse(row.entry_json) } });
-      return normalized.sessions[row.session_key] || Object.values(normalized.sessions)[0] || null;
-    } catch (_) {
-      return null;
-    }
+    return parseArchiveRow(row);
   }
 
   function loadRows() {
@@ -169,6 +221,10 @@ function createSessionUsageArchiveStore(options = {}) {
         const entry = parseRow(row);
         if (entry) archive.sessions[row.session_key] = entry;
       }
+      const prunedDay = metadataValue('pruned-day');
+      const prunedMonth = metadataValue('pruned-month');
+      if (prunedDay) archive.prunedDay = prunedDay;
+      if (prunedMonth) archive.prunedMonth = prunedMonth;
       revision = Number(metadataValue('revision') || 0);
       archiveSource = 'database';
       reloadRequired = false;
@@ -205,16 +261,9 @@ function createSessionUsageArchiveStore(options = {}) {
     // agent's one-time migration. Until the writer commits the migration marker,
     // the legacy JSON remains an atomic, read-only fallback.
     if (!database && (!existsSync(databasePath) || !databaseIsMigrated())) {
-      if (existsSync(legacyPath)) {
-        archive = readSessionUsageArchive({ ...options, path: legacyPath });
-        archiveSource = 'legacy';
-        return archive;
-      }
-      // Migration commits its marker before removing the legacy file. If the
-      // fallback disappeared between the checks above, retry the marker before
-      // returning an empty archive for this refresh.
+      const snapshot = readSessionUsageArchiveSnapshot({ ...options, databasePath, path: legacyPath });
       if (!existsSync(databasePath) || !databaseIsMigrated()) {
-        archive = normalizeSessionUsageArchive({});
+        archive = snapshot;
         archiveSource = 'legacy';
         return archive;
       }
@@ -242,6 +291,14 @@ function createSessionUsageArchiveStore(options = {}) {
     try {
       const storedRevision = Number(metadataValue('revision') || 0);
       if (storedRevision > revision) loadRevisedRows(revision);
+      const storedPrunedDay = metadataValue('pruned-day');
+      const storedPrunedMonth = metadataValue('pruned-month');
+      if (storedPrunedDay && (!archive.prunedDay || archive.prunedDay < storedPrunedDay)) {
+        archive.prunedDay = storedPrunedDay;
+      }
+      if (storedPrunedMonth && (!archive.prunedMonth || archive.prunedMonth < storedPrunedMonth)) {
+        archive.prunedMonth = storedPrunedMonth;
+      }
       const result = mutate(archive);
       const keys = [...result.changedKeys].filter((key) => archive?.sessions?.[key]);
       let nextRevision = storedRevision;
@@ -249,6 +306,12 @@ function createSessionUsageArchiveStore(options = {}) {
         nextRevision = storedRevision + 1;
         upsertEntries(keys, nextRevision);
         setMetadataValue('revision', nextRevision);
+      }
+      if (archive.prunedDay && archive.prunedDay !== storedPrunedDay) {
+        setMetadataValue('pruned-day', archive.prunedDay);
+      }
+      if (archive.prunedMonth && archive.prunedMonth !== storedPrunedMonth) {
+        setMetadataValue('pruned-month', archive.prunedMonth);
       }
       database.exec('COMMIT');
       revision = nextRevision;
@@ -330,5 +393,6 @@ function createSessionUsageArchiveStore(options = {}) {
 module.exports = {
   SESSION_ARCHIVE_DATABASE_VERSION,
   createSessionUsageArchiveStore,
+  readSessionUsageArchiveSnapshot,
   sessionUsageArchiveDatabasePath
 };

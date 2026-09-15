@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
+const { readJson } = require('../../src/shared/config');
 
 const {
   captureSessionUsageArchive,
@@ -13,6 +14,7 @@ const {
 } = require('../../src/shared/sessionUsageArchive');
 const {
   createSessionUsageArchiveStore,
+  readSessionUsageArchiveSnapshot,
   sessionUsageArchiveDatabasePath
 } = require('../../src/shared/sessionUsageArchiveStore');
 
@@ -275,24 +277,20 @@ test('refresh switches to SQLite if migration removes legacy during handoff', (t
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
-  const legacyPath = path.join(dir, 'session-usage-archive.json');
-  const databasePath = sessionUsageArchiveDatabasePath(options);
   writeSessionUsageArchive(
     captureSessionUsageArchive({}, summary(100), new Date('2026-09-15T08:00:00.000Z')),
     options
   );
-  const emptyDatabase = new DatabaseSync(databasePath);
-  emptyDatabase.close();
   const writer = createSessionUsageArchiveStore(options);
   let interleaved = false;
   const reader = createSessionUsageArchiveStore({
     ...options,
-    existsSync(filePath) {
-      if (!interleaved && filePath === legacyPath) {
+    readJson(filePath, fallback) {
+      if (!interleaved) {
         interleaved = true;
         assert.equal(writer.capture(summary(125), new Date('2026-09-15T08:01:00.000Z')).error, null);
       }
-      return fs.existsSync(filePath);
+      return readJson(filePath, fallback);
     }
   });
 
@@ -300,6 +298,30 @@ test('refresh switches to SQLite if migration removes legacy during handoff', (t
   assert.equal(interleaved, true);
   writer.close();
   reader.close();
+});
+
+test('read-only snapshots keep dry-run history after JSON migration', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const legacyPath = path.join(dir, 'session-usage-archive.json');
+  const databasePath = sessionUsageArchiveDatabasePath(options);
+
+  assert.deepEqual(readSessionUsageArchiveSnapshot(options).sessions, {});
+  assert.equal(fs.existsSync(databasePath), false);
+  writeSessionUsageArchive(
+    captureSessionUsageArchive({}, summary(100), new Date('2026-09-15T08:00:00.000Z')),
+    options
+  );
+  const writer = createSessionUsageArchiveStore(options);
+  writer.read(new Date('2026-09-15T08:01:00.000Z'));
+  writer.close();
+
+  assert.equal(fs.existsSync(legacyPath), false);
+  assert.equal(
+    readSessionUsageArchiveSnapshot(options).sessions['codex:one'].periods.allTime.totalTokens,
+    100
+  );
 });
 
 test('malformed legacy JSON cannot be marked as migrated or removed', (t) => {
@@ -422,6 +444,30 @@ test('prunes expired day and month payloads while retaining all-time', (t) => {
   assert.equal(nextMonth.sessions['codex:one'].periods.month, undefined);
   assert.equal(nextMonth.sessions['codex:one'].periods.allTime.totalTokens, 100);
   store.close();
+});
+
+test('persisted prune frontiers prevent stale writers from restoring expired periods', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const current = createSessionUsageArchiveStore(options);
+  const stale = createSessionUsageArchiveStore(options);
+  const oldDate = new Date(2026, 8, 30, 8, 0);
+  const newDate = new Date(2026, 9, 1, 8, 0);
+
+  current.capture(summary(100), oldDate);
+  stale.read(new Date(2026, 8, 30, 8, 1));
+  const pruned = current.read(newDate).sessions['codex:one'].periods;
+  assert.equal(pruned.today, undefined);
+  assert.equal(pruned.month, undefined);
+
+  assert.equal(stale.capture(summary(125), new Date(2026, 8, 30, 9, 0)).error, null);
+  const retained = current.refresh().sessions['codex:one'].periods;
+  assert.equal(retained.today, undefined);
+  assert.equal(retained.month, undefined);
+  assert.equal(retained.allTime.totalTokens, 125);
+  current.close();
+  stale.close();
 });
 
 test('clear removes SQLite sidecars and any legacy archive', (t) => {

@@ -142,6 +142,8 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
   const day = localDay(captureDate);
   const month = localMonth(captureDate);
   for (const periodName of PERIODS) {
+    if (periodName === 'today' && archive.prunedDay && day < archive.prunedDay) continue;
+    if (periodName === 'month' && archive.prunedMonth && month < archive.prunedMonth) continue;
     const rawPeriod = deviceRecord?.periods?.[periodName] || deviceRecord?.[periodName];
     const period = options.canonicalSummary === true
       ? (rawPeriod && typeof rawPeriod === 'object' ? rawPeriod : { sessions: {} })
