@@ -70,9 +70,9 @@ test('Amp follows XDG_DATA_HOME like Tokscale does, not a home-relative literal'
   try {
     // clients.rs declares PathRoot::XdgData for amp, and that root consults
     // XDG_DATA_HOME on every platform (never a home-relative literal), so an
-    // override must move the root with it. clientSourceRoots() reads the
-    // process environment for XDG (the same way the other XDG roots do), so the
-    // override belongs on process.env rather than in its options bag.
+    // override must move the root with it. It is set on process.env here because
+    // that is the environment production resolves from; the injected options bag
+    // is honoured too, and tests/shared/tokscaleBlankEnv.test.js is what pins it.
     const options = { homeDir: home, platform: 'linux' };
     assert.deepEqual(clientSourceRoots('amp', options).amp, [
       { id: 'amp-threads', dir: path.join(home, '.local', 'share', 'amp', 'threads') }
