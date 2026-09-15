@@ -205,11 +205,19 @@ function createSessionUsageArchiveStore(options = {}) {
     // agent's one-time migration. Until the writer commits the migration marker,
     // the legacy JSON remains an atomic, read-only fallback.
     if (!database && (!existsSync(databasePath) || !databaseIsMigrated())) {
-      archive = existsSync(legacyPath)
-        ? readSessionUsageArchive({ ...options, path: legacyPath })
-        : normalizeSessionUsageArchive({});
-      archiveSource = 'legacy';
-      return archive;
+      if (existsSync(legacyPath)) {
+        archive = readSessionUsageArchive({ ...options, path: legacyPath });
+        archiveSource = 'legacy';
+        return archive;
+      }
+      // Migration commits its marker before removing the legacy file. If the
+      // fallback disappeared between the checks above, retry the marker before
+      // returning an empty archive for this refresh.
+      if (!existsSync(databasePath) || !databaseIsMigrated()) {
+        archive = normalizeSessionUsageArchive({});
+        archiveSource = 'legacy';
+        return archive;
+      }
     }
     ensureDatabase();
     loadRows();

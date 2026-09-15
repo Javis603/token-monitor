@@ -98,27 +98,33 @@ function canonicalSessionUsageArchive(value) {
 function pruneExpiredSessionUsagePeriods(archive, capturedAt, changedKeys) {
   const day = localDay(capturedAt);
   const month = localMonth(capturedAt);
-  if (archive.prunedDay === day && archive.prunedMonth === month) return;
+  // Collector snapshots can finish out of order across processes. A stale
+  // snapshot must never move the pruning frontier backwards.
+  const pruneDay = !archive.prunedDay || archive.prunedDay < day;
+  const pruneMonth = !archive.prunedMonth || archive.prunedMonth < month;
+  if (!pruneDay && !pruneMonth) return;
 
   for (const [key, entry] of Object.entries(archive.sessions)) {
     let changed = false;
     entry.periodWindows = entry.periodWindows || {};
     const todayWindow = entry.periodWindows?.today;
-    if (entry.periods?.today && (todayWindow?.day || entry.day) !== day) {
+    const retainedDay = todayWindow?.day || entry.day;
+    if (pruneDay && entry.periods?.today && (!retainedDay || retainedDay < day)) {
       delete entry.periods.today;
       delete entry.periodWindows.today;
       changed = true;
     }
     const monthWindow = entry.periodWindows?.month;
-    if (entry.periods?.month && (monthWindow?.month || entry.month) !== month) {
+    const retainedMonth = monthWindow?.month || entry.month;
+    if (pruneMonth && entry.periods?.month && (!retainedMonth || retainedMonth < month)) {
       delete entry.periods.month;
       delete entry.periodWindows.month;
       changed = true;
     }
     if (changed) changedKeys.add(key);
   }
-  archive.prunedDay = day;
-  archive.prunedMonth = month;
+  if (pruneDay) archive.prunedDay = day;
+  if (pruneMonth) archive.prunedMonth = month;
 }
 
 // The caller owns the canonical in-memory archive. Updating it in place keeps a
@@ -128,6 +134,7 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
   const archive = canonicalSessionUsageArchive(existingArchive);
   const changedKeys = new Set();
   const captureDate = toDate(capturedAt);
+  const captureTime = captureDate.getTime();
   pruneExpiredSessionUsagePeriods(archive, captureDate, changedKeys);
   if (!deviceRecord || typeof deviceRecord !== 'object') return { archive, changedKeys };
 
@@ -154,6 +161,10 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
       };
       const nextSession = cloneJson(session);
       const window = entry.periodWindows?.[periodName] || {};
+      const retainedCaptureTime = Date.parse(window.capturedAt || '');
+      // SQLite serializes commits, not collection time. Keep the newest event
+      // for each period when two collectors finish in the opposite order.
+      if (Number.isFinite(retainedCaptureTime) && retainedCaptureTime > captureTime) continue;
       const sameWindow = periodName === 'today'
         ? window.day === day
         : periodName === 'month'

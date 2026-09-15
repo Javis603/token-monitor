@@ -168,6 +168,46 @@ test('writers rebase the same session before applying changes to different perio
   second.close();
 });
 
+test('an older capture cannot overwrite a newer snapshot for the same period', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const first = createSessionUsageArchiveStore(options);
+  const second = createSessionUsageArchiveStore(options);
+
+  first.capture(summary(100), new Date('2026-09-15T08:00:00.000Z'));
+  second.read(new Date('2026-09-15T08:00:30.000Z'));
+  second.capture(summary(150, 'one', ['allTime']), new Date('2026-09-15T08:02:00.000Z'));
+  first.capture(summary(125, 'one', ['allTime']), new Date('2026-09-15T08:01:00.000Z'));
+
+  const retained = first.refresh().sessions['codex:one'];
+  assert.equal(retained.periods.allTime.totalTokens, 150);
+  assert.equal(retained.periodWindows.allTime.capturedAt, '2026-09-15T08:02:00.000Z');
+  first.close();
+  second.close();
+});
+
+test('an older capture cannot prune or replace newer day and month windows', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const current = createSessionUsageArchiveStore(options);
+  const stale = createSessionUsageArchiveStore(options);
+  const currentAt = new Date(2026, 9, 1, 8, 2);
+  const staleAt = new Date(2026, 8, 30, 8, 1);
+
+  assert.equal(current.capture(summary(150), currentAt).error, null);
+  assert.equal(stale.capture(summary(125), staleAt).error, null);
+
+  const retained = current.refresh().sessions['codex:one'];
+  for (const periodName of ['today', 'month', 'allTime']) {
+    assert.equal(retained.periods[periodName].totalTokens, 150);
+    assert.equal(retained.periodWindows[periodName].capturedAt, currentAt.toISOString());
+  }
+  current.close();
+  stale.close();
+});
+
 test('migration ownership is rechecked after acquiring the SQLite write lock', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -187,7 +227,10 @@ test('migration ownership is rechecked after acquiring the SQLite write lock', (
     })
   });
 
-  assert.equal(second.read().sessions['codex:one'].periods.allTime.totalTokens, 125);
+  assert.equal(
+    second.read(new Date('2026-09-15T08:01:30.000Z')).sessions['codex:one'].periods.allTime.totalTokens,
+    125
+  );
   const database = new DatabaseSync(sessionUsageArchiveDatabasePath(options), { readOnly: true });
   assert.equal(database.prepare("SELECT value FROM metadata WHERE key = 'revision'").get().value, '2');
   database.close();
@@ -224,6 +267,37 @@ test('a reader reloads SQLite after serving legacy during another writer migrati
   assert.equal(writer.capture(summary(125), new Date('2026-09-15T08:01:00.000Z')).error, null);
   assert.equal(reader.refresh().sessions['codex:one'].periods.allTime.totalTokens, 125);
 
+  writer.close();
+  reader.close();
+});
+
+test('refresh switches to SQLite if migration removes legacy during handoff', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const legacyPath = path.join(dir, 'session-usage-archive.json');
+  const databasePath = sessionUsageArchiveDatabasePath(options);
+  writeSessionUsageArchive(
+    captureSessionUsageArchive({}, summary(100), new Date('2026-09-15T08:00:00.000Z')),
+    options
+  );
+  const emptyDatabase = new DatabaseSync(databasePath);
+  emptyDatabase.close();
+  const writer = createSessionUsageArchiveStore(options);
+  let interleaved = false;
+  const reader = createSessionUsageArchiveStore({
+    ...options,
+    existsSync(filePath) {
+      if (!interleaved && filePath === legacyPath) {
+        interleaved = true;
+        assert.equal(writer.capture(summary(125), new Date('2026-09-15T08:01:00.000Z')).error, null);
+      }
+      return fs.existsSync(filePath);
+    }
+  });
+
+  assert.equal(reader.refresh().sessions['codex:one'].periods.allTime.totalTokens, 125);
+  assert.equal(interleaved, true);
   writer.close();
   reader.close();
 });
