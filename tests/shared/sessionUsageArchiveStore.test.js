@@ -16,7 +16,7 @@ const {
   sessionUsageArchiveDatabasePath
 } = require('../../src/shared/sessionUsageArchiveStore');
 
-function summary(totalTokens = 100, sessionId = 'one') {
+function summary(totalTokens = 100, sessionId = 'one', periodNames = ['today', 'month', 'allTime']) {
   const session = {
     client: 'codex',
     sessionId,
@@ -25,9 +25,32 @@ function summary(totalTokens = 100, sessionId = 'one') {
     models: { 'gpt-5': totalTokens },
     modelCosts: { 'gpt-5': totalTokens / 100 }
   };
-  return Object.fromEntries(['today', 'month', 'allTime'].map((period) => [period, {
+  return Object.fromEntries(periodNames.map((period) => [period, {
     sessions: { [`codex:${sessionId}`]: { ...session } }
   }]));
+}
+
+function databaseWithExecHook(hook) {
+  return class HookedDatabaseSync {
+    constructor(filePath, options) {
+      this.database = options === undefined
+        ? new DatabaseSync(filePath)
+        : new DatabaseSync(filePath, options);
+    }
+
+    exec(sql) {
+      hook(sql);
+      return this.database.exec(sql);
+    }
+
+    prepare(sql) {
+      return this.database.prepare(sql);
+    }
+
+    close() {
+      return this.database.close();
+    }
+  };
 }
 
 function migrationMarker(options) {
@@ -108,6 +131,52 @@ test('writers allocate global revisions under the SQLite lock and absorb interve
   database.close();
   assert.equal(second.refresh().sessions['codex:one'].periods.allTime.totalTokens, 125);
   assert.equal(first.refresh().sessions['codex:two'].periods.allTime.totalTokens, 50);
+  first.close();
+  second.close();
+});
+
+test('writers rebase the same session before applying changes to different periods', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const first = createSessionUsageArchiveStore(options);
+  const second = createSessionUsageArchiveStore(options);
+
+  first.capture(summary(100), new Date('2026-09-15T08:00:00.000Z'));
+  second.read(new Date('2026-09-15T08:00:30.000Z'));
+  first.capture(summary(125, 'one', ['allTime']), new Date('2026-09-15T08:01:00.000Z'));
+  second.capture(summary(150, 'one', ['today']), new Date('2026-09-15T08:01:30.000Z'));
+
+  const retained = second.refresh().sessions['codex:one'].periods;
+  assert.equal(retained.allTime.totalTokens, 125);
+  assert.equal(retained.today.totalTokens, 150);
+  first.close();
+  second.close();
+});
+
+test('migration ownership is rechecked after acquiring the SQLite write lock', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  writeSessionUsageArchive(
+    captureSessionUsageArchive({}, summary(100), new Date('2026-09-15T08:00:00.000Z')),
+    options
+  );
+  const first = createSessionUsageArchiveStore(options);
+  let interleaved = false;
+  const second = createSessionUsageArchiveStore({
+    ...options,
+    DatabaseSync: databaseWithExecHook((sql) => {
+      if (interleaved || !/^\s*BEGIN IMMEDIATE\s*$/i.test(sql)) return;
+      interleaved = true;
+      assert.equal(first.capture(summary(125), new Date('2026-09-15T08:01:00.000Z')).error, null);
+    })
+  });
+
+  assert.equal(second.read().sessions['codex:one'].periods.allTime.totalTokens, 125);
+  const database = new DatabaseSync(sessionUsageArchiveDatabasePath(options), { readOnly: true });
+  assert.equal(database.prepare("SELECT value FROM metadata WHERE key = 'revision'").get().value, '2');
+  database.close();
   first.close();
   second.close();
 });
@@ -273,6 +342,30 @@ test('clear removes SQLite sidecars and any legacy archive', (t) => {
   const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
   const store = createSessionUsageArchiveStore(options);
   store.capture(summary(), new Date('2026-09-15T08:00:00.000Z'));
+  assert.equal(store.clear(), true);
+  assert.equal(fs.existsSync(sessionUsageArchiveDatabasePath(options)), false);
+});
+
+test('clear discards pending rows instead of retrying a failed write', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  let failWrites = false;
+  const store = createSessionUsageArchiveStore({
+    ...options,
+    DatabaseSync: databaseWithExecHook((sql) => {
+      if (!failWrites || !/^\s*COMMIT\s*$/i.test(sql)) return;
+      const error = new Error('write failed');
+      error.code = 'EIO';
+      throw error;
+    })
+  });
+
+  assert.equal(store.capture(summary(100), new Date('2026-09-15T08:00:00.000Z')).error, null);
+  failWrites = true;
+  const failed = store.capture(summary(125), new Date('2026-09-15T08:01:00.000Z'));
+  assert.equal(failed.changedKeys.size, 1);
+  assert.equal(failed.error?.code, 'EIO');
   assert.equal(store.clear(), true);
   assert.equal(fs.existsSync(sessionUsageArchiveDatabasePath(options)), false);
 });

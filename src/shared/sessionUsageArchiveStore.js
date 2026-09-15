@@ -51,9 +51,20 @@ function createSessionUsageArchiveStore(options = {}) {
     `).run(key, String(value));
   }
 
-  function writeEntries(keys) {
-    const uniqueKeys = [...new Set(keys)].filter((key) => archive?.sessions?.[key]);
-    if (uniqueKeys.length === 0) return revision;
+  function loadRevisedRows(sinceRevision, skippedKeys = new Set()) {
+    for (const row of database.prepare(`
+      SELECT session_key, entry_json
+      FROM sessions
+      WHERE revision > ?
+      ORDER BY revision, session_key
+    `).all(sinceRevision)) {
+      if (skippedKeys.has(row.session_key)) continue;
+      const entry = parseRow(row);
+      if (entry) archive.sessions[row.session_key] = entry;
+    }
+  }
+
+  function upsertEntries(keys, nextRevision) {
     const upsert = database.prepare(`
       INSERT INTO sessions (session_key, entry_json, revision)
       VALUES (?, ?, ?)
@@ -61,26 +72,22 @@ function createSessionUsageArchiveStore(options = {}) {
         entry_json = excluded.entry_json,
         revision = excluded.revision
     `);
+    for (const key of keys) {
+      upsert.run(key, JSON.stringify(archive.sessions[key]), nextRevision);
+    }
+  }
+
+  function writeEntries(keys) {
+    const uniqueKeys = [...new Set(keys)].filter((key) => archive?.sessions?.[key]);
+    if (uniqueKeys.length === 0) return revision;
     database.exec('BEGIN IMMEDIATE');
     try {
       const storedRevision = Number(metadataValue('revision') || 0);
       if (storedRevision > revision) {
-        const pending = new Set(uniqueKeys);
-        for (const row of database.prepare(`
-          SELECT session_key, entry_json
-          FROM sessions
-          WHERE revision > ?
-          ORDER BY revision, session_key
-        `).all(revision)) {
-          if (pending.has(row.session_key)) continue;
-          const entry = parseRow(row);
-          if (entry) archive.sessions[row.session_key] = entry;
-        }
+        loadRevisedRows(revision, new Set(uniqueKeys));
       }
       const nextRevision = storedRevision + 1;
-      for (const key of uniqueKeys) {
-        upsert.run(key, JSON.stringify(archive.sessions[key]), nextRevision);
-      }
+      upsertEntries(uniqueKeys, nextRevision);
       setMetadataValue('revision', nextRevision);
       database.exec('COMMIT');
       revision = nextRevision;
@@ -93,13 +100,17 @@ function createSessionUsageArchiveStore(options = {}) {
 
   function migrateLegacyArchive() {
     if (metadataValue('legacy-migrated') === '1') return;
-    const legacy = existsSync(legacyPath)
-      ? normalizeSessionUsageArchive(JSON.parse(readFileSync(legacyPath, 'utf8')))
-      : normalizeSessionUsageArchive({});
-    archive = legacy;
-    const keys = Object.keys(legacy.sessions);
     database.exec('BEGIN IMMEDIATE');
     try {
+      if (metadataValue('legacy-migrated') === '1') {
+        database.exec('COMMIT');
+        return;
+      }
+      const legacy = existsSync(legacyPath)
+        ? normalizeSessionUsageArchive(JSON.parse(readFileSync(legacyPath, 'utf8')))
+        : normalizeSessionUsageArchive({});
+      archive = legacy;
+      const keys = Object.keys(legacy.sessions);
       const upsert = database.prepare(`
         INSERT INTO sessions (session_key, entry_json, revision)
         VALUES (?, ?, 1)
@@ -188,10 +199,7 @@ function createSessionUsageArchiveStore(options = {}) {
 
   function loadAll(now = new Date()) {
     loadRows();
-    const result = updateSessionUsageArchive(archive, null, now);
-    for (const key of result.changedKeys) pendingKeys.add(key);
-    flushPending();
-    return archive;
+    return mutateArchive((current) => updateSessionUsageArchive(current, null, now)).archive;
   }
 
   function databaseIsMigrated() {
@@ -250,6 +258,30 @@ function createSessionUsageArchiveStore(options = {}) {
     return true;
   }
 
+  function mutateArchive(mutate) {
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      const storedRevision = Number(metadataValue('revision') || 0);
+      if (storedRevision > revision) loadRevisedRows(revision);
+      const result = mutate(archive);
+      for (const key of result.changedKeys) pendingKeys.add(key);
+      const keys = [...pendingKeys].filter((key) => archive?.sessions?.[key]);
+      let nextRevision = storedRevision;
+      if (keys.length > 0) {
+        nextRevision = storedRevision + 1;
+        upsertEntries(keys, nextRevision);
+        setMetadataValue('revision', nextRevision);
+      }
+      database.exec('COMMIT');
+      revision = nextRevision;
+      for (const key of keys) pendingKeys.delete(key);
+      return result;
+    } catch (error) {
+      try { database.exec('ROLLBACK'); } catch (_) {}
+      throw error;
+    }
+  }
+
   function capture(deviceRecord, capturedAt = new Date()) {
     let current;
     try {
@@ -261,13 +293,18 @@ function createSessionUsageArchiveStore(options = {}) {
         error
       };
     }
-    const pruned = updateSessionUsageArchive(current, null, capturedAt);
-    for (const key of pruned.changedKeys) pendingKeys.add(key);
-    const result = updateSessionUsageArchive(current, deviceRecord, capturedAt, { canonicalSummary: true });
-    for (const key of result.changedKeys) pendingKeys.add(key);
+    let pruned = { archive: current, changedKeys: new Set() };
+    let result = { archive: current, changedKeys: new Set() };
     let error = null;
     try {
-      flushPending();
+      mutateArchive((latest) => {
+        pruned = updateSessionUsageArchive(latest, null, capturedAt);
+        result = updateSessionUsageArchive(latest, deviceRecord, capturedAt, { canonicalSummary: true });
+        return {
+          archive: result.archive,
+          changedKeys: new Set([...pruned.changedKeys, ...result.changedKeys])
+        };
+      });
     } catch (cause) {
       error = cause;
     }
@@ -279,7 +316,7 @@ function createSessionUsageArchiveStore(options = {}) {
   }
 
   function clear() {
-    close();
+    close({ flush: false });
     archive = normalizeSessionUsageArchive({});
     archiveSource = null;
     revision = 0;
@@ -291,9 +328,12 @@ function createSessionUsageArchiveStore(options = {}) {
     return removed;
   }
 
-  function close() {
+  function close(closeOptions = {}) {
     if (!database) return;
-    try { flushPending(); } finally {
+    const shouldFlush = closeOptions.flush !== false;
+    try {
+      if (shouldFlush) flushPending();
+    } finally {
       database.close();
       database = null;
     }
