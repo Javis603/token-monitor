@@ -176,10 +176,10 @@ test('T3CODE_HOME expands a leading tilde the way T3 Code itself does', () => {
   // T3 resolves `resolve(expandHomePath(raw.trim()))`, so these land in home.
   assert.equal(t3Root('~'), home);
   assert.equal(t3Root('~/custom-t3'), path.join(home, 'custom-t3'));
-  // A Windows-style separator expands on every platform, as T3's regex allows.
-  // The expansion only substitutes the `~`, so the backslash stays literal and
-  // `path.join` normalizes it the same way T3's own `resolve()` step would.
-  assert.equal(metadata.expandHomePath('~\\custom-t3', home), `${home}\\custom-t3`);
+  // T3 drops the leading separator for both forms and joins the remainder, so a
+  // backslash-typed path resolves under home on POSIX too rather than staying a
+  // literal name with a backslash in it.
+  assert.equal(metadata.expandHomePath('~\\custom-t3', home), path.join(home, 'custom-t3'));
   // An absolute path is left alone.
   const absolute = path.join(path.parse(process.cwd()).root, 'srv', 't3');
   assert.equal(t3Root(absolute), absolute);
@@ -189,6 +189,10 @@ test('T3CODE_HOME expands a leading tilde the way T3 Code itself does', () => {
   // Absent or blank, the default base directory still applies.
   assert.equal(t3Root(''), path.join(home, '.t3'));
   assert.equal(metadata.t3HomeDir({ homeDir: home, env: {} }), path.join(home, '.t3'));
+  // T3 only trims the value, so internal spaces are preserved verbatim.
+  const spaced = metadata.t3HomeDir({ homeDir: home, env: { T3CODE_HOME: '/srv/T3  Data ' } });
+  assert.equal(spaced, path.resolve('/srv/T3  Data'));
+  assert.match(spaced, /T3 {2}Data$/);
 });
 
 maybe('a tilde T3CODE_HOME still finds the store instead of failing closed', () => {

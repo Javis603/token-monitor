@@ -56,19 +56,23 @@ function codexHomeDir(options = {}) {
 //
 // T3 expands a leading `~` against the user's home before resolving the base
 // directory, so `T3CODE_HOME=~/t3-alt` means the home directory rather than a
-// literal `~` directory under the working directory. Mirror its rule: only a lone
-// `~`, `~/...` or `~\...` expands.
-const HOME_PREFIX_PATTERN = /^~(?=$|[/\\])/;
-
+// literal `~` directory under the working directory. Mirror its rule exactly:
+// a lone `~` is home, `~/...` and `~\...` drop that first separator and join the
+// rest onto home, and anything else is left untouched.
 function expandHomePath(value, homeDir) {
-  return String(value || '').replace(HOME_PREFIX_PATTERN, homeDir);
+  const raw = String(value || '');
+  if (raw === '~') return homeDir;
+  if (raw.startsWith('~/') || raw.startsWith('~\\')) return path.join(homeDir, raw.slice(2));
+  return raw;
 }
 
 function t3HomeDir(options = {}) {
   const homeDir = options.homeDir || os.homedir();
   const env = options.env || process.env;
   if (options.useEnvRoot !== false) {
-    const configured = cleanText(env.T3CODE_HOME);
+    // T3 only trims this value, so collapse nothing: a path containing a
+    // doubled space is a different directory, not a cosmetic difference.
+    const configured = String(env.T3CODE_HOME || '').trim();
     if (configured) return path.resolve(expandHomePath(configured, homeDir));
   }
   return path.join(homeDir, '.t3');
