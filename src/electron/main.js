@@ -219,6 +219,7 @@ const {
 } = require('../shared/sessionUsageArchive');
 const {
   createSessionUsageArchiveStore,
+  readSessionUsageArchiveSnapshot,
   sessionUsageArchiveDatabasePath
 } = require('../shared/sessionUsageArchiveStore');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
@@ -2677,7 +2678,11 @@ function updateArchivedClientUsage(previousClients, nextClients) {
 function ensureSessionUsageArchiveLoaded() {
   if (sessionUsageArchive) return sessionUsageArchive;
   try {
-    sessionUsageArchive = sessionUsageArchiveStore.read();
+    // The headless agent owns migration and pruning while its PID is active.
+    // Anchor projection must not turn Electron into a second archive writer.
+    sessionUsageArchive = isExternalAgentActive()
+      ? readSessionUsageArchiveSnapshot()
+      : sessionUsageArchiveStore.read();
   } catch (error) {
     console.log(`[session-archive] read failed: ${error.message}`);
     sessionUsageArchive = normalizeSessionUsageArchive({});

@@ -2425,20 +2425,16 @@ function applyHomeListMark(mark, iconKind, color) {
   mark.style.background = color;
 }
 
-function sessionPageButton(direction, page, disabled) {
+function sessionPageButton(direction) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = `session-page-button session-page-${direction}`;
-  const labelKey = direction === 'previous' ? 'sessions.pagePrevious' : 'sessions.pageNext';
-  button.setAttribute('aria-label', t(labelKey));
-  button.title = t(labelKey);
-  button.disabled = disabled;
   const icon = document.createElement('span');
   icon.className = 'session-page-icon';
   icon.setAttribute('aria-hidden', 'true');
   button.append(icon);
   button.addEventListener('click', () => {
-    state.sessionPage = page;
+    state.sessionPage += direction === 'previous' ? -1 : 1;
     state.rowSignature = '';
     els.breakdown.scrollTop = 0;
     render();
@@ -2446,17 +2442,15 @@ function sessionPageButton(direction, page, disabled) {
   return button;
 }
 
-function sessionPager(page) {
+function sessionPager() {
   const pager = document.createElement('nav');
   pager.className = 'session-pager';
-  pager.setAttribute('aria-label', t('sessions.pagination'));
   const status = document.createElement('span');
   status.className = 'session-page-status';
-  status.textContent = t('sessions.pageRange', page);
   pager.append(
-    sessionPageButton('previous', page.page - 1, page.page === 0),
+    sessionPageButton('previous'),
     status,
-    sessionPageButton('next', page.page + 1, page.page >= page.pageCount - 1)
+    sessionPageButton('next')
   );
   return pager;
 }
@@ -2469,7 +2463,28 @@ function renderSessionPager(page) {
     : '';
   if (signature === state.sessionPagerSignature) return;
   state.sessionPagerSignature = signature;
-  els.sessionPagerHost.replaceChildren(...(visible ? [sessionPager(page)] : []));
+  if (!visible) {
+    els.sessionPagerHost.replaceChildren();
+    return;
+  }
+  let pager = els.sessionPagerHost.querySelector('.session-pager');
+  if (!pager) {
+    pager = sessionPager();
+    els.sessionPagerHost.append(pager);
+  }
+  pager.setAttribute('aria-label', t('sessions.pagination'));
+  const previous = pager.querySelector('.session-page-previous');
+  const next = pager.querySelector('.session-page-next');
+  for (const [button, labelKey] of [
+    [previous, 'sessions.pagePrevious'],
+    [next, 'sessions.pageNext']
+  ]) {
+    button.setAttribute('aria-label', t(labelKey));
+    button.title = t(labelKey);
+  }
+  previous.disabled = page.page === 0;
+  next.disabled = page.page >= page.pageCount - 1;
+  pager.querySelector('.session-page-status').textContent = t('sessions.pageRange', page);
 }
 
 function renderRows(rows, { incompleteHint = '' } = {}) {

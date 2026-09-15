@@ -134,6 +134,10 @@ test('renderer applies the policy before touching breakdown rows', () => {
   assert.match(app, /sessionPagerHost: document\.getElementById\('sessionPagerHost'\)/);
   assert.match(app, /renderSessionPager\(page\);/);
   assert.doesNotMatch(app, /nodes\.(?:unshift|push)\(sessionPager\(page\)\)/);
+  assert.match(app, /let pager = els\.sessionPagerHost\.querySelector\('\.session-pager'\);/);
+  assert.match(app, /if \(!pager\) \{\s*pager = sessionPager\(\);\s*els\.sessionPagerHost\.append\(pager\);\s*\}/);
+  assert.match(app, /state\.sessionPage \+= direction === 'previous' \? -1 : 1;/);
+  assert.doesNotMatch(app, /replaceChildren\([^)]*sessionPager/);
   assert.match(css, /\.session-pager-host\s*\{[^}]*display:\s*flex;[^}]*flex:\s*0 0 24px;[^}]*justify-content:\s*center;/s);
   assert.match(css, /\.session-pager\s*\{[^}]*width:\s*min\(208px, 100%\);/s);
   assert.match(css, /\.session-pager\s*\{[^}]*grid-template-columns:\s*24px minmax\(0, 1fr\) 24px;/s);
