@@ -3,58 +3,58 @@
   "modeNote": "\"override\": ensure-vendored-tokscale.js swaps in the pinned fork build described below, and the two verify-vendored-tokscale*.js gates run against it. \"upstream\": ensure-vendored-tokscale.js no-ops (no download or replacement) and the plain npm-installed tokscale is authoritative — but both verify-vendored-tokscale*.js gates keep running, now against that npm-installed binary, so CI still fails if it doesn't actually cover DEFAULT_CLIENTS or regressed DSH parsing. `override` remains required while Token Monitor depends on downstream functionality the installed upstream release does not provide. The upstream scanner and DSH patches may be retired once equivalent fixes ship officially; the session/workspace reporting capability is a persistent Token Monitor requirement, so flipping to `upstream` is correct only when an official release provides an equivalent report surface. Without it the collector still runs (the scan falls back to `client,session,model` and the file-reading resolvers answer), but scan-backed session timestamps and project attribution narrow to the clients that have a resolver. The pin fields (commit/releaseTag/platforms) stay in place either way, so flipping back to \"override\" for a future upstream lag is editing this file again rather than re-adding infrastructure; baseVersion is not one of them — it tracks the installed dependency in both modes (see baseVersionNote).",
   "upstream": "junhoyeo/tokscale",
   "fork": "Javis603/tokscale",
-  "commit": "8ef7aa98add33f5ff65b495cf30807ce89b78e69",
+  "commit": "09cf5471e48064c04be5f81e2b766538caf55e04",
   "commitTitle": "feat(report): join sessions to workspaces and expose session activity",
-  "baseVersion": "4.16.0",
+  "baseVersion": "4.17.0",
   "baseVersionNote": "The npm-installed @tokscale/cli-<platform> package version this manifest is aligned with. It tracks the dependency in BOTH modes, and two gates enforce that: ensure-vendored-tokscale.js refuses to swap under \"override\" when the installed package reports something else, and verify-vendored-tokscale-release.js (plus its real-manifest test, so npm run verify catches it too) rejects any manifest whose baseVersion disagrees with @tokscale/cli optionalDependencies. So a tokscale bump always has to touch this file — either pin a new build or flip the mode — instead of silently leaving a stale override in place.",
   "releaseRepo": "Javis603/tokscale",
-  "releaseTag": "token-monitor-8ef7aa98",
-  "reason": "Tokscale 4.16.0 includes the upstream fixes through cbe3330d, including Pi fork-session deduplication in e7f4906a. Token Monitor still carries the downstream DSH fixes through 3d6e23b6; those patches may be retired as equivalent fixes land upstream. Token Monitor also depends on the session/workspace reporting capability in 8ef7aa98, including the client,workspace,session,model grouping and the sessions/workspaces metadata its collector reads. That capability remains required regardless of whether the fork or a future upstream release supplies it.",
+  "releaseTag": "token-monitor-09cf5471",
+  "reason": "Tokscale 4.17.0 is the new baseline; it upstreams the DSH version-tagged transcript discovery (11d24ec5) that previously lived only on the fork, and adds Kimi response duration, Cline per-message model identity, OpenRouter pricing tier/separator fixes, Antigravity CLI step timestamps, and WorkBuddy 5.5 root scanning. Token Monitor still carries two downstream DSH correctness fixes that upstream has not absorbed (streamed assistant attempts 1425488c, v3 inherited seed boundaries 8a93308b) plus the vendor-release workflow. Token Monitor also depends on the session/workspace reporting capability in 09cf5471, including the client,workspace,session,model grouping and the sessions/workspaces metadata its collector reads. That capability remains required regardless of whether the fork or a future upstream release supplies it.",
   "platforms": {
     "android-arm64": {
       "package": "@tokscale/cli-android-arm64",
       "asset": "tokscale-android-arm64",
-      "sha256": "6f7943c0019cef72ffae9e31fd1a795791622d620831f75d62f2df9f87914932"
+      "sha256": "f752e8e2de16029de04615df1003e38dd9be49295d19832ee675f934948f5075"
     },
     "darwin-arm64": {
       "package": "@tokscale/cli-darwin-arm64",
       "asset": "tokscale-darwin-arm64",
-      "sha256": "575a4bdeb27f8f2fe0b085985caaec54b39e4240f41bd7fc1628ac9b8ae71751"
+      "sha256": "411786fe4ea32b5e281a8e3ec91909b0d22d9dcf8bccafb71e0c2cdc542a6329"
     },
     "darwin-x64": {
       "package": "@tokscale/cli-darwin-x64",
       "asset": "tokscale-darwin-x64",
-      "sha256": "4e6760390451b4e178a49e6f99aff00d6f0ceb412a05a913f994f2a8fd1cd615"
+      "sha256": "ad6048c1424bdd6c301278359b957b8616985a0dfe64d411ce45b3e319309cc0"
     },
     "linux-arm64": {
       "package": "@tokscale/cli-linux-arm64-gnu",
       "asset": "tokscale-linux-arm64",
-      "sha256": "8ef1e41a87fd51fe8f7c0826ea9c9b4fef6807ddad875fc88186bbc6114b4d9f"
+      "sha256": "9e9859e55b56b17fb268213509cbbad7b6794d599b73222925f48d74fcc28e18"
     },
     "linux-arm64-musl": {
       "package": "@tokscale/cli-linux-arm64-musl",
       "asset": "tokscale-linux-arm64-musl",
-      "sha256": "dc12912da13b01f666567a11418fa6f5d48a6508641aa972360026be9e2c6844"
+      "sha256": "1ca46c3bad7dda8e8396164f0475d786f0baf9ffe7d37a823c4ce4ff46613cc5"
     },
     "linux-x64": {
       "package": "@tokscale/cli-linux-x64-gnu",
       "asset": "tokscale-linux-x64",
-      "sha256": "c75057ba1b45fa2b5feacfaa6ff9fb5a54ddff545b2bbc178ccb89ef27af6f9a"
+      "sha256": "8c2bd407fc36cb6e20fb6484e49237c351e1506ef83f3a414cb8d4759af94166"
     },
     "linux-x64-musl": {
       "package": "@tokscale/cli-linux-x64-musl",
       "asset": "tokscale-linux-x64-musl",
-      "sha256": "a6c748a731165a665cbc17bb87a6855634f0a83fe0c14e950a227f3750ae27eb"
+      "sha256": "10d73deb4e9b7867d59ce6d487b817ed3065a0d13246b1cc6d5e3ebb698343e5"
     },
     "win32-arm64": {
       "package": "@tokscale/cli-win32-arm64-msvc",
       "asset": "tokscale-win32-arm64.exe",
-      "sha256": "d133cc39c693e16a31528069deab680939e14b28a0ee33ee9a8de55ff00daa43"
+      "sha256": "0bb87af1df9ce1de768b4b557b3a87f836b9055a0da5d930baf4f27937119cf4"
     },
     "win32-x64": {
       "package": "@tokscale/cli-win32-x64-msvc",
       "asset": "tokscale-win32-x64.exe",
-      "sha256": "bb0f7a5ea70ea879584bf6a2736b03c79d904354f11f26ac079eadf2bee7f49c"
+      "sha256": "17823a5d2bc7d522c8eb577c43c64b8d6e9d99ccfd54ba0fd2664a7d06f44f1a"
     }
   }
 }

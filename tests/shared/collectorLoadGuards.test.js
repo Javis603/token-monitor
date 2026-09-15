@@ -2065,7 +2065,8 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     path.join('Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent'),
     path.join('.local', 'share', 'kiro-cli'),
     path.join('.codebuddy', 'projects'),
-    path.join('.workbuddy', 'projects')
+    path.join('.workbuddy', 'projects'),
+    path.join('.workbuddy-ai', 'projects')
   ]);
   fs.writeFileSync(path.join(tmp, '.local', 'share', 'kilo', 'kilo.db'), '');
   const originalHomedir = os.homedir;
@@ -2096,6 +2097,7 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     // collector code, not this cross-platform test.
     assert.ok(dirs.includes(path.join(tmp, '.codebuddy', 'projects')));
     assert.ok(dirs.includes(path.join(tmp, '.workbuddy', 'projects')));
+    assert.ok(dirs.includes(path.join(tmp, '.workbuddy-ai', 'projects')));
     assert.deepEqual(clientDataDirPresence('pi,zed,kilo,micode,zcode,kiro,codebuddy,workbuddy'), {
       pi: true, zed: true, kilo: true, micode: true, zcode: true, kiro: true, codebuddy: true, workbuddy: true
     });
