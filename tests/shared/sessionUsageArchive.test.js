@@ -372,7 +372,7 @@ test('canonical capture safely prunes malformed entries without period windows',
     }
   };
 
-  const result = updateSessionUsageArchive(archive, null, new Date('2026-07-09T08:30:00.000Z'));
+  const result = updateSessionUsageArchive(archive, null, new Date(2026, 6, 9, 8, 30));
 
   assert.deepEqual([...result.changedKeys], ['opencode:o1']);
   assert.equal(archive.sessions['opencode:o1'].periods.today, undefined);
