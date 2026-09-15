@@ -3497,9 +3497,11 @@ html.is-windows .settings-panel select option {
 }
 .session-pager {
   display: grid;
-  width: min(220px, 100%);
-  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  width: fit-content;
+  max-width: 100%;
+  grid-template-columns: 24px minmax(0, max-content) 24px;
   align-items: center;
+  column-gap: clamp(8px, 3vw, 16px);
   min-height: 24px;
   margin-inline: auto;
   padding: 0;

@@ -135,7 +135,8 @@ test('renderer applies the policy before touching breakdown rows', () => {
   assert.match(app, /renderSessionPager\(page\);/);
   assert.doesNotMatch(app, /nodes\.(?:unshift|push)\(sessionPager\(page\)\)/);
   assert.match(css, /\.session-pager-host\s*\{[^}]*display:\s*flex;[^}]*flex:\s*0 0 24px;[^}]*justify-content:\s*center;/s);
-  assert.match(css, /\.session-pager\s*\{[^}]*width:\s*min\(220px, 100%\);/s);
+  assert.match(css, /\.session-pager\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;/s);
+  assert.match(css, /\.session-pager\s*\{[^}]*grid-template-columns:\s*24px minmax\(0, max-content\) 24px;[^}]*column-gap:\s*clamp\(8px, 3vw, 16px\);/s);
   assert.match(css, /\.session-pager\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
   assert.doesNotMatch(css, /\.session-pager\s*\{[^}]*(?:position:\s*sticky|border-radius|box-shadow|backdrop-filter|--panel-rgb|--control-alpha)/s);
   assert.match(css, /\.session-page-button\s*\{[^}]*color:\s*var\(--muted\);/s);
