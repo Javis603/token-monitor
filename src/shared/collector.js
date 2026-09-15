@@ -176,9 +176,11 @@ function resolvePlatformBinary() {
 // goose, zed, micode, devin-cli, hindsight), PathRoot::Config's Linux arm
 // (antigravity, trae, warp, mcode, hindsight) and the codex headless roots.
 //
-// Only these three are listed. TOKSCALE_CONFIG_DIR is deliberately NOT here:
-// tokscale's `!custom.is_empty()` and Token Monitor's `length > 0` check agree
-// that a blank value counts as set, so there is nothing to reconcile.
+// Only these three are listed. TOKSCALE_CONFIG_DIR is deliberately NOT here,
+// because both sides already agree on it: an empty value is unset, while any
+// non-empty value — whitespace included — is an override. Tokscale spells that
+// `!custom.is_empty()` and Token Monitor `override.length > 0`, so there is
+// nothing to reconcile.
 //
 // Blank is the whole predicate, so one case is knowingly left alone: a
 // NON-blank but relative XDG_CONFIG_HOME. Token Monitor rejects it via
@@ -193,13 +195,27 @@ const TOKSCALE_BLANK_SENSITIVE_ENV_KEYS = Object.freeze([
   'TOKSCALE_HEADLESS_DIR'
 ]);
 
-function tokscaleEnvWithBlanksDropped(env) {
+// Windows environment names are case-insensitive, and `{ ...process.env }`
+// preserves whatever casing the OS handed Node — a shell can export
+// `Xdg_Data_Home` and a canonical-spelling lookup then misses it entirely,
+// leaving the blank value in the child's environment. Match case-insensitively
+// there so the key we delete is the one that is actually present. POSIX names
+// are case-sensitive, so an exact match stays the narrower correct rule.
+function tokscaleEnvWithBlanksDropped(env, platform = process.platform) {
+  const caseInsensitive = platform === 'win32';
+  const namesFor = (key) => {
+    if (!caseInsensitive) return Object.prototype.hasOwnProperty.call(env, key) ? [key] : [];
+    const lowered = key.toLowerCase();
+    return Object.keys(env).filter((name) => name.toLowerCase() === lowered);
+  };
   let dropped = null;
   for (const key of TOKSCALE_BLANK_SENSITIVE_ENV_KEYS) {
-    const value = env[key];
-    if (typeof value !== 'string' || value.trim()) continue;
-    if (!dropped) dropped = { ...env };
-    delete dropped[key];
+    for (const name of namesFor(key)) {
+      const value = env[name];
+      if (typeof value !== 'string' || value.trim()) continue;
+      if (!dropped) dropped = { ...env };
+      delete dropped[name];
+    }
   }
   return dropped || env;
 }
@@ -215,7 +231,7 @@ function tokscaleCommand(options = {}) {
   const extraDirsEnv = customExtraDirs
     ? { ...process.env, TOKSCALE_EXTRA_DIRS: customExtraDirs }
     : process.env;
-  const env = tokscaleEnvWithBlanksDropped(extraDirsEnv);
+  const env = tokscaleEnvWithBlanksDropped(extraDirsEnv, options.platform || process.platform);
   const command = useDirect
     ? { bin: resolved.path, prefixArgs: [], env }
     : { bin: process.execPath, prefixArgs: [TOKSCALE_BIN_JS], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } };

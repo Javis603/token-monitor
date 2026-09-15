@@ -68,6 +68,33 @@ test('non-string values are left alone rather than treated as blank', () => {
   assert.equal(tokscaleEnvWithBlanksDropped(env), env);
 });
 
+test('Windows deletes a blank key regardless of the casing the OS reported', () => {
+  // Windows env names are case-insensitive and `{ ...process.env }` keeps the
+  // casing Node was handed, so a canonical-spelling lookup would miss
+  // `Xdg_Data_Home` and leak the blank value into the child. The Windows runner
+  // is the only place this can regress, so it is pinned here rather than left to
+  // the CI matrix.
+  const env = { Path: 'C:\\Windows', Xdg_Data_Home: '   ', HOME: '/home/u' };
+  const result = tokscaleEnvWithBlanksDropped(env, 'win32');
+
+  assert.equal(Object.keys(result).some((name) => name.toLowerCase() === 'xdg_data_home'), false);
+  // The mixed-case PATH spelling every Windows shell sets must survive.
+  assert.equal(result.Path, 'C:\\Windows');
+  assert.equal(result.HOME, '/home/u');
+
+  // A non-blank value in any casing is kept.
+  const kept = tokscaleEnvWithBlanksDropped({ Xdg_Data_Home: 'C:\\custom' }, 'win32');
+  assert.equal(kept.Xdg_Data_Home, 'C:\\custom');
+});
+
+test('POSIX keeps a mixed-case key rather than treating it as the XDG variable', () => {
+  // Names are case-sensitive on POSIX, so `Xdg_Data_Home` is a different
+  // variable and must not be deleted — the narrower rule is the correct one.
+  const env = { Xdg_Data_Home: '   ', PATH: '/usr/bin' };
+  assert.equal(tokscaleEnvWithBlanksDropped(env, 'linux'), env);
+  assert.equal(tokscaleEnvWithBlanksDropped(env, 'darwin'), env);
+});
+
 test('a blank key is dropped without disturbing the TOKSCALE_EXTRA_DIRS override', () => {
   // tokscaleCommand() adds TOKSCALE_EXTRA_DIRS before this runs, so the copy
   // must preserve it.
