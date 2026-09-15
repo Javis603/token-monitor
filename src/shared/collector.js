@@ -1699,6 +1699,13 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const xdgHome = xdgDataHome(home);
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
+  // Amp (Sourcegraph / AmpCode): tokscale reads the XDG-data root on every
+  // platform — clients.rs declares PathRoot::XdgData + relative "amp/threads",
+  // pattern T-*.json (the thread JSON holds a usageLedger and per-assistant-
+  // message usage). So this follows XDG_DATA_HOME like opencode/zed/kilo rather
+  // than a home-relative literal; a Windows or macOS install keeps the XDG
+  // convention instead of an Application Support tree.
+  add('amp', ['amp-threads', path.join(xdgHome, 'amp', 'threads')]);
   // Droid (Factory): tokscale reads the home-relative ~/.factory/sessions tree on
   // every platform (clients.rs PathRoot::Home). The Factory desktop app is an
   // Electron shell over the same bundled droid kernel and keeps no session data

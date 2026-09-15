@@ -48,6 +48,7 @@
     { id: 'cursor', label: 'Cursor' },
     { id: 'antigravity', label: 'Antigravity' },
     { id: 'cline', label: 'Cline' },
+    { id: 'amp', label: 'Amp' },
     { id: 'droid', label: 'Factory Droid' },
     { id: 'kimi', label: 'Kimi' },
     { id: 'qwen', label: 'Qwen' },
