@@ -1833,13 +1833,17 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['codebuddy-projects', path.join(home, '.codebuddy', 'projects')],
     ...[...new Set(codebuddyExtLogRoots)].map((dir) => ['codebuddy-extension-logs', dir])
   );
-  // WorkBuddy (Tencent): watch only the detailed session dir (projects/*.jsonl,
-  // the preferred source) — not the whole ~/.workbuddy app home, whose config /
-  // auth churn would add polling load and spurious ticks with no usage change.
-  // A legacy install with only ~/.workbuddy/workbuddy.db (no projects/) still
-  // refreshes via the periodic full tick; the WSL marker stays the broader
-  // `.workbuddy` so a db-only WSL home is still scanned.
-  add('workbuddy', ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')]);
+  // WorkBuddy (Tencent): watch only the detailed session dirs (projects/*.jsonl,
+  // the preferred source) — not the whole app homes, whose config / auth churn
+  // would add polling load and spurious ticks with no usage change. WorkBuddy
+  // 5.5 moved to ~/.workbuddy-ai; keep the legacy ~/.workbuddy root because
+  // tokscale 4.17.0 still scans both. A db-only install still refreshes via the
+  // periodic full tick; the WSL markers stay broader so those homes are found.
+  add(
+    'workbuddy',
+    ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')],
+    ['workbuddy-projects', path.join(home, '.workbuddy-ai', 'projects')]
+  );
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
   // Qoder CN — SQLite DB under the platform Application Support dir.

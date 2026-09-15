@@ -189,6 +189,7 @@ test('wslUsageHomes keeps a home whose only tracked-client data is pi, zed, Kilo
   assert.deepEqual(homesFor('.config/kiro/User/globalStorage/kiro.kiroagent'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
   assert.deepEqual(homesFor('.codebuddy/projects'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
   assert.deepEqual(homesFor('.workbuddy'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.workbuddy-ai'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
   assert.deepEqual(homesFor('.lmstudio/server-logs'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
 });
 
