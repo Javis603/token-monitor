@@ -181,3 +181,23 @@ test('Unsloth has a label and uses the standard mask-safe icon path', () => {
   assert.ok(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'unsloth.svg')));
   assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'unsloth.png')));
 });
+
+test('Amp carries its own brand colour and mask-safe icon assets', () => {
+  const source = rendererSource();
+  const styles = rendererStyles();
+  const { clientColors } = require('../../src/electron/renderer/usageCharts');
+
+  assert.ok(clientLabelIds().has('amp'));
+  assert.equal(clientColors.amp, '#F34E3F', 'Amp chart colour is the Amp brand red');
+  assert.match(source, /clientsWithIcon = new Set\([\s\S]*'amp'/);
+  assert.match(styles, /\.row-icon-amp\s*\{[^}]*mask-image:\s*url\([^)]*assets\/icons\/amp\.svg\)/s);
+  assert.doesNotMatch(styles, /\.row-icon-amp\s*\{[^}]*background-image:/s);
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'amp.svg')));
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'amp.png')));
+
+  // The mark is a single flat ink, so the tray's re-ink path can recolour it
+  // instead of drawing it in the SVG's own fill.
+  const icon = fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'amp.svg'), 'utf8');
+  assert.match(icon, /fill="#F34E3F"/);
+  assert.doesNotMatch(icon, /<linearGradient|<radialGradient|stroke=/);
+});
