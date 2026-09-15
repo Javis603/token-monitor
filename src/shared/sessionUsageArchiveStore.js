@@ -194,6 +194,8 @@ function createSessionUsageArchiveStore(options = {}) {
           entry_json TEXT NOT NULL,
           revision INTEGER NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS sessions_revision_idx
+          ON sessions(revision, session_key);
       `);
       const storedVersion = metadataValue('schema-version');
       if (storedVersion && Number(storedVersion) !== SESSION_ARCHIVE_DATABASE_VERSION) {

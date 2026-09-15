@@ -129,6 +129,10 @@ test('migrates the legacy JSON only after verified row storage', (t) => {
 
   const database = new DatabaseSync(sessionUsageArchiveDatabasePath(options), { readOnly: true });
   assert.equal(Number(database.prepare('SELECT COUNT(*) AS count FROM sessions').get().count), 1);
+  assert.deepEqual(
+    database.prepare("PRAGMA index_info('sessions_revision_idx')").all().map((column) => column.name),
+    ['revision', 'session_key']
+  );
   database.close();
   store.close();
 });
