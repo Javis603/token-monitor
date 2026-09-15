@@ -8,6 +8,7 @@
 // Token Monitor already resolved.
 
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -81,15 +82,15 @@ test('a blank key is dropped without disturbing the TOKSCALE_EXTRA_DIRS override
 // pins the disagreement so the helper cannot be dropped as unnecessary if the
 // resolution code is ever refactored.
 test('a blank XDG_DATA_HOME resolves a usable root for Token Monitor', () => {
-  const home = '/tmp/amp-blank-consistency';
+  // Built with path.join so the expectation is native-separator correct: the
+  // collector resolves through node:path, so a hardcoded POSIX string fails on
+  // Windows for a reason that has nothing to do with the behaviour under test.
+  const home = path.join(path.sep, 'tmp', 'amp-blank-consistency');
+  const expected = path.join(home, '.local', 'share', 'amp', 'threads');
   for (const blank of ['', '   ', '\t']) {
     process.env.XDG_DATA_HOME = blank;
     const roots = clientSourceRoots('amp', { homeDir: home, platform: 'linux' }).amp;
-    assert.deepEqual(roots, [{ id: 'amp-threads', dir: '/tmp/amp-blank-consistency/.local/share/amp/threads' }]);
-    assert.deepEqual(
-      clientWatchCandidates('amp', { homeDir: home, platform: 'linux' }).amp,
-      ['/tmp/amp-blank-consistency/.local/share/amp/threads']
-    );
+    assert.deepEqual(roots, [{ id: 'amp-threads', dir: expected }]);
+    assert.deepEqual(clientWatchCandidates('amp', { homeDir: home, platform: 'linux' }).amp, [expected]);
   }
 });
-
