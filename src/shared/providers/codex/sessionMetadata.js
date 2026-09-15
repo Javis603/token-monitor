@@ -90,6 +90,15 @@ function discoverT3DbPaths(options = {}) {
   const root = t3HomeDir(options);
   return [...new Set([
     path.join(root, 'userdata', 'state.sqlite'),
+    // A dev server keeps its state beside the base directory rather than in it.
+    // T3 picks that state directory from two rules that can disagree on which
+    // subdirectory applies: the desktop app uses `dev` when the run is a dev one
+    // and no `T3CODE_HOME` is configured, while the server uses `dev` only when no
+    // explicit base directory was given. A `T3CODE_HOME` therefore counts as
+    // explicit and lands under `dev/userdata`. Check both dev layouts; the
+    // leading `userdata` path stays first because an installed app is the common
+    // case and is the authoritative store when it exists.
+    path.join(root, 'dev', 'userdata', 'state.sqlite'),
     path.join(root, 'dev', 'state.sqlite')
   ])];
 }

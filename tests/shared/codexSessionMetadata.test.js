@@ -167,6 +167,20 @@ test('discovers the newest state database first and honors CODEX_HOME', () => {
   ]);
 });
 
+test('the default T3 discovery covers every installed and dev state layout', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 't3-default-home-'));
+  tmpDirs.push(home);
+  const root = path.join(home, '.t3');
+
+  const paths = metadata.discoverT3DbPaths({ homeDir: home });
+
+  // An installed app is the common case, so its store stays first.
+  assert.equal(paths[0], path.join(root, 'userdata', 'state.sqlite'));
+  assert.ok(paths.includes(path.join(root, 'dev', 'userdata', 'state.sqlite')), 'dev-runner layout missing');
+  assert.ok(paths.includes(path.join(root, 'dev', 'state.sqlite')), 'dev layout missing');
+  assert.equal(new Set(paths).size, paths.length, 'paths must be deduped');
+});
+
 test('T3CODE_HOME expands a leading tilde the way T3 Code itself does', () => {
   // Build the home from the running platform's filesystem root so it is already
   // absolute on Windows too (`D:\home\someone`), which `path.resolve` preserves.
