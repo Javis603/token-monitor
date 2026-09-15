@@ -837,6 +837,13 @@
                 </span>
               </button>
               <div id="cursorSettingsDetails" class="cursor-settings-details hidden">
+                <label class="checkbox-label settings-item">
+                  <span class="settings-item-text">
+                    <span class="settings-item-title" data-i18n="settings.cursor.deviceUsage">Count Cursor usage on this device only</span>
+                  </span>
+                  <input id="cursorDeviceUsageInput" type="checkbox" />
+                  <span class="settings-note settings-item-desc" data-i18n="settings.cursor.deviceUsageNote">Installs a Cursor Agent stop hook and reads a machine-local log instead of the account-level cache. Limits stay account-scoped. Cloud Agent usage is not recorded.</span>
+                </label>
                 <p class="settings-note" data-i18n="settings.cursor.accountsNote">Token Monitor automatically detects accounts signed in through the Cursor desktop app. Uncheck an account to stop monitoring its limits; account-level token usage still includes every saved account.</p>
                 <p id="cursorAgentActiveNote" class="settings-note hidden" data-i18n="settings.cursor.agentActive">Stop the headless agent before adding or removing Cursor accounts.</p>
                 <div id="cursorAccountList" class="managed-account-list"></div>
