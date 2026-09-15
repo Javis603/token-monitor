@@ -44,7 +44,9 @@ test('forecast details use the shared accessible tooltip without repeating third
   assert.match(renderer, /limitDetailInfoNode\([\s\S]*?'codex-reset-forecast-info-wrap'/);
   assert.match(renderer, /limits\.codexResetForecast\.lastReset/);
   assert.match(renderer, /limits\.codexResetForecast\.resetType/);
-  assert.match(renderer, /codexResetForecastType\(forecast\?\.latestResetType\)/);
+  assert.match(renderer, /forecast\?\.status === 'scheduled' \? forecast\?\.scheduledResetType : forecast\?\.latestResetType/);
+  assert.match(renderer, /limits\.codexResetForecast\.scheduledFor/);
+  assert.match(renderer, /limits\.codexResetForecast\.sourceAnnouncement/);
   assert.match(renderer, /limits\.codexResetForecast\.sourceSignal/);
   assert.match(renderer, /if \(forecast\?\.error\)[\s\S]*?limits\.codexResetForecast\.lastAttempt/);
   assert.doesNotMatch(renderer, /limits\.codexResetForecast\.checked/);
@@ -60,7 +62,8 @@ test('forecast details use the shared accessible tooltip without repeating third
   assert.doesNotMatch(renderer, /sourceText/);
   assert.match(renderer, /const chance = forecast\.chancePercent;/);
   assert.doesNotMatch(renderer, /Number\(forecast\.chancePercent\)/);
-  assert.match(renderer, /limits\.codexResetForecast\.expectedReset/);
+  assert.equal((renderer.match(/limits\.codexResetForecast\.expected/g) || []).length, 2);
+  assert.doesNotMatch(renderer, /limits\.codexResetForecast\.expectedReset/);
   assert.match(renderer, /: \(expiresAt \|\| ''\)/);
   assert.doesNotMatch(renderer, /limits\.codexResetForecast\.expires['"]/);
   assert.doesNotMatch(renderer, /forecast\.predictedAt \|\| forecast\.expiresAt/);
@@ -150,6 +153,25 @@ test('renderer hides an active forecast at its expiry boundary', () => {
   const renderer = app.slice(app.indexOf('function renderCodexResetForecast'), app.indexOf('function appendCodexResetForecast'));
   assert.match(renderer, /forecast\?\.status === 'active' && !expired/);
   assert.match(renderer, /forecast\?\.status === 'inactive' \|\| expired/);
+  assert.match(renderer, /forecast\?\.status === 'scheduled'/);
+  assert.match(renderer, /limits\.codexResetForecast\.scheduled/);
+  assert.match(renderer, /limits\.codexResetForecast\.expected/);
+  assert.match(renderer, /limits\.codexResetForecast\.schedulePending/);
+});
+
+test('scheduled reset labels exist in every locale', () => {
+  const i18n = fs.readFileSync(path.join(root, 'src/electron/renderer/i18n.js'), 'utf8');
+  for (const key of [
+    'limits.codexResetForecast.scheduled',
+    'limits.codexResetForecast.scheduledFor',
+    'limits.codexResetForecast.schedulePending',
+    'limits.codexResetForecast.expected',
+    'limits.codexResetForecast.sourceAnnouncement'
+  ]) {
+    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+  }
+  assert.match(i18n, /'limits\.codexResetForecast\.scheduled': '已排程'/);
+  assert.doesNotMatch(i18n, /'limits\.codexResetForecast\.scheduled': '重置已排程'/);
 });
 
 test('forecast source author is displayed as an X handle without duplicating @', () => {

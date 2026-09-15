@@ -3,7 +3,11 @@
 // Client identity — ids, labels and display order — comes from the shared
 // catalog (loaded as a script before this file). Destructured to the bare
 // names the call sites below already use.
-const { CLIENT_IDS, CLIENT_LABELS: clientLabels, KNOWN_CLIENT_LIST: KNOWN_CLIENTS } = window.TokenMonitorClientCatalog;
+const {
+  CLIENT_IDS,
+  CLIENT_LABELS: clientLabels,
+  KNOWN_CLIENT_LIST: KNOWN_CLIENTS
+} = window.TokenMonitorClientCatalog;
 // Limits provider identity comes from its own shared catalog, bound here rather
 // than at its first use below because the icon tables are derived from it.
 const { LIMIT_PROVIDER_CATALOG: LIMIT_PROVIDERS, LIMIT_PROVIDER_IDS } = window.TokenMonitorLimitProviders;
@@ -19,8 +23,8 @@ const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
-  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
+  'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
+  'gemini', 'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
 // Limits rows mark more ids than there are tracked clients: every provider, plus
 // relay ids that only ever appear as a limits row and have no catalog entry.
@@ -69,20 +73,21 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   opencode: 'opencodeCookieGroup',
   cursor: 'cursorAccountGroup',
   antigravity: 'antigravityAccountGroup',
+  factory: 'factoryAccountGroup',
   kimi: 'kimiAccountGroup',
-  zed: 'zedAccountGroup',
   copilot: 'copilotAccountGroup',
+  zed: 'zedAccountGroup',
+  commandcode: 'commandcodeAccountGroup',
   mimo: 'mimoAccountGroup',
   zai: 'zaiAccountGroup',
   zaiteam: 'zaiteamAccountGroup',
+  qoder: 'qoderAccountGroup',
   deepseek: 'deepseekAccountGroup',
   openrouter: 'openrouterAccountGroup',
   minimax: 'minimaxAccountGroup',
   volcengine: 'volcengineAccountGroup',
-  qoder: 'qoderAccountGroup',
-  trae: 'traeAccountGroup',
-  commandcode: 'commandcodeAccountGroup',
   ollama: 'ollamaAccountGroup',
+  trae: 'traeAccountGroup',
   alibaba: 'alibabaAccountGroup',
   thirdparty: 'thirdpartyAccountGroup'
 };
@@ -92,20 +97,21 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   opencode: 'opencodeCookieStatus',
   cursor: 'cursorAccountStatus',
   antigravity: 'antigravityAccountStatus',
+  factory: 'factoryAccountStatus',
   kimi: 'kimiAccountStatus',
-  zed: 'zedAccountStatus',
   copilot: 'copilotApiTokenStatus',
+  zed: 'zedAccountStatus',
+  commandcode: 'commandcodeAccountStatus',
   mimo: 'mimoAccountStatus',
   zai: 'zaiAccountStatus',
   zaiteam: 'zaiteamAccountStatus',
+  qoder: 'qoderAccountStatus',
   deepseek: 'deepseekApiKeyStatus',
   openrouter: 'openrouterStatus',
   minimax: 'minimaxApiKeyStatus',
   volcengine: 'volcengineAccountStatus',
-  qoder: 'qoderAccountStatus',
-  trae: 'traeAccountStatus',
-  commandcode: 'commandcodeAccountStatus',
   ollama: 'ollamaAccountStatus',
+  trae: 'traeAccountStatus',
   alibaba: 'alibabaAccountStatus',
   thirdparty: 'thirdpartyStatus'
 };
@@ -142,6 +148,12 @@ const TRAY_ICON_PROVIDERS = [
 const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.id).join(',');
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
 const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentation;
+
+function limitProviderColor(providerId) {
+  if (providerId === 'factory') return clientColors.droid;
+  if (providerId === 'mimo') return clientColors.xiaomi;
+  return clientColors[providerId] || clientColors.default;
+}
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
 const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
@@ -154,7 +166,6 @@ const clientDisplayPreferencesApi = window.TokenMonitorClientDisplayPreferences;
 const settingsListFilterApi = window.TokenMonitorSettingsListFilter;
 const customPricingFormApi = window.TokenMonitorCustomPricingForm;
 const viewDisplayPreferencesApi = window.TokenMonitorViewDisplayPreferences;
-const preferenceDragSortApi = window.TokenMonitorPreferenceDragSort;
 const verticalDragSortApi = window.TokenMonitorVerticalDragSort;
 const rowDragControllerApi = window.TokenMonitorRowDragController;
 const homeOverviewApi = window.TokenMonitorHomeOverview;
@@ -296,7 +307,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '' };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '' };
 state.zedAccountExpanded = false;
 state.zedPendingCheckSince = 0;
 state.toolDetailMode = 'tokens';
@@ -312,6 +323,7 @@ state.clientRescans = clientRescanStateApi.createClientRescanState({
 state.toolPreferenceRenderSignature = '';
 state.toolPreferenceDetailSignature = '';
 state.toolPreferenceSourceSignature = '';
+state.customScanPathErrors = new Map();
 state.limitProviderRenderSignature = '';
 state.limitPanelRenderSignature = '';
 state.settingsPushRevision = 0;
@@ -341,7 +353,6 @@ state.projectSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
-let preferenceDrag = null;
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
@@ -5830,20 +5841,38 @@ function codexResetForecastType(value) {
 function codexResetForecastTooltip(forecast) {
   const entries = [];
   const disclaimer = t('limits.codexResetForecast.disclaimer');
-  const latestResetType = codexResetForecastType(forecast?.latestResetType);
-  if (latestResetType) {
-    entries.push([t('limits.codexResetForecast.resetType'), latestResetType]);
+  const resetType = codexResetForecastType(
+    forecast?.status === 'scheduled' ? forecast?.scheduledResetType : forecast?.latestResetType
+  );
+  if (resetType) {
+    entries.push([t('limits.codexResetForecast.resetType'), resetType]);
+  }
+  const scheduledFor = codexResetForecastDate(forecast?.scheduledFor);
+  const scheduledIn = codexResetForecastTimeUntil(forecast?.scheduledFor);
+  if (scheduledFor) {
+    entries.push([
+      t('limits.codexResetForecast.scheduledFor'),
+      [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
+    ]);
   }
   const latestReset = codexResetForecastDate(forecast?.latestResetAt);
   if (latestReset) {
     const age = codexResetForecastAge(forecast.latestResetAt);
     entries.push([t('limits.codexResetForecast.lastReset'), [latestReset, age].filter(Boolean).join(' · ')]);
   }
+  const sourceObservedAt = forecast?.status === 'scheduled'
+    ? forecast?.scheduledAnnouncedAt
+    : forecast?.observedAt;
   const source = [
     codexResetForecastSourceAuthor(forecast?.sourceAuthor),
-    codexResetForecastAge(forecast?.observedAt)
+    codexResetForecastAge(sourceObservedAt)
   ].filter(Boolean).join(' · ');
-  if (source) entries.push([t('limits.codexResetForecast.sourceSignal'), source]);
+  if (source) {
+    const sourceLabel = forecast?.status === 'scheduled'
+      ? 'limits.codexResetForecast.sourceAnnouncement'
+      : 'limits.codexResetForecast.sourceSignal';
+    entries.push([t(sourceLabel), source]);
+  }
   const expiresAt = codexResetForecastDate(forecast?.expiresAt);
   const expiresIn = codexResetForecastTimeUntil(forecast?.expiresAt);
   if (expiresAt) {
@@ -5910,6 +5939,18 @@ function renderCodexResetForecast() {
   if (state.codexResetForecastBusy && !forecast) {
     item.classList.add('is-loading');
     value.textContent = t('limits.codexResetForecast.loading');
+  } else if (forecast?.status === 'scheduled') {
+    value.textContent = t('limits.codexResetForecast.scheduled');
+    const scheduledFor = codexResetForecastDate(forecast.scheduledFor);
+    const scheduledIn = codexResetForecastTimeUntil(forecast.scheduledFor);
+    detail.textContent = [
+      scheduledFor
+        ? t('limits.codexResetForecast.expected', {
+            date: [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
+          })
+        : t('limits.codexResetForecast.schedulePending'),
+      forecast.stale ? t('limits.codexResetForecast.stale') : ''
+    ].filter(Boolean).join(' · ');
   } else if (forecast?.status === 'active' && !expired) {
     const chance = forecast.chancePercent;
     value.textContent = Number.isFinite(chance)
@@ -5919,7 +5960,7 @@ function renderCodexResetForecast() {
     const expiresAt = codexResetForecastDate(forecast.expiresAt);
     detail.textContent = [
       predictedAt
-        ? t('limits.codexResetForecast.expectedReset', { date: predictedAt })
+        ? t('limits.codexResetForecast.expected', { date: predictedAt })
         : (expiresAt || ''),
       forecast.stale ? t('limits.codexResetForecast.stale') : ''
     ].filter(Boolean).join(' · ');
@@ -6482,7 +6523,7 @@ function renderLimits() {
   }
   for (const { id, label } of rows) {
     const visibleProviders = visibleProviderEntries.get(id) || [{ provider: id, status: 'disabled', windows: [] }];
-    const color = id === 'mimo' ? clientColors.xiaomi : (clientColors[id] || clientColors.default);
+    const color = limitProviderColor(id);
     if (id === 'claude' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderClaudeAccountGroup(label, visibleProviders, color));
       continue;
@@ -7645,7 +7686,7 @@ function homeLimitRows() {
     providerOptions,
     enabledProviderIds: Array.from(enabled),
     hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet()),
-    colors: clientColors,
+    colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
     accountColor: (provider, id, fallbackColor) => (
@@ -10081,6 +10122,7 @@ function syncSettingsForm() {
   renderDeepseekStatus();
   renderMinimaxStatus();
   renderExternalProviderStatus('claude');
+  renderExternalProviderStatus('factory');
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
@@ -10220,19 +10262,6 @@ function preferenceRows(kind) {
   return Array.from(list?.querySelectorAll(selector) || []);
 }
 
-function preferenceOrder(kind) {
-  const attr = preferenceItemAttribute(kind);
-  return preferenceRows(kind).map((row) => row.dataset[attr]).filter(Boolean);
-}
-
-function preferenceRowRects(kind) {
-  const attr = preferenceItemAttribute(kind);
-  return preferenceRows(kind).map((row) => {
-    const rect = row.getBoundingClientRect();
-    return { id: row.dataset[attr], top: rect.top, bottom: rect.bottom };
-  });
-}
-
 function applyPreferenceOrder(kind, order) {
   const list = preferenceListForKind(kind);
   if (!list) return;
@@ -10240,75 +10269,16 @@ function applyPreferenceOrder(kind, order) {
   const rowsById = new Map(preferenceRows(kind).map((row) => [row.dataset[attr], row]));
   for (const id of order || []) {
     const row = rowsById.get(id);
-    if (row) list.appendChild(row);
+    if (!row) continue;
+    list.appendChild(row);
+    const companionId = kind === 'view'
+      ? ({ home: 'homeSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', status: 'serviceProvidersContainer' })[id]
+      : kind === 'homeModule'
+        ? ({ limits: 'homeLimitProviderContainer', trends: 'homeActivitySettingsContainer' })[id]
+        : '';
+    const companion = companionId ? document.getElementById(companionId) : null;
+    if (companion) list.appendChild(companion);
   }
-}
-
-function finishPreferenceDrag() {
-  setPreferencePointerListeners(false);
-  document.querySelectorAll('.is-dragging').forEach((row) => row.classList.remove('is-dragging'));
-  preferenceDrag = null;
-}
-
-function applyPreferenceLiveOrder(kind, clientY) {
-  if (!preferenceDrag) return -1;
-  const currentOrder = preferenceOrder(kind);
-  const nextOrder = preferenceDragSortApi.reorderItemsFromClientY(currentOrder, preferenceRowRects(kind), preferenceDrag.id, clientY);
-  if (nextOrder.join(',') !== currentOrder.join(',')) {
-    applyPreferenceOrder(kind, nextOrder);
-    preferenceDrag.changed = true;
-  }
-  preferenceDrag.order = nextOrder;
-  return nextOrder;
-}
-
-function startPreferenceDrag(event, kind, id) {
-  if (event.currentTarget.disabled) return;
-  event.preventDefault();
-  const order = preferenceOrder(kind);
-  preferenceDrag = { kind, id, pointerId: event.pointerId, originalOrder: order, order, changed: false, handle: event.currentTarget };
-  event.currentTarget.setPointerCapture?.(event.pointerId);
-  event.currentTarget.closest('[data-client], [data-provider], [data-view], [data-status-provider], [data-home-module], [data-home-limit-provider]')?.classList.add('is-dragging');
-  setPreferencePointerListeners(true);
-  applyPreferenceLiveOrder(kind, event.clientY);
-}
-
-function setPreferencePointerListeners(active) {
-  const method = active ? 'addEventListener' : 'removeEventListener';
-  window[method]('pointermove', onPreferencePointerMove, true);
-  window[method]('pointerup', onPreferencePointerUp, true);
-  window[method]('pointercancel', onPreferencePointerCancel, true);
-}
-
-function releasePreferencePointer(pointerId) {
-  const handle = preferenceDrag?.handle;
-  if (handle?.hasPointerCapture?.(pointerId)) {
-    handle.releasePointerCapture(pointerId);
-  }
-}
-
-function onPreferencePointerMove(event) {
-  if (!preferenceDrag || preferenceDrag.pointerId !== event.pointerId) return;
-  event.preventDefault();
-  applyPreferenceLiveOrder(preferenceDrag.kind, event.clientY);
-}
-
-function onPreferencePointerUp(event) {
-  if (!preferenceDrag || preferenceDrag.pointerId !== event.pointerId) return;
-  event.preventDefault();
-  const { kind } = preferenceDrag;
-  const order = applyPreferenceLiveOrder(kind, event.clientY) || preferenceDrag.order;
-  const changed = preferenceDrag.changed;
-  releasePreferencePointer(event.pointerId);
-  finishPreferenceDrag();
-  if (changed) void onPreferenceOrderCommit(kind, order);
-}
-
-function onPreferencePointerCancel(event) {
-  if (!preferenceDrag || preferenceDrag.pointerId !== event.pointerId) return;
-  applyPreferenceOrder(preferenceDrag.kind, preferenceDrag.originalOrder);
-  releasePreferencePointer(event.pointerId);
-  finishPreferenceDrag();
 }
 
 function createPreferenceOrderHandle({ kind, id, label, count }) {
@@ -10327,9 +10297,124 @@ function createPreferenceOrderHandle({ kind, id, label, count }) {
   handle.setAttribute('aria-label', handle.title);
   handle.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Home End');
   handle.disabled = count <= 1;
-  handle.addEventListener('pointerdown', (event) => startPreferenceDrag(event, kind, id));
+  // Main-screen lists keep the handle as both the visible reorder affordance
+  // and the only pointer/keyboard entry point. The row listener below still
+  // delegates the gesture to the shared controller.
   handle.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, kind, id));
   return handle;
+}
+
+const VIEW_PREFERENCE_SUBGROUPS = {
+  home: ['homeSettingsExpanded', 'homeSettingsContainer'],
+  trends: ['trendSettingsExpanded', 'trendSettingsContainer'],
+  project: ['projectSettingsExpanded', 'projectSettingsContainer'],
+  status: ['serviceProvidersExpanded', 'serviceProvidersContainer']
+};
+
+const HOME_MODULE_SUBGROUPS = {
+  limits: ['homeLimitSettingsExpanded', 'homeLimitProviderContainer'],
+  trends: ['homeActivitySettingsExpanded', 'homeActivitySettingsContainer']
+};
+
+function expandedPreferenceSubgroups(definitions) {
+  return Object.entries(definitions)
+    .filter(([, [stateKey]]) => Boolean(state[stateKey]))
+    .map(([id]) => id)
+    .join(',');
+}
+
+function setPreferenceSubgroupsExpanded(definitions, rowSelector, value) {
+  const expanded = new Set(String(value || '').split(',').filter(Boolean));
+  const dataKey = rowSelector === '.view-preference-row' ? 'view' : 'homeModule';
+  for (const [id, [stateKey, containerId]] of Object.entries(definitions)) {
+    const open = expanded.has(id);
+    state[stateKey] = open;
+    const row = Array.from(document.querySelectorAll(rowSelector)).find((candidate) => candidate.dataset[dataKey] === id);
+    const toggle = row?.querySelector('.view-subgroup-toggle');
+    toggle?.classList.toggle('is-expanded', open);
+    toggle?.setAttribute('aria-expanded', String(open));
+    document.getElementById(containerId)?.classList.toggle('hidden', !open);
+  }
+}
+
+function togglePreferenceSubgroup(definitions, rowSelector, id) {
+  const expanded = new Set(expandedPreferenceSubgroups(definitions).split(',').filter(Boolean));
+  if (expanded.has(id)) expanded.delete(id);
+  else expanded.add(id);
+  setPreferenceSubgroupsExpanded(definitions, rowSelector, Array.from(expanded).join(','));
+}
+
+function setViewPreferenceExpanded(value) {
+  setPreferenceSubgroupsExpanded(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', value);
+}
+
+function setHomeModulePreferenceExpanded(value) {
+  setPreferenceSubgroupsExpanded(HOME_MODULE_SUBGROUPS, '.home-module-preference-row', value);
+}
+
+// Main-screen rows retain their six-dot handle as the only drag surface while
+// using the same thresholded controller as Collection and AI Tool Limits.
+// Visibility/configuration controls and nested panels keep their own gestures.
+const MAIN_PREFERENCE_DRAG_EXCLUDED = 'button:not(.preference-order-handle), input, select, textarea, a, label, .accordion-animated-container';
+
+function createMainPreferenceRowDrag({ kind, rowSelector, idKey, settingKey, getExpanded, setExpanded }) {
+  return rowDragControllerApi.createRowDragController({
+    dragSort: verticalDragSortApi,
+    getList: () => preferenceListForKind(kind),
+    getScrollPanel: () => els.settingsPanel,
+    rowSelector,
+    idKey,
+    dragExcluded: MAIN_PREFERENCE_DRAG_EXCLUDED,
+    dragStartSelector: '.preference-order-handle',
+    getExpanded,
+    setExpanded,
+    applyOrder: (order) => applyPreferenceOrder(kind, order),
+    preserveScroll: preserveSettingsPanelScroll,
+    mirrorOrder: (order) => {
+      const value = order.join(',');
+      state.settings = { ...state.settings, [settingKey]: value };
+      return value;
+    },
+    persistOrder: (_order, _id, value) => void saveSettings({ [settingKey]: value }),
+    requestRender: () => renderViewPreferences()
+  });
+}
+
+const viewPreferenceRowDrag = createMainPreferenceRowDrag({
+  kind: 'view',
+  rowSelector: '.view-preference-row[data-view]',
+  idKey: 'view',
+  settingKey: 'viewDisplayOrder',
+  getExpanded: () => expandedPreferenceSubgroups(VIEW_PREFERENCE_SUBGROUPS),
+  setExpanded: setViewPreferenceExpanded
+});
+
+const homeModulePreferenceRowDrag = createMainPreferenceRowDrag({
+  kind: 'homeModule',
+  rowSelector: '.home-module-preference-row[data-home-module]',
+  idKey: 'homeModule',
+  settingKey: 'homeModuleOrder',
+  getExpanded: () => expandedPreferenceSubgroups(HOME_MODULE_SUBGROUPS),
+  setExpanded: setHomeModulePreferenceExpanded
+});
+
+const homeLimitProviderRowDrag = createMainPreferenceRowDrag({
+  kind: 'homeLimitProvider',
+  rowSelector: '.home-limit-provider-row[data-home-limit-provider]',
+  idKey: 'homeLimitProvider',
+  settingKey: 'homeLimitProviderOrder'
+});
+
+const statusProviderRowDrag = createMainPreferenceRowDrag({
+  kind: 'statusProvider',
+  rowSelector: '.status-provider-row[data-status-provider]',
+  idKey: 'statusProvider',
+  settingKey: 'serviceProviderDisplayOrder'
+});
+
+function deferMainPreferenceRender() {
+  return [viewPreferenceRowDrag, homeModulePreferenceRowDrag, homeLimitProviderRowDrag, statusProviderRowDrag]
+    .some((controller) => controller.deferRender());
 }
 
 // The limit provider list drags from the whole row instead of a handle. The
@@ -10353,14 +10438,17 @@ const limitProviderRowDrag = rowDragControllerApi.createRowDragController({
   applyOrder: (order) => applyPreferenceOrder('provider', order),
   preserveScroll: preserveSettingsPanelScroll,
   mirrorOrder: (order) => { state.settings = { ...state.settings, limitProviderOrder: order.join(',') }; },
-  // Saved directly rather than through `onPreferenceOrderCommit`, whose no-op
-  // guard compares against the value `mirrorOrder` just wrote and would drop it.
+  // Saved directly because the controller has already mirrored the order into
+  // local state before a deferred repaint can run.
   persistOrder: (order) => void saveSettings({ limitProviderOrder: order.join(',') }),
   requestRender: () => renderLimitProviderCheckboxes()
 });
 
 function renderViewPreferences() {
   if (!els.viewDisplayList) return;
+  // Every list under Main Screen shares this render path. A settings or stats
+  // repaint during a drag is held until the controller lands or aborts.
+  if (deferMainPreferenceRender()) return;
   const hidden = hiddenViewSet();
   const orderValue = effectiveViewDisplayOrderValue();
   const views = viewDisplayPreferencesApi.orderedViews(VIEW_DISPLAY_OPTIONS, orderValue);
@@ -10408,6 +10496,7 @@ function renderViewPreferences() {
     actions.className = 'tool-preference-actions';
     actions.append(visibility, handle);
     row.append(name, actions);
+    row.addEventListener('pointerdown', (event) => viewPreferenceRowDrag.startRowDrag(event, id));
     els.viewDisplayList.appendChild(row);
     if (id === 'home') {
       row.classList.add('has-subgroup');
@@ -10421,13 +10510,7 @@ function renderViewPreferences() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => {
-        state.homeSettingsExpanded = !state.homeSettingsExpanded;
-        toggle.classList.toggle('is-expanded', state.homeSettingsExpanded);
-        toggle.setAttribute('aria-expanded', String(Boolean(state.homeSettingsExpanded)));
-        const container = document.getElementById('homeSettingsContainer');
-        if (container) container.classList.toggle('hidden', !state.homeSettingsExpanded);
-      });
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
       actions.insertBefore(toggle, visibility);
 
       const listContainer = document.createElement('div');
@@ -10451,13 +10534,7 @@ function renderViewPreferences() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => {
-        state.trendSettingsExpanded = !state.trendSettingsExpanded;
-        toggle.classList.toggle('is-expanded', state.trendSettingsExpanded);
-        toggle.setAttribute('aria-expanded', String(Boolean(state.trendSettingsExpanded)));
-        const container = document.getElementById('trendSettingsContainer');
-        if (container) container.classList.toggle('hidden', !state.trendSettingsExpanded);
-      });
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
       actions.insertBefore(toggle, visibility);
       
       const listContainer = document.createElement('div');
@@ -10481,13 +10558,7 @@ function renderViewPreferences() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => {
-        state.projectSettingsExpanded = !state.projectSettingsExpanded;
-        toggle.classList.toggle('is-expanded', state.projectSettingsExpanded);
-        toggle.setAttribute('aria-expanded', String(Boolean(state.projectSettingsExpanded)));
-        const container = document.getElementById('projectSettingsContainer');
-        if (container) container.classList.toggle('hidden', !state.projectSettingsExpanded);
-      });
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
       actions.insertBefore(toggle, visibility);
 
       const listContainer = document.createElement('div');
@@ -10511,13 +10582,7 @@ function renderViewPreferences() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => {
-        state.serviceProvidersExpanded = !state.serviceProvidersExpanded;
-        toggle.classList.toggle('is-expanded', state.serviceProvidersExpanded);
-        toggle.setAttribute('aria-expanded', String(Boolean(state.serviceProvidersExpanded)));
-        const container = document.getElementById('serviceProvidersContainer');
-        if (container) container.classList.toggle('hidden', !state.serviceProvidersExpanded);
-      });
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
       actions.insertBefore(toggle, actions.firstChild);
       
       const listContainer = document.createElement('div');
@@ -10652,6 +10717,7 @@ function renderHomeLimitProviderList() {
     actions.className = 'tool-preference-actions';
     actions.append(visibility, handle);
     row.append(labelGroup, actions);
+    row.addEventListener('pointerdown', (event) => homeLimitProviderRowDrag.startRowDrag(event, id));
     wrap.append(row);
   }
   return wrap;
@@ -10718,21 +10784,7 @@ function renderHomeSettingsList() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       configure.append(toggleIcon);
-      configure.addEventListener('click', () => {
-        if (id === 'limits') {
-          state.homeLimitSettingsExpanded = !state.homeLimitSettingsExpanded;
-          configure.classList.toggle('is-expanded', state.homeLimitSettingsExpanded);
-          configure.setAttribute('aria-expanded', String(Boolean(state.homeLimitSettingsExpanded)));
-          const container = document.getElementById('homeLimitProviderContainer');
-          if (container) container.classList.toggle('hidden', !state.homeLimitSettingsExpanded);
-          return;
-        }
-        state.homeActivitySettingsExpanded = !state.homeActivitySettingsExpanded;
-        configure.classList.toggle('is-expanded', state.homeActivitySettingsExpanded);
-        configure.setAttribute('aria-expanded', String(Boolean(state.homeActivitySettingsExpanded)));
-        const container = document.getElementById('homeActivitySettingsContainer');
-        if (container) container.classList.toggle('hidden', !state.homeActivitySettingsExpanded);
-      });
+      configure.addEventListener('click', () => togglePreferenceSubgroup(HOME_MODULE_SUBGROUPS, '.home-module-preference-row', id));
       actions.append(configure);
     }
     const visibility = document.createElement('button');
@@ -10746,6 +10798,7 @@ function renderHomeSettingsList() {
     const handle = createPreferenceOrderHandle({ kind: 'homeModule', id, label, count: modules.length });
     actions.append(visibility, handle);
     row.append(name, actions);
+    row.addEventListener('pointerdown', (event) => homeModulePreferenceRowDrag.startRowDrag(event, id));
     wrap.append(row);
     if (id === 'limits') {
       const listContainer = document.createElement('div');
@@ -10996,6 +11049,7 @@ function renderServiceProviderList() {
     actions.className = 'tool-preference-actions';
     actions.append(visibility, handle);
     row.append(name, actions);
+    row.addEventListener('pointerdown', (event) => statusProviderRowDrag.startRowDrag(event, id));
     wrap.append(row);
   }
   return wrap;
@@ -11200,9 +11254,102 @@ function friendlyPath(dir) {
   return clientHealthPresentationApi.friendlyPath(dir, state.appInfo?.homeDir, state.appInfo?.platform);
 }
 
+let customScanPathMutationQueue = Promise.resolve();
+
+function customScanPathsForClient(clientId) {
+  const paths = state.settings?.customScanPaths?.[clientId];
+  return Array.isArray(paths) ? paths : [];
+}
+
+function queueCustomScanPathMutation(operation) {
+  const queued = customScanPathMutationQueue.then(operation, operation);
+  // A rejected mutation must not poison the queue. The caller still receives
+  // the original result while the retained tail always permits the next edit.
+  customScanPathMutationQueue = queued.catch(() => {});
+  return queued;
+}
+
+function customScanPathErrorKey(error) {
+  const message = String(error?.message || error || '');
+  if (message.includes('custom-scan-path-limit-per-client')) {
+    return 'settings.tools.health.customSourcePerClientLimit';
+  }
+  if (message.includes('custom-scan-path-limit-global')) {
+    return 'settings.tools.health.customSourceGlobalLimit';
+  }
+  return 'settings.tools.health.customSourceError';
+}
+
+function mutateCustomScanPaths(clientId, mutation, options = {}) {
+  return queueCustomScanPathMutation(async () => {
+    try {
+      // Read inside the queue so every operation starts from the settings
+      // returned by the preceding save, including edits for another client.
+      const current = customScanPathsForClient(clientId);
+      const next = mutation(current);
+      if (!Array.isArray(next)) return;
+      const customScanPaths = { ...(state.settings?.customScanPaths || {}) };
+      if (next.length > 0) customScanPaths[clientId] = next;
+      else delete customScanPaths[clientId];
+      const patch = { customScanPaths };
+      if (options.enableClient === true) {
+        const tracked = enabledClientSet();
+        if (!tracked.has(clientId)) patch.clients = [...tracked, clientId].join(',');
+      }
+      await saveSettings(patch);
+      state.customScanPathErrors.delete(clientId);
+      resetClientSourceProbe(clientId);
+      loadClientSources(clientId, { force: true });
+      refillOpenClientHealthPanel();
+    } catch (error) {
+      state.customScanPathErrors.set(clientId, customScanPathErrorKey(error));
+      refillOpenClientHealthPanel();
+    }
+  });
+}
+
+function customSourceIcon(kind) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const first = document.createElementNS(svg.namespaceURI, 'path');
+  first.setAttribute('d', kind === 'add' ? 'M8 3v10' : 'M4 4l8 8');
+  const second = document.createElementNS(svg.namespaceURI, 'path');
+  second.setAttribute('d', kind === 'add' ? 'M3 8h10' : 'M12 4l-8 8');
+  svg.append(first, second);
+  return svg;
+}
+
+function resetClientSourceProbe(clientId) {
+  state.clientSources?.entries?.delete(clientId);
+  state.clientSourcesKey = '';
+  state.clientSourcesRequest += 1;
+}
+
+async function addCustomScanPath(clientId) {
+  try {
+    const result = await window.tokenMonitor?.pickCustomScanPath?.(clientId);
+    if (result?.canceled) return;
+    if (!result?.ok || !result.dir) throw new Error(result?.error || 'pick-failed');
+    await mutateCustomScanPaths(clientId, (current) => (
+      current.includes(result.dir) ? null : [...current, result.dir]
+    ), { enableClient: true });
+  } catch (error) {
+    state.customScanPathErrors.set(clientId, customScanPathErrorKey(error));
+    refillOpenClientHealthPanel();
+  }
+}
+
+async function removeCustomScanPath(clientId, dir) {
+  await mutateCustomScanPaths(clientId, (current) => {
+    const remaining = current.filter((entry) => entry !== dir);
+    return remaining.length === current.length ? null : remaining;
+  });
+}
+
 // Values are formatted here and nowhere else — the presentation helper returns
 // three semantic groups containing only raw numbers, timestamps and i18n keys.
-function clientHealthGroup(group, notes) {
+function clientHealthGroup(group, notes, clientId) {
   const section = document.createElement('section');
   section.className = `tool-health-group tool-health-group-${group.id}`;
   const heading = document.createElement('h4');
@@ -11212,24 +11359,62 @@ function clientHealthGroup(group, notes) {
   body.className = 'tool-health-group-body';
 
   if (group.id === 'source') {
+    section.append(heading);
+    const summaryRow = document.createElement('div');
+    summaryRow.className = 'tool-health-source-summary-row';
     const summary = document.createElement('div');
     summary.className = 'tool-health-group-summary';
     summary.textContent = t(`settings.tools.health.source.${group.state}`, {
       detected: group.detectedCount,
       checked: group.checkedCount
     });
-    body.append(summary);
+    summaryRow.append(summary);
+    if (state.appInfo?.customScanClientIds?.includes(clientId)) {
+      const addSource = document.createElement('button');
+      addSource.type = 'button';
+      addSource.className = 'tool-health-source-control tool-health-source-add';
+      addSource.title = t('settings.tools.health.addCustomSource');
+      addSource.setAttribute('aria-label', addSource.title);
+      addSource.append(customSourceIcon('add'));
+      const label = document.createElement('span');
+      label.textContent = addSource.title;
+      addSource.append(label);
+      addSource.addEventListener('click', () => { void addCustomScanPath(clientId); });
+      summaryRow.append(addSource);
+    }
+    body.append(summaryRow);
+    const customSourceError = state.customScanPathErrors.get(clientId);
+    if (customSourceError) {
+      const error = document.createElement('div');
+      error.className = 'tool-health-group-meta tool-health-source-error';
+      error.setAttribute('role', 'status');
+      error.textContent = t(customSourceError);
+      body.append(error);
+    }
     if (group.checks.length > 0) {
       const list = document.createElement('div');
       list.className = 'tool-health-checks';
       for (const check of group.checks) {
         const paths = check.paths?.length ? check.paths : [{ dir: '', exists: check.exists }];
         for (const pathInfo of paths) {
+          const row = document.createElement('div');
+          row.className = 'tool-health-check-row';
           const chip = document.createElement('code');
           chip.className = `tool-health-check${pathInfo.exists ? ' found' : pathInfo.pending ? ' pending' : ''}`;
           chip.textContent = pathInfo.dir ? friendlyPath(pathInfo.dir) : check.id;
           if (pathInfo.dir) chip.title = pathInfo.dir;
-          list.append(chip);
+          row.append(chip);
+          if (pathInfo.custom) {
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'tool-health-source-control tool-health-source-remove';
+            remove.title = t('settings.tools.health.removeCustomSource');
+            remove.setAttribute('aria-label', `${remove.title}: ${friendlyPath(pathInfo.dir)}`);
+            remove.append(customSourceIcon('remove'));
+            remove.addEventListener('click', () => { void removeCustomScanPath(clientId, pathInfo.dir); });
+            row.append(remove);
+          }
+          list.append(row);
         }
       }
       body.append(list);
@@ -11298,7 +11483,8 @@ function clientHealthGroup(group, notes) {
     line.textContent = t(`settings.tools.health.code.${note.code}`);
     body.append(line);
   }
-  section.append(heading, body);
+  if (group.id !== 'source') section.append(heading);
+  section.append(body);
   return section;
 }
 
@@ -11423,7 +11609,8 @@ function clientHealthPanel(detail, clientId) {
   for (const group of detail.groups) {
     groups.append(clientHealthGroup(
       group,
-      detail.notes.filter((note) => note.group === group.id)
+      detail.notes.filter((note) => note.group === group.id),
+      clientId
     ));
   }
   box.append(groups, clientHealthActions(clientId, detail));
@@ -11570,7 +11757,8 @@ function toolPreferenceRenderSignature() {
       state.settings?.clientDisplayOrder || '',
       state.settings?.locale || state.settings?.language || '',
       state.settings?.currency || '',
-      state.settings?.compactTokenUnits || ''
+      state.settings?.compactTokenUnits || '',
+      JSON.stringify(state.settings?.customScanPaths || {})
     ],
     query: toolPreferenceQuery(),
     deviceId: device?.deviceId || '',
@@ -12427,32 +12615,6 @@ async function onPreferenceReorder(kind, id, targetIndex) {
   else if (kind === 'homeLimitProvider') await onHomeLimitProviderReorder(id, targetIndex);
   else if (kind === 'statusProvider') await onServiceProviderReorder(id, targetIndex);
   else await onLimitProviderReorder(id, targetIndex);
-}
-
-// Only the handle-based lists commit through here; the two whole-row lists save
-// from their own drag wiring, because this compares against the value they have
-// already mirrored into `state.settings` and would read the write as a no-op.
-async function onPreferenceOrderCommit(kind, order) {
-  const value = (order || []).join(',');
-  if (kind === 'view') {
-    const current = viewDisplayPreferencesApi.normalizeViewDisplayOrder(effectiveViewDisplayOrderValue(), VIEW_DISPLAY_OPTIONS).join(',');
-    if (value !== current) await saveSettings({ viewDisplayOrder: value });
-    return;
-  }
-  if (kind === 'homeModule') {
-    const current = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS).join(',');
-    if (value !== current) await saveSettings({ homeModuleOrder: value });
-    return;
-  }
-  if (kind === 'homeLimitProvider') {
-    const current = limitProviderOrderApi.normalizeLimitProviderOrder(homeLimitProviderOrderValue(), LIMIT_PROVIDERS).join(',');
-    if (value !== current) await saveSettings({ homeLimitProviderOrder: value });
-    return;
-  }
-  if (kind === 'statusProvider') {
-    const current = serviceStatusProviderPreferencesApi.normalizeOrder(state.settings?.serviceProviderDisplayOrder, SERVICE_PROVIDER_OPTIONS).join(',');
-    if (value !== current) await saveSettings({ serviceProviderDisplayOrder: value });
-  }
 }
 
 function onPreferenceOrderKeydown(event, kind, id) {
@@ -13483,6 +13645,7 @@ function renderStatsUpdate() {
   renderDeepseekStatus();
   renderMinimaxStatus();
   renderExternalProviderStatus('claude');
+  renderExternalProviderStatus('factory');
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
@@ -15430,30 +15593,15 @@ const externalLimitAccountConfig = {
     sourceKey: 'claudeWebCookieSource',
     pendingKey: 'claudePendingCheckSince'
   },
-  zai: {
-    configuredKey: 'zaiApiKeyConfigured',
-    sourceKey: 'zaiApiKeySource',
-    pendingKey: 'zaiPendingCheckSince'
+  factory: {
+    configuredKey: 'factoryCredentialConfigured',
+    sourceKey: 'factoryCredentialSource',
+    pendingKey: 'factoryPendingCheckSince'
   },
-  zaiteam: {
-    configuredKey: 'zaiTeamApiKeyConfigured',
-    sourceKey: 'zaiTeamApiKeySource',
-    pendingKey: 'zaiteamPendingCheckSince'
-  },
-  volcengine: {
-    configuredKey: 'volcengineCredentialsConfigured',
-    sourceKey: 'volcengineCredentialsSource',
-    pendingKey: 'volcenginePendingCheckSince'
-  },
-  qoder: {
-    configuredKey: 'qoderCookieConfigured',
-    sourceKey: 'qoderCookieSource',
-    pendingKey: 'qoderPendingCheckSince'
-  },
-  trae: {
-    configuredKey: 'traeAccessTokenConfigured',
-    sourceKey: 'traeAccessTokenSource',
-    pendingKey: 'traePendingCheckSince'
+  kimi: {
+    configuredKey: 'kimiCredentialConfigured',
+    sourceKey: 'kimiCredentialSource',
+    pendingKey: 'kimiPendingCheckSince'
   },
   zed: {
     configuredKey: 'zedCookieConfigured',
@@ -15465,15 +15613,35 @@ const externalLimitAccountConfig = {
     sourceKey: 'commandcodeCookieSource',
     pendingKey: 'commandcodePendingCheckSince'
   },
-  kimi: {
-    configuredKey: 'kimiCredentialConfigured',
-    sourceKey: 'kimiCredentialSource',
-    pendingKey: 'kimiPendingCheckSince'
+  zai: {
+    configuredKey: 'zaiApiKeyConfigured',
+    sourceKey: 'zaiApiKeySource',
+    pendingKey: 'zaiPendingCheckSince'
+  },
+  zaiteam: {
+    configuredKey: 'zaiTeamApiKeyConfigured',
+    sourceKey: 'zaiTeamApiKeySource',
+    pendingKey: 'zaiteamPendingCheckSince'
+  },
+  qoder: {
+    configuredKey: 'qoderCookieConfigured',
+    sourceKey: 'qoderCookieSource',
+    pendingKey: 'qoderPendingCheckSince'
+  },
+  volcengine: {
+    configuredKey: 'volcengineCredentialsConfigured',
+    sourceKey: 'volcengineCredentialsSource',
+    pendingKey: 'volcenginePendingCheckSince'
   },
   ollama: {
     configuredKey: 'ollamaCookieConfigured',
     sourceKey: 'ollamaCookieSource',
     pendingKey: 'ollamaPendingCheckSince'
+  },
+  trae: {
+    configuredKey: 'traeAccessTokenConfigured',
+    sourceKey: 'traeAccessTokenSource',
+    pendingKey: 'traePendingCheckSince'
   },
   alibaba: {
     configuredKey: 'alibabaCookieConfigured',
@@ -15569,7 +15737,11 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
   if (accountStatus === 'linked') {
     // A ZCode-discovered login is an OAuth-style link, not a pasted API key,
     // so it reads as connected the way Zed's linked sessions do.
-    const linkedKey = providerName === 'zai' && source === 'zcode-auto' ? 'settings.zai.statusLinked' : null;
+    const linkedKey = providerName === 'zai' && source === 'zcode-auto'
+      ? 'settings.zai.statusLinked'
+      : providerName === 'factory' && source === 'droid-env'
+        ? 'settings.factory.statusDroidEnv'
+        : null;
     return t(linkedKey || (source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`));
   }
   if (accountStatus === 'invalid') return t(`settings.${providerName}.statusInvalid`);
@@ -15614,6 +15786,10 @@ function zaiPlatformUrl() {
   return region === 'bigmodel-cn'
     ? 'https://bigmodel.cn/coding-plan/personal/usage'
     : 'https://z.ai/manage-apikey/coding-plan/personal/my-plan';
+}
+
+function factoryPlatformUrl() {
+  return 'https://app.factory.ai/settings/api-keys';
 }
 
 function zaiteamPlatformUrl() {
@@ -15725,6 +15901,14 @@ function ollamaValidationError(provider) {
   return t('settings.ollama.validationUnavailable');
 }
 
+function factoryApiKeyValidationError(provider) {
+  if (provider?.status === 'unauthorized') return t('settings.factory.validationInvalid');
+  if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
+    return t('settings.factory.validationRateLimited');
+  }
+  return t('settings.factory.validationUnavailable');
+}
+
 function renderExternalProviderStatus(providerName) {
   const config = externalLimitAccountConfig[providerName];
   const statusEl = document.getElementById(`${providerName}AccountStatus`);
@@ -15781,8 +15965,8 @@ function renderExternalProviderStatus(providerName) {
     manualPanel.classList.remove('hidden');
     openBtn.classList.remove('hidden');
   }
-  const canClearConfiguredClaude = providerName === 'claude' && configured;
-  logoutBtn.classList.toggle('hidden', source !== 'settings' || (!linked && !canClearConfiguredClaude));
+  const canClearConfiguredCredential = source === 'settings' && configured;
+  logoutBtn.classList.toggle('hidden', !canClearConfiguredCredential);
   refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();
 }
@@ -17710,6 +17894,67 @@ function setupCursorAccountUI() {
     });
   }
 
+  const factoryToggle = document.getElementById('factorySettingsToggle');
+  if (factoryToggle) {
+    factoryToggle.addEventListener('click', () => setExternalAccountExpanded('factory', !state.factoryAccountExpanded));
+    setExternalAccountExpanded('factory', false);
+    renderExternalProviderStatus('factory');
+
+    document.getElementById('factoryOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal(factoryPlatformUrl());
+    });
+
+    document.getElementById('factoryLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ factoryApiKey: '' });
+      clearExternalProviderCheckPending('factory');
+      clearExternalProviderPendingStatus('factory');
+      renderExternalProviderStatus('factory');
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('factoryRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('factoryApiKeySubmit').addEventListener('click', async () => {
+      const input = document.getElementById('factoryApiKeyInput');
+      const errorEl = document.getElementById('factoryErrorMessage');
+      const submit = document.getElementById('factoryApiKeySubmit');
+      errorEl.classList.add('hidden');
+      if (!String(input.value || '').trim()) {
+        errorEl.textContent = t('settings.factory.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      submit.disabled = true;
+      submit.textContent = t('settings.common.checking');
+      try {
+        markExternalProviderCheckPending('factory');
+        const validation = await window.tokenMonitor.factory.validateApiKey(input.value);
+        if (!validation?.ok) {
+          clearExternalProviderCheckPending('factory');
+          renderExternalProviderStatus('factory');
+          errorEl.textContent = factoryApiKeyValidationError(validation);
+          errorEl.classList.remove('hidden');
+          return;
+        }
+        await saveSettings({ factoryApiKey: input.value });
+        input.value = '';
+        renderExternalProviderStatus('factory');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('factory', !externalProviderAccountLinked('factory'));
+        renderExternalProviderStatus('factory');
+      } catch (err) {
+        clearExternalProviderCheckPending('factory');
+        errorEl.textContent = t('settings.factory.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      } finally {
+        submit.disabled = false;
+        submit.textContent = t('settings.factory.saveApiKey');
+      }
+    });
+  }
+
   const zaiToggle = document.getElementById('zaiSettingsToggle');
   if (zaiToggle) {
     const zaiApiRegionInput = document.getElementById('zaiApiRegionInput');
@@ -18678,19 +18923,20 @@ function initSettingsAnimationWrappers() {
     '.hub-mode-fields',
     '.presence-feature-body',
     '#claudeManualPanel',
-    '#cursorManualPanel',
     '#opencodeManualPanel',
-    '#deepseekManualPanel',
-    '#minimaxManualPanel',
-    '#zaiManualPanel',
-    '#zaiteamManualPanel',
-    '#volcengineManualPanel',
-    '#qoderManualPanel',
-    '#traeManualPanel',
+    '#cursorManualPanel',
+    '#factoryManualPanel',
+    '#kimiManualPanel',
     '#zedManualPanel',
     '#commandcodeManualPanel',
-    '#kimiManualPanel',
+    '#zaiManualPanel',
+    '#zaiteamManualPanel',
+    '#qoderManualPanel',
+    '#deepseekManualPanel',
+    '#minimaxManualPanel',
+    '#volcengineManualPanel',
     '#ollamaManualPanel',
+    '#traeManualPanel',
     '#alibabaManualPanel'
   ].join(', ');
 

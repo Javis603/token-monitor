@@ -1,24 +1,33 @@
 ﻿'use strict';
 
+const zlib = require('node:zlib');
+const { acceptsEncoding } = require('./hubProtocol');
+
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
+const JSON_COMPRESSION_MIN_BYTES = 1024;
 
 function corsHeaders(extraHeaders = {}) {
   return {
     'access-control-allow-origin': '*',
     'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-    'access-control-allow-headers': 'authorization,content-type,x-token-monitor-secret',
+    'access-control-allow-headers': 'authorization,content-type,x-token-monitor-secret,x-token-monitor-response,x-token-monitor-stream',
     ...extraHeaders
   };
 }
 
 function sendJson(res, statusCode, payload, extraHeaders = {}) {
-  const body = JSON.stringify(payload, null, 2);
+  const body = Buffer.from(JSON.stringify(payload), 'utf8');
+  const compressed = acceptsEncoding(res.req, 'gzip') && body.byteLength >= JSON_COMPRESSION_MIN_BYTES
+    ? zlib.gzipSync(body, { level: zlib.constants.Z_BEST_SPEED })
+    : null;
   res.writeHead(statusCode, corsHeaders({
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
+    'content-length': String((compressed || body).byteLength),
+    ...(compressed ? { 'content-encoding': 'gzip', vary: 'accept-encoding' } : {}),
     ...extraHeaders
   }));
-  res.end(body);
+  res.end(compressed || body);
 }
 
 function sendText(res, statusCode, body, contentType = 'text/plain; charset=utf-8') {

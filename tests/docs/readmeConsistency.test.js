@@ -51,6 +51,7 @@ const supportedToolOrder = [
   'Cursor IDE / Cursor CLI',
   'Antigravity',
   'Cline',
+  'Factory Droid',
   'Kimi CLI / Kimi Code / Kimi Work',
   'Qwen CLI',
   'Grok Build',
@@ -89,6 +90,7 @@ const supportedToolIdOrder = [
   'cursor',
   'antigravity',
   'cline',
+  'droid',
   'kimi',
   'qwen',
   'xai',
@@ -198,6 +200,7 @@ test('localized READMEs disclose the LM Studio server-log tracking boundary', ()
 // The table's icon id is not always the provider id (a tool row is named after
 // its artwork), and GLM/GLM Team share one row, so the two are bridged here.
 const README_ICON_TO_LIMIT_PROVIDERS = {
+  droid: ['factory'],
   xai: ['grok'],
   'mimo-code': ['mimo'],
   zcode: ['zai', 'zaiteam']

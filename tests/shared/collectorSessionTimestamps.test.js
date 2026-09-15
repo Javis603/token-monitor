@@ -450,6 +450,9 @@ test('applySessionTimestamps promotes a cached unversioned DSH path when a versi
     const cache = {
       metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set(),
       dshSessionFileCache: new Map(), retryMisses: true,
+      // Model Windows/NTFS returning the same directory timestamp around a
+      // rapid create. Promotion must not depend on that timestamp changing.
+      dshDirectoryFingerprintsReliable: false,
       indexDshSessionHeaders(options) {
         indexCalls += 1;
         return indexDshSessionHeaders(options);
@@ -534,13 +537,17 @@ test('collectUsageOnce does not re-walk the DSH sessions tree on a second real t
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'session.jsonl'), `${JSON.stringify({ type: 'session', id: 'session-e2e', createdAt: 1750000000000 })}\n`);
 
-    // dshSessionFiles() walks the tree via fs.readdirSync(dir, {withFileTypes}).
-    // Counting only calls rooted under the DSH sessions dir isolates "the
-    // tree was walked" from every other readdirSync call a full tick makes
-    // (tokscale client discovery, WSL probing, etc).
-    let walks = 0;
+    // dshSessionFiles() walks root -> project -> session. Count only the first
+    // two levels so a Windows fallback that verifies one already-known session
+    // directory is not mistaken for rebuilding the whole tree.
+    let treeWalks = 0;
     fs.readdirSync = (target, ...rest) => {
-      if (typeof target === 'string' && target.startsWith(sessionsRoot)) walks += 1;
+      if (typeof target === 'string') {
+        const relative = path.relative(sessionsRoot, target);
+        if (relative === '' || (!relative.startsWith('..') && relative.split(path.sep).length === 1)) {
+          treeWalks += 1;
+        }
+      }
       return realReaddirSync(target, ...rest);
     };
 
@@ -562,12 +569,12 @@ test('collectUsageOnce does not re-walk the DSH sessions tree on a second real t
 
     const first = await collectUsageOnce(baseOptions);
     assert.equal(first.today.sessions['dsh:session-e2e'].startedAt, new Date(1750000000000).toISOString());
-    const walksAfterFirstTick = walks;
+    const walksAfterFirstTick = treeWalks;
     assert.ok(walksAfterFirstTick > 0, 'the first real tick must discover the session via the tree walk');
 
     const second = await collectUsageOnce(baseOptions);
     assert.equal(second.today.sessions['dsh:session-e2e'].startedAt, new Date(1750000000000).toISOString());
-    assert.equal(walks, walksAfterFirstTick, 'a second collectUsageOnce() call must not rebuild and re-walk the DSH tree');
+    assert.equal(treeWalks, walksAfterFirstTick, 'a second collectUsageOnce() call must not rebuild and re-walk the DSH tree');
   } finally {
     fs.readdirSync = realReaddirSync;
     delete require.cache[collectorPath];

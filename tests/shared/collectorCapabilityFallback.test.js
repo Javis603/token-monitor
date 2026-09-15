@@ -268,3 +268,55 @@ test('a capability probe cannot hold the process-wide resolver forever after SIG
     delete require.cache[collectorPath];
   }
 });
+
+test('an old binary that rejects both the join and a client retries once per rejection, not once per pair', async () => {
+  // A build old enough to lack the workspace join is also old enough to lack a
+  // recently added client, so both rejections land in the same scan. Each one
+  // is remembered on its own; the client retry must not re-offer a grouping
+  // the same binary just rejected.
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    if (args.includes('--help')) return helpChild(['claude']);
+    const groupBy = args[args.indexOf('--group-by') + 1];
+    if (groupBy.includes('workspace')) {
+      return exitChild(2, `Error: Invalid group-by value: '${groupBy}'.`);
+    }
+    const requested = args[args.indexOf('--client') + 1];
+    if (requested.split(',').includes('dsh')) {
+      return exitChild(2, 'error: invalid value \'dsh\' for --client');
+    }
+    return jsonChild({ entries: [] });
+  };
+
+  try {
+    const { collectUsageOnce } = freshCollector();
+    await collectUsageOnce({
+      clients: 'claude,dsh',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false
+    });
+
+    const groupings = calls
+      .filter((args) => !args.includes('--help'))
+      .map((args) => args[args.indexOf('--group-by') + 1]);
+    // today: joined(rejected) → plain(unknown client) → plain(retry, ok);
+    // month/allTime: both rejections already known, one plain scan each.
+    assert.deepEqual(groupings, [
+      'client,workspace,session,model',
+      'client,session,model',
+      'client,session,model',
+      'client,session,model',
+      'client,session,model'
+    ]);
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});

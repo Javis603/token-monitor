@@ -29,6 +29,13 @@ function resolveSessionMetadata(sessionIds, context) {
   const { deps, home, isoFromDate } = context;
   const result = new Map();
   const fileCache = deps.dshSessionFileCache || sessionFileCache;
+  // Windows directory timestamps can remain unchanged across a create observed
+  // in the same collection window. Verify the preferred generation in
+  // this one already-known session directory instead of trusting that stat as
+  // an invalidation signal. This is still bounded per session and never walks
+  // the whole DSH sessions tree.
+  const directoryFingerprintsReliable = deps.dshDirectoryFingerprintsReliable
+    ?? (process.platform !== 'win32');
   // A scoped home is a WSL distro. Host DSH_HOME must never redirect this
   // lookup away from that distro, matching tokscale's use_env_roots: false.
   const env = deps.scopedHome ? {} : (deps.env || process.env);
@@ -68,7 +75,10 @@ function resolveSessionMetadata(sessionIds, context) {
     let entry = fileCache.get(key);
     if (!entry) continue;
     const directoryFingerprint = directoryStatFingerprint(path.dirname(entry.filePath));
-    if (directoryFingerprint && entry.directoryFingerprint && directoryFingerprint !== entry.directoryFingerprint) {
+    const directoryFingerprintChanged = directoryFingerprint
+      && entry.directoryFingerprint
+      && directoryFingerprint !== entry.directoryFingerprint;
+    if (directoryFingerprintChanged || !directoryFingerprintsReliable) {
       const preferredPath = preferredDshSessionFileInDirectory(path.dirname(entry.filePath));
       if (preferredPath && preferredPath !== entry.filePath) {
         const preferredHeader = readDshSessionHeader(preferredPath);

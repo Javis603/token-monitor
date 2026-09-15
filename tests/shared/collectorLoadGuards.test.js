@@ -4580,6 +4580,73 @@ test('Tokscale headless capture roots are optional only while they are the defau
   }
 });
 
+test('custom Tokscale scan paths stay visible and use recursive extra-root watcher semantics', () => {
+  const tmp = withTmpHome([]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { clientSourceChecks, visibleDiagnosticRoots, watchIgnoreMatcher, watchPathsForClients } = freshCollector();
+    const custom = path.join(tmp, 'relocated', 'codex');
+    const options = { customScanPaths: { codex: [custom] } };
+
+    const missing = visibleDiagnosticRoots('codex', options).codex.find((root) => root.custom === true);
+    assert.deepEqual(missing, {
+      id: 'custom-scan-path',
+      dir: custom,
+      custom: true,
+      exists: false
+    });
+    assert.deepEqual(clientSourceChecks('codex', options).codex.at(-1), {
+      id: 'custom-scan-path',
+      exists: false
+    });
+    assert.equal(watchPathsForClients('codex', options).includes(custom), false);
+
+    fs.mkdirSync(custom, { recursive: true });
+    assert.equal(watchPathsForClients('codex', options).includes(custom), true);
+
+    const openclawOptions = { customScanPaths: { openclaw: [custom] } };
+    const ignored = watchIgnoreMatcher('openclaw', openclawOptions);
+    assert.equal(ignored(path.join(custom, 'direct.json')), false);
+    assert.equal(ignored(path.join(custom, 'nested')), false);
+    assert.equal(ignored(path.join(custom, 'nested', 'session.json')), false);
+
+    const copilotCustom = path.join(tmp, '.copilot', 'imported-sessions');
+    fs.mkdirSync(copilotCustom, { recursive: true });
+    const copilotIgnored = watchIgnoreMatcher('copilot', {
+      customScanPaths: { copilot: [copilotCustom] }
+    });
+    assert.equal(copilotIgnored(path.join(tmp, '.copilot', 'cache')), true);
+    assert.equal(copilotIgnored(path.join(copilotCustom, 'direct.jsonl')), false);
+    assert.equal(copilotIgnored(path.join(copilotCustom, 'nested')), false);
+    assert.equal(copilotIgnored(path.join(copilotCustom, 'nested', 'session.jsonl')), false);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('custom Antigravity roots remain watchable without watching its self-sync cache', () => {
+  const tmp = withTmpHome([]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchPathsForClients } = freshCollector();
+    const customAntigravity = path.join(tmp, 'relocated', 'antigravity');
+    fs.mkdirSync(customAntigravity, { recursive: true });
+
+    const roots = watchPathsForClients('antigravity', {
+      customScanPaths: { antigravity: [customAntigravity] }
+    });
+    assert.deepEqual(roots, [customAntigravity]);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('the quit variant of stop() skips the watcher walk and leans on `stopped`', async () => {
   const tmp = withTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;

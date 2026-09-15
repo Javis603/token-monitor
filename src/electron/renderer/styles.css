@@ -2002,6 +2002,57 @@ span.settings-note.settings-item-desc {
   font: inherit;
   font-weight: 500;
 }
+.tool-health-source-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.tool-health-source-control {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.tool-health-source-control:hover {
+  background: rgba(var(--line-rgb), 0.1);
+  color: var(--fg);
+}
+.tool-health-source-control:focus-visible {
+  outline: 1px solid rgba(var(--accent-rgb), 0.72);
+  outline-offset: 1px;
+}
+.tool-health-source-control svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.5;
+}
+.tool-health-source-add {
+  display: flex;
+  align-items: center;
+  width: auto;
+  height: 18px;
+  padding: 1px 5px 1px 4px;
+  border: 1px solid rgba(var(--line-rgb), 0.18);
+  gap: 2px;
+  font: inherit;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.tool-health-source-add svg {
+  width: 10px;
+  height: 10px;
+}
 .tool-health-group-body {
   display: grid;
   gap: 3px;
@@ -2088,6 +2139,13 @@ span.settings-note.settings-item-desc {
   justify-items: start;
   gap: 3px;
 }
+.tool-health-check-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+}
 .tool-health-check {
   max-width: 100%;
   padding: 1px 4px;
@@ -2098,17 +2156,20 @@ span.settings-note.settings-item-desc {
   line-height: 1.3;
   opacity: 0.72;
   overflow-wrap: anywhere;
-  text-decoration: line-through;
 }
 .tool-health-check.pending {
   opacity: 0.72;
-  text-decoration: none;
 }
 .tool-health-check.found {
   border-color: rgba(var(--success-rgb), 0.28);
   color: var(--success);
   opacity: 1;
-  text-decoration: none;
+}
+.tool-health-source-remove {
+  flex: 0 0 auto;
+}
+.tool-health-source-error {
+  color: var(--orange);
 }
 .tool-health-note-line {
   font-size: 10px;
@@ -2457,13 +2518,6 @@ span.settings-note.settings-item-desc {
 .preference-order-handle:disabled {
   opacity: 0.34;
   cursor: default;
-}
-.view-preference-row.is-dragging,
-.home-module-preference-row.is-dragging,
-.home-limit-provider-row.is-dragging {
-  background: rgba(var(--accent-rgb), 0.08);
-  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.28);
-  opacity: 0.9;
 }
 .reset-appearance-button {
   /* Glyph label, same reason as .tool-header-action. */
@@ -3466,6 +3520,8 @@ html.is-windows .settings-panel select option {
 .row-icon-cursor     { -webkit-mask-image: url(../../../assets/icons/cursor.svg);        mask-image: url(../../../assets/icons/cursor.svg); }
 .row-icon-antigravity { -webkit-mask-image: url(../../../assets/icons/antigravity.svg);   mask-image: url(../../../assets/icons/antigravity.svg); }
 .row-icon-cline      { -webkit-mask-image: url(../../../assets/icons/cline.svg);         mask-image: url(../../../assets/icons/cline.svg); }
+.row-icon-droid      { -webkit-mask-image: url(../../../assets/icons/droid.svg);         mask-image: url(../../../assets/icons/droid.svg); }
+.row-icon-factory    { -webkit-mask-image: url(../../../assets/icons/droid.svg);         mask-image: url(../../../assets/icons/droid.svg); }
 .row-icon-kimi       { -webkit-mask-image: url(../../../assets/icons/kimi.svg);          mask-image: url(../../../assets/icons/kimi.svg); }
 .row-icon-grok       { -webkit-mask-image: url(../../../assets/icons/xai.svg);           mask-image: url(../../../assets/icons/xai.svg); }
 .row-icon-copilot    { -webkit-mask-image: url(../../../assets/icons/copilot.svg);       mask-image: url(../../../assets/icons/copilot.svg); }
@@ -5310,47 +5366,69 @@ html.is-windows .limit-live-badge {
 }
 
 #claudeManualPanel,
-#cursorManualPanel,
 #opencodeManualPanel,
-#deepseekManualPanel,
-#minimaxManualPanel,
-#zaiManualPanel,
-#zaiteamManualPanel,
-#volcengineManualPanel,
-#qoderManualPanel,
-#traeManualPanel,
+#cursorManualPanel,
+#factoryManualPanel,
+#kimiManualPanel,
+#copilotManualPanel,
 #zedManualPanel,
 #commandcodeManualPanel,
-#ollamaManualPanel,
 #mimoManualPanel,
-#kimiManualPanel,
-#copilotManualPanel {
+#zaiManualPanel,
+#zaiteamManualPanel,
+#qoderManualPanel,
+#deepseekManualPanel,
+#minimaxManualPanel,
+#volcengineManualPanel,
+#ollamaManualPanel,
+#traeManualPanel {
   min-width: 0;
 }
 #claudeManualPanel > .accordion-animation-inner,
-#cursorManualPanel > .accordion-animation-inner,
 #opencodeManualPanel > .accordion-animation-inner,
-#deepseekManualPanel > .accordion-animation-inner,
-#minimaxManualPanel > .accordion-animation-inner,
-#zaiManualPanel > .accordion-animation-inner,
-#zaiteamManualPanel > .accordion-animation-inner,
-#volcengineManualPanel > .accordion-animation-inner,
-#qoderManualPanel > .accordion-animation-inner,
-#traeManualPanel > .accordion-animation-inner,
+#cursorManualPanel > .accordion-animation-inner,
+#factoryManualPanel > .accordion-animation-inner,
+#kimiManualPanel > .accordion-animation-inner,
 #zedManualPanel > .accordion-animation-inner,
 #commandcodeManualPanel > .accordion-animation-inner,
-#ollamaManualPanel > .accordion-animation-inner,
 #mimoManualPanel > .accordion-animation-inner,
-#kimiManualPanel > .accordion-animation-inner,
+#zaiManualPanel > .accordion-animation-inner,
+#zaiteamManualPanel > .accordion-animation-inner,
+#qoderManualPanel > .accordion-animation-inner,
+#deepseekManualPanel > .accordion-animation-inner,
+#minimaxManualPanel > .accordion-animation-inner,
+#volcengineManualPanel > .accordion-animation-inner,
+#ollamaManualPanel > .accordion-animation-inner,
+#traeManualPanel > .accordion-animation-inner,
 #alibabaManualPanel > .accordion-animation-inner {
   display: grid;
   min-width: 0;
   gap: 8px;
 }
 #claudeManualPanel textarea,
-#cursorManualPanel textarea,
 #opencodeManualPanel textarea,
+#cursorManualPanel textarea,
+#factoryManualPanel input,
+#kimiManualPanel input,
+#kimiManualPanel textarea,
+#copilotManualDetails input,
+#zedManualPanel textarea,
+#commandcodeManualPanel textarea,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
+#zaiManualPanel input,
+#zaiApiRegionInput,
+#zaiteamManualPanel input,
+#qoderManualPanel textarea,
+#qoderManualPanel select,
+#deepseekManualPanel input,
 #openrouterApiKeyInput,
+#minimaxManualPanel input,
+#volcengineManualPanel input,
+#ollamaManualPanel textarea,
+#traeManualPanel input,
+#alibabaManualPanel textarea,
+#alibabaManualPanel select,
 #thirdpartyPlatformInput,
 #thirdpartyModeInput,
 #thirdpartyAuthModeInput,
@@ -5363,33 +5441,30 @@ html.is-windows .limit-live-badge {
 #thirdpartyUsedPathInput,
 #thirdpartyTotalPathInput,
 #thirdpartyCurrencyInput,
-#thirdpartyDivisorInput,
-#deepseekManualPanel input,
-#minimaxManualPanel input,
-#zaiManualPanel input,
-#zaiteamManualPanel input,
-#zaiApiRegionInput,
-#volcengineManualPanel input,
-#qoderManualPanel textarea,
-#qoderManualPanel select,
-#traeManualPanel input,
-#zedManualPanel textarea,
-#commandcodeManualPanel textarea,
-#ollamaManualPanel textarea,
-#mimoManualPanel input,
-#mimoManualPanel textarea,
-#kimiManualPanel input,
-#kimiManualPanel textarea,
-#alibabaManualPanel textarea,
-#alibabaManualPanel select,
-#copilotManualDetails input {
+#thirdpartyDivisorInput {
   width: 100%;
   font-size: 12px;
 }
 #claudeManualPanel textarea,
-#cursorManualPanel textarea,
 #opencodeManualPanel textarea,
+#cursorManualPanel textarea,
+#factoryManualPanel input,
+#kimiManualPanel input,
+#kimiManualPanel textarea,
+#copilotManualDetails input,
+#zedManualPanel textarea,
+#commandcodeManualPanel textarea,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
+#zaiManualPanel input,
+#zaiteamManualPanel input,
+#qoderManualPanel textarea,
+#deepseekManualPanel input,
 #openrouterApiKeyInput,
+#minimaxManualPanel input,
+#volcengineManualPanel input,
+#ollamaManualPanel textarea,
+#traeManualPanel input,
 #thirdpartyBaseUrlInput,
 #thirdpartyAccessTokenInput,
 #thirdpartyUserIdInput,
@@ -5399,22 +5474,7 @@ html.is-windows .limit-live-badge {
 #thirdpartyUsedPathInput,
 #thirdpartyTotalPathInput,
 #thirdpartyCurrencyInput,
-#thirdpartyDivisorInput,
-#deepseekManualPanel input,
-#minimaxManualPanel input,
-#zaiManualPanel input,
-#zaiteamManualPanel input,
-#volcengineManualPanel input,
-#qoderManualPanel textarea,
-#traeManualPanel input,
-#zedManualPanel textarea,
-#commandcodeManualPanel textarea,
-#ollamaManualPanel textarea,
-#mimoManualPanel input,
-#mimoManualPanel textarea,
-#kimiManualPanel input,
-#kimiManualPanel textarea,
-#copilotManualDetails input {
+#thirdpartyDivisorInput {
   font-family: monospace;
 }
 .link-button {
@@ -5588,6 +5648,56 @@ html.is-windows .limit-live-badge {
   gap: 8px;
 }
 .status-provider-row.is-hidden .tool-preference-name { opacity: 0.45; }
+
+/* Main Screen starts pointer reordering from the six-dot handles, while the
+   rows use the same transform choreography as Collection and AI Tool Limits. */
+.view-preference-row,
+.home-module-preference-row,
+.home-limit-provider-row,
+.status-provider-row {
+  position: relative;
+  touch-action: pan-y;
+  transform: translateY(calc(var(--drag-y, 0px) + var(--drag-shift, 0px)));
+  transition:
+    transform 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+.view-preference-row.dragging,
+.home-module-preference-row.dragging,
+.home-limit-provider-row.dragging,
+.status-provider-row.dragging {
+  z-index: 2;
+  background: rgba(var(--panel-rgb), 0.96);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.62);
+  cursor: grabbing;
+  scale: 1.02;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+  will-change: transform;
+}
+.view-preference-row.dragging .preference-order-handle,
+.home-module-preference-row.dragging .preference-order-handle,
+.home-limit-provider-row.dragging .preference-order-handle,
+.status-provider-row.dragging .preference-order-handle { cursor: grabbing; }
+#viewDisplayList.is-landing > .view-preference-row,
+.home-settings-list.is-landing > .home-module-preference-row,
+.home-limit-provider-list.is-landing > .home-limit-provider-row,
+.status-provider-list.is-landing > .status-provider-row {
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+#viewDisplayList.drag-active > .view-preference-row:not(.dragging),
+.home-settings-list.drag-active > .home-module-preference-row:not(.dragging),
+.home-limit-provider-list.drag-active > .home-limit-provider-row:not(.dragging),
+.status-provider-list.drag-active > .status-provider-row:not(.dragging) { opacity: 0.78; }
+#viewDisplayList.is-reordering > .accordion-animated-container,
+.home-settings-list.is-reordering > .accordion-animated-container { transition: none; }
 .service-status-empty {
   padding: 12px 0;
   color: var(--muted);
@@ -6989,6 +7099,10 @@ html.is-windows .limit-live-badge {
   .tray-composer-item { transition: none; }
   .settings-panel .limit-provider-row { transition: none; }
   .tool-preference-row { transition: none; }
+  .view-preference-row,
+  .home-module-preference-row,
+  .home-limit-provider-row,
+  .status-provider-row { transition: none; }
   .tool-preference-main .cursor-disclosure-icon { transition: none; }
 }
 

@@ -161,6 +161,8 @@ test('tool health copy stays compact and describes snapshots, not liveness', () 
     '正常 7 · 待查 5 · 未安裝 9'
   );
   assert.equal(translate('zh-TW', 'settings.tools.health.source'), '來源');
+  assert.equal(translate('zh-TW', 'settings.tools.health.addCustomSource'), '新增路徑');
+  assert.equal(translate('zh-TW', 'settings.tools.health.removeCustomSource'), '移除自訂來源');
   assert.equal(translate('zh-TW', 'settings.tools.health.sync'), '採集');
   assert.equal(translate('zh-TW', 'settings.tools.health.usage'), '用量');
   assert.equal(translate('en', 'settings.tools.health.sync.pending'), 'Sync pending');

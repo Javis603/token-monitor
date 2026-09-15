@@ -1,21 +1,11 @@
 'use strict';
 
-const DEFAULT_WIDGET_URL_SCHEME = 'token-monitor';
 const DEFAULT_MAC_DISTRIBUTION_CHANNEL = 'developer-id';
 
 const APP_GROUP_SEGMENT = '[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?';
 const GROUP_PROFILE_APP_GROUP = new RegExp(`^group\\.${APP_GROUP_SEGMENT}(?:\\.${APP_GROUP_SEGMENT})*$`);
 const TEAM_PREFIXED_APP_GROUP = new RegExp(`^([A-Z0-9]{10})\\.${APP_GROUP_SEGMENT}(?:\\.${APP_GROUP_SEGMENT})*$`);
 const DEVELOPMENT_TEAM = /^[A-Z0-9]{10}$/;
-
-function normalizeWidgetURLScheme(value, fallback = DEFAULT_WIDGET_URL_SCHEME) {
-  const raw = String(value ?? '').trim();
-  const resolved = raw || fallback;
-  if (!/^[A-Za-z][A-Za-z0-9+.-]*$/.test(resolved)) {
-    throw new Error('TOKEN_MONITOR_WIDGET_URL_SCHEME contains unsupported characters');
-  }
-  return resolved.toLowerCase();
-}
 
 function classifyAppGroup(value) {
   const appGroup = String(value || '').trim();
@@ -82,12 +72,10 @@ function normalizeMacDistributionChannel(value) {
 
 module.exports = {
   DEFAULT_MAC_DISTRIBUTION_CHANNEL,
-  DEFAULT_WIDGET_URL_SCHEME,
   classifyAppGroup,
   isTeamPrefixedAppGroup,
   normalizeMacDistributionChannel,
   validateAppGroup,
   validateAppGroupForDistribution,
-  validateAppGroupSyntax,
-  normalizeWidgetURLScheme
+  validateAppGroupSyntax
 };

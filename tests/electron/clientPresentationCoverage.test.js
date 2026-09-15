@@ -27,12 +27,27 @@ const rendererPath = path.join(rootDir, 'src/electron/renderer/app.js');
 const stylesPath = path.join(rootDir, 'src/electron/renderer/styles.css');
 
 test('every catalog client has a usage chart colour', () => {
+  assert.deepEqual(
+    Object.keys(clientColors).filter((id) => CLIENT_IDS.includes(id)),
+    CLIENT_IDS,
+    'tracked clientColors entries should follow CLIENT_CATALOG display order'
+  );
   for (const id of CLIENT_IDS) {
     assert.ok(clientColors[id], `${id} needs a clientColors entry in usageCharts.js`);
   }
 });
 
 test('every catalog client has a vendor ordering slot and label', () => {
+  assert.deepEqual(
+    VENDOR_ORDER.filter((id) => CLIENT_IDS.includes(id)),
+    CLIENT_IDS,
+    'tracked VENDOR_ORDER entries should follow CLIENT_CATALOG display order'
+  );
+  assert.deepEqual(
+    Object.keys(VENDOR_LABELS).filter((id) => CLIENT_IDS.includes(id)),
+    CLIENT_IDS,
+    'tracked VENDOR_LABELS entries should follow CLIENT_CATALOG display order'
+  );
   for (const id of CLIENT_IDS) {
     assert.ok(VENDOR_ORDER.includes(id), `${id} needs a VENDOR_ORDER slot in themePresets.js`);
     assert.ok(VENDOR_LABELS[id], `${id} needs a VENDOR_LABELS entry in themePresets.js`);
@@ -52,7 +67,13 @@ test('clientsWithIcon covers every catalog client', () => {
   // Strip comments first: a commented-out id is absent from the runtime Set, so
   // counting it would report coverage the renderer does not have.
   const entries = block[1].replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-  const iconIds = new Set([...entries.matchAll(/'([a-z0-9-]+)'/g)].map((match) => match[1]));
+  const iconIdOrder = [...entries.matchAll(/'([a-z0-9-]+)'/g)].map((match) => match[1]);
+  const iconIds = new Set(iconIdOrder);
+  assert.deepEqual(
+    iconIdOrder.filter((id) => CLIENT_IDS.includes(id)),
+    CLIENT_IDS,
+    'tracked clientsWithIcon entries should follow CLIENT_CATALOG display order'
+  );
   for (const id of CLIENT_IDS) {
     assert.ok(iconIds.has(id), `${id} should resolve to an icon row`);
   }

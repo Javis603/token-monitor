@@ -79,6 +79,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   generateDiagnosticReport: () => ipcRenderer.invoke('diagnostics:generate'),
   copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
   clientSources: (clientId) => ipcRenderer.invoke('usage:clientSources', clientId),
+  pickCustomScanPath: (clientId) => ipcRenderer.invoke('usage:pickCustomScanPath', clientId),
   revealClientSource: (clientId) => ipcRenderer.invoke('usage:revealClientSource', clientId),
   revealClientSyncLock: (clientId) => ipcRenderer.invoke('usage:revealClientSyncLock', clientId),
   rescanClient: (clientId) => ipcRenderer.invoke('usage:rescanClient', clientId),
@@ -149,6 +150,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   },
   ollama: {
     validateCookie: (cookie) => ipcRenderer.invoke('ollama:validateCookie', cookie)
+  },
+  factory: {
+    validateApiKey: (apiKey) => ipcRenderer.invoke('factory:validateApiKey', apiKey)
   },
   opencode: {
     saveCookie: (cookie) => ipcRenderer.invoke('opencode:saveCookie', cookie),
