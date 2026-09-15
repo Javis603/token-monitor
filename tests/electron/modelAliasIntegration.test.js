@@ -63,7 +63,8 @@ test('native widget work freezes the alias choice and projects independently res
   const capture = mainFunction('captureMacWidgetWork', {
     settings, macWidgetConfiguration: () => ({ snapshotPath: '/fixture/snapshot.json', widgetKind: 'fixture' }),
     macWidgetDemand: null, historyResolverOptions: () => ({}), macWidgetHistorySourceKey: () => 'local',
-    completeHistorySource: () => 'local', macWidgetPresentation: () => ({})
+    completeHistorySource: () => 'local', macWidgetActiveCodexAccount: () => null,
+    macWidgetPresentation: () => ({})
   });
   const work = capture({ stats: {}, owner: { epoch: 1 } });
   settings.modelAliases['anthropic/claude-opus-5'] = 'changed';
