@@ -53,12 +53,23 @@ function codexHomeDir(options = {}) {
 // generated title back to the Codex thread row. Its runtime state lives under a
 // base directory of its own, with the server database one level below in
 // `userdata` (a dev-server run writes to `dev` instead).
+//
+// T3 expands a leading `~` against the user's home before resolving the base
+// directory, so `T3CODE_HOME=~/t3-alt` means the home directory rather than a
+// literal `~` directory under the working directory. Mirror its rule: only a lone
+// `~`, `~/...` or `~\...` expands.
+const HOME_PREFIX_PATTERN = /^~(?=$|[/\\])/;
+
+function expandHomePath(value, homeDir) {
+  return String(value || '').replace(HOME_PREFIX_PATTERN, homeDir);
+}
+
 function t3HomeDir(options = {}) {
   const homeDir = options.homeDir || os.homedir();
   const env = options.env || process.env;
   if (options.useEnvRoot !== false) {
     const configured = cleanText(env.T3CODE_HOME);
-    if (configured) return path.resolve(configured);
+    if (configured) return path.resolve(expandHomePath(configured, homeDir));
   }
   return path.join(homeDir, '.t3');
 }
@@ -339,6 +350,7 @@ module.exports = {
   cleanSessionTitle,
   codexHomeDir,
   t3HomeDir,
+  expandHomePath,
   discoverT3DbPaths,
   discoverDbPaths,
   threadIdCandidates,

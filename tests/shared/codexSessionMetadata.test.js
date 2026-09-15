@@ -167,6 +167,52 @@ test('discovers the newest state database first and honors CODEX_HOME', () => {
   ]);
 });
 
+test('T3CODE_HOME expands a leading tilde the way T3 Code itself does', () => {
+  const home = path.join(path.sep, 'home', 'someone');
+  const t3Root = (value) => metadata.t3HomeDir({ homeDir: home, env: { T3CODE_HOME: value } });
+
+  // T3 resolves `resolve(expandHomePath(raw.trim()))`, so these land in home.
+  assert.equal(t3Root('~'), home);
+  assert.equal(t3Root('~/custom-t3'), path.join(home, 'custom-t3'));
+  // A Windows-style separator expands on every platform, as T3's regex allows.
+  // The expansion only substitutes the `~`, so the backslash stays literal and
+  // `path.join` normalizes it the same way T3's own `resolve()` step would.
+  assert.equal(metadata.expandHomePath('~\\custom-t3', home), `${home}\\custom-t3`);
+  // An absolute path is left alone.
+  assert.equal(t3Root(path.join(path.sep, 'srv', 't3')), path.join(path.sep, 'srv', 't3'));
+  // A bare `~` inside a longer segment is a literal directory name, not home.
+  assert.equal(metadata.expandHomePath('~x', home), '~x');
+  assert.equal(metadata.expandHomePath('a/~/b', home), 'a/~/b');
+  // Absent or blank, the default base directory still applies.
+  assert.equal(t3Root(''), path.join(home, '.t3'));
+  assert.equal(metadata.t3HomeDir({ homeDir: home, env: {} }), path.join(home, '.t3'));
+});
+
+maybe('a tilde T3CODE_HOME still finds the store instead of failing closed', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 't3-tilde-home-'));
+  tmpDirs.push(home);
+  const codexThreadId = '01a0a091-18da-7123-b874-e75d66eaae9c';
+  // T3CODE_HOME is the base directory; the server database sits under `userdata`.
+  const stateDir = path.join(home, 'userdata');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const db = new sqlite.DatabaseSync(path.join(stateDir, 'state.sqlite'));
+  db.exec('CREATE TABLE projection_threads (thread_id TEXT PRIMARY KEY, title TEXT, deleted_at TEXT)');
+  db.exec('CREATE TABLE provider_session_runtime (thread_id TEXT PRIMARY KEY, provider_name TEXT, resume_cursor_json TEXT)');
+  db.prepare('INSERT INTO projection_threads VALUES (?, ?, NULL)').run('t3-1', 'T3 title via tilde home');
+  db.prepare('INSERT INTO provider_session_runtime VALUES (?, ?, ?)')
+    .run('t3-1', 'codex', JSON.stringify({ threadId: codexThreadId }));
+  db.close();
+
+  // The populated store sits in a custom root, reached only if the tilde expands:
+  // without expansion the reader would stat a literal `~` directory and give up.
+  const result = metadata.readT3SessionMeta([codexThreadId], {
+    homeDir: home,
+    env: { T3CODE_HOME: '~' },
+    sqlite
+  });
+  assert.deepEqual(result.get(codexThreadId), { title: 'T3 title via tilde home' });
+});
+
 test('title cleaning is Unicode-safe and bounded', () => {
   const cleaned = metadata.cleanSessionTitle('🧪'.repeat(metadata.TITLE_MAX_CODE_POINTS + 20));
   assert.equal(Array.from(cleaned).length, metadata.TITLE_MAX_CODE_POINTS);
