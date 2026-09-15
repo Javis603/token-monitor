@@ -38,7 +38,7 @@ function createSessionUsageArchiveStore(options = {}) {
   let archive = null;
   let archiveSource = null;
   let revision = 0;
-  const pendingKeys = new Set();
+  let reloadRequired = false;
 
   function metadataValue(key) {
     return database.prepare('SELECT value FROM metadata WHERE key = ?').get(key)?.value;
@@ -51,14 +51,13 @@ function createSessionUsageArchiveStore(options = {}) {
     `).run(key, String(value));
   }
 
-  function loadRevisedRows(sinceRevision, skippedKeys = new Set()) {
+  function loadRevisedRows(sinceRevision) {
     for (const row of database.prepare(`
       SELECT session_key, entry_json
       FROM sessions
       WHERE revision > ?
       ORDER BY revision, session_key
     `).all(sinceRevision)) {
-      if (skippedKeys.has(row.session_key)) continue;
       const entry = parseRow(row);
       if (entry) archive.sessions[row.session_key] = entry;
     }
@@ -74,27 +73,6 @@ function createSessionUsageArchiveStore(options = {}) {
     `);
     for (const key of keys) {
       upsert.run(key, JSON.stringify(archive.sessions[key]), nextRevision);
-    }
-  }
-
-  function writeEntries(keys) {
-    const uniqueKeys = [...new Set(keys)].filter((key) => archive?.sessions?.[key]);
-    if (uniqueKeys.length === 0) return revision;
-    database.exec('BEGIN IMMEDIATE');
-    try {
-      const storedRevision = Number(metadataValue('revision') || 0);
-      if (storedRevision > revision) {
-        loadRevisedRows(revision, new Set(uniqueKeys));
-      }
-      const nextRevision = storedRevision + 1;
-      upsertEntries(uniqueKeys, nextRevision);
-      setMetadataValue('revision', nextRevision);
-      database.exec('COMMIT');
-      revision = nextRevision;
-      return revision;
-    } catch (error) {
-      try { database.exec('ROLLBACK'); } catch (_) {}
-      throw error;
     }
   }
 
@@ -185,7 +163,7 @@ function createSessionUsageArchiveStore(options = {}) {
 
   function loadRows() {
     ensureDatabase();
-    if (archiveSource !== 'database') {
+    if (archiveSource !== 'database' || reloadRequired) {
       archive = normalizeSessionUsageArchive({});
       for (const row of database.prepare('SELECT session_key, entry_json FROM sessions').all()) {
         const entry = parseRow(row);
@@ -193,6 +171,7 @@ function createSessionUsageArchiveStore(options = {}) {
       }
       revision = Number(metadataValue('revision') || 0);
       archiveSource = 'database';
+      reloadRequired = false;
     }
     return archive;
   }
@@ -250,22 +229,13 @@ function createSessionUsageArchiveStore(options = {}) {
     return archive;
   }
 
-  function flushPending() {
-    if (pendingKeys.size === 0) return false;
-    const keys = [...pendingKeys];
-    writeEntries(keys);
-    for (const key of keys) pendingKeys.delete(key);
-    return true;
-  }
-
   function mutateArchive(mutate) {
     database.exec('BEGIN IMMEDIATE');
     try {
       const storedRevision = Number(metadataValue('revision') || 0);
       if (storedRevision > revision) loadRevisedRows(revision);
       const result = mutate(archive);
-      for (const key of result.changedKeys) pendingKeys.add(key);
-      const keys = [...pendingKeys].filter((key) => archive?.sessions?.[key]);
+      const keys = [...result.changedKeys].filter((key) => archive?.sessions?.[key]);
       let nextRevision = storedRevision;
       if (keys.length > 0) {
         nextRevision = storedRevision + 1;
@@ -274,10 +244,14 @@ function createSessionUsageArchiveStore(options = {}) {
       }
       database.exec('COMMIT');
       revision = nextRevision;
-      for (const key of keys) pendingKeys.delete(key);
       return result;
     } catch (error) {
       try { database.exec('ROLLBACK'); } catch (_) {}
+      // The in-memory entries may already contain a mutation that SQLite did
+      // not commit. Keep that snapshot available to the current caller, but
+      // reload the database before another mutation instead of retrying a
+      // materialized row that can no longer be safely rebased.
+      reloadRequired = true;
       throw error;
     }
   }
@@ -316,11 +290,11 @@ function createSessionUsageArchiveStore(options = {}) {
   }
 
   function clear() {
-    close({ flush: false });
+    close();
     archive = normalizeSessionUsageArchive({});
     archiveSource = null;
     revision = 0;
-    pendingKeys.clear();
+    reloadRequired = false;
     let removed = false;
     for (const filePath of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`, legacyPath]) {
       removed = removeIfPresent(filePath, unlinkSync) || removed;
@@ -328,22 +302,16 @@ function createSessionUsageArchiveStore(options = {}) {
     return removed;
   }
 
-  function close(closeOptions = {}) {
+  function close() {
     if (!database) return;
-    const shouldFlush = closeOptions.flush !== false;
-    try {
-      if (shouldFlush) flushPending();
-    } finally {
-      database.close();
-      database = null;
-    }
+    database.close();
+    database = null;
   }
 
   return {
     capture,
     clear,
     close,
-    flush: flushPending,
     read: loadAll,
     refresh,
     databasePath,

@@ -53,6 +53,20 @@ function databaseWithExecHook(hook) {
   };
 }
 
+function failingCommitDatabase() {
+  let failNextCommit = false;
+  return {
+    DatabaseSync: databaseWithExecHook((sql) => {
+      if (!failNextCommit || !/^\s*COMMIT\s*$/i.test(sql)) return;
+      failNextCommit = false;
+      const error = new Error('write failed');
+      error.code = 'EIO';
+      throw error;
+    }),
+    failNextCommit: () => { failNextCommit = true; }
+  };
+}
+
 function migrationMarker(options) {
   const database = new DatabaseSync(sessionUsageArchiveDatabasePath(options), { readOnly: true });
   try {
@@ -346,23 +360,74 @@ test('clear removes SQLite sidecars and any legacy archive', (t) => {
   assert.equal(fs.existsSync(sessionUsageArchiveDatabasePath(options)), false);
 });
 
-test('clear discards pending rows instead of retrying a failed write', (t) => {
+test('close does not retry a failed row over another writer update', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
-  let failWrites = false;
-  const store = createSessionUsageArchiveStore({
-    ...options,
-    DatabaseSync: databaseWithExecHook((sql) => {
-      if (!failWrites || !/^\s*COMMIT\s*$/i.test(sql)) return;
-      const error = new Error('write failed');
-      error.code = 'EIO';
-      throw error;
-    })
-  });
+  const seed = createSessionUsageArchiveStore(options);
+  seed.capture(summary(100), new Date('2026-09-15T08:00:00.000Z'));
+  seed.close();
+  const failure = failingCommitDatabase();
+  const first = createSessionUsageArchiveStore({ ...options, DatabaseSync: failure.DatabaseSync });
+  const second = createSessionUsageArchiveStore(options);
+  first.read(new Date('2026-09-15T08:00:10.000Z'));
+  second.read(new Date('2026-09-15T08:00:10.000Z'));
+
+  failure.failNextCommit();
+  assert.equal(
+    first.capture(summary(125, 'one', ['allTime']), new Date('2026-09-15T08:01:00.000Z')).error?.code,
+    'EIO'
+  );
+  assert.equal(
+    second.capture(summary(150, 'one', ['today']), new Date('2026-09-15T08:02:00.000Z')).error,
+    null
+  );
+  first.close();
+  second.close();
+
+  const reopened = createSessionUsageArchiveStore(options);
+  const periods = reopened.read(new Date('2026-09-15T08:03:00.000Z')).sessions['codex:one'].periods;
+  assert.equal(periods.today.totalTokens, 150);
+  assert.equal(periods.allTime.totalTokens, 100);
+  reopened.close();
+});
+
+test('the next capture reloads SQLite after a failed archive mutation', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const seed = createSessionUsageArchiveStore(options);
+  seed.capture(summary(100), new Date('2026-09-15T08:00:00.000Z'));
+  seed.close();
+  const failure = failingCommitDatabase();
+  const first = createSessionUsageArchiveStore({ ...options, DatabaseSync: failure.DatabaseSync });
+  const second = createSessionUsageArchiveStore(options);
+  first.read(new Date('2026-09-15T08:00:10.000Z'));
+  second.read(new Date('2026-09-15T08:00:10.000Z'));
+
+  failure.failNextCommit();
+  assert.equal(
+    first.capture(summary(125, 'one', ['allTime']), new Date('2026-09-15T08:01:00.000Z')).error?.code,
+    'EIO'
+  );
+  second.capture(summary(150, 'one', ['today']), new Date('2026-09-15T08:02:00.000Z'));
+  const recovered = first.capture({}, new Date('2026-09-15T08:03:00.000Z'));
+  assert.equal(recovered.error, null);
+  assert.equal(recovered.archive.sessions['codex:one'].periods.today.totalTokens, 150);
+  assert.equal(recovered.archive.sessions['codex:one'].periods.allTime.totalTokens, 100);
+  first.close();
+  second.close();
+});
+
+test('clear remains available after a failed archive mutation', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const failure = failingCommitDatabase();
+  const store = createSessionUsageArchiveStore({ ...options, DatabaseSync: failure.DatabaseSync });
 
   assert.equal(store.capture(summary(100), new Date('2026-09-15T08:00:00.000Z')).error, null);
-  failWrites = true;
+  failure.failNextCommit();
   const failed = store.capture(summary(125), new Date('2026-09-15T08:01:00.000Z'));
   assert.equal(failed.changedKeys.size, 1);
   assert.equal(failed.error?.code, 'EIO');
