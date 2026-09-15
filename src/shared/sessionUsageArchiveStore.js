@@ -80,8 +80,7 @@ function readSessionUsageArchiveSnapshot(options = {}) {
   }
 
   const legacy = readSessionUsageArchive({ ...options, path: legacyPath });
-  if (!existsSync(legacyPath)) return readMigratedArchiveSnapshot(options) || legacy;
-  return legacy;
+  return readMigratedArchiveSnapshot(options) || legacy;
 }
 
 function createSessionUsageArchiveStore(options = {}) {
@@ -216,16 +215,20 @@ function createSessionUsageArchiveStore(options = {}) {
   function loadRows() {
     ensureDatabase();
     if (archiveSource !== 'database' || reloadRequired) {
+      // Record the metadata boundary before scanning rows. A concurrent commit
+      // can then make this revision temporarily stale, but never make it skip a
+      // row that the scan did not load; refresh will safely replay newer rows.
+      const loadedRevision = Number(metadataValue('revision') || 0);
+      const prunedDay = metadataValue('pruned-day');
+      const prunedMonth = metadataValue('pruned-month');
       archive = normalizeSessionUsageArchive({});
       for (const row of database.prepare('SELECT session_key, entry_json FROM sessions').all()) {
         const entry = parseRow(row);
         if (entry) archive.sessions[row.session_key] = entry;
       }
-      const prunedDay = metadataValue('pruned-day');
-      const prunedMonth = metadataValue('pruned-month');
       if (prunedDay) archive.prunedDay = prunedDay;
       if (prunedMonth) archive.prunedMonth = prunedMonth;
-      revision = Number(metadataValue('revision') || 0);
+      revision = loadedRevision;
       archiveSource = 'database';
       reloadRequired = false;
     }

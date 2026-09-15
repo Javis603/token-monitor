@@ -55,6 +55,42 @@ function databaseWithExecHook(hook) {
   };
 }
 
+function databaseWithRowsHook(hook) {
+  return class HookedDatabaseSync {
+    constructor(filePath, options) {
+      this.database = options === undefined
+        ? new DatabaseSync(filePath)
+        : new DatabaseSync(filePath, options);
+    }
+
+    exec(sql) {
+      return this.database.exec(sql);
+    }
+
+    prepare(sql) {
+      const statement = this.database.prepare(sql);
+      if (!/SELECT session_key, entry_json FROM sessions/.test(sql)) return statement;
+      return new Proxy(statement, {
+        get(target, property) {
+          if (property !== 'all') {
+            const value = target[property];
+            return typeof value === 'function' ? value.bind(target) : value;
+          }
+          return (...args) => {
+            const rows = target.all(...args);
+            hook();
+            return rows;
+          };
+        }
+      });
+    }
+
+    close() {
+      return this.database.close();
+    }
+  };
+}
+
 function failingCommitDatabase() {
   let failNextCommit = false;
   return {
@@ -128,6 +164,33 @@ test('reopening a reader keeps its archive revision instead of skipping newer ro
   assert.equal(reader.refresh(new Date('2026-09-15T08:01:30.000Z')).sessions['codex:one'].periods.allTime.totalTokens, 125);
   writer.close();
   reader.close();
+});
+
+test('a full reload cannot advance past a row committed after its scan', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const seed = createSessionUsageArchiveStore(options);
+  seed.capture(summary(100), new Date('2026-09-15T08:00:00.000Z'));
+  seed.close();
+  const writer = createSessionUsageArchiveStore(options);
+  let interleaved = false;
+  const reader = createSessionUsageArchiveStore({
+    ...options,
+    DatabaseSync: databaseWithRowsHook(() => {
+      if (interleaved) return;
+      interleaved = true;
+      assert.equal(writer.capture(summary(125), new Date('2026-09-15T08:01:00.000Z')).error, null);
+    })
+  });
+
+  assert.equal(
+    reader.read(new Date('2026-09-15T08:01:30.000Z')).sessions['codex:one'].periods.allTime.totalTokens,
+    125
+  );
+  assert.equal(reader.refresh().sessions['codex:one'].periods.allTime.totalTokens, 125);
+  reader.close();
+  writer.close();
 });
 
 test('writers allocate global revisions under the SQLite lock and absorb intervening rows', (t) => {
@@ -322,6 +385,41 @@ test('read-only snapshots keep dry-run history after JSON migration', (t) => {
     readSessionUsageArchiveSnapshot(options).sessions['codex:one'].periods.allTime.totalTokens,
     100
   );
+});
+
+test('read-only snapshots prefer SQLite when failed cleanup retains legacy JSON', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const legacyPath = path.join(dir, 'session-usage-archive.json');
+  writeSessionUsageArchive(
+    captureSessionUsageArchive({}, summary(100), new Date('2026-09-15T08:00:00.000Z')),
+    options
+  );
+  const writer = createSessionUsageArchiveStore({
+    ...options,
+    unlinkSync() {
+      const error = new Error('denied');
+      error.code = 'EACCES';
+      throw error;
+    }
+  });
+  let interleaved = false;
+  const archive = readSessionUsageArchiveSnapshot({
+    ...options,
+    readJson(filePath, fallback) {
+      const legacy = readJson(filePath, fallback);
+      if (!interleaved) {
+        interleaved = true;
+        assert.equal(writer.capture(summary(125), new Date('2026-09-15T08:01:00.000Z')).error, null);
+      }
+      return legacy;
+    }
+  });
+
+  assert.equal(fs.existsSync(legacyPath), true);
+  assert.equal(archive.sessions['codex:one'].periods.allTime.totalTokens, 125);
+  writer.close();
 });
 
 test('malformed legacy JSON cannot be marked as migrated or removed', (t) => {
