@@ -54,7 +54,6 @@ function createSessionUsageArchiveStore(options = {}) {
   function writeEntries(keys) {
     const uniqueKeys = [...new Set(keys)].filter((key) => archive?.sessions?.[key]);
     if (uniqueKeys.length === 0) return revision;
-    const nextRevision = revision + 1;
     const upsert = database.prepare(`
       INSERT INTO sessions (session_key, entry_json, revision)
       VALUES (?, ?, ?)
@@ -64,6 +63,21 @@ function createSessionUsageArchiveStore(options = {}) {
     `);
     database.exec('BEGIN IMMEDIATE');
     try {
+      const storedRevision = Number(metadataValue('revision') || 0);
+      if (storedRevision > revision) {
+        const pending = new Set(uniqueKeys);
+        for (const row of database.prepare(`
+          SELECT session_key, entry_json
+          FROM sessions
+          WHERE revision > ?
+          ORDER BY revision, session_key
+        `).all(revision)) {
+          if (pending.has(row.session_key)) continue;
+          const entry = parseRow(row);
+          if (entry) archive.sessions[row.session_key] = entry;
+        }
+      }
+      const nextRevision = storedRevision + 1;
       for (const key of uniqueKeys) {
         upsert.run(key, JSON.stringify(archive.sessions[key]), nextRevision);
       }
@@ -237,7 +251,16 @@ function createSessionUsageArchiveStore(options = {}) {
   }
 
   function capture(deviceRecord, capturedAt = new Date()) {
-    const current = loadRows();
+    let current;
+    try {
+      current = loadRows();
+    } catch (error) {
+      return {
+        archive: archive || normalizeSessionUsageArchive({}),
+        changedKeys: new Set(),
+        error
+      };
+    }
     const pruned = updateSessionUsageArchive(current, null, capturedAt);
     for (const key of pruned.changedKeys) pendingKeys.add(key);
     const result = updateSessionUsageArchive(current, deviceRecord, capturedAt, { canonicalSummary: true });

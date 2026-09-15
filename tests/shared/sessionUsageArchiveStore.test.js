@@ -16,17 +16,17 @@ const {
   sessionUsageArchiveDatabasePath
 } = require('../../src/shared/sessionUsageArchiveStore');
 
-function summary(totalTokens = 100) {
+function summary(totalTokens = 100, sessionId = 'one') {
   const session = {
     client: 'codex',
-    sessionId: 'one',
+    sessionId,
     totalTokens,
     costUsd: totalTokens / 100,
     models: { 'gpt-5': totalTokens },
     modelCosts: { 'gpt-5': totalTokens / 100 }
   };
   return Object.fromEntries(['today', 'month', 'allTime'].map((period) => [period, {
-    sessions: { 'codex:one': { ...session } }
+    sessions: { [`codex:${sessionId}`]: { ...session } }
   }]));
 }
 
@@ -82,13 +82,34 @@ test('reopening a reader keeps its archive revision instead of skipping newer ro
   const reader = createSessionUsageArchiveStore(options);
 
   writer.capture(summary(100), new Date('2026-09-15T08:00:00.000Z'));
-  assert.equal(reader.read().sessions['codex:one'].periods.allTime.totalTokens, 100);
+  assert.equal(reader.read(new Date('2026-09-15T08:00:30.000Z')).sessions['codex:one'].periods.allTime.totalTokens, 100);
   reader.close();
   writer.capture(summary(125), new Date('2026-09-15T08:01:00.000Z'));
 
-  assert.equal(reader.refresh().sessions['codex:one'].periods.allTime.totalTokens, 125);
+  assert.equal(reader.refresh(new Date('2026-09-15T08:01:30.000Z')).sessions['codex:one'].periods.allTime.totalTokens, 125);
   writer.close();
   reader.close();
+});
+
+test('writers allocate global revisions under the SQLite lock and absorb intervening rows', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const first = createSessionUsageArchiveStore(options);
+  const second = createSessionUsageArchiveStore(options);
+
+  first.capture(summary(100), new Date('2026-09-15T08:00:00.000Z'));
+  second.read(new Date('2026-09-15T08:00:30.000Z'));
+  first.capture(summary(125), new Date('2026-09-15T08:01:00.000Z'));
+  second.capture(summary(50, 'two'), new Date('2026-09-15T08:01:30.000Z'));
+
+  const database = new DatabaseSync(sessionUsageArchiveDatabasePath(options), { readOnly: true });
+  assert.equal(database.prepare("SELECT value FROM metadata WHERE key = 'revision'").get().value, '3');
+  database.close();
+  assert.equal(second.refresh().sessions['codex:one'].periods.allTime.totalTokens, 125);
+  assert.equal(first.refresh().sessions['codex:two'].periods.allTime.totalTokens, 50);
+  first.close();
+  second.close();
 });
 
 test('read-only refresh leaves legacy migration to the active writer', (t) => {
@@ -133,6 +154,23 @@ test('malformed legacy JSON cannot be marked as migrated or removed', (t) => {
   const store = createSessionUsageArchiveStore(options);
 
   assert.throws(() => store.read(), SyntaxError);
+  assert.equal(fs.existsSync(legacyPath), true);
+  assert.equal(migrationMarker(options), undefined);
+  store.close();
+});
+
+test('capture reports a strict migration failure without blocking current usage', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const legacyPath = path.join(dir, 'session-usage-archive.json');
+  fs.writeFileSync(legacyPath, '{"version":1,"sessions":');
+  const store = createSessionUsageArchiveStore(options);
+
+  const result = store.capture(summary(), new Date('2026-09-15T08:00:00.000Z'));
+  assert.equal(result.error instanceof SyntaxError, true);
+  assert.equal(result.changedKeys.size, 0);
+  assert.deepEqual(result.archive.sessions, {});
   assert.equal(fs.existsSync(legacyPath), true);
   assert.equal(migrationMarker(options), undefined);
   store.close();

@@ -111,7 +111,7 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
     } else {
       const result = sessionUsageArchiveStore.capture(summary, archiveDate);
       sessionUsageArchive = result.archive;
-      if (result.error) console.error(`[session-archive] write failed: ${result.error.message}`);
+      if (result.error) console.error(`[session-archive] update failed: ${result.error.message}`);
     }
     visibleSummary = applySessionUsageArchive(summary, sessionUsageArchive, {
       now: archiveDate,
