@@ -137,6 +137,38 @@ test('migrates the legacy JSON only after verified row storage', (t) => {
   store.close();
 });
 
+test('makes the migration durable before deleting legacy JSON, then restores normal sync', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const legacyPath = path.join(dir, 'session-usage-archive.json');
+  const legacy = captureSessionUsageArchive({}, summary(), new Date('2026-09-15T08:00:00.000Z'));
+  writeSessionUsageArchive(legacy, options);
+
+  const events = [];
+  const store = createSessionUsageArchiveStore({
+    ...options,
+    DatabaseSync: databaseWithExecHook((sql) => events.push(sql.trim())),
+    unlinkSync(filePath) {
+      events.push(`UNLINK ${path.basename(filePath)}`);
+      fs.unlinkSync(filePath);
+    }
+  });
+  store.read(new Date('2026-09-15T08:01:00.000Z'));
+
+  const fullIndex = events.indexOf('PRAGMA synchronous = FULL');
+  const beginIndex = events.indexOf('BEGIN IMMEDIATE');
+  const commitIndex = events.indexOf('COMMIT');
+  const unlinkIndex = events.indexOf(`UNLINK ${path.basename(legacyPath)}`);
+  const normalIndex = events.lastIndexOf('PRAGMA synchronous = NORMAL');
+  assert.ok(fullIndex >= 0 && fullIndex < beginIndex);
+  assert.ok(beginIndex < commitIndex);
+  assert.ok(commitIndex < unlinkIndex);
+  assert.ok(unlinkIndex < normalIndex);
+
+  store.close();
+});
+
 test('persists and refreshes only revised session rows between processes', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

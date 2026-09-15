@@ -182,7 +182,10 @@ function createSessionUsageArchiveStore(options = {}) {
     database = new Database(databasePath);
     try {
       database.exec('PRAGMA journal_mode = WAL');
-      database.exec('PRAGMA synchronous = NORMAL');
+      // The one-time migration deletes the legacy JSON after its transaction
+      // commits. FULL makes that handoff durable across an OS crash or power
+      // loss; steady-state row updates return to NORMAL below.
+      database.exec('PRAGMA synchronous = FULL');
       database.exec('PRAGMA busy_timeout = 5000');
       database.exec(`
         CREATE TABLE IF NOT EXISTS metadata (
@@ -203,6 +206,7 @@ function createSessionUsageArchiveStore(options = {}) {
       }
       if (!storedVersion) setMetadataValue('schema-version', SESSION_ARCHIVE_DATABASE_VERSION);
       migrateLegacyArchive();
+      database.exec('PRAGMA synchronous = NORMAL');
       return database;
     } catch (error) {
       try { database.close(); } catch (_) {}
