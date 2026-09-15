@@ -159,6 +159,51 @@ function resolvePlatformBinary() {
   return decideResolver({ downloaded, bundled, shim });
 }
 
+// Tokscale reads a few XDG environment variables with a bare
+// `std::env::var(...)`, so ANY present value wins — including "" and "   ".
+// Token Monitor resolves those same roots with nonBlankEnvPath(), which treats a
+// blank value as unset (matching the XDG basedir spec, where $XDG_DATA_HOME is
+// "either not set or empty"). A blank value therefore makes the watcher and the
+// health check resolve ~/.local/share while the scan resolves "" or "   " as the
+// root — a directory that is not even absolute — so health can read `detected`
+// while the collector looks somewhere else entirely.
+//
+// Dropping the blank key entirely (rather than rewriting it to another value)
+// is what makes the two agree: tokscale then takes its own fallback, which is
+// the same root Token Monitor already resolved. It also stays correct if
+// tokscale later adopts blank-as-unset itself, and it fixes every client behind
+// the affected roots at once — PathRoot::XdgData (opencode, amp, kilo, crush,
+// goose, zed, micode, devin-cli, hindsight), PathRoot::Config's Linux arm
+// (antigravity, trae, warp, mcode, hindsight) and the codex headless roots.
+//
+// Only these three are listed. TOKSCALE_CONFIG_DIR is deliberately NOT here:
+// tokscale's `!custom.is_empty()` and Token Monitor's `length > 0` check agree
+// that a blank value counts as set, so there is nothing to reconcile.
+//
+// Blank is the whole predicate, so one case is knowingly left alone: a
+// NON-blank but relative XDG_CONFIG_HOME. Token Monitor rejects it via
+// absoluteEnvPath() (and so does the `dirs` crate behind Tokscale's own
+// fallback) while Tokscale's raw read would accept it, but that is a separate
+// divergence on an invalid-per-spec value, and the Linux-only arm it lives in
+// cannot be exercised from this repo's test matrix. Relative XDG_DATA_HOME is
+// fine as-is: nonBlankEnvPath keeps it, and Tokscale reads it the same way.
+const TOKSCALE_BLANK_SENSITIVE_ENV_KEYS = Object.freeze([
+  'XDG_DATA_HOME',
+  'XDG_CONFIG_HOME',
+  'TOKSCALE_HEADLESS_DIR'
+]);
+
+function tokscaleEnvWithBlanksDropped(env) {
+  let dropped = null;
+  for (const key of TOKSCALE_BLANK_SENSITIVE_ENV_KEYS) {
+    const value = env[key];
+    if (typeof value !== 'string' || value.trim()) continue;
+    if (!dropped) dropped = { ...env };
+    delete dropped[key];
+  }
+  return dropped || env;
+}
+
 function tokscaleCommand(options = {}) {
   const resolved = resolvePlatformBinary();
   const useDirect = Boolean(resolved && resolved.source !== 'shim');
@@ -167,9 +212,10 @@ function tokscaleCommand(options = {}) {
     process.env.TOKSCALE_EXTRA_DIRS,
     { platform: options.platform || process.platform }
   );
-  const env = customExtraDirs
+  const extraDirsEnv = customExtraDirs
     ? { ...process.env, TOKSCALE_EXTRA_DIRS: customExtraDirs }
     : process.env;
+  const env = tokscaleEnvWithBlanksDropped(extraDirsEnv);
   const command = useDirect
     ? { bin: resolved.path, prefixArgs: [], env }
     : { bin: process.execPath, prefixArgs: [TOKSCALE_BIN_JS], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } };
@@ -3808,6 +3854,7 @@ module.exports = {
   startCollector,
   tokscaleCommand,
   tokscaleClientFilter,
+  tokscaleEnvWithBlanksDropped,
   TOKSCALE_CLIENT_ALIASES,
   watchAttributionRootsForClients,
   watcherOptions,

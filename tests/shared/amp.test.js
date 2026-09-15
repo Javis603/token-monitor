@@ -83,12 +83,30 @@ test('Amp follows XDG_DATA_HOME like Tokscale does, not a home-relative literal'
       { id: 'amp-threads', dir: path.join(xdg, 'amp', 'threads') }
     ]);
 
-    // A whitespace-only override counts as unset, matching the other
-    // XDG-derived roots.
+    // A whitespace-only override counts as unset here, matching the other
+    // XDG-derived roots — but the bundled tokscale does NOT agree, so this is a
+    // known Token Monitor <-> tokscale divergence rather than a contract this
+    // client can rely on. clients.rs spells PathRoot::XdgData as
+    // `std::env::var("XDG_DATA_HOME").unwrap_or_else(...)`, so ANY present
+    // value wins, including "" and "   ". with it set blank the scan resolves
+    // <blank>/amp/threads while the watcher and health check resolve
+    // ~/.local/share/amp/threads, so health can read `detected` while the
+    // collector scans somewhere else.
+    //
+    // The same gap covers TOKSCALE_HEADLESS_DIR and, through that one
+    // resolve_with_env_strategy arm, every other PathRoot::XdgData client
+    // (opencode, kilo, crush, goose, zed, micode, devin-cli, hindsight) — it is
+    // pre-existing rather than Amp-specific. Upstream already treats a blank
+    // value as unset elsewhere (non_blank_env_path for the CLINE_* family, and
+    // an explicit trim() for $XDG_DATA_HOME/gjc), so the fix belongs in
+    // tokscale and this assertion is pinned to the resolution Token Monitor
+    // performs, not to a promise about the binary.
     process.env.XDG_DATA_HOME = '   ';
-    assert.deepEqual(clientSourceRoots('amp', options).amp, [
-      { id: 'amp-threads', dir: path.join(home, '.local', 'share', 'amp', 'threads') }
-    ]);
+    assert.deepEqual(
+      clientSourceRoots('amp', options).amp,
+      [{ id: 'amp-threads', dir: path.join(home, '.local', 'share', 'amp', 'threads') }],
+      'blank XDG_DATA_HOME is unset for Token Monitor; tokscale currently disagrees (see comment)'
+    );
   } finally {
     delete process.env.XDG_DATA_HOME;
     fs.rmSync(home, { recursive: true, force: true });
