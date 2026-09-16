@@ -1158,6 +1158,11 @@ async function collectUsageOnce(options) {
     qoderCnReadState.periodFailed = false;
     qoderCnReadState.fallbackUsed = false;
   }
+  const mavisReadState = options.mavisReadState;
+  if (mavisReadState) {
+    mavisReadState.periodFailed = false;
+    mavisReadState.fallbackUsed = false;
+  }
   let today = emptyPeriod();
   let month = emptyPeriod();
   let allTime = emptyPeriod();
@@ -1281,6 +1286,10 @@ async function collectUsageOnce(options) {
       } catch (err) {
         if (typeof options.logger === 'function') options.logger(`mavis parse failed: ${err.message}`);
         mavisPeriodReadFailed = true;
+        if (mavisReadState) {
+          mavisReadState.periodFailed = true;
+          mavisReadState.fallbackUsed = Boolean(options.mavisFallbackPeriods);
+        }
       }
     }
     throwIfAborted(options.signal);
@@ -1414,13 +1423,19 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, mavisPeriods.month);
       allTime = mergePeriods(allTime, mavisPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), mavis: mavisPeriods.today };
-    } else if (mavisPeriodReadFailed && !anchorUsed && anchor?.todayPartitions?.mavis) {
-      // pi-agent SQLite holds the lock while the mavis runtime commits;
-      // a transient BUSY or I/O failure must not blank today's mavis
-      // partition or erase month/allTime totals via the emptyPeriod()
-      // fall-back in completeTodayPartitions below. Fall back to the last
-      // full-scan anchor until the next full tick can refresh month/allTime.
-      todayPartitions = { ...(todayPartitions || {}), mavis: anchor.todayPartitions.mavis };
+    } else if (mavisPeriodReadFailed && !anchorUsed && options.mavisFallbackPeriods) {
+      // pi-agent SQLite holds the lock while the mavis runtime commits; a
+      // transient BUSY or I/O failure must not blank today's mavis partition
+      // or erase month/allTime totals via the emptyPeriod() fallback in
+      // completeTodayPartitions below. todayOnlyAnchor is null on full-scan
+      // ticks (see runTick wiring), so the fallback travels explicitly as
+      // options.mavisFallbackPeriods (mirrors qoderCnFallbackPeriods).
+      const fallback = options.mavisFallbackPeriods;
+      if (mavisReadState) mavisReadState.fallbackUsed = true;
+      today = mergePeriods(today, fallback.today);
+      month = mergePeriods(month, fallback.month);
+      allTime = mergePeriods(allTime, fallback.allTime);
+      todayPartitions = { ...(todayPartitions || {}), mavis: fallback.today };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1594,6 +1609,7 @@ async function collectUsageOnce(options) {
       windowsPeriods,
       todayPartitions,
       qoderCnPeriods,
+      mavisPeriods: mavisPeriodReadFailed ? null : mavisPeriods,
       wslBundle,
       wslStatus,
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
@@ -3219,6 +3235,11 @@ function startCollector(options) {
           month: saved.month,
           allTime: saved.allTime,
           qoderCnPeriods: saved.qoderCnPeriods || null,
+          // Carry over the last-known-good mavis periods so a restart into a
+          // cold-start full-scan tick can recover from a transient SQLite
+          // BUSY without blanking today's mavis totals. Replaced by the
+          // next successful full scan via the anchored tick update below.
+          mavisPeriods: saved.mavisPeriods || null,
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -3300,6 +3321,7 @@ function startCollector(options) {
     try {
       let captured = null;
       const qoderCnReadState = { periodFailed: false };
+      const mavisReadState = { periodFailed: false };
       const summary = await collectUsageOnce({
         ...options,
         signal: runtimeSignal,
@@ -3345,6 +3367,8 @@ function startCollector(options) {
         qoderCnFallbackPeriods: anchor?.qoderCnPeriods || null,
         qoderCnHistoryFallbackGraph: qoderCnHistoryGraph,
         qoderCnReadState,
+        mavisFallbackPeriods: anchor?.mavisPeriods || null,
+        mavisReadState,
         onAnchorComputed: (x) => { captured = x; },
         onQoderCnHistoryGraph: (graph) => { qoderCnHistoryGraph = graph; },
         onProgress: (partial) => {
@@ -3419,6 +3443,7 @@ function startCollector(options) {
           allTime: captured.windowsPeriods.allTime,
           todayPartitions: captured.todayPartitions,
           qoderCnPeriods: captured.qoderCnPeriods,
+          mavisPeriods: captured.mavisPeriods,
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {})
         };
@@ -3434,6 +3459,7 @@ function startCollector(options) {
               month: anchor.month,
               allTime: anchor.allTime,
               qoderCnPeriods: anchor.qoderCnPeriods,
+              mavisPeriods: anchor.mavisPeriods,
               wslBundle: wslAnchor,
               wslStatus: wslStatusAnchor,
               ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
@@ -3453,6 +3479,9 @@ function startCollector(options) {
             month: applyPeriodDelta(anchor.qoderCnPeriods.month, captured.qoderCnPeriods.today, anchor.qoderCnPeriods.today),
             allTime: applyPeriodDelta(anchor.qoderCnPeriods.allTime, captured.qoderCnPeriods.today, anchor.qoderCnPeriods.today)
           };
+        }
+        if (captured.mavisPeriods && (!mavisReadState || !mavisReadState.periodFailed)) {
+          anchor.mavisPeriods = captured.mavisPeriods;
         }
         if (captured.nativeSessions) anchor.nativeSessions = captured.nativeSessions;
         if (captured.nativeProjects) anchor.nativeProjects = captured.nativeProjects;
