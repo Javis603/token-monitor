@@ -528,100 +528,168 @@ test('reapplying an archive never invents a period the preview omitted', () => {
   assert.equal(visible.today.sessions['opencode:o1'].archived, true);
 });
 
-function liveCursorConversationSummary() {
+const CURSOR_MODEL = 'cursor-grok-4.6-high';
+const CURSOR_UUID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+
+function cursorSession(sessionId, tokens, extra = {}) {
+  return {
+    client: 'cursor',
+    sessionId,
+    totalTokens: tokens,
+    costUsd: tokens / 100,
+    models: { [CURSOR_MODEL]: tokens },
+    modelCosts: { [CURSOR_MODEL]: tokens / 100 },
+    ...extra
+  };
+}
+
+function liveCursorSummary(sessions) {
+  const totalTokens = sessions.reduce((sum, session) => sum + session.totalTokens, 0);
+  const costUsd = sessions.reduce((sum, session) => sum + session.costUsd, 0);
   return {
     allTime: {
-      totalTokens: 1000,
-      costUsd: 10,
-      clients: { cursor: 1000 },
-      clientCosts: { cursor: 10 },
-      models: { 'cursor-grok-4.6-high': 1000 },
-      modelCosts: { 'cursor-grok-4.6-high': 10 },
-      sessions: {
-        'cursor:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee': {
-          client: 'cursor',
-          sessionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
-          totalTokens: 1000,
-          costUsd: 10,
-          cacheReadTokens: 900,
-          outputTokens: 40,
-          models: { 'cursor-grok-4.6-high': 1000 },
-          modelCosts: { 'cursor-grok-4.6-high': 10 },
-          lastUsedAt: '2026-09-12T11:00:00.000Z'
-        }
-      }
+      totalTokens,
+      costUsd,
+      clients: { cursor: totalTokens },
+      clientCosts: { cursor: costUsd },
+      models: { [CURSOR_MODEL]: totalTokens },
+      modelCosts: { [CURSOR_MODEL]: costUsd },
+      sessions: Object.fromEntries(sessions.map((session) => [`cursor:${session.sessionId}`, session]))
     }
   };
 }
 
-function legacyCursorEventArchive() {
+function conversation(tokens, startedAt = '2026-08-13T02:00:00.000Z', lastUsedAt = '2026-08-13T03:00:00.000Z') {
+  return cursorSession(CURSOR_UUID, tokens, { startedAt, lastUsedAt });
+}
+
+function legacyEventArchive(events) {
   return {
-    sessions: {
-      'cursor:cursor-active-2026-08-13T02:42:39.510Z': {
-        client: 'cursor',
-        sessionId: 'cursor-active-2026-08-13T02:42:39.510Z',
-        capturedAt: '2026-08-30T06:33:52.626Z',
-        day: '2026-08-30',
-        month: '2026-08',
-        periods: {
-          allTime: {
-            client: 'cursor',
-            sessionId: 'cursor-active-2026-08-13T02:42:39.510Z',
-            totalTokens: 800,
-            costUsd: 8,
-            cacheReadTokens: 700,
-            outputTokens: 50,
-            models: { 'cursor-grok-4.6-high': 800 },
-            modelCosts: { 'cursor-grok-4.6-high': 8 }
-          }
+    sessions: Object.fromEntries(events.map(([sessionId, tokens, model = CURSOR_MODEL]) => [`cursor:${sessionId}`, {
+      client: 'cursor',
+      sessionId,
+      capturedAt: '2026-08-30T06:33:52.626Z',
+      day: '2026-08-30',
+      month: '2026-08',
+      periods: {
+        allTime: {
+          ...cursorSession(sessionId, tokens),
+          models: { [model]: tokens },
+          modelCosts: { [model]: tokens / 100 }
         }
       }
-    }
+    }]))
   };
 }
 
-test('does not reapply Cursor event-scoped archive IDs on top of live conversation sessions', () => {
-  const visible = applySessionUsageArchive(liveCursorConversationSummary(), legacyCursorEventArchive(), {
-    now: new Date('2026-09-12T12:00:00.000Z')
-  });
+const NOW = { now: new Date('2026-09-12T12:00:00.000Z') };
+
+test('legacy Cursor events a live conversation exactly accounts for are not replayed', () => {
+  const archive = legacyEventArchive([
+    ['cursor-active-2026-08-13T02:10:00.000Z', 300],
+    ['cursor-active-2026-08-13T02:42:39.510Z', 700]
+  ]);
+  const visible = applySessionUsageArchive(liveCursorSummary([conversation(1000)]), archive, NOW);
 
   assert.equal(visible.allTime.totalTokens, 1000);
-  assert.equal(visible.allTime.costUsd, 10);
-  assert.equal(visible.allTime.clients.cursor, 1000);
-  assert.equal(visible.allTime.models['cursor-grok-4.6-high'], 1000);
+  assert.equal(visible.allTime.models[CURSOR_MODEL], 1000);
   assert.equal(visible.allTime.sessions['cursor:cursor-active-2026-08-13T02:42:39.510Z'], undefined);
-  assert.equal(visible.allTime.sessions['cursor:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'].archived, undefined);
 });
 
-test('drops Cursor event-scoped IDs when normalizing an existing archive', () => {
-  const normalized = normalizeSessionUsageArchive(legacyCursorEventArchive());
-  assert.deepEqual(normalized.sessions, {});
+test("legacy Cursor events at a conversation's first and last activity are inside it", () => {
+  const archive = legacyEventArchive([
+    ['cursor-active-2026-08-13T02:00:00.000Z', 400],
+    ['cursor-active-2026-08-13T03:00:00.000Z', 600]
+  ]);
+  const visible = applySessionUsageArchive(liveCursorSummary([conversation(1000)]), archive, NOW);
+
+  assert.equal(visible.allTime.totalTokens, 1000);
 });
 
-test('does not capture Cursor event-scoped live sessions into the archive', () => {
-  const summary = liveCursorConversationSummary();
-  summary.allTime.sessions = {
-    'cursor:cursor-active-2026-08-13T02:42:39.510Z': {
-      client: 'cursor',
-      sessionId: 'cursor-active-2026-08-13T02:42:39.510Z',
-      totalTokens: 800,
-      costUsd: 8,
-      models: { 'cursor-grok-4.6-high': 800 },
-      modelCosts: { 'cursor-grok-4.6-high': 8 }
+test('legacy Cursor events from a secondary account match the same way', () => {
+  const archive = legacyEventArchive([['cursor-team-a-2026-08-13T02:42:39.510Z', 1000]]);
+  const visible = applySessionUsageArchive(liveCursorSummary([conversation(1000)]), archive, NOW);
+
+  assert.equal(visible.allTime.totalTokens, 1000);
+});
+
+for (const [name, live, events] of [
+    ['its tokens fall short of the conversation', [conversation(1000)], [['cursor-active-2026-08-13T02:42:39.510Z', 800]]],
+    ['the event lies outside every conversation', [conversation(1000)], [['cursor-active-2026-08-13T05:00:00.000Z', 1000]]],
+    ['the conversation used another model', [conversation(1000)], [['cursor-active-2026-08-13T02:42:39.510Z', 1000, 'gpt-5.5']]],
+    ['two conversations contain the event', [
+      conversation(1000),
+      cursorSession('bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee', 1000, {
+        startedAt: '2026-08-13T02:30:00.000Z',
+        lastUsedAt: '2026-08-13T04:00:00.000Z'
+      })
+    ], [['cursor-active-2026-08-13T02:42:39.510Z', 1000]]],
+    ['the conversation also used a model no legacy event covers', [
+      { ...conversation(300), models: { [CURSOR_MODEL]: 100, 'gpt-5.5': 200 } }
+    ], [['cursor-active-2026-08-13T02:42:39.510Z', 100]]],
+    ['the conversation has no activity bounds', [cursorSession(CURSOR_UUID, 1000)], [['cursor-active-2026-08-13T02:42:39.510Z', 1000]]],
+    ['there is no live Cursor data', [], [['cursor-active-2026-08-13T02:42:39.510Z', 1000]]]
+]) {
+  test(`legacy Cursor events keep replaying when ${name}`, () => {
+    const summary = liveCursorSummary(live);
+    const before = summary.allTime.totalTokens;
+    const visible = applySessionUsageArchive(summary, legacyEventArchive(events), NOW);
+    const replayed = events.reduce((sum, [, tokens]) => sum + tokens, 0);
+    assert.equal(visible.allTime.totalTokens, before + replayed);
+  });
+}
+
+test('legacy Cursor CSV timestamps without Z or fraction parse as UTC', () => {
+  const { legacyCursorEventTime } = require('../../src/shared/providers/cursor/sessionGuard');
+  const previousTimeZone = process.env.TZ;
+  process.env.TZ = 'Asia/Hong_Kong';
+  try {
+    const expected = Date.UTC(2026, 7, 13, 2, 42, 39);
+    for (const sessionId of [
+      'cursor-active-2026-08-13T02:42:39Z',
+      'cursor-active-2026-08-13T02:42:39',
+      'cursor-team-a-2026-08-13T02:42:39.000',
+      'cursor-team-a-2026-08-13T02:42:39.000Z'
+    ]) {
+      assert.equal(legacyCursorEventTime({ client: 'cursor', sessionId }), expected, sessionId);
     }
-  };
-  const archive = captureSessionUsageArchive({}, summary, new Date('2026-09-12T12:00:00.000Z'));
-  assert.equal(archive.sessions['cursor:cursor-active-2026-08-13T02:42:39.510Z'], undefined);
+    assert.equal(legacyCursorEventTime({ client: 'cursor', sessionId: 'cursor-active-2026-08-13' }), null);
+    assert.equal(legacyCursorEventTime({ client: 'cursor', sessionId: CURSOR_UUID }), null);
+  } finally {
+    if (previousTimeZone === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTimeZone;
+  }
+});
+
+test('legacy Cursor events covering every model of a conversation are not replayed', () => {
+  const live = conversation(300);
+  live.models = { [CURSOR_MODEL]: 100, 'gpt-5.5': 200 };
+  const archive = legacyEventArchive([
+    ['cursor-active-2026-08-13T02:10:00', 100],
+    ['cursor-active-2026-08-13T02:20:00', 200, 'gpt-5.5']
+  ]);
+  const visible = applySessionUsageArchive(liveCursorSummary([live]), archive, NOW);
+
+  assert.equal(visible.allTime.totalTokens, 300);
+});
+
+test('legacy Cursor events stay in the archive through normalization and capture', () => {
+  const key = 'cursor:cursor-team-a-2026-08-13T02:42:39.510Z';
+  const archive = legacyEventArchive([['cursor-team-a-2026-08-13T02:42:39.510Z', 1000]]);
+  assert.equal(normalizeSessionUsageArchive(archive).sessions[key].periods.allTime.totalTokens, 1000);
+
+  const captured = captureSessionUsageArchive(archive, liveCursorSummary([conversation(1000)]), NOW.now);
+  assert.equal(captured.sessions[key].periods.allTime.totalTokens, 1000);
+  assert.equal(captured.sessions[`cursor:${CURSOR_UUID}`].periods.allTime.totalTokens, 1000);
 });
 
 test('still preserves Cursor conversation sessions after the live source drops them', () => {
-  const archive = captureSessionUsageArchive({}, liveCursorConversationSummary(), new Date('2026-09-12T12:00:00.000Z'));
+  const archive = captureSessionUsageArchive({}, liveCursorSummary([conversation(1000)]), NOW.now);
   const visible = applySessionUsageArchive({ allTime: { sessions: {} } }, archive, {
     now: new Date('2026-09-12T12:05:00.000Z')
   });
 
-  assert.equal(archive.sessions['cursor:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'].periods.allTime.totalTokens, 1000);
   assert.equal(visible.allTime.totalTokens, 1000);
   assert.equal(visible.allTime.clients.cursor, 1000);
-  assert.equal(visible.allTime.sessions['cursor:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'].archived, true);
+  assert.equal(visible.allTime.sessions[`cursor:${CURSOR_UUID}`].archived, true);
 });

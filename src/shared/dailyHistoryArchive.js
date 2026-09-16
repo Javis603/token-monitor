@@ -387,37 +387,39 @@ function dayComponentQuality(day) {
   )) ? 1 : 0;
 }
 
-function equalUsageInflatesCost(incomingTokens, incomingCost, previousTokens, previousCost) {
-  return incomingTokens === previousTokens && incomingCost > previousCost && previousCost > 0;
-}
-
 function liveDayIsGreater(incoming, previous) {
   const incomingTokens = dayTokens(incoming);
   const previousTokens = dayTokens(previous);
   if (incomingTokens !== previousTokens) return incomingTokens > previousTokens;
-  const incomingCost = dayCost(incoming);
-  const previousCost = dayCost(previous);
-  // Same token total with a higher price is the Cursor liveDays inflation:
-  // a same-day snapshot frozen an older rate, then the graph later priced the
-  // same events at catalog. Do not let that snapshot raise 30D above TOTAL.
-  // A zero previous cost still accepts a fill-in price.
-  if (equalUsageInflatesCost(incomingTokens, incomingCost, previousTokens, previousCost)) return false;
   const qualityDifference = dayComponentQuality(incoming) - dayComponentQuality(previous);
   if (qualityDifference !== 0) return qualityDifference > 0;
-  return incomingCost !== previousCost;
+  // Equal usage can receive a corrected price in either direction. The later
+  // live observation is authoritative once its provenance quality is equal.
+  return dayCost(incoming) !== dayCost(previous);
 }
 
-function observationWithStableCost(observation, previous) {
-  if (!previous) return observation;
-  if (!equalUsageInflatesCost(
-    num(observation.tokens),
-    num(observation.cost),
-    num(previous.tokens),
-    num(previous.cost)
-  )) {
-    return observation;
-  }
-  return { ...observation, cost: previous.cost };
+// A Cursor liveDay keeps the cost of the moment it was captured, while the
+// graph reprices that day's same events on every scan. When both hold the same
+// Cursor usage, the graph's cost is the current one; a liveDay that wins the day
+// because another observation grew must not carry its stale Cursor cost along.
+// Graph cost that is missing still takes the liveDay's, and every other client
+// keeps the bidirectional repricing liveDayIsGreater allows.
+function withGraphPricedCursorCosts(day, graphDay) {
+  if (!graphDay) return day;
+  let changed = false;
+  const observations = Object.fromEntries(Object.entries(day.observations).map(([key, observation]) => {
+    const graphObservation = graphDay.observations[key];
+    if (normalizeTokscaleClientName(observation.client) !== 'cursor'
+      || !graphObservation
+      || num(graphObservation.tokens) !== num(observation.tokens)
+      || num(graphObservation.cost) <= 0
+      || num(graphObservation.cost) === num(observation.cost)) {
+      return [key, observation];
+    }
+    changed = true;
+    return [key, { ...observation, cost: graphObservation.cost }];
+  }));
+  return changed ? { ...day, observations } : day;
 }
 
 function mergeLiveDayMetadata(liveDay, previousDay) {
@@ -425,7 +427,6 @@ function mergeLiveDayMetadata(liveDay, previousDay) {
   const observations = Object.fromEntries(Object.entries(liveDay.observations).map(([key, observation]) => {
     const previous = previousDay.observations[key];
     if (!previous) return [key, observation];
-    observation = observationWithStableCost(observation, previous);
     if (liveDay.componentSummary) {
       return [key, {
         ...observation,
@@ -509,7 +510,7 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
     if (hasTodayKey && date > todayKey) continue;
     const previous = currentDays.get(date);
     if (!previous || liveDayIsGreater(liveDay, previous)) {
-      currentDays.set(date, mergeLiveDayMetadata(liveDay, previous));
+      currentDays.set(date, withGraphPricedCursorCosts(mergeLiveDayMetadata(liveDay, previous), previous));
     }
   }
 

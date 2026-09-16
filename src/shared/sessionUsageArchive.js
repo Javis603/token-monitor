@@ -16,11 +16,7 @@ const {
 } = require('./archiveHelpers');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
-const { isCursorEventScopedSession } = require('./providers/cursor/sessionGuard');
-
-function isUnstableArchivedSession(session, key = '') {
-  return isReasonixSyntheticSession(session, key) || isCursorEventScopedSession(session, key);
-}
+const { coveredLegacyCursorSessionKeys, legacyCursorEventTime } = require('./providers/cursor/sessionGuard');
 
 function sessionUsageArchiveDate(deviceRecord, fallback = new Date()) {
   const collectedAt = new Date(deviceRecord?.updatedAt || '');
@@ -42,7 +38,7 @@ function sameJson(left, right) {
 }
 
 function normalizedSessionFrom(value, fallbackKey) {
-  if (isUnstableArchivedSession(value, fallbackKey)) return null;
+  if (isReasonixSyntheticSession(value, fallbackKey)) return null;
   const period = normalizePeriod({ sessions: { [fallbackKey || 'session']: value } });
   return Object.values(period.sessions)[0] || null;
 }
@@ -58,7 +54,7 @@ function normalizeSessionUsageArchive(value) {
 
   for (const [rawKey, rawEntry] of Object.entries(source)) {
     if (!rawEntry || typeof rawEntry !== 'object') continue;
-    if (isUnstableArchivedSession(rawEntry, rawKey)) continue;
+    if (isReasonixSyntheticSession(rawEntry, rawKey)) continue;
     const rawPeriods = rawEntry.periods && typeof rawEntry.periods === 'object'
       ? rawEntry.periods
       : rawEntry;
@@ -74,7 +70,7 @@ function normalizeSessionUsageArchive(value) {
 
     for (const periodName of PERIODS) {
       const session = normalizedSessionFrom(rawPeriods?.[periodName], rawKey);
-      if (!session || isUnstableArchivedSession(session, rawKey) || !hasSessionUsage(session)) continue;
+      if (!session || isReasonixSyntheticSession(session, rawKey) || !hasSessionUsage(session)) continue;
       const key = sessionKey(session.client, session.sessionId);
       if (!key) continue;
       entry.client = session.client;
@@ -154,7 +150,7 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
       ? (rawPeriod && typeof rawPeriod === 'object' ? rawPeriod : { sessions: {} })
       : periodFor(deviceRecord, periodName);
     for (const session of Object.values(period.sessions || {})) {
-      if (isUnstableArchivedSession(session) || !hasSessionUsage(session)) continue;
+      if (isReasonixSyntheticSession(session) || !hasSessionUsage(session)) continue;
       const archiveKey = sessionKey(session.client, session.sessionId);
       if (!archiveKey) continue;
       const entry = archive.sessions[archiveKey] || {
@@ -240,7 +236,7 @@ function addSessionBreakdown(period, session) {
 }
 
 function addArchivedSession(period, session, archiveKey = null) {
-  if (isUnstableArchivedSession(session)) return;
+  if (isReasonixSyntheticSession(session)) return;
   const key = archiveKey || sessionKey(session.client, session.sessionId);
   if (!key || period.sessions[key]) return;
 
@@ -315,6 +311,7 @@ function applySessionUsageArchive(summary, archive, options = {}) {
     return targetPeriods.get(periodName);
   };
 
+  const legacyCursorEvents = new Map();
   for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
     for (const periodName of PERIODS) {
       const session = entry.periods?.[periodName];
@@ -326,7 +323,22 @@ function applySessionUsageArchive(summary, archive, options = {}) {
       if (!hasSummaryPeriod(next, periodName)) continue;
       const period = targetFor(periodName);
       if (period.sessions[archiveKey]) continue;
+      if (legacyCursorEventTime(session) !== null) {
+        if (!legacyCursorEvents.has(periodName)) legacyCursorEvents.set(periodName, []);
+        legacyCursorEvents.get(periodName).push([archiveKey, session]);
+        continue;
+      }
       addArchivedSession(period, session, archiveKey);
+    }
+  }
+
+  // Coverage reads only live sessions, so replaying other archived rows first
+  // cannot change which legacy Cursor events count as covered.
+  for (const [periodName, events] of legacyCursorEvents) {
+    const period = targetFor(periodName);
+    const covered = coveredLegacyCursorSessionKeys(events, period.sessions);
+    for (const [archiveKey, session] of events) {
+      if (!covered.has(archiveKey)) addArchivedSession(period, session, archiveKey);
     }
   }
 

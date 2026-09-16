@@ -825,3 +825,63 @@ test('equal-token liveDays fills in a missing price without requiring more token
   assert.equal(day.tokens, 100);
   assert.equal(day.cost, 1.5);
 });
+
+test('a Cursor liveDay takes the graph cost after the graph reprices the same usage upward', () => {
+  let archive = captureLiveDailyHistory({}, cursorLivePeriod(100, 1), { todayKey: '2026-08-18' });
+  archive = captureDailyHistoryArchive(archive, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 100, 1.2, 1)
+  ]), { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  assert.equal(restored.daily.find((row) => row.date === '2026-08-18').cost, 1.2);
+});
+
+function claudeLivePeriod(totalTokens, costUsd) {
+  const period = cursorLivePeriod(totalTokens, costUsd);
+  return {
+    ...period,
+    clients: { claude: totalTokens },
+    clientCosts: { claude: costUsd },
+    models: { 'claude-sonnet-5': totalTokens },
+    modelCosts: { 'claude-sonnet-5': costUsd },
+    clientModels: { claude: { 'claude-sonnet-5': totalTokens } },
+    clientModelCosts: { claude: { 'claude-sonnet-5': costUsd } }
+  };
+}
+
+test('other clients keep repricing equal-token live days in either direction', () => {
+  let archive = captureLiveDailyHistory({}, claudeLivePeriod(100, 1), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, claudeLivePeriod(100, 1.2), { todayKey: '2026-08-18' });
+  archive = captureDailyHistoryArchive(archive, graph('2026-08-18', [
+    client('claude', 'claude-sonnet-5', 100, 0.9, 1)
+  ]), { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  assert.equal(restored.daily.find((row) => row.date === '2026-08-18').cost, 1.2);
+});
+
+test('a live day fills one model price while another model on that day is already priced', () => {
+  const liveDay = {
+    ...claudeLivePeriod(300, 3),
+    clients: { claude: 300 },
+    clientCosts: { claude: 3 },
+    models: { 'claude-sonnet-5': 100, 'claude-haiku-4-5': 200 },
+    modelCosts: { 'claude-sonnet-5': 1, 'claude-haiku-4-5': 2 },
+    clientModels: { claude: { 'claude-sonnet-5': 100, 'claude-haiku-4-5': 200 } },
+    clientModelCosts: { claude: { 'claude-sonnet-5': 1, 'claude-haiku-4-5': 2 } }
+  };
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-18', [
+    client('claude', 'claude-sonnet-5', 100, 1, 1),
+    client('claude', 'claude-haiku-4-5', 200, 0, 1)
+  ]), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, liveDay, { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  assert.equal(restored.daily.find((row) => row.date === '2026-08-18').cost, 3);
+});
