@@ -358,13 +358,19 @@ function buildTrayMenuTemplate(options = {}) {
     { label: t('trayMenu.settings'), click: callback('onOpenSettings') },
     {
       label: t('trayMenu.quit'),
-      // macOS already binds Cmd+Q to the app menu's quit role, so echoing it
-      // here matches the platform convention (and Typeless-style menus) without
-      // inventing a binding. The hint is macOS-only and display-only: no other
-      // platform has that default, and a tray-menu accelerator there is
-      // registered with the system, which would grab Cmd/Ctrl+Q from every
-      // other app on the machine.
-      ...(platform === 'darwin' ? { accelerator: 'Command+Q', registerAccelerator: false } : {}),
+      // macOS renders a menu item's shortcut from `accelerator` as that item's
+      // key equivalent, and is the only way to show one there -- which is how
+      // the platform convention of Cmd+Q beside Quit is drawn. The default
+      // application menu already binds Cmd+Q to its quit role and this app
+      // never replaces it, so this documents the binding that is actually live
+      // rather than inventing one.
+      //
+      // macOS-only on purpose: on Windows/Linux an accelerator is registered
+      // with the system, which would grab Ctrl+Q from every other app on the
+      // machine. `registerAccelerator` cannot be used to soften that here --
+      // Electron documents it as Linux/Windows-only, so on macOS it would be
+      // dead config that implies a display-only guarantee it does not provide.
+      ...(platform === 'darwin' ? { accelerator: 'Command+Q' } : {}),
       click: callback('onQuit')
     }
   ];

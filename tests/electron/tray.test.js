@@ -477,7 +477,7 @@ test('tray context menu uses the selected locale for every visible level', () =>
   assert.equal(template[4].submenu.at(-1).label, '固定於桌面');
 });
 
-test('tray context menu shows the macOS Quit shortcut as a display-only hint', () => {
+test('tray context menu shows the macOS Quit shortcut on macOS only', () => {
   const darwin = buildTrayMenuTemplate({
     state: { appVersion: '0.58.0', trayContent: 'tokens', trayMode: true },
     platform: 'darwin'
@@ -485,9 +485,13 @@ test('tray context menu shows the macOS Quit shortcut as a display-only hint', (
   const quit = darwin.at(-1);
   assert.equal(quit.label, 'Quit Token Monitor');
   assert.equal(quit.accelerator, 'Command+Q');
-  // A registered accelerator inside a tray menu becomes a system-wide grab on
-  // Windows/Linux, so the macOS hint has to stay display-only.
-  assert.equal(quit.registerAccelerator, false);
+  // `registerAccelerator` is documented as Linux/Windows-only, so it must not
+  // be set here: on macOS it would be dead config implying a display-only
+  // guarantee the platform does not honour. macOS draws the shortcut from
+  // `accelerator` as the item's key equivalent, which is the only presentation
+  // mechanism there. That it does not become a system-wide grab is verified
+  // against a live Electron tray menu, not by this flag.
+  assert.equal('registerAccelerator' in quit, false);
 
   for (const platform of ['win32', 'linux']) {
     const template = buildTrayMenuTemplate({
