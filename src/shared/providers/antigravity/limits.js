@@ -135,8 +135,17 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
   const providers = [...remote];
   if (local?.accountKey) {
     const duplicateIndex = providers.findIndex((provider) => provider.accountKey === local.accountKey);
-    if (duplicateIndex >= 0) providers.splice(duplicateIndex, 1, local);
-    else providers.unshift(local);
+    if (duplicateIndex >= 0) {
+      const existing = providers[duplicateIndex];
+      const existingHasGrouped = (existing.windows || []).some((w) => typeof w.windowMinutes === 'number');
+      const localHasGrouped = (local.windows || []).some((w) => typeof w.windowMinutes === 'number');
+      const localIsHealthy = local.status === 'ok';
+      if (localIsHealthy && (localHasGrouped || !existingHasGrouped)) {
+        providers.splice(duplicateIndex, 1, local);
+      }
+    } else {
+      providers.unshift(local);
+    }
   }
   return providers;
 }
