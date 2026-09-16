@@ -369,9 +369,8 @@ function buildTrayMenuTemplate(options = {}) {
       // Windows or Linux would not take the key away from other applications --
       // `globalShortcut` is the API that does that, and this does not use it.
       // There is simply less to echo elsewhere: Windows declares no default quit
-      // accelerator, and on Linux the default application menu already binds
-      // Ctrl+Q while the tray menu there is re-exported over dbusmenu, where the
-      // hint's rendering is unverified.
+      // accelerator, and Linux already shows Ctrl+Q through its own application
+      // menu.
       ...(platform === 'darwin' ? { accelerator: 'Command+Q' } : {}),
       click: callback('onQuit')
     }
