@@ -202,6 +202,8 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'kiro-ide-globalstorage',
   'kiro-sessions',
   'lmstudio-server-logs',
+  // Mavis (MiniMax Code) — ~/.minimax/v2/sqlite/runtime-state.sqlite.
+  'mavis-sqlite',
   'mimocode-data',
   'mimocode-orca-data',
   'omp-sessions',

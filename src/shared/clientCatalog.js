@@ -69,7 +69,15 @@
     { id: 'dsh', label: 'DeepSeek Harness' },
     { id: 'cherrystudio', label: 'Cherry Studio' },
     { id: 'lmstudio', label: 'LM Studio' },
-    { id: 'unsloth', label: 'Unsloth' }
+    { id: 'unsloth', label: 'Unsloth' },
+    // Mavis (MiniMax Code) — reads ~/.minimax/v2/sqlite/runtime-state.sqlite.
+    // Like proma / qodercn this is a locallyParsed client: the tokscale client
+    // filter excludes it and a small adapter in providers/mavis/ reads the
+    // SQLite directly. Cost is the runtime-supplied `cost_usd` column, no
+    // external pricing lookup needed. Default tracked (opt-out) — like
+    // claude / codex / etc. — since v0.57.0 the catalog already trusts new
+    // clients to opt in cleanly.
+    { id: 'mavis', label: 'MiniMax Code', locallyParsed: true }
   ].map((client) => Object.freeze({
     defaultTracked: true,
     locallyParsed: false,

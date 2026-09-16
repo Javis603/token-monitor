@@ -67,6 +67,12 @@ const {
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 const {
+  buildMavisHistoryGraph,
+  buildMavisPeriods,
+  collectMavisRows,
+  MAVIS_HOME
+} = require('./providers/mavis/usage');
+const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
   isReasonixNativeSessionSidecar,
@@ -1131,6 +1137,7 @@ async function collectUsageOnce(options) {
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
+  const includesMavis = normalizedClients.split(',').includes('mavis');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -1159,6 +1166,9 @@ async function collectUsageOnce(options) {
   let promaPricing = null;
   let qoderCnPeriods = null;
   let qoderCnRows = null;
+  let mavisPeriods = null;
+  let mavisRows = null;
+  let mavisPeriodReadFailed = false;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
   const emitProgress = (periods) => {
@@ -1232,6 +1242,39 @@ async function collectUsageOnce(options) {
         qoderCnPeriods = options.qoderCnFallbackPeriods || null;
       }
     }
+    if (includesMavis && (!targetRequested || targetClients.includes('mavis'))) {
+      // Mavis is read locally and never goes through the tokscale client
+      // filter (locallyParsed: true). The adapter handles its own
+      // sqlite3-CLI / node:sqlite fallback inside readMavisDbRows and
+      // throws on a hard read failure — we surface the error and skip
+      // the partition so the next tick can try again with a fresh
+      // DB handle.
+      //
+      // PI-agent SQLite averages ~3–50 new rows per 5-minute tick (the
+      // runtime writes at p50=6s / p90=29s intervals). When the today
+      // anchor is alive we only need those new rows to patch today's
+      // partition; the month / allTime buckets are kept on the anchor
+      // untouched (`!anchorUsed` is the gate that merges them in). A
+      // `sinceMs = todayStart` read cuts IO from "every row in the
+      // table" (currently ~4k rows, growing) to "rows since local
+      // midnight". Cold-start / full-scan ticks still pull the whole
+      // table so month + allTime can be rebuilt from scratch.
+      const mavisSinceMs = anchorUsed
+        ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime()
+        : undefined;
+      try {
+        mavisRows = await collectMavisRows({ logger: options.logger, sinceMs: mavisSinceMs });
+        const mavisJson = await buildMavisPeriods({ now: collectedAt, allTimeSince, rows: mavisRows });
+        mavisPeriods = {
+          today: extractUsageFromTokscale(mavisJson.today),
+          month: extractUsageFromTokscale(mavisJson.month),
+          allTime: extractUsageFromTokscale(mavisJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`mavis parse failed: ${err.message}`);
+        mavisPeriodReadFailed = true;
+      }
+    }
     throwIfAborted(options.signal);
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
@@ -1282,6 +1325,14 @@ async function collectUsageOnce(options) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
         freshPartitions.qodercn = anchor.todayPartitions.qodercn;
+      }
+      if (mavisPeriods) freshPartitions.mavis = mavisPeriods.today;
+      if (mavisPeriodReadFailed && anchor.todayPartitions?.mavis) {
+        // Mavis / mavis SQLite lives at ~/.minimax/v2/sqlite/runtime-state.sqlite
+        // and is held by the mavis runtime. A transient busy-timeout or other
+        // read failure must not blank the existing today partition or subtract
+        // it from month/allTime — the partition survives for the next tick.
+        freshPartitions.mavis = anchor.todayPartitions.mavis;
       }
       if (!useTargetedPartitions) {
         // The fallback rebuilds every Tokscale partition, but parse-local
@@ -1349,6 +1400,12 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, qoderCnPeriods.month);
       allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), qodercn: qoderCnPeriods.today };
+    }
+    if (mavisPeriods && !anchorUsed) {
+      today = mergePeriods(today, mavisPeriods.today);
+      month = mergePeriods(month, mavisPeriods.month);
+      allTime = mergePeriods(allTime, mavisPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), mavis: mavisPeriods.today };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1559,6 +1616,23 @@ async function collectUsageOnce(options) {
         if (typeof options.logger === 'function') options.logger(`qodercn history parse failed: ${err.message}`);
       }
     }
+    // Mavis history graph: reuse the period scan's full rows when present
+    // (non-anchored ticks), or read full rows just for the graph on
+    // anchored ticks. mavis doesn't need a pricing resolver — its
+    // `cost_usd` is the source of truth — so this stays single-pass.
+    let mavisGraph = null;
+    let mavisHistoryReadFailed = false;
+    if (includesMavis) {
+      try {
+        const rows = (mavisRows && mavisRows.length > 0 && mavisRows[0].createdAt && mavisRows[0].createdAt < Date.now() - 30 * 60_000)
+          ? mavisRows
+          : await collectMavisRows({ logger: options.logger });
+        mavisGraph = await buildMavisHistoryGraph({ rows });
+      } catch (err) {
+        mavisHistoryReadFailed = true;
+        if (typeof options.logger === 'function') options.logger(`mavis history parse failed: ${err.message}`);
+      }
+    }
     const historyQoderCnGraph = qoderCnHistoryReadFailed
       ? options.qoderCnHistoryFallbackGraph
       : qoderCnGraph;
@@ -1567,6 +1641,7 @@ async function collectUsageOnce(options) {
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
       qoderCnGraph: historyQoderCnGraph || null,
+      mavisGraph: !mavisHistoryReadFailed ? mavisGraph : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -2110,6 +2185,19 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
     const existingNativeRoots = nativeRoots.filter(dirExists);
     if (existingNativeRoots.length > 0) {
       rootsByClient.reasonix = [...new Set([...(rootsByClient.reasonix || []), ...existingNativeRoots])];
+    }
+  }
+  // Mavis (MiniMax Code) writes token usage to a parse-local SQLite at
+  // ~/.minimax/v2/sqlite/runtime-state.sqlite. Watching the parent
+  // directory lets chokidar wake us on every runtime commit (the
+  // *.sqlite-wal / *.sqlite-shm sidecars fire too — that's fine, our
+  // attribution tolerates multiple events per tick — but we still want
+  // the actual DB file to be in the list so a vacuum/replace never goes
+  // unnoticed).
+  if (enabled.has('mavis')) {
+    const mavisHome = MAVIS_HOME;
+    if (dirExists(mavisHome)) {
+      rootsByClient.mavis = [...new Set([...(rootsByClient.mavis || []), mavisHome])];
     }
   }
   return rootsByClient;
@@ -2891,6 +2979,15 @@ function canonicalWatchFilePath(file) {
 }
 
 function watcherOptions(usePolling, ignored) {
+  // `awaitWriteFinish` delays the event until mtime is stable for the
+  // stabilityThreshold (default 500ms). That's the right call for
+  // config files / JSON logs that get rewritten in one shot, but it
+  // is a trap for SQLite databases written under WAL — mavis runtime
+  // commits a transaction every ~6–30 seconds and the runtime-state
+  // SQLite's mtime keeps changing, so the watcher never emits an event
+  // and smart-mode activity tracking never advances. With WAL the
+  // reader-side `readOnly` open sees a consistent snapshot anyway, so
+  // we can safely drop the gate.
   return {
     ignoreInitial: true,
     persistent: true,
@@ -2898,7 +2995,7 @@ function watcherOptions(usePolling, ignored) {
       ? { usePolling: true, interval: 2000, binaryInterval: 5000 }
       : { usePolling: false }),
     ...(ignored ? { ignored } : {}),
-    awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 200 }
+    awaitWriteFinish: false
   };
 }
 
