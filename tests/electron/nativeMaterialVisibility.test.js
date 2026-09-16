@@ -17,6 +17,7 @@ function fakeWindow() {
   let minimized = false;
   return {
     emit(event) { listeners.get(event)?.(); },
+    webContents: { isDestroyed: () => false, send() {}, on() {} },
     isDestroyed: () => false,
     isMinimized: () => minimized,
     isVisible: () => visible,
@@ -31,21 +32,21 @@ function fakeWindow() {
 test('native material is active only for a visible non-minimized macOS window', () => {
   const win = fakeWindow();
   win.setVisible(true);
-  syncNativeMaterialVisibility(win, true, 'darwin');
+  syncNativeMaterialVisibility(win, true, 'darwin', { osRelease: '24.0.0' });
   win.setVisible(false);
-  syncNativeMaterialVisibility(win, true, 'darwin');
+  syncNativeMaterialVisibility(win, true, 'darwin', { osRelease: '24.0.0' });
   win.setVisible(true);
   win.setMinimized(true);
-  syncNativeMaterialVisibility(win, true, 'darwin');
+  syncNativeMaterialVisibility(win, true, 'darwin', { osRelease: '24.0.0' });
   syncNativeMaterialVisibility(win, true, 'win32');
 
-  assert.deepEqual(win.materials, ['hud', null, null]);
+  assert.deepEqual(win.materials, ['hud', null]);
 });
 
 test('window lifecycle suspends and restores the latest material preference', () => {
   const win = fakeWindow();
   let enabled = true;
-  attachNativeMaterialVisibility(win, () => enabled, 'darwin');
+  attachNativeMaterialVisibility(win, () => enabled, 'darwin', { osRelease: '24.0.0' });
 
   win.setVisible(true);
   win.emit('show');
@@ -55,26 +56,29 @@ test('window lifecycle suspends and restores the latest material preference', ()
   win.setVisible(true);
   win.emit('restore');
 
-  assert.deepEqual(win.materials, ['hud', null, null]);
+  assert.deepEqual(win.materials, ['hud', null]);
 });
 
-test('an unchanged material preference does not re-apply to either window', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  const applyMaterial = main.slice(
-    main.indexOf('function applyNativeMaterial(source = settings)'),
-    main.indexOf('function withHistoryPreview(')
-  );
-
-  // applyNativeMaterial() also runs for every appearance slider preview and
-  // floating-bubble transition; neither should rebuild an unchanged effect.
-  assert.match(
-    applyMaterial,
-    /mainWindowNativeBlurEnabled !== enabled\) \{\s*mainWindowNativeBlurEnabled = enabled;\s*syncNativeMaterialVisibility\(mainWindow, enabled\);/
-  );
-  assert.match(
-    applyMaterial,
-    /dashboardWindowNativeBlurEnabled !== enabled\) \{\s*dashboardWindowNativeBlurEnabled = enabled;\s*syncNativeMaterialVisibility\(dashboardWindow, enabled\);/
-  );
+test('an unchanged material preference does not recreate its native container', () => {
+  const win = fakeWindow();
+  let creations = 0;
+  let disposals = 0;
+  const deps = {
+    osRelease: '26.0.0',
+    createGlass() {
+      creations += 1;
+      return { update() {}, dispose() { disposals += 1; } };
+    }
+  };
+  win.setVisible(true);
+  syncNativeMaterialVisibility(win, { enabled: true }, 'darwin', deps);
+  syncNativeMaterialVisibility(win, { enabled: true, dark: false }, 'darwin', deps);
+  win.setVisible(false);
+  syncNativeMaterialVisibility(win, { enabled: true }, 'darwin', deps);
+  assert.equal(creations, 1);
+  assert.equal(disposals, 0);
+  syncNativeMaterialVisibility(win, { enabled: false }, 'darwin', deps);
+  assert.equal(disposals, 1);
 });
 
 test('main and Dashboard windows use the visibility-aware material lifecycle', () => {
@@ -97,7 +101,7 @@ test('main and Dashboard windows use the visibility-aware material lifecycle', (
       /process\.platform === 'darwin' \? \{ vibrancy: 'hud', visualEffectState: 'active' \} : \{\}/
     );
   }
-  assert.match(mainWindowConstructor, /mainWindow = win;\s*mainWindowNativeBlurEnabled = null;/);
+  assert.match(mainWindowConstructor, /attachNativeMaterialVisibility\(win, \(\) => nativeMaterialOptions\(\)\)/);
   assert.doesNotMatch(main, /\.setVisualEffectState\(/);
   assert.equal([...main.matchAll(/syncNativeMaterialVisibility\((?:mainWindow|dashboardWindow),/g)].length, 2);
 });

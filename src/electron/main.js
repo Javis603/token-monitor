@@ -360,8 +360,10 @@ const {
 const { applyWindowsAccentBlur } = require('./windowsBackdrop');
 const {
   attachNativeMaterialVisibility,
-  syncNativeMaterialVisibility
+  syncNativeMaterialVisibility,
+  getNativeMaterialState
 } = require('./nativeMaterialVisibility');
+const { isLightHex } = require('./renderer/themePresets');
 
 if (!app.isPackaged) loadDotEnv();
 
@@ -418,9 +420,7 @@ const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends']
 const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
 
 let mainWindow = null;
-let mainWindowNativeBlurEnabled = false;
 let dashboardWindow = null;
-let dashboardWindowNativeBlurEnabled = false;
 let settingsPath = null;
 let settings = null;
 let initialLimitProvidersPending = false;
@@ -2859,22 +2859,22 @@ function nativeBlurEnabled(source = settings) {
   return floatingBubbleNativeGlassEnabled(source);
 }
 
+function nativeMaterialOptions(source = settings, dashboard = false) {
+  return {
+    enabled: nativeBlurEnabled(source),
+    opaque: dashboard && source.dashboardFlat === true,
+    reducedTransparency: nativeTheme.prefersReducedTransparency === true,
+    highContrast: nativeTheme.shouldUseHighContrastColors === true,
+    dark: !isLightHex(source.themeColors?.bg),
+    radius: !dashboard && floatingBubbleState.collapsed ? 17 : 14
+  };
+}
+
 function applyNativeMaterial(source = settings) {
-  const enabled = nativeBlurEnabled(source);
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindowNativeBlurEnabled !== enabled) {
-    mainWindowNativeBlurEnabled = enabled;
-    syncNativeMaterialVisibility(mainWindow, enabled);
-  }
-  // This also runs for every appearance slider preview and floating-bubble
-  // transition, so re-applying an unchanged material would rebuild its native
-  // effect view for nothing.
-  if (dashboardWindow && !dashboardWindow.isDestroyed() && dashboardWindowNativeBlurEnabled !== enabled) {
-    dashboardWindowNativeBlurEnabled = enabled;
-    syncNativeMaterialVisibility(dashboardWindow, enabled);
-  }
-  // Windows: backgroundMaterial is locked in at window creation. setBackgroundMaterial('none')
-  // does not restore layered-window transparency once DWM SystemBackdrop has been engaged,
-  // so toggling is handled by rebuildWindow() instead.
+  syncNativeMaterialVisibility(mainWindow, nativeMaterialOptions(source));
+  syncNativeMaterialVisibility(dashboardWindow, nativeMaterialOptions(source, true));
+  // Windows' material is still construction-time; its existing rebuild path
+  // handles setting changes. The macOS manager avoids recreating stable views.
 }
 
 function withHistoryPreview(stats, devices) {
@@ -6253,12 +6253,8 @@ function createWindow(boundsOverride, options = {}) {
     // Keeps a popover unmaximizable across rebuilds, which never re-run enterTrayMode().
     ...(settings?.trayMode ? { maximizable: false } : {}),
     ...floatingBubbleWindowChrome(process.platform, collapsedFloatingBubble),
-    // visualEffectState is construction-time only — Electron exposes no setter for
-    // it (verified: BrowserWindow has setVibrancy but no setVisualEffectState), and
-    // it is what keeps the material vibrant while the window is not key. Without
-    // it macOS falls back to followWindow and the glass greys out on blur. The
-    // vibrancy here is immediately re-evaluated by applyNativeMaterial() below, so
-    // a window that is not on screen still ends up with no material attached.
+    // Seed the legacy fallback's construction-only active state. The material
+    // manager immediately replaces HUD with Liquid Glass when supported.
     ...(process.platform === 'darwin' ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass && !windowsAccent ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
@@ -6268,7 +6264,6 @@ function createWindow(boundsOverride, options = {}) {
     }
   });
   mainWindow = win;
-  mainWindowNativeBlurEnabled = null;
   mainWindowChrome = { collapsedFloatingBubble };
   applyMacSpaceBehavior();
   applyWindowsChrome(win, { round: true });
@@ -6306,7 +6301,7 @@ function createWindow(boundsOverride, options = {}) {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
   });
   applyWindowSettings();
-  attachNativeMaterialVisibility(win, () => mainWindowNativeBlurEnabled);
+  attachNativeMaterialVisibility(win, () => nativeMaterialOptions());
   applyNativeMaterial();
   win.on('focus', () => {
     stopFloatingBubbleAutoCollapseTimer();
@@ -6440,10 +6435,9 @@ function createDashboardWindow() {
     }
   });
   dashboardWindow = win;
-  dashboardWindowNativeBlurEnabled = glass;
   applyWindowsChrome(win, { round: true });
-  attachNativeMaterialVisibility(win, () => dashboardWindowNativeBlurEnabled);
-  syncNativeMaterialVisibility(win, dashboardWindowNativeBlurEnabled);
+  attachNativeMaterialVisibility(win, () => nativeMaterialOptions(settings, true));
+  syncNativeMaterialVisibility(win, nativeMaterialOptions(settings, true));
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -6467,7 +6461,6 @@ function createDashboardWindow() {
   });
   win.on('closed', () => {
     dashboardWindow = null;
-    dashboardWindowNativeBlurEnabled = false;
   });
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
     .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
@@ -6556,7 +6549,10 @@ app.whenReady().then(() => {
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
   // it — nothing else in the app would notice the change.
-  nativeTheme.on('updated', () => { void pushSystemUiThemeAfterChange(); });
+  nativeTheme.on('updated', () => {
+    applyNativeMaterial();
+    void pushSystemUiThemeAfterChange();
+  });
   const widgetRuntime = macWidgetRuntimeSupport({
     platform: process.platform,
     osRelease: process.platform === 'darwin' ? os.release() : ''
@@ -7002,8 +6998,11 @@ app.whenReady().then(() => {
     pushSettingsToRenderer();
     return settingsForRenderer();
   });
-  ipcMain.handle('appearance:preview', (_event, patch) => {
-    applyNativeMaterial({ ...settings, ...patch });
+  ipcMain.handle('appearance:preview', (event, patch) => {
+    // Preview only the requesting surface: another window still renders its
+    // saved theme until settings:update broadcasts the committed preference.
+    const win = BrowserWindow.fromWebContents(event.sender);
+    syncNativeMaterialVisibility(win, nativeMaterialOptions({ ...settings, ...patch }, win === dashboardWindow));
     if (patch && patch.zoomFactor !== undefined && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.setZoomFactor(clampZoom(patch.zoomFactor));
     }
@@ -7164,6 +7163,10 @@ app.whenReady().then(() => {
     saveSettings({ throwOnError: true });
     if (settings.hubMode === 'host') startMode();
     return getHubInfo();
+  });
+  ipcMain.handle('appearance:getNativeMaterial', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return getNativeMaterialState(win);
   });
   ipcMain.handle('app:getInfo', () => ({
     version: app.getVersion(),

@@ -10,6 +10,7 @@ const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const fontSettingsApi = window.TokenMonitorFontSettings;
 const statsRenderSchedulerApi = window.TokenMonitorStatsRenderScheduler;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+const glassRenderingApi = window.TokenMonitorGlassRendering;
 
 // Canonical brand colours, captured before any override (clientColors is shared
 // by reference and mutated in place to apply vendor overrides).
@@ -43,6 +44,8 @@ const state = {
   chartKind: 'bars', motion: 'none', reduceMotion: 'system',
   heatmapMetric: 'cost'
 };
+let nativeMaterialState = glassRenderingApi?.normalizeNativeMaterialState?.() || { type: 'transparent', reducedTransparency: false, highContrast: false };
+let nativeMaterialRevision = 0;
 
 const DATA_MOTION_MS = 800;
 const KLINE_MOTION_MS = 560;
@@ -213,8 +216,9 @@ function applyTranslations() {
 }
 
 function applyAppearance(settings) {
+  glassRenderingApi?.applyNativeMaterialClasses?.(nativeMaterialState);
   const opacity = Math.min(100, Math.max(0, settings?.glassOpacity ?? 68)) / 100;
-  const depth = Math.min(100, Math.max(0, settings?.glassBlur ?? 32)) / 100;
+  const depth = (glassRenderingApi?.usesNativeMaterial?.(nativeMaterialState) ? 32 : Math.min(100, Math.max(0, settings?.glassBlur ?? 32))) / 100;
   const root = document.documentElement.style;
   root.setProperty('--glass-alpha', opacity.toFixed(2));
   root.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
@@ -638,9 +642,27 @@ async function refresh() {
 }
 
 async function boot() {
+  const materialPush = window.tokenMonitor.onNativeMaterialState;
+  if (typeof materialPush === 'function') {
+    materialPush((next) => {
+      nativeMaterialRevision += 1;
+      nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState(next);
+      glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
+      applyAppearance(state.settings || {});
+    });
+  }
+  const materialQueryRevision = nativeMaterialRevision;
+  try {
+    const initialMaterial = await window.tokenMonitor.getNativeMaterialState?.();
+    if (materialQueryRevision === nativeMaterialRevision && initialMaterial) {
+      nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState(initialMaterial);
+      glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
+    }
+  } catch (_) {}
   let settings = {};
   try { settings = await window.tokenMonitor.getSettings(); } catch (_) {}
   state.locale = i18n.resolveLocale(settings.locale || settings.language, navigator.languages);
+  state.settings = settings;
   state.currency = settings.currency || 'USD';
   state.compactTokenUnits = compactTokenApi.normalizeCompactTokenUnits(settings.compactTokenUnits);
   if (settings.currencyRatesEffective && window.TokenMonitorCurrency?.configureRates) {
@@ -661,6 +683,12 @@ async function boot() {
 // dashboard shares the main window's preload, so it receives the same push.
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
+  state.settings = { ...(state.settings || {}), ...next };
+  if ('dashboardFlat' in next) {
+    state.flat = next.dashboardFlat === true;
+    els.body.classList.toggle('flat', state.flat);
+  }
+  applyAppearance(state.settings);
   applyFontSettings(next);
   let needsRender = false;
   const nextLocale = i18n.resolveLocale(next.locale || next.language, navigator.languages);
