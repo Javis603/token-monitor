@@ -2902,11 +2902,34 @@ function watcherOptions(usePolling, ignored) {
   };
 }
 
-function isQoderCnSelfWatchEvent(filePath, rootsByClient = {}) {
-  if (!filePath || !path.basename(filePath).endsWith('.db-shm')) return false;
+// Clients whose SQLite wal-index sidecar our own read-only scan recreates.
+//
+// Opening a WAL database read-only still maps the shared-memory index, and
+// SQLite rewrites <db>-shm when it does. That write is indistinguishable from a
+// real data change to a filesystem watcher, so watching the sidecar re-triggers
+// the scan that caused it: watch event -> targeted scan -> shm write -> watch
+// event, forever. Measured on darwin for zcode: 0 shm changes while idle over
+// 40s, then 20 of 20 consecutive tokscale zcode --today scans rewrote
+// db.sqlite-shm. The same shape was already fixed for Qoder CN (#301), where it
+// was 142 events/5min with the client stopped.
+//
+// Only the sidecar is dropped. The real data signal lives in the database and
+// its -wal, so a genuine change still produces an event; a client whose scan was
+// measured NOT to rewrite its sidecar (micode) is deliberately absent here, and
+// adding a client to this list asserts a measurement rather than a hunch.
+const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['qodercn', 'zcode']);
+
+function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
+  // Match SQLite's wal-index suffix, not one client's database basename: ZCode's
+  // file is db.sqlite-shm, whose name does not contain '.db-'. The suffix is
+  // required to be one of the SQLite extensions this collector's clients use, so
+  // the match cannot widen into an unrelated '-shm' sidecar, and it never matches
+  // the -wal or the database itself.
+  const name = path.basename(String(filePath || ''));
+  if (!/^[^/]+\.(?:db|sqlite|sqlite3)-shm$/.test(name)) return false;
   const resolved = path.resolve(filePath);
-  return (rootsByClient.qodercn || [])
-    .some((root) => resolved.startsWith(path.resolve(root) + path.sep));
+  return SELF_WATCHED_SQLITE_SIDECAR_CLIENTS.some((client) => (rootsByClient[client] || [])
+    .some((root) => resolved.startsWith(path.resolve(root) + path.sep)));
 }
 
 function startCollector(options) {
@@ -3631,14 +3654,10 @@ function startCollector(options) {
       // The quit path leaves the watcher open (see stop), so events can still
       // arrive after the collector is done with them.
       if (stopped) return;
-      // Our own read-only opens of Qoder CN's local.db recreate its SQLite
-      // wal-index (local.db-shm), so watching that sidecar re-triggers the
-      // watch loop forever — confirmed: 142 events/5min with Qoder CN fully
-      // stopped, dropping to 0 after this filter. The real data signal lives
-      // in local.db / local.db-wal, so drop *.db-shm events under the
-      // qodercn roots only. (hermes/micode may share this pattern upstream —
-      // out of scope here, their watch behaviour is left untouched.)
-      if (isQoderCnSelfWatchEvent(filePath, rootsByClient)) return;
+      // Drop the wal-index sidecar of clients whose own scan recreates it, so
+      // the collector cannot re-trigger itself. See
+      // SELF_WATCHED_SQLITE_SIDECAR_CLIENTS for the measured per-client evidence.
+      if (isSelfWatchSqliteSidecarEvent(filePath, rootsByClient)) return;
       activityRevision += 1;
       if (tickPending) {
         pendingActivityRevision = pendingActivityRevision === null
@@ -3879,7 +3898,7 @@ module.exports = {
   // read or pin a client's floor directly instead of inferring it from tick
   // timings; the collector never takes a second instance.
   selfSyncThrottle,
-  isQoderCnSelfWatchEvent,
+  isSelfWatchSqliteSidecarEvent,
   shouldIncludeHistory,
   spawnTokscaleHelp,
   startCollector,
