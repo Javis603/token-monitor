@@ -63,7 +63,11 @@
   const VENDOR_ORDER = [
     'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline',
     'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
-    'openrouter', 'gemini', 'qoder', 'deepseek', 'xai', 'meta', 'mistral', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'minimax', 'doubao', 'hunyuan', 'volcengine', 'ollama', 'trae', 'alibaba', 'thirdparty'
+    'openrouter', 'gemini', 'qoder', 'deepseek', 'xai', 'meta', 'mistral', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'minimax', 'doubao', 'hunyuan', 'volcengine', 'ollama', 'trae', 'alibaba', 'thirdparty',
+    // Mavis (MiniMax Code) — locally-parsed pi-agent SQLite. Slot it at the
+    // end of the catalogue so the order stays stable for users who already
+    // picked themes and the row appears next to its MiniMax brand cousin.
+    'mavis'
   ];
 
   // Display labels for every vendor in the clientColors map. The widget also
@@ -120,6 +124,7 @@
     ollama: 'Ollama',
     alibaba: 'Alibaba Cloud',
     thirdparty: 'Third-party APIs',
+    mavis: 'Mavis (MiniMax Code)',
     default: 'Default'
   };
 
