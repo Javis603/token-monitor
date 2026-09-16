@@ -120,6 +120,7 @@ module.exports = {
   rebuildWindowBounds,
   restoreWindowMaximized,
   restoreWindowMaximizedForReveal,
+  sameWindowBounds,
   setWindowMaximizable,
   shouldPersistWindowBounds,
   shouldRestoreWindowMaximized,

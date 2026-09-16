@@ -377,6 +377,7 @@ Object.assign(els, {
   backHomeButton: document.getElementById('backHomeButton'),
   systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
+  topEdgeHideInput: document.getElementById('topEdgeHideInput'),
   trayIconOptions: document.getElementById('trayIconOptions'),
   trayOptions: document.getElementById('trayOptions'),
   hubModeOptions: document.getElementById('hubModeOptions'),
@@ -10138,6 +10139,7 @@ function syncSettingsForm() {
   els.swapSettingsRefreshInput.checked = state.settings.settingsInTitlebar === true;
   els.discordRpcInput.checked = Boolean(state.settings.discordRpcEnabled);
   els.floatingBubbleInput.checked = state.settings.floatingBubbleEnabled === true;
+  if (els.topEdgeHideInput) els.topEdgeHideInput.checked = state.settings.topEdgeHideEnabled === true;
   const floatingBubbleTrigger = state.settings.floatingBubbleTrigger === 'hover' ? 'hover' : 'click';
   for (const input of els.floatingBubbleTriggerInputs || []) input.checked = input.value === floatingBubbleTrigger;
   if (els.floatingBubbleContentInput) els.floatingBubbleContentInput.value = normalizeTrayContentValue(state.settings.floatingBubbleContent);
@@ -13424,6 +13426,10 @@ els.floatingBubbleInput.addEventListener('change', () => {
   els.floatingBubbleOptions?.classList.toggle('hidden', !els.floatingBubbleInput.checked);
   refreshTrayComposers();
   saveSettings({ floatingBubbleEnabled: els.floatingBubbleInput.checked });
+});
+els.topEdgeHideInput?.addEventListener('change', () => {
+  state.settings.topEdgeHideEnabled = els.topEdgeHideInput.checked;
+  saveSettings({ topEdgeHideEnabled: els.topEdgeHideInput.checked });
 });
 for (const input of els.floatingBubbleTriggerInputs || []) {
   input.addEventListener('change', () => {
