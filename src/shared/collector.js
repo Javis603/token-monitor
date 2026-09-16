@@ -67,6 +67,12 @@ const {
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 const {
+  buildMavisHistoryGraph,
+  buildMavisPeriods,
+  collectMavisRows,
+  MAVIS_HOME
+} = require('./providers/mavis/usage');
+const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
   isReasonixNativeSessionSidecar,
@@ -943,27 +949,6 @@ function propagateTodayProjects(today, periods) {
       }
       if (session.title && !target.title) target.title = session.title;
       if (session.sessionKind && !target.sessionKind) target.sessionKind = session.sessionKind;
-      // Context occupancy is replaced rather than gap-filled: the derived
-      // periods carry the last full scan's reading, which is older than this
-      // tick's by construction. The copy is unconditional, including a cleared
-      // pair — the fresh scan is the authority, and a tick that read no valid
-      // pair (a DSH model switch drops the occupancy until the next usage chunk
-      // measures against the new window) must clear the stale one rather than
-      // leave the derived period showing a gauge the fresh scan dropped. The
-      // dock card reads month first, so it was the surface that displayed it.
-      target.contextWindow = Number(session.contextWindow) || 0;
-      target.contextTokens = Number(session.contextTokens) || 0;
-      // The turn boundary is copied in all three states, matching what the
-      // fresh scan said: `true` finished, `false` open, absent unknown. Copying
-      // only `true` left a stale `true` in a derived period after its session
-      // picked the next turn back up, and collapsing `false` into "delete" lost the
-      // one value that can clear it — the dock card reads month first, so it kept
-      // showing a finished session while today showed it running.
-      if (session.turnEnded === true || session.turnEnded === false) {
-        target.turnEnded = session.turnEnded;
-      } else {
-        delete target.turnEnded;
-      }
       if (session.startedAt && (!target.startedAt || Date.parse(session.startedAt) < Date.parse(target.startedAt))) {
         target.startedAt = session.startedAt;
       }
@@ -1160,6 +1145,7 @@ async function collectUsageOnce(options) {
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
+  const includesMavis = normalizedClients.split(',').includes('mavis');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -1171,6 +1157,11 @@ async function collectUsageOnce(options) {
   if (qoderCnReadState) {
     qoderCnReadState.periodFailed = false;
     qoderCnReadState.fallbackUsed = false;
+  }
+  const mavisReadState = options.mavisReadState;
+  if (mavisReadState) {
+    mavisReadState.periodFailed = false;
+    mavisReadState.fallbackUsed = false;
   }
   let today = emptyPeriod();
   let month = emptyPeriod();
@@ -1188,6 +1179,9 @@ async function collectUsageOnce(options) {
   let promaPricing = null;
   let qoderCnPeriods = null;
   let qoderCnRows = null;
+  let mavisPeriods = null;
+  let mavisRows = null;
+  let mavisPeriodReadFailed = false;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
   const emitProgress = (periods) => {
@@ -1261,6 +1255,43 @@ async function collectUsageOnce(options) {
         qoderCnPeriods = options.qoderCnFallbackPeriods || null;
       }
     }
+    if (includesMavis && (!targetRequested || targetClients.includes('mavis'))) {
+      // Mavis is read locally and never goes through the tokscale client
+      // filter (locallyParsed: true). The adapter handles its own
+      // sqlite3-CLI / node:sqlite fallback inside readMavisDbRows and
+      // throws on a hard read failure — we surface the error and skip
+      // the partition so the next tick can try again with a fresh
+      // DB handle.
+      //
+      // PI-agent SQLite averages ~3–50 new rows per 5-minute tick (the
+      // runtime writes at p50=6s / p90=29s intervals). When the today
+      // anchor is alive we only need those new rows to patch today's
+      // partition; the month / allTime buckets are kept on the anchor
+      // untouched (`!anchorUsed` is the gate that merges them in). A
+      // `sinceMs = todayStart` read cuts IO from "every row in the
+      // table" (currently ~4k rows, growing) to "rows since local
+      // midnight". Cold-start / full-scan ticks still pull the whole
+      // table so month + allTime can be rebuilt from scratch.
+      const mavisSinceMs = anchorUsed
+        ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime()
+        : undefined;
+      try {
+        mavisRows = await collectMavisRows({ logger: options.logger, sinceMs: mavisSinceMs });
+        const mavisJson = await buildMavisPeriods({ now: collectedAt, allTimeSince, rows: mavisRows });
+        mavisPeriods = {
+          today: extractUsageFromTokscale(mavisJson.today),
+          month: extractUsageFromTokscale(mavisJson.month),
+          allTime: extractUsageFromTokscale(mavisJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`mavis parse failed: ${err.message}`);
+        mavisPeriodReadFailed = true;
+        if (mavisReadState) {
+          mavisReadState.periodFailed = true;
+          mavisReadState.fallbackUsed = Boolean(options.mavisFallbackPeriods);
+        }
+      }
+    }
     throwIfAborted(options.signal);
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
@@ -1311,6 +1342,14 @@ async function collectUsageOnce(options) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
         freshPartitions.qodercn = anchor.todayPartitions.qodercn;
+      }
+      if (mavisPeriods) freshPartitions.mavis = mavisPeriods.today;
+      if (mavisPeriodReadFailed && anchor.todayPartitions?.mavis) {
+        // Mavis / mavis SQLite lives at ~/.minimax/v2/sqlite/runtime-state.sqlite
+        // and is held by the mavis runtime. A transient busy-timeout or other
+        // read failure must not blank the existing today partition or subtract
+        // it from month/allTime — the partition survives for the next tick.
+        freshPartitions.mavis = anchor.todayPartitions.mavis;
       }
       if (!useTargetedPartitions) {
         // The fallback rebuilds every Tokscale partition, but parse-local
@@ -1384,13 +1423,19 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, mavisPeriods.month);
       allTime = mergePeriods(allTime, mavisPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), mavis: mavisPeriods.today };
-    } else if (mavisPeriodReadFailed && !anchorUsed && anchor?.todayPartitions?.mavis) {
-      // pi-agent SQLite holds the lock while the mavis runtime commits;
-      // a transient BUSY or I/O failure must not blank today's mavis
-      // partition or erase month/allTime totals via the emptyPeriod()
-      // fall-back in completeTodayPartitions below. Fall back to the last
-      // full-scan anchor until the next full tick can refresh month/allTime.
-      todayPartitions = { ...(todayPartitions || {}), mavis: anchor.todayPartitions.mavis };
+    } else if (mavisPeriodReadFailed && !anchorUsed && options.mavisFallbackPeriods) {
+      // pi-agent SQLite holds the lock while the mavis runtime commits; a
+      // transient BUSY or I/O failure must not blank today's mavis partition
+      // or erase month/allTime totals via the emptyPeriod() fallback in
+      // completeTodayPartitions below. todayOnlyAnchor is null on full-scan
+      // ticks (see runTick wiring), so the fallback travels explicitly as
+      // options.mavisFallbackPeriods (mirrors qoderCnFallbackPeriods).
+      const fallback = options.mavisFallbackPeriods;
+      if (mavisReadState) mavisReadState.fallbackUsed = true;
+      today = mergePeriods(today, fallback.today);
+      month = mergePeriods(month, fallback.month);
+      allTime = mergePeriods(allTime, fallback.allTime);
+      todayPartitions = { ...(todayPartitions || {}), mavis: fallback.today };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1564,6 +1609,7 @@ async function collectUsageOnce(options) {
       windowsPeriods,
       todayPartitions,
       qoderCnPeriods,
+      mavisPeriods: mavisPeriodReadFailed ? null : mavisPeriods,
       wslBundle,
       wslStatus,
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
@@ -1601,6 +1647,23 @@ async function collectUsageOnce(options) {
         if (typeof options.logger === 'function') options.logger(`qodercn history parse failed: ${err.message}`);
       }
     }
+    // Mavis history graph: reuse the period scan's full rows when present
+    // (non-anchored ticks), or read full rows just for the graph on
+    // anchored ticks. mavis doesn't need a pricing resolver — its
+    // `cost_usd` is the source of truth — so this stays single-pass.
+    let mavisGraph = null;
+    let mavisHistoryReadFailed = false;
+    if (includesMavis) {
+      try {
+        const rows = (mavisRows && mavisRows.length > 0 && mavisRows[0].createdAt && mavisRows[0].createdAt < Date.now() - 30 * 60_000)
+          ? mavisRows
+          : await collectMavisRows({ logger: options.logger });
+        mavisGraph = await buildMavisHistoryGraph({ rows });
+      } catch (err) {
+        mavisHistoryReadFailed = true;
+        if (typeof options.logger === 'function') options.logger(`mavis history parse failed: ${err.message}`);
+      }
+    }
     const historyQoderCnGraph = qoderCnHistoryReadFailed
       ? options.qoderCnHistoryFallbackGraph
       : qoderCnGraph;
@@ -1609,6 +1672,7 @@ async function collectUsageOnce(options) {
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
       qoderCnGraph: historyQoderCnGraph || null,
+      mavisGraph: !mavisHistoryReadFailed ? mavisGraph : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -2157,6 +2221,19 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
     const existingNativeRoots = nativeRoots.filter(dirExists);
     if (existingNativeRoots.length > 0) {
       rootsByClient.reasonix = [...new Set([...(rootsByClient.reasonix || []), ...existingNativeRoots])];
+    }
+  }
+  // Mavis (MiniMax Code) writes token usage to a parse-local SQLite at
+  // ~/.minimax/v2/sqlite/runtime-state.sqlite. Watching the parent
+  // directory lets chokidar wake us on every runtime commit (the
+  // *.sqlite-wal / *.sqlite-shm sidecars fire too — that's fine, our
+  // attribution tolerates multiple events per tick — but we still want
+  // the actual DB file to be in the list so a vacuum/replace never goes
+  // unnoticed).
+  if (enabled.has('mavis')) {
+    const mavisHome = MAVIS_HOME;
+    if (dirExists(mavisHome)) {
+      rootsByClient.mavis = [...new Set([...(rootsByClient.mavis || []), mavisHome])];
     }
   }
   return rootsByClient;
@@ -2938,6 +3015,15 @@ function canonicalWatchFilePath(file) {
 }
 
 function watcherOptions(usePolling, ignored) {
+  // `awaitWriteFinish` delays the event until mtime is stable for the
+  // stabilityThreshold (default 500ms). That's the right call for
+  // config files / JSON logs that get rewritten in one shot, but it
+  // is a trap for SQLite databases written under WAL — mavis runtime
+  // commits a transaction every ~6–30 seconds and the runtime-state
+  // SQLite's mtime keeps changing, so the watcher never emits an event
+  // and smart-mode activity tracking never advances. With WAL the
+  // reader-side `readOnly` open sees a consistent snapshot anyway, so
+  // we can safely drop the gate.
   return {
     ignoreInitial: true,
     persistent: true,
@@ -2945,38 +3031,15 @@ function watcherOptions(usePolling, ignored) {
       ? { usePolling: true, interval: 2000, binaryInterval: 5000 }
       : { usePolling: false }),
     ...(ignored ? { ignored } : {}),
-    awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 200 }
+    awaitWriteFinish: false
   };
 }
 
-// Clients whose SQLite wal-index sidecar our own read-only scan recreates.
-//
-// Opening a WAL database read-only still maps the shared-memory index, and
-// SQLite rewrites <db>-shm when it does. That write is indistinguishable from a
-// real data change to a filesystem watcher, so watching the sidecar re-triggers
-// the scan that caused it: watch event -> targeted scan -> shm write -> watch
-// event, forever. Measured on darwin for zcode: 0 shm changes while idle over
-// 40s, then 20 of 20 consecutive tokscale zcode --today scans rewrote
-// db.sqlite-shm. The same shape was already fixed for Qoder CN (#301), where it
-// was 142 events/5min with the client stopped.
-//
-// Only the sidecar is dropped. The real data signal lives in the database and
-// its -wal, so a genuine change still produces an event; a client whose scan was
-// measured NOT to rewrite its sidecar (micode) is deliberately absent here, and
-// adding a client to this list asserts a measurement rather than a hunch.
-const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['qodercn', 'zcode']);
-
-function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
-  // Match SQLite's wal-index suffix, not one client's database basename: ZCode's
-  // file is db.sqlite-shm, whose name does not contain '.db-'. The suffix is
-  // required to be one of the SQLite extensions this collector's clients use, so
-  // the match cannot widen into an unrelated '-shm' sidecar, and it never matches
-  // the -wal or the database itself.
-  const name = path.basename(String(filePath || ''));
-  if (!/^[^/]+\.(?:db|sqlite|sqlite3)-shm$/.test(name)) return false;
+function isQoderCnSelfWatchEvent(filePath, rootsByClient = {}) {
+  if (!filePath || !path.basename(filePath).endsWith('.db-shm')) return false;
   const resolved = path.resolve(filePath);
-  return SELF_WATCHED_SQLITE_SIDECAR_CLIENTS.some((client) => (rootsByClient[client] || [])
-    .some((root) => resolved.startsWith(path.resolve(root) + path.sep)));
+  return (rootsByClient.qodercn || [])
+    .some((root) => resolved.startsWith(path.resolve(root) + path.sep));
 }
 
 function startCollector(options) {
@@ -3172,6 +3235,11 @@ function startCollector(options) {
           month: saved.month,
           allTime: saved.allTime,
           qoderCnPeriods: saved.qoderCnPeriods || null,
+          // Carry over the last-known-good mavis periods so a restart into a
+          // cold-start full-scan tick can recover from a transient SQLite
+          // BUSY without blanking today's mavis totals. Replaced by the
+          // next successful full scan via the anchored tick update below.
+          mavisPeriods: saved.mavisPeriods || null,
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -3253,6 +3321,7 @@ function startCollector(options) {
     try {
       let captured = null;
       const qoderCnReadState = { periodFailed: false };
+      const mavisReadState = { periodFailed: false };
       const summary = await collectUsageOnce({
         ...options,
         signal: runtimeSignal,
@@ -3298,6 +3367,8 @@ function startCollector(options) {
         qoderCnFallbackPeriods: anchor?.qoderCnPeriods || null,
         qoderCnHistoryFallbackGraph: qoderCnHistoryGraph,
         qoderCnReadState,
+        mavisFallbackPeriods: anchor?.mavisPeriods || null,
+        mavisReadState,
         onAnchorComputed: (x) => { captured = x; },
         onQoderCnHistoryGraph: (graph) => { qoderCnHistoryGraph = graph; },
         onProgress: (partial) => {
@@ -3372,6 +3443,7 @@ function startCollector(options) {
           allTime: captured.windowsPeriods.allTime,
           todayPartitions: captured.todayPartitions,
           qoderCnPeriods: captured.qoderCnPeriods,
+          mavisPeriods: captured.mavisPeriods,
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {})
         };
@@ -3387,6 +3459,7 @@ function startCollector(options) {
               month: anchor.month,
               allTime: anchor.allTime,
               qoderCnPeriods: anchor.qoderCnPeriods,
+              mavisPeriods: anchor.mavisPeriods,
               wslBundle: wslAnchor,
               wslStatus: wslStatusAnchor,
               ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
@@ -3406,6 +3479,9 @@ function startCollector(options) {
             month: applyPeriodDelta(anchor.qoderCnPeriods.month, captured.qoderCnPeriods.today, anchor.qoderCnPeriods.today),
             allTime: applyPeriodDelta(anchor.qoderCnPeriods.allTime, captured.qoderCnPeriods.today, anchor.qoderCnPeriods.today)
           };
+        }
+        if (captured.mavisPeriods && (!mavisReadState || !mavisReadState.periodFailed)) {
+          anchor.mavisPeriods = captured.mavisPeriods;
         }
         if (captured.nativeSessions) anchor.nativeSessions = captured.nativeSessions;
         if (captured.nativeProjects) anchor.nativeProjects = captured.nativeProjects;
@@ -3701,10 +3777,14 @@ function startCollector(options) {
       // The quit path leaves the watcher open (see stop), so events can still
       // arrive after the collector is done with them.
       if (stopped) return;
-      // Drop the wal-index sidecar of clients whose own scan recreates it, so
-      // the collector cannot re-trigger itself. See
-      // SELF_WATCHED_SQLITE_SIDECAR_CLIENTS for the measured per-client evidence.
-      if (isSelfWatchSqliteSidecarEvent(filePath, rootsByClient)) return;
+      // Our own read-only opens of Qoder CN's local.db recreate its SQLite
+      // wal-index (local.db-shm), so watching that sidecar re-triggers the
+      // watch loop forever — confirmed: 142 events/5min with Qoder CN fully
+      // stopped, dropping to 0 after this filter. The real data signal lives
+      // in local.db / local.db-wal, so drop *.db-shm events under the
+      // qodercn roots only. (hermes/micode may share this pattern upstream —
+      // out of scope here, their watch behaviour is left untouched.)
+      if (isQoderCnSelfWatchEvent(filePath, rootsByClient)) return;
       activityRevision += 1;
       if (tickPending) {
         pendingActivityRevision = pendingActivityRevision === null
@@ -3945,7 +4025,7 @@ module.exports = {
   // read or pin a client's floor directly instead of inferring it from tick
   // timings; the collector never takes a second instance.
   selfSyncThrottle,
-  isSelfWatchSqliteSidecarEvent,
+  isQoderCnSelfWatchEvent,
   shouldIncludeHistory,
   spawnTokscaleHelp,
   startCollector,
