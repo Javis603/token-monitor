@@ -63,11 +63,14 @@
   const VENDOR_ORDER = [
     'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline',
     'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
-    'openrouter', 'gemini', 'qoder', 'deepseek', 'xai', 'meta', 'mistral', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'minimax', 'doubao', 'hunyuan', 'volcengine', 'ollama', 'trae', 'alibaba', 'thirdparty',
-    // Mavis (MiniMax Code) — locally-parsed pi-agent SQLite. Slot it at the
-    // end of the catalogue so the order stays stable for users who already
-    // picked themes and the row appears next to its MiniMax brand cousin.
-    'mavis'
+    'openrouter', 'gemini', 'qoder', 'deepseek', 'xai', 'meta', 'mistral', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'minimax',
+    // Mavis (MiniMax Code) — locally-parsed pi-agent SQLite. Slot it next to
+    // its MiniMax brand cousin (same company) so the row sits with the
+    // related local parser. 'thirdparty' remains the universal fallback and
+    // MUST stay last; tests in tests/electron/thirdPartySettings.test.js
+    // assert VENDOR_ORDER.at(-1) === 'thirdparty'.
+    'mavis',
+    'doubao', 'hunyuan', 'volcengine', 'ollama', 'trae', 'alibaba', 'thirdparty'
   ];
 
   // Display labels for every vendor in the clientColors map. The widget also
