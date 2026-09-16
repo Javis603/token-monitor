@@ -2001,6 +2001,11 @@ function clientSourceRoots(clientsCsv, options = {}) {
   );
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
+  // Mavis (MiniMax Code) — pi-agent local SQLite under the user home.
+  // This is a parse-local adapter, not a tokscale client: the watcher is
+  // only here so health checks see the path; collector reads it through
+  // providers/mavis/usage.js.
+  add('mavis', ['mavis-sqlite', path.join(home, '.minimax', 'v2', 'sqlite')]);
   // Qoder CN — SQLite DB under the platform Application Support dir.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform: process.platform, env: process.env });
   add('qodercn', ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]));
