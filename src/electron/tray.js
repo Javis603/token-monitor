@@ -287,6 +287,7 @@ const OPEN_VIEW_MENU_ITEMS = [
 
 function buildTrayMenuTemplate(options = {}) {
   const state = options.state || {};
+  const platform = options.platform || process.platform;
   const presentation = state.trayMode ? 'tray' : state.windowBehavior;
   const callback = (name) => (typeof options[name] === 'function' ? options[name] : () => {});
   const t = (key, params) => {
@@ -355,7 +356,17 @@ function buildTrayMenuTemplate(options = {}) {
     { type: 'separator' },
     { label: t('trayMenu.version', { version: state.appVersion || '' }), enabled: false },
     { label: t('trayMenu.settings'), click: callback('onOpenSettings') },
-    { label: t('trayMenu.quit'), click: callback('onQuit') }
+    {
+      label: t('trayMenu.quit'),
+      // macOS already binds Cmd+Q to the app menu's quit role, so echoing it
+      // here matches the platform convention (and Typeless-style menus) without
+      // inventing a binding. The hint is macOS-only and display-only: no other
+      // platform has that default, and a tray-menu accelerator there is
+      // registered with the system, which would grab Cmd/Ctrl+Q from every
+      // other app on the machine.
+      ...(platform === 'darwin' ? { accelerator: 'Command+Q', registerAccelerator: false } : {}),
+      click: callback('onQuit')
+    }
   ];
 }
 
@@ -391,6 +402,7 @@ function createTray({
   const menuState = () => (typeof getMenuState === 'function' ? getMenuState() : {});
   const buildMenu = (state = menuState()) => Menu.buildFromTemplate(buildTrayMenuTemplate({
     state,
+    platform,
     onOpenSettings,
     onOpenView,
     onQuit,
