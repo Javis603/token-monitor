@@ -11,21 +11,26 @@ const {
   macWidgetSnapshotNeedsWrite
 } = require('../shared/macWidgetSnapshot');
 const { validateAppGroupSyntax } = require('../shared/macWidgetConfig');
+const { resolveMacAppGroupContainerPath } = require('./macAppGroupContainer');
 
 function resolveMacWidgetSnapshotPath(options = {}) {
   const platform = options.platform || process.platform;
   if (platform !== 'darwin') return null;
   const appGroup = String(options.appGroup || '').trim();
-  const home = String(options.home || '').trim();
   const snapshotFileName = String(options.snapshotFileName || 'snapshot.json').trim();
-  if (!home) return null;
   try {
     validateAppGroupSyntax(appGroup);
   } catch (_) {
     return null;
   }
   if (!snapshotFileName || path.basename(snapshotFileName) !== snapshotFileName) return null;
-  return path.join(home, 'Library', 'Group Containers', appGroup, snapshotFileName);
+  const resolveContainerPath = options.resolveContainerPath || resolveMacAppGroupContainerPath;
+  const containerPath = resolveContainerPath(appGroup, {
+    platform,
+    logger: options.logger
+  });
+  if (!containerPath) return null;
+  return path.join(containerPath, snapshotFileName);
 }
 
 function safeLog(logger, message) {

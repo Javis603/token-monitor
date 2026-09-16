@@ -2065,7 +2065,8 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     path.join('Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent'),
     path.join('.local', 'share', 'kiro-cli'),
     path.join('.codebuddy', 'projects'),
-    path.join('.workbuddy', 'projects')
+    path.join('.workbuddy', 'projects'),
+    path.join('.workbuddy-ai', 'projects')
   ]);
   fs.writeFileSync(path.join(tmp, '.local', 'share', 'kilo', 'kilo.db'), '');
   const originalHomedir = os.homedir;
@@ -2096,6 +2097,7 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     // collector code, not this cross-platform test.
     assert.ok(dirs.includes(path.join(tmp, '.codebuddy', 'projects')));
     assert.ok(dirs.includes(path.join(tmp, '.workbuddy', 'projects')));
+    assert.ok(dirs.includes(path.join(tmp, '.workbuddy-ai', 'projects')));
     assert.deepEqual(clientDataDirPresence('pi,zed,kilo,micode,zcode,kiro,codebuddy,workbuddy'), {
       pi: true, zed: true, kilo: true, micode: true, zcode: true, kiro: true, codebuddy: true, workbuddy: true
     });
@@ -4351,7 +4353,7 @@ test('smart collection acknowledges the latest activity revision after tick coal
   }
 });
 
-// tokscale resolves opencode, zed and micode through `PathRoot::XdgData`
+// tokscale resolves opencode, zed, micode and amp through `PathRoot::XdgData`
 // (clients.rs) and the CodeBuddy extension logs through `dirs::data_local_dir()`,
 // which is the XDG data home on Linux. Kiro's CLI database is the deliberate
 // exception: tokscale spells it as a home-relative literal, so following XDG
@@ -4359,7 +4361,7 @@ test('smart collection acknowledges the latest activity revision after tick coal
 test('XDG_DATA_HOME moves exactly the roots tokscale resolves through it', () => {
   const tmp = withTmpHome([]);
   const xdg = path.join(tmp, 'custom-xdg');
-  for (const dir of ['opencode', 'zed/threads', 'mimocode', 'CodeBuddyExtension/Logs']) {
+  for (const dir of ['opencode', 'zed/threads', 'mimocode', 'amp/threads', 'CodeBuddyExtension/Logs']) {
     fs.mkdirSync(path.join(xdg, dir), { recursive: true });
   }
   fs.mkdirSync(path.join(tmp, '.local', 'share', 'kiro-cli'), { recursive: true });
@@ -4369,10 +4371,11 @@ test('XDG_DATA_HOME moves exactly the roots tokscale resolves through it', () =>
   process.env.XDG_DATA_HOME = xdg;
   try {
     const { watchPathsForClients } = freshCollector();
-    const roots = watchPathsForClients('opencode,zed,micode,codebuddy,kiro');
+    const roots = watchPathsForClients('opencode,zed,micode,amp,codebuddy,kiro');
     assert.ok(roots.includes(path.join(xdg, 'opencode')));
     assert.ok(roots.includes(path.join(xdg, 'zed', 'threads')));
     assert.ok(roots.includes(path.join(xdg, 'mimocode')));
+    assert.ok(roots.includes(path.join(xdg, 'amp', 'threads')));
     if (process.platform !== 'win32' && process.platform !== 'darwin') {
       assert.ok(roots.includes(path.join(xdg, 'CodeBuddyExtension', 'Logs')));
     }
@@ -4394,16 +4397,18 @@ test('an unset XDG_DATA_HOME falls back to the .local/share roots', () => {
   const tmp = withTmpHome([
     path.join('.local', 'share', 'opencode'),
     path.join('.local', 'share', 'zed', 'threads'),
-    path.join('.local', 'share', 'mimocode')
+    path.join('.local', 'share', 'mimocode'),
+    path.join('.local', 'share', 'amp', 'threads')
   ]);
   const originalHomedir = os.homedir;
   os.homedir = () => tmp;
   try {
     const { watchPathsForClients } = freshCollector();
-    const roots = watchPathsForClients('opencode,zed,micode');
+    const roots = watchPathsForClients('opencode,zed,micode,amp');
     assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'opencode')));
     assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'zed', 'threads')));
     assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'mimocode')));
+    assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'amp', 'threads')));
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];

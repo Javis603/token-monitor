@@ -105,23 +105,25 @@ const settingsIconAssets = {
 };
 
 test('preference drag only selects sortable rows, not nested controls', () => {
-  const body = functionBody(readRendererFile('app.js'), 'preferenceRows', 'preferenceOrder');
+  const body = functionBody(readRendererFile('app.js'), 'preferenceRows', 'applyPreferenceOrder');
   assert.match(body, /\.tool-preference-row\[data-client\]/);
   assert.match(body, /\.limit-provider-row\[data-provider\]/);
   assert.match(body, /\.view-preference-row\[data-view\]/);
+  assert.match(body, /\.home-module-preference-row\[data-home-module\]/);
+  assert.match(body, /\.home-limit-provider-row\[data-home-limit-provider\]/);
+  assert.match(body, /\.status-provider-row\[data-status-provider\]/);
   assert.doesNotMatch(body, /querySelectorAll\(`\\\[data-\$\{attr\}\\\]`\)/);
 });
 
-// The handle-based lists still reorder by moving DOM nodes as the pointer
-// travels, with no transform animation. The two whole-row lists moved to the
-// transform model and carry their own guards in limitProviderDrag.test.js.
-test('handle-based preference drag does not animate row transforms during pointer movement', () => {
+test('main-screen rows use transform drag while retaining their handles', () => {
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
-  assert.doesNotMatch(app, /animatePreferenceOrderChange/);
-  assert.doesNotMatch(app, /translateY\(/);
-  assert.doesNotMatch(cssRule(css, '.view-preference-row'), /transform/);
+  assert.match(css, /\.view-preference-row,[\s\S]*?\.status-provider-row \{[\s\S]*?transform: translateY\(calc\(var\(--drag-y, 0px\) \+ var\(--drag-shift, 0px\)\)\)/);
   assert.doesNotMatch(cssRule(css, '.preference-order-handle'), /transition:\s*transform/);
+  const handle = functionBody(app, 'createPreferenceOrderHandle', 'expandedPreferenceSubgroups');
+  assert.match(handle, /addEventListener\('keydown'/);
+  assert.doesNotMatch(handle, /addEventListener\('pointerdown'/);
+  assert.doesNotMatch(app, /TokenMonitorPreferenceDragSort|startPreferenceDrag|preferenceDrag =/);
 });
 
 test('tool preference controls place compact actions beside the note without duplicate headers', () => {
@@ -267,7 +269,47 @@ test('a press on the tool row own controls never arms a drag', () => {
   assert.match(wiring, /clientDisplayPreferencesApi\.clientDisplayOrderCommit\(order, KNOWN_CLIENTS, state\.settings\?\.clientDisplayOrder, state\.settings\?\.pinnedClients, id\)/);
   assert.match(wiring, /persistOrder: \(_order, _id, patch\) => void saveSettings\(patch\)/);
   assert.doesNotMatch(wiring, /onPreferenceOrderCommit\(/);
-  assert.doesNotMatch(functionBody(app, 'onPreferenceOrderCommit', 'onPreferenceOrderKeydown'), /clientDisplayOrder|pinnedClients/);
+});
+
+test('all four Main Screen lists use the shared controller from their handles', () => {
+  const app = readRendererFile('app.js');
+  const wiring = functionBody(app, 'createMainPreferenceRowDrag', 'deferMainPreferenceRender');
+  assert.match(wiring, /rowDragControllerApi\.createRowDragController/);
+  assert.match(wiring, /dragExcluded: MAIN_PREFERENCE_DRAG_EXCLUDED/);
+  assert.match(wiring, /dragStartSelector: '\.preference-order-handle'/);
+  assert.match(wiring, /mirrorOrder:[\s\S]*?state\.settings = \{ \.\.\.state\.settings, \[settingKey\]: value \}/);
+  assert.match(wiring, /persistOrder:[\s\S]*?saveSettings\(\{ \[settingKey\]: value \}\)/);
+
+  for (const [controller, renderer, id] of [
+    ['viewPreferenceRowDrag', 'renderViewPreferences', 'view'],
+    ['homeModulePreferenceRowDrag', 'renderHomeSettingsList', 'homeModule'],
+    ['homeLimitProviderRowDrag', 'renderHomeLimitProviderList', 'homeLimitProvider'],
+    ['statusProviderRowDrag', 'renderServiceProviderList', 'statusProvider']
+  ]) {
+    const start = app.indexOf(`function ${renderer}(`);
+    const next = app.indexOf('\nfunction ', start + 10);
+    const body = app.slice(start, next);
+    assert.match(body, new RegExp(`row\\.addEventListener\\('pointerdown',[\\s\\S]*?${controller}\\.startRowDrag\\(event, id\\)`));
+    assert.match(body, new RegExp(`createPreferenceOrderHandle\\(\\{ kind: '${id}'`));
+  }
+
+  assert.match(app, /const MAIN_PREFERENCE_DRAG_EXCLUDED = 'button:not\(\.preference-order-handle\), input, select, textarea, a, label, \.accordion-animated-container';/);
+  assert.match(app, /if \(deferMainPreferenceRender\(\)\) return;/);
+});
+
+test('Main Screen drag keeps expandable rows and their panels together', () => {
+  const app = readRendererFile('app.js');
+  const apply = functionBody(app, 'applyPreferenceOrder', 'createPreferenceOrderHandle');
+  assert.match(apply, /home: 'homeSettingsContainer'/);
+  assert.match(apply, /status: 'serviceProvidersContainer'/);
+  assert.match(apply, /limits: 'homeLimitProviderContainer'/);
+  assert.match(apply, /if \(companion\) list\.appendChild\(companion\)/);
+
+  const expand = functionBody(app, 'setPreferenceSubgroupsExpanded', 'togglePreferenceSubgroup');
+  assert.match(expand, /state\[stateKey\] = open/);
+  assert.match(expand, /classList\.toggle\('hidden', !open\)/);
+  assert.match(app, /getExpanded: \(\) => expandedPreferenceSubgroups\(VIEW_PREFERENCE_SUBGROUPS\)/);
+  assert.match(app, /getExpanded: \(\) => expandedPreferenceSubgroups\(HOME_MODULE_SUBGROUPS\)/);
 });
 
 test('view preferences place compact actions beside the note without duplicate headers', () => {

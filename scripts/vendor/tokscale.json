@@ -1,60 +1,60 @@
 {
   "mode": "override",
-  "modeNote": "\"override\": ensure-vendored-tokscale.js swaps in the pinned fork build described below, and the two verify-vendored-tokscale*.js gates run against it. \"upstream\": ensure-vendored-tokscale.js no-ops (no download or replacement) and the plain npm-installed tokscale is authoritative — but both verify-vendored-tokscale*.js gates keep running, now against that npm-installed binary, so CI still fails if it doesn't actually cover DEFAULT_CLIENTS or regressed DSH parsing. Flip to this once package.json's tokscale dependency is bumped to an official release that already contains the commit below. The pin fields (commit/releaseTag/platforms) stay in place either way, so flipping back to \"override\" for a future upstream lag is editing this file again rather than re-adding infrastructure; baseVersion is not one of them — it tracks the installed dependency in both modes (see baseVersionNote).",
+  "modeNote": "\"override\": ensure-vendored-tokscale.js swaps in the pinned fork build described below, and the two verify-vendored-tokscale*.js gates run against it. \"upstream\": ensure-vendored-tokscale.js no-ops (no download or replacement) and the plain npm-installed tokscale is authoritative — but both verify-vendored-tokscale*.js gates keep running, now against that npm-installed binary, so CI still fails if it doesn't actually cover DEFAULT_CLIENTS or regressed DSH parsing. `override` remains required while Token Monitor depends on downstream functionality the installed upstream release does not provide. The upstream scanner and DSH patches may be retired once equivalent fixes ship officially; the session/workspace reporting capability is a persistent Token Monitor requirement, so flipping to `upstream` is correct only when an official release provides an equivalent report surface. Without it the collector still runs (the scan falls back to `client,session,model` and the file-reading resolvers answer), but scan-backed session timestamps and project attribution narrow to the clients that have a resolver. The pin fields (commit/releaseTag/platforms) stay in place either way, so flipping back to \"override\" for a future upstream lag is editing this file again rather than re-adding infrastructure; baseVersion is not one of them — it tracks the installed dependency in both modes (see baseVersionNote).",
   "upstream": "junhoyeo/tokscale",
   "fork": "Javis603/tokscale",
-  "commit": "7f95725d107878966f05837b6f0fd916cccd5417",
+  "commit": "09cf5471e48064c04be5f81e2b766538caf55e04",
   "commitTitle": "feat(report): join sessions to workspaces and expose session activity",
-  "baseVersion": "4.15.1",
+  "baseVersion": "4.17.0",
   "baseVersionNote": "The npm-installed @tokscale/cli-<platform> package version this manifest is aligned with. It tracks the dependency in BOTH modes, and two gates enforce that: ensure-vendored-tokscale.js refuses to swap under \"override\" when the installed package reports something else, and verify-vendored-tokscale-release.js (plus its real-manifest test, so npm run verify catches it too) rejects any manifest whose baseVersion disagrees with @tokscale/cli optionalDependencies. So a tokscale bump always has to touch this file — either pin a new build or flip the mode — instead of silently leaving a stale override in place.",
   "releaseRepo": "Javis603/tokscale",
-  "releaseTag": "token-monitor-7f95725d",
-  "reason": "Tokscale 4.15.1 predates the upstream fixes through d9a45a65, the downstream DSH fixes through 0158c14e, and the downstream session/workspace report additions in 7f95725d. Token Monitor uses this pinned fork build for the client,workspace,session,model grouping and the sessions/workspaces arrays its collector reads, and until an official release contains the required upstream and DSH fixes.",
+  "releaseTag": "token-monitor-09cf5471",
+  "reason": "Tokscale 4.17.0 is the new baseline; it upstreams the DSH version-tagged transcript discovery (11d24ec5) that previously lived only on the fork, and adds Kimi response duration, Cline per-message model identity, OpenRouter pricing tier/separator fixes, Antigravity CLI step timestamps, and WorkBuddy 5.5 root scanning. Token Monitor still carries two downstream DSH correctness fixes that upstream has not absorbed (streamed assistant attempts 1425488c, v3 inherited seed boundaries 8a93308b) plus the vendor-release workflow. Token Monitor also depends on the session/workspace reporting capability in 09cf5471, including the client,workspace,session,model grouping and the sessions/workspaces metadata its collector reads. That capability remains required regardless of whether the fork or a future upstream release supplies it.",
   "platforms": {
     "android-arm64": {
       "package": "@tokscale/cli-android-arm64",
       "asset": "tokscale-android-arm64",
-      "sha256": "98aa8239e26b2d6c3ab03c31d9b9ea4d71991914ac5e5462579d9dbdbc1ee297"
+      "sha256": "f752e8e2de16029de04615df1003e38dd9be49295d19832ee675f934948f5075"
     },
     "darwin-arm64": {
       "package": "@tokscale/cli-darwin-arm64",
       "asset": "tokscale-darwin-arm64",
-      "sha256": "3ec05c40a4c9880f700532eca64bbb07289bc5e7c52f9d0954ecedc55dfcb537"
+      "sha256": "411786fe4ea32b5e281a8e3ec91909b0d22d9dcf8bccafb71e0c2cdc542a6329"
     },
     "darwin-x64": {
       "package": "@tokscale/cli-darwin-x64",
       "asset": "tokscale-darwin-x64",
-      "sha256": "ee5e3dc52c7100338bf6fd74a395a94aae6c27bee33b46dbdd56197605b78c41"
+      "sha256": "ad6048c1424bdd6c301278359b957b8616985a0dfe64d411ce45b3e319309cc0"
     },
     "linux-arm64": {
       "package": "@tokscale/cli-linux-arm64-gnu",
       "asset": "tokscale-linux-arm64",
-      "sha256": "8c602f096cd299f6728e440e28328869278921dfe8524b0b1a7368efb9417ec3"
+      "sha256": "9e9859e55b56b17fb268213509cbbad7b6794d599b73222925f48d74fcc28e18"
     },
     "linux-arm64-musl": {
       "package": "@tokscale/cli-linux-arm64-musl",
       "asset": "tokscale-linux-arm64-musl",
-      "sha256": "528f9dadb32daa67750ebbcf8a111aac9c0bc04d74ab4e10a4599c547f4c54a8"
+      "sha256": "1ca46c3bad7dda8e8396164f0475d786f0baf9ffe7d37a823c4ce4ff46613cc5"
     },
     "linux-x64": {
       "package": "@tokscale/cli-linux-x64-gnu",
       "asset": "tokscale-linux-x64",
-      "sha256": "2bdbe7b976988807c63f64df36800d0f008c354e80a3d49c590950eb49a3f5bb"
+      "sha256": "8c2bd407fc36cb6e20fb6484e49237c351e1506ef83f3a414cb8d4759af94166"
     },
     "linux-x64-musl": {
       "package": "@tokscale/cli-linux-x64-musl",
       "asset": "tokscale-linux-x64-musl",
-      "sha256": "86cc47d1955cbc2f34df7200d24b4deae6bafb8c4cf7a02ba3ed07a3a751a04d"
+      "sha256": "10d73deb4e9b7867d59ce6d487b817ed3065a0d13246b1cc6d5e3ebb698343e5"
     },
     "win32-arm64": {
       "package": "@tokscale/cli-win32-arm64-msvc",
       "asset": "tokscale-win32-arm64.exe",
-      "sha256": "9e5524a81f5596c129f8150e28cf9b7a03c281c28f21df559f2dc5c5ee561c2f"
+      "sha256": "0bb87af1df9ce1de768b4b557b3a87f836b9055a0da5d930baf4f27937119cf4"
     },
     "win32-x64": {
       "package": "@tokscale/cli-win32-x64-msvc",
       "asset": "tokscale-win32-x64.exe",
-      "sha256": "2eea01f7cddceec887a8dfce3ce730f45bd1c5f36e669e54c6175df7c0405af2"
+      "sha256": "17823a5d2bc7d522c8eb577c43c64b8d6e9d99ccfd54ba0fd2664a7d06f44f1a"
     }
   }
 }

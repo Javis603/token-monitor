@@ -11,6 +11,14 @@ const read = (file) => fs.readFileSync(path.join(rootDir, file), 'utf8');
 
 const localizedReadmes = ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md'];
 
+const nativeMacWidgetCopy = {
+  'README.md': '- **Native macOS Widgets** — View token usage and cost, trends, AI tool quota remaining and reset times, activity heatmaps, and breakdowns by tool or model in Small, Medium, and Large layouts on macOS 14+',
+  'README.zh-TW.md': '- **原生 macOS 小工具**：在 macOS 14+ 上透過小型、中型與大型版面查看 Token 用量與成本、趨勢、各 AI 工具的剩餘額度與重設時間、活動熱圖，以及依工具或模型分類的明細',
+  'README.zh-CN.md': '- **原生 macOS 小部件**：在 macOS 14+ 上通过小号、中号和大号布局查看 Token 用量与成本、趋势、各 AI 工具的剩余额度与重置时间、活动热力图，以及按工具或模型分类的明细',
+  'README.ja.md': '- **ネイティブ macOS ウィジェット** — macOS 14 以降で、小・中・大サイズのレイアウトにトークン使用量とコスト、推移、AI ツールごとのクォータ残量とリセット時刻、アクティビティヒートマップ、ツール・モデル別の内訳を表示します',
+  'README.ko.md': '- **네이티브 macOS 위젯** — macOS 14 이상에서 소형·중형·대형 레이아웃으로 토큰 사용량과 비용, 추세, AI 도구별 잔여 할당량과 재설정 시간, 활동 히트맵, 도구·모델별 분석을 확인할 수 있습니다'
+};
+
 // The supported-tools table is what a reader can actually verify, so the prose counts are
 // checked against it — not against LIMIT_PROVIDER_IDS, where zai/zaiteam are two ids but
 // share one table row.
@@ -51,6 +59,8 @@ const supportedToolOrder = [
   'Cursor IDE / Cursor CLI',
   'Antigravity',
   'Cline',
+  'Amp',
+  'Factory Droid',
   'Kimi CLI / Kimi Code / Kimi Work',
   'Qwen CLI',
   'Grok Build',
@@ -89,6 +99,8 @@ const supportedToolIdOrder = [
   'cursor',
   'antigravity',
   'cline',
+  'amp',
+  'droid',
   'kimi',
   'qwen',
   'xai',
@@ -173,6 +185,14 @@ test('localized READMEs list the same supported tools', () => {
   }
 });
 
+test('localized READMEs describe native macOS Widget data and layouts', () => {
+  for (const [file, copy] of Object.entries(nativeMacWidgetCopy)) {
+    const text = read(file);
+    assert.ok(text.includes(copy), file);
+    assert.doesNotMatch(text, /source-only preview|源码预览|原始碼預覽|소스 코드 미리보기|ソースコード上のプレビュー/, file);
+  }
+});
+
 test('localized READMEs disclose the LM Studio server-log tracking boundary', () => {
   for (const file of localizedReadmes) {
     const text = read(file);
@@ -198,6 +218,7 @@ test('localized READMEs disclose the LM Studio server-log tracking boundary', ()
 // The table's icon id is not always the provider id (a tool row is named after
 // its artwork), and GLM/GLM Team share one row, so the two are bridged here.
 const README_ICON_TO_LIMIT_PROVIDERS = {
+  droid: ['factory'],
   xai: ['grok'],
   'mimo-code': ['mimo'],
   zcode: ['zai', 'zaiteam']

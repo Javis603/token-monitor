@@ -50,7 +50,7 @@ const SESSION_TEXT_KEYS = [
   'name', 'preview', 'firstUserMessage', 'first_user_message',
   'customTitle', 'custom_title', 'aiTitle', 'ai_title'
 ];
-const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'minimax']);
+const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'factory', 'minimax']);
 
 function asNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -235,9 +235,11 @@ function normalizeClientName(value) {
   if (raw.includes('gemini')) return 'gemini';
   if (raw.includes('cursor')) return 'cursor';
   if (raw.includes('antigravity')) return 'antigravity';
+  if (raw === 'amp') return 'amp';
   if (raw.includes('kimi')) return 'kimi';
   if (raw.includes('qwen')) return 'qwen';
   if (raw.includes('grok')) return 'grok';
+  if (raw === 'droid') return 'droid';
   if (raw.includes('copilot')) return 'copilot';
   if (/\bpi\b/.test(raw)) return 'pi';
   if (raw.includes('zed')) return 'zed';

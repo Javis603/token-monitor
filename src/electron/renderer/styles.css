@@ -675,6 +675,8 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   gap: 2px;
 }
 .settings-item-title { color: var(--text); }
+.model-alias-example { overflow-wrap: anywhere; }
+
 .settings-item-desc,
 p.settings-note.settings-item-desc,
 span.settings-note.settings-item-desc {
@@ -1300,15 +1302,15 @@ span.settings-note.settings-item-desc {
 .codex-login-details .codex-login-output { margin-top: 6px; }
 .settings-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .settings-note code { padding: 1px 5px; border-radius: 3px; background: rgba(var(--overlay-rgb), 0.06); font-size: 10px; }
-.kimi-cookie-steps { text-wrap: pretty; }
-.kimi-api-fallback {
+.kimi-web-steps { text-wrap: pretty; }
+.kimi-web-fallback {
   min-width: 0;
   padding-top: 10px;
   border-top: 1px solid rgba(var(--line-rgb), 0.075);
   color: var(--muted);
   font-size: 10px;
 }
-.kimi-api-fallback summary {
+.kimi-web-fallback summary {
   width: max-content;
   max-width: 100%;
   color: var(--text);
@@ -1318,13 +1320,13 @@ span.settings-note.settings-item-desc {
   line-height: 1.35;
   user-select: none;
 }
-.kimi-api-fallback summary::marker { color: var(--muted); }
-.kimi-api-fallback summary:focus-visible {
+.kimi-web-fallback summary::marker { color: var(--muted); }
+.kimi-web-fallback summary:focus-visible {
   border-radius: 3px;
   outline: 1px solid rgba(115, 189, 245, 0.72);
   outline-offset: 3px;
 }
-.kimi-api-fallback-body {
+.kimi-web-fallback-body {
   display: grid;
   gap: 8px;
   margin-top: 8px;
@@ -2517,13 +2519,6 @@ span.settings-note.settings-item-desc {
   opacity: 0.34;
   cursor: default;
 }
-.view-preference-row.is-dragging,
-.home-module-preference-row.is-dragging,
-.home-limit-provider-row.is-dragging {
-  background: rgba(var(--accent-rgb), 0.08);
-  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.28);
-  opacity: 0.9;
-}
 .reset-appearance-button {
   /* Glyph label, same reason as .tool-header-action. */
   font-size: 16px;
@@ -3492,13 +3487,68 @@ html.is-windows .settings-panel select option {
 }
 
 .row { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid rgba(var(--line-rgb), 0.12); }
-.breakdown.large-session-list .session-row {
-  contain-intrinsic-block-size: auto 72px;
+.session-pager-host {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
 }
-.breakdown.large-session-list.large-session-list-ready .session-row {
-  content-visibility: auto;
-  contain: layout paint style;
+.session-pager {
+  display: grid;
+  width: min(208px, 100%);
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  align-items: center;
+  min-height: 24px;
+  margin-inline: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
+.session-page-status {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  line-height: 1;
+  opacity: 0.78;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-page-button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.72;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+.session-page-button:hover:not(:disabled) {
+  color: var(--text);
+  opacity: 1;
+}
+.session-page-button:focus-visible {
+  box-shadow: inset 0 -1px 0 rgba(var(--accent-rgb), 0.58);
+  color: var(--text);
+  opacity: 1;
+}
+.session-page-button:disabled { cursor: default; opacity: 0.28; }
+.session-page-icon {
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+  mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+}
+.session-page-next .session-page-icon { transform: rotate(180deg); }
 .row-head { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
 .row-name { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 8px; color: var(--text); }
 .dot {
@@ -3525,6 +3575,9 @@ html.is-windows .settings-panel select option {
 .row-icon-cursor     { -webkit-mask-image: url(../../../assets/icons/cursor.svg);        mask-image: url(../../../assets/icons/cursor.svg); }
 .row-icon-antigravity { -webkit-mask-image: url(../../../assets/icons/antigravity.svg);   mask-image: url(../../../assets/icons/antigravity.svg); }
 .row-icon-cline      { -webkit-mask-image: url(../../../assets/icons/cline.svg);         mask-image: url(../../../assets/icons/cline.svg); }
+.row-icon-amp        { -webkit-mask-image: url(../../../assets/icons/amp.svg);           mask-image: url(../../../assets/icons/amp.svg); }
+.row-icon-droid      { -webkit-mask-image: url(../../../assets/icons/droid.svg);         mask-image: url(../../../assets/icons/droid.svg); }
+.row-icon-factory    { -webkit-mask-image: url(../../../assets/icons/droid.svg);         mask-image: url(../../../assets/icons/droid.svg); }
 .row-icon-kimi       { -webkit-mask-image: url(../../../assets/icons/kimi.svg);          mask-image: url(../../../assets/icons/kimi.svg); }
 .row-icon-grok       { -webkit-mask-image: url(../../../assets/icons/xai.svg);           mask-image: url(../../../assets/icons/xai.svg); }
 .row-icon-copilot    { -webkit-mask-image: url(../../../assets/icons/copilot.svg);       mask-image: url(../../../assets/icons/copilot.svg); }
@@ -5369,47 +5422,69 @@ html.is-windows .limit-live-badge {
 }
 
 #claudeManualPanel,
-#cursorManualPanel,
 #opencodeManualPanel,
-#deepseekManualPanel,
-#minimaxManualPanel,
-#zaiManualPanel,
-#zaiteamManualPanel,
-#volcengineManualPanel,
-#qoderManualPanel,
-#traeManualPanel,
+#cursorManualPanel,
+#factoryManualPanel,
+#kimiManualPanel,
+#copilotManualPanel,
 #zedManualPanel,
 #commandcodeManualPanel,
-#ollamaManualPanel,
 #mimoManualPanel,
-#kimiManualPanel,
-#copilotManualPanel {
+#zaiManualPanel,
+#zaiteamManualPanel,
+#qoderManualPanel,
+#deepseekManualPanel,
+#minimaxManualPanel,
+#volcengineManualPanel,
+#ollamaManualPanel,
+#traeManualPanel {
   min-width: 0;
 }
 #claudeManualPanel > .accordion-animation-inner,
-#cursorManualPanel > .accordion-animation-inner,
 #opencodeManualPanel > .accordion-animation-inner,
-#deepseekManualPanel > .accordion-animation-inner,
-#minimaxManualPanel > .accordion-animation-inner,
-#zaiManualPanel > .accordion-animation-inner,
-#zaiteamManualPanel > .accordion-animation-inner,
-#volcengineManualPanel > .accordion-animation-inner,
-#qoderManualPanel > .accordion-animation-inner,
-#traeManualPanel > .accordion-animation-inner,
+#cursorManualPanel > .accordion-animation-inner,
+#factoryManualPanel > .accordion-animation-inner,
+#kimiManualPanel > .accordion-animation-inner,
 #zedManualPanel > .accordion-animation-inner,
 #commandcodeManualPanel > .accordion-animation-inner,
-#ollamaManualPanel > .accordion-animation-inner,
 #mimoManualPanel > .accordion-animation-inner,
-#kimiManualPanel > .accordion-animation-inner,
+#zaiManualPanel > .accordion-animation-inner,
+#zaiteamManualPanel > .accordion-animation-inner,
+#qoderManualPanel > .accordion-animation-inner,
+#deepseekManualPanel > .accordion-animation-inner,
+#minimaxManualPanel > .accordion-animation-inner,
+#volcengineManualPanel > .accordion-animation-inner,
+#ollamaManualPanel > .accordion-animation-inner,
+#traeManualPanel > .accordion-animation-inner,
 #alibabaManualPanel > .accordion-animation-inner {
   display: grid;
   min-width: 0;
   gap: 8px;
 }
 #claudeManualPanel textarea,
-#cursorManualPanel textarea,
 #opencodeManualPanel textarea,
+#cursorManualPanel textarea,
+#factoryManualPanel input,
+#kimiManualPanel input,
+#kimiManualPanel textarea,
+#copilotManualDetails input,
+#zedManualPanel textarea,
+#commandcodeManualPanel textarea,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
+#zaiManualPanel input,
+#zaiApiRegionInput,
+#zaiteamManualPanel input,
+#qoderManualPanel textarea,
+#qoderManualPanel select,
+#deepseekManualPanel input,
 #openrouterApiKeyInput,
+#minimaxManualPanel input,
+#volcengineManualPanel input,
+#ollamaManualPanel textarea,
+#traeManualPanel input,
+#alibabaManualPanel textarea,
+#alibabaManualPanel select,
 #thirdpartyPlatformInput,
 #thirdpartyModeInput,
 #thirdpartyAuthModeInput,
@@ -5422,33 +5497,30 @@ html.is-windows .limit-live-badge {
 #thirdpartyUsedPathInput,
 #thirdpartyTotalPathInput,
 #thirdpartyCurrencyInput,
-#thirdpartyDivisorInput,
-#deepseekManualPanel input,
-#minimaxManualPanel input,
-#zaiManualPanel input,
-#zaiteamManualPanel input,
-#zaiApiRegionInput,
-#volcengineManualPanel input,
-#qoderManualPanel textarea,
-#qoderManualPanel select,
-#traeManualPanel input,
-#zedManualPanel textarea,
-#commandcodeManualPanel textarea,
-#ollamaManualPanel textarea,
-#mimoManualPanel input,
-#mimoManualPanel textarea,
-#kimiManualPanel input,
-#kimiManualPanel textarea,
-#alibabaManualPanel textarea,
-#alibabaManualPanel select,
-#copilotManualDetails input {
+#thirdpartyDivisorInput {
   width: 100%;
   font-size: 12px;
 }
 #claudeManualPanel textarea,
-#cursorManualPanel textarea,
 #opencodeManualPanel textarea,
+#cursorManualPanel textarea,
+#factoryManualPanel input,
+#kimiManualPanel input,
+#kimiManualPanel textarea,
+#copilotManualDetails input,
+#zedManualPanel textarea,
+#commandcodeManualPanel textarea,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
+#zaiManualPanel input,
+#zaiteamManualPanel input,
+#qoderManualPanel textarea,
+#deepseekManualPanel input,
 #openrouterApiKeyInput,
+#minimaxManualPanel input,
+#volcengineManualPanel input,
+#ollamaManualPanel textarea,
+#traeManualPanel input,
 #thirdpartyBaseUrlInput,
 #thirdpartyAccessTokenInput,
 #thirdpartyUserIdInput,
@@ -5458,22 +5530,7 @@ html.is-windows .limit-live-badge {
 #thirdpartyUsedPathInput,
 #thirdpartyTotalPathInput,
 #thirdpartyCurrencyInput,
-#thirdpartyDivisorInput,
-#deepseekManualPanel input,
-#minimaxManualPanel input,
-#zaiManualPanel input,
-#zaiteamManualPanel input,
-#volcengineManualPanel input,
-#qoderManualPanel textarea,
-#traeManualPanel input,
-#zedManualPanel textarea,
-#commandcodeManualPanel textarea,
-#ollamaManualPanel textarea,
-#mimoManualPanel input,
-#mimoManualPanel textarea,
-#kimiManualPanel input,
-#kimiManualPanel textarea,
-#copilotManualDetails input {
+#thirdpartyDivisorInput {
   font-family: monospace;
 }
 .link-button {
@@ -5647,6 +5704,56 @@ html.is-windows .limit-live-badge {
   gap: 8px;
 }
 .status-provider-row.is-hidden .tool-preference-name { opacity: 0.45; }
+
+/* Main Screen starts pointer reordering from the six-dot handles, while the
+   rows use the same transform choreography as Collection and AI Tool Limits. */
+.view-preference-row,
+.home-module-preference-row,
+.home-limit-provider-row,
+.status-provider-row {
+  position: relative;
+  touch-action: pan-y;
+  transform: translateY(calc(var(--drag-y, 0px) + var(--drag-shift, 0px)));
+  transition:
+    transform 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+.view-preference-row.dragging,
+.home-module-preference-row.dragging,
+.home-limit-provider-row.dragging,
+.status-provider-row.dragging {
+  z-index: 2;
+  background: rgba(var(--panel-rgb), 0.96);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.62);
+  cursor: grabbing;
+  scale: 1.02;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+  will-change: transform;
+}
+.view-preference-row.dragging .preference-order-handle,
+.home-module-preference-row.dragging .preference-order-handle,
+.home-limit-provider-row.dragging .preference-order-handle,
+.status-provider-row.dragging .preference-order-handle { cursor: grabbing; }
+#viewDisplayList.is-landing > .view-preference-row,
+.home-settings-list.is-landing > .home-module-preference-row,
+.home-limit-provider-list.is-landing > .home-limit-provider-row,
+.status-provider-list.is-landing > .status-provider-row {
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+#viewDisplayList.drag-active > .view-preference-row:not(.dragging),
+.home-settings-list.drag-active > .home-module-preference-row:not(.dragging),
+.home-limit-provider-list.drag-active > .home-limit-provider-row:not(.dragging),
+.status-provider-list.drag-active > .status-provider-row:not(.dragging) { opacity: 0.78; }
+#viewDisplayList.is-reordering > .accordion-animated-container,
+.home-settings-list.is-reordering > .accordion-animated-container { transition: none; }
 .service-status-empty {
   padding: 12px 0;
   color: var(--muted);
@@ -5856,12 +5963,16 @@ html.is-windows .limit-live-badge {
   border-radius: 50%;
 }
 
-.custom-pricing-form {
+.custom-pricing-form,
+.model-alias-form {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-top: 8px;
 }
+
+.model-alias-form label { display: grid; gap: 4px; min-width: 0; }
+.model-alias-form input { width: 100%; min-width: 0; box-sizing: border-box; }
 
 
 
@@ -7044,6 +7155,10 @@ html.is-windows .limit-live-badge {
   .tray-composer-item { transition: none; }
   .settings-panel .limit-provider-row { transition: none; }
   .tool-preference-row { transition: none; }
+  .view-preference-row,
+  .home-module-preference-row,
+  .home-limit-provider-row,
+  .status-provider-row { transition: none; }
   .tool-preference-main .cursor-disclosure-icon { transition: none; }
 }
 

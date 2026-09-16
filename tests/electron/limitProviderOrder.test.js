@@ -34,6 +34,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'opencode',
     'cursor',
     'antigravity',
+    'factory',
     'kimi',
     'grok',
     'copilot',
@@ -101,4 +102,40 @@ test('reorderLimitProvider moves a provider to a target index', () => {
     reorderLimitProvider('claude,codex,cursor,antigravity', providers, 'unknown', 1),
     'claude,codex,cursor,antigravity'
   );
+});
+
+// These hand-wired surfaces used to insert new providers independently of the
+// README-backed catalog, making the source and account layout disagree.
+test('provider registration and account layout order follows the catalog', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const read = (file) => fs.readFileSync(path.join(__dirname, '../..', file), 'utf8');
+  const canonical = LIMIT_PROVIDER_CATALOG.map(({ id }) => id);
+  const check = (ids, label) => {
+    assert.ok(ids.length > 0, `${label} must contain providers`);
+    assert.deepEqual(ids, canonical.filter((id) => ids.includes(id)), label);
+  };
+  for (const [file, names, indent] of [
+    ['src/electron/renderer/app.js', ['LIMIT_PROVIDER_ACCOUNT_GROUP_IDS', 'LIMIT_PROVIDER_ACCOUNT_STATUS_IDS', 'externalLimitAccountConfig'], '  '],
+    ['src/electron/renderer/limitProviderPresentation.js', ['PROVIDER_SOURCE_LABELS', 'CAPABILITY_TAGS'], '    '],
+    ['src/electron/runtimeConfig.js', ['LIMIT_PROVIDER_SETTING_KEYS'], '  ']
+  ]) {
+    const source = read(file);
+    for (const name of names) {
+      const start = source.indexOf(`const ${name} =`);
+      assert.notEqual(start, -1, name);
+      const body = source.slice(start).split(new RegExp(`\\n${indent.slice(2)}\\}`))[0];
+      check([...body.matchAll(new RegExp(`^${indent}(\\w+):`, 'gm'))].map((match) => match[1]), name);
+    }
+  }
+  const html = read('src/electron/renderer/index.html');
+  check([...html.matchAll(/^ {12}<div id="(\w+)(?:AccountGroup|CookieGroup)"/gm)]
+    .map((match) => match[1]).filter((id) => canonical.includes(id)), 'HTML account groups');
+  const swift = read('native/macos/TokenMonitorWidget/WidgetViewModel.swift');
+  const fallback = swift.slice(swift.indexOf('static func provider(')).split('default:')[0];
+  check([...fallback.matchAll(/case "(\w+)":/g)].map((match) => match[1])
+    .filter((id) => canonical.includes(id)), 'Widget provider labels');
+  const collector = read('src/shared/limits/collector.js');
+  check([...collector.matchAll(/^ {4}(\w+): \(providerOptions, probeDeps\)/gm)]
+    .map((match) => match[1]), 'provider fetchers');
 });

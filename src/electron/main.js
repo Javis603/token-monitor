@@ -94,9 +94,10 @@ const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
+const { normalizeModelAliases, normalizeModelAliasGrouping, projectModelAliasStats, projectModelAliasHistory } = require('./modelAliasPresentation');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
-const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie, alibabaCookie, alibabaVariant, normalizeAlibabaCookieHeader } = require('../shared/limits/collector');
+const { claudeWebCookie, deepseekToken, factoryEnvApiKey, fetchClaudeLimits, fetchFactoryLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, resolveFactoryAutomaticApiKey, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie, alibabaCookie, alibabaVariant, normalizeAlibabaCookieHeader } = require('../shared/limits/collector');
 const { discoverZcodeConnection } = require('../shared/providers/zai/zcodeDiscovery');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/providers/ollama/limits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
@@ -213,16 +214,23 @@ const {
 } = require('../shared/clientUsageArchive');
 const {
   applySessionUsageArchive,
-  captureSessionUsageArchive,
-  clearSessionUsageArchive,
   normalizeSessionUsageArchive,
-  readSessionUsageArchive,
-  sessionUsageArchivePath,
-  sessionUsageArchiveDate,
-  writeSessionUsageArchive
+  sessionUsageArchiveDate
 } = require('../shared/sessionUsageArchive');
+const {
+  createSessionUsageArchiveStore,
+  readSessionUsageArchiveSnapshot,
+  sessionUsageArchiveDatabasePath
+} = require('../shared/sessionUsageArchiveStore');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
 const { aggregateDevices, aggregateHistory, applyProjectRollups } = require('../shared/usage');
+const {
+  HUB_RESPONSE_HEADER,
+  HUB_RESPONSE_MINIMAL,
+  HUB_STREAM_HEADER,
+  HUB_STREAM_VERSION,
+  applyFreshnessEvent
+} = require('../shared/hubProtocol');
 const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const {
@@ -250,10 +258,8 @@ const {
   readMacWidgetHistoryCache,
   writeMacWidgetHistoryCache
 } = require('./macWidgetHistoryStore');
-const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServicesRecovery');
 const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
-const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
 const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidgetDemand');
 const linuxAutostart = require('./linuxAutostart');
@@ -424,6 +430,7 @@ let credentialStore = null;
 let credentialStorageErrorShown = false;
 let antigravityOAuthLoginController = null;
 let sessionUsageArchive = null;
+const sessionUsageArchiveStore = createSessionUsageArchiveStore();
 let lastSessionUsageArchiveUpdate = {
   at: null,
   durationMs: null,
@@ -457,16 +464,6 @@ function normalizeHomeLimitAccountCount(value) {
   if (!Number.isFinite(count)) return HOME_LIMIT_ACCOUNT_COUNT_DEFAULT;
   return Math.max(1, Math.min(HOME_LIMIT_ACCOUNT_COUNT_MAX, count));
 }
-
-let pendingMacWidgetOpen = null;
-app.on('open-url', (event, url) => {
-  const urlScheme = macWidgetConfiguration()?.urlScheme || 'token-monitor';
-  const destination = parseMacWidgetDeepLink(url, urlScheme);
-  if (!destination) return;
-  event.preventDefault();
-  pendingMacWidgetOpen = destination;
-  if (app.isReady()) setImmediate(openMainWindowFromWidget);
-});
 
 function defaultSettings() {
   const envHubUrl = process.env.TOKEN_MONITOR_HUB_URL || '';
@@ -543,6 +540,8 @@ function defaultSettings() {
     archivedClientUsage: { version: 1, clients: {} },
     allTimeSince: process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01',
     customModelPricing: [],
+    modelAliases: {},
+    modelAliasGrouping: 'off',
     limitsEnabled: parseBoolean(process.env.TOKEN_MONITOR_LIMITS_ENABLED, true),
     limitProviders: parseLimitProviders(process.env.TOKEN_MONITOR_LIMIT_PROVIDERS).join(','),
     limitProviderOrder: defaultLimitProviderOrder(),
@@ -600,6 +599,7 @@ function defaultSettings() {
     minimaxApiKey: '',
     copilotApiToken: '',
     copilotEnterpriseHost: '',
+    factoryApiKey: '',
     zaiApiKey: '',
     zaiApiRegion: normalizeZaiApiRegion(process.env.TOKEN_MONITOR_ZAI_API_REGION || process.env.ZAI_API_REGION || process.env.Z_AI_API_HOST || 'global'),
     zaiTeamApiKey: '',
@@ -826,6 +826,28 @@ function normalizeCopilotApiToken(value) {
 
 function currentCopilotApiToken() {
   return settings?.copilotApiToken || copilotToken(process.env);
+}
+
+function normalizeFactoryApiKey(value) {
+  return normalizeSecretSetting(value);
+}
+
+function currentFactoryApiKey() {
+  return settings?.factoryApiKey || factoryEnvApiKey({}, { env: process.env });
+}
+
+async function validateFactoryApiKey(raw, deps = {}) {
+  const apiKey = (deps.normalizeApiKey || normalizeFactoryApiKey)(raw);
+  if (!apiKey) return { ok: false, status: 'notConfigured' };
+  try {
+    const provider = await (deps.fetchLimits || fetchFactoryLimits)(
+      { factoryApiKey: apiKey },
+      deps.providerDeps || electronProviderDeps()
+    );
+    return { ok: provider?.status === 'ok', status: provider?.status || 'unavailable' };
+  } catch (error) {
+    return { ok: false, status: error?.status || 'unavailable' };
+  }
 }
 
 function normalizeSecretSetting(value) {
@@ -2496,6 +2518,8 @@ function readSettings() {
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
+    merged.modelAliases = normalizeModelAliases(merged.modelAliases);
+    merged.modelAliasGrouping = normalizeModelAliasGrouping(merged.modelAliasGrouping);
     merged.interfaceFontFamily = fontSettingsApi.normalizeFontFamily(merged.interfaceFontFamily);
     merged.displayFontFamily = fontSettingsApi.normalizeFontFamily(merged.displayFontFamily);
     merged.tokenRateMode = normalizeTokenRateMode(merged.tokenRateMode);
@@ -2654,7 +2678,11 @@ function updateArchivedClientUsage(previousClients, nextClients) {
 function ensureSessionUsageArchiveLoaded() {
   if (sessionUsageArchive) return sessionUsageArchive;
   try {
-    sessionUsageArchive = readSessionUsageArchive();
+    // The headless agent owns migration and pruning while its PID is active.
+    // Anchor projection must not turn Electron into a second archive writer.
+    sessionUsageArchive = isExternalAgentActive()
+      ? readSessionUsageArchiveSnapshot()
+      : sessionUsageArchiveStore.read();
   } catch (error) {
     console.log(`[session-archive] read failed: ${error.message}`);
     sessionUsageArchive = normalizeSessionUsageArchive({});
@@ -2671,23 +2699,18 @@ function updateSessionUsageArchive(summary, now) {
       failureCode
     };
   };
-  const previous = ensureSessionUsageArchiveLoaded();
-  const next = captureSessionUsageArchive(previous, summary, now);
-  if (JSON.stringify(next) === JSON.stringify(previous)) {
-    finish();
-    return previous;
-  }
   try {
-    writeSessionUsageArchive(next);
-    sessionUsageArchive = next;
+    const result = sessionUsageArchiveStore.capture(summary, now);
+    sessionUsageArchive = result.archive;
+    if (result.error) throw result.error;
   } catch (error) {
     finish('archive-write-failed');
     diagnosticJournal.record({ subsystem: 'storage', code: 'storage-archive-update-failed' });
     console.log(`[session-archive] write failed: ${error.message}`);
-    return next;
+    return sessionUsageArchive || ensureSessionUsageArchiveLoaded();
   }
   finish();
-  return next;
+  return sessionUsageArchive;
 }
 
 // Read-only projection of both archives onto a summary. Un-tracked clients and
@@ -2701,7 +2724,12 @@ function summaryWithArchivesApplied(summary, sessionArchive, now) {
   });
   const visibleSummary = settings?.sessionUsageArchiveEnabled === false
     ? withArchivedClients
-    : applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
+    : applySessionUsageArchive(withArchivedClients, sessionArchive, {
+        now,
+        canonical: true,
+        canonicalSummary: true,
+        mutate: true
+      });
   return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
 }
 
@@ -2709,8 +2737,13 @@ function summaryWithArchivedClientUsage(summary) {
   const now = sessionUsageArchiveDate(summary);
   if (settings?.sessionUsageArchiveEnabled === false) return summaryWithArchivesApplied(summary, null, now);
   if (isExternalAgentActive()) {
-    sessionUsageArchive = null;
-    return summaryWithArchivesApplied(summary, ensureSessionUsageArchiveLoaded(), now);
+    try {
+      sessionUsageArchive = sessionUsageArchiveStore.refresh(now);
+    } catch (error) {
+      console.log(`[session-archive] refresh failed: ${error.message}`);
+      sessionUsageArchive = sessionUsageArchive || normalizeSessionUsageArchive({});
+    }
+    return summaryWithArchivesApplied(summary, sessionUsageArchive, now);
   }
   return summaryWithArchivesApplied(summary, updateSessionUsageArchive(summary, now), now);
 }
@@ -2892,11 +2925,11 @@ let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
 
 function electronPresentationStats(stats) {
-  return projectLimitStatsForDisplay(stats, {
+  return projectModelAliasStats(projectLimitStatsForDisplay(stats, {
     localDeviceId: settings?.deviceId,
     syncActive: mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim()),
     opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
-  });
+  }), settings?.modelAliases, { grouping: settings?.modelAliasGrouping });
 }
 let trayCodexPendingSince = 0;
 let trayCodexSwitchInFlight = false;
@@ -3035,7 +3068,7 @@ const diagnosticReportGenerator = createDiagnosticReportGenerator({
   getArchiveFileStat: async () => {
     if (settings?.sessionUsageArchiveEnabled === false) return { ok: false, code: 'archive-not-enabled' };
     try {
-      const stat = await fs.promises.stat(sessionUsageArchivePath());
+      const stat = await fs.promises.stat(sessionUsageArchiveDatabasePath());
       return { ok: true, stat };
     } catch (error) {
       return { ok: false, code: error?.code === 'ENOENT' ? 'archive-not-present' : 'archive-stat-failed' };
@@ -3253,7 +3286,11 @@ async function postToHub(summary) {
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/ingest`;
   const { response } = await postSyncPayload(fetch, url, {
-    headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      [HUB_RESPONSE_HEADER]: HUB_RESPONSE_MINIMAL,
+      ...(secret ? { authorization: `Bearer ${secret}` } : {})
+    },
     summary,
     logger: (message) => console.log(`[sync] ${message}`)
   });
@@ -3942,7 +3979,6 @@ function macWidgetConfiguration() {
   if (cachedMacWidgetConfiguration !== undefined) return cachedMacWidgetConfiguration;
 
   let appGroup = String(process.env.TOKEN_MONITOR_APP_GROUP || '').trim();
-  let urlScheme = String(process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME || 'token-monitor').trim();
   let snapshotFileName = 'snapshot.json';
   let widgetKind = DEFAULT_WIDGET_KIND;
   const configCandidates = [
@@ -3954,7 +3990,6 @@ function macWidgetConfiguration() {
       try {
         const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
         appGroup = String(config.appGroup || '').trim();
-        urlScheme = String(config.urlScheme || urlScheme).trim();
         widgetKind = String(config.widgetKind || widgetKind).trim();
         snapshotFileName = String(config.snapshotFileName || snapshotFileName).trim();
         if (appGroup) break;
@@ -3963,8 +3998,8 @@ function macWidgetConfiguration() {
   }
   const snapshotPath = resolveMacWidgetSnapshotPath({
     appGroup,
-    home: app.getPath('home'),
-    snapshotFileName
+    snapshotFileName,
+    logger: (message) => console.warn(message)
   });
   if (!snapshotPath) {
     cachedMacWidgetConfiguration = null;
@@ -3973,10 +4008,7 @@ function macWidgetConfiguration() {
   cachedMacWidgetConfiguration = {
     appGroup,
     snapshotPath,
-    widgetKind,
-    urlScheme: (() => {
-      try { return normalizeWidgetURLScheme(urlScheme); } catch (_) { return 'token-monitor'; }
-    })()
+    widgetKind
   };
   return cachedMacWidgetConfiguration;
 }
@@ -4018,6 +4050,15 @@ function macWidgetPresentation() {
     showCost: true,
     locale: settings?.language,
     theme: Object.keys(settings?.themeColors || {}).length ? 'custom' : 'system'
+  });
+}
+
+function macWidgetActiveCodexAccount() {
+  const provider = localLiveCodexProvider(latestStats, settings?.deviceId || '');
+  if (!provider) return null;
+  return Object.freeze({
+    accountKey: String(provider.accountKey || '').trim(),
+    accountEmail: String(provider.accountEmail || '').trim()
   });
 }
 
@@ -4067,7 +4108,10 @@ function captureMacWidgetWork({ stats, owner }) {
     historyCachePath: completeHistorySource(resolverConfig) === 'remote'
       ? macWidgetHistoryCachePath(app.getPath('userData'), sourceKey)
       : null,
+    activeCodexAccount: macWidgetActiveCodexAccount(),
     presentation: macWidgetPresentation(),
+    modelAliases: Object.freeze(normalizeModelAliases(settings?.modelAliases)),
+    modelAliasGrouping: normalizeModelAliasGrouping(settings?.modelAliasGrouping),
     snapshotPath: widget.snapshotPath,
     widgetKind: widget.widgetKind
   };
@@ -4103,8 +4147,9 @@ function ensureMacWidgetSnapshotController() {
     prepareSnapshot: (work, history) => prepareMacWidgetSnapshotUpdate(work.stats, {
       snapshotPath: work.snapshotPath,
       snapshotOptions: {
+        activeCodexAccount: work.activeCodexAccount,
         presentation: work.presentation,
-        history
+        history: projectModelAliasHistory(history, work.modelAliases, { grouping: work.modelAliasGrouping })
       },
       logger: (message) => console.warn(message)
     }),
@@ -4456,7 +4501,11 @@ async function startStatsStream(options = {}) {
   sseAbortController = controller;
   try {
     const response = await fetch(url, {
-      headers: { accept: 'text/event-stream', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+      headers: {
+        accept: 'text/event-stream',
+        [HUB_STREAM_HEADER]: HUB_STREAM_VERSION,
+        ...(secret ? { authorization: `Bearer ${secret}` } : {})
+      },
       signal: controller.signal
     });
     if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
@@ -4481,10 +4530,20 @@ async function startStatsStream(options = {}) {
         buffer = buffer.slice(idx + 2);
         let parsed = parseSseChunk(chunk);
         if (parsed) {
-          if (parsed.event === 'stats' && parsed.data?.stats) {
+          if ((parsed.event === 'stats' || parsed.event === 'snapshot') && parsed.data?.stats) {
             setLatestHubStatsCache(parsed.data.stats, 'client', generation, cacheIdentity);
             const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
             parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
+            updateDiscordRpcDisplay(displayStats);
+          } else if (parsed.event === 'freshness') {
+            const refreshed = applyFreshnessEvent(latestHubStats, parsed.data);
+            if (!refreshed) continue;
+            setLatestHubStatsCache(refreshed, 'client', generation, cacheIdentity);
+            const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
+            parsed = {
+              event: 'stats',
+              data: { type: 'stats', reason: parsed.data?.reason || 'ingest', stats: displayStats, at: parsed.data?.at }
+            };
             updateDiscordRpcDisplay(displayStats);
           }
           sendPush(parsed, { widgetProducerOwner });
@@ -4515,37 +4574,6 @@ function showPopover() {
   // case where macOS fires blur immediately after show because the click that
   // opened us still has the menu bar as the focused element.
   setTimeout(() => { suppressNextBlurHide = false; }, 250);
-}
-
-function openMainWindowFromWidget() {
-  if (!app.isReady()) return;
-  const destination = pendingMacWidgetOpen || { page: 'overview', view: 'home', settings: false };
-  pendingMacWidgetOpen = null;
-  updateRendererViewState({ breakdown: destination.view });
-  applyMacActivationPolicy({ mainWindowVisible: true });
-  // Closing the window with the tray icon off destroys it while macOS keeps the
-  // app alive, so a widget click has to be able to build one again — the same
-  // recovery focusExistingWindow() performs for the dock and the shortcut.
-  // Bailing out instead consumed the open-url event and left the widget dead
-  // for the rest of the session, since nothing else reads pendingMacWidgetOpen.
-  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const sendDestination = () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (destination.settings) mainWindow.webContents.send('settings:open');
-    else mainWindow.webContents.send('view:open', destination.view);
-  };
-  if (mainWindow.webContents.isLoadingMainFrame()) mainWindow.webContents.once('did-finish-load', sendDestination);
-  else sendDestination();
-  if (settings?.trayMode && tray) {
-    showPopover();
-    return;
-  }
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  applyMacSpaceBehavior(false);
-  // A collapsed bubble would otherwise swallow the navigation we just sent.
-  if (floatingBubbleState.collapsed) expandFloatingBubble();
-  else mainWindow.show();
 }
 
 function hidePopover() {
@@ -4746,6 +4774,8 @@ function settingsForRenderer() {
     : copilotToken(process.env)
       ? 'env'
       : '';
+  const factoryAutomaticCredential = resolveFactoryAutomaticApiKey({}, { env: process.env });
+  const factoryCredentialSource = settings?.factoryApiKey ? 'settings' : factoryAutomaticCredential.source;
   const zcodeAutoCredential = currentZcodeAutoCredential();
   // "A usable local ZCode login exists" — advertised so the renderer shows
   // the auto-detect state instead of "disabled" when the provider is
@@ -4878,6 +4908,8 @@ function settingsForRenderer() {
     minimaxApiKeySource,
     copilotApiTokenConfigured: Boolean(currentCopilotApiToken()),
     copilotApiTokenSource,
+    factoryCredentialConfigured: Boolean(currentFactoryApiKey()),
+    factoryCredentialSource,
     zaiApiKeyConfigured: Boolean(currentZaiApiKey() || zcodeAutoCredential),
     zaiApiKeySource,
     zcodeLoginDetected,
@@ -5442,6 +5474,9 @@ function stopAll() {
   // the process, and a graceful hub close buys nothing on the way out.
   void stopEmbeddedHub();
   stopDiscordRpc();
+  try { sessionUsageArchiveStore.close(); } catch (error) {
+    console.log(`[session-archive] close failed: ${error?.message || error}`);
+  }
   if (tray && !tray.isDestroyed()) tray.destroy();
   tray = null;
 }
@@ -5512,7 +5547,8 @@ function requestAppQuit() {
 // itself; callers pass only `periods` (privacy: devices/limits never enter).
 async function writeExportTo(dir, periods, options = {}) {
   if (!dir) return { ok: false, reason: 'no-dir' };
-  const history = await getDashboardHistory().catch(() => null);
+  // Export remains lossless: local display aliases never rewrite exported IDs.
+  const history = await getCompleteHistory().catch(() => null);
   // History unavailable (e.g. a transient hub fetch failure) is NOT the same as
   // "no history": writing a snapshot-only set would emit empty time-series JSON
   // AND the orphan cleanup below would delete an existing daily.csv. Never write a
@@ -6110,6 +6146,7 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'platform.deepseek.com' && parsed.pathname.startsWith('/api_keys')) return true;
   if (parsed.hostname === 'platform.minimaxi.com') return true;
   if (parsed.hostname === 'platform.minimax.io') return true;
+  if (parsed.hostname === 'app.factory.ai' && parsed.pathname.startsWith('/settings/api-keys')) return true;
   if (parsed.hostname === 'z.ai' || parsed.hostname === 'www.z.ai') return true;
   if (parsed.hostname === 'bigmodel.cn' || parsed.hostname === 'www.bigmodel.cn') return true;
   if (parsed.hostname === 'www.volcengine.com' || parsed.hostname === 'console.volcengine.com') return true;
@@ -6444,13 +6481,13 @@ async function getDashboardHistory(options = {}) {
     : { history: await getCompleteHistory(), deviceHistories: undefined };
   const history = resolved.history;
   const source = completeHistorySource(historyResolverOptions());
-  return {
+  return projectModelAliasHistory({
     ...history,
     ...(includeDevices ? { deviceHistories: resolved.deviceHistories } : {}),
     fixedPeriods: fixedPeriodHistoryMeta({
       source
     })
-  };
+  }, settings?.modelAliases, { grouping: settings?.modelAliasGrouping });
 }
 
 let cursorStatusCache = { value: null, at: 0 };
@@ -6553,7 +6590,6 @@ app.whenReady().then(() => {
   configureWindowToggleShortcut();
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
   ensureTray();
-  if (pendingMacWidgetOpen) setImmediate(openMainWindowFromWidget);
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
   if (widgetRuntimeSupported) ensureMacWidgetDemand();
@@ -6597,7 +6633,7 @@ app.whenReady().then(() => {
   ipcMain.handle('sessionUsageArchive:clear', () => {
     if (isExternalAgentActive()) return { ok: false, error: 'agentActive' };
     try {
-      clearSessionUsageArchive();
+      sessionUsageArchiveStore.clear();
       clearDailyHistoryArchive();
       sessionUsageArchive = normalizeSessionUsageArchive({});
       return { ok: true };
@@ -6680,6 +6716,7 @@ app.whenReady().then(() => {
     if (patch.minimaxApiKey !== undefined) normalizedPatch.minimaxApiKey = normalizeMinimaxApiKey(patch.minimaxApiKey);
     if (patch.copilotApiToken !== undefined) normalizedPatch.copilotApiToken = normalizeCopilotApiToken(patch.copilotApiToken);
     if (patch.copilotEnterpriseHost !== undefined) normalizedPatch.copilotEnterpriseHost = normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost);
+    if (patch.factoryApiKey !== undefined) normalizedPatch.factoryApiKey = normalizeFactoryApiKey(patch.factoryApiKey);
     if (patch.zaiApiKey !== undefined) normalizedPatch.zaiApiKey = normalizeZaiApiKey(patch.zaiApiKey);
     if (patch.zaiApiRegion !== undefined) normalizedPatch.zaiApiRegion = normalizeZaiApiRegion(patch.zaiApiRegion);
     if (patch.zaiTeamApiKey !== undefined) normalizedPatch.zaiTeamApiKey = normalizeZaiTeamApiKey(patch.zaiTeamApiKey);
@@ -6729,6 +6766,8 @@ app.whenReady().then(() => {
       showLiveTokenRate: parseBoolean(patch.showLiveTokenRate ?? settings.showLiveTokenRate, false),
       liveTokenRateScope: normalizeLiveTokenRateScope(patch.liveTokenRateScope ?? settings.liveTokenRateScope),
       compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
+      modelAliases: normalizeModelAliases(patch.modelAliases ?? settings.modelAliases),
+      modelAliasGrouping: normalizeModelAliasGrouping(patch.modelAliasGrouping ?? settings.modelAliasGrouping),
       interfaceFontFamily: fontSettingsApi.normalizeFontFamily(
         patch.interfaceFontFamily ?? settings.interfaceFontFamily
       ),
@@ -6818,6 +6857,7 @@ app.whenReady().then(() => {
       minimaxApiKey: patch.minimaxApiKey !== undefined ? normalizeMinimaxApiKey(patch.minimaxApiKey) : (settings.minimaxApiKey || ''),
       copilotApiToken: patch.copilotApiToken !== undefined ? normalizeCopilotApiToken(patch.copilotApiToken) : (settings.copilotApiToken || ''),
       copilotEnterpriseHost: patch.copilotEnterpriseHost !== undefined ? normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost) : (settings.copilotEnterpriseHost || ''),
+      factoryApiKey: patch.factoryApiKey !== undefined ? normalizeFactoryApiKey(patch.factoryApiKey) : (settings.factoryApiKey || ''),
       zaiApiKey: patch.zaiApiKey !== undefined ? normalizeZaiApiKey(patch.zaiApiKey) : (settings.zaiApiKey || ''),
       zaiApiRegion: patch.zaiApiRegion !== undefined ? normalizeZaiApiRegion(patch.zaiApiRegion) : normalizeZaiApiRegion(settings.zaiApiRegion || 'global'),
       zaiTeamApiKey: patch.zaiTeamApiKey !== undefined ? normalizeZaiTeamApiKey(patch.zaiTeamApiKey) : (settings.zaiTeamApiKey || ''),
@@ -6948,6 +6988,16 @@ app.whenReady().then(() => {
       // Re-project the cached aggregate immediately. The Hub can be offline and
       // therefore may not send another frame after this local-only setting changes.
       refreshLimitStatsPresentation();
+    }
+    if (JSON.stringify(settings.modelAliases) !== JSON.stringify(previousSettingsState.modelAliases)
+      || settings.modelAliasGrouping !== previousSettingsState.modelAliasGrouping) {
+      // No collection/pricing refresh: regroup the cached source immediately,
+      // including when the hub is offline. Revision decoration invalidates the
+      // main renderer's full-history caches; the dashboard has its own event.
+      refreshLimitStatsPresentation();
+      if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+        try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
+      }
     }
     pushSettingsToRenderer();
     return settingsForRenderer();
@@ -7328,6 +7378,7 @@ app.whenReady().then(() => {
     rememberOllamaValidation(cookie, provider);
     return { ok: provider.status === 'ok', status: provider.status };
   });
+  ipcMain.handle('factory:validateApiKey', (_event, raw) => validateFactoryApiKey(raw));
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
     const cookie = opencodeWeb.sanitizeCookieHeader(raw);
     if (!cookie) {

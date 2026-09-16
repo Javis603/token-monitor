@@ -253,7 +253,9 @@ test('Home limit provider settings expand with the shared accordion transition',
   assert.match(renderHomeSettingsList, /homeLimitProviderContainer/);
   assert.match(renderHomeSettingsList, /accordion-animated-container\$\{state\.homeLimitSettingsExpanded \? '' : ' hidden'\}/);
   assert.match(renderHomeSettingsList, /accordion-animation-inner/);
-  assert.match(renderHomeSettingsList, /container\.classList\.toggle\('hidden', !state\.homeLimitSettingsExpanded\)/);
+  assert.match(renderHomeSettingsList, /togglePreferenceSubgroup\(HOME_MODULE_SUBGROUPS, '\.home-module-preference-row', id\)/);
+  const sharedExpansion = functionBody(app, 'setPreferenceSubgroupsExpanded', 'togglePreferenceSubgroup');
+  assert.match(sharedExpansion, /document\.getElementById\(containerId\)\?\.classList\.toggle\('hidden', !open\)/);
   assert.doesNotMatch(renderHomeSettingsList, /if \(id === 'limits' && state\.homeLimitSettingsExpanded\) wrap\.append\(renderHomeLimitProviderList\(\)\)/);
   assert.match(css, /\.tool-preference-list,\s*\.settings-nested-list,\s*\.cursor-settings-details-inner/);
   assert.match(css, /\.tool-preference-list > \* \+ \*,\s*\.settings-nested-list > \* \+ \*/);
@@ -378,8 +380,8 @@ test('Projects TOTAL view explains an incomplete cross-device breakdown', () => 
   assert.match(app, /projectRowsApi\.projectBreakdownIncomplete\(state\.stats, state\.period\)/);
   assert.match(app, /hint\.className = 'breakdown-incomplete-hint'/);
   assert.doesNotMatch(app, /hint\.dataset\.key/);
-  assert.match(app, /children\.filter\(\(child\) => child !== existingHint\)/);
-  assert.match(app, /JSON\.stringify\(\[state\.breakdown, hintText, rows\.map\(\(row\) => row\.key\)\]\)/);
+  assert.match(app, /\.filter\(\(child\) => child !== existingHint\)/);
+  assert.match(app, /page\.total,[\s\S]*visibleRows\.map\(\(row\) => row\.key\)/);
   assert.match(app, /hint\.setAttribute\('role', 'status'\)/);
   assert.match(app, /incompleteHint = 'projects\.incomplete'/);
   assert.match(app, /incompleteHint = 'sessions\.incomplete'/);
