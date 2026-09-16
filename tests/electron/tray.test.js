@@ -485,14 +485,9 @@ test('tray context menu shows the macOS Quit shortcut on macOS only', () => {
   const quit = darwin.at(-1);
   assert.equal(quit.label, 'Quit Token Monitor');
   assert.equal(quit.accelerator, 'Command+Q');
-  // `registerAccelerator` is documented as Linux/Windows-only, so it must not
-  // be set here: on macOS it would be dead config implying a display-only
-  // guarantee the platform does not honour. macOS draws the shortcut from
-  // `accelerator` as the item's key equivalent, which is the only presentation
-  // mechanism there. That it does not become a system-wide grab is verified
-  // against a live Electron tray menu, not by this flag.
-  assert.equal('registerAccelerator' in quit, false);
-
+  // Scoped to macOS because that is where the shortcut is worth echoing, not
+  // because a menu accelerator elsewhere would be unsafe: menu accelerators are
+  // local shortcuts, so they cannot take a key from another application.
   for (const platform of ['win32', 'linux']) {
     const template = buildTrayMenuTemplate({
       state: { appVersion: '0.58.0', trayContent: 'tokens', trayMode: true },

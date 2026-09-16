@@ -358,18 +358,20 @@ function buildTrayMenuTemplate(options = {}) {
     { label: t('trayMenu.settings'), click: callback('onOpenSettings') },
     {
       label: t('trayMenu.quit'),
-      // macOS renders a menu item's shortcut from `accelerator` as that item's
-      // key equivalent, and is the only way to show one there -- which is how
-      // the platform convention of Cmd+Q beside Quit is drawn. The default
-      // application menu already binds Cmd+Q to its quit role and this app
-      // never replaces it, so this documents the binding that is actually live
-      // rather than inventing one.
+      // macOS draws a menu item's shortcut from `accelerator` as that item's key
+      // equivalent, which is how the platform convention of Cmd+Q beside Quit is
+      // shown. Electron's default application menu already binds Cmd+Q to its
+      // quit role and this app never replaces it, so this documents the binding
+      // that is actually live rather than inventing one.
       //
-      // macOS-only on purpose: on Windows/Linux an accelerator is registered
-      // with the system, which would grab Ctrl+Q from every other app on the
-      // machine. `registerAccelerator` cannot be used to soften that here --
-      // Electron documents it as Linux/Windows-only, so on macOS it would be
-      // dead config that implies a display-only guarantee it does not provide.
+      // macOS-only as a scope decision, not a safety one. Menu accelerators are
+      // local shortcuts, active only while the app is focused, so adding one on
+      // Windows or Linux would not take the key away from other applications --
+      // `globalShortcut` is the API that does that, and this does not use it.
+      // There is simply less to echo elsewhere: Windows declares no default quit
+      // accelerator, and on Linux the default application menu already binds
+      // Ctrl+Q while the tray menu there is re-exported over dbusmenu, where the
+      // hint's rendering is unverified.
       ...(platform === 'darwin' ? { accelerator: 'Command+Q' } : {}),
       click: callback('onQuit')
     }
