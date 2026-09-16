@@ -7,7 +7,8 @@ const test = require('node:test');
 
 const {
   attachNativeMaterialVisibility,
-  syncNativeMaterialVisibility
+  syncNativeMaterialVisibility,
+  getNativeMaterialState
 } = require('../../src/electron/nativeMaterialVisibility');
 
 function fakeWindow() {
@@ -76,9 +77,23 @@ test('an unchanged material preference does not recreate its native container', 
   win.setVisible(false);
   syncNativeMaterialVisibility(win, { enabled: true }, 'darwin', deps);
   assert.equal(creations, 1);
+  assert.equal(getNativeMaterialState(win).type, 'liquid-glass');
   assert.equal(disposals, 0);
   syncNativeMaterialVisibility(win, { enabled: false }, 'darwin', deps);
   assert.equal(disposals, 1);
+});
+
+test('failed native initialization reports the fallback instead of claiming Liquid Glass', (t) => {
+  t.mock.method(console, 'warn', () => {});
+  const win = fakeWindow();
+  win.setVisible(true);
+  syncNativeMaterialVisibility(win, { enabled: true }, 'darwin', {
+    osRelease: '25.0.0',
+    createGlass() { throw new Error('bridge initialization failed'); }
+  });
+  assert.deepEqual(win.materials, [null, 'hud']);
+  assert.equal(getNativeMaterialState(win).type, 'vibrancy');
+  assert.equal(getNativeMaterialState(win).fallbackReason, 'bridge initialization failed');
 });
 
 test('main and Dashboard windows use the visibility-aware material lifecycle', () => {
