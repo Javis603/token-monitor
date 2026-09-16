@@ -76,8 +76,8 @@ test('mac release scripts build native Apple Silicon and Intel artifacts with th
   assert.match(rootPackage.scripts['dist:mac:x64'], /--x64/);
 
   const workflow = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'release.yml'), 'utf8');
-  assert.match(workflow, /os: macos-15\s+target: mac\s+arch: arm64\s+dist_script: dist:mac:widget/);
-  assert.match(workflow, /os: macos-15-intel\s+target: mac\s+arch: x64\s+dist_script: dist:mac:widget:x64/);
+  assert.match(workflow, /os: macos-26\s+target: mac\s+arch: arm64\s+dist_script: dist:mac:widget/);
+  assert.match(workflow, /os: macos-26-intel\s+target: mac\s+arch: x64\s+dist_script: dist:mac:widget:x64/);
   assert.doesNotMatch(workflow, /TOKEN_MONITOR_WIDGET_ENABLED: '0'/);
   assert.match(workflow, /TOKEN_MONITOR_APP_GROUP: \$\{\{ matrix\.target == 'mac' && vars\.TOKEN_MONITOR_APP_GROUP \|\| '' \}\}/);
   assert.match(workflow, /TOKEN_MONITOR_WIDGET_BUNDLE_ID: \$\{\{ matrix\.target == 'mac' && vars\.TOKEN_MONITOR_WIDGET_BUNDLE_ID \|\| '' \}\}/);

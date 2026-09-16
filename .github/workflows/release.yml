@@ -8,9 +8,12 @@ jobs:
   build:
     strategy:
       fail-fast: false
+      # macOS 26 images ship a current Xcode (26.x); there is no GA macos-27
+      # image and the xcode-27 preview is arm64-only, so both Mac legs stay on
+      # 26 so the arm64 and x64 Widget builds use the same SDK.
       matrix:
         include:
-          - os: macos-15
+          - os: macos-26
             target: mac
             arch: arm64
             dist_script: dist:mac:widget
@@ -20,7 +23,7 @@ jobs:
               dist/*.zip
               dist/latest-mac.yml
               dist/*.blockmap
-          - os: macos-15-intel
+          - os: macos-26-intel
             target: mac
             arch: x64
             dist_script: dist:mac:widget:x64
