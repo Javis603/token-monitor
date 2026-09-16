@@ -1047,6 +1047,14 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
   }
+  if (options.mavisGraph) {
+    // pi-agent SQLite stays in the parse-local lane (locallyParsed: true);
+    // its daily graph is built independently and must ride alongside
+    // proma / qoderCn so daily-history-archive.json and the merged
+    // summary.history both see Mavis data.
+    rawGraphs.push(options.mavisGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.mavisGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -1370,6 +1378,19 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, qoderCnPeriods.month);
       allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), qodercn: qoderCnPeriods.today };
+    }
+    if (mavisPeriods && !anchorUsed) {
+      today = mergePeriods(today, mavisPeriods.today);
+      month = mergePeriods(month, mavisPeriods.month);
+      allTime = mergePeriods(allTime, mavisPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), mavis: mavisPeriods.today };
+    } else if (mavisPeriodReadFailed && !anchorUsed && anchor?.todayPartitions?.mavis) {
+      // pi-agent SQLite holds the lock while the mavis runtime commits;
+      // a transient BUSY or I/O failure must not blank today's mavis
+      // partition or erase month/allTime totals via the emptyPeriod()
+      // fall-back in completeTodayPartitions below. Fall back to the last
+      // full-scan anchor until the next full tick can refresh month/allTime.
+      todayPartitions = { ...(todayPartitions || {}), mavis: anchor.todayPartitions.mavis };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
