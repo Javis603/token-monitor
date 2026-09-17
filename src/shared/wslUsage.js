@@ -33,6 +33,7 @@ const WSL_DATA_MARKERS = [
   '.gemini/antigravity-cli/conversations',
   '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks',
   '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks',
+  '.local/share/amp/threads',
   '.pi/agent/sessions',
   '.omp/agent/sessions',
   '.local/share/zed/threads/threads.db',
@@ -51,6 +52,7 @@ const WSL_DATA_MARKERS = [
   '.config/kiro/User/globalStorage/kiro.kiroagent',
   '.codebuddy/projects',
   '.workbuddy',
+  '.workbuddy-ai',
   '.proma/agent-sessions',
   '.lmstudio/server-logs',
   '.unsloth/studio/studio.db'
@@ -80,6 +82,7 @@ const MARKER_CLIENTS = {
   '.gemini/antigravity-cli/conversations': 'antigravity',
   '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks': 'cline',
   '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks': 'cline',
+  '.local/share/amp/threads': 'amp',
   '.pi/agent/sessions': 'pi',
   '.omp/agent/sessions': 'pi',
   '.local/share/zed/threads/threads.db': 'zed',
@@ -98,6 +101,7 @@ const MARKER_CLIENTS = {
   '.config/kiro/User/globalStorage/kiro.kiroagent': 'kiro',
   '.codebuddy/projects': 'codebuddy',
   '.workbuddy': 'workbuddy',
+  '.workbuddy-ai': 'workbuddy',
   '.proma/agent-sessions': 'proma',
   '.lmstudio/server-logs': 'lmstudio',
   '.unsloth/studio/studio.db': 'unsloth'

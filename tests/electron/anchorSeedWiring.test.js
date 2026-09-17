@@ -33,6 +33,14 @@ test('the anchor seed publishes through sendPush, not straight to the renderer',
   assert.match(prime, /deferToRenderer: true/);
 });
 
+test('an external agent keeps anchor archive loading read-only', () => {
+  const ensureArchive = functionSource('function ensureSessionUsageArchiveLoaded()');
+  assert.match(
+    ensureArchive,
+    /isExternalAgentActive\(\)\s*\? readSessionUsageArchiveSnapshot\(\)\s*:\s*sessionUsageArchiveStore\.read\(\)/
+  );
+});
+
 test('only the seed waits for the renderer, so the deferral cannot queue up', () => {
   const push = functionSource('function sendPush(');
   // Live stats send directly. Deferring all of them would add a

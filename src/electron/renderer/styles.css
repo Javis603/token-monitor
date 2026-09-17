@@ -1302,15 +1302,15 @@ span.settings-note.settings-item-desc {
 .codex-login-details .codex-login-output { margin-top: 6px; }
 .settings-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .settings-note code { padding: 1px 5px; border-radius: 3px; background: rgba(var(--overlay-rgb), 0.06); font-size: 10px; }
-.kimi-cookie-steps { text-wrap: pretty; }
-.kimi-api-fallback {
+.kimi-web-steps { text-wrap: pretty; }
+.kimi-web-fallback {
   min-width: 0;
   padding-top: 10px;
   border-top: 1px solid rgba(var(--line-rgb), 0.075);
   color: var(--muted);
   font-size: 10px;
 }
-.kimi-api-fallback summary {
+.kimi-web-fallback summary {
   width: max-content;
   max-width: 100%;
   color: var(--text);
@@ -1320,13 +1320,13 @@ span.settings-note.settings-item-desc {
   line-height: 1.35;
   user-select: none;
 }
-.kimi-api-fallback summary::marker { color: var(--muted); }
-.kimi-api-fallback summary:focus-visible {
+.kimi-web-fallback summary::marker { color: var(--muted); }
+.kimi-web-fallback summary:focus-visible {
   border-radius: 3px;
   outline: 1px solid rgba(115, 189, 245, 0.72);
   outline-offset: 3px;
 }
-.kimi-api-fallback-body {
+.kimi-web-fallback-body {
   display: grid;
   gap: 8px;
   margin-top: 8px;
@@ -3487,13 +3487,68 @@ html.is-windows .settings-panel select option {
 }
 
 .row { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid rgba(var(--line-rgb), 0.12); }
-.breakdown.large-session-list .session-row {
-  contain-intrinsic-block-size: auto 72px;
+.session-pager-host {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
 }
-.breakdown.large-session-list.large-session-list-ready .session-row {
-  content-visibility: auto;
-  contain: layout paint style;
+.session-pager {
+  display: grid;
+  width: min(208px, 100%);
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  align-items: center;
+  min-height: 24px;
+  margin-inline: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
+.session-page-status {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  line-height: 1;
+  opacity: 0.78;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-page-button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.72;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+.session-page-button:hover:not(:disabled) {
+  color: var(--text);
+  opacity: 1;
+}
+.session-page-button:focus-visible {
+  box-shadow: inset 0 -1px 0 rgba(var(--accent-rgb), 0.58);
+  color: var(--text);
+  opacity: 1;
+}
+.session-page-button:disabled { cursor: default; opacity: 0.28; }
+.session-page-icon {
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+  mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+}
+.session-page-next .session-page-icon { transform: rotate(180deg); }
 .row-head { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
 .row-name { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 8px; color: var(--text); }
 .dot {
@@ -3520,6 +3575,7 @@ html.is-windows .settings-panel select option {
 .row-icon-cursor     { -webkit-mask-image: url(../../../assets/icons/cursor.svg);        mask-image: url(../../../assets/icons/cursor.svg); }
 .row-icon-antigravity { -webkit-mask-image: url(../../../assets/icons/antigravity.svg);   mask-image: url(../../../assets/icons/antigravity.svg); }
 .row-icon-cline      { -webkit-mask-image: url(../../../assets/icons/cline.svg);         mask-image: url(../../../assets/icons/cline.svg); }
+.row-icon-amp        { -webkit-mask-image: url(../../../assets/icons/amp.svg);           mask-image: url(../../../assets/icons/amp.svg); }
 .row-icon-droid      { -webkit-mask-image: url(../../../assets/icons/droid.svg);         mask-image: url(../../../assets/icons/droid.svg); }
 .row-icon-factory    { -webkit-mask-image: url(../../../assets/icons/droid.svg);         mask-image: url(../../../assets/icons/droid.svg); }
 .row-icon-kimi       { -webkit-mask-image: url(../../../assets/icons/kimi.svg);          mask-image: url(../../../assets/icons/kimi.svg); }

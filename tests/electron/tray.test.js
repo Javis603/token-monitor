@@ -477,6 +477,26 @@ test('tray context menu uses the selected locale for every visible level', () =>
   assert.equal(template[4].submenu.at(-1).label, '固定於桌面');
 });
 
+test('tray context menu shows the macOS Quit shortcut on macOS only', () => {
+  const darwin = buildTrayMenuTemplate({
+    state: { appVersion: '0.58.0', trayContent: 'tokens', trayMode: true },
+    platform: 'darwin'
+  });
+  const quit = darwin.at(-1);
+  assert.equal(quit.label, 'Quit Token Monitor');
+  assert.equal(quit.accelerator, 'Command+Q');
+  // Scoped to macOS because that is where the shortcut is worth echoing, not
+  // because a menu accelerator elsewhere would be unsafe: menu accelerators are
+  // local shortcuts, so they cannot take a key from another application.
+  for (const platform of ['win32', 'linux']) {
+    const template = buildTrayMenuTemplate({
+      state: { appVersion: '0.58.0', trayContent: 'tokens', trayMode: true },
+      platform
+    });
+    assert.equal(template.at(-1).accelerator, undefined);
+  }
+});
+
 test('tray context menu disables unavailable views', () => {
   const template = buildTrayMenuTemplate({
     state: {

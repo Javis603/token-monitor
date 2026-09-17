@@ -4,27 +4,31 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Custom scan paths:** Adds extra session folders for supported tools through **Settings → Collection → expand a tool → Add path**, covering records outside the default locations. (#674)
-- **Session activity and projects:** Adds activity times across discoverable sessions and project attribution when the workspace folder can be identified. (#676)
-- **Factory Droid usage:** Supports token usage from Droid CLI and Factory desktop sessions. (#682)
-- **Volcengine Agent Plan:** Reads personal Agent Plan quotas automatically from the locally signed-in arkcli account on this computer when explicit Volcengine credentials are not configured. (#655)
+- **Amp usage:** Tracks token usage from Amp sessions. (#694)
+- **Factory Droid limits:** Reads Factory Droid plan quotas and the Extra Usage balance from an automatically detected API key. (#685)
+- **Model aliases:** Merges different names for the same model into one row, with optional automatic duplicate or prefix grouping. (#661)
+- **Native macOS Widgets:** Adds Summary, Activity, Breakdown, Quota, and Dashboard Widgets for macOS 14+. (#642, #689)
 
 ### Improved
-- **Hub sync bandwidth:** Reduces repeated full statistics transfers for Node and Cloudflare Worker Hubs while keeping older clients compatible. (#649)
+- **Sessions:** Pages long session lists. (#693)
 
 ### Fixed
-- **Codex scheduled resets:** Shows an announced reset schedule instead of leaving the earlier forecast visible. (#679)
-- **DeepSeek Harness sessions on Windows:** Switches to the latest versioned transcript even when it is created rapidly, so usage and details do not remain pinned to older data. (#680)
-- **Pi-family sessions:** Avoids double-counting copied responses across forked or continued Pi, Senpi, and Omp session files.
+- **Live token rate:** Includes Kimi Code responses in the generation speed. (#695)
+- **Antigravity CLI sessions:** Dates each turn from its own timestamp so it lands on the correct day. (#695)
+- **Cline sessions:** Shows the model that answered each request instead of an unresolved model name. (#695)
+- **OpenRouter costs:** Corrects estimated costs that used the wrong service tier or missed a differently spelled model name. (#695)
+- **WorkBuddy 5.5 usage:** Counts sessions created by WorkBuddy 5.5. (#695)
+- **Session history:** Prevents the app from freezing once the preserved archive grows large. (#693)
+- **Codex sessions in T3 Code:** Shows the session title instead of the first user message. (#692)
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.58.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.58.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.58.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-Setup-0.58.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.58.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.58.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -62,27 +66,31 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **自定义扫描路径：** 可通过**“设置”→“采集”→展开工具→“添加路径”**为支持的工具添加额外 session 文件夹，读取不在默认位置的记录。（#674）
-- **会话时间与项目：** 为可发现的会话补充活动时间；能识别工作区文件夹时，也会归入对应项目。（#676）
-- **Factory Droid 用量：** 支持统计 Droid CLI 与 Factory 桌面版 session 的 Token 用量。（#682）
-- **Volcengine Agent Plan：** 未配置 Volcengine 凭据时，可自动读取本机 arkcli 当前登录个人账号的 Agent Plan 额度。（#655）
+- **Amp 用量：** 新增 Amp 会话的 Token 用量统计。（#694）
+- **Factory Droid 额度：** 支持自动检测 API 密钥，读取 Factory Droid 方案额度与 Extra Usage 余额。（#685）
+- **模型别名：** 可将同一模型的不同名称合并为一行显示，支持自动合并重复或移除前缀。（#661）
+- **原生 macOS 小部件：** 新增摘要、活动、明细、额度和仪表盘小部件，支持 macOS 14+。（#642, #689）
 
 ### 改进
-- **Hub 同步流量：** 减少 Node 与 Cloudflare Worker Hub 重复传输完整统计数据，同时保持旧版客户端兼容。（#649）
+- **会话列表：** 较长时改为分页显示。（#693）
 
 ### 修复
-- **Codex 计划重置：** 收到重置排期公告后会显示该排期，不再停留在先前的预测状态。（#679）
-- **Windows DeepSeek Harness 会话：** 快速生成版本化对话记录时也会切换到最新记录，避免用量与详情停留在旧数据。（#680）
-- **Pi 系列会话：** Pi、Senpi 与 Omp 分叉或续接 session 文件中的已复制响应不再重复计入用量。
+- **实时 Token 速率：** 生成速度现在也包含 Kimi Code 的响应。（#695）
+- **Antigravity CLI 会话：** 按每轮自身的时间标记归属日期，会话会归入正确的一天。（#695）
+- **Cline 会话：** 显示每次请求实际使用的模型，不再显示无法识别的模型名称。（#695）
+- **OpenRouter 成本：** 修正可能取用错误服务档位价格，或因模型名称写法不同而无法匹配的问题。（#695）
+- **WorkBuddy 5.5 用量：** 统计 WorkBuddy 5.5 创建的会话。（#695）
+- **会话历史：** 保留的历史累积变大后，应用不再卡顿。（#693）
+- **T3 Code 中的 Codex 会话：** 显示会话标题，不再显示首条消息。（#692）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.58.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.58.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.58.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-Setup-0.58.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.58.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.58.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -115,7 +123,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.56.0...v0.57.0">v0.56.0...v0.57.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.57.0...v0.58.0">v0.57.0...v0.58.0</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -133,27 +141,31 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **自訂掃描路徑：** 可透過**「設定」→「採集」→展開工具→「新增路徑」**為支援的工具加入額外 session 資料夾，讀取不在預設位置的記錄。（#674）
-- **工作階段時間與專案：** 為可找到的工作階段補上活動時間；能識別工作區資料夾時，也會歸入對應專案。（#676）
-- **Factory Droid 用量：** 支援統計 Droid CLI 與 Factory 桌面版 session 的 Token 用量。（#682）
-- **Volcengine Agent Plan：** 未設定 Volcengine 憑證時，可自動讀取本機 arkcli 目前登入個人帳號的 Agent Plan 額度。（#655）
+- **Amp 用量：** 新增 Amp 會話的 Token 用量統計。（#694）
+- **Factory Droid 額度：** 支援自動偵測 API 金鑰，讀取 Factory Droid 方案額度與 Extra Usage 餘額。（#685）
+- **模型別名：** 可將同一模型的不同名稱合併為一列顯示，支援自動合併重複或移除前綴。（#661）
+- **原生 macOS 小工具：** 新增摘要、活動、明細、額度與儀表板小工具，支援 macOS 14+。（#642, #689）
 
 ### 改進
-- **Hub 同步流量：** 減少 Node 與 Cloudflare Worker Hub 重複傳輸完整統計資料，同時保持舊版用戶端相容。（#649）
+- **會話列表：** 較長時改為分頁顯示。（#693）
 
 ### 修復
-- **Codex 排程重設：** 收到重設排程公告後會顯示該排程，不再停留在先前的預測狀態。（#679）
-- **Windows DeepSeek Harness 工作階段：** 快速產生版本化對話記錄時也會切換至最新記錄，避免用量與詳情停留在舊資料。（#680）
-- **Pi 系列工作階段：** Pi、Senpi 與 Omp 分支或接續 session 檔案中的已複製回應不再重複計入用量。
+- **即時 Token 速率：** 生成速度現在也包含 Kimi Code 的回應。（#695）
+- **Antigravity CLI 會話：** 依每輪自身時間標記歸屬日期，歸入正確的一天。（#695）
+- **Cline 會話：** 顯示每次請求實際使用的模型，不再顯示無法辨識的模型名稱。（#695）
+- **OpenRouter 成本：** 修正可能取用錯誤服務層級價格，或因模型名稱寫法不同而無法匹配的問題。（#695）
+- **WorkBuddy 5.5 用量：** 統計 WorkBuddy 5.5 建立的會話。（#695）
+- **會話記錄：** 保留的歷史累積變大後，應用不再卡頓。（#693）
+- **T3 Code 中的 Codex 會話：** 顯示會話標題，不再顯示首則訊息。（#692）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.58.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.58.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.58.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-Setup-0.58.0.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.58.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.58.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0.AppImage)
 
 </details>
 
@@ -166,27 +178,31 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ko:start -->
 ### 추가
-- **사용자 지정 스캔 경로:** **설정 → 수집 → 도구 펼치기 → 경로 추가**에서 지원 도구별로 세션 폴더를 추가하여 기본 위치 밖의 기록을 읽을 수 있습니다. (#674)
-- **세션 시간 및 프로젝트:** 탐색 가능한 세션에 활동 시간을 표시하고, 작업 공간 폴더를 식별할 수 있으면 해당 프로젝트에 연결합니다. (#676)
-- **Factory Droid 사용량:** Droid CLI와 Factory 데스크톱 세션의 토큰 사용량을 지원합니다. (#682)
-- **Volcengine Agent Plan:** Volcengine 자격 증명을 직접 설정하지 않은 경우 이 컴퓨터의 arkcli에 로그인된 개인 계정에서 Agent Plan 할당량을 자동으로 읽습니다. (#655)
+- **Amp 사용량:** Amp 세션의 토큰 사용량을 추적합니다. (#694)
+- **Factory Droid 할당량:** API 키를 자동으로 감지해 Factory Droid 플랜 할당량과 Extra Usage 잔액을 읽습니다. (#685)
+- **모델 별칭:** 같은 모델의 서로 다른 이름을 한 줄로 묶어 표시하며, 중복 병합이나 접두사 제거를 선택할 수 있습니다. (#661)
+- **네이티브 macOS 위젯:** 요약, 활동, 분석, 할당량, 대시보드 위젯을 macOS 14+에 추가합니다. (#642, #689)
 
 ### 개선
-- **Hub 동기화 트래픽:** 이전 클라이언트 호환성을 유지하면서 Node 및 Cloudflare Worker Hub의 반복적인 전체 통계 전송을 줄였습니다. (#649)
+- **세션 목록:** 세션이 많으면 페이지로 나누어 표시합니다. (#693)
 
 ### 수정
-- **Codex 예약 리셋:** 리셋 일정이 공지되면 이전 예측 대신 공지된 일정을 표시합니다. (#679)
-- **Windows의 DeepSeek Harness 세션:** 버전이 지정된 대화 기록이 빠르게 생성되어도 최신 기록으로 전환되어 사용량과 상세 정보가 이전 데이터에 머무르지 않습니다. (#680)
-- **Pi 계열 세션:** 포크하거나 이어서 진행한 Pi, Senpi 및 Omp 세션 파일에 복사된 응답이 중복 집계되지 않습니다.
+- **실시간 토큰 속도:** 생성 속도에 Kimi Code 응답도 포함합니다. (#695)
+- **Antigravity CLI 세션:** 각 턴의 자체 시간을 기준으로 날짜를 판단해 올바른 날에 표시합니다. (#695)
+- **Cline 세션:** 각 요청을 실제로 처리한 모델을 표시하고, 확인되지 않은 모델 이름을 표시하지 않습니다. (#695)
+- **OpenRouter 비용:** 잘못된 서비스 등급 가격을 사용하거나 모델 이름 표기가 달라 매칭되지 않던 문제를 수정했습니다. (#695)
+- **WorkBuddy 5.5 사용량:** WorkBuddy 5.5에서 만든 세션을 집계합니다. (#695)
+- **세션 기록:** 보관된 기록이 커져도 앱이 멈추지 않습니다. (#693)
+- **T3 Code의 Codex 세션:** 첫 메시지 대신 세션 제목을 표시합니다. (#692)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.58.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.58.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.58.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-Setup-0.58.0.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.58.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.58.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0.AppImage)
 
 </details>
 
@@ -199,27 +215,31 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **カスタムスキャンパス：** **設定 → 収集 → ツールを展開 → パスを追加**から、対応ツールごとに追加のセッションフォルダーを指定し、既定の場所にない記録を読み込めます。（#674）
-- **セッション時刻とプロジェクト：** 検出可能なセッションにアクティビティ時刻を表示し、ワークスペースフォルダーを識別できる場合は該当プロジェクトに関連付けます。（#676）
-- **Factory Droid の使用量：** Droid CLI と Factory デスクトップのセッションで Token 使用量を集計できます。（#682）
-- **Volcengine Agent Plan：** Volcengine の認証情報を明示的に設定していない場合、このコンピューターで arkcli にログイン中の個人アカウントから Agent Plan のクォータを自動取得します。（#655）
+- **Amp の使用量：** Amp セッションのトークン使用量を集計します。（#694）
+- **Factory Droid のクォータ：** API キーを自動検出し、Factory Droid のプランクォータと Extra Usage 残高を読み取ります。（#685）
+- **モデルの別名：** 同じモデルの異なる名前を 1 行にまとめて表示し、重複の統合や接頭辞の削除を選べます。（#661）
+- **ネイティブ macOS ウィジェット：** サマリー、アクティビティ、内訳、クォータ、ダッシュボードのウィジェットを macOS 14 以降に追加します。（#642, #689）
 
 ### 改善
-- **Hub 同期トラフィック：** 旧バージョンのクライアントとの互換性を保ちながら、Node および Cloudflare Worker Hub による完全な統計データの重複送信を減らしました。（#649）
+- **セッション一覧：** セッションが多い場合はページに分けて表示します。（#693）
 
 ### 修正
-- **Codex の予定リセット：** リセット予定が告知されると、以前の予測ではなく告知された予定を表示します。（#679）
-- **Windows の DeepSeek Harness セッション：** バージョン付きの会話記録が短時間に作成されても最新の記録へ切り替わり、使用量や詳細が古いデータのまま残りません。（#680）
-- **Pi 系セッション：** フォークまたは継続した Pi、Senpi、Omp のセッションファイルにコピーされた応答を重複計上しません。
+- **ライブ Token レート：** 生成速度に Kimi Code の応答も含めます。（#695）
+- **Antigravity CLI のセッション：** 各ターン自身の時刻で日付を判定し、正しい日に表示します。（#695）
+- **Cline のセッション：** 各リクエストを実際に処理したモデルを表示し、判別できないモデル名を表示しません。（#695）
+- **OpenRouter のコスト：** 誤ったサービス階層の価格を使ったり、モデル名の表記違いで一致しなかったりする問題を修正しました。（#695）
+- **WorkBuddy 5.5 の使用量：** WorkBuddy 5.5 が作成したセッションを集計します。（#695）
+- **セッション履歴：** 保持した履歴が大きくなってもアプリが固まりません。（#693）
+- **T3 Code の Codex セッション：** 最初のメッセージではなくセッションタイトルを表示します。（#692）
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.58.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.58.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.58.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-Setup-0.58.0.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.58.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.58.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.58.0/Token-Monitor-0.58.0.AppImage)
 
 </details>
 

@@ -214,14 +214,14 @@ const {
 } = require('../shared/clientUsageArchive');
 const {
   applySessionUsageArchive,
-  captureSessionUsageArchive,
-  clearSessionUsageArchive,
   normalizeSessionUsageArchive,
-  readSessionUsageArchive,
-  sessionUsageArchivePath,
-  sessionUsageArchiveDate,
-  writeSessionUsageArchive
+  sessionUsageArchiveDate
 } = require('../shared/sessionUsageArchive');
+const {
+  createSessionUsageArchiveStore,
+  readSessionUsageArchiveSnapshot,
+  sessionUsageArchiveDatabasePath
+} = require('../shared/sessionUsageArchiveStore');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
 const { aggregateDevices, aggregateHistory, applyProjectRollups } = require('../shared/usage');
 const {
@@ -431,6 +431,7 @@ let credentialStore = null;
 let credentialStorageErrorShown = false;
 let antigravityOAuthLoginController = null;
 let sessionUsageArchive = null;
+const sessionUsageArchiveStore = createSessionUsageArchiveStore();
 let lastSessionUsageArchiveUpdate = {
   at: null,
   durationMs: null,
@@ -2684,7 +2685,11 @@ function updateArchivedClientUsage(previousClients, nextClients) {
 function ensureSessionUsageArchiveLoaded() {
   if (sessionUsageArchive) return sessionUsageArchive;
   try {
-    sessionUsageArchive = readSessionUsageArchive();
+    // The headless agent owns migration and pruning while its PID is active.
+    // Anchor projection must not turn Electron into a second archive writer.
+    sessionUsageArchive = isExternalAgentActive()
+      ? readSessionUsageArchiveSnapshot()
+      : sessionUsageArchiveStore.read();
   } catch (error) {
     console.log(`[session-archive] read failed: ${error.message}`);
     sessionUsageArchive = normalizeSessionUsageArchive({});
@@ -2701,23 +2706,18 @@ function updateSessionUsageArchive(summary, now) {
       failureCode
     };
   };
-  const previous = ensureSessionUsageArchiveLoaded();
-  const next = captureSessionUsageArchive(previous, summary, now);
-  if (JSON.stringify(next) === JSON.stringify(previous)) {
-    finish();
-    return previous;
-  }
   try {
-    writeSessionUsageArchive(next);
-    sessionUsageArchive = next;
+    const result = sessionUsageArchiveStore.capture(summary, now);
+    sessionUsageArchive = result.archive;
+    if (result.error) throw result.error;
   } catch (error) {
     finish('archive-write-failed');
     diagnosticJournal.record({ subsystem: 'storage', code: 'storage-archive-update-failed' });
     console.log(`[session-archive] write failed: ${error.message}`);
-    return next;
+    return sessionUsageArchive || ensureSessionUsageArchiveLoaded();
   }
   finish();
-  return next;
+  return sessionUsageArchive;
 }
 
 // Read-only projection of both archives onto a summary. Un-tracked clients and
@@ -2731,7 +2731,12 @@ function summaryWithArchivesApplied(summary, sessionArchive, now) {
   });
   const visibleSummary = settings?.sessionUsageArchiveEnabled === false
     ? withArchivedClients
-    : applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
+    : applySessionUsageArchive(withArchivedClients, sessionArchive, {
+        now,
+        canonical: true,
+        canonicalSummary: true,
+        mutate: true
+      });
   return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
 }
 
@@ -2739,8 +2744,13 @@ function summaryWithArchivedClientUsage(summary) {
   const now = sessionUsageArchiveDate(summary);
   if (settings?.sessionUsageArchiveEnabled === false) return summaryWithArchivesApplied(summary, null, now);
   if (isExternalAgentActive()) {
-    sessionUsageArchive = null;
-    return summaryWithArchivesApplied(summary, ensureSessionUsageArchiveLoaded(), now);
+    try {
+      sessionUsageArchive = sessionUsageArchiveStore.refresh(now);
+    } catch (error) {
+      console.log(`[session-archive] refresh failed: ${error.message}`);
+      sessionUsageArchive = sessionUsageArchive || normalizeSessionUsageArchive({});
+    }
+    return summaryWithArchivesApplied(summary, sessionUsageArchive, now);
   }
   return summaryWithArchivesApplied(summary, updateSessionUsageArchive(summary, now), now);
 }
@@ -3065,7 +3075,7 @@ const diagnosticReportGenerator = createDiagnosticReportGenerator({
   getArchiveFileStat: async () => {
     if (settings?.sessionUsageArchiveEnabled === false) return { ok: false, code: 'archive-not-enabled' };
     try {
-      const stat = await fs.promises.stat(sessionUsageArchivePath());
+      const stat = await fs.promises.stat(sessionUsageArchiveDatabasePath());
       return { ok: true, stat };
     } catch (error) {
       return { ok: false, code: error?.code === 'ENOENT' ? 'archive-not-present' : 'archive-stat-failed' };
@@ -3995,8 +4005,8 @@ function macWidgetConfiguration() {
   }
   const snapshotPath = resolveMacWidgetSnapshotPath({
     appGroup,
-    home: app.getPath('home'),
-    snapshotFileName
+    snapshotFileName,
+    logger: (message) => console.warn(message)
   });
   if (!snapshotPath) {
     cachedMacWidgetConfiguration = null;
@@ -5472,6 +5482,9 @@ function stopAll() {
   // the process, and a graceful hub close buys nothing on the way out.
   void stopEmbeddedHub();
   stopDiscordRpc();
+  try { sessionUsageArchiveStore.close(); } catch (error) {
+    console.log(`[session-archive] close failed: ${error?.message || error}`);
+  }
   if (tray && !tray.isDestroyed()) tray.destroy();
   tray = null;
 }
@@ -6628,7 +6641,7 @@ app.whenReady().then(() => {
   ipcMain.handle('sessionUsageArchive:clear', () => {
     if (isExternalAgentActive()) return { ok: false, error: 'agentActive' };
     try {
-      clearSessionUsageArchive();
+      sessionUsageArchiveStore.clear();
       clearDailyHistoryArchive();
       sessionUsageArchive = normalizeSessionUsageArchive({});
       return { ok: true };

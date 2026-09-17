@@ -182,10 +182,11 @@ test('does not rewrite unchanged snapshots so reload callers can skip refreshes'
 });
 
 test('resolves only safe macOS App Group snapshot paths', () => {
+  const resolveContainerPath = (appGroup) => path.join('/Users/example/Library/Group Containers', appGroup);
   assert.equal(resolveMacWidgetSnapshotPath({
     platform: 'darwin',
     appGroup: 'group.com.example.tokenmonitor',
-    home: '/Users/example'
+    resolveContainerPath
   }), path.join(
     '/Users/example',
     'Library',
@@ -196,12 +197,12 @@ test('resolves only safe macOS App Group snapshot paths', () => {
   assert.equal(resolveMacWidgetSnapshotPath({
     platform: 'linux',
     appGroup: 'group.com.example.tokenmonitor',
-    home: '/home/example'
+    resolveContainerPath
   }), null);
   assert.equal(resolveMacWidgetSnapshotPath({
     platform: 'darwin',
     appGroup: 'ABCDEFGHIJ.dev.example.widgettest',
-    home: '/Users/example'
+    resolveContainerPath
   }), path.join(
     '/Users/example',
     'Library',
@@ -212,18 +213,23 @@ test('resolves only safe macOS App Group snapshot paths', () => {
   assert.equal(resolveMacWidgetSnapshotPath({
     platform: 'darwin',
     appGroup: 'SHORT.dev.example.widgettest',
-    home: '/Users/example'
+    resolveContainerPath
   }), null);
   assert.equal(resolveMacWidgetSnapshotPath({
     platform: 'darwin',
     appGroup: '../../credentials',
-    home: '/Users/example'
+    resolveContainerPath
   }), null);
   assert.equal(resolveMacWidgetSnapshotPath({
     platform: 'darwin',
     appGroup: 'group.com.example.tokenmonitor',
-    home: '/Users/example',
+    resolveContainerPath,
     snapshotFileName: '../credentials.json'
+  }), null);
+  assert.equal(resolveMacWidgetSnapshotPath({
+    platform: 'darwin',
+    appGroup: 'group.com.example.tokenmonitor',
+    resolveContainerPath: () => null
   }), null);
 });
 
