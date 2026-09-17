@@ -353,7 +353,11 @@ const {
 } = require('./floatingBubble');
 const { applyWindowsChrome } = require('./windowsChrome');
 const { canUseEdgeDock, createEdgeDockController, edgeDockSupported } = require('./edgeDock/controller');
-const { normalizeEdgeDockOffset, normalizeEdgeDockSide } = require('./edgeDock/geometry');
+const {
+  normalizeEdgeDockDisplayId,
+  normalizeEdgeDockOffset,
+  normalizeEdgeDockSide
+} = require('./edgeDock/geometry');
 const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
 const { DERIVED_PERIODS: EDGE_DOCK_DERIVED_PERIODS, normalizeEdgeDockItems } = require('./renderer/edgeDock/items');
 const fixedPeriodRangesApi = require('./renderer/fixedPeriodRanges');
@@ -523,6 +527,7 @@ function defaultSettings() {
     edgeDockWarnColors: false,
     edgeDockSide: 'right',
     edgeDockOffset: null,
+    edgeDockDisplayId: null,
     edgeDockItems: null,
     lastViewState: { period: 'today', breakdown: 'tool' },
     discordRpcEnabled: false,
@@ -1883,7 +1888,6 @@ async function performCodexSystemAccountSwitch(id) {
       enabled: refreshed.enabled !== false,
       restart: false
     });
-    void queueLimitInvalidation({ provider: 'codex' }, 'system-account-switch');
     const activeAccountId = codexAccountId(targetIdentity, refreshed);
     const accountsForRenderer = codexAccountsForRenderer();
     return {
@@ -1906,6 +1910,11 @@ async function performCodexSystemAccountSwitch(id) {
 
 let codexSystemSwitchInFlight = false;
 
+function pushCodexActiveAccountToRenderer(account) {
+  if (!account || !mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('codex:activeAccount', account); } catch (_) {}
+}
+
 // Every surface reaches the same credential-swap lane. The renderer-level
 // locks keep each button tidy; this process-wide guard prevents two windows or
 // the tray from writing the live auth file at the same time.
@@ -1915,40 +1924,47 @@ async function switchCodexSystemAccount(id) {
   }
   codexSystemSwitchInFlight = true;
   try {
-    return await performCodexSystemAccountSwitch(id);
+    const result = await performCodexSystemAccountSwitch(id);
+    if (result?.ok) {
+      // Publish the optimistic selection from the shared lane so the App,
+      // Edge Dock and tray agree immediately regardless of which one initiated
+      // the switch. Quota data catches up through one targeted refresh below.
+      codexPresentationActiveAccountId = result.activeAccountId || id;
+      codexPresentationPendingAccountId = codexPresentationActiveAccountId;
+      codexPresentationPendingSince = Date.now();
+      pushCodexActiveAccountToRenderer(result.activeAccount);
+      pushSettingsToRenderer();
+      if (latestStats) refreshLimitStatsPresentation();
+      void refreshCodexManagedAccountLimits(id, 'system-account-switch')
+        .then((refreshResult) => {
+          if (!refreshResult?.ok) {
+            console.log(`[codex] post-switch refresh failed: ${refreshResult?.error || 'unknown error'}`);
+          }
+          if (latestStats) refreshLimitStatsPresentation();
+        })
+        .catch((error) => {
+          console.log(`[codex] post-switch refresh failed: ${error?.message || error}`);
+        });
+    }
+    return result;
   } finally {
     codexSystemSwitchInFlight = false;
   }
 }
 
-// The Edge Dock's Switch button: the same optimistic swap the Limits view runs.
-// Repaint immediately after the credential write so the checkmark moves, then
-// refresh that account's quota in the background. The dock's renderer has no
-// settings access, so the projection resolves the managed account id and this
-// side owns the credential write.
+// The Edge Dock uses the same shared switch lane as the App and tray. That lane
+// broadcasts the optimistic account and refreshes its quota in the background;
+// this wrapper only keeps the dock-specific error log.
 async function switchCodexAccountFromEdgeDock(accountId) {
   const result = await switchCodexSystemAccount(accountId);
   if (!result?.ok) {
     console.log(`[edge-dock] codex account switch failed: ${result?.error || 'unknown error'}`);
     return result;
   }
-  codexPresentationActiveAccountId = result.activeAccountId || accountId;
-  codexPresentationPendingAccountId = codexPresentationActiveAccountId;
-  codexPresentationPendingSince = Date.now();
-  pushSettingsToRenderer();
-  if (latestStats) refreshLimitStatsPresentation();
-  void refreshCodexManagedAccountLimits(accountId).then((refreshResult) => {
-    if (!refreshResult?.ok) {
-      console.log(`[edge-dock] codex account refresh failed: ${refreshResult?.error || 'unknown error'}`);
-    }
-    if (latestStats) refreshLimitStatsPresentation();
-  }).catch((error) => {
-    console.log(`[edge-dock] codex account refresh failed: ${error?.message || error}`);
-  });
   return result;
 }
 
-async function refreshCodexManagedAccountLimits(id) {
+async function refreshCodexManagedAccountLimits(id, reason = 'account-refresh') {
   const accountId = String(id || '').trim();
   const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
   const account = accounts.find((entry) => entry.id === accountId);
@@ -1960,7 +1976,7 @@ async function refreshCodexManagedAccountLimits(id) {
       provider: 'codex',
       accountId: account.id,
       accountKey: account.accountKey || ''
-    }, 'account-refresh');
+    }, reason);
     const summary = result?.snapshot || deviceRuntimeHandle.getSnapshot()?.limits;
     const providers = (summary?.providers || []).filter((provider) => {
       if (provider?.provider !== 'codex') return false;
@@ -2623,6 +2639,7 @@ function readSettings() {
     merged.edgeDockEnabled = parseBoolean(merged.edgeDockEnabled, false);
     merged.edgeDockSide = normalizeEdgeDockSide(merged.edgeDockSide);
     merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
+    merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
     merged.edgeDockMode = merged.edgeDockMode === 'always' ? 'always' : 'autoHide';
     merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
@@ -5292,12 +5309,13 @@ function ensureEdgeDockController() {
       settings?.reduceMotion,
       process.platform === 'darwin' && systemPreferences?.getAnimationSettings?.().prefersReducedMotion === true
     ),
-    applyShapeMask: (win, commands, width, height) => {
-      const scale = screen.getPrimaryDisplay()?.scaleFactor || 2;
+    applyShapeMask: (win, commands, width, height, currentDisplay) => {
+      const scale = currentDisplay?.scaleFactor || screen.getDisplayMatching?.(win.getBounds())?.scaleFactor || 2;
       const { buffer, pixelWidth, pixelHeight } = rasterizeMask(toPolygons(commands), width, height, scale);
       const png = nativeImage.createFromBitmap(buffer, { width: pixelWidth, height: pixelHeight }).toPNG();
       if (!applyVibrancyMask(win, png, width, height)) console.log('[edge-dock] native material mask unavailable; showing the tinted silhouette only');
     },
+    applyWindowsAccentBlur,
     primaryButtonDown: () => primaryButtonDown(process.platform),
     // The dock card's Switch button runs the same swap the Limits view does,
     // then repaints from the refreshed records. It is the dock's only write.
@@ -5308,9 +5326,10 @@ function ensureEdgeDockController() {
       saveSettings();
       pushSettingsToRenderer();
     },
-    onPlacementChange: ({ side, offset }) => {
+    onPlacementChange: ({ side, offset, displayId }) => {
       settings.edgeDockSide = normalizeEdgeDockSide(side);
       settings.edgeDockOffset = normalizeEdgeDockOffset(offset);
+      settings.edgeDockDisplayId = normalizeEdgeDockDisplayId(displayId);
       saveSettings();
       pushSettingsToRenderer();
     },
@@ -5548,10 +5567,6 @@ async function switchCodexAccountFromTray(accountId) {
           showTrayCodexSwitchError(result?.error);
           return;
         }
-        codexPresentationActiveAccountId = result.activeAccountId || accountId;
-        codexPresentationPendingAccountId = codexPresentationActiveAccountId;
-        codexPresentationPendingSince = Date.now();
-        pushSettingsToRenderer();
       } catch (error) {
         showTrayCodexSwitchError(error?.message || error);
       }
@@ -7112,6 +7127,7 @@ app.whenReady().then(() => {
       edgeDockEnabled: parseBoolean(patch.edgeDockEnabled ?? settings.edgeDockEnabled, false),
       edgeDockSide: normalizeEdgeDockSide(patch.edgeDockSide ?? settings.edgeDockSide),
       edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
+      edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),
       edgeDockMode: (patch.edgeDockMode ?? settings.edgeDockMode) === 'always' ? 'always' : 'autoHide',
       edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
       // `null` is a real value here (back to the automatic default), so the

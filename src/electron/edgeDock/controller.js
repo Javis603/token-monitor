@@ -12,11 +12,13 @@ const {
   edgeDockPlacementForDrop,
   edgeDockRailBounds,
   edgeDockTriggerBounds,
+  normalizeEdgeDockDisplayId,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
   rectContains
 } = require('./geometry');
-const { bubbleCommands, railCommands, toSvgPath } = require('../renderer/edgeDock/shapes');
+const { shapeRectsFromPolygons } = require('./mask');
+const { bubbleCommands, railCommands, toPolygons, toSvgPath } = require('../renderer/edgeDock/shapes');
 
 const SURFACES = Object.freeze(['peek', 'rail', 'bubble']);
 const POLL_IDLE_MS = 90;
@@ -39,11 +41,10 @@ function canUseEdgeDock(settings = {}, platform = process.platform) {
 // windows, so it never steals focus, never enters the app switcher, and works
 // the same whether the widget is a window, a tray popover or a floating bubble.
 //
-// Every surface is a transparent window whose silhouette (rail shoulders, card
+// Every surface is a frameless window whose silhouette (rail shoulders, card
 // tail) is drawn by the renderer from edgeDockShapes.js. On macOS the native
-// material behind it is clipped to the same silhouette through a mask, so the
-// sculpted shape keeps real glass; elsewhere the silhouette is filled with the
-// theme's glass tint, since Windows acrylic cannot be clipped to a shape.
+// material behind it is clipped to the same silhouette through a mask. Windows
+// uses its native Acrylic/Accent backdrop and Electron's shaped-window region.
 function createEdgeDockController(deps) {
   const {
     BrowserWindow,
@@ -57,6 +58,7 @@ function createEdgeDockController(deps) {
     prefersReducedMotion = () => false,
     onPlacementChange,
     applyShapeMask,
+    applyWindowsAccentBlur,
     primaryButtonDown = () => null,
     onToggleRateMode,
     onSwitchCodexAccount,
@@ -72,6 +74,7 @@ function createEdgeDockController(deps) {
   let cells = [];
   let appearance = {};
   let builtGlass = null;
+  let builtMaterial = null;
   let bubbleCell = null;
   let bubbleHeight = 0;
   // The card the bubble window is currently sized and shaped for. The renderer
@@ -104,12 +107,20 @@ function createEdgeDockController(deps) {
     const current = settings();
     return {
       side: normalizeEdgeDockSide(current.edgeDockSide),
-      offset: normalizeEdgeDockOffset(current.edgeDockOffset)
+      offset: normalizeEdgeDockOffset(current.edgeDockOffset),
+      displayId: normalizeEdgeDockDisplayId(current.edgeDockDisplayId)
     };
   }
 
   function display() {
-    try { return screen.getPrimaryDisplay(); } catch (_) { return null; }
+    try {
+      const displayId = normalizeEdgeDockDisplayId(placement().displayId);
+      if (displayId) {
+        const match = screen.getAllDisplays?.().find((entry) => String(entry.id) === displayId);
+        if (match) return match;
+      }
+      return screen.getPrimaryDisplay();
+    } catch (_) { return null; }
   }
 
   function layout() {
@@ -149,7 +160,7 @@ function createEdgeDockController(deps) {
   function fade(win, to, duration, done) {
     if (!alive(win)) return;
     cancelFade(win);
-    if (prefersReducedMotion()) {
+    if (prefersReducedMotion() || duration <= 0) {
       win.setOpacity(to);
       done?.();
       return;
@@ -220,10 +231,13 @@ function createEdgeDockController(deps) {
     send(surface, 'edgeDock:render', payload);
   }
 
-  function createSurface(surface, glass) {
+  function createSurface(surface, materialKey) {
     const mac = platform === 'darwin';
     const win32 = platform === 'win32';
-    const material = mac && glass;
+    const material = materialKey !== 'none';
+    const macMaterial = mac && material;
+    const windowsMaterial = win32 && material;
+    const windowsAccent = materialKey === 'win32:accent';
     const win = new BrowserWindow({
       width: surface === 'bubble' ? EDGE_DOCK_METRICS.bubbleWidth : EDGE_DOCK_METRICS.railWidth,
       height: 80,
@@ -239,15 +253,16 @@ function createEdgeDockController(deps) {
       alwaysOnTop: true,
       // The macOS shadow follows the masked material; a transparent Windows
       // window has no shape-aware shadow to offer.
-      hasShadow: material,
+      hasShadow: macMaterial,
       backgroundColor: '#00000000',
-      transparent: true,
+      transparent: !windowsMaterial,
       ...(win32 ? { thickFrame: false } : {}),
       ...(mac ? { type: 'panel', acceptFirstMouse: true, roundedCorners: false } : {}),
       // The material stays attached for the window's lifetime rather than being
       // detached while hidden: re-attaching builds a new effect view, which
       // would silently drop the shape mask.
-      ...(material ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
+      ...(macMaterial ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
+      ...(windowsMaterial && !windowsAccent ? { backgroundMaterial: 'acrylic' } : {}),
       webPreferences: {
         preload: preloadPath,
         contextIsolation: true,
@@ -256,6 +271,10 @@ function createEdgeDockController(deps) {
         backgroundThrottling: false
       }
     });
+    if (windowsAccent && !applyWindowsAccentBlur?.(win)) {
+      logger('[edge-dock] AccentBlurBehind unavailable; falling back to Acrylic');
+      try { win.setBackgroundMaterial?.('acrylic'); } catch (_) {}
+    }
     if (mac) {
       win.setAlwaysOnTop(true, 'floating');
       win.setVisibleOnAllWorkspaces?.(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
@@ -297,6 +316,7 @@ function createEdgeDockController(deps) {
     bubbleCell = null;
     bubblePlaced = null;
     builtGlass = null;
+    builtMaterial = null;
     for (const surface of SURFACES) shapes[surface] = null;
   }
 
@@ -328,7 +348,9 @@ function createEdgeDockController(deps) {
     const { x, y, width, height } = bounds;
     win.setBounds({ x, y, width, height });
     const { side } = placement();
-    const key = `${side}:${width}x${height}:${bounds.tailY ?? ''}`;
+    const currentDisplay = display();
+    const displayKey = `${currentDisplay?.id ?? ''}:${currentDisplay?.scaleFactor ?? ''}`;
+    const key = `${displayKey}:${side}:${width}x${height}:${bounds.tailY ?? ''}`;
     if (shapes[surface]?.key === key) return;
     const built = commandsFor(surface, bounds, side);
     const closed = Array.isArray(built) ? built : built.closed;
@@ -336,9 +358,15 @@ function createEdgeDockController(deps) {
     shapes[surface] = { key, width, height, d: toSvgPath(closed), outline: toSvgPath(outline) };
     if (builtGlass && platform === 'darwin') {
       try {
-        applyShapeMask?.(win, closed, width, height);
+        applyShapeMask?.(win, closed, width, height, currentDisplay);
       } catch (error) {
         logger(`[edge-dock] ${surface} mask failed: ${error.message}`);
+      }
+    } else if (builtGlass && platform === 'win32') {
+      try {
+        win.setShape?.(shapeRectsFromPolygons(toPolygons(closed), width, height));
+      } catch (error) {
+        logger(`[edge-dock] ${surface} shape failed: ${error.message}`);
       }
     }
     render(surface);
@@ -346,10 +374,16 @@ function createEdgeDockController(deps) {
 
   function buildWindows() {
     const glass = Boolean(nativeGlass());
-    if (builtGlass === glass && SURFACES.every((surface) => alive(windows[surface]))) return;
+    const materialKey = !glass
+      ? 'none'
+      : platform === 'win32'
+        ? `win32:${settings().windowsBackdrop === 'accent' ? 'accent' : 'acrylic'}`
+        : platform === 'darwin' ? 'mac' : 'none';
+    if (builtMaterial === materialKey && SURFACES.every((surface) => alive(windows[surface]))) return;
     destroyWindows();
-    builtGlass = glass;
-    for (const surface of SURFACES) windows[surface] = createSurface(surface, glass);
+    builtMaterial = materialKey;
+    builtGlass = materialKey !== 'none';
+    for (const surface of SURFACES) windows[surface] = createSurface(surface, materialKey);
     intent.retract();
     // An always-visible dock stays revealed across a rebuild; the new rail
     // window picks this up when its page finishes loading.
@@ -412,6 +446,15 @@ function createEdgeDockController(deps) {
     }
     // Positioned and revealed once the renderer reports its content height, so
     // the card never appears at a stale size or position.
+  }
+
+  function invalidateBubblePlacement() {
+    bubblePlaced = null;
+    bubbleHeight = 0;
+    lastSent.bubble = '';
+    if (!bubbleVisible) return;
+    bubbleVisible = false;
+    setVisible('bubble', false, 0);
   }
 
   function hideBubble() {
@@ -487,14 +530,18 @@ function createEdgeDockController(deps) {
   }
 
   function followDrag(point, current) {
+    let targetDisplay;
+    try { targetDisplay = screen.getDisplayNearestPoint?.(point) || display(); } catch (_) { targetDisplay = display(); }
     const next = edgeDockPlacementForDrop({
-      workArea: current.workArea,
+      workArea: targetDisplay?.workArea || current.workArea,
       pointer: point,
       grabOffsetY: drag.grabOffsetY,
       cellKinds: cellKinds()
     });
     if (!next) return;
-    const changedSide = next.side !== placement().side;
+    next.displayId = normalizeEdgeDockDisplayId(targetDisplay?.id);
+    const previous = placement();
+    const changedSide = next.side !== previous.side || next.displayId !== previous.displayId;
     placementOverride = next;
     positionRail();
     if (changedSide) render('rail');
@@ -570,7 +617,8 @@ function createEdgeDockController(deps) {
       if (bubbleCell === null || cells[bubbleCell]?.id !== cellId) return;
       const height = Math.round(Number(payload?.height));
       if (!Number.isFinite(height) || height <= 0) return;
-      bubbleHeight = Math.min(height, display()?.workArea?.height || 720);
+      const maxHeight = Math.max(40, (display()?.workArea?.height || 720) - EDGE_DOCK_METRICS.screenMargin * 2);
+      bubbleHeight = Math.min(height, maxHeight);
       // Store the clamped height: reopening this card restores it verbatim, so
       // keeping the raw value here would place a card taller than the work area.
       bubblePlaced = { cellId, height: bubbleHeight };
@@ -610,9 +658,10 @@ function createEdgeDockController(deps) {
 
   function onDisplayChange() {
     if (!running) return;
+    if (bubbleCell !== null) invalidateBubblePlacement();
     positionRail();
-    if (railVisible) placeBubble();
-    else showPeek();
+    if (bubbleCell !== null) render('bubble');
+    if (!railVisible) showPeek();
   }
 
   function attachDisplayListeners() {
@@ -668,11 +717,40 @@ function createEdgeDockController(deps) {
     setCells(nextCells) {
       const next = Array.isArray(nextCells) ? nextCells : [];
       if (JSON.stringify(next) === JSON.stringify(cells)) return;
+      const previousCells = cells;
+      const focusedId = bubbleCell !== null ? previousCells[bubbleCell]?.id || null : null;
+      const placedId = bubblePlaced?.cellId || null;
       const previous = cells.map((cell) => cell.id).join(',');
       cells = next;
       if (!running) return;
       const structural = previous !== cells.map((cell) => cell.id).join(',');
-      applyEffects(intent.clampCell(cells.length));
+      if (placedId) {
+        const before = previousCells.find((cell) => cell.id === placedId);
+        const after = cells.find((cell) => cell.id === placedId);
+        const contentChanged = JSON.stringify(before) !== JSON.stringify(after);
+        // Keep an open card visible while its replacement is measured in the
+        // renderer's hidden staging layer. The old placed height lets equal-size
+        // updates commit immediately; a changed height is reported back and the
+        // window is resized before the new card is swapped in. Clearing the
+        // placement here made every quota refresh blink, and made a Codex
+        // account switch blink twice (optimistic account, then refreshed quota).
+        if (contentChanged && !(bubbleVisible && focusedId === placedId)) {
+          invalidateBubblePlacement();
+        }
+      }
+      if (focusedId) {
+        const nextIndex = cells.findIndex((cell) => cell.id === focusedId);
+        if (nextIndex < 0) {
+          intent.focusCell(null);
+          invalidateBubblePlacement();
+          hideBubble();
+        } else {
+          bubbleCell = nextIndex;
+          intent.focusCell(nextIndex);
+        }
+      } else if (structural) {
+        intent.focusCell(null);
+      }
       if (structural && !drag) positionRail();
       if (!structural && !railVisible) return;
       render('rail');

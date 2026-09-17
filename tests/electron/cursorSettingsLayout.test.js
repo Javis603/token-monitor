@@ -614,6 +614,7 @@ test('Codex system account switching is exposed from limits account rows', () =>
 
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
   assert.match(preload, /switchSystemAccount: \(id\) => ipcRenderer\.invoke\('codex:switchSystemAccount', id\)/);
+  assert.match(preload, /ipcRenderer\.on\('codex:activeAccount', handler\)/);
   assert.match(preload, /refreshAccountLimits: \(id\) => ipcRenderer\.invoke\('codex:refreshAccountLimits', id\)/);
 
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
@@ -637,18 +638,18 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(pendingExpiryBody, /setTimeout\(\(\) =>/);
   assert.match(pendingExpiryBody, /applyCodexActiveAccountFromStats\(\);/);
   assert.match(pendingExpiryBody, /renderLimits\(\);/);
+  assert.match(pendingExpiryBody, /maybeUpdateBarsIcon\(\);/);
   const pendingSetBody = functionBody(app, 'setCodexPendingActiveAccount', 'applyCodexActiveAccountFromStats');
   assert.match(pendingSetBody, /state\.codexPendingActiveAccountUntil = Date\.now\(\) \+ CODEX_PENDING_ACTIVE_GRACE_MS;/);
   assert.match(pendingSetBody, /scheduleCodexPendingActiveAccountExpiry\(\);/);
-  const activeStatsBody = functionBody(app, 'applyCodexActiveAccountFromStats', 'applyCodexAccountLimitsRefresh');
+  const activeStatsBody = functionBody(app, 'applyCodexActiveAccountFromStats', 'renderLimitProviderHead');
   assert.match(activeStatsBody, /Date\.now\(\) < state\.codexPendingActiveAccountUntil/);
   assert.match(activeStatsBody, /state\.codexActiveAccount = pendingAccount;/);
   assert.match(activeStatsBody, /clearCodexPendingActiveAccount\(\);/);
   assert.match(activeStatsBody, /state\.codexActiveAccount = activeAccount;/);
-  const limitsRefreshBody = functionBody(app, 'applyCodexAccountLimitsRefresh', 'renderLimitProviderHead');
-  assert.match(limitsRefreshBody, /applyCodexActiveAccountFromStats\(\);/);
-  assert.match(app, /setCodexPendingActiveAccount\(result\.activeAccount \|\| null\);/);
-  assert.match(app, /window\.tokenMonitor\.codex\.refreshAccountLimits\(accountId\)\.then/);
+  assert.match(app, /applyCodexOptimisticActiveAccount\(result\.activeAccount\);/);
+  assert.match(app, /window\.tokenMonitor\.codex\.onActiveAccount\?\.\(\(account\) => \{/);
+  assert.doesNotMatch(app, /window\.tokenMonitor\.codex\.refreshAccountLimits\(accountId\)\.then/);
   assert.match(control, /\.limit-account-switch-zone:hover/);
   assert.match(control, /\.limit-account-active-zone:focus-within/);
   const switchBody = functionBody(main, 'performCodexSystemAccountSwitch', 'switchCodexSystemAccount');
@@ -686,11 +687,13 @@ test('Codex system account switching is exposed from limits account rows', () =>
   const switchGuard = functionBody(main, 'switchCodexSystemAccount', 'switchCodexAccountFromEdgeDock');
   assert.match(switchGuard, /if \(codexSystemSwitchInFlight\)/);
   assert.match(switchGuard, /await performCodexSystemAccountSwitch\(id\)/);
+  assert.match(switchGuard, /refreshCodexManagedAccountLimits\(id, 'system-account-switch'\)/);
+  assert.match(switchGuard, /pushCodexActiveAccountToRenderer\(result\.activeAccount\);/);
+  assert.match(switchGuard, /codexPresentationPendingAccountId = codexPresentationActiveAccountId;/);
   assert.match(switchGuard, /finally \{/);
   const dockSwitch = functionBody(main, 'switchCodexAccountFromEdgeDock', 'refreshCodexManagedAccountLimits');
   assert.match(dockSwitch, /await switchCodexSystemAccount\(accountId\)/);
-  assert.match(dockSwitch, /codexPresentationPendingAccountId = codexPresentationActiveAccountId;/);
-  assert.match(dockSwitch, /void refreshCodexManagedAccountLimits\(accountId\)\.then/);
+  assert.doesNotMatch(dockSwitch, /refreshCodexManagedAccountLimits/);
   assert.doesNotMatch(dockSwitch, /await refreshCodexManagedAccountLimits/);
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   assert.match(renderLimits, /const rowOptions = id === 'codex'\s*\? \{ accountTitle: true, allowSystemSwitch: true \}/s);

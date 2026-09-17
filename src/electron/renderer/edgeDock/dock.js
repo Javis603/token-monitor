@@ -112,7 +112,7 @@ function applyAppearance(payload) {
   style.setProperty('--display-font', displayFont);
 
   docEl.classList.toggle('system-glass-disabled', appearance.systemGlass === false);
-  docEl.classList.toggle('edge-dock-no-material', !(payload?.glass === true && payload?.platform === 'darwin'));
+  docEl.classList.toggle('edge-dock-no-material', payload?.glass !== true);
   docEl.classList.toggle('is-windows', payload?.platform === 'win32');
   docEl.classList.toggle('is-mac-legacy', isMacLegacy(payload));
   docEl.classList.toggle(

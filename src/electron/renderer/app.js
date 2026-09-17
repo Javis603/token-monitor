@@ -603,17 +603,10 @@ const codexAccountControl = codexAccountControlApi.createCodexAccountControl({
   onSwitchFailure: (message) => {
     state.codexAccountError = message;
   },
-  onSwitchSuccess: (result, accountId) => {
+  onSwitchSuccess: (result, _accountId) => {
     state.codexAccountError = '';
     state.settings.codexManagedAccounts = result.accounts || state.settings.codexManagedAccounts || [];
-    setCodexPendingActiveAccount(result.activeAccount || null);
-    state.codexActiveAccount = result.activeAccount;
-    window.tokenMonitor.codex.refreshAccountLimits(accountId).then((refreshResult) => {
-      if (refreshResult?.ok) applyCodexAccountLimitsRefresh(refreshResult.providers || []);
-      else if (refreshResult?.error) console.log(`[codex] refresh account limits failed: ${refreshResult.error}`);
-    }).catch((refreshError) => {
-      console.log(`[codex] refresh account limits failed: ${refreshError?.message || refreshError}`);
-    });
+    applyCodexOptimisticActiveAccount(result.activeAccount);
   },
   onPostSwitchError: (error) => {
     console.log(`[codex] post-switch update failed: ${error?.message || error}`);
@@ -5007,16 +5000,6 @@ function codexSwitchAccountForProvider(provider) {
   }) || null;
 }
 
-function codexProviderMatchesProvider(left, right) {
-  if (!left || !right || left.provider !== 'codex' || right.provider !== 'codex') return false;
-  const leftKey = String(left.accountKey || '').trim();
-  const rightKey = String(right.accountKey || '').trim();
-  if (leftKey && rightKey && leftKey === rightKey) return true;
-  const leftEmail = String(left.accountEmail || '').trim().toLowerCase();
-  const rightEmail = String(right.accountEmail || '').trim().toLowerCase();
-  return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
-}
-
 function codexActiveAccountMatchesProvider(provider) {
   return accountIdentityApi.codexAccountMatchesProvider(state.codexActiveAccount, provider);
 }
@@ -5073,6 +5056,7 @@ function scheduleCodexPendingActiveAccountExpiry() {
     renderLimits();
     renderCodexAccounts();
     renderSettingsSummaries();
+    maybeUpdateBarsIcon();
   }, delay);
 }
 
@@ -5084,6 +5068,12 @@ function setCodexPendingActiveAccount(account) {
   state.codexPendingActiveAccount = account;
   state.codexPendingActiveAccountUntil = Date.now() + CODEX_PENDING_ACTIVE_GRACE_MS;
   scheduleCodexPendingActiveAccountExpiry();
+}
+
+function applyCodexOptimisticActiveAccount(account) {
+  if (!account) return;
+  setCodexPendingActiveAccount(account);
+  state.codexActiveAccount = account;
 }
 
 function applyCodexActiveAccountFromStats() {
@@ -5102,35 +5092,6 @@ function applyCodexActiveAccountFromStats() {
     clearCodexPendingActiveAccount();
   }
   state.codexActiveAccount = activeAccount;
-}
-
-function applyCodexAccountLimitsRefresh(providers) {
-  const refreshed = (providers || []).filter((provider) => provider?.provider === 'codex');
-  if (!refreshed.length || !state.stats?.limits) return;
-  const used = new Set();
-  const existingProviders = state.stats.limits.providers || [];
-  const nextProviders = existingProviders.map((provider) => {
-    if (provider?.provider !== 'codex') return provider;
-    const index = refreshed.findIndex((candidate, candidateIndex) => (
-      !used.has(candidateIndex) && codexProviderMatchesProvider(candidate, provider)
-    ));
-    if (index === -1) return provider;
-    used.add(index);
-    return refreshed[index];
-  });
-  refreshed.forEach((provider, index) => {
-    if (!used.has(index)) nextProviders.push(provider);
-  });
-  state.stats = {
-    ...state.stats,
-    limits: {
-      ...state.stats.limits,
-      providers: nextProviders
-    }
-  };
-  applyCodexActiveAccountFromStats();
-  renderLimits();
-  maybeUpdateBarsIcon();
 }
 
 function renderLimitProviderHead(id, label, provider, color, options = {}) {
@@ -13615,6 +13576,15 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   maybeUpdateBarsIcon();
 });
 
+window.tokenMonitor.codex.onActiveAccount?.((account) => {
+  if (!account) return;
+  applyCodexOptimisticActiveAccount(account);
+  renderLimits();
+  renderCodexAccounts();
+  renderSettingsSummaries();
+  maybeUpdateBarsIcon();
+});
+
 reducedMotionMedia?.addEventListener?.('change', () => {
   if (motionPreferenceApi.normalize(state.settings?.reduceMotion) !== 'system') return;
   applyReduceMotionPreference('system');
@@ -14461,13 +14431,12 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
 }
 
 function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options = {}) {
-  const activeCodex = localLiveCodexProvider();
-  const activeCodexKey = activeCodex?.accountKey
-    && (stats?.limits?.providers || []).some((provider) => (
-      provider?.provider === 'codex' && provider?.accountKey === activeCodex.accountKey
-    ))
-    ? activeCodex.accountKey
-    : '';
+  const codexProviders = (stats?.limits?.providers || []).filter((provider) => provider?.provider === 'codex');
+  const selectedCodexKey = String(state.codexActiveAccount?.accountKey || '').trim();
+  const detectedCodexKey = String(localLiveCodexProvider()?.accountKey || '').trim();
+  const activeCodexKey = [selectedCodexKey, detectedCodexKey].find((accountKey) => (
+    accountKey && codexProviders.some((provider) => provider.accountKey === accountKey)
+  )) || '';
   const resolved = trayLayoutApi.resolveTrayLayout(layout, stats, {
     currency: currentCurrency(),
     ...compactTokenDisplayOptions(),
@@ -14545,8 +14514,12 @@ function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
 }
 
 async function maybeUpdateBarsIcon(options = {}) {
-  if (options.refreshComposers !== false && isSettingsSurfaceVisible()) refreshTrayComposers();
-  else syncCustomTrayClockTimer();
+  if (options.refreshComposers !== false && isSettingsSurfaceVisible()) {
+    refreshTrayComposers();
+    if (edgeDockAvailable() && state.settings?.edgeDockEnabled === true) edgeDockComposer?.render();
+  } else {
+    syncCustomTrayClockTimer();
+  }
   const mode = state.settings?.trayContent;
   if (!window.TokenMonitorTrayText.isGeneratedTrayIconMode(mode)) return;
   if (!window.tokenMonitor.setTrayIcons) return;

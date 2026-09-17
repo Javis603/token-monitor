@@ -66,6 +66,12 @@ function normalizeEdgeDockOffset(value) {
   return Math.max(0, Math.min(1, number));
 }
 
+function normalizeEdgeDockDisplayId(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const id = String(value).trim();
+  return id || null;
+}
+
 function rectContains(rect, point) {
   if (!rect || !point) return false;
   return point.x >= rect.x && point.x < rect.x + rect.width
@@ -422,6 +428,7 @@ module.exports = {
   edgeDockPlacementForDrop,
   edgeDockRailBounds,
   edgeDockTriggerBounds,
+  normalizeEdgeDockDisplayId,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
   railLength,

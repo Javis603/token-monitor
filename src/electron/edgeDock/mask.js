@@ -54,4 +54,32 @@ function rasterizeMask(polygons, width, height, scale = 1) {
   return { buffer, pixelWidth, pixelHeight };
 }
 
-module.exports = { rasterizeMask };
+// Windows' native backdrop needs an opaque BrowserWindow. setShape() clips that
+// rectangular window to the same silhouette the renderer paints. Consecutive
+// scanlines with identical spans are merged so the native region stays small.
+function shapeRectsFromPolygons(polygons, width, height) {
+  const { buffer, pixelWidth, pixelHeight } = rasterizeMask(polygons, width, height, 1);
+  const rows = [];
+  for (let y = 0; y < pixelHeight; y += 1) {
+    let start = -1;
+    let end = -1;
+    for (let x = 0; x < pixelWidth; x += 1) {
+      if (buffer[(y * pixelWidth + x) * 4 + 3] < 128) continue;
+      if (start < 0) start = x;
+      end = x + 1;
+    }
+    if (start >= 0 && end > start) rows.push({ x: start, y, width: end - start, height: 1 });
+  }
+  const rects = [];
+  for (const row of rows) {
+    const previous = rects.at(-1);
+    if (previous && previous.x === row.x && previous.width === row.width && previous.y + previous.height === row.y) {
+      previous.height += 1;
+    } else {
+      rects.push(row);
+    }
+  }
+  return rects;
+}
+
+module.exports = { rasterizeMask, shapeRectsFromPolygons };

@@ -15,13 +15,14 @@ const {
   edgeDockPlacementForDrop,
   edgeDockRailBounds,
   edgeDockTriggerBounds,
+  normalizeEdgeDockDisplayId,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
   railLength
 } = require('../../src/electron/edgeDock/geometry');
 const { canUseEdgeDock } = require('../../src/electron/edgeDock/controller');
 const { bubbleCommands, railCommands, toPolygons, toSvgPath } = require('../../src/electron/renderer/edgeDock/shapes');
-const { rasterizeMask } = require('../../src/electron/edgeDock/mask');
+const { rasterizeMask, shapeRectsFromPolygons } = require('../../src/electron/edgeDock/mask');
 const { DEFAULT_LIMIT_COUNT, normalizeEdgeDockItems, reorderEdgeDockItems } = require('../../src/electron/renderer/edgeDock/items');
 const verticalDragSort = require('../../src/electron/renderer/verticalDragSort');
 const {
@@ -48,6 +49,9 @@ test('placement settings normalize to a known side and a 0..1 offset', () => {
   assert.equal(normalizeEdgeDockOffset('0.5'), 0.5);
   assert.equal(normalizeEdgeDockOffset(4), 1);
   assert.equal(normalizeEdgeDockOffset(-1), 0);
+  assert.equal(normalizeEdgeDockDisplayId(null), null);
+  assert.equal(normalizeEdgeDockDisplayId(42), '42');
+  assert.equal(normalizeEdgeDockDisplayId('  secondary  '), 'secondary');
 });
 
 test('rail hugs the chosen edge and its peek handle is flush with it', () => {
@@ -197,6 +201,16 @@ test('mask rasterizes the silhouette with soft edges and empty outside corners',
   // The shoulder's curved boundary is anti-aliased rather than stair-stepped.
   const row = Array.from({ length: pixelWidth }, (_, x) => alpha(x, 30));
   assert.ok(row.some((value) => value > 0 && value < 255));
+});
+
+test('Windows shape regions follow the silhouette without one rectangle per pixel', () => {
+  const commands = railCommands({ width: 64, height: 200, side: 'right', shoulder: 28, radius: 20 });
+  const rects = shapeRectsFromPolygons(toPolygons(commands), 64, 200);
+  assert.ok(rects.length > 1);
+  assert.ok(rects.length < 100);
+  assert.ok(rects.every((rect) => rect.width > 0 && rect.height > 0));
+  assert.ok(rects.some((rect) => rect.x > 0), 'the outer corner remains outside the native region');
+  assert.ok(rects.some((rect) => rect.x + rect.width === 64), 'the region still reaches the screen edge');
 });
 
 test('dropping a dragged rail picks the nearer side and a normalized offset', () => {
