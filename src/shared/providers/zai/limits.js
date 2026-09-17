@@ -828,5 +828,8 @@ module.exports = {
   zaiDashboardUrl,
   parseZaiUsage,
   parseZcodeStartPlanBalances,
-  fetchZaiLimits
+  fetchZaiLimits,
+  // Shared with the team provider: the same BigModel gateways answer with the
+  // same HTTP 200 body envelopes, so the classification lives in one place.
+  readZaiBody
 };

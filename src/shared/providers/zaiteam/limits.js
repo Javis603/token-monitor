@@ -3,7 +3,7 @@
 const { normalizeLimitProvider } = require('../../limits/core');
 const { cleanSecret } = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
-const { parseZaiUsage } = require('../zai/limits');
+const { parseZaiUsage, readZaiBody } = require('../zai/limits');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 
 const ZAI_TEAM_FETCH_TIMEOUT_MS = 12_000;
@@ -59,7 +59,10 @@ async function fetchJson(url, { key, organization, project }, deps = {}) {
         : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
       throw error;
     }
-    return response.json();
+    // Same BigModel gateway as the personal endpoints, same HTTP 200 body
+    // envelope: a refused credential arrives as code 401/403 inside a 200 and
+    // would otherwise read as "answered with no windows".
+    return readZaiBody(response, url);
   }, { signal: deps.signal, deadlineMs });
 }
 
