@@ -14,9 +14,9 @@
 //
 // Missing files are normal (ZCode not installed) and resolve to kind 'none';
 // malformed JSON is treated the same way rather than surfacing as an error.
-// The billing credential (the credential store's zcodejwttoken, or the
-// provider entry's mirror on 3.11.x installs) is for in-memory use only —
-// never logged, persisted, or handed to the renderer.
+// The credential a lane ends up querying with — a credential-store entry on
+// 3.12.3+, or the provider entry's plaintext mirror on 3.11.x installs — is
+// for in-memory use only: never logged, persisted, or handed to the renderer.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -120,16 +120,45 @@ function decryptZcodeCredential(value, env) {
   }
 }
 
-function storedZcodeJwtCredential(base, readFileSync, env) {
-  const store = readJson(path.join(base, 'credentials.json'), readFileSync);
+function readCredentialStore(base, readFileSync) {
+  return readJson(path.join(base, 'credentials.json'), readFileSync);
+}
+
+function storedZcodeJwtCredential(store, env) {
   const token = decryptZcodeCredential(store?.zcodejwttoken, env);
   return token ? { token, source: 'zcode-auto' } : null;
 }
 
-// Resolve which credential the billing lane should present. The live store's
-// JWT is the ZCode-managed token the server rotates; the provider entry's
-// plain mirror is what 3.11.x installations have, and answers as
-// syntax/auth errors once stale.
+// The selected account's own coding key, mirrored by ZCode into the credential
+// store under a name built from the provider id and the logged-in identity
+// (its accountProviderCredentialKey). That identity is the profile's user id —
+// the same source ZCode's loadAccountIdentity reads — so the name can be
+// reconstructed exactly, and a machine that has held several accounts can
+// never surface a previous one's key by accident. Anything that does not line
+// up (missing profile, unknown shape, no such entry) resolves to null and the
+// caller falls back to the provider entry's mirror.
+function storedAccountKeyCredential(store, env, { family, selectionKind }) {
+  if (!store || !family || !selectionKind) return null;
+  const profileJson = decryptZcodeCredential(store[`oauth:${family}:user_info`], env);
+  if (!profileJson) return null;
+  let identity;
+  try {
+    const profile = JSON.parse(profileJson);
+    identity = String(profile?.user_id ?? profile?.id ?? profile?.userId ?? '').trim();
+  } catch (_) {
+    return null;
+  }
+  if (!identity) return null;
+  // Mirrors ZCode's accountProviderCredentialKey: `account:${providerId}` for
+  // the plan kind, then the identity percent-encoded the way it writes it.
+  const keyName = `account-provider:coding-plan:account:${family}-${selectionKind}:account:${encodeURIComponent(identity)}:api-key`;
+  const token = decryptZcodeCredential(store[keyName], env);
+  return token ? { token, source: 'zcode-auto' } : null;
+}
+
+// Resolve the provider entry's plaintext mirror credential: what 3.11.x
+// installations carry, and the fallback wherever the credential store cannot
+// be read. A stale mirror answers as a syntax/auth error.
 function billingCredential(provider) {
   const providerKey = String(provider?.options?.apiKey || '').trim();
   if (providerKey) return { token: providerKey, source: 'zcode-auto' };
@@ -177,17 +206,28 @@ function discoverZcodeConnection(options = {}, deps = {}) {
 
   if (isStartPlanProviderId(providerId) || isCodingPlanProviderId(providerId)) {
     const kind = isStartPlanProviderId(providerId) ? 'start-billing' : 'coding-quota';
-    // The credential store is read lazily: a quota-shaped selection only
-    // touches it when it needs the billing credential, and at most once per
-    // discovery call.
-    let storedJwt;
-    const liveBillingCredential = () => {
-      if (storedJwt === undefined) storedJwt = storedZcodeJwtCredential(base, readFileSync, env);
-      return storedJwt;
+    // The kind as written (individual/team/start-plan…), needed to name the
+    // account's own store entry; a 3.11.x install has none and falls through
+    // to the mirror.
+    const selectionKind = String(settings?.providerFamilyConnectionSelections?.[family]?.kind || '').trim();
+    // The credential store is read at most once per discovery call, and only
+    // when a lane actually needs it.
+    let storeCache;
+    const readStore = () => {
+      if (storeCache === undefined) storeCache = readCredentialStore(base, readFileSync);
+      return storeCache;
     };
+    const liveBillingCredential = () => storedZcodeJwtCredential(readStore(), env);
+    // The account key is looked up only for the quota lane: a start-plan
+    // selection needs the account-level JWT alone, so it must not touch the
+    // profile entry at all. Where the quota lane does read it, the selection's
+    // own key wins over the entry's mirror — on a machine that has switched
+    // accounts the mirror still belongs to whoever wrote it last under 3.11.x,
+    // while the store entry names the logged-in account — and it falls back to
+    // the mirror only when the store cannot name it.
     const credential = kind === 'start-billing'
       ? liveBillingCredential() || billingCredential(provider)
-      : billingCredential(provider);
+      : storedAccountKeyCredential(readStore(), env, { family, selectionKind }) || billingCredential(provider);
     // `entitled` marks a result the lane can actually query. Since 3.12.3
     // stopped writing the entitlement cache, a readable credential is the
     // only local signal; the query itself answers entitlement.

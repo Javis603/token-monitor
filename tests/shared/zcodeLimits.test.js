@@ -636,3 +636,70 @@ test('a coding-quota selection takes the live billing credential for its billing
   assert.equal(discovery.credential.token, 'coding-mirror');
   assert.equal(discovery.billing.credential.token, 'live-jwt');
 });
+
+test('the selected account\'s own store key outranks a mirror left by another account', () => {
+  // A machine that switched accounts under 3.12.3: config.json keeps the
+  // previous account's mirror (never rewritten), while the store names the
+  // logged-in account's key by provider id + profile user id. Reading the
+  // mirror first would attribute a different account's quota to this login.
+  const identity = 'b1a2c3d4-0000-1111-2222-333344445555';
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': { enabled: false, systemDisabledReason: 'coding_plan_not_entitled', options: { apiKey: 'other-account-mirror' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      zcodejwttoken: encryptCredential('live-billing-jwt', TEST_CREDENTIAL_SECRET),
+      'oauth:zai:user_info': encryptCredential(JSON.stringify({ user_id: identity, name: 'x' }), TEST_CREDENTIAL_SECRET),
+      [`account-provider:coding-plan:account:zai-individual-coding-plan:account:${identity}:api-key`]:
+        encryptCredential('current-account-key', TEST_CREDENTIAL_SECRET)
+    })
+  };
+  const deps = {
+    readFileSync: fileSystem(files),
+    homeDir: '/home/test',
+    env: { ZCODE_CREDENTIAL_SECRET: TEST_CREDENTIAL_SECRET }
+  };
+  const discovery = discoverZcodeConnection({}, deps);
+  assert.equal(discovery.kind, 'coding-quota');
+  assert.equal(discovery.credential.token, 'current-account-key');
+  // The billing lane still takes the store's account-level JWT.
+  assert.equal(discovery.billing.credential.token, 'live-billing-jwt');
+
+  // A profile whose id names no store entry resolves to no account key, so the
+  // mirror carries the lane rather than a wrong key being invented.
+  const mismatched = { ...files, 'credentials.json': JSON.stringify({
+    zcodejwttoken: encryptCredential('live-billing-jwt', TEST_CREDENTIAL_SECRET),
+    'oauth:zai:user_info': encryptCredential(JSON.stringify({ user_id: 'nobody' }), TEST_CREDENTIAL_SECRET),
+    [`account-provider:coding-plan:account:zai-individual-coding-plan:account:${identity}:api-key`]:
+      encryptCredential('current-account-key', TEST_CREDENTIAL_SECRET)
+  }) };
+  const fallback = discoverZcodeConnection({}, { ...deps, readFileSync: fileSystem(mismatched) });
+  assert.equal(fallback.credential.token, 'other-account-mirror');
+
+  // A team entry is named the same way (the real store carries
+  // `…:zai-team-coding-plan:account:<id>:api-key`), so a team selection
+  // resolves its own key — and only falls back when that entry is absent.
+  const teamFiles = (withTeamEntry) => ({
+    ...files,
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'team-coding-plan' } }
+    }),
+    'credentials.json': JSON.stringify({
+      zcodejwttoken: encryptCredential('live-billing-jwt', TEST_CREDENTIAL_SECRET),
+      'oauth:zai:user_info': encryptCredential(JSON.stringify({ user_id: identity }), TEST_CREDENTIAL_SECRET),
+      ...(withTeamEntry ? {
+        [`account-provider:coding-plan:account:zai-team-coding-plan:account:${identity}:api-key`]:
+          encryptCredential('team-account-key', TEST_CREDENTIAL_SECRET)
+      } : {})
+    })
+  });
+  const team = discoverZcodeConnection({}, { ...deps, readFileSync: fileSystem(teamFiles(true)) });
+  assert.equal(team.credential.token, 'team-account-key');
+  const teamMissing = discoverZcodeConnection({}, { ...deps, readFileSync: fileSystem(teamFiles(false)) });
+  assert.equal(teamMissing.credential.token, 'other-account-mirror');
+});
