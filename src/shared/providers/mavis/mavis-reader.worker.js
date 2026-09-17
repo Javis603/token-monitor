@@ -36,6 +36,13 @@ if (!parentPort) {
   throw new Error('mavis-reader.worker.js must be loaded as a worker_threads worker');
 }
 
+/**
+ * Lazily import `node:sqlite` and return the `DatabaseSync` constructor.
+ * Throws when the runtime does not expose the API (older Node / 32-bit
+ * Electron builds).
+ *
+ * @returns {Promise<typeof import('node:sqlite').DatabaseSync>} Constructor.
+ */
 async function loadSqlite() {
   // `node:sqlite` is exposed as ESM only; the dynamic import is the
   // documented way to access it from a CommonJS module. Node 22.5+
@@ -47,6 +54,15 @@ async function loadSqlite() {
   return mod.DatabaseSync;
 }
 
+/**
+ * Worker entry: open the mavis DB read-only, run the supplied prepared
+ * statement with the supplied bind args, and post the resulting rows
+ * (capped at `workerData.maxReadRows`) back to the parent. Always closes
+ * the database handle. Posts either `{ type: 'done', ... }` or
+ * `{ type: 'error', error }`.
+ *
+ * @returns {Promise<void>} Resolves after posting the result.
+ */
 async function run() {
   const DatabaseSync = await loadSqlite();
   const { dbPath, sql, bindArgs = [], maxReadRows, busyTimeoutMs } = workerData || {};
