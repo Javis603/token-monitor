@@ -703,3 +703,61 @@ test('the selected account\'s own store key outranks a mirror left by another ac
   const teamMissing = discoverZcodeConnection({}, { ...deps, readFileSync: fileSystem(teamFiles(false)) });
   assert.equal(teamMissing.credential.token, 'other-account-mirror');
 });
+
+test('a fresh 3.12.3 install with no mirror recovers its key from the store', () => {
+  // The machine never ran 3.11.x, so the provider entry's mirror was never
+  // written — the state that made a subscribed account render nothing at all.
+  const identity = 'c2b3d4e5-1111-2222-3333-444455556666';
+  const discovery = discoverZcodeConnection({}, {
+    readFileSync: fileSystem({
+      'setting.json': JSON.stringify({
+        providerFamilyDomain: 'zai',
+        providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
+      }),
+      'config.json': JSON.stringify({ provider: {
+        'builtin:zai-coding-plan': { enabled: true, options: { apiKey: '' } }
+      } }),
+      'credentials.json': JSON.stringify({
+        zcodejwttoken: encryptCredential('fresh-billing-jwt', TEST_CREDENTIAL_SECRET),
+        'oauth:zai:user_info': encryptCredential(JSON.stringify({ user_id: identity }), TEST_CREDENTIAL_SECRET),
+        [`account-provider:coding-plan:account:zai-individual-coding-plan:account:${identity}:api-key`]:
+          encryptCredential('fresh-account-key', TEST_CREDENTIAL_SECRET)
+      })
+    }),
+    homeDir: '/home/test',
+    env: { ZCODE_CREDENTIAL_SECRET: TEST_CREDENTIAL_SECRET }
+  });
+  assert.equal(discovery.kind, 'coding-quota');
+  assert.equal(discovery.entitled, true);
+  assert.equal(discovery.credential.token, 'fresh-account-key');
+  assert.equal(discovery.billing.credential.token, 'fresh-billing-jwt');
+});
+
+test('the store entry is chosen by the profile identity, not by entry order', () => {
+  // One machine can hold entries for several accounts; only the one the
+  // profile names may be used, whatever order the store lists them in.
+  const current = 'd3c4e5f6-2222-3333-4444-555566667777';
+  const previous = 'e4d5f6a7-3333-4444-5555-666677778888';
+  const entry = (id, token) => [`account-provider:coding-plan:account:zai-individual-coding-plan:account:${id}:api-key`,
+    encryptCredential(token, TEST_CREDENTIAL_SECRET)];
+  const discovery = discoverZcodeConnection({}, {
+    readFileSync: fileSystem({
+      'setting.json': JSON.stringify({
+        providerFamilyDomain: 'zai',
+        providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
+      }),
+      'config.json': JSON.stringify({ provider: {
+        'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'unused-mirror' } }
+      } }),
+      'credentials.json': JSON.stringify(Object.fromEntries([
+        // The previous account's entry is listed first on purpose.
+        entry(previous, 'previous-account-key'),
+        entry(current, 'current-account-key'),
+        ['oauth:zai:user_info', encryptCredential(JSON.stringify({ user_id: current }), TEST_CREDENTIAL_SECRET)]
+      ]))
+    }),
+    homeDir: '/home/test',
+    env: { ZCODE_CREDENTIAL_SECRET: TEST_CREDENTIAL_SECRET }
+  });
+  assert.equal(discovery.credential.token, 'current-account-key');
+});
