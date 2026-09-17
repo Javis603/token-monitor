@@ -93,13 +93,22 @@ function isCodingPlanProviderId(providerId) {
 const ZCODE_CREDENTIAL_ENVELOPE = 'enc:v1:';
 
 // Same derivation as ZCode's own defaultCredentialSecret: an explicit
-// ZCODE_CREDENTIAL_SECRET wins, otherwise machine-local values.
+// ZCODE_CREDENTIAL_SECRET wins, otherwise machine-local values. The machine
+// string is derived once per process — its inputs (platform, home directory,
+// account name) cannot change under it — because the first os.userInfo() call
+// consults the directory service (measured ~1 ms on macOS, and that service
+// can be arbitrarily slow on a managed machine) while the derivation itself
+// would otherwise run once per decrypted entry.
+let machineCredentialSecret = null;
 function credentialSecret(env) {
   const explicit = String(env?.ZCODE_CREDENTIAL_SECRET || '').trim();
   if (explicit) return explicit;
-  let username = 'unknown';
-  try { username = os.userInfo().username; } catch (_) {}
-  return `zcode-credential-fallback:${os.platform()}:${os.homedir()}:${username}`;
+  if (machineCredentialSecret === null) {
+    let username = 'unknown';
+    try { username = os.userInfo().username; } catch (_) {}
+    machineCredentialSecret = `zcode-credential-fallback:${os.platform()}:${os.homedir()}:${username}`;
+  }
+  return machineCredentialSecret;
 }
 
 // Envelope as ZCode writes it: base64url(iv).base64url(authTag).base64url(cipher).
