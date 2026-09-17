@@ -59,9 +59,8 @@ async function fetchJson(url, { key, organization, project }, deps = {}) {
         : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
       throw error;
     }
-    // Same BigModel gateway as the personal endpoints, same HTTP 200 body
-    // envelope: a refused credential arrives as code 401/403 inside a 200 and
-    // would otherwise read as "answered with no windows".
+    // The team quota shares the personal endpoints' gateway and envelope, so
+    // its body-level refusals are classified the same way (see readZaiBody).
     return readZaiBody(response, url);
   }, { signal: deps.signal, deadlineMs });
 }
