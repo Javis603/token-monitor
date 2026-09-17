@@ -33,6 +33,7 @@ const {
 } = require('./providers/workbuddy/localAuth');
 const { createElectronLimitsFetch } = require('./limitsFetch');
 const {
+  boundsOnDisplay,
   expandedBoundsForCollapse,
   normalWindowBounds,
   persistWindowState,
@@ -2150,6 +2151,21 @@ function displayForPoint(point) {
   } catch (_) {
     return null;
   }
+}
+
+// A tray click is a "show me this app" gesture, and macOS already behaves this way
+// for every built-in menu bar item: the window belongs on the display the user
+// pointed at. No-op when the window is already there, so the common case — and
+// every single-display user — costs nothing.
+function moveWindowToDisplay(win, display) {
+  if (!win || (typeof win.isDestroyed === 'function' && win.isDestroyed()) || !display) return false;
+  const bounds = win.getBounds();
+  const current = displayForBounds(bounds);
+  if (current && current.id === display.id) return false;
+  const next = boundsOnDisplay(bounds, current, display);
+  if (!next) return false;
+  win.setBounds(next);
+  return true;
 }
 
 function collapsedAreaForDisplay(display) {
@@ -4560,13 +4576,13 @@ async function startStatsStream(options = {}) {
   }
 }
 
-function showPopover() {
+function showPopover(clickPoint = null) {
   if (!mainWindow || mainWindow.isDestroyed() || !tray) return;
   applyMacActivationPolicy();
   applyMacSpaceBehavior(true);
   applyWindowSettings();
   const current = mainWindow.getBounds();
-  const target = popoverBounds(tray, current.width, current.height);
+  const target = popoverBounds(tray, current.width, current.height, { clickPoint });
   mainWindow.setBounds(target);
   suppressNextBlurHide = true;
   mainWindow.show();
@@ -4581,24 +4597,29 @@ function hidePopover() {
   if (mainWindow.isVisible()) mainWindow.hide();
 }
 
-function togglePopover() {
+function togglePopover(clickPoint = null) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isVisible() && mainWindow.isFocused()) hidePopover();
-  else showPopover();
+  else showPopover(clickPoint);
 }
 
-function focusExistingWindow() {
+function focusExistingWindow(clickPoint = null) {
   applyMacActivationPolicy({ mainWindowVisible: true });
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow();
     return;
   }
   if (mainWindow.isMinimized()) mainWindow.restore();
-  if (settings?.trayMode) showPopover();
+  if (settings?.trayMode) showPopover(clickPoint);
   else {
     applyMacSpaceBehavior(false);
     if (floatingBubbleState.collapsed) expandFloatingBubble();
     else {
+      // The tray icon is reachable from every display, so the window follows the
+      // click onto the one the user pointed at — which is what every built-in
+      // menu bar item does on macOS. moveWindowToDisplay() no-ops when the window
+      // is already on that display.
+      moveWindowToDisplay(mainWindow, displayForPoint(clickPoint));
       mainWindow.show();
       restoreWindowMaximized(mainWindow, settings);
     }
@@ -5071,10 +5092,10 @@ function handleWindowToggleShortcut() {
   else focusExistingWindow();
 }
 
-function handleTrayToggle() {
+function handleTrayToggle(_tray, clickPoint = null) {
   const action = trayToggleAction(settings);
-  if (action === 'togglePopover') togglePopover();
-  else if (action === 'focusWindow') focusExistingWindow();
+  if (action === 'togglePopover') togglePopover(clickPoint);
+  else if (action === 'focusWindow') focusExistingWindow(clickPoint);
 }
 
 function trayMenuLocale() {
@@ -5143,20 +5164,31 @@ function setWindowPresentationFromMenu(value) {
   if (previousTrayMode) exitTrayMode();
   else {
     applyWindowSettings();
-    focusExistingWindow();
+    focusExistingWindow(trayMenuClickPoint());
   }
   pushSettingsToRenderer();
 }
 
+// Menu items are reached from a tray menu, which pops up under the pointer, so the
+// cursor still describes the display the user is working on. Same reasoning as the
+// click path: the window should end up on that display.
+function trayMenuClickPoint() {
+  try {
+    return screen.getCursorScreenPoint();
+  } catch (_) {
+    return null;
+  }
+}
+
 function openSettingsFromTray() {
-  focusExistingWindow();
+  focusExistingWindow(trayMenuClickPoint());
   sendMainWindowEvent('settings:open');
 }
 
 function openViewFromTray(viewId) {
   const normalized = String(viewId || '').trim().toLowerCase();
   if (!TRAY_OPEN_VIEW_IDS.has(normalized)) return;
-  focusExistingWindow();
+  focusExistingWindow(trayMenuClickPoint());
   sendMainWindowEvent('view:open', normalized);
 }
 
