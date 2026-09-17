@@ -34,9 +34,10 @@ const ZCODE_PROVIDER_IDS = Object.freeze({
 
 // ZCode 3.12.3 moved the family selection to a kind-based field
 // (providerFamilyConnectionSelections[family].kind, its own one-way
-// migration); both plan kinds resolve to the builtin:* entry that carries
-// the mirror credential. An off-peak selection has no GLM plan lane here and
-// maps to nothing — it must not fall back to a frozen legacy selection.
+// migration); both plan kinds resolve to the builtin:* entry whose account the
+// credential is resolved for — the store's key where it exists, that entry's
+// mirror otherwise. An off-peak selection has no GLM plan lane here and maps
+// to nothing — it must not fall back to a frozen legacy selection.
 const SELECTION_KIND_SLOT = Object.freeze({
   'start-plan': 'startPlan',
   'individual-coding-plan': 'codingPlan',

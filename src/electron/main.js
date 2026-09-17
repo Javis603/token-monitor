@@ -871,9 +871,10 @@ function currentZaiApiKey() {
 }
 
 // A locally logged-in ZCode install is a credential source for the GLM lane
-// even when no console key was entered. Reads two small JSON files
-// synchronously; settingsForRenderer renders at human interaction speed, so
-// the cost is bounded by how often that runs, not by any refresh loop.
+// even when no console key was entered. Reads the ZCode data files
+// synchronously (setting.json, config.json, and the credential store where it
+// exists); settingsForRenderer renders at human interaction speed, so the cost
+// is bounded by how often that runs, not by any refresh loop.
 function currentZcodeAutoCredential() {
   const discovery = discoverZcodeConnection();
   return discovery.entitled && discovery.credential ? discovery : null;

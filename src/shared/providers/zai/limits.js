@@ -122,9 +122,9 @@ function zaiDashboardUrl(region = 'global') {
   return ZAI_REGIONS[zaiRegion({ zaiApiRegion: region })].dashboardUrl;
 }
 
-// Mirrors ZCode's pickCurrentSubscriptionFromList: the entry in the current
-// period wins, then any VALID one, then the first row — so a historical or
-// expired row listed first cannot name the account's plan.
+// Follows ZCode's pickCurrentSubscriptionFromList ordering (current-period
+// VALID, then current-period, then VALID); where ZCode stops at null, ours
+// keeps a first-row fallback so an all-expired list still names a plan.
 function firstSubscription(subscriptions) {
   const rows = Array.isArray(subscriptions?.data)
     ? subscriptions.data.filter((row) => row && typeof row === 'object')
