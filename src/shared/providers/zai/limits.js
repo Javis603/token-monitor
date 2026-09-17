@@ -391,6 +391,9 @@ async function fetchZaiLimits(options = {}, deps = {}) {
     });
     // Mirror-key quota on the console-key endpoint; classified errors (429,
     // auth) propagate, empty results keep the lane attempted, not unconfigured.
+    // `entitled` now means discovery found a usable auto credential — since
+    // 3.12.3 stopped writing the entitlement cache, the mirror key's presence
+    // is the only local signal, and the query itself answers entitlement.
     if (discovery.kind === 'coding-quota' && discovery.entitled) {
       const mirrorKey = discovery.credential?.token;
       if (mirrorKey) {
@@ -425,7 +428,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       }
       return emptyLane(true);
     }
-    if (discovery.kind !== 'start-billing' || !discovery.entitled || !discovery.credential) {
+    if (discovery.kind !== 'start-billing' || !discovery.credential) {
       return emptyLane();
     }
     return fetchZcodeBilling(discovery.credential.token);

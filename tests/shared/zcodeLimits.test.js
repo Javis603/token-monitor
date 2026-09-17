@@ -8,9 +8,12 @@ const { discoverZcodeConnection } = require('../../src/shared/providers/zai/zcod
 const { parseZcodeStartPlanBalances } = require('../../src/shared/providers/zai/limits');
 
 // Fixtures mirror the live billing/balance payload shape: plan entitlements
-// carry the grant period, balance buckets carry the usage numbers.
+// carry the grant period, balance buckets carry the usage numbers. The ZCode
+// side mirrors a 3.12.3 install: the kind-based selection is authoritative and
+// the legacy selected-key string is retained but frozen.
 const SETTINGS = {
   providerFamilyDomain: 'zai',
+  providerFamilyConnectionSelections: { zai: { kind: 'start-plan' } },
   modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-start-plan' }
 };
 
@@ -28,6 +31,9 @@ const REGISTRY = {
   }
 };
 
+// The entitlement cache 3.11.x wrote; 3.12.3 leaves the file behind without
+// updating it, so discovery must not read it. Kept in the fixtures to pin that
+// a stale copy changes no outcome.
 const PLAN_CACHE = {
   version: 1,
   entryStatus: {
@@ -66,26 +72,79 @@ test('discoverZcodeConnection resolves the selected plan, or none on a broken in
   assert.equal(discovery.kind, 'start-billing');
   assert.equal(discovery.family, 'zai');
   assert.equal(discovery.providerId, 'builtin:zai-start-plan');
-  assert.equal(discovery.entitled, true);
   assert.equal(discovery.credential.token, 'zcode-mirror-jwt');
   assert.equal(discovery.credential.source, 'zcode-auto');
 
-  // Failure paths all collapse the same way: an unentitled plan keeps its
-  // cache reason, and missing or malformed files degrade to kind 'none'
-  // rather than surfacing as errors.
-  const unentitled = discoverZcodeConnection({}, discoveryDeps({
+  // The stale entitlement cache 3.11.x wrote (and 3.12.3 stopped updating)
+  // changes nothing: presence of the mirror key is the local signal since the
+  // cache went away, and a plan the cache calls unavailable still answers.
+  const staleCache = discoverZcodeConnection({}, discoveryDeps({
     ...HAPPY_FILES,
     'coding-plan-cache.json': JSON.stringify({
       entryStatus: { items: { 'builtin:zai-start-plan': { status: 'unavailable', reason: 'coding_plan_not_entitled' } } }
     })
   }));
-  assert.equal(unentitled.entitled, false);
-  assert.equal(unentitled.reason, 'coding_plan_not_entitled');
+  assert.equal(staleCache.kind, 'start-billing');
+  assert.equal(staleCache.credential.token, 'zcode-mirror-jwt');
+
   assert.equal(discoverZcodeConnection({}, discoveryDeps({})).kind, 'none');
   assert.equal(discoverZcodeConnection({}, discoveryDeps({
     ...HAPPY_FILES,
     'setting.json': '{not json'
   })).kind, 'none');
+});
+
+test('discoverZcodeConnection maps the 3.12.3 kind selection and falls back to the legacy key', () => {
+  const kind = (value, family = 'zai') => ({ ...HAPPY_FILES, 'setting.json': JSON.stringify({
+    providerFamilyDomain: family,
+    providerFamilyConnectionSelections: { [family]: { kind: value } },
+    modelProviderFamilySelectedKeys: { [family]: 'coding-plan:builtin:zai-start-plan' }
+  }) });
+  const codingRegistry = JSON.stringify({ provider: {
+    'builtin:zai-coding-plan': { enabled: false, systemDisabledReason: 'coding_plan_not_entitled', options: { apiKey: 'coding-mirror' } },
+    'builtin:zai-start-plan': { enabled: true, options: { apiKey: 'start-mirror' } }
+  } });
+
+  const individual = discoverZcodeConnection({}, discoveryDeps({ ...kind('individual-coding-plan'), 'config.json': codingRegistry }));
+  assert.equal(individual.kind, 'coding-quota');
+  assert.equal(individual.providerId, 'builtin:zai-coding-plan');
+  assert.equal(individual.credential.token, 'coding-mirror');
+
+  const team = discoverZcodeConnection({}, discoveryDeps({ ...kind('team-coding-plan'), 'config.json': codingRegistry }));
+  assert.equal(team.kind, 'coding-quota');
+
+  // An off-peak selection has no GLM plan lane; it must not fall back to the
+  // frozen legacy string (which still points at the start plan here).
+  const offPeak = discoverZcodeConnection({}, discoveryDeps({ ...kind('off-peak'), 'config.json': codingRegistry }));
+  assert.equal(offPeak.kind, 'none');
+
+  // 3.11.x installs only have the legacy string.
+  const legacy = discoverZcodeConnection({}, discoveryDeps({
+    ...HAPPY_FILES,
+    'setting.json': JSON.stringify({ providerFamilyDomain: 'zai', modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-coding-plan' } }),
+    'config.json': codingRegistry
+  }));
+  assert.equal(legacy.kind, 'coding-quota');
+  assert.equal(legacy.credential.token, 'coding-mirror');
+});
+
+test('a disabled entry only blocks discovery when the account context is gone', () => {
+  const disabled = (enabled, systemDisabledReason) => discoveryDeps({
+    ...HAPPY_FILES,
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-start-plan': { enabled, systemDisabledReason, options: { apiKey: 'zcode-mirror-jwt' } }
+    } })
+  });
+  // A persistent not-entitled state (the shape a subscription-less 3.12.3
+  // install carries) is queryable — the lane's own error classification
+  // answers it, so discovery must not swallow it as "not settled".
+  assert.equal(discoverZcodeConnection({}, disabled(false, 'coding_plan_not_entitled')).credential.token, 'zcode-mirror-jwt');
+  assert.equal(discoverZcodeConnection({}, disabled(false, 'coding_plan_auth_failed')).credential.token, 'zcode-mirror-jwt');
+  // The inactive account context and the reason-less torn switch 3.11.x wrote
+  // are the only disabled shapes that keep the lane off.
+  assert.equal(discoverZcodeConnection({}, disabled(false, 'oauth_provider_inactive')).kind, 'none');
+  assert.equal(discoverZcodeConnection({}, disabled(false, undefined)).kind, 'none');
+  assert.equal(discoverZcodeConnection({}, disabled(true, undefined)).kind, 'start-billing');
 });
 
 test('discoverZcodeConnection follows a redirected data base dir', () => {
@@ -135,8 +194,7 @@ test('discoverZcodeConnection reports a direct API selection as unsupported', ()
   };
   const discovery = discoverZcodeConnection({}, discoveryDeps(apiFiles));
   assert.equal(discovery.kind, 'api-unsupported');
-  assert.equal(discovery.entitled, false);
-  assert.equal(discovery.reason, 'api_balance_not_supported');
+  assert.equal(discovery.credential, undefined);
   // A BigModel-hosted baseURL derives the bigmodel family.
   const cn = discoverZcodeConnection({}, discoveryDeps({
     ...apiFiles,
@@ -156,6 +214,7 @@ test('discoverZcodeConnection returns a coding-quota credential from the mirror 
   const discovery = discoverZcodeConnection({}, discoveryDeps({
     'setting.json': JSON.stringify({
       ...SETTINGS,
+      providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } },
       modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-coding-plan' }
     }),
     'config.json': JSON.stringify({
@@ -165,13 +224,9 @@ test('discoverZcodeConnection returns a coding-quota credential from the mirror 
           options: { apiKey: 'coding-mirror-key', baseURL: 'https://api.z.ai/api/anthropic' }
         }
       }
-    }),
-    'coding-plan-cache.json': JSON.stringify({
-      entryStatus: { items: { 'builtin:zai-coding-plan': { status: 'available' } } }
     })
   }));
   assert.equal(discovery.kind, 'coding-quota');
-  assert.equal(discovery.entitled, true);
   assert.equal(discovery.credential.token, 'coding-mirror-key');
   assert.equal(discovery.family, 'zai');
 });
@@ -373,13 +428,11 @@ test('discoverZcodeConnection re-reads disk on every call — an account switch 
   files = {
     'setting.json': JSON.stringify({
       providerFamilyDomain: 'bigmodel',
+      providerFamilyConnectionSelections: { bigmodel: { kind: 'individual-coding-plan' } },
       modelProviderFamilySelectedKeys: { bigmodel: 'coding-plan:builtin:bigmodel-coding-plan' }
     }),
     'config.json': JSON.stringify({
       provider: { 'builtin:bigmodel-coding-plan': { enabled: true, options: { apiKey: 'bm-mirror-key' } } }
-    }),
-    'coding-plan-cache.json': JSON.stringify({
-      entryStatus: { items: { 'builtin:bigmodel-coding-plan': { status: 'available' } } }
     })
   };
   const switched = discoverZcodeConnection({}, deps);
@@ -393,15 +446,15 @@ test('a coding-quota selection also surfaces the start-plan billing credential',
   // selected (validateZaiCodingPlanPairAvailability); the unselected entry
   // keeps enabled:false and still carries its mirror key.
   const files = {
-    'setting.json': JSON.stringify({ providerFamilyDomain: 'zai', modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-coding-plan' } }),
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } },
+      modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-coding-plan' }
+    }),
     'config.json': JSON.stringify({ provider: {
       'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'coding-mirror' } },
-      'builtin:zai-start-plan': { enabled: false, options: { apiKey: 'start-jwt' } }
-    } }),
-    'coding-plan-cache.json': JSON.stringify({ entryStatus: { items: {
-      'builtin:zai-coding-plan': { status: 'available' },
-      'builtin:zai-start-plan': { status: 'available' }
-    } } })
+      'builtin:zai-start-plan': { enabled: false, systemDisabledReason: 'coding_plan_not_entitled', options: { apiKey: 'start-jwt' } }
+    } })
   };
   const deps = { readFileSync: (filePath) => {
     const name = path.basename(String(filePath));
@@ -411,16 +464,18 @@ test('a coding-quota selection also surfaces the start-plan billing credential',
   const discovery = discoverZcodeConnection({}, deps);
   assert.equal(discovery.kind, 'coding-quota');
   assert.equal(discovery.credential.token, 'coding-mirror');
+  // The start entry's persistent disabled state no longer suppresses billing:
+  // the endpoint is account-level and answers for itself.
   assert.equal(discovery.billing.credential.token, 'start-jwt');
 
-  // No billing when the start-plan entry is not entitled.
-  const unentitled = JSON.parse(files['coding-plan-cache.json']);
-  unentitled.entryStatus.items['builtin:zai-start-plan'] = { status: 'unavailable', reason: 'coding_plan_not_entitled' };
-  const noBilling = discoverZcodeConnection({}, { ...deps, readFileSync: (filePath) => {
+  // Without a start entry (or without its mirror key) there is nothing to ride.
+  const noStart = discoverZcodeConnection({}, { ...deps, readFileSync: (filePath) => {
     const name = path.basename(String(filePath));
-    if (name === 'coding-plan-cache.json') return JSON.stringify(unentitled);
+    if (name === 'config.json') return JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'coding-mirror' } }
+    } });
     if (Object.hasOwn(files, name)) return files[name];
     throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
   } });
-  assert.equal(noBilling.billing, undefined);
+  assert.equal(noStart.billing, undefined);
 });
