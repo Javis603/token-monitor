@@ -718,3 +718,35 @@ test('clear remains available after a failed archive mutation', (t) => {
   assert.equal(store.clear(), true);
   assert.equal(fs.existsSync(sessionUsageArchiveDatabasePath(options)), false);
 });
+
+test('a legacy Cursor session link is committed and survives reopening the store', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const legacyId = 'cursor-active-2026-08-13T02:42:39.510Z';
+  const cursorSession = (sessionId, totalTokens) => ({
+    client: 'cursor',
+    sessionId,
+    totalTokens,
+    costUsd: 1,
+    models: { default: totalTokens },
+    modelCosts: { default: 1 }
+  });
+  const capturedAt = new Date('2026-09-15T08:00:00.000Z');
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+
+  const first = createSessionUsageArchiveStore(options);
+  first.capture({ allTime: { sessions: { [`cursor:${legacyId}`]: cursorSession(legacyId, 700) } } }, capturedAt);
+  first.close();
+
+  const cursorUsageEvents = () => ({
+    signature: 'synced',
+    sessionsAt: (time, totalTokens) => (time === Date.parse('2026-08-13T02:42:39.510Z') && totalTokens === 700 ? ['conv-1'] : [])
+  });
+  const linking = createSessionUsageArchiveStore({ ...options, cursorUsageEvents });
+  linking.capture({ allTime: { sessions: { 'cursor:conv-1': cursorSession('conv-1', 700) } } }, capturedAt);
+  linking.close();
+
+  const reopened = createSessionUsageArchiveStore(options);
+  t.after(() => reopened.close());
+  assert.equal(reopened.read(capturedAt).sessions[`cursor:${legacyId}`].supersededBy, 'cursor:conv-1');
+});

@@ -98,6 +98,7 @@ const { normalizeModelAliases, normalizeModelAliasGrouping, projectModelAliasSta
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
 const { claudeWebCookie, deepseekToken, factoryEnvApiKey, fetchClaudeLimits, fetchFactoryLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, resolveFactoryAutomaticApiKey, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie, alibabaCookie, alibabaVariant, normalizeAlibabaCookieHeader } = require('../shared/limits/collector');
+const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 const { discoverZcodeConnection } = require('../shared/providers/zai/zcodeDiscovery');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/providers/ollama/limits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
@@ -430,7 +431,7 @@ let credentialStore = null;
 let credentialStorageErrorShown = false;
 let antigravityOAuthLoginController = null;
 let sessionUsageArchive = null;
-const sessionUsageArchiveStore = createSessionUsageArchiveStore();
+const sessionUsageArchiveStore = createSessionUsageArchiveStore({ cursorUsageEvents: createCursorUsageEventIndex() });
 let lastSessionUsageArchiveUpdate = {
   at: null,
   durationMs: null,

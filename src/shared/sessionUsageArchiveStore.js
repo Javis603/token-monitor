@@ -355,7 +355,10 @@ function createSessionUsageArchiveStore(options = {}) {
     try {
       mutateArchive((latest) => {
         pruned = updateSessionUsageArchive(latest, null, capturedAt);
-        result = updateSessionUsageArchive(latest, deviceRecord, capturedAt, { canonicalSummary: true });
+        result = updateSessionUsageArchive(latest, deviceRecord, capturedAt, {
+          canonicalSummary: true,
+          cursorUsageEvents: options.cursorUsageEvents
+        });
         return {
           archive: result.archive,
           changedKeys: new Set([...pruned.changedKeys, ...result.changedKeys])
