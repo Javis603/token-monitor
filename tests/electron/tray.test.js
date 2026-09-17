@@ -445,6 +445,29 @@ test('tray context menu complements the primary click with useful commands', () 
   ]);
 });
 
+test('tray context menu offers edge dock controls only where the dock is supported', () => {
+  const patches = [];
+  const unsupported = buildTrayMenuTemplate({ state: { trayContent: 'tokens', windowBehavior: 'floating' } });
+  assert.equal(unsupported.some((item) => item.label === 'Edge Dock'), false);
+
+  const template = buildTrayMenuTemplate({
+    state: { trayContent: 'tokens', windowBehavior: 'floating', edgeDockSupported: true, edgeDockEnabled: false, edgeDockMode: 'always', edgeDockSide: 'left' },
+    onSetEdgeDock: (patch) => patches.push(patch)
+  });
+  const dock = template.find((item) => item.label === 'Edge Dock');
+  assert.ok(dock);
+  assert.equal(template.indexOf(dock), template.findIndex((item) => item.label === 'Window Presentation') + 1);
+  const [show, , autoHide, always, , left, right] = dock.submenu;
+  assert.equal(show.checked, false);
+  assert.equal(always.checked, true);
+  assert.equal(autoHide.checked, false);
+  assert.equal(left.checked, true);
+  show.click();
+  autoHide.click();
+  right.click();
+  assert.deepEqual(patches, [{ edgeDockEnabled: true }, { edgeDockMode: 'autoHide' }, { edgeDockSide: 'right' }]);
+});
+
 test('tray context menu exposes refresh progress and current window mode', () => {
   const template = buildTrayMenuTemplate({
     state: { refreshing: true, trayContent: 'tokens', trayMode: false, windowBehavior: 'desktop' }

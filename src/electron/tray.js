@@ -319,6 +319,39 @@ function buildTrayMenuTemplate(options = {}) {
       }))
     };
   })() : null;
+  // Edge dock quick controls. Offered only where the dock itself is supported;
+  // mode and edge stay usable while the dock is off so it opens the way the
+  // user wants when switched on.
+  const edgeDockItem = state.edgeDockSupported ? (() => {
+    const setDock = callback('onSetEdgeDock');
+    const mode = state.edgeDockMode === 'always' ? 'always' : 'autoHide';
+    const side = state.edgeDockSide === 'left' ? 'left' : 'right';
+    return {
+      label: t('trayMenu.edgeDock'),
+      submenu: [
+        {
+          label: t('trayMenu.edgeDockShow'),
+          type: 'checkbox',
+          checked: state.edgeDockEnabled === true,
+          click: () => setDock({ edgeDockEnabled: state.edgeDockEnabled !== true })
+        },
+        { type: 'separator' },
+        ...[['autoHide', 'settings.edgeDock.mode.autoHide'], ['always', 'settings.edgeDock.mode.always']].map(([value, labelKey]) => ({
+          label: t(labelKey),
+          type: 'radio',
+          checked: mode === value,
+          click: () => setDock({ edgeDockMode: value })
+        })),
+        { type: 'separator' },
+        ...[['left', 'settings.edgeDockSide.left'], ['right', 'settings.edgeDockSide.right']].map(([value, labelKey]) => ({
+          label: t(labelKey),
+          type: 'radio',
+          checked: side === value,
+          click: () => setDock({ edgeDockSide: value })
+        }))
+      ]
+    };
+  })() : null;
   return [
     {
       label: t(state.refreshing ? 'trayMenu.refreshing' : 'trayMenu.refreshNow'),
@@ -353,6 +386,7 @@ function buildTrayMenuTemplate(options = {}) {
         click: () => callback('onSetWindowPresentation')(value)
       }))
     },
+    ...(edgeDockItem ? [edgeDockItem] : []),
     { type: 'separator' },
     { label: t('trayMenu.version', { version: state.appVersion || '' }), enabled: false },
     { label: t('trayMenu.settings'), click: callback('onOpenSettings') },
@@ -397,6 +431,7 @@ function createTray({
   onRefresh,
   onSetTrayContent,
   onSetWindowPresentation,
+  onSetEdgeDock,
   onSwitchCodexAccount,
   onToggle,
   platform = process.platform,
@@ -422,6 +457,13 @@ function createTray({
         return typeof onSetWindowPresentation === 'function'
           ? onSetWindowPresentation(value)
           : undefined;
+      } finally {
+        refreshContextMenu();
+      }
+    },
+    onSetEdgeDock: (patch) => {
+      try {
+        return typeof onSetEdgeDock === 'function' ? onSetEdgeDock(patch) : undefined;
       } finally {
         refreshContextMenu();
       }

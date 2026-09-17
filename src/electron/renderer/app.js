@@ -377,6 +377,13 @@ Object.assign(els, {
   backHomeButton: document.getElementById('backHomeButton'),
   systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
+  edgeDockFeature: document.getElementById('edgeDockFeature'),
+  edgeDockInput: document.getElementById('edgeDockInput'),
+  edgeDockOptions: document.getElementById('edgeDockOptions'),
+  edgeDockSideInputs: Array.from(document.querySelectorAll('input[name="edgeDockSide"]')),
+  edgeDockModeInputs: Array.from(document.querySelectorAll('input[name="edgeDockMode"]')),
+  edgeDockWarnColorsInput: document.getElementById('edgeDockWarnColorsInput'),
+  edgeDockComposer: document.getElementById('edgeDockComposer'),
   trayIconOptions: document.getElementById('trayIconOptions'),
   trayOptions: document.getElementById('trayOptions'),
   hubModeOptions: document.getElementById('hubModeOptions'),
@@ -10142,6 +10149,7 @@ function syncSettingsForm() {
   for (const input of els.floatingBubbleTriggerInputs || []) input.checked = input.value === floatingBubbleTrigger;
   if (els.floatingBubbleContentInput) els.floatingBubbleContentInput.value = normalizeTrayContentValue(state.settings.floatingBubbleContent);
   els.floatingBubbleOptions?.classList.toggle('hidden', state.settings.floatingBubbleEnabled !== true);
+  syncEdgeDockControls();
   const showTrayIcon = state.settings.showTrayIcon !== false;
   if (els.showTrayIconInput) els.showTrayIconInput.checked = showTrayIcon;
   els.trayModeInput.disabled = !showTrayIcon;
@@ -13425,6 +13433,72 @@ els.floatingBubbleInput.addEventListener('change', () => {
   refreshTrayComposers();
   saveSettings({ floatingBubbleEnabled: els.floatingBubbleInput.checked });
 });
+// The dock needs positionable, non-activating windows and a global cursor
+// read; Linux (Wayland in particular) offers neither reliably, so the option is
+// only offered on macOS and Windows.
+function edgeDockAvailable() {
+  const platform = state.appInfo?.platform;
+  return platform === 'darwin' || platform === 'win32';
+}
+
+function syncEdgeDockControls() {
+  if (!els.edgeDockInput) return;
+  const available = edgeDockAvailable();
+  els.edgeDockFeature?.classList.toggle('hidden', !available);
+  const enabled = available && state.settings?.edgeDockEnabled === true;
+  els.edgeDockInput.checked = enabled;
+  els.edgeDockOptions?.classList.toggle('hidden', !enabled);
+  const side = state.settings?.edgeDockSide === 'left' ? 'left' : 'right';
+  for (const input of els.edgeDockSideInputs || []) input.checked = input.value === side;
+  const mode = state.settings?.edgeDockMode === 'always' ? 'always' : 'autoHide';
+  for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
+  if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
+  if (enabled) edgeDockComposer?.render();
+}
+
+const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComposer
+  ? window.TokenMonitorEdgeDockComposer.createEdgeDockComposer({
+    root: els.edgeDockComposer,
+    t,
+    itemsApi: window.TokenMonitorEdgeDockItems,
+    presentationApi: window.TokenMonitorEdgeDockPresentation,
+    getSettings: () => state.settings,
+    getStats: () => state.stats,
+    save: (patch) => saveSettings(patch),
+    providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
+    providerColor: (id) => limitProviderColor(id),
+    hasProviderMark: (id) => limitMarksWithIcon.has(id),
+    maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
+      ? accountIdentityApi.maskEmailAddress(email)
+      : String(email || '')),
+    createRowDrag: (config) => rowDragControllerApi.createRowDragController({
+      dragSort: verticalDragSortApi,
+      getScrollPanel: () => els.settingsPanel,
+      preserveScroll: preserveSettingsPanelScroll,
+      ...config
+    })
+  })
+  : null;
+
+els.edgeDockInput?.addEventListener('change', () => {
+  state.settings.edgeDockEnabled = els.edgeDockInput.checked;
+  els.edgeDockOptions?.classList.toggle('hidden', !els.edgeDockInput.checked);
+  void saveSettings({ edgeDockEnabled: els.edgeDockInput.checked });
+});
+for (const input of els.edgeDockSideInputs || []) {
+  input.addEventListener('change', () => {
+    if (input.checked) void saveSettings({ edgeDockSide: input.value });
+  });
+}
+els.edgeDockWarnColorsInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockWarnColors: els.edgeDockWarnColorsInput.checked });
+});
+for (const input of els.edgeDockModeInputs || []) {
+  input.addEventListener('change', () => {
+    if (input.checked) void saveSettings({ edgeDockMode: input.value });
+  });
+}
+
 for (const input of els.floatingBubbleTriggerInputs || []) {
   input.addEventListener('change', () => {
     if (input.checked) void saveSettings({ floatingBubbleTrigger: input.value });

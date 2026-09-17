@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, screen, session, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, screen, session, shell, systemPreferences } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
 const {
@@ -125,7 +125,7 @@ const {
   normalizePinnedClients
 } = require('./renderer/clientDisplayPreferences');
 const { normalizeRankingMetric } = require('./renderer/usageAttributionRows');
-const { LANGUAGE_OPTIONS, resolveLocale, translate } = require('./renderer/i18n');
+const { LANGUAGE_OPTIONS, resolveLocale, resolveRegionalLocale, translate } = require('./renderer/i18n');
 const {
   defaultViewDisplayPreferences,
   normalizeHiddenViews,
@@ -352,6 +352,16 @@ const {
   moveFloatingBubbleBounds
 } = require('./floatingBubble');
 const { applyWindowsChrome } = require('./windowsChrome');
+const { canUseEdgeDock, createEdgeDockController, edgeDockSupported } = require('./edgeDock/controller');
+const { normalizeEdgeDockOffset, normalizeEdgeDockSide } = require('./edgeDock/geometry');
+const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
+const { DERIVED_PERIODS: EDGE_DOCK_DERIVED_PERIODS, normalizeEdgeDockItems } = require('./renderer/edgeDock/items');
+const fixedPeriodRangesApi = require('./renderer/fixedPeriodRanges');
+const tokenRateApi = require('./renderer/tokenRatePresentation');
+const { toPolygons } = require('./renderer/edgeDock/shapes');
+const { rasterizeMask } = require('./edgeDock/mask');
+const { applyVibrancyMask } = require('./edgeDock/macVibrancyMask');
+const { primaryButtonDown } = require('./edgeDock/pointerButtons');
 const { setMoveToActiveSpace } = require('./macosSpaceBehavior');
 const {
   WINDOWS_BACKDROP_ACCENT,
@@ -508,6 +518,12 @@ function defaultSettings() {
     floatingBubbleContent: 'icon',
     floatingBubbleCustomLayout: createDefaultTrayLayout(),
     floatingBubbleBounds: null,
+    edgeDockEnabled: false,
+    edgeDockMode: 'autoHide',
+    edgeDockWarnColors: false,
+    edgeDockSide: 'right',
+    edgeDockOffset: null,
+    edgeDockItems: null,
     lastViewState: { period: 'today', breakdown: 'tool' },
     discordRpcEnabled: false,
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
@@ -2560,6 +2576,12 @@ function readSettings() {
     merged.floatingBubbleTrigger = merged.floatingBubbleTrigger === 'hover' ? 'hover' : 'click';
     merged.floatingBubbleContent = normalizeTrayContent(merged.floatingBubbleContent, 'icon');
     merged.floatingBubbleCustomLayout = normalizeTrayLayout(merged.floatingBubbleCustomLayout);
+    merged.edgeDockEnabled = parseBoolean(merged.edgeDockEnabled, false);
+    merged.edgeDockSide = normalizeEdgeDockSide(merged.edgeDockSide);
+    merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
+    merged.edgeDockMode = merged.edgeDockMode === 'always' ? 'always' : 'autoHide';
+    merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
+    merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
     merged.trayCustomLayout = normalizeTrayLayout(merged.trayCustomLayout);
     merged.showTrayProviderBadge = parseBoolean(merged.showTrayProviderBadge, false);
     merged.windowToggleShortcut = normalizeWindowToggleShortcut(merged.windowToggleShortcut);
@@ -4215,6 +4237,7 @@ function sendPush(payload, options = {}) {
       data: { ...payload.data, stats: visibleStats }
     };
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
+    updateEdgeDockCells(visibleStats);
     syncTrayCodexActiveAccount();
     updateTrayDisplay();
     if (!options.skipExport && settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
@@ -5012,6 +5035,7 @@ async function pushSystemUiThemeAfterChange() {
 
 function pushSettingsToRenderer() {
   const payload = settingsForRenderer();
+  syncEdgeDock(payload);
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('settings:push', payload); } catch (_) {}
   }
@@ -5024,10 +5048,248 @@ function pushSettingsToRenderer() {
   }
 }
 
+let edgeDockController = null;
+
+// The dock renderer is a floating surface outside the widget, so it gets an
+// allowlisted appearance projection instead of the full renderer settings.
+function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
+  const source = rendererSettings || {};
+  return {
+    language: source.language,
+    currency: source.currency,
+    currencyRatesEffective: source.currencyRatesEffective,
+    compactTokenUnits: source.compactTokenUnits,
+    themeColors: source.themeColors,
+    vendorColors: source.vendorColors,
+    glassOpacity: source.glassOpacity,
+    glassBlur: source.glassBlur,
+    systemGlass: source.systemGlass,
+    reduceMotion: source.reduceMotion,
+    interfaceFontFamily: source.interfaceFontFamily,
+    displayFontFamily: source.displayFontFamily,
+    showLimitUsed: source.showLimitUsed,
+    maskLimitAccountEmails: source.maskLimitAccountEmails,
+    edgeDockWarnColors: source.edgeDockWarnColors === true
+  };
+}
+
+// The dock's live-rate readout keeps its own tracker, fed from the same stats
+// pushes, so it works whether or not the widget's footer rate is switched on.
+const EDGE_DOCK_RATE_ACTIVE_MS = 8000;
+const EDGE_DOCK_RATE_CLEAR_MS = 3 * 60 * 1000;
+let edgeDockRateTracker = null;
+let edgeDockRateContext = '';
+let edgeDockRateTimer = null;
+
+function edgeDockShowsLiveRate() {
+  return Array.isArray(settings?.edgeDockItems)
+    && settings.edgeDockItems.some((item) => item.type === 'stat' && item.metric === 'liveRate');
+}
+
+function edgeDockLiveRateSample(visibleStats) {
+  if (edgeDockRateTimer) clearTimeout(edgeDockRateTimer);
+  edgeDockRateTimer = null;
+  if (!edgeDockShowsLiveRate()) {
+    edgeDockRateTracker = null;
+    edgeDockRateContext = '';
+    return null;
+  }
+  const hubMode = settings?.hubMode;
+  const syncMode = hubMode === 'client' || hubMode === 'host';
+  const scope = syncMode && settings?.liveTokenRateScope !== 'device' ? 'all' : 'device';
+  const selection = tokenRateApi.selectLiveTokenRatePeriods(visibleStats, settings?.deviceId, hubMode, scope);
+  const context = [mode, hubMode || '', settings?.hubUrl || '', settings?.deviceId || '', scope, selection.source].join('|');
+  if (!edgeDockRateTracker) {
+    edgeDockRateTracker = tokenRateApi.createLiveTokenRateGroupTracker({
+      activeMs: EDGE_DOCK_RATE_ACTIVE_MS,
+      clearMs: EDGE_DOCK_RATE_CLEAR_MS
+    });
+  }
+  if (context !== edgeDockRateContext) {
+    edgeDockRateContext = context;
+    edgeDockRateTracker.reset(selection.entries);
+  } else {
+    edgeDockRateTracker.observe(selection.entries);
+  }
+  // A sample goes idle and then clears without any new push; re-project then.
+  const expiresAt = edgeDockRateTracker.nextExpiryAt();
+  if (expiresAt) {
+    edgeDockRateTimer = setTimeout(() => {
+      edgeDockRateTimer = null;
+      if (latestStats) updateEdgeDockCells(electronPresentationStats(latestStats));
+    }, Math.max(0, expiresAt - Date.now()) + 20);
+  }
+  return edgeDockRateTracker.getSample();
+}
+
+// Week / last-7 / last-30 are not collector periods; the widget sums them from
+// History. The dock does the same, once per History revision and day, and
+// re-projects when the answer lands. Until then those readouts show unknown.
+let edgeDockDerivedPeriods = {};
+let edgeDockDerivedSignature = '';
+
+function edgeDockDerivedSelections() {
+  const items = Array.isArray(settings?.edgeDockItems) ? settings.edgeDockItems : [];
+  return EDGE_DOCK_DERIVED_PERIODS.filter((period) => items.some((item) => item.type === 'stat' && item.metric === period));
+}
+
+function refreshEdgeDockDerivedPeriods(visibleStats) {
+  const selections = edgeDockDerivedSelections();
+  if (!selections.length || !visibleStats) {
+    edgeDockDerivedPeriods = {};
+    edgeDockDerivedSignature = '';
+    return;
+  }
+  const todayKey = fixedPeriodRangesApi.localDayKey();
+  const signature = [
+    selections.join(','),
+    todayKey,
+    settings?.historyEnabled !== false,
+    fixedPeriodRangesApi.deviceInventorySignature(visibleStats.devices || []),
+    visibleStats.deviceHistoryRevision || visibleStats.historyRevision || ''
+  ].join('|');
+  if (signature === edgeDockDerivedSignature) return;
+  edgeDockDerivedSignature = signature;
+  getDashboardHistory({ includeDevices: true })
+    .then((history) => {
+      if (signature !== edgeDockDerivedSignature || !latestStats) return;
+      const stats = electronPresentationStats(latestStats);
+      const sources = fixedPeriodRangesApi.joinDeviceHistorySources(history?.deviceHistories || [], stats.devices || []);
+      const preferred = typeof app.getPreferredSystemLanguages === 'function' ? app.getPreferredSystemLanguages() : [app.getLocale()];
+      const next = {};
+      for (const selection of selections) {
+        const snapshot = fixedPeriodRangesApi.fixedPeriodSnapshotFromDevices(selection, sources, {
+          historyEnabled: settings?.historyEnabled !== false,
+          historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true,
+          todayKey,
+          locale: resolveRegionalLocale([...preferred, trayMenuLocale()])
+        });
+        if (snapshot?.status === 'ready' && snapshot.period) next[selection] = snapshot.period;
+      }
+      edgeDockDerivedPeriods = next;
+      updateEdgeDockCells(stats);
+    })
+    .catch((error) => {
+      console.log(`[edge-dock] history for derived periods failed: ${error.message}`);
+      // Let the next stats push retry rather than pinning the failure.
+      if (signature === edgeDockDerivedSignature) edgeDockDerivedSignature = '';
+    });
+}
+
+// The Codex reset forecast is the Limits view's opt-in; the dock shows it on the
+// Codex card when that option is on. Fetched through the same cached client,
+// no more than every few minutes, and re-projected only when it changes.
+const EDGE_DOCK_FORECAST_REFRESH_MS = 5 * 60 * 1000;
+let edgeDockForecast = null;
+let edgeDockForecastAt = 0;
+let edgeDockForecastInFlight = false;
+
+function edgeDockForecastWanted() {
+  if (settings?.codexResetForecastEnabled !== true) return false;
+  const items = settings?.edgeDockItems;
+  // Automatic items follow the connected providers, which may include Codex.
+  return !Array.isArray(items) || items.some((item) => item.type === 'limit' && item.provider === 'codex');
+}
+
+function refreshEdgeDockForecast() {
+  if (!edgeDockForecastWanted()) {
+    edgeDockForecast = null;
+    return;
+  }
+  if (edgeDockForecastInFlight || Date.now() - edgeDockForecastAt < EDGE_DOCK_FORECAST_REFRESH_MS) return;
+  edgeDockForecastInFlight = true;
+  edgeDockForecastAt = Date.now();
+  Promise.resolve(codexResetForecastClient.getForecast({ force: false }))
+    .then((forecast) => {
+      const changed = JSON.stringify(forecast || null) !== JSON.stringify(edgeDockForecast);
+      edgeDockForecast = forecast || null;
+      if (changed && latestStats) updateEdgeDockCells(electronPresentationStats(latestStats));
+    })
+    .catch((error) => console.log(`[edge-dock] reset forecast failed: ${error.message}`))
+    .finally(() => { edgeDockForecastInFlight = false; });
+}
+
+function edgeDockCellsFor(visibleStats) {
+  refreshEdgeDockDerivedPeriods(visibleStats);
+  refreshEdgeDockForecast();
+  return buildEdgeDockCells(visibleStats, {
+    derivedPeriods: edgeDockDerivedPeriods,
+    codexResetForecast: edgeDockForecastWanted() ? edgeDockForecast : null,
+    localDeviceId: settings?.deviceId,
+    items: settings?.edgeDockItems,
+    limitsEnabled: settings?.limitsEnabled !== false,
+    limitProviders: settings?.limitProviders,
+    limitProviderOrder: settings?.limitProviderOrder,
+    liveRate: edgeDockLiveRateSample(visibleStats),
+    tokenRateMode: settings?.tokenRateMode
+  });
+}
+
+function updateEdgeDockCells(visibleStats) {
+  if (!edgeDockController?.isRunning() || !visibleStats) return;
+  edgeDockController.setCells(edgeDockCellsFor(visibleStats));
+}
+
+function ensureEdgeDockController() {
+  if (edgeDockController) return edgeDockController;
+  edgeDockController = createEdgeDockController({
+    BrowserWindow,
+    ipcMain,
+    screen,
+    platform: process.platform,
+    rendererDir: path.join(__dirname, 'renderer'),
+    preloadPath: path.join(__dirname, 'edgeDock', 'preload.js'),
+    getSettings: () => settings,
+    nativeGlass: () => nativeBlurEnabled(),
+    prefersReducedMotion: () => motionPreferenceApi.shouldReduceMotion(
+      settings?.reduceMotion,
+      process.platform === 'darwin' && systemPreferences?.getAnimationSettings?.().prefersReducedMotion === true
+    ),
+    applyShapeMask: (win, commands, width, height) => {
+      const scale = screen.getPrimaryDisplay()?.scaleFactor || 2;
+      const { buffer, pixelWidth, pixelHeight } = rasterizeMask(toPolygons(commands), width, height, scale);
+      const png = nativeImage.createFromBitmap(buffer, { width: pixelWidth, height: pixelHeight }).toPNG();
+      if (!applyVibrancyMask(win, png, width, height)) console.log('[edge-dock] native material mask unavailable; showing the tinted silhouette only');
+    },
+    primaryButtonDown: () => primaryButtonDown(process.platform),
+    // The same setting the widget's rate readout toggles, so both stay in step.
+    onToggleRateMode: () => {
+      settings.tokenRateMode = settings.tokenRateMode === 'burn' ? 'speed' : 'burn';
+      saveSettings();
+      pushSettingsToRenderer();
+    },
+    onPlacementChange: ({ side, offset }) => {
+      settings.edgeDockSide = normalizeEdgeDockSide(side);
+      settings.edgeDockOffset = normalizeEdgeDockOffset(offset);
+      saveSettings();
+      pushSettingsToRenderer();
+    },
+    logger: (message) => console.log(message)
+  });
+  return edgeDockController;
+}
+
+function syncEdgeDock(rendererSettings) {
+  if (!settings) return;
+  if (!canUseEdgeDock(settings)) {
+    edgeDockController?.stop();
+    if (edgeDockRateTimer) clearTimeout(edgeDockRateTimer);
+    edgeDockRateTimer = null;
+    return;
+  }
+  const controller = ensureEdgeDockController();
+  controller.setAppearance(edgeDockAppearance(rendererSettings));
+  // Provider selection and order are settings too, so re-project on every sync
+  // rather than waiting for the next stats push to reorder the rail.
+  if (latestStats) controller.setCells(edgeDockCellsFor(electronPresentationStats(latestStats)));
+  controller.sync();
+}
+
 function refreshLimitStatsPresentation() {
   if (!latestStats) return;
   const visibleStats = electronPresentationStats(latestStats);
   scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
+  updateEdgeDockCells(visibleStats);
   updateTrayDisplay();
   if (mainWindow && !mainWindow.isDestroyed()) {
     try {
@@ -5120,6 +5382,15 @@ function setTrayContentFromMenu(value) {
   settings.trayContent = next;
   saveSettings();
   updateTrayDisplay();
+  pushSettingsToRenderer();
+}
+
+function setEdgeDockFromMenu(patch = {}) {
+  if (patch.edgeDockEnabled !== undefined) settings.edgeDockEnabled = parseBoolean(patch.edgeDockEnabled, false);
+  if (patch.edgeDockMode !== undefined) settings.edgeDockMode = patch.edgeDockMode === 'always' ? 'always' : 'autoHide';
+  if (patch.edgeDockSide !== undefined) settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
+  saveSettings();
+  // Also re-syncs the dock itself (pushSettingsToRenderer → syncEdgeDock).
   pushSettingsToRenderer();
 }
 
@@ -5274,6 +5545,10 @@ function ensureTray() {
         activeCodexAccountId: codex.activeAccountId,
         codexSwitching: codex.switching,
         maskAccountEmails: Boolean(settings?.maskLimitAccountEmails),
+        edgeDockSupported: edgeDockSupported(process.platform),
+        edgeDockEnabled: settings?.edgeDockEnabled === true,
+        edgeDockMode: settings?.edgeDockMode,
+        edgeDockSide: settings?.edgeDockSide,
         viewEnabled: {
           home: true,
           project: settings?.projectsEnabled !== false,
@@ -5289,6 +5564,7 @@ function ensureTray() {
     onRefresh: () => { void refreshFromTray(); },
     onSetTrayContent: setTrayContentFromMenu,
     onSetWindowPresentation: setWindowPresentationFromMenu,
+    onSetEdgeDock: setEdgeDockFromMenu,
     onSwitchCodexAccount: (accountId) => { void switchCodexAccountFromTray(accountId); },
     onOpenSettings: openSettingsFromTray,
     onQuit: requestAppQuit,
@@ -6335,6 +6611,12 @@ function createWindow(boundsOverride, options = {}) {
     }
   });
   win.webContents.on('before-input-event', handleZoomShortcut);
+  // The dock's own windows would otherwise keep the process alive after the
+  // last real window closes, which window-all-closed relies on for quitting.
+  win.on('closed', () => {
+    if (quitRequested || process.platform === 'darwin') return;
+    if (BrowserWindow.getAllWindows().every((other) => edgeDockController?.owns(other))) app.quit();
+  });
   win.on('show', () => sendMainWindowVisibility(win));
   win.on('hide', () => sendMainWindowVisibility(win));
   win.on('minimize', () => sendMainWindowVisibility(win));
@@ -6607,6 +6889,7 @@ app.whenReady().then(() => {
   applyEffectiveRates();                 // use cache/defaults immediately, avoid first-paint gap
   refreshExchangeRates();                // non-blocking: only fetches when stale
   rateRefreshTimer = setInterval(() => { refreshExchangeRates(); }, 6 * 60 * 60 * 1000);
+  syncEdgeDock();
   setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
 
@@ -6776,6 +7059,14 @@ app.whenReady().then(() => {
       ),
       tokenRateMode: normalizeTokenRateMode(patch.tokenRateMode ?? settings.tokenRateMode),
       floatingBubbleEnabled: parseBoolean(patch.floatingBubbleEnabled ?? settings.floatingBubbleEnabled, false),
+      edgeDockEnabled: parseBoolean(patch.edgeDockEnabled ?? settings.edgeDockEnabled, false),
+      edgeDockSide: normalizeEdgeDockSide(patch.edgeDockSide ?? settings.edgeDockSide),
+      edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
+      edgeDockMode: (patch.edgeDockMode ?? settings.edgeDockMode) === 'always' ? 'always' : 'autoHide',
+      edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
+      // `null` is a real value here (back to the automatic default), so the
+      // patch is checked for presence rather than coalesced.
+      edgeDockItems: normalizeEdgeDockItems('edgeDockItems' in (patch || {}) ? patch.edgeDockItems : settings.edgeDockItems),
       discordRpcEnabled: patch.discordRpcEnabled ?? settings.discordRpcEnabled ?? false,
       limitsEnabled: parseBoolean(patch.limitsEnabled ?? settings.limitsEnabled, true),
       // Sourced from settings only, never from the patch: subscriptions:save is
@@ -6917,6 +7208,7 @@ app.whenReady().then(() => {
     ) && latestStats) updateDiscordRpcDisplay(latestStats);
     applyWindowSettings();
     syncFloatingBubbleAvailability();
+    syncEdgeDock();
     const nextNativeMaterial = nativeBlurEnabled();
     const nextWindowsBackdrop = normalizeWindowsBackdropMode(settings?.windowsBackdrop);
     const windowsBackdropChanged = previousWindowsBackdrop !== nextWindowsBackdrop
@@ -8277,7 +8569,7 @@ app.whenReady().then(() => {
   // was the one path reaching applyMacSpaceBehavior() with a process type
   // nothing had decided, which skipTransformProcessType now preserves.
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length > 0) return;
+    if (BrowserWindow.getAllWindows().some((win) => !edgeDockController?.owns(win))) return;
     applyMacActivationPolicy({ mainWindowVisible: true });
     createWindow();
   });
@@ -8299,6 +8591,7 @@ app.on('before-quit', () => {
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
   stopTaskbarZOrderKeeper();
   unregisterWindowToggleShortcut();
+  edgeDockController?.stop();
   electronWorkbuddyLocalAuth.dispose();
   if (skipForcedQuit) return;
   performQuit();

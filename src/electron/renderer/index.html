@@ -6,6 +6,7 @@
     <title>Token Monitor</title>
     <script src="floatingBubbleBoot.js"></script>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="edgeDock/composer.css" />
   </head>
   <body>
     <main class="shell">
@@ -299,6 +300,28 @@
                     </select>
                   </label>
                   <div id="floatingBubbleComposer" class="tray-composer hidden" data-surface="floatingBubble"></div>
+                </div>
+              </div>
+              <div id="edgeDockFeature" class="presence-feature">
+                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.edgeDock">Edge Dock</span></span><input id="edgeDockInput" type="checkbox" /></label>
+                <div id="edgeDockOptions" class="presence-feature-body hidden">
+                  <p class="settings-note" data-i18n="settings.display.edgeDockNote">A slim quota rail hidden at the screen edge. Push the pointer to the edge to reveal it, click to pin, drag to move or switch sides.</p>
+                  <div class="settings-item">
+                    <span id="edgeDockModeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.mode">Visibility</span></span>
+                    <div class="inline-options" role="radiogroup" aria-labelledby="edgeDockModeLabel">
+                      <label class="inline-option"><input type="radio" name="edgeDockMode" value="autoHide" /><span data-i18n="settings.edgeDock.mode.autoHide">Auto-hide</span></label>
+                      <label class="inline-option"><input type="radio" name="edgeDockMode" value="always" /><span data-i18n="settings.edgeDock.mode.always">Always visible</span></label>
+                    </div>
+                  </div>
+                  <div class="settings-item">
+                    <span id="edgeDockSideLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.edgeDockSide">Screen edge</span></span>
+                    <div class="inline-options" role="radiogroup" aria-labelledby="edgeDockSideLabel">
+                      <label class="inline-option"><input type="radio" name="edgeDockSide" value="left" /><span data-i18n="settings.edgeDockSide.left">Left</span></label>
+                      <label class="inline-option"><input type="radio" name="edgeDockSide" value="right" /><span data-i18n="settings.edgeDockSide.right">Right</span></label>
+                    </div>
+                  </div>
+                  <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.warnColors">Highlight low limits in colour</span></span><input id="edgeDockWarnColorsInput" type="checkbox" /></label>
+                  <div id="edgeDockComposer" class="edge-dock-composer"></div>
                 </div>
               </div>
               <div class="presence-feature">
@@ -1869,6 +1892,9 @@
     <script src="../../shared/compactMoney.js"></script>
     <script src="../../shared/fontSettings.js"></script>
     <script src="../../shared/trayText.js"></script>
+    <script src="edgeDock/items.js"></script>
+    <script src="edgeDock/presentation.js"></script>
+    <script src="edgeDock/composer.js"></script>
     <script src="../../shared/trayLayout.js"></script>
     <script src="tokenRatePresentation.js"></script>
     <script src="../motionPreference.js"></script>
