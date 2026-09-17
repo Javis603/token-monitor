@@ -841,7 +841,12 @@ test('a 3.12.3-shaped install with a subscription renders the quota windows', as
     'setting.json': JSON.stringify({
       providerFamilyDomain: 'zai',
       providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } },
-      modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-coding-plan' }
+      // The frozen legacy string points at the *other* provider on purpose:
+      // that is what a 3.12.3 install looks like after the user switched, and
+      // it keeps this case a guard on the kind path — a code path that fell
+      // back to the legacy string would query billing instead, which the
+      // fetch mock below rejects.
+      modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-start-plan' }
     }),
     'config.json': JSON.stringify({ provider: {
       'builtin:zai-coding-plan': {
@@ -881,4 +886,5 @@ test('a 3.12.3-shaped install with a subscription renders the quota windows', as
   assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly', 'billing']);
   assert.equal(provider.windows[0].usedPercent, 12.5);
   assert.equal(provider.windows[1].usedPercent, 25);
+  assert.equal(provider.windows[2].usedPercent, 40);
 });
