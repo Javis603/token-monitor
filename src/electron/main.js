@@ -1837,7 +1837,7 @@ function setCodexManagedAccountEnabled(id, enabled) {
   return { ok: true, accounts: codexAccountsForRenderer() };
 }
 
-async function switchCodexSystemAccount(id) {
+async function performCodexSystemAccountSwitch(id) {
   const accountId = String(id || '').trim();
   const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
   const account = accounts.find((entry) => entry.id === accountId);
@@ -1904,12 +1904,37 @@ async function switchCodexSystemAccount(id) {
   }
 }
 
+let codexSystemSwitchInFlight = false;
+
+// Every surface reaches the same credential-swap lane. The renderer-level
+// locks keep each button tidy; this process-wide guard prevents two windows or
+// the tray from writing the live auth file at the same time.
+async function switchCodexSystemAccount(id) {
+  if (codexSystemSwitchInFlight) {
+    return { ok: false, error: 'A Codex account switch is already in progress.' };
+  }
+  codexSystemSwitchInFlight = true;
+  try {
+    return await performCodexSystemAccountSwitch(id);
+  } finally {
+    codexSystemSwitchInFlight = false;
+  }
+}
+
+async function switchCodexSystemAccountAndRefresh(accountId) {
+  const result = await switchCodexSystemAccount(accountId);
+  if (!result?.ok) return result;
+  const refreshResult = await refreshCodexManagedAccountLimits(accountId);
+  if (!refreshResult?.ok) return { ...result, refreshError: refreshResult?.error || 'Unknown refresh error' };
+  return { ...result, providers: refreshResult.providers || [] };
+}
+
 // The Edge Dock's Switch button: the same swap the Limits view runs, then a
 // repaint of what the dock and widget show. The dock's renderer has no settings
 // access, so the projection resolves the managed account id and this side owns
 // the credential write.
 async function switchCodexAccountFromEdgeDock(accountId) {
-  const result = await switchCodexSystemAccount(accountId);
+  const result = await switchCodexSystemAccountAndRefresh(accountId);
   if (!result?.ok) {
     console.log(`[edge-dock] codex account switch failed: ${result?.error || 'unknown error'}`);
     return result;
@@ -8512,7 +8537,7 @@ app.whenReady().then(() => {
     return { ok: true, cancelled: true };
   });
   ipcMain.handle('codex:removeAccount', async (_event, id) => removeCodexManagedAccount(id));
-  ipcMain.handle('codex:switchSystemAccount', async (_event, id) => switchCodexSystemAccount(id));
+  ipcMain.handle('codex:switchSystemAccount', async (_event, id) => switchCodexSystemAccountAndRefresh(id));
   ipcMain.handle('codex:refreshAccountLimits', async (_event, id) => refreshCodexManagedAccountLimits(id));
   ipcMain.handle('copilot:signIn', async (event, request = {}) => {
     if (copilotLoginController) return { ok: false, error: 'A GitHub Copilot sign-in is already in progress.', flowId: copilotLoginFlowId };

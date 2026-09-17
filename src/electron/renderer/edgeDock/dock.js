@@ -34,10 +34,7 @@ const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)
 const state = {
   payload: null,
   locale: 'en',
-  appearanceKey: '',
-  // The Codex account a Switch press is waiting on, so the button can show the
-  // in-flight label instead of letting a second press through.
-  switchingAccountId: ''
+  appearanceKey: ''
 };
 const maskSupport = new Map();
 
@@ -57,6 +54,25 @@ root.append(shapeLayer, contentLayer);
 function t(key, params) {
   return i18n.translate(state.locale, key, params);
 }
+
+const codexAccountControl = limitPresentationApi.createCodexAccountControl({
+  document,
+  requestAnimationFrame,
+  translate: t,
+  switchAccount: (accountId) => bridge.switchCodexAccount(accountId),
+  requestRender: () => {
+    if (surface === 'bubble' && state.payload?.cell) renderBubble(state.payload);
+  },
+  onSwitchFailure: (message) => {
+    console.log(`[edge-dock] codex account switch failed: ${message}`);
+  },
+  onSwitchSuccess: (result) => {
+    if (result.refreshError) console.log(`[edge-dock] codex account refresh failed: ${result.refreshError}`);
+  },
+  onPostSwitchError: (error) => {
+    console.log(`[edge-dock] codex post-switch update failed: ${error?.message || error}`);
+  }
+});
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -259,65 +275,16 @@ function accountTitle(account) {
   return appearance().maskLimitAccountEmails === true ? accountIdentityApi.maskEmailAddress(email) : email;
 }
 
-// The Limits view's account affordances, reused rather than restyled: the dock
-// page already loads the widget stylesheet, so .limit-account-switch-zone and
-// .limit-account-active-zone bring the same Switch button, "Local" hint and
-// spacing the widget has. The dock only wires the press to the main process.
-function accountSwitchControl(account, titleNode) {
+// The Limits view and dock both call the same renderer control. This wrapper
+// only maps the dock card's projected account shape into that shared contract.
+function accountControl(account, titleNode, options = {}) {
   const accountId = String(account.switchAccountId || '');
-  if (!accountId) return null;
-  const switching = state.switchingAccountId === accountId;
-  const zone = el('span', 'limit-account-switch-zone');
-  zone.classList.toggle('is-switching', switching);
-  const popover = el('span', 'limit-account-switch-popover');
-  const button = el('button', 'limit-account-switch-button');
-  button.type = 'button';
-  button.disabled = Boolean(state.switchingAccountId);
-  button.textContent = t(switching ? 'limits.codex.switching' : 'limits.codex.switchAccount');
-  const label = t('limits.codex.switchAccountTitle', {
-    account: accountTitle(account) || t('settings.codex.unnamedAccount')
+  return codexAccountControl.render({
+    titleNode,
+    active: options.showActive !== false && account.active === true,
+    switchAccount: accountId ? { id: accountId } : null,
+    accountLabel: accountTitle(account)
   });
-  button.title = label;
-  button.setAttribute('aria-label', label);
-  // pointerdown, not click: the card can be rebuilt by a stats push between
-  // press and release, which would swallow a click.
-  button.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0 || state.switchingAccountId) return;
-    event.preventDefault();
-    event.stopPropagation();
-    state.switchingAccountId = accountId;
-    zone.classList.add('is-switching');
-    button.disabled = true;
-    button.textContent = t('limits.codex.switching');
-    Promise.resolve(bridge.switchCodexAccount(accountId))
-      .then(() => {
-        // A successful switch re-projects the cards with the new live account
-        // (which rebuilds this row without a button); only the failure path has
-        // to clear the in-flight state by hand.
-        state.switchingAccountId = '';
-        renderBubble(state.payload);
-      })
-      .catch(() => {
-        state.switchingAccountId = '';
-        renderBubble(state.payload);
-      });
-  });
-  popover.append(button);
-  zone.append(titleNode, popover);
-  return zone;
-}
-
-// The account in use on this device, marked the way the Limits view marks it:
-// the check badge plus a "Local" popover that explains it on hover.
-function accountActiveControl(titleNode) {
-  const zone = el('span', 'limit-account-active-zone');
-  zone.tabIndex = 0;
-  const hint = t('limits.codex.activeAccountHint');
-  zone.setAttribute('aria-label', hint);
-  const badge = el('span', 'limit-live-badge', '\u2713');
-  const popover = el('span', 'limit-account-active-popover', hint);
-  zone.append(titleNode, badge, popover);
-  return zone;
 }
 
 // ---- Silhouette -------------------------------------------------------------
@@ -736,8 +703,8 @@ function providerCard(cell) {
   // With one account the email moves to the header, and so does the switch
   // affordance; with several, each row carries its own (below).
   const headTitle = el('span', 'limit-name-title edge-dock-card-title', providerLabel(cell.provider));
-  const headSwitch = single ? accountSwitchControl(single, headTitle) : null;
-  nameRow.append(headSwitch || headTitle);
+  const headControl = single ? accountControl(single, headTitle, { showActive: false }) : headTitle;
+  nameRow.append(headControl);
   if (single?.planLabel) nameRow.append(el('span', 'edge-dock-pill', single.planLabel));
   head.append(nameRow);
   const singleUpdated = single ? updatedText(single.updatedAt) : '';
@@ -756,9 +723,7 @@ function providerCard(cell) {
       // The row is one of three things, exactly as in the Limits view: the
       // account in use here (check badge plus a "Local" hint), a row that can be
       // switched to (hover reveals Switch), or a plain title.
-      const zone = accountSwitchControl(account, titleNode)
-        || (account.active ? accountActiveControl(titleNode) : null);
-      names.append(zone || titleNode);
+      names.append(accountControl(account, titleNode));
       const updated = updatedText(account.updatedAt);
       if (updated) names.append(el('span', 'edge-dock-card-subtitle', updated));
       name.append(names);
@@ -931,12 +896,16 @@ function render(payload) {
   updateShape(payload);
   if (surface === 'peek') renderPeek(payload);
   else if (surface === 'rail') renderRail(payload);
-  else renderBubble(payload);
+  else if (!codexAccountControl.deferRender(contentLayer)) renderBubble(payload);
 }
 
 bridge.onRender(render);
 // Reset countdowns move without a stats push; repaint the open card each minute.
 setInterval(() => {
-  if (surface === 'bubble' && state.payload?.cell) renderBubble(state.payload);
+  if (
+    surface === 'bubble'
+    && state.payload?.cell
+    && !codexAccountControl.deferRender(contentLayer)
+  ) renderBubble(state.payload);
 }, 30_000);
 bridge.ready();

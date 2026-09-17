@@ -592,7 +592,11 @@ function createEdgeDockController(deps) {
       if (!accountId) return { ok: false, error: 'Missing account' };
       try {
         const result = await onSwitchCodexAccount?.(accountId);
-        return { ok: result?.ok !== false, error: result?.error || '' };
+        return {
+          ok: result?.ok !== false,
+          error: result?.error || '',
+          refreshError: result?.refreshError || ''
+        };
       } catch (error) {
         logger(`[edge-dock] codex account switch failed: ${error.message}`);
         return { ok: false, error: error?.message || 'Switch failed' };
