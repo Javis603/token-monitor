@@ -72,6 +72,7 @@ test('discoverZcodeConnection resolves the selected plan, or none on a broken in
   assert.equal(discovery.kind, 'start-billing');
   assert.equal(discovery.family, 'zai');
   assert.equal(discovery.providerId, 'builtin:zai-start-plan');
+  assert.equal(discovery.entitled, true);
   assert.equal(discovery.credential.token, 'zcode-mirror-jwt');
   assert.equal(discovery.credential.source, 'zcode-auto');
 
@@ -194,6 +195,8 @@ test('discoverZcodeConnection reports a direct API selection as unsupported', ()
   };
   const discovery = discoverZcodeConnection({}, discoveryDeps(apiFiles));
   assert.equal(discovery.kind, 'api-unsupported');
+  assert.equal(discovery.entitled, false);
+  assert.equal(discovery.reason, 'api_balance_not_supported');
   assert.equal(discovery.credential, undefined);
   // A BigModel-hosted baseURL derives the bigmodel family.
   const cn = discoverZcodeConnection({}, discoveryDeps({
@@ -227,8 +230,25 @@ test('discoverZcodeConnection returns a coding-quota credential from the mirror 
     })
   }));
   assert.equal(discovery.kind, 'coding-quota');
+  assert.equal(discovery.entitled, true);
   assert.equal(discovery.credential.token, 'coding-mirror-key');
   assert.equal(discovery.family, 'zai');
+
+  // A selected plan entry with no readable credential cannot be queried, so
+  // discovery reports it unentitled with its own reason instead of dropping
+  // the selection (the settings pill still shows the detected login).
+  const keyless = discoverZcodeConnection({}, discoveryDeps({
+    'setting.json': JSON.stringify({
+      ...SETTINGS,
+      providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': { enabled: true, options: { apiKey: '' } }
+    } })
+  }));
+  assert.equal(keyless.kind, 'coding-quota');
+  assert.equal(keyless.entitled, false);
+  assert.equal(keyless.reason, 'coding_plan_not_authenticated');
 });
 
 const BILLING_PAYLOAD = {
