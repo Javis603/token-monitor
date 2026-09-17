@@ -7,7 +7,8 @@ const path = require('node:path');
 const test = require('node:test');
 
 const cursorAuth = require('../../src/shared/providers/cursor/auth');
-const { startCollector } = require('../../src/shared/collector');
+const { collectUsageOnce, startCollector } = require('../../src/shared/collector');
+const { SYNC_MIN_INTERVAL_MS } = require('../../src/shared/selfSyncThrottle');
 
 function waitFor(predicate, timeoutMs = 2000) {
   const startedAt = Date.now();
@@ -133,5 +134,68 @@ test('startup self-sync waits until every self-synced client is covered', async 
     runtime.stop();
     cursorAuth.runCursorSync = originalRunCursorSync;
     fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+});
+
+test('startup self-sync retries after the shared throttle allows it', async (t) => {
+  const originalRunCursorSync = cursorAuth.runCursorSync;
+  const originalNow = Date.now;
+  const baseNow = originalNow();
+  let clockOffsetMs = 0;
+  let syncCalls = 0;
+  Date.now = () => baseNow + clockOffsetMs;
+  cursorAuth.runCursorSync = async () => { syncCalls += 1; };
+
+  try {
+    await collectUsageOnce({
+      clients: 'cursor',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'startup-self-sync-throttle-seed',
+      agentVersion: 'test',
+      historyEnabled: false,
+      dailyHistoryArchiveEnabled: false,
+      projectsEnabled: false,
+      wslScanEnabled: false,
+      anchorPersistenceEnabled: false,
+      forceSelfSync: ['cursor'],
+      runTokscale: async () => ({ entries: [] })
+    });
+    assert.equal(syncCalls, 1);
+
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const runtime = startCollector({
+      clients: 'cursor',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'startup-self-sync-throttle-test',
+      agentVersion: 'test',
+      historyEnabled: false,
+      dailyHistoryArchiveEnabled: false,
+      projectsEnabled: false,
+      wslScanEnabled: false,
+      watchEnabled: false,
+      anchorPersistenceEnabled: false,
+      deferSelfSyncOnStartup: true,
+      intervalMs: 60 * 60 * 1000,
+      runTokscale: async () => ({ entries: [] }),
+      onUpdate: () => {}
+    });
+
+    try {
+      await waitFor(() => runtime.getDiagnostics().lastTickSuccessAt !== null);
+      assert.equal(syncCalls, 1, 'the startup catch-up stays pending while Cursor is throttled');
+
+      clockOffsetMs = SYNC_MIN_INTERVAL_MS + 1000;
+      t.mock.timers.tick(SYNC_MIN_INTERVAL_MS + 1000);
+      await waitFor(() => syncCalls === 2);
+      assert.equal(syncCalls, 2, 'the deferred startup sync retries after its throttle window');
+    } finally {
+      runtime.stop();
+    }
+  } finally {
+    t.mock.timers.reset();
+    Date.now = originalNow;
+    cursorAuth.runCursorSync = originalRunCursorSync;
   }
 });
