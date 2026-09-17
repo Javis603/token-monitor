@@ -885,3 +885,25 @@ test('a live day fills one model price while another model on that day is alread
   }), '2026-08-19');
   assert.equal(restored.daily.find((row) => row.date === '2026-08-18').cost, 3);
 });
+
+test('a Cursor graph day kept on a tied aggregate cost still fills a price only the liveDay has', () => {
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 100, 0, 1),
+    client('cursor', 'gpt-5.5', 200, 3, 1)
+  ]), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, {
+    ...cursorLivePeriod(300, 3),
+    models: { 'cursor-grok-4.6-high': 100, 'gpt-5.5': 200 },
+    modelCosts: { 'cursor-grok-4.6-high': 1, 'gpt-5.5': 2 },
+    clientModels: { cursor: { 'cursor-grok-4.6-high': 100, 'gpt-5.5': 200 } },
+    clientModelCosts: { cursor: { 'cursor-grok-4.6-high': 1, 'gpt-5.5': 2 } }
+  }, { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  const day = restored.daily.find((row) => row.date === '2026-08-18');
+  assert.equal(day.perModel['cursor-grok-4.6-high'].cost, 1);
+  assert.equal(day.perModel['gpt-5.5'].cost, 3);
+  assert.equal(day.cost, 4);
+});
