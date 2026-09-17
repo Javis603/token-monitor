@@ -618,7 +618,7 @@ test('Codex system account switching is exposed from limits account rows', () =>
 
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   assert.match(main, /ipcMain\.handle\('codex:switchSystemAccount'/);
-  assert.match(main, /switchCodexSystemAccountAndRefresh\(id\)/);
+  assert.match(main, /ipcMain\.handle\('codex:switchSystemAccount',[\s\S]*?switchCodexSystemAccount\(id\)/);
   assert.match(main, /ipcMain\.handle\('codex:refreshAccountLimits'/);
   assert.match(main, /refreshCodexManagedAccountLimits\(id\)/);
   assert.match(accountControl, /createCodexAccountControl/);
@@ -648,6 +648,7 @@ test('Codex system account switching is exposed from limits account rows', () =>
   const limitsRefreshBody = functionBody(app, 'applyCodexAccountLimitsRefresh', 'renderLimitProviderHead');
   assert.match(limitsRefreshBody, /applyCodexActiveAccountFromStats\(\);/);
   assert.match(app, /setCodexPendingActiveAccount\(result\.activeAccount \|\| null\);/);
+  assert.match(app, /window\.tokenMonitor\.codex\.refreshAccountLimits\(accountId\)\.then/);
   assert.match(control, /\.limit-account-switch-zone:hover/);
   assert.match(control, /\.limit-account-active-zone:focus-within/);
   const switchBody = functionBody(main, 'performCodexSystemAccountSwitch', 'switchCodexSystemAccount');
@@ -682,13 +683,15 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(refreshBody, /result\?\.snapshot \|\| deviceRuntimeHandle\.getSnapshot\(\)\?\.limits/);
   assert.doesNotMatch(refreshBody, /codexManagedAccountsForCollector\(\)/);
   assert.doesNotMatch(refreshBody, /collectLimitsOnce/);
-  const switchGuard = functionBody(main, 'switchCodexSystemAccount', 'switchCodexSystemAccountAndRefresh');
+  const switchGuard = functionBody(main, 'switchCodexSystemAccount', 'switchCodexAccountFromEdgeDock');
   assert.match(switchGuard, /if \(codexSystemSwitchInFlight\)/);
   assert.match(switchGuard, /await performCodexSystemAccountSwitch\(id\)/);
   assert.match(switchGuard, /finally \{/);
-  const switchAndRefresh = functionBody(main, 'switchCodexSystemAccountAndRefresh', 'switchCodexAccountFromEdgeDock');
-  assert.match(switchAndRefresh, /await switchCodexSystemAccount\(accountId\)/);
-  assert.match(switchAndRefresh, /await refreshCodexManagedAccountLimits\(accountId\)/);
+  const dockSwitch = functionBody(main, 'switchCodexAccountFromEdgeDock', 'refreshCodexManagedAccountLimits');
+  assert.match(dockSwitch, /await switchCodexSystemAccount\(accountId\)/);
+  assert.match(dockSwitch, /codexPresentationPendingAccountId = codexPresentationActiveAccountId;/);
+  assert.match(dockSwitch, /void refreshCodexManagedAccountLimits\(accountId\)\.then/);
+  assert.doesNotMatch(dockSwitch, /await refreshCodexManagedAccountLimits/);
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   assert.match(renderLimits, /const rowOptions = id === 'codex'\s*\? \{ accountTitle: true, allowSystemSwitch: true \}/s);
   assert.match(renderLimits, /renderLimitProviderRow\(id, label, provider, thirdPartyVisual\?\.color \|\| color, rowOptions\)/);

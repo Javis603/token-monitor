@@ -583,8 +583,9 @@ function createEdgeDockController(deps) {
     });
     // The card's Switch button, the one action the dock can take that is not
     // about its own geometry. The main process owns the credential swap and
-    // re-projects the cards when it lands; the renderer only reports intent and
-    // gets the outcome back so the button can leave its in-flight label.
+    // re-projects the cards as soon as the credential swap lands; quota refresh
+    // continues in the background. The renderer only reports intent and gets
+    // the swap outcome back so the button can leave its in-flight label.
     ipcMain.removeHandler('edgeDock:switchCodexAccount');
     ipcMain.handle('edgeDock:switchCodexAccount', async (event, payload) => {
       if (surfaceFor(event.sender) !== 'bubble') return { ok: false, error: 'Unknown surface' };
@@ -594,8 +595,7 @@ function createEdgeDockController(deps) {
         const result = await onSwitchCodexAccount?.(accountId);
         return {
           ok: result?.ok !== false,
-          error: result?.error || '',
-          refreshError: result?.refreshError || ''
+          error: result?.error || ''
         };
       } catch (error) {
         logger(`[edge-dock] codex account switch failed: ${error.message}`);

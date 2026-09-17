@@ -1921,26 +1921,30 @@ async function switchCodexSystemAccount(id) {
   }
 }
 
-async function switchCodexSystemAccountAndRefresh(accountId) {
-  const result = await switchCodexSystemAccount(accountId);
-  if (!result?.ok) return result;
-  const refreshResult = await refreshCodexManagedAccountLimits(accountId);
-  if (!refreshResult?.ok) return { ...result, refreshError: refreshResult?.error || 'Unknown refresh error' };
-  return { ...result, providers: refreshResult.providers || [] };
-}
-
-// The Edge Dock's Switch button: the same swap the Limits view runs, then a
-// repaint of what the dock and widget show. The dock's renderer has no settings
-// access, so the projection resolves the managed account id and this side owns
-// the credential write.
+// The Edge Dock's Switch button: the same optimistic swap the Limits view runs.
+// Repaint immediately after the credential write so the checkmark moves, then
+// refresh that account's quota in the background. The dock's renderer has no
+// settings access, so the projection resolves the managed account id and this
+// side owns the credential write.
 async function switchCodexAccountFromEdgeDock(accountId) {
-  const result = await switchCodexSystemAccountAndRefresh(accountId);
+  const result = await switchCodexSystemAccount(accountId);
   if (!result?.ok) {
     console.log(`[edge-dock] codex account switch failed: ${result?.error || 'unknown error'}`);
     return result;
   }
+  codexPresentationActiveAccountId = result.activeAccountId || accountId;
+  codexPresentationPendingAccountId = codexPresentationActiveAccountId;
+  codexPresentationPendingSince = Date.now();
   pushSettingsToRenderer();
   if (latestStats) refreshLimitStatsPresentation();
+  void refreshCodexManagedAccountLimits(accountId).then((refreshResult) => {
+    if (!refreshResult?.ok) {
+      console.log(`[edge-dock] codex account refresh failed: ${refreshResult?.error || 'unknown error'}`);
+    }
+    if (latestStats) refreshLimitStatsPresentation();
+  }).catch((error) => {
+    console.log(`[edge-dock] codex account refresh failed: ${error?.message || error}`);
+  });
   return result;
 }
 
@@ -2983,8 +2987,8 @@ let macWidgetDemand = null;
 let macWidgetPublicationReady = false;
 let cachedMacWidgetConfiguration;
 let trayRefreshInFlight = false;
-let trayCodexActiveAccountId = '';
-let trayCodexPendingAccountId = '';
+let codexPresentationActiveAccountId = '';
+let codexPresentationPendingAccountId = '';
 
 function electronPresentationStats(stats) {
   return projectModelAliasStats(projectLimitStatsForDisplay(stats, {
@@ -2993,7 +2997,7 @@ function electronPresentationStats(stats) {
     opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
   }), settings?.modelAliases, { grouping: settings?.modelAliasGrouping });
 }
-let trayCodexPendingSince = 0;
+let codexPresentationPendingSince = 0;
 let trayCodexSwitchInFlight = false;
 const DEFAULT_EXPORT_INTERVAL_MS = 60 * 1000;
 let lastExportAt = 0;
@@ -4278,7 +4282,7 @@ function sendPush(payload, options = {}) {
     };
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
     updateEdgeDockCells(visibleStats);
-    syncTrayCodexActiveAccount();
+    syncCodexPresentationActiveAccount();
     updateTrayDisplay();
     if (!options.skipExport && settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
       lastExportAt = Date.now();
@@ -5252,12 +5256,14 @@ function refreshEdgeDockForecast() {
 function edgeDockCellsFor(visibleStats) {
   refreshEdgeDockDerivedPeriods(visibleStats);
   refreshEdgeDockForecast();
+  syncCodexPresentationActiveAccount();
   return buildEdgeDockCells(visibleStats, {
     derivedPeriods: edgeDockDerivedPeriods,
     codexResetForecast: edgeDockForecastWanted() ? edgeDockForecast : null,
     localDeviceId: settings?.deviceId,
     items: settings?.edgeDockItems,
     codexManagedAccounts: codexAccountsForRenderer(),
+    activeCodexAccountId: codexPresentationPendingAccountId || codexPresentationActiveAccountId,
     limitsEnabled: settings?.limitsEnabled !== false,
     limitProviders: settings?.limitProviders,
     limitProviderOrder: settings?.limitProviderOrder,
@@ -5481,27 +5487,27 @@ function enabledTrayCodexAccounts() {
   );
 }
 
-function syncTrayCodexActiveAccount() {
+function syncCodexPresentationActiveAccount() {
   const accounts = enabledTrayCodexAccounts();
   const localDeviceId = settings?.deviceId || '';
   const liveProvider = localLiveCodexProvider(latestStats, localDeviceId);
   const selection = reconcileCodexAccountSelection({
     detectedAccountId: codexAccountIdForProvider(accounts, liveProvider),
     detectedAt: liveProvider?.updatedAt,
-    pendingAccountId: trayCodexPendingAccountId,
-    pendingSince: trayCodexPendingSince
+    pendingAccountId: codexPresentationPendingAccountId,
+    pendingSince: codexPresentationPendingSince
   });
-  trayCodexActiveAccountId = selection.activeAccountId;
-  trayCodexPendingAccountId = selection.pendingAccountId;
-  if (!trayCodexPendingAccountId) trayCodexPendingSince = 0;
+  codexPresentationActiveAccountId = selection.activeAccountId;
+  codexPresentationPendingAccountId = selection.pendingAccountId;
+  if (!codexPresentationPendingAccountId) codexPresentationPendingSince = 0;
 }
 
 function trayCodexMenuState() {
-  syncTrayCodexActiveAccount();
+  syncCodexPresentationActiveAccount();
   const accounts = enabledTrayCodexAccounts();
   return {
     accounts,
-    activeAccountId: trayCodexPendingAccountId || trayCodexActiveAccountId,
+    activeAccountId: codexPresentationPendingAccountId || codexPresentationActiveAccountId,
     switching: trayCodexSwitchInFlight
   };
 }
@@ -5530,7 +5536,7 @@ function showTrayRefreshError(error) {
 
 async function switchCodexAccountFromTray(accountId) {
   if (trayCodexSwitchInFlight || !accountId) return;
-  const currentId = trayCodexPendingAccountId || trayCodexActiveAccountId;
+  const currentId = codexPresentationPendingAccountId || codexPresentationActiveAccountId;
   if (accountId === currentId) return;
   return runTrayMenuAction({
     setInFlight: (value) => { trayCodexSwitchInFlight = value; },
@@ -5542,9 +5548,9 @@ async function switchCodexAccountFromTray(accountId) {
           showTrayCodexSwitchError(result?.error);
           return;
         }
-        trayCodexActiveAccountId = result.activeAccountId || accountId;
-        trayCodexPendingAccountId = trayCodexActiveAccountId;
-        trayCodexPendingSince = Date.now();
+        codexPresentationActiveAccountId = result.activeAccountId || accountId;
+        codexPresentationPendingAccountId = codexPresentationActiveAccountId;
+        codexPresentationPendingSince = Date.now();
         pushSettingsToRenderer();
       } catch (error) {
         showTrayCodexSwitchError(error?.message || error);
@@ -8537,7 +8543,7 @@ app.whenReady().then(() => {
     return { ok: true, cancelled: true };
   });
   ipcMain.handle('codex:removeAccount', async (_event, id) => removeCodexManagedAccount(id));
-  ipcMain.handle('codex:switchSystemAccount', async (_event, id) => switchCodexSystemAccountAndRefresh(id));
+  ipcMain.handle('codex:switchSystemAccount', async (_event, id) => switchCodexSystemAccount(id));
   ipcMain.handle('codex:refreshAccountLimits', async (_event, id) => refreshCodexManagedAccountLimits(id));
   ipcMain.handle('copilot:signIn', async (event, request = {}) => {
     if (copilotLoginController) return { ok: false, error: 'A GitHub Copilot sign-in is already in progress.', flowId: copilotLoginFlowId };

@@ -201,6 +201,13 @@
   line-height: 1.45;
 }
 .settings-panel .edge-dock-composer-switch { min-height: 26px; }
+.settings-panel .edge-dock-composer-choice {
+  min-height: 30px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.edge-dock-composer-choice .inline-options { flex-wrap: wrap; justify-content: flex-end; }
+.edge-dock-composer-choice .inline-option { padding-inline: 7px; }
 .edge-dock-composer-menu { display: grid; gap: 10px; }
 .edge-dock-composer-menu-group,
 .edge-dock-composer-accounts { display: grid; gap: 2px; }

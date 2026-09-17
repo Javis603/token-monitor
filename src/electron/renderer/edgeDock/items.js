@@ -6,7 +6,8 @@
 //
 // `edgeDockItems` is either null — the automatic default, which follows the
 // connected limit providers — or an ordered list the user composed:
-//   { type: 'limit', provider, hiddenAccounts: [accountKey], showUsage }
+//   { type: 'limit', provider, hiddenAccounts: [accountKey], showUsage,
+//     accountMode: 'active' | 'lowest' }
 //   { type: 'stat', metric }   metric: a usage period, or 'liveRate'
 (function exposeEdgeDockItems(root, factory) {
   const node = typeof module === 'object' && module.exports;
@@ -59,7 +60,11 @@
         provider,
         hiddenAccounts,
         showUsage: raw.showUsage !== false,
-        showSessions: raw.showSessions !== false
+        showSessions: raw.showSessions !== false,
+        // Codex has a meaningful local "current account", so its glance value
+        // follows that account unless the user explicitly asks for the tightest
+        // visible account. Other providers have no local-login identity.
+        accountMode: provider === 'codex' && raw.accountMode !== 'lowest' ? 'active' : 'lowest'
       };
     }
     if (raw.type === 'stat') {
@@ -94,7 +99,8 @@
       provider,
       hiddenAccounts: [],
       showUsage: true,
-      showSessions: true
+      showSessions: true,
+      accountMode: provider === 'codex' ? 'active' : 'lowest'
     }));
   }
 

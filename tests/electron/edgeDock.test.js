@@ -362,6 +362,55 @@ test('the live Codex account is marked from this device only', () => {
   };
   const [codex] = buildEdgeDockCells(stats, { localDeviceId: 'here' });
   assert.deepEqual(codex.accounts.map((account) => account.active), [false, true]);
+  assert.equal(codex.remainingPercent, 40, 'the current account supplies the default rail value');
+});
+
+test('Codex rail defaults to the current account and can opt into lowest remaining', () => {
+  const records = [
+    provider('codex', {
+      accountKey: 'sha256:a',
+      accountEmail: 'a@example.com',
+      windows: [{ kind: 'session', remainingPercent: 5 }]
+    }),
+    provider('codex', {
+      accountKey: 'sha256:b',
+      accountEmail: 'b@example.com',
+      windows: [{ kind: 'session', remainingPercent: 70 }]
+    })
+  ];
+  const stats = {
+    limits: { providers: records },
+    devices: [{ deviceId: 'here', limits: { providers: [records[1]] } }]
+  };
+  const [current] = buildEdgeDockCells(stats, { localDeviceId: 'here' });
+  assert.equal(current.remainingPercent, 70);
+
+  const [lowest] = buildEdgeDockCells(stats, {
+    localDeviceId: 'here',
+    items: [{ type: 'limit', provider: 'codex', accountMode: 'lowest' }]
+  });
+  assert.equal(lowest.remainingPercent, 5);
+});
+
+test('an optimistic Codex account selection moves the active rail value before refreshed stats arrive', () => {
+  const records = [
+    provider('codex', { accountKey: 'sha256:a', windows: [{ kind: 'session', remainingPercent: 5 }] }),
+    provider('codex', { accountKey: 'sha256:b', windows: [{ kind: 'session', remainingPercent: 70 }] })
+  ];
+  const stats = {
+    limits: { providers: records },
+    devices: [{ deviceId: 'here', limits: { providers: [records[0]] } }]
+  };
+  const [codex] = buildEdgeDockCells(stats, {
+    localDeviceId: 'here',
+    activeCodexAccountId: 'managed-b',
+    codexManagedAccounts: [
+      { id: 'managed-a', accountKey: 'sha256:a' },
+      { id: 'managed-b', accountKey: 'sha256:b' }
+    ]
+  });
+  assert.deepEqual(codex.accounts.map((account) => account.active), [false, true]);
+  assert.equal(codex.remainingPercent, 70);
 });
 
 test('codex card rows resolve a switchable managed account, and never the live one', () => {
@@ -441,8 +490,10 @@ test('item settings normalize to null for automatic and drop unknown entries', (
   ]);
   assert.deepEqual(
     normalizeEdgeDockItems([{ type: 'limit', provider: 'CODEX', hiddenAccounts: ['k', 'k', 7, ''] }]),
-    [{ type: 'limit', provider: 'codex', hiddenAccounts: ['k', '7'], showUsage: true, showSessions: true }]
+    [{ type: 'limit', provider: 'codex', hiddenAccounts: ['k', '7'], showUsage: true, showSessions: true, accountMode: 'active' }]
   );
+  assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'codex', accountMode: 'lowest' }])[0].accountMode, 'lowest');
+  assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'claude', accountMode: 'active' }])[0].accountMode, 'lowest');
 });
 
 test('a dragged usage item keeps its place in the saved order', () => {

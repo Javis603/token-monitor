@@ -211,25 +211,9 @@
     const accounts = records
       .filter((record) => !record?.accountKey || !hidden.has(record.accountKey))
       .map((record) => ({ record, summary: accountSummary(record) }));
-    // The rail shows the tightest usable account: a glance surface that
-    // averaged or picked the first account would understate how close the
-    // user is to a limit.
-    let headline = null;
-    for (const account of accounts) {
-      if (account.summary.primaryRemaining === null) continue;
-      if (!headline || account.summary.primaryRemaining < headline.summary.primaryRemaining) headline = account;
-    }
-    const headlineWindow = headline?.summary.primaryWindow || null;
-    const headlineCredits = headlineWindow && balanceDisplay.isCreditsWindow(headlineWindow)
-      ? {
-        amount: balanceDisplay.creditsAmount(headline.record, headlineWindow),
-        currency: balanceDisplay.creditsCurrency(headline.record, headlineWindow)
-      }
-      : null;
-    // Accounts keep the collector's order, as the Limits view lists them; only
-    // the rail's headline picks the tightest one. The live Codex account is
-    // taken from this device's records alone, so a synced device's login is
-    // never marked as the one in use here.
+    // Accounts keep the collector's order, as the Limits view lists them. The
+    // live Codex account is taken from this device's records alone, so a synced
+    // device's login is never marked as the one in use here.
     const live = id === 'codex'
       ? accountIdentity?.localLiveCodexProvider?.(options.stats, options.localDeviceId) || null
       : null;
@@ -246,13 +230,18 @@
     // still offers it, which is how the local login gets re-activated. Mirror
     // that gate rather than inventing a stricter one.
     const grouped = accounts.length > 1;
-    const sorted = accounts.map((account) => {
-      const active = Boolean(live && (
-        (live.accountKey && live.accountKey === account.record.accountKey)
-        || (!live.accountKey && live.accountEmail && live.accountEmail === account.record.accountEmail)
-      ));
+    const projected = accounts.map((account) => {
+      const managed = managedAccounts.find((entry) => (
+        entry?.enabled !== false && accountIdentity?.codexAccountMatchesProvider?.(entry, account.record)
+      )) || null;
+      const active = id === 'codex' && options.activeCodexAccountId
+        ? managed?.id === options.activeCodexAccountId
+        : Boolean(live && (
+          (live.accountKey && live.accountKey === account.record.accountKey)
+          || (!live.accountKey && live.accountEmail && live.accountEmail === account.record.accountEmail)
+        ));
       const switchable = (grouped ? !active : true)
-        ? managedAccounts.find((entry) => entry?.enabled !== false && accountIdentity?.codexAccountMatchesProvider?.(entry, account.record)) || null
+        ? managed
         : null;
       return {
         ...account,
@@ -263,6 +252,26 @@
         }
       };
     });
+    // Codex defaults to the account this machine is using. Users who monitor a
+    // pool can opt back into the previous tightest-visible-account headline.
+    // If the active row is hidden or has no usable value, fall back to the
+    // tightest visible account rather than leaving the rail blank.
+    let tightest = null;
+    for (const account of projected) {
+      if (account.summary.primaryRemaining === null) continue;
+      if (!tightest || account.summary.primaryRemaining < tightest.summary.primaryRemaining) tightest = account;
+    }
+    const activeHeadline = id === 'codex' && options.accountMode !== 'lowest'
+      ? projected.find((account) => account.summary.active && account.summary.primaryRemaining !== null) || null
+      : null;
+    const headline = activeHeadline || tightest;
+    const headlineWindow = headline?.summary.primaryWindow || null;
+    const headlineCredits = headlineWindow && balanceDisplay.isCreditsWindow(headlineWindow)
+      ? {
+        amount: balanceDisplay.creditsAmount(headline.record, headlineWindow),
+        currency: balanceDisplay.creditsCurrency(headline.record, headlineWindow)
+      }
+      : null;
     return {
       id,
       kind: 'provider',
@@ -272,7 +281,7 @@
       windowKind: headlineWindow ? String(headlineWindow.kind || '') : '',
       credits: headlineCredits,
       accountCount: accounts.length,
-      accounts: sorted.slice(0, MAX_BUBBLE_ACCOUNTS).map((account) => account.summary),
+      accounts: projected.slice(0, MAX_BUBBLE_ACCOUNTS).map((account) => account.summary),
       usage: options.showUsage === false ? null : providerUsage(options.stats, id),
       sessions: options.showSessions === false ? [] : recentSessionsFor(options.stats, id),
       forecast: id === 'codex' ? options.codexResetForecast || null : null
@@ -360,6 +369,7 @@
           stats,
           localDeviceId: options.localDeviceId,
           codexManagedAccounts: options.codexManagedAccounts,
+          activeCodexAccountId: options.activeCodexAccountId,
           codexResetForecast: options.codexResetForecast
         }));
       }

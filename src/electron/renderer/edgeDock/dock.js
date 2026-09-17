@@ -67,9 +67,6 @@ const codexAccountControl = codexAccountControlApi.createCodexAccountControl({
   onSwitchFailure: (message) => {
     console.log(`[edge-dock] codex account switch failed: ${message}`);
   },
-  onSwitchSuccess: (result) => {
-    if (result.refreshError) console.log(`[edge-dock] codex account refresh failed: ${result.refreshError}`);
-  },
   onPostSwitchError: (error) => {
     console.log(`[edge-dock] codex post-switch update failed: ${error?.message || error}`);
   }

@@ -171,6 +171,28 @@
       return label;
     }
 
+    function choiceRow(titleKey, value, choices, onChange) {
+      const row = el('div', 'settings-item edge-dock-composer-choice');
+      const text = el('span', 'settings-item-text');
+      text.append(el('span', 'settings-item-title', t(titleKey)));
+      const options = el('span', 'inline-options');
+      for (const choice of choices) {
+        const label = el('label', 'inline-option');
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = `edgeDock-${ui.selected}-${titleKey}`;
+        input.value = choice.value;
+        input.checked = value === choice.value;
+        input.addEventListener('change', () => {
+          if (input.checked) onChange(input.value);
+        });
+        label.append(input, el('span', '', t(choice.labelKey)));
+        options.append(label);
+      }
+      row.append(text, options);
+      return row;
+    }
+
     function detail(items) {
       const pane = el('div', 'edge-dock-composer-detail');
       if (ui.menuOpen) {
@@ -211,6 +233,14 @@
       pane.append(switchRow('settings.edgeDock.showSessions', item.showSessions !== false, (checked) => {
         void updateItem(id, { showSessions: checked });
       }));
+      if (item.provider === 'codex') {
+        pane.append(choiceRow('settings.edgeDock.limitValue', item.accountMode === 'lowest' ? 'lowest' : 'active', [
+          { value: 'active', labelKey: 'trayComposer.account.active' },
+          { value: 'lowest', labelKey: 'trayComposer.account.lowest' }
+        ], (accountMode) => {
+          void updateItem(id, { accountMode });
+        }));
+      }
       const accounts = accountsFor(item.provider);
       if (accounts.length > 1) {
         const hidden = new Set(item.hiddenAccounts || []);

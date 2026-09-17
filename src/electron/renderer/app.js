@@ -603,13 +603,17 @@ const codexAccountControl = codexAccountControlApi.createCodexAccountControl({
   onSwitchFailure: (message) => {
     state.codexAccountError = message;
   },
-  onSwitchSuccess: (result) => {
+  onSwitchSuccess: (result, accountId) => {
     state.codexAccountError = '';
     state.settings.codexManagedAccounts = result.accounts || state.settings.codexManagedAccounts || [];
     setCodexPendingActiveAccount(result.activeAccount || null);
     state.codexActiveAccount = result.activeAccount;
-    if (Array.isArray(result.providers)) applyCodexAccountLimitsRefresh(result.providers);
-    if (result.refreshError) console.log(`[codex] refresh account limits failed: ${result.refreshError}`);
+    window.tokenMonitor.codex.refreshAccountLimits(accountId).then((refreshResult) => {
+      if (refreshResult?.ok) applyCodexAccountLimitsRefresh(refreshResult.providers || []);
+      else if (refreshResult?.error) console.log(`[codex] refresh account limits failed: ${refreshResult.error}`);
+    }).catch((refreshError) => {
+      console.log(`[codex] refresh account limits failed: ${refreshError?.message || refreshError}`);
+    });
   },
   onPostSwitchError: (error) => {
     console.log(`[codex] post-switch update failed: ${error?.message || error}`);
