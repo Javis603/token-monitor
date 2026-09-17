@@ -263,6 +263,24 @@ function parseZaiUsage(quotaBody, subscriptionBody = null) {
   return { plan, windows };
 }
 
+// ZCode's gateways answer HTTP 200 with a business code in the body; an
+// expired or revoked credential arrives as 401 "token expired or incorrect",
+// which ZCode classifies through isSuccessfulBusinessEnvelope as an auth
+// failure. Anything else in the body stays on the existing contract — a key
+// without a subscription answers code 500 and is a state, not a transport
+// failure, so a fulfilled finance report still keeps the row usable. Shared by
+// every ZCode-facing request so the classification cannot drift between them.
+async function readZaiBody(response, url) {
+  const body = await response.json();
+  const code = body?.code;
+  if (code === 401 || code === 403) {
+    const error = new Error(`${url} answered code ${code}`);
+    error.status = 'unauthorized';
+    throw error;
+  }
+  return body;
+}
+
 async function fetchJson(url, key, deps = {}) {
   const deadlineMs = Number(deps.zaiFetchTimeoutMs || deps.fetchTimeoutMs || ZAI_FETCH_TIMEOUT_MS);
   return runWithProbeDeadline(async ({ signal }) => {
@@ -280,21 +298,7 @@ async function fetchJson(url, key, deps = {}) {
         : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
       throw error;
     }
-    const body = await response.json();
-    // ZCode's gateways answer HTTP 200 with a business code in the body; an
-    // expired or revoked credential arrives as 401 "token expired or
-    // incorrect", which ZCode classifies through isSuccessfulBusinessEnvelope
-    // as an auth failure. Anything else in the body stays on the existing
-    // contract — a key without a subscription answers code 500 and is a
-    // state, not a transport failure, so a fulfilled finance report still
-    // keeps the row usable.
-    const code = body?.code;
-    if (code === 401 || code === 403) {
-      const error = new Error(`${url} answered code ${code}`);
-      error.status = 'unauthorized';
-      throw error;
-    }
-    return body;
+    return readZaiBody(response, url);
   }, { signal: deps.signal, deadlineMs });
 }
 
@@ -392,7 +396,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
           : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
         throw error;
       }
-      return response.json();
+      return readZaiBody(response, zcodeStartPlanBalanceUrl());
     }, { signal: deps.signal, deadlineMs: Number(deps.zaiFetchTimeoutMs || deps.fetchTimeoutMs || ZAI_FETCH_TIMEOUT_MS) });
     const usage = parseZcodeStartPlanBalances(payload);
     // Empty balances with an active plan are a legal mid-state (a grant not

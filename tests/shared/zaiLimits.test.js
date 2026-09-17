@@ -695,6 +695,45 @@ test('a failed ZCode billing request preserves console data and surfaces the man
   assert.ok(provider.windows.some(w => w.kind === 'session'));
 });
 
+// The billing gateway also answers HTTP 200 with the failure in the body, and
+// that shape used to read as "fulfilled but empty" while the console lane
+// succeeded — the row kept `ok` and hid the dead ZCode credential entirely.
+// ZCode-managed failures stay `unavailable` at provider level even though the
+// billing helper classifies them as unauthorized.
+for (const code of [401, 403]) {
+  test(`a billing body code ${code} under HTTP 200 preserves the console lane and reports unavailable`, async () => {
+    const provider = await fetchZaiLimits({ zaiApiKey: 'console' }, {
+      env: {}, ...zcodeLaneDeps(async url => {
+        if (String(url).includes('zcode-plan/billing/balance')) {
+          return { ok: true, status: 200, json: async () => ({ code, msg: 'token expired or incorrect' }) };
+        }
+        return keyLaneResponses({ balance: 7, subscription: 'Pro' })(url);
+      })
+    });
+    assert.equal(provider.status, 'unavailable');
+    assert.equal(provider.source, 'api');
+    assert.equal(provider.balance.amount, 7);
+    assert.equal(provider.accountLabel, 'Pro');
+    assert.ok(provider.windows.some(w => w.kind === 'session'), 'console windows survive');
+    assert.ok(provider.windows.some(w => w.metric === 'credits'), 'balance window survives');
+    assert.equal(provider.windows.some(w => w.label === 'GLM-5.3'), false, 'no plan buckets from the dead credential');
+  });
+}
+
+test('a billing body code 500 stays a no-plan state rather than an auth failure', async () => {
+  const provider = await fetchZaiLimits({ zaiApiKey: 'console' }, {
+    env: {}, ...zcodeLaneDeps(async url => {
+      if (String(url).includes('zcode-plan/billing/balance')) {
+        return { ok: true, status: 200, json: async () => ({ code: 500, msg: '当前用户不存在coding plan' }) };
+      }
+      return keyLaneResponses({ balance: 7, subscription: 'Pro' })(url);
+    })
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'api');
+  assert.equal(provider.balance.amount, 7);
+});
+
 test('the same console and ZCode coding key queries and renders quota once', async () => {
   let quotaCalls = 0;
   const provider = await fetchZaiLimits({ zaiApiKey: 'mirror-jwt' }, {
