@@ -28,10 +28,9 @@
     monthTokens: 'month',
     monthCost: 'month'
   });
-  // Both reference docks keep the resting column short (one provider in
-  // CodeBurn's, three in CodeNotch's mockup); four covers the common
-  // Claude/Codex/Cursor/+1 setup without turning the default into a wall.
-  const DEFAULT_LIMIT_COUNT = 4;
+  // The resting column stays short: three covers the common Claude/Codex/Cursor
+  // setup, and a fourth row pushed the rail tall enough to feel like a wall.
+  const DEFAULT_LIMIT_COUNT = 3;
   const MAX_ITEMS = 24;
   const MAX_HIDDEN_ACCOUNTS = 32;
   const PROVIDER_IDS = new Set(limitProviders?.LIMIT_PROVIDER_IDS || []);

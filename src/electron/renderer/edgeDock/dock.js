@@ -34,7 +34,10 @@ const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)
 const state = {
   payload: null,
   locale: 'en',
-  appearanceKey: ''
+  appearanceKey: '',
+  // The Codex account a Switch press is waiting on, so the button can show the
+  // in-flight label instead of letting a second press through.
+  switchingAccountId: ''
 };
 const maskSupport = new Map();
 
@@ -254,6 +257,53 @@ function accountTitle(account) {
   const email = account.accountEmail || '';
   if (!email) return '';
   return appearance().maskLimitAccountEmails === true ? accountIdentityApi.maskEmailAddress(email) : email;
+}
+
+// The account THIS device's Codex is signed into is the one that cannot be
+// switched away from; every other row whose identity matches an enabled managed
+// login gets the same hover-to-reveal Switch affordance the Limits view has.
+// Pressing it hands the id to the main process, which owns the credential swap.
+function accountSwitchControl(account, titleNode, extraClass = '') {
+  const accountId = String(account.switchAccountId || '');
+  if (!accountId) return null;
+  const switching = state.switchingAccountId === accountId;
+  const zone = el('span', 'edge-dock-account-switch');
+  if (extraClass) zone.classList.add(extraClass);
+  zone.classList.toggle('is-switching', switching);
+  const button = el('button', 'edge-dock-account-switch-button');
+  button.type = 'button';
+  button.disabled = Boolean(state.switchingAccountId);
+  button.textContent = t(switching ? 'limits.codex.switching' : 'limits.codex.switchAccount');
+  const label = t('limits.codex.switchAccountTitle', {
+    account: accountTitle(account) || t('settings.codex.unnamedAccount')
+  });
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  // pointerdown, not click: the card can be rebuilt by a stats push between
+  // press and release, which would swallow a click.
+  button.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || state.switchingAccountId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    state.switchingAccountId = accountId;
+    zone.classList.add('is-switching');
+    button.disabled = true;
+    button.textContent = t('limits.codex.switching');
+    Promise.resolve(bridge.switchCodexAccount(accountId))
+      .then(() => {
+        // A successful switch re-projects the cards with the new live account
+        // (which rebuilds this row without a button); only the failure path has
+        // to clear the in-flight state by hand.
+        state.switchingAccountId = '';
+        renderBubble(state.payload);
+      })
+      .catch(() => {
+        state.switchingAccountId = '';
+        renderBubble(state.payload);
+      });
+  });
+  zone.append(titleNode, button);
+  return zone;
 }
 
 // ---- Silhouette -------------------------------------------------------------
@@ -668,7 +718,12 @@ function providerCard(cell) {
   // at the mark's edge, as in the Limits view.
   const head = el('header', 'edge-dock-card-head');
   const nameRow = el('div', 'edge-dock-card-name-row');
-  nameRow.append(markNode(cell.provider), el('span', 'edge-dock-card-title', providerLabel(cell.provider)));
+  nameRow.append(markNode(cell.provider));
+  // With one account the email moves to the header, and so does the switch
+  // affordance; with several, each row carries its own (below).
+  const headTitle = el('span', 'edge-dock-card-title', providerLabel(cell.provider));
+  const headSwitch = single ? accountSwitchControl(single, headTitle, 'edge-dock-account-switch-block') : null;
+  nameRow.append(headSwitch || headTitle);
   if (single?.planLabel) nameRow.append(el('span', 'edge-dock-pill', single.planLabel));
   head.append(nameRow);
   const singleUpdated = single ? updatedText(single.updatedAt) : '';
@@ -684,7 +739,9 @@ function providerCard(cell) {
       const names = el('div', 'edge-dock-card-titles');
       const title = accountTitle(account) || account.planLabel || providerLabel(cell.provider);
       // The account in use on this Mac, marked as the Limits view marks it.
-      names.append(el('span', 'edge-dock-account-title', account.active ? `${title} ✓` : title));
+      const titleNode = el('span', 'edge-dock-account-title', account.active ? `${title} ✓` : title);
+      const switchZone = accountSwitchControl(account, titleNode);
+      names.append(switchZone || titleNode);
       const updated = updatedText(account.updatedAt);
       if (updated) names.append(el('span', 'edge-dock-card-subtitle', updated));
       name.append(names);

@@ -59,6 +59,7 @@ function createEdgeDockController(deps) {
     applyShapeMask,
     primaryButtonDown = () => null,
     onToggleRateMode,
+    onSwitchCodexAccount,
     logger = () => {}
   } = deps;
 
@@ -579,6 +580,23 @@ function createEdgeDockController(deps) {
     ipcMain.on('edgeDock:toggleRateMode', (event) => {
       if (surfaceFor(event.sender) !== 'bubble') return;
       try { onToggleRateMode?.(); } catch (error) { logger(`[edge-dock] rate mode toggle failed: ${error.message}`); }
+    });
+    // The card's Switch button, the one action the dock can take that is not
+    // about its own geometry. The main process owns the credential swap and
+    // re-projects the cards when it lands; the renderer only reports intent and
+    // gets the outcome back so the button can leave its in-flight label.
+    ipcMain.removeHandler('edgeDock:switchCodexAccount');
+    ipcMain.handle('edgeDock:switchCodexAccount', async (event, payload) => {
+      if (surfaceFor(event.sender) !== 'bubble') return { ok: false, error: 'Unknown surface' };
+      const accountId = String(payload?.accountId || '').trim();
+      if (!accountId) return { ok: false, error: 'Missing account' };
+      try {
+        const result = await onSwitchCodexAccount?.(accountId);
+        return { ok: result?.ok !== false, error: result?.error || '' };
+      } catch (error) {
+        logger(`[edge-dock] codex account switch failed: ${error.message}`);
+        return { ok: false, error: error?.message || 'Switch failed' };
+      }
     });
     ipcMain.on('edgeDock:dismiss', (event) => {
       if (!surfaceFor(event.sender)) return;

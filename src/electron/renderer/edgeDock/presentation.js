@@ -233,16 +233,36 @@
     const live = id === 'codex'
       ? accountIdentity?.localLiveCodexProvider?.(options.stats, options.localDeviceId) || null
       : null;
-    const sorted = accounts.map((account) => ({
-      ...account,
-      summary: {
-        ...account.summary,
-        active: Boolean(live && (
-          (live.accountKey && live.accountKey === account.record.accountKey)
-          || (!live.accountKey && live.accountEmail && live.accountEmail === account.record.accountEmail)
-        ))
-      }
-    }));
+    // The managed account a card row could switch this device to, as the Limits
+    // view's Switch button resolves it: only for Codex, only off the account
+    // already in use here, and only when it maps to an enabled managed login.
+    // The id is resolved here because the dock renderer has no settings access;
+    // it reports the id back and the main process owns the swap.
+    const managedAccounts = id === 'codex' && Array.isArray(options.codexManagedAccounts)
+      ? options.codexManagedAccounts
+      : [];
+    // The Limits view only hides the Switch button on the account already in
+    // use when the provider is grouped as several accounts; a lone Codex row
+    // still offers it, which is how the local login gets re-activated. Mirror
+    // that gate rather than inventing a stricter one.
+    const grouped = accounts.length > 1;
+    const sorted = accounts.map((account) => {
+      const active = Boolean(live && (
+        (live.accountKey && live.accountKey === account.record.accountKey)
+        || (!live.accountKey && live.accountEmail && live.accountEmail === account.record.accountEmail)
+      ));
+      const switchable = (grouped ? !active : true)
+        ? managedAccounts.find((entry) => entry?.enabled !== false && accountIdentity?.codexAccountMatchesProvider?.(entry, account.record)) || null
+        : null;
+      return {
+        ...account,
+        summary: {
+          ...account.summary,
+          active,
+          switchAccountId: switchable ? String(switchable.id || '') : ''
+        }
+      };
+    });
     return {
       id,
       kind: 'provider',
@@ -339,6 +359,7 @@
           ...item,
           stats,
           localDeviceId: options.localDeviceId,
+          codexManagedAccounts: options.codexManagedAccounts,
           codexResetForecast: options.codexResetForecast
         }));
       }

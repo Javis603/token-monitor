@@ -364,6 +364,55 @@ test('the live Codex account is marked from this device only', () => {
   assert.deepEqual(codex.accounts.map((account) => account.active), [false, true]);
 });
 
+test('codex card rows resolve a switchable managed account, and never the live one', () => {
+  const records = [
+    provider('codex', { accountKey: 'sha256:a', accountEmail: 'a@example.com' }),
+    provider('codex', { accountKey: 'sha256:b', accountEmail: 'b@example.com' })
+  ];
+  const stats = {
+    limits: { providers: records },
+    devices: [{ deviceId: 'here', limits: { providers: [provider('codex', { accountKey: 'sha256:b', accountEmail: 'b@example.com' })] } }]
+  };
+  const codexManagedAccounts = [
+    { id: 'managed-a', accountKey: 'sha256:a', email: 'a@example.com' },
+    { id: 'managed-b', accountKey: 'sha256:b', email: 'b@example.com' },
+    { id: 'managed-disabled', accountKey: 'sha256:c', email: 'c@example.com', enabled: false }
+  ];
+  const [codex] = buildEdgeDockCells(stats, { localDeviceId: 'here', codexManagedAccounts });
+  // a is not the live account here, so it can be switched to; b is live, so it
+  // offers no switch meaning the button never appears on the account in use.
+  assert.deepEqual(codex.accounts.map((account) => account.switchAccountId), ['managed-a', '']);
+  // A row whose identity matches only a disabled managed login offers nothing,
+  // even though it is not the live account.
+  const [withDisabled] = buildEdgeDockCells(
+    {
+      limits: { providers: [provider('codex', { accountKey: 'sha256:b' }), provider('codex', { accountKey: 'sha256:c' })] },
+      devices: [{ deviceId: 'here', limits: { providers: [provider('codex', { accountKey: 'sha256:b' })] } }]
+    },
+    { localDeviceId: 'here', codexManagedAccounts }
+  );
+  assert.deepEqual(withDisabled.accounts.map((account) => account.switchAccountId), ['', '']);
+  // Providers other than Codex never carry the switch affordance.
+  const [claude] = buildEdgeDockCells({ limits: { providers: [provider('claude')] } }, { codexManagedAccounts });
+  assert.equal(claude.accounts[0].switchAccountId, '');
+});
+
+test('a lone Codex account still offers a switch onto the local login', () => {
+  const stats = { limits: { providers: [provider('codex', { accountKey: 'sha256:a', accountEmail: 'a@example.com' })] } };
+  const [codex] = buildEdgeDockCells(stats, {
+    codexManagedAccounts: [{ id: 'managed-a', accountKey: 'sha256:a', email: 'a@example.com' }]
+  });
+  assert.equal(codex.accounts.length, 1);
+  assert.equal(codex.accounts[0].switchAccountId, 'managed-a');
+});
+
+test('automatic items default to three providers', () => {
+  const stats = { limits: { providers: ['claude', 'codex', 'cursor', 'grok', 'kimi'].map((id) => provider(id)) } };
+  const cells = buildEdgeDockCells(stats, {});
+  assert.equal(DEFAULT_LIMIT_COUNT, 3);
+  assert.equal(cells.length, 3);
+});
+
 test('hidden accounts are left out of the headline and the card', () => {
   const stats = {
     limits: {

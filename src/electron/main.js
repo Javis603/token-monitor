@@ -1904,6 +1904,21 @@ async function switchCodexSystemAccount(id) {
   }
 }
 
+// The Edge Dock's Switch button: the same swap the Limits view runs, then a
+// repaint of what the dock and widget show. The dock's renderer has no settings
+// access, so the projection resolves the managed account id and this side owns
+// the credential write.
+async function switchCodexAccountFromEdgeDock(accountId) {
+  const result = await switchCodexSystemAccount(accountId);
+  if (!result?.ok) {
+    console.log(`[edge-dock] codex account switch failed: ${result?.error || 'unknown error'}`);
+    return result;
+  }
+  pushSettingsToRenderer();
+  if (latestStats) refreshLimitStatsPresentation();
+  return result;
+}
+
 async function refreshCodexManagedAccountLimits(id) {
   const accountId = String(id || '').trim();
   const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
@@ -5217,6 +5232,7 @@ function edgeDockCellsFor(visibleStats) {
     codexResetForecast: edgeDockForecastWanted() ? edgeDockForecast : null,
     localDeviceId: settings?.deviceId,
     items: settings?.edgeDockItems,
+    codexManagedAccounts: codexAccountsForRenderer(),
     limitsEnabled: settings?.limitsEnabled !== false,
     limitProviders: settings?.limitProviders,
     limitProviderOrder: settings?.limitProviderOrder,
@@ -5252,6 +5268,9 @@ function ensureEdgeDockController() {
       if (!applyVibrancyMask(win, png, width, height)) console.log('[edge-dock] native material mask unavailable; showing the tinted silhouette only');
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
+    // The dock card's Switch button runs the same swap the Limits view does,
+    // then repaints from the refreshed records. It is the dock's only write.
+    onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
     // The same setting the widget's rate readout toggles, so both stay in step.
     onToggleRateMode: () => {
       settings.tokenRateMode = settings.tokenRateMode === 'burn' ? 'speed' : 'burn';
