@@ -830,3 +830,55 @@ for (const scenario of [
     assert.equal(subscriptionCalls, 0, 'subscription is skipped without usable quota');
   });
 }
+
+// The migration shape 3.12.3 leaves behind: the kind-based selection is the
+// only live one, the entry carries a persistent not_entitled reason, and the
+// entitlement cache is gone. Every other ZCode fixture here routes through the
+// legacy selected-key string, so without this case the subscribed account's
+// recovery — the user-visible point of the change — had no end-to-end guard.
+test('a 3.12.3-shaped install with a subscription renders the quota windows', async () => {
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } },
+      modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-coding-plan' }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': {
+        enabled: false,
+        systemDisabledReason: 'coding_plan_not_entitled',
+        options: { apiKey: 'mirror-key' }
+      }
+    } }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  const provider = await fetchZaiLimits({}, {
+    env: {},
+    now: () => Date.parse('2026-09-17T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url) => {
+      const target = String(url);
+      if (target.includes('/quota/limit')) {
+        return { ok: true, status: 200, json: async () => ({ data: { limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 12.5 },
+          { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 25 },
+          { type: 'TIME_LIMIT', remaining: 9, percentage: 40 }
+        ] } }) };
+      }
+      if (target.includes('/subscription/list')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ product_name: 'GLM Coding Pro', next_renew_time: '2026-10-13T00:00:00Z' }] }) };
+      }
+      throw new Error('unexpected url ' + target);
+    }
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'oauth');
+  assert.equal(provider.accountLabel, 'GLM Coding Pro');
+  assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly', 'billing']);
+  assert.equal(provider.windows[0].usedPercent, 12.5);
+  assert.equal(provider.windows[1].usedPercent, 25);
+});
