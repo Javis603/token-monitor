@@ -16,6 +16,7 @@ const balanceDisplay = window.TokenMonitorLimitBalanceDisplay;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const limitPresentationApi = window.TokenMonitorLimitProviderPresentation;
+const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 const { clientColors } = window.TokenMonitorUsageCharts;
 const { LIMIT_PROVIDER_LABELS } = window.TokenMonitorLimitProviders;
 const { CLIENT_LABELS } = window.TokenMonitorClientCatalog;
@@ -55,7 +56,7 @@ function t(key, params) {
   return i18n.translate(state.locale, key, params);
 }
 
-const codexAccountControl = limitPresentationApi.createCodexAccountControl({
+const codexAccountControl = codexAccountControlApi.createCodexAccountControl({
   document,
   requestAnimationFrame,
   translate: t,

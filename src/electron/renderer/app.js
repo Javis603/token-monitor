@@ -148,6 +148,7 @@ const TRAY_ICON_PROVIDERS = [
 const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.id).join(',');
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
 const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentation;
+const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 
 function limitProviderColor(providerId) {
   if (providerId === 'factory') return clientColors.droid;
@@ -589,7 +590,7 @@ function t(key, params) {
   return i18n.translate(currentLocale(), key, params);
 }
 
-const codexAccountControl = limitProviderPresentationApi.createCodexAccountControl({
+const codexAccountControl = codexAccountControlApi.createCodexAccountControl({
   document,
   requestAnimationFrame,
   translate: t,

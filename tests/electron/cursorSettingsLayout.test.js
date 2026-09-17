@@ -533,7 +533,7 @@ test('Codex account email masking is an opt-in display-only setting', () => {
 
 test('Codex system account switching is exposed from limits account rows', () => {
   const app = readRendererFile('app.js');
-  const presentation = readRendererFile('limitProviderPresentation.js');
+  const accountControl = fs.readFileSync(path.join(rendererDir, '..', 'providers', 'codex', 'accountControl.js'), 'utf8');
   const renderHead = functionBody(app, 'renderLimitProviderHead', 'renderProviderWindows');
   assert.doesNotMatch(renderHead, /showActiveAccount/);
   assert.match(renderHead, /codexAccountControl\.render\(\{/);
@@ -549,9 +549,9 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.doesNotMatch(renderHead, /titleButton\.className = 'limit-account-title-button'/);
 
   const control = functionBodyBeforeMarker(
-    presentation,
+    accountControl,
     'createCodexAccountControl',
-    '\n  return {\n    antigravityQuotaWindow'
+    '\n  return { createCodexAccountControl };'
   );
   assert.match(control, /zone\.className = 'limit-account-active-zone'/);
   assert.match(control, /popover\.className = 'limit-account-active-popover'/);
@@ -621,7 +621,9 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(main, /switchCodexSystemAccountAndRefresh\(id\)/);
   assert.match(main, /ipcMain\.handle\('codex:refreshAccountLimits'/);
   assert.match(main, /refreshCodexManagedAccountLimits\(id\)/);
-  assert.match(presentation, /createCodexAccountControl/);
+  assert.match(accountControl, /createCodexAccountControl/);
+  assert.match(readRendererFile('index.html'), /<script src="\.\.\/providers\/codex\/accountControl\.js"><\/script>/);
+  assert.match(readRendererFile(path.join('edgeDock', 'index.html')), /<script src="\.\.\/\.\.\/providers\/codex\/accountControl\.js"><\/script>/);
   assert.match(app, /const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;/);
   assert.match(app, /codexPendingActiveAccount: null/);
   assert.match(app, /codexPendingActiveAccountUntil: 0/);
