@@ -2,7 +2,7 @@
 summary: "Z.ai/GLM provider notes: the two-key system, the three quota pools that merge into one row, the ZCode billing gateway's device-id gate, and the local spend store."
 read_when:
   - Adding or changing Z.ai quota, balance, or subscription windows
-  - Changing ZCode local discovery or the mirror-key credential path
+  - Changing ZCode local discovery, the selection fields, or the credential path
   - Debugging ZCode Start/Weekend plan buckets or the billing endpoint
   - Changing the zai-balance.json spend store or its day-key semantics
   - Changing Z.ai credential handling or security boundaries
@@ -22,7 +22,12 @@ Z.ai appears in Token Monitor as one limits row fed by up to three independent a
 
 - The **console key** (`sk-…` or `{id}.{secret}`) calls quota, subscription, and the finance report. It cannot call the ZCode billing endpoint.
 - A **start-plan mirror JWT** calls billing. A **coding-plan mirror key** calls quota. These are different selections and credentials, not one JWT that is assumed to work on both endpoints. Discovery reads the selected provider's `options.apiKey` in `config.json`; it never decrypts `credentials.json` or reads the OS keychain. The mirror remains in memory and never enters Token Monitor's credential store or renderer.
-- Billing auth failures surface as `unavailable` until ZCode refreshes its managed credential. A console quota 401/403 surfaces as `unauthorized`. Do not infer endpoint compatibility from a key's format.
+- ZCode 3.12.3 keeps its live credentials in `credentials.json` and stopped rewriting the plaintext mirrors in `config.json` that this lane reads, so a mirror can lag a re-login while the store's token stays current. The coding-plan mirror key is still accepted by the quota endpoint; the Start/Weekend billing credential's freshness is the open boundary question in #718.
+- Billing auth failures surface as `unavailable` until ZCode refreshes its managed credential. A console quota 401/403 surfaces as `unauthorized`, and a gateway business code carried inside HTTP 200 (`code:401`, `code:500`) classifies the same way. Do not infer endpoint compatibility from a key's format.
+
+## ZCode 3.12.3 migration
+
+3.12.3 moved the family selection to `providerFamilyConnectionSelections[family].kind` (`start-plan`, `individual-coding-plan`, `team-coding-plan`, `off-peak`), retains the legacy `modelProviderFamilySelectedKeys` string without writing it, stopped writing `coding-plan-cache.json` (the entitlement source discovery used to consult), and leaves disabled provider entries with a persistent `systemDisabledReason` instead of a transient flag. Discovery follows the kind field with the legacy string as the 3.11.x fallback and refuses to guess on an unmapped kind; a disabled entry only blocks the lane when the account context is gone (`oauth_provider_inactive`) or when the 3.11.x torn-switch shape left no reason at all. Without the cache, a readable credential is the only local signal that a lane can be queried — `entitled` means exactly that, and the query itself answers entitlement.
 
 ## ZCode billing gateway gates
 
@@ -32,7 +37,7 @@ Z.ai appears in Token Monitor as one limits row fed by up to three independent a
 
 - Quota and finance run concurrently. Subscription lookup enriches only a quota response with usable windows; failed or empty quota never starts that extra request. A successful finance response still contributes Balance and Spend when quota fails.
 - Console quota transport failures retain their classified status (`unauthorized`, `sourceRateLimited`, or `unavailable`), even when other data survives. A failed ZCode request also degrades status while preserving console data; console quota errors take precedence. Finance and subscription enrichment remain best-effort and do not erase usable quota.
-- A successful no-plan response (`code:500`, no quota windows) with a valid cash balance is `ok`; without usable data an attempted lane is `unavailable`. An entitled but empty ZCode balance response likewise yields `unavailable` when it is the only source.
+- A gateway business code carried inside HTTP 200 classifies the way ZCode reads it: `code:401` (an expired or revoked credential) surfaces as `unauthorized`, while `code:500` (a key without a subscription) is a state, not a failure — a successful no-plan response with a valid cash balance is `ok`, and without usable data an attempted lane is `unavailable`. An entitled but empty ZCode balance response likewise yields `unavailable` when it is the only source.
 - The same console key and ZCode coding-plan key at the same regional endpoint query and render quota once.
 - A coding-plan selection also queries billing in parallel and renders the account's Start/Weekend buckets in the same row (ZCode does the same via `validateZaiCodingPlanPairAvailability`); billing is best-effort and never blocks the quota answer. The row header names the consumed mode; the buckets are the account's assets. Different credentials are not assumed to be the same account. A manual key controls the console lane; an independent Start/Weekend billing lane can still contribute.
 - All quota/billing windows are live HTTPS responses. They omit component `source: local`; only the credential was found on disk. Provider-level source remains `api` with a console key and `oauth` for discovery alone.
