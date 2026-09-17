@@ -378,65 +378,26 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The Limits view's hover-to-switch affordance, on the account line inside the
-   card: the email itself is the hover target, and a Switch button fades in at
-   the end of its line. The zone wraps only the title, so the button centres on
-   the title's own line and never overlaps the refresh time beneath it. */
-.edge-dock-account-switch {
-  position: relative;
-  display: block;
-  min-width: 0;
+/* The account rows reuse the Limits view's own .limit-account-switch-zone and
+   .limit-account-active-zone from styles.css, so the Switch button, the ✓ badge
+   and the "Local" hint have the widget's spacing rather than a lookalike. Only
+   the flex context differs: the card stacks its titles in a column, and a flex
+   column stretches its children, which would push the zone (and the popover
+   anchored to its right edge) out to the full card width. Shrink it back to the
+   title it wraps, and let the header variant keep taking its row's free space. */
+.edge-dock-card-titles > .limit-account-switch-zone,
+.edge-dock-card-titles > .limit-account-active-zone {
+  align-self: flex-start;
   max-width: 100%;
 }
-/* Single-account cards put the zone in the header, where it should take the
-   title's flex slot beside the mark rather than shrink to its content. */
-.edge-dock-account-switch-block { flex: 1 1 auto; }
-.edge-dock-account-switch .edge-dock-account-title {
-  display: block;
-  transition: color 140ms ease;
+.edge-dock-card-name-row > .limit-account-switch-zone,
+.edge-dock-card-name-row > .limit-account-active-zone {
+  flex: 1 1 auto;
+  min-width: 0;
 }
-.edge-dock-account-switch:hover .edge-dock-account-title,
-.edge-dock-account-switch:focus-within .edge-dock-account-title {
-  color: var(--text);
-}
-.edge-dock-account-switch-button {
-  position: absolute;
-  top: 50%;
-  right: 0;
-  z-index: 2;
-  display: inline-grid;
-  place-items: center;
-  height: 18px;
-  padding: 0 6px;
-  border: 1px solid rgba(var(--line-rgb), 0.18);
-  border-radius: 6px;
-  background: rgba(var(--glass-rgb), 0.92);
-  color: var(--text);
-  cursor: pointer;
-  font: inherit;
-  font-size: 9px;
-  line-height: 1;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-50%) translateX(2px);
-  transition: opacity 140ms ease, transform 160ms ease, color 140ms ease, border-color 140ms ease;
-  white-space: nowrap;
-}
-.edge-dock-account-switch:hover .edge-dock-account-switch-button,
-.edge-dock-account-switch:focus-within .edge-dock-account-switch-button,
-.edge-dock-account-switch.is-switching .edge-dock-account-switch-button {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(-50%) translateX(0);
-}
-.edge-dock-account-switch-button:hover,
-.edge-dock-account-switch-button:focus-visible {
-  border-color: rgba(var(--accent-rgb), 0.32);
-  color: var(--accent);
-}
-.edge-dock-account-switch-button:disabled { cursor: default; }
-.edge-dock-reduced-motion .edge-dock-account-switch .edge-dock-account-title,
-.edge-dock-reduced-motion .edge-dock-account-switch-button { transition: none; }
+/* The dock's titles carry .limit-name-title beside their own class, so the
+   widget's zone rules (hover glow, reduced-motion, the block box the ellipsis
+   needs) apply here verbatim instead of being restated. */
 
 .edge-dock-window { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 /* Two columns like the Limits view: short windows pair up side by side,

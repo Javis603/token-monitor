@@ -259,18 +259,18 @@ function accountTitle(account) {
   return appearance().maskLimitAccountEmails === true ? accountIdentityApi.maskEmailAddress(email) : email;
 }
 
-// The account THIS device's Codex is signed into is the one that cannot be
-// switched away from; every other row whose identity matches an enabled managed
-// login gets the same hover-to-reveal Switch affordance the Limits view has.
-// Pressing it hands the id to the main process, which owns the credential swap.
-function accountSwitchControl(account, titleNode, extraClass = '') {
+// The Limits view's account affordances, reused rather than restyled: the dock
+// page already loads the widget stylesheet, so .limit-account-switch-zone and
+// .limit-account-active-zone bring the same Switch button, "Local" hint and
+// spacing the widget has. The dock only wires the press to the main process.
+function accountSwitchControl(account, titleNode) {
   const accountId = String(account.switchAccountId || '');
   if (!accountId) return null;
   const switching = state.switchingAccountId === accountId;
-  const zone = el('span', 'edge-dock-account-switch');
-  if (extraClass) zone.classList.add(extraClass);
+  const zone = el('span', 'limit-account-switch-zone');
   zone.classList.toggle('is-switching', switching);
-  const button = el('button', 'edge-dock-account-switch-button');
+  const popover = el('span', 'limit-account-switch-popover');
+  const button = el('button', 'limit-account-switch-button');
   button.type = 'button';
   button.disabled = Boolean(state.switchingAccountId);
   button.textContent = t(switching ? 'limits.codex.switching' : 'limits.codex.switchAccount');
@@ -302,7 +302,21 @@ function accountSwitchControl(account, titleNode, extraClass = '') {
         renderBubble(state.payload);
       });
   });
-  zone.append(titleNode, button);
+  popover.append(button);
+  zone.append(titleNode, popover);
+  return zone;
+}
+
+// The account in use on this device, marked the way the Limits view marks it:
+// the check badge plus a "Local" popover that explains it on hover.
+function accountActiveControl(titleNode) {
+  const zone = el('span', 'limit-account-active-zone');
+  zone.tabIndex = 0;
+  const hint = t('limits.codex.activeAccountHint');
+  zone.setAttribute('aria-label', hint);
+  const badge = el('span', 'limit-live-badge', '\u2713');
+  const popover = el('span', 'limit-account-active-popover', hint);
+  zone.append(titleNode, badge, popover);
   return zone;
 }
 
@@ -721,8 +735,8 @@ function providerCard(cell) {
   nameRow.append(markNode(cell.provider));
   // With one account the email moves to the header, and so does the switch
   // affordance; with several, each row carries its own (below).
-  const headTitle = el('span', 'edge-dock-card-title', providerLabel(cell.provider));
-  const headSwitch = single ? accountSwitchControl(single, headTitle, 'edge-dock-account-switch-block') : null;
+  const headTitle = el('span', 'limit-name-title edge-dock-card-title', providerLabel(cell.provider));
+  const headSwitch = single ? accountSwitchControl(single, headTitle) : null;
   nameRow.append(headSwitch || headTitle);
   if (single?.planLabel) nameRow.append(el('span', 'edge-dock-pill', single.planLabel));
   head.append(nameRow);
@@ -738,10 +752,13 @@ function providerCard(cell) {
       const name = el('div', 'edge-dock-account-name');
       const names = el('div', 'edge-dock-card-titles');
       const title = accountTitle(account) || account.planLabel || providerLabel(cell.provider);
-      // The account in use on this Mac, marked as the Limits view marks it.
-      const titleNode = el('span', 'edge-dock-account-title', account.active ? `${title} ✓` : title);
-      const switchZone = accountSwitchControl(account, titleNode);
-      names.append(switchZone || titleNode);
+      const titleNode = el('span', 'limit-name-title edge-dock-account-title', title);
+      // The row is one of three things, exactly as in the Limits view: the
+      // account in use here (check badge plus a "Local" hint), a row that can be
+      // switched to (hover reveals Switch), or a plain title.
+      const zone = accountSwitchControl(account, titleNode)
+        || (account.active ? accountActiveControl(titleNode) : null);
+      names.append(zone || titleNode);
       const updated = updatedText(account.updatedAt);
       if (updated) names.append(el('span', 'edge-dock-card-subtitle', updated));
       name.append(names);
