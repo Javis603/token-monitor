@@ -1169,25 +1169,27 @@ async function collectUsageOnce(options) {
     try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
   };
   if (normalizedClients) {
-    const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
-    await maybeSyncCursor(syncClients, options.logger, {
-      minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'cursor'),
-      signal: options.signal,
-      timeoutMs: options.selfSyncTimeoutMs,
-      terminationOptions: options.subprocessTerminationOptions,
-      onTerminationUnconfirmed: () => reportTerminationUnconfirmed('cursor-sync'),
-      onFailure: options.onSelfSyncFailed
-    });
-    await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
-      minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'antigravity'),
-      run: options.runAntigravitySync,
-      syncLockPath: options.antigravitySyncLockPath,
-      signal: options.signal,
-      timeoutMs: options.selfSyncTimeoutMs,
-      terminationOptions: options.subprocessTerminationOptions,
-      onTerminationUnconfirmed: () => reportTerminationUnconfirmed('antigravity-sync'),
-      onFailure: options.onSelfSyncFailed
-    });
+    if (options.skipSelfSync !== true) {
+      const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
+      await maybeSyncCursor(syncClients, options.logger, {
+        minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'cursor'),
+        signal: options.signal,
+        timeoutMs: options.selfSyncTimeoutMs,
+        terminationOptions: options.subprocessTerminationOptions,
+        onTerminationUnconfirmed: () => reportTerminationUnconfirmed('cursor-sync'),
+        onFailure: options.onSelfSyncFailed
+      });
+      await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
+        minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'antigravity'),
+        run: options.runAntigravitySync,
+        syncLockPath: options.antigravitySyncLockPath,
+        signal: options.signal,
+        timeoutMs: options.selfSyncTimeoutMs,
+        terminationOptions: options.subprocessTerminationOptions,
+        onTerminationUnconfirmed: () => reportTerminationUnconfirmed('antigravity-sync'),
+        onFailure: options.onSelfSyncFailed
+      });
+    }
     throwIfAborted(options.signal);
     if (includesProma && (!targetRequested || targetClients.includes('proma'))) {
       try {
@@ -3026,6 +3028,10 @@ function startCollector(options) {
   let debounceTimer = null;
   let intervalTimer = null;
   let stopped = false;
+  // The widget can show a complete local scan before a cache-backed provider's
+  // optional sync finishes. Once that first record is published, a targeted tick
+  // refreshes only the self-synced clients and reconciles their today partitions.
+  let startupSelfSyncPending = false;
   let lastTickAttemptAt = 0;
   let lastTickSuccessAt = 0;
   let lastTickFailureAt = 0;
@@ -3091,6 +3097,11 @@ function startCollector(options) {
       return 'targeted';
     }
     return tickOptions.todayOnly === true ? 'today' : 'full';
+  }
+
+  function tickCoversSelfSync(tickOptions = {}, targetClients = []) {
+    if (tickOptions.todayOnly !== true || targetClients.length === 0) return true;
+    return selfSyncedClients.every((client) => targetClients.includes(client));
   }
 
   function timestampOrNull(value) {
@@ -3199,6 +3210,12 @@ function startCollector(options) {
     const targetAnchorReady = canTargetTodayPartitions(anchor, requestedTargetClients);
     const anchored = Boolean(tickOptions.todayOnly && anchor && anchor.dateKey === todayKey);
     const refreshWsl = Boolean(tickOptions.refreshWsl);
+    const skipSelfSync = options.deferSelfSyncOnStartup === true && !initialCollectionComplete;
+    if (!skipSelfSync && startupSelfSyncPending && tickCoversSelfSync(tickOptions, requestedTargetClients)) {
+      // A normal full/all-client tick already pays for these syncs, so the
+      // deferred startup catch-up is no longer needed.
+      startupSelfSyncPending = false;
+    }
     const hadPreviousFailure = tickHadFailure;
     lastTickAttemptAt = tickStartedAt;
     lastTickReasonCode = tickReasonCode(reason);
@@ -3233,6 +3250,7 @@ function startCollector(options) {
         } : null,
         forceSelfSync: tickOptions.forceSelfSync ?? null,
         sourceSelfSync: tickOptions.sourceSelfSync ?? null,
+        skipSelfSync,
         reasonixNativeSessionsEnabled,
         reasonixNativeSessionCache,
         // Both selections name clients whose pending source event this tick has
@@ -3414,6 +3432,7 @@ function startCollector(options) {
         collectedActivityRevision = Math.max(collectedActivityRevision, tickOptions.activityRevision);
         initialCollectionComplete = true;
       }
+      if (skipSelfSync && selfSyncedClients.length > 0) startupSelfSyncPending = true;
       return true;
     } catch (error) {
       if (stopped) return;
@@ -3537,6 +3556,17 @@ function startCollector(options) {
         const waiters = pendingWaiters;
         pendingWaiters = [];
         resolveWaiters(waiters, false);
+      }
+      if (!stopped && startupSelfSyncPending) {
+        startupSelfSyncPending = false;
+        // Keep the first local record responsive, then refresh only the
+        // cache-backed clients whose sync was intentionally deferred.
+        const sourceSelfSync = sourceSyncQueue.takeDue();
+        void runTick('startup-self-sync', {
+          todayOnly: true,
+          targetClients: selfSyncedClients,
+          ...(sourceSelfSync ? { sourceSelfSync } : {})
+        });
       }
     }
   }

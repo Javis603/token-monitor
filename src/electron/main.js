@@ -719,6 +719,9 @@ function electronUsageConfig(errorPrefix) {
     watchTriggersCollection: collectorWatchTriggersCollection(),
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
+    // Let the widget publish its first local scan before Cursor/Antigravity
+    // self-syncs, which can be much slower than the usage scan itself.
+    deferSelfSyncOnStartup: true,
     dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
     logger: (message) => console.log(`[${errorPrefix}] ${message}`)
