@@ -23,7 +23,7 @@ Z.ai appears in Token Monitor as one limits row fed by up to three independent a
 - The **console key** (`sk-…` or `{id}.{secret}`) calls quota, subscription, and the finance report. It cannot call the ZCode billing endpoint.
 - A **start-plan mirror JWT** calls billing. A **coding-plan mirror key** calls quota. These are different selections and credentials, not one JWT that is assumed to work on both endpoints. Discovery reads the selected provider's `options.apiKey` in `config.json`; it never decrypts `credentials.json` or reads the OS keychain. The mirror remains in memory and never enters Token Monitor's credential store or renderer.
 - ZCode 3.12.3 keeps its live credentials in `credentials.json` and stopped rewriting the plaintext mirrors in `config.json` that this lane reads, so a mirror can lag a re-login while the store's token stays current. The coding-plan mirror key is still accepted by the quota endpoint; the Start/Weekend billing credential's freshness is the open boundary question in #718.
-- Billing auth failures surface as `unavailable` until ZCode refreshes its managed credential. A console quota 401/403 surfaces as `unauthorized`, and a gateway business code carried inside HTTP 200 (`code:401`, `code:500`) classifies the same way. Do not infer endpoint compatibility from a key's format.
+- Billing auth failures surface as `unavailable` until ZCode refreshes its managed credential. A console quota 401/403 surfaces as `unauthorized`, and a gateway business code carried inside HTTP 200 (`code:401`, `code:403`, `code:500`) classifies the same way. Do not infer endpoint compatibility from a key's format.
 
 ## ZCode 3.12.3 migration
 

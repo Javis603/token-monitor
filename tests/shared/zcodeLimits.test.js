@@ -5,7 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { discoverZcodeConnection } = require('../../src/shared/providers/zai/zcodeDiscovery');
-const { parseZcodeStartPlanBalances } = require('../../src/shared/providers/zai/limits');
+const { parseZaiUsage, parseZcodeStartPlanBalances } = require('../../src/shared/providers/zai/limits');
 
 // Fixtures mirror the live billing/balance payload shape: plan entitlements
 // carry the grant period, balance buckets carry the usage numbers. The ZCode
@@ -498,4 +498,67 @@ test('a coding-quota selection also surfaces the start-plan billing credential',
     throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
   } });
   assert.equal(noStart.billing, undefined);
+});
+
+// ZCode 3.12.3's own normalizers define the tolerance this parser has to
+// match: normalizeZaiStartPlanBalanceLimits reads timestamps through
+// parseUnixSeconds (numeric strings included, non-positive values absent) and
+// matches a bucket to its plan by user_plan_id first, falling back to
+// plan_id; pickCurrentSubscriptionFromList prefers the in-current-period VALID
+// row over whatever the server lists first.
+test('the billing parser accepts ZCode\'s numeric-string timestamps and rejects a zero epoch', () => {
+  const { windows } = parseZcodeStartPlanBalances({ data: {
+    plans: [{ plan_id: 'p1', status: 'active', entitlements: [{ entitlement_id: 'e1', period: 'daily' }] }],
+    balances: [
+      { plan_id: 'p1', entitlement_id: 'e1', show_name: 'String expiry', total_units: 10, remaining_units: 5, expires_at: '1788706800' },
+      { plan_id: 'p1', entitlement_id: 'e1', show_name: 'Zero expiry', total_units: 10, remaining_units: 5, expires_at: 0 },
+      { plan_id: 'p1', entitlement_id: 'e1', show_name: 'ISO expiry', total_units: 10, remaining_units: 5, expires_at: '2026-09-06T15:00:00.000Z' }
+    ]
+  } });
+  const byLabel = new Map(windows.map((window) => [window.label, window]));
+  assert.equal(byLabel.get('String expiry').resetsAt, '2026-09-06T15:00:00.000Z');
+  assert.equal(byLabel.get('Zero expiry').resetsAt, undefined, 'a non-positive epoch is absent, not 1970');
+  assert.equal(byLabel.get('ISO expiry').resetsAt, '2026-09-06T15:00:00.000Z');
+});
+
+test('a bucket matches its plan through user_plan_id when the two identities differ', () => {
+  const payload = (balance) => ({ data: {
+    plans: [{ plan_id: 'plan-a', user_plan_id: 'user-plan-7', status: 'active',
+      entitlements: [{ entitlement_id: 'e1', period: 'daily' }] }],
+    balances: [balance]
+  } });
+  const base = { entitlement_id: 'e1', show_name: 'GLM-5.3', total_units: 100, remaining_units: 40, expires_at: 1788706800 };
+
+  // The bucket carries only the subscription-scoped identity; matching on
+  // plan_id alone would leave it without a period, losing its daily shape.
+  const matched = parseZcodeStartPlanBalances(payload({ ...base, user_plan_id: 'user-plan-7' }));
+  assert.equal(matched.windows.length, 1);
+  assert.equal(matched.windows[0].kind, 'daily');
+  assert.equal(matched.windows[0].windowMinutes, 1440);
+  assert.equal(matched.windows[0].boundaryKind, 'reset');
+
+  // A bucket whose identities match nothing keeps the billing shape — the
+  // fallback must not invent a daily window for an unknown plan.
+  const unmatched = parseZcodeStartPlanBalances(payload({ ...base, plan_id: 'plan-unrelated' }));
+  assert.equal(unmatched.windows[0].kind, 'billing');
+  assert.equal(unmatched.windows[0].windowMinutes, undefined);
+});
+
+test('the subscription picker prefers the current-period VALID row over a listed-first expired one', () => {
+  const usage = parseZaiUsage(
+    { data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }] } },
+    { data: [
+      { productName: 'Expired Plan', status: 'EXPIRED', inCurrentPeriod: false },
+      { productName: 'GLM Coding Pro', status: 'VALID', inCurrentPeriod: true, nextRenewTime: '2026-10-13T00:00:00Z' }
+    ] }
+  );
+  assert.equal(usage.plan, 'GLM Coding Pro');
+
+  // Without any usable marker the first row still names the account, which is
+  // the pre-existing fallback; the picker only reorders when it has a signal.
+  const fallback = parseZaiUsage(
+    { data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }] } },
+    { data: [{ productName: 'Only Plan' }] }
+  );
+  assert.equal(fallback.plan, 'Only Plan');
 });

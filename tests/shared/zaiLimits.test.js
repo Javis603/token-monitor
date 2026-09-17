@@ -655,18 +655,20 @@ for (const status of [401, 429, 500]) {
 
 // The same gateway failures also arrive as HTTP 200 with the failure in the
 // body. An expired or revoked credential is the one shape that is a transport
-// failure (code 401, ZCode's isSuccessfulBusinessEnvelope reads it as auth);
-// a key without a subscription answers code 500 and stays a state.
-test('fetchZaiLimits classifies a body code 401 under HTTP 200 as unauthorized', async () => {
-  const provider = await fetchZaiLimits({ zaiApiKey: 'expired-token' }, {
-    env: {}, ...noZcode,
-    fetch: async (url) => String(url).includes('/quota/limit')
-      ? { ok: true, status: 200, json: async () => ({ code: 401, msg: 'token expired or incorrect' }) }
-      : { ok: true, status: 200, json: async () => ({ code: 200, data: { availableBalance: 7 } }) }
+// failure (code 401/403, ZCode's isSuccessfulBusinessEnvelope reads both as
+// auth); a key without a subscription answers code 500 and stays a state.
+for (const code of [401, 403]) {
+  test(`fetchZaiLimits classifies a body code ${code} under HTTP 200 as unauthorized`, async () => {
+    const provider = await fetchZaiLimits({ zaiApiKey: 'expired-token' }, {
+      env: {}, ...noZcode,
+      fetch: async (url) => String(url).includes('/quota/limit')
+        ? { ok: true, status: 200, json: async () => ({ code, msg: 'token expired or incorrect' }) }
+        : { ok: true, status: 200, json: async () => ({ code: 200, data: { availableBalance: 7 } }) }
+    });
+    assert.equal(provider.status, 'unauthorized');
+    assert.equal(provider.balance?.amount, 7);
   });
-  assert.equal(provider.status, 'unauthorized');
-  assert.equal(provider.balance?.amount, 7);
-});
+}
 
 test('fetchZaiLimits keeps a no-plan body code 500 as a state with the balance intact', async () => {
   const provider = await fetchZaiLimits({ zaiApiKey: 'no-plan-key' }, {
