@@ -673,6 +673,26 @@ test('legacy Cursor events covering every model of a conversation are not replay
   assert.equal(visible.allTime.totalTokens, 300);
 });
 
+test('legacy Cursor events stay covered after their conversation leaves the live data', () => {
+  let archive = legacyEventArchive([
+    ['cursor-active-2026-08-13T02:10:00.000Z', 300],
+    ['cursor-active-2026-08-13T02:42:39.510Z', 700]
+  ]);
+  archive = captureSessionUsageArchive(archive, liveCursorSummary([conversation(1000)]), NOW.now);
+  const visible = applySessionUsageArchive(liveCursorSummary([]), archive, NOW);
+
+  assert.equal(visible.allTime.totalTokens, 1000);
+  assert.equal(visible.allTime.sessions[`cursor:${CURSOR_UUID}`].archived, true);
+});
+
+test('legacy Cursor Auto events match conversations the API reports as default', () => {
+  const live = { ...conversation(1000), models: { default: 1000 } };
+  const archive = legacyEventArchive([['cursor-active-2026-08-13T02:42:39.510Z', 1000, 'cursor-auto']]);
+  const visible = applySessionUsageArchive(liveCursorSummary([live]), archive, NOW);
+
+  assert.equal(visible.allTime.totalTokens, 1000);
+});
+
 test('legacy Cursor events stay in the archive through normalization and capture', () => {
   const key = 'cursor:cursor-team-a-2026-08-13T02:42:39.510Z';
   const archive = legacyEventArchive([['cursor-team-a-2026-08-13T02:42:39.510Z', 1000]]);

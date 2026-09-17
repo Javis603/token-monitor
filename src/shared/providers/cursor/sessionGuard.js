@@ -20,6 +20,11 @@ const { numberValue } = require('../../archiveHelpers');
 // indistinguishable from the JSON fallback's per-day IDs and never match.
 const LEGACY_EVENT_ID = /^cursor-.+?-(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?)Z?$/i;
 
+// The CSV export and the JSON API name Cursor's Auto router differently: the
+// CSV says `auto` (normalized to `cursor-auto` on read) and the API says
+// `default`, for the same event at the same millisecond with the same tokens.
+const CONVERSATION_MODEL_FOR_LEGACY = new Map([['cursor-auto', 'default']]);
+
 function isCursor(session) {
   return String(session?.client || '').trim().toLowerCase() === 'cursor';
 }
@@ -40,12 +45,15 @@ function usedModels(session) {
   return Object.keys(session?.models || {}).filter((model) => tokens(session.models[model]) > 0);
 }
 
-// Live conversations grouped by each model they used. Bounds that are missing
-// or inverted cannot place an event, so those sessions are left out.
-function liveSessionsByModel(liveSessions) {
+// Conversations grouped by each model they used. Archived conversations count
+// as much as live ones: once an account's live data is gone, its conversations
+// replay from the archive, and they still hold the legacy events that would
+// otherwise replay beside them. Bounds that are missing or inverted cannot place
+// an event, so those sessions are left out.
+function conversationsByModel(sessions) {
   const byModel = new Map();
-  for (const [key, session] of Object.entries(liveSessions || {})) {
-    if (!isCursor(session) || session.archived || legacyCursorEventTime(session) !== null) continue;
+  for (const [key, session] of Object.entries(sessions || {})) {
+    if (!isCursor(session) || legacyCursorEventTime(session) !== null) continue;
     const startedAt = Date.parse(session.startedAt || '');
     const lastUsedAt = Date.parse(session.lastUsedAt || '');
     if (!Number.isFinite(startedAt) || !Number.isFinite(lastUsedAt) || lastUsedAt < startedAt) continue;
@@ -57,8 +65,8 @@ function liveSessionsByModel(liveSessions) {
   return byModel;
 }
 
-// Calls `assign(event, live)` for each event that falls inside exactly one live
-// session. One sweep over time-sorted events keeps the sessions open at each
+// Calls `assign(event, conversation)` for each event that falls inside exactly
+// one conversation. One sweep over time-sorted events keeps the sessions open at each
 // event, so the cost is the sorts plus a linear pass however the intervals nest.
 function assignToSoleContainingSession(events, sessions, assign) {
   const byStart = [...sessions].sort((left, right) => left.startedAt - right.startedAt);
@@ -73,42 +81,43 @@ function assignToSoleContainingSession(events, sessions, assign) {
   }
 }
 
-// Archive keys of legacy Cursor events that live conversations already account
-// for. Each event must fall inside exactly one conversation that used its model,
+// Archive keys of legacy Cursor events that conversations already account for. Each event must fall inside exactly one conversation that used its model,
 // and a conversation's events are skipped together only when they add up to
 // that conversation's total and every per-model total. That rules out partial
 // matches and conversations holding post-migration events, but it is a usage
 // fingerprint rather than proof of account identity.
-function coveredLegacyCursorSessionKeys(archivedSessions, liveSessions) {
+function coveredLegacyCursorSessionKeys(legacySessions, periodSessions) {
   const covered = new Set();
-  const liveByModel = liveSessionsByModel(liveSessions);
-  if (liveByModel.size === 0) return covered;
+  const byModel = conversationsByModel(periodSessions);
+  if (byModel.size === 0) return covered;
 
   const eventsByModel = new Map();
-  for (const [key, session] of archivedSessions) {
+  for (const [key, session] of legacySessions) {
     const time = legacyCursorEventTime(session);
     const models = time === null ? [] : usedModels(session);
-    if (models.length !== 1 || !liveByModel.has(models[0])) continue;
-    if (!eventsByModel.has(models[0])) eventsByModel.set(models[0], []);
-    eventsByModel.get(models[0]).push({ key, session, time });
+    if (models.length !== 1) continue;
+    const model = byModel.has(models[0]) ? models[0] : CONVERSATION_MODEL_FOR_LEGACY.get(models[0]);
+    if (!byModel.has(model)) continue;
+    if (!eventsByModel.has(model)) eventsByModel.set(model, []);
+    eventsByModel.get(model).push({ key, time, tokens: tokens(session.models[models[0]]), totalTokens: tokens(session.totalTokens) });
   }
 
   const groups = new Map();
   for (const [model, events] of eventsByModel) {
-    assignToSoleContainingSession(events, liveByModel.get(model), (event, live) => {
-      const group = groups.get(live.key) || { live: live.session, totalTokens: 0, models: {}, keys: [] };
-      group.totalTokens += tokens(event.session.totalTokens);
-      group.models[model] = (group.models[model] || 0) + tokens(event.session.models[model]);
+    assignToSoleContainingSession(events, byModel.get(model), (event, conversation) => {
+      const group = groups.get(conversation.key) || { conversation: conversation.session, totalTokens: 0, models: {}, keys: [] };
+      group.totalTokens += event.totalTokens;
+      group.models[model] = (group.models[model] || 0) + event.tokens;
       group.keys.push(event.key);
-      groups.set(live.key, group);
+      groups.set(conversation.key, group);
     });
   }
 
   for (const group of groups.values()) {
-    const liveModels = usedModels(group.live);
-    const exact = group.totalTokens === tokens(group.live.totalTokens)
-      && liveModels.length === Object.keys(group.models).length
-      && liveModels.every((model) => group.models[model] === tokens(group.live.models[model]));
+    const conversationModels = usedModels(group.conversation);
+    const exact = group.totalTokens === tokens(group.conversation.totalTokens)
+      && conversationModels.length === Object.keys(group.models).length
+      && conversationModels.every((model) => group.models[model] === tokens(group.conversation.models[model]));
     if (exact) group.keys.forEach((key) => covered.add(key));
   }
   return covered;

@@ -332,8 +332,8 @@ function applySessionUsageArchive(summary, archive, options = {}) {
     }
   }
 
-  // Coverage reads only live sessions, so replaying other archived rows first
-  // cannot change which legacy Cursor events count as covered.
+  // Legacy Cursor events are judged after every other row has replayed, so a
+  // conversation that survives only in the archive still covers them.
   for (const [periodName, events] of legacyCursorEvents) {
     const period = targetFor(periodName);
     const covered = coveredLegacyCursorSessionKeys(events, period.sessions);
