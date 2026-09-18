@@ -5,6 +5,7 @@
 const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 
 const TOKSCALE_CLIENT_ALIASES = new Map([
+  ['antigravity-cli', 'antigravity'],
   ['omp', 'pi'],
   ['kilocode', 'kilo']
 ]);
@@ -272,7 +273,8 @@ function computeStreaks(days, todayKey) {
 }
 
 function addPerClient(target, source, includeTokenComponents = false) {
-  for (const [client, v] of Object.entries(source || {})) {
+  for (const [rawClient, v] of Object.entries(source || {})) {
+    const client = normalizeTokscaleClientName(rawClient) || rawClient;
     const t = target[client] || (target[client] = { tokens: 0, cost: 0, messages: 0 });
     t.tokens += num(v.tokens); t.cost += num(v.cost); t.messages += num(v.messages);
     if (includeTokenComponents) {
