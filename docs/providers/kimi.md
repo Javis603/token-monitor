@@ -76,7 +76,7 @@ for Kimi.
 - **Discovery is indexed, not probed.** `readKimiSessionStateFiles` lists two directory levels and
   reads only the sessions it was asked about, never the workspace × session product. A guard test
   asserts zero stat probes for unknown ids. Cost is O(workspaces) readdirs + O(matches) reads: 0.2 ms
-  for a 25-session home, ~3.7 ms worst case on a synthetic 10 000-session tree.
+  for a home with a few dozen sessions, ~3.7 ms worst case on a synthetic 10 000-session tree.
 - **Reads are unbounded by size** (unlike the SQLite budgets elsewhere): `state.json` is small today —
   the `agents` map grows one entry per subagent — so nothing caps it yet.
 - **`ctitle-*` sessions are separate sessions to us.** Kimi Work spawns them to name a conversation
