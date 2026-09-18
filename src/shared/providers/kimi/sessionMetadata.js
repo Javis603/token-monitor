@@ -96,8 +96,12 @@ function readKimiSessionStateFiles(roots, sessionIds) {
 
 // `toISOString` throws on an invalid date instead of returning one, and a finite
 // number can still be out of range (`Number.MAX_VALUE` passes `Number.isFinite`).
-// That throw would leave this reader and abort the whole metadata pass, since the
-// resolver is called without containment, so every path validates first.
+// That throw would escape this reader and abort the whole metadata pass, since
+// the resolver is called without containment, so every path validates first.
+// The shared `isoFromDate` cannot be reused here: `src/shared/sessionMetadata.js`
+// requires this module, so the import would be a cycle. A non-positive number
+// counts as absent — the runtime's own `toEpochMs` returns 0 for a value it
+// cannot use, and no session document carries a pre-1970 time.
 function isoFromDate(date) {
   return Number.isNaN(date.getTime()) ? '' : date.toISOString();
 }
