@@ -4,7 +4,8 @@
 // Electron can only attach vibrancy to a whole rectangular window; AppKit's
 // public `maskImage` property on the effect view is what lets the edge dock keep
 // real glass in a sculpted silhouette. Lazy and best-effort like the Space
-// behaviour bridge: any failure leaves the rectangular material in place.
+// behaviour bridge: failures are reported so the controller can remove the
+// rectangular material before revealing the renderer-backed fallback.
 
 let api = null;
 

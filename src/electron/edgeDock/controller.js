@@ -357,11 +357,18 @@ function createEdgeDockController(deps) {
     const closed = Array.isArray(built) ? built : built.closed;
     const outline = Array.isArray(built) ? built : built.outline;
     shapes[surface] = { key, width, height, d: toSvgPath(closed), outline: toSvgPath(outline) };
-    if (builtGlass && platform === 'darwin') {
+    if (builtGlass && platform === 'darwin' && nativeMaterial[surface]) {
+      let masked = false;
       try {
-        applyShapeMask?.(win, closed, width, height, currentDisplay);
+        masked = applyShapeMask?.(win, closed, width, height, currentDisplay) === true;
       } catch (error) {
         logger(`[edge-dock] ${surface} mask failed: ${error.message}`);
+      }
+      if (!masked) {
+        nativeMaterial[surface] = false;
+        win.setVibrancy?.(null);
+        win.setHasShadow?.(false);
+        logger(`[edge-dock] ${surface} native material mask unavailable; showing the tinted silhouette only`);
       }
     } else if (platform === 'win32') {
       try {

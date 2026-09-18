@@ -33,6 +33,8 @@ class FakeBrowserWindow extends EventEmitter {
     this.destroyed = false;
     this.shapeCalls = [];
     this.backgroundMaterials = [];
+    this.vibrancyCalls = [];
+    this.hasShadowCalls = [];
     FakeBrowserWindow.instances.push(this);
   }
 
@@ -54,6 +56,8 @@ class FakeBrowserWindow extends EventEmitter {
   setHiddenInMissionControl() {}
   setShape(rects) { this.shapeCalls.push(rects); }
   setBackgroundMaterial(material) { this.backgroundMaterials.push(material); }
+  setVibrancy(value) { this.vibrancyCalls.push(value); }
+  setHasShadow(value) { this.hasShadowCalls.push(value); }
   destroy() { this.destroyed = true; }
 }
 
@@ -113,6 +117,7 @@ function createFixture(options = {}) {
   const screen = new FakeScreen(displays);
   const ipcMain = new FakeIpcMain();
   const placements = [];
+  const maskWindows = [];
   const controller = createEdgeDockController({
     BrowserWindow: FakeBrowserWindow,
     ipcMain,
@@ -123,6 +128,10 @@ function createFixture(options = {}) {
     getSettings: () => settings,
     nativeGlass: () => options.nativeGlass === true,
     prefersReducedMotion: () => true,
+    applyShapeMask: (win) => {
+      maskWindows.push(win);
+      return options.maskAvailable !== false;
+    },
     onPlacementChange: (placement) => {
       placements.push(placement);
       settings.edgeDockSide = placement.side;
@@ -138,7 +147,7 @@ function createFixture(options = {}) {
   controller.sync();
   for (const win of FakeBrowserWindow.instances) win.webContents.emit('did-finish-load');
   const windowFor = (surface) => FakeBrowserWindow.instances.filter((win) => !win.destroyed && win.surface === surface).at(-1);
-  return { controller, ipcMain, placements, screen, settings, windowFor };
+  return { controller, ipcMain, maskWindows, placements, screen, settings, windowFor };
 }
 
 test('an open card follows its cell id across removal and reorder', (t) => {
@@ -250,6 +259,21 @@ test('Windows keeps shaped click-through regions without native glass', (t) => {
   t.after(() => plain.controller.stop());
   assert.equal(sentPayload(plain.windowFor('rail'), 'rail').glass, false);
   assert.ok(['peek', 'rail'].every((surface) => plain.windowFor(surface).shapeCalls.at(-1)?.length > 0));
+});
+
+test('macOS drops rectangular vibrancy when a surface mask cannot be applied', (t) => {
+  const fixture = createFixture({ platform: 'darwin', nativeGlass: true, maskAvailable: false });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const attemptedMasks = fixture.maskWindows.length;
+
+  assert.ok(attemptedMasks > 0);
+  assert.equal(sentPayload(rail, 'rail').glass, false);
+  assert.deepEqual(rail.vibrancyCalls, [null]);
+  assert.deepEqual(rail.hasShadowCalls, [false]);
+
+  fixture.controller.sync();
+  assert.equal(fixture.maskWindows.length, attemptedMasks, 'the no-material fallback remains stable for this window');
 });
 
 test('display metric changes hide and remeasure an open card against the new work area', (t) => {

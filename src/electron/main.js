@@ -5314,7 +5314,7 @@ function ensureEdgeDockController() {
       const scale = currentDisplay?.scaleFactor || screen.getDisplayMatching?.(win.getBounds())?.scaleFactor || 2;
       const { buffer, pixelWidth, pixelHeight } = rasterizeMask(toPolygons(commands), width, height, scale);
       const png = nativeImage.createFromBitmap(buffer, { width: pixelWidth, height: pixelHeight }).toPNG();
-      if (!applyVibrancyMask(win, png, width, height)) console.log('[edge-dock] native material mask unavailable; showing the tinted silhouette only');
+      return applyVibrancyMask(win, png, width, height);
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
     // The dock card's Switch button runs the same swap the Limits view does,
