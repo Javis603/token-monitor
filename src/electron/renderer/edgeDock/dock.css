@@ -55,6 +55,8 @@ html, body.edge-dock {
   fill: none;
   stroke: var(--line);
   stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
 /* Without native material behind it the tint alone carries the surface, so it

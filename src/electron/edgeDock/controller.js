@@ -44,8 +44,8 @@ function canUseEdgeDock(settings = {}, platform = process.platform) {
 // Every surface is a frameless window whose silhouette (rail shoulders, card
 // tail) is drawn by the renderer from edgeDockShapes.js. On macOS the native
 // material behind it is clipped to the same silhouette through a mask. Windows
-// uses a transparent shaped window with Accent blur, and falls back to the
-// renderer's tinted silhouette when that best-effort API is unavailable.
+// uses a transparent shaped window and lets the renderer paint the tint: both
+// DWM backdrop APIs paint the full BrowserWindow rectangle despite setShape().
 function createEdgeDockController(deps) {
   const {
     BrowserWindow,
@@ -59,7 +59,6 @@ function createEdgeDockController(deps) {
     prefersReducedMotion = () => false,
     onPlacementChange,
     applyShapeMask,
-    applyWindowsAccentBlur,
     primaryButtonDown = () => null,
     onToggleRateMode,
     onSwitchCodexAccount,
@@ -91,7 +90,6 @@ function createEdgeDockController(deps) {
   const shapes = { peek: null, rail: null, bubble: null };
   const nativeMaterial = { peek: false, rail: false, bubble: false };
   const lastSent = { peek: '', rail: '', bubble: '' };
-  let windowsMaterialFallbackLogged = false;
 
   function settings() {
     return getSettings() || {};
@@ -239,8 +237,7 @@ function createEdgeDockController(deps) {
     const win32 = platform === 'win32';
     const material = materialKey !== 'none';
     const macMaterial = mac && material;
-    const windowsMaterial = win32 && material;
-    nativeMaterial[surface] = macMaterial ? true : (windowsMaterial ? null : false);
+    nativeMaterial[surface] = macMaterial;
     const win = new BrowserWindow({
       width: surface === 'bubble' ? EDGE_DOCK_METRICS.bubbleWidth : EDGE_DOCK_METRICS.railWidth,
       height: 80,
@@ -258,9 +255,9 @@ function createEdgeDockController(deps) {
       // window has no shape-aware shadow to offer.
       hasShadow: macMaterial,
       backgroundColor: '#00000000',
-      // DWM's documented Acrylic paints the full native rectangle even after
-      // Electron applies a shaped region. Keep dock surfaces transparent and
-      // attach the shape-aware Accent material only after setShape() below.
+      // DWM's Acrylic and Accent policies both paint the full native rectangle
+      // even after Electron applies a shaped region. Windows therefore keeps
+      // the transparent renderer-backed surface used by the no-glass mode.
       transparent: true,
       ...(win32 ? { thickFrame: false } : {}),
       ...(mac ? { type: 'panel', acceptFirstMouse: true, roundedCorners: false } : {}),
@@ -318,7 +315,6 @@ function createEdgeDockController(deps) {
     bubblePlaced = null;
     builtGlass = null;
     builtMaterial = null;
-    windowsMaterialFallbackLogged = false;
     for (const surface of SURFACES) {
       shapes[surface] = null;
       nativeMaterial[surface] = false;
@@ -373,26 +369,13 @@ function createEdgeDockController(deps) {
       } catch (error) {
         logger(`[edge-dock] ${surface} shape failed: ${error.message}`);
       }
-      if (builtGlass && nativeMaterial[surface] === null) {
-        nativeMaterial[surface] = applyWindowsAccentBlur?.(win, {
-          mode: builtMaterial === 'win32:accent' ? 'blur' : 'acrylic'
-        }) === true;
-        if (!nativeMaterial[surface] && !windowsMaterialFallbackLogged) {
-          windowsMaterialFallbackLogged = true;
-          logger('[edge-dock] shaped Windows blur unavailable; showing the tinted silhouette only');
-        }
-      }
     }
     render(surface);
   }
 
   function buildWindows() {
     const glass = Boolean(nativeGlass());
-    const materialKey = !glass
-      ? 'none'
-      : platform === 'win32'
-        ? `win32:${settings().windowsBackdrop === 'accent' ? 'accent' : 'acrylic'}`
-        : platform === 'darwin' ? 'mac' : 'none';
+    const materialKey = glass && platform === 'darwin' ? 'mac' : 'none';
     if (builtMaterial === materialKey && SURFACES.every((surface) => alive(windows[surface]))) return;
     destroyWindows();
     builtMaterial = materialKey;

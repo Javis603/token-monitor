@@ -53,6 +53,10 @@
   // corner. Drawn with the tail on the right and mirrored for a left rail.
   function bubbleCommands({ width, height, side = 'right', tail, tailY, neck, radius }) {
     const bw = width - tail;
+    // Leave the point inside the BrowserWindow. A tip exactly on its outer edge
+    // clips half of the antialiased outline and leaves a notch on both Chromium
+    // and the macOS native-material mask.
+    const tipX = Math.max(bw, width - 1);
     const h = height;
     const r = Math.max(0, Math.min(radius, h / 2, bw / 2));
     const n = Math.max(0, Math.min(neck, (h - 2 * r) / 2));
@@ -62,7 +66,7 @@
       ['L', bw - r, 0],
       ['C', bw - r * ARC, 0, bw, r * ARC, bw, r],
       ['L', bw, ty - n],
-      ['C', bw, ty - n * 0.4, bw + tail * 0.5, ty - 1.5, bw + tail, ty],
+      ['C', bw, ty - n * 0.4, bw + tail * 0.5, ty - 1.5, tipX, ty],
       ['C', bw + tail * 0.5, ty + 1.5, bw, ty + n * 0.4, bw, ty + n],
       ['L', bw, h - r],
       ['C', bw, h - r * ARC, bw - r * ARC, h, bw - r, h],
@@ -84,7 +88,7 @@
   }
 
   // Flattens the commands into closed polygons for scanline filling.
-  function toPolygons(commands, segments = 12) {
+  function toPolygons(commands, segments = 24) {
     const polygons = [];
     let current = null;
     let x = 0;

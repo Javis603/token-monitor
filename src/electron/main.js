@@ -5316,7 +5316,6 @@ function ensureEdgeDockController() {
       const png = nativeImage.createFromBitmap(buffer, { width: pixelWidth, height: pixelHeight }).toPNG();
       if (!applyVibrancyMask(win, png, width, height)) console.log('[edge-dock] native material mask unavailable; showing the tinted silhouette only');
     },
-    applyWindowsAccentBlur,
     primaryButtonDown: () => primaryButtonDown(process.platform),
     // The dock card's Switch button runs the same swap the Limits view does,
     // then repaints from the refreshed records. It is the dock's only write.

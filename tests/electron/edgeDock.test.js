@@ -180,13 +180,13 @@ test('rail silhouette starts and ends on the screen edge and mirrors for the lef
 });
 
 test('bubble tail tip lands on tailY and stays clear of the corners', () => {
-  const tip = (commands) => commands.find(([op, ...p]) => op === 'C' && p[4] === 292);
+  const tip = (commands) => commands.find(([op, ...p]) => op === 'C' && p[4] === 291);
   const right = bubbleCommands({ width: 292, height: 160, side: 'right', tail: 12, tailY: 90, neck: 18, radius: 18 });
   assert.equal(tip(right)[6], 90);
   const clamped = bubbleCommands({ width: 292, height: 160, side: 'right', tail: 12, tailY: 2, neck: 18, radius: 18 });
   assert.equal(tip(clamped)[6], 36);
   const left = bubbleCommands({ width: 292, height: 160, side: 'left', tail: 12, tailY: 90, neck: 18, radius: 18 });
-  assert.ok(left.some(([op, ...p]) => op === 'C' && p[4] === 0 && p[5] === 90));
+  assert.ok(left.some(([op, ...p]) => op === 'C' && p[4] === 1 && p[5] === 90));
 });
 
 test('mask rasterizes the silhouette with soft edges and empty outside corners', () => {

@@ -5,7 +5,7 @@
 // a surface is never shown with a rectangular material for a frame while a
 // renderer round trip catches up.
 
-const SUBSAMPLES = 4;
+const SUBSAMPLES = 8;
 
 function rowCrossings(polygons, y) {
   const crossings = [];
@@ -54,9 +54,10 @@ function rasterizeMask(polygons, width, height, scale = 1) {
   return { buffer, pixelWidth, pixelHeight };
 }
 
-// Windows' native backdrop needs an opaque BrowserWindow. setShape() clips that
-// rectangular window to the same silhouette the renderer paints. Consecutive
-// scanlines with identical spans are merged so the native region stays small.
+// setShape() supplies the Windows input region and keeps transparent corners
+// click-through. Include every antialiased edge pixel plus a one-pixel fringe:
+// clipping at 50% alpha cuts Chromium's smoother edge into visible stair steps.
+// Consecutive scanlines with identical spans are merged to keep the region small.
 function shapeRectsFromPolygons(polygons, width, height) {
   const { buffer, pixelWidth, pixelHeight } = rasterizeMask(polygons, width, height, 1);
   const rows = [];
@@ -64,11 +65,15 @@ function shapeRectsFromPolygons(polygons, width, height) {
     let start = -1;
     let end = -1;
     for (let x = 0; x < pixelWidth; x += 1) {
-      if (buffer[(y * pixelWidth + x) * 4 + 3] < 128) continue;
+      if (buffer[(y * pixelWidth + x) * 4 + 3] === 0) continue;
       if (start < 0) start = x;
       end = x + 1;
     }
-    if (start >= 0 && end > start) rows.push({ x: start, y, width: end - start, height: 1 });
+    if (start >= 0 && end > start) {
+      start = Math.max(0, start - 1);
+      end = Math.min(pixelWidth, end + 1);
+      rows.push({ x: start, y, width: end - start, height: 1 });
+    }
   }
   const rects = [];
   for (const row of rows) {
