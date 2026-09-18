@@ -1607,6 +1607,20 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
       updatedAt: Date.parse('2026-09-18T04:45:00.000Z')
     }));
     period.sessions['kimi:session_title_type'] = { client: 'kimi', sessionId: 'session_title_type', totalTokens: 100 };
+    // `Number.MAX_VALUE` is finite and positive, so it passes the numeric guard
+    // while landing outside the Date range; converting it must leave the field
+    // unset rather than throw, or one corrupt document takes the pass down.
+    const outOfRangeSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_out_of_range');
+    fs.mkdirSync(outOfRangeSess, { recursive: true });
+    fs.writeFileSync(path.join(outOfRangeSess, 'state.json'), JSON.stringify({
+      version: 2,
+      cwd: path.join(tmp, 'OutOfRangeProj'),
+      createdAt: Number.MAX_VALUE,
+      updatedAt: 1e16,
+      title: 'still resolved',
+      titleKind: 'generated'
+    }));
+    period.sessions['kimi:session_out_of_range'] = { client: 'kimi', sessionId: 'session_out_of_range', totalTokens: 100 };
     // The pre-prompt placeholder is what an unnamed session holds, and must not
     // become a row label even when it is marked custom-proof (it is not custom).
     const placeholderSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_placeholder');
@@ -1680,6 +1694,10 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
     assert.equal(Array.from(customV2Title).length, 160, 'a title must be capped at the shared 160 code points');
     assert.ok(customV2Title.endsWith('…'), 'a capped title must be marked as truncated');
     assert.equal(period.sessions['kimi:session_title_type'].title || '', '', 'a non-string title must stay unset');
+    assert.equal(period.sessions['kimi:session_out_of_range'].startedAt || '', '', 'an out-of-range timestamp must stay unset');
+    assert.equal(period.sessions['kimi:session_out_of_range'].lastUsedAt || '', '', 'an out-of-range timestamp must stay unset');
+    assert.equal(period.sessions['kimi:session_out_of_range'].projectLabel, 'OutOfRangeProj', 'one bad timestamp must not abort the rest of the document');
+    assert.equal(period.sessions['kimi:session_out_of_range'].title, 'still resolved', 'one bad timestamp must not abort the rest of the document');
     assert.equal(period.sessions['kimi:session_titled'].title || '', '', 'a replaceable prompt copy must stay unset');
     assert.equal(period.sessions['kimi:session_placeholder'].title || '', '', 'the "New Session" placeholder must stay unset');
     assert.equal(period.sessions['kimi:conv-envelope'].title || '', '', 'the Work prompt envelope must stay unset');
