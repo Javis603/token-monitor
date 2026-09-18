@@ -135,7 +135,25 @@ function normalizeComponentSummary(value, observations) {
     }
     return result;
   };
-  const perClient = normalizeMap(value.perClient, tokenMaps.perClient);
+  const foldComponentMapByClient = (map) => {
+    if (!map || typeof map !== 'object') return map;
+    const folded = {};
+    for (const [rawClient, comp] of Object.entries(map)) {
+      const client = normalizeTokscaleClientName(rawClient) || rawClient;
+      if (!folded[client]) {
+        folded[client] = { ...comp };
+      } else {
+        folded[client] = {
+          cacheReadTokens: num(folded[client].cacheReadTokens) + num(comp?.cacheReadTokens),
+          cacheWriteTokens: num(folded[client].cacheWriteTokens) + num(comp?.cacheWriteTokens),
+          outputTokens: num(folded[client].outputTokens) + num(comp?.outputTokens),
+          unclassifiedTokens: num(folded[client].unclassifiedTokens) + num(comp?.unclassifiedTokens)
+        };
+      }
+    }
+    return folded;
+  };
+  const perClient = normalizeMap(foldComponentMapByClient(value.perClient), tokenMaps.perClient);
   const perModel = normalizeMap(value.perModel, tokenMaps.perModel);
   if (!perClient || !perModel) return null;
   return {

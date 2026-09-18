@@ -392,7 +392,12 @@ function renderBreakdown() {
   let grandTotal = 0;
   
   for (const d of daily) {
-    if (d.perClient) Object.entries(d.perClient).forEach(([k, v]) => clientTotals[k] = (clientTotals[k] || 0) + Number(v.tokens || 0));
+    if (d.perClient) {
+      Object.entries(d.perClient).forEach(([k, v]) => {
+        const client = normalizeClientKey(k);
+        clientTotals[client] = (clientTotals[client] || 0) + Number(v.tokens || 0);
+      });
+    }
     if (d.perModel) Object.entries(d.perModel).forEach(([k, v]) => modelTotals[k] = (modelTotals[k] || 0) + Number(v.tokens || 0));
     grandTotal += Number(d.tokens || 0);
   }
@@ -612,6 +617,35 @@ function showHeatTooltip(date, day, ev) {
   positionTooltip(ev);
 }
 
+function normalizeClientKey(key) {
+  return key === 'antigravity-cli' ? 'antigravity' : key;
+}
+
+function normalizeHistoryPayload(history) {
+  if (!history || typeof history !== 'object') return history;
+  const fold = (entry) => {
+    if (!entry?.perClient) return entry;
+    const perClient = {};
+    for (const [k, v] of Object.entries(entry.perClient)) {
+      const client = normalizeClientKey(k);
+      const t = perClient[client] || (perClient[client] = { tokens: 0, cost: 0, messages: 0 });
+      t.tokens += Number(v?.tokens || 0);
+      t.cost += Number(v?.cost || 0);
+      t.messages += Number(v?.messages || 0);
+      if (v?.cacheReadTokens) t.cacheReadTokens = (t.cacheReadTokens || 0) + Number(v.cacheReadTokens);
+      if (v?.cacheWriteTokens) t.cacheWriteTokens = (t.cacheWriteTokens || 0) + Number(v.cacheWriteTokens);
+      if (v?.outputTokens) t.outputTokens = (t.outputTokens || 0) + Number(v.outputTokens);
+      if (v?.unclassifiedTokens) t.unclassifiedTokens = (t.unclassifiedTokens || 0) + Number(v.unclassifiedTokens);
+    }
+    return { ...entry, perClient };
+  };
+  return {
+    ...history,
+    daily: Array.isArray(history.daily) ? history.daily.map(fold) : [],
+    monthly: Array.isArray(history.monthly) ? history.monthly.map(fold) : []
+  };
+}
+
 let refreshRunning = false;
 let refreshQueued = false;
 
@@ -623,7 +657,7 @@ async function refresh() {
   refreshRunning = true;
   try {
     state.motion = state.history ? 'update' : 'entry';
-    state.history = await window.tokenMonitor.getDashboardHistory();
+    state.history = normalizeHistoryPayload(await window.tokenMonitor.getDashboardHistory());
     render();
   } catch (error) {
     state.motion = 'none';
