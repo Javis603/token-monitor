@@ -17,6 +17,27 @@ function cleanTitle(value) {
     : `${chars.slice(0, TITLE_MAX_CODE_POINTS - 1).join('')}…`;
 }
 
+// Whether a `user` record is something the user actually asked, as opposed to
+// the plumbing that shares the same type. Almost every user record is a
+// tool_result being handed back to the model (14070 of 16393 on one real
+// machine), and the client also writes meta and compaction bookkeeping there.
+// Only a real prompt starts a new turn, so only it may retire the previous
+// completion — treating a tool_result as one would mark every working session
+// as finished, which is the same mistake `tool_use` guards against.
+function isUserPrompt(entry) {
+  if (entry?.isMeta === true || entry?.isCompactSummary === true) return false;
+  const content = entry?.message?.content;
+  if (typeof content === 'string') return content.trim().length > 0;
+  if (!Array.isArray(content)) return false;
+  let asked = false;
+  for (const block of content) {
+    const type = block?.type;
+    if (type === 'tool_result') return false;
+    if (type === 'text' || type === 'image') asked = true;
+  }
+  return asked;
+}
+
 function applyMetadataLine(state, line) {
   if (!line.length) return;
   try {
@@ -35,6 +56,15 @@ function applyMetadataLine(state, line) {
       // state costs no extra read.
       const stopReason = entry.message?.stop_reason;
       if (typeof stopReason === 'string' && stopReason) state.stopReason = stopReason;
+      // The assistant answered, so any prompt the user sent before it belongs to
+      // the turn this record closes.
+      state.userSinceStop = false;
+    } else if (isUserPrompt(entry)) {
+      // A prompt accepted after the last completion means that completion no
+      // longer describes the current turn: the old `end_turn` would otherwise
+      // latch, and the session would read as finished while the new turn is
+      // still being generated. The next assistant record restores the reading.
+      state.userSinceStop = true;
     }
   } catch (_) { /* skip partial or unrelated lines */ }
 }
@@ -97,6 +127,7 @@ function emptyIndex() {
     customTitle: '',
     aiTitle: '',
     stopReason: '',
+    userSinceStop: false,
     trailing: Buffer.alloc(0),
     droppingLongLine: false
   };
@@ -128,6 +159,7 @@ function readSessionTitle(filePath, deps = {}) {
         customTitle: cached.customTitle || '',
         aiTitle: cached.aiTitle || '',
         stopReason: cached.stopReason || '',
+        userSinceStop: cached.userSinceStop === true,
         trailing: Buffer.isBuffer(cached.trailing) ? Buffer.from(cached.trailing) : Buffer.alloc(0),
         droppingLongLine: cached.droppingLongLine === true
       }
@@ -170,7 +202,9 @@ function readSessionTurnEnded(filePath, deps = {}) {
   readSessionTitle(file, deps);
   const cached = cache.get(file);
   const stopReason = String(cached?.stopReason || '');
-  return stopReason !== '' && stopReason !== 'tool_use';
+  // A completion is only the current turn while nothing newer has been asked of
+  // the session. `tool_use` never counts: the client paused to run tools.
+  return stopReason !== '' && stopReason !== 'tool_use' && cached?.userSinceStop !== true;
 }
 
 function resolveSessionMetadata(sessionIds, context) {

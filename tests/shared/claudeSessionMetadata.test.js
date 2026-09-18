@@ -48,6 +48,53 @@ test('readSessionTurnEnded follows the newest stop_reason, and tool_use is not a
   assert.equal(readSessionTurnEnded(silent.file, { cache: new Map() }), false);
   assert.equal(readSessionTurnEnded('', { cache: new Map() }), false);
 
+  // A prompt accepted after a completion starts the next turn, so that
+  // completion no longer describes the current one. Without this the old
+  // `end_turn` latched and a session that had just been prompted still read as
+  // finished — which is what a real transcript did on 57 of 196 sessions.
+  const prompted = fixture([assistant('end_turn'), JSON.stringify({ type: 'user', message: { content: 'next thing' } })]);
+  t.after(() => fs.rmSync(prompted.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(prompted.file, { cache: new Map() }), false);
+
+  // ...and the assistant answering again restores the reading.
+  const answered = fixture([
+    assistant('end_turn'),
+    JSON.stringify({ type: 'user', message: { content: 'next thing' } }),
+    assistant('end_turn')
+  ]);
+  t.after(() => fs.rmSync(answered.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(answered.file, { cache: new Map() }), true);
+
+  // A tool_result shares the user type and must NOT retire the completion:
+  // it is the plumbing of the turn in progress (14070 of 16393 user records on
+  // one real machine), so treating it as a prompt would mark every working
+  // session finished.
+  const toolResult = fixture([
+    assistant('end_turn'),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'ok' }] } })
+  ]);
+  t.after(() => fs.rmSync(toolResult.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(toolResult.file, { cache: new Map() }), true);
+
+  // Neither does client bookkeeping that rides the same type.
+  const bookkeeping = fixture([
+    assistant('end_turn'),
+    JSON.stringify({ type: 'user', isMeta: true, message: { content: 'caveat text' } })
+  ]);
+  t.after(() => fs.rmSync(bookkeeping.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(bookkeeping.file, { cache: new Map() }), true);
+
+  // The state survives the append-only resume, which rebuilds the index from the
+  // cached one rather than re-reading the whole file. A field dropped from that
+  // carry-over silently reverts to the empty default on the next tick, so a
+  // completion would come back from the dead the moment the transcript grows.
+  const appended = fixture([assistant('end_turn')]);
+  t.after(() => fs.rmSync(appended.dir, { recursive: true, force: true }));
+  const appendCache = new Map();
+  assert.equal(readSessionTurnEnded(appended.file, { cache: appendCache }), true);
+  fs.appendFileSync(appended.file, JSON.stringify({ type: 'user', message: { content: 'keep going' } }) + '\n');
+  assert.equal(readSessionTurnEnded(appended.file, { cache: appendCache }), false, 'the prompt must survive the append resume');
+
   // The title still resolves from the same shared index, so asking for both
   // costs one pass rather than two.
   const both = fixture([
