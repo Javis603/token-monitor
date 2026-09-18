@@ -27,8 +27,6 @@
   </dict>
   <key>TokenMonitorAppGroup</key>
   <string>$(TOKEN_MONITOR_APP_GROUP)</string>
-  <key>TokenMonitorURLScheme</key>
-  <string>$(TOKEN_MONITOR_WIDGET_URL_SCHEME)</string>
   <key>TMWidgetBuildTimestamp</key>
   <string>$(TOKEN_MONITOR_WIDGET_BUILD_TIMESTAMP)</string>
   <key>TMWidgetGitRevision</key>
@@ -36,8 +34,8 @@
   <key>TMWidgetKind</key>
   <string>$(TOKEN_MONITOR_WIDGET_KIND)</string>
   <key>TMWidgetSchemaVersion</key>
-  <string>6</string>
+  <string>$(TOKEN_MONITOR_WIDGET_SCHEMA_VERSION)</string>
   <key>TMWidgetUIVersion</key>
-  <string>19</string>
+  <string>$(TOKEN_MONITOR_WIDGET_UI_VERSION)</string>
 </dict>
 </plist>

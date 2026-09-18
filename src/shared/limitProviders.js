@@ -38,6 +38,7 @@
     { id: 'opencode', label: 'OpenCode' },
     { id: 'cursor', label: 'Cursor' },
     { id: 'antigravity', label: 'Antigravity' },
+    { id: 'factory', label: 'Factory Droid' },
     { id: 'kimi', label: 'Kimi' },
     { id: 'grok', label: 'Grok' },
     { id: 'copilot', label: 'GitHub Copilot' },
@@ -67,6 +68,7 @@
   // Collection client ids normally match their Limits provider id. Keep the
   // exceptions explicit here.
   const LIMIT_PROVIDER_BY_CLIENT = Object.freeze({
+    droid: 'factory',
     micode: 'mimo',
     zcode: 'zai',
     qodercn: 'qoder'

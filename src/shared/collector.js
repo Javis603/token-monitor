@@ -159,6 +159,67 @@ function resolvePlatformBinary() {
   return decideResolver({ downloaded, bundled, shim });
 }
 
+// Tokscale reads a few XDG environment variables with a bare
+// `std::env::var(...)`, so ANY present value wins — including "" and "   ".
+// Token Monitor resolves those same roots with nonBlankEnvPath(), which treats a
+// blank value as unset (matching the XDG basedir spec, where $XDG_DATA_HOME is
+// "either not set or empty"). A blank value therefore makes the watcher and the
+// health check resolve ~/.local/share while the scan resolves "" or "   " as the
+// root — a directory that is not even absolute — so health can read `detected`
+// while the collector looks somewhere else entirely.
+//
+// Dropping the blank key entirely (rather than rewriting it to another value)
+// is what makes the two agree: tokscale then takes its own fallback, which is
+// the same root Token Monitor already resolved. It also stays correct if
+// tokscale later adopts blank-as-unset itself, and it fixes every client behind
+// the affected roots at once — PathRoot::XdgData (opencode, amp, kilo, crush,
+// goose, zed, micode, devin-cli, hindsight), PathRoot::Config's Linux arm
+// (antigravity, trae, warp, mcode, hindsight) and the codex headless roots.
+//
+// Only these three are listed. TOKSCALE_CONFIG_DIR is deliberately NOT here,
+// because both sides already agree on it: an empty value is unset, while any
+// non-empty value — whitespace included — is an override. Tokscale spells that
+// `!custom.is_empty()` and Token Monitor `override.length > 0`, so there is
+// nothing to reconcile.
+//
+// Blank is the whole predicate, so one case is knowingly left alone: a
+// NON-blank but relative XDG_CONFIG_HOME. Token Monitor rejects it via
+// absoluteEnvPath() (and so does the `dirs` crate behind Tokscale's own
+// fallback) while Tokscale's raw read would accept it, but that is a separate
+// divergence on an invalid-per-spec value, and the Linux-only arm it lives in
+// cannot be exercised from this repo's test matrix. Relative XDG_DATA_HOME is
+// fine as-is: nonBlankEnvPath keeps it, and Tokscale reads it the same way.
+const TOKSCALE_BLANK_SENSITIVE_ENV_KEYS = Object.freeze([
+  'XDG_DATA_HOME',
+  'XDG_CONFIG_HOME',
+  'TOKSCALE_HEADLESS_DIR'
+]);
+
+// Windows environment names are case-insensitive, and `{ ...process.env }`
+// preserves whatever casing the OS handed Node — a shell can export
+// `Xdg_Data_Home` and a canonical-spelling lookup then misses it entirely,
+// leaving the blank value in the child's environment. Match case-insensitively
+// there so the key we delete is the one that is actually present. POSIX names
+// are case-sensitive, so an exact match stays the narrower correct rule.
+function tokscaleEnvWithBlanksDropped(env, platform = process.platform) {
+  const caseInsensitive = platform === 'win32';
+  const namesFor = (key) => {
+    if (!caseInsensitive) return Object.prototype.hasOwnProperty.call(env, key) ? [key] : [];
+    const lowered = key.toLowerCase();
+    return Object.keys(env).filter((name) => name.toLowerCase() === lowered);
+  };
+  let dropped = null;
+  for (const key of TOKSCALE_BLANK_SENSITIVE_ENV_KEYS) {
+    for (const name of namesFor(key)) {
+      const value = env[name];
+      if (typeof value !== 'string' || value.trim()) continue;
+      if (!dropped) dropped = { ...env };
+      delete dropped[name];
+    }
+  }
+  return dropped || env;
+}
+
 function tokscaleCommand(options = {}) {
   const resolved = resolvePlatformBinary();
   const useDirect = Boolean(resolved && resolved.source !== 'shim');
@@ -167,9 +228,10 @@ function tokscaleCommand(options = {}) {
     process.env.TOKSCALE_EXTRA_DIRS,
     { platform: options.platform || process.platform }
   );
-  const env = customExtraDirs
+  const extraDirsEnv = customExtraDirs
     ? { ...process.env, TOKSCALE_EXTRA_DIRS: customExtraDirs }
     : process.env;
+  const env = tokscaleEnvWithBlanksDropped(extraDirsEnv, options.platform || process.platform);
   const command = useDirect
     ? { bin: resolved.path, prefixArgs: [], env }
     : { bin: process.execPath, prefixArgs: [TOKSCALE_BIN_JS], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } };
@@ -1572,8 +1634,12 @@ function cherryStudioTranscriptRoots({ homeDir, platform = process.platform, env
   ];
 }
 
-function xdgDataHome(home) {
-  return nonBlankEnvPath('XDG_DATA_HOME', path.join(home, '.local', 'share'));
+// `env` is threaded through rather than read off process.env here: every other
+// resolver in clientSourceRoots() takes the caller's injected env, and a scan of
+// this function that reached for the real environment would resolve a different
+// root than the one its caller passed in.
+function xdgDataHome(home, env = process.env) {
+  return nonBlankEnvPath('XDG_DATA_HOME', path.join(home, '.local', 'share'), env);
 }
 
 // Where tokscale looks for captured `codex exec --json` output. Both defaults
@@ -1696,9 +1762,29 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // (`{home}/.local/share/kiro-cli/data.sqlite3`, scanner.rs), so following XDG
   // there would watch a directory it never reads. The split is upstream's, not
   // an oversight — check clients.rs before adding or removing a root here.
-  const xdgHome = xdgDataHome(home);
+  // The XDG fallback hangs off Tokscale's *effective* home, not the Win32
+  // profile. A normal scan passes no --home, so the CLI hands the scanner
+  // `paths::home_dir()`, and on Windows that returns an absolute native $HOME
+  // in preference to the user profile (paths.rs home_dir()). Deriving the
+  // fallback from os.homedir() instead pointed the watcher and the health check
+  // at the profile while the scan read the $HOME tree, so Amp could show
+  // `detected` next to usage collected from another directory.
+  const tokscaleHome = tokscaleHomeDir({ env, platform, homeDir: home });
+  const xdgHome = xdgDataHome(tokscaleHome, env);
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
+  // Amp (Sourcegraph / AmpCode): tokscale reads the XDG-data root on every
+  // platform — clients.rs declares PathRoot::XdgData + relative "amp/threads",
+  // pattern T-*.json (the thread JSON holds a usageLedger and per-assistant-
+  // message usage). So this follows XDG_DATA_HOME like opencode/zed/kilo rather
+  // than a home-relative literal; a Windows or macOS install keeps the XDG
+  // convention instead of an Application Support tree.
+  add('amp', ['amp-threads', path.join(xdgHome, 'amp', 'threads')]);
+  // Droid (Factory): tokscale reads the home-relative ~/.factory/sessions tree on
+  // every platform (clients.rs PathRoot::Home). The Factory desktop app is an
+  // Electron shell over the same bundled droid kernel and keeps no session data
+  // of its own, so this one root covers both.
+  add('droid', ['droid-sessions', path.join(home, '.factory', 'sessions')]);
   // Tokscale resolves these two caches differently and the split is deliberate
   // upstream, so mirror it rather than picking whichever looks tidier:
   //   cursor.rs      — `home_dir().join(".config/tokscale/cursor-cache")`, a
@@ -1710,7 +1796,6 @@ function clientSourceRoots(clientsCsv, options = {}) {
   //                    routed that way on purpose so an isolated profile covers
   //                    the sync cache too.
   const tokscaleConfigRoot = tokscaleConfigDir({ env, platform, homeDir: home });
-  const tokscaleHome = tokscaleHomeDir({ env, platform, homeDir: home });
   add('cursor', ['tokscale-cursor-cache', path.join(tokscaleHome, '.config', 'tokscale', 'cursor-cache')]);
   add('antigravity', ['tokscale-antigravity-cache', path.join(tokscaleConfigRoot, 'antigravity-cache')]);
   // A whitespace-only KIMI_CODE_HOME counts as unset, matching tokscale: it
@@ -1828,13 +1913,17 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['codebuddy-projects', path.join(home, '.codebuddy', 'projects')],
     ...[...new Set(codebuddyExtLogRoots)].map((dir) => ['codebuddy-extension-logs', dir])
   );
-  // WorkBuddy (Tencent): watch only the detailed session dir (projects/*.jsonl,
-  // the preferred source) — not the whole ~/.workbuddy app home, whose config /
-  // auth churn would add polling load and spurious ticks with no usage change.
-  // A legacy install with only ~/.workbuddy/workbuddy.db (no projects/) still
-  // refreshes via the periodic full tick; the WSL marker stays the broader
-  // `.workbuddy` so a db-only WSL home is still scanned.
-  add('workbuddy', ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')]);
+  // WorkBuddy (Tencent): watch only the detailed session dirs (projects/*.jsonl,
+  // the preferred source) — not the whole app homes, whose config / auth churn
+  // would add polling load and spurious ticks with no usage change. WorkBuddy
+  // 5.5 moved to ~/.workbuddy-ai; keep the legacy ~/.workbuddy root because
+  // tokscale 4.17.0 still scans both. A db-only install still refreshes via the
+  // periodic full tick; the WSL markers stay broader so those homes are found.
+  add(
+    'workbuddy',
+    ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')],
+    ['workbuddy-projects', path.join(home, '.workbuddy-ai', 'projects')]
+  );
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
   // Qoder CN — SQLite DB under the platform Application Support dir.
@@ -2813,11 +2902,34 @@ function watcherOptions(usePolling, ignored) {
   };
 }
 
-function isQoderCnSelfWatchEvent(filePath, rootsByClient = {}) {
-  if (!filePath || !path.basename(filePath).endsWith('.db-shm')) return false;
+// Clients whose SQLite wal-index sidecar our own read-only scan recreates.
+//
+// Opening a WAL database read-only still maps the shared-memory index, and
+// SQLite rewrites <db>-shm when it does. That write is indistinguishable from a
+// real data change to a filesystem watcher, so watching the sidecar re-triggers
+// the scan that caused it: watch event -> targeted scan -> shm write -> watch
+// event, forever. Measured on darwin for zcode: 0 shm changes while idle over
+// 40s, then 20 of 20 consecutive tokscale zcode --today scans rewrote
+// db.sqlite-shm. The same shape was already fixed for Qoder CN (#301), where it
+// was 142 events/5min with the client stopped.
+//
+// Only the sidecar is dropped. The real data signal lives in the database and
+// its -wal, so a genuine change still produces an event; a client whose scan was
+// measured NOT to rewrite its sidecar (micode) is deliberately absent here, and
+// adding a client to this list asserts a measurement rather than a hunch.
+const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['qodercn', 'zcode']);
+
+function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
+  // Match SQLite's wal-index suffix, not one client's database basename: ZCode's
+  // file is db.sqlite-shm, whose name does not contain '.db-'. The suffix is
+  // required to be one of the SQLite extensions this collector's clients use, so
+  // the match cannot widen into an unrelated '-shm' sidecar, and it never matches
+  // the -wal or the database itself.
+  const name = path.basename(String(filePath || ''));
+  if (!/^[^/]+\.(?:db|sqlite|sqlite3)-shm$/.test(name)) return false;
   const resolved = path.resolve(filePath);
-  return (rootsByClient.qodercn || [])
-    .some((root) => resolved.startsWith(path.resolve(root) + path.sep));
+  return SELF_WATCHED_SQLITE_SIDECAR_CLIENTS.some((client) => (rootsByClient[client] || [])
+    .some((root) => resolved.startsWith(path.resolve(root) + path.sep)));
 }
 
 function startCollector(options) {
@@ -3542,14 +3654,10 @@ function startCollector(options) {
       // The quit path leaves the watcher open (see stop), so events can still
       // arrive after the collector is done with them.
       if (stopped) return;
-      // Our own read-only opens of Qoder CN's local.db recreate its SQLite
-      // wal-index (local.db-shm), so watching that sidecar re-triggers the
-      // watch loop forever — confirmed: 142 events/5min with Qoder CN fully
-      // stopped, dropping to 0 after this filter. The real data signal lives
-      // in local.db / local.db-wal, so drop *.db-shm events under the
-      // qodercn roots only. (hermes/micode may share this pattern upstream —
-      // out of scope here, their watch behaviour is left untouched.)
-      if (isQoderCnSelfWatchEvent(filePath, rootsByClient)) return;
+      // Drop the wal-index sidecar of clients whose own scan recreates it, so
+      // the collector cannot re-trigger itself. See
+      // SELF_WATCHED_SQLITE_SIDECAR_CLIENTS for the measured per-client evidence.
+      if (isSelfWatchSqliteSidecarEvent(filePath, rootsByClient)) return;
       activityRevision += 1;
       if (tickPending) {
         pendingActivityRevision = pendingActivityRevision === null
@@ -3790,12 +3898,13 @@ module.exports = {
   // read or pin a client's floor directly instead of inferring it from tick
   // timings; the collector never takes a second instance.
   selfSyncThrottle,
-  isQoderCnSelfWatchEvent,
+  isSelfWatchSqliteSidecarEvent,
   shouldIncludeHistory,
   spawnTokscaleHelp,
   startCollector,
   tokscaleCommand,
   tokscaleClientFilter,
+  tokscaleEnvWithBlanksDropped,
   TOKSCALE_CLIENT_ALIASES,
   watchAttributionRootsForClients,
   watcherOptions,

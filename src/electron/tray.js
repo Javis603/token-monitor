@@ -287,6 +287,7 @@ const OPEN_VIEW_MENU_ITEMS = [
 
 function buildTrayMenuTemplate(options = {}) {
   const state = options.state || {};
+  const platform = options.platform || process.platform;
   const presentation = state.trayMode ? 'tray' : state.windowBehavior;
   const callback = (name) => (typeof options[name] === 'function' ? options[name] : () => {});
   const t = (key, params) => {
@@ -316,6 +317,39 @@ function buildTrayMenuTemplate(options = {}) {
           if (account.id !== state.activeCodexAccountId) callback('onSwitchCodexAccount')(account.id);
         }
       }))
+    };
+  })() : null;
+  // Edge dock quick controls. Offered only where the dock itself is supported;
+  // mode and edge stay usable while the dock is off so it opens the way the
+  // user wants when switched on.
+  const edgeDockItem = state.edgeDockSupported ? (() => {
+    const setDock = callback('onSetEdgeDock');
+    const mode = state.edgeDockMode === 'always' ? 'always' : 'autoHide';
+    const side = state.edgeDockSide === 'left' ? 'left' : 'right';
+    return {
+      label: t('trayMenu.edgeDock'),
+      submenu: [
+        {
+          label: t('trayMenu.edgeDockShow'),
+          type: 'checkbox',
+          checked: state.edgeDockEnabled === true,
+          click: () => setDock({ edgeDockEnabled: state.edgeDockEnabled !== true })
+        },
+        { type: 'separator' },
+        ...[['autoHide', 'settings.edgeDock.mode.autoHide'], ['always', 'settings.edgeDock.mode.always']].map(([value, labelKey]) => ({
+          label: t(labelKey),
+          type: 'radio',
+          checked: mode === value,
+          click: () => setDock({ edgeDockMode: value })
+        })),
+        { type: 'separator' },
+        ...[['left', 'settings.edgeDockSide.left'], ['right', 'settings.edgeDockSide.right']].map(([value, labelKey]) => ({
+          label: t(labelKey),
+          type: 'radio',
+          checked: side === value,
+          click: () => setDock({ edgeDockSide: value })
+        }))
+      ]
     };
   })() : null;
   return [
@@ -352,10 +386,28 @@ function buildTrayMenuTemplate(options = {}) {
         click: () => callback('onSetWindowPresentation')(value)
       }))
     },
+    ...(edgeDockItem ? [edgeDockItem] : []),
     { type: 'separator' },
     { label: t('trayMenu.version', { version: state.appVersion || '' }), enabled: false },
     { label: t('trayMenu.settings'), click: callback('onOpenSettings') },
-    { label: t('trayMenu.quit'), click: callback('onQuit') }
+    {
+      label: t('trayMenu.quit'),
+      // macOS draws a menu item's shortcut from `accelerator` as that item's key
+      // equivalent, which is how the platform convention of Cmd+Q beside Quit is
+      // shown. Electron's default application menu already binds Cmd+Q to its
+      // quit role and this app never replaces it, so this documents the binding
+      // that is actually live rather than inventing one.
+      //
+      // macOS-only as a scope decision, not a safety one. Menu accelerators are
+      // local shortcuts, active only while the app is focused, so adding one on
+      // Windows or Linux would not take the key away from other applications --
+      // `globalShortcut` is the API that does that, and this does not use it.
+      // There is simply less to echo elsewhere: Windows declares no default quit
+      // accelerator, and Linux already shows Ctrl+Q through its own application
+      // menu.
+      ...(platform === 'darwin' ? { accelerator: 'Command+Q' } : {}),
+      click: callback('onQuit')
+    }
   ];
 }
 
@@ -379,6 +431,7 @@ function createTray({
   onRefresh,
   onSetTrayContent,
   onSetWindowPresentation,
+  onSetEdgeDock,
   onSwitchCodexAccount,
   onToggle,
   platform = process.platform,
@@ -391,6 +444,7 @@ function createTray({
   const menuState = () => (typeof getMenuState === 'function' ? getMenuState() : {});
   const buildMenu = (state = menuState()) => Menu.buildFromTemplate(buildTrayMenuTemplate({
     state,
+    platform,
     onOpenSettings,
     onOpenView,
     onQuit,
@@ -403,6 +457,13 @@ function createTray({
         return typeof onSetWindowPresentation === 'function'
           ? onSetWindowPresentation(value)
           : undefined;
+      } finally {
+        refreshContextMenu();
+      }
+    },
+    onSetEdgeDock: (patch) => {
+      try {
+        return typeof onSetEdgeDock === 'function' ? onSetEdgeDock(patch) : undefined;
       } finally {
         refreshContextMenu();
       }

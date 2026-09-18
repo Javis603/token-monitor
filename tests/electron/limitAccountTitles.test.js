@@ -156,10 +156,11 @@ test('title resolution matches between the limits panel and Home', () => {
   assert.match(app, /limitAccountTitle\(id, provider, index, providerEntries\)/);
   // The tray renders account text outside the title resolver, so it reads the
   // same setting rather than its own.
-  assert.match(
-    balancedBlock(app, 'function renderCustomTrayLayout('),
-    /item\.metric === 'account'\s*&& limitAccountEmailsMasked\(\)/
-  );
+  const customTrayLayout = balancedBlock(app, 'function renderCustomTrayLayout(');
+  assert.match(customTrayLayout, /item\.metric === 'account'\s*&& limitAccountEmailsMasked\(\)/);
+  assert.match(customTrayLayout, /state\.codexActiveAccount\?\.accountKey/);
+  assert.match(customTrayLayout, /\[selectedCodexKey, detectedCodexKey\]\.find/);
+  assert.match(customTrayLayout, /activeAccountKeys: activeCodexKey \? \{ codex: activeCodexKey \} : \{\}/);
 
   // Named-API providers keep their profile name on both surfaces.
   assert.equal(

@@ -44,7 +44,7 @@ test('every Electron collector mode yields daily-history writes to an external a
 });
 
 test('clearing retained session usage also clears retained daily history', () => {
-  assert.match(main, /clearSessionUsageArchive\(\);\s*clearDailyHistoryArchive\(\);/);
+  assert.match(main, /sessionUsageArchiveStore\.clear\(\);\s*clearDailyHistoryArchive\(\);/);
 });
 
 test('the headless agent retains daily history without mutating storage in dry-run mode', () => {

@@ -6,6 +6,7 @@
   if (root) root.TokenMonitorCustomPricingForm = api;
 })(typeof window !== 'undefined' ? window : null, function createCustomPricingFormApi() {
   function inUseModelIds(stats) {
+    if (Array.isArray(stats?.modelAliasSourceIds)) return stats.modelAliasSourceIds.slice();
     const periods = (stats && stats.periods) || {};
     const ids = new Set();
     for (const key of ['today', 'month', 'allTime']) {

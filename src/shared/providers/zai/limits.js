@@ -122,9 +122,18 @@ function zaiDashboardUrl(region = 'global') {
   return ZAI_REGIONS[zaiRegion({ zaiApiRegion: region })].dashboardUrl;
 }
 
+// Mirrors ZCode's pickCurrentSubscriptionFromList: the entry in the current
+// period wins, then any VALID one, then the first row — so a historical or
+// expired row listed first cannot name the account's plan.
 function firstSubscription(subscriptions) {
-  const rows = Array.isArray(subscriptions?.data) ? subscriptions.data : [];
-  return rows.find((row) => row && typeof row === 'object') || null;
+  const rows = Array.isArray(subscriptions?.data)
+    ? subscriptions.data.filter((row) => row && typeof row === 'object')
+    : [];
+  if (rows.length === 0) return null;
+  return rows.find((row) => row.inCurrentPeriod === true && row.status === 'VALID')
+    ?? rows.find((row) => row.inCurrentPeriod === true)
+    ?? rows.find((row) => row.status === 'VALID')
+    ?? rows[0];
 }
 
 function firstTextField(source, fields, { display = false } = {}) {
@@ -254,6 +263,24 @@ function parseZaiUsage(quotaBody, subscriptionBody = null) {
   return { plan, windows };
 }
 
+// ZCode's gateways answer HTTP 200 with a business code in the body; an
+// expired or revoked credential arrives as 401 "token expired or incorrect",
+// which ZCode classifies through isSuccessfulBusinessEnvelope as an auth
+// failure. Anything else in the body stays on the existing contract — a key
+// without a subscription answers code 500 and is a state, not a transport
+// failure, so a fulfilled finance report still keeps the row usable. Shared by
+// every ZCode-facing request so the classification cannot drift between them.
+async function readZaiBody(response, url) {
+  const body = await response.json();
+  const code = body?.code;
+  if (code === 401 || code === 403) {
+    const error = new Error(`${url} answered code ${code}`);
+    error.status = 'unauthorized';
+    throw error;
+  }
+  return body;
+}
+
 async function fetchJson(url, key, deps = {}) {
   const deadlineMs = Number(deps.zaiFetchTimeoutMs || deps.fetchTimeoutMs || ZAI_FETCH_TIMEOUT_MS);
   return runWithProbeDeadline(async ({ signal }) => {
@@ -271,7 +298,7 @@ async function fetchJson(url, key, deps = {}) {
         : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
       throw error;
     }
-    return response.json();
+    return readZaiBody(response, url);
   }, { signal: deps.signal, deadlineMs });
 }
 
@@ -369,7 +396,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
           : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
         throw error;
       }
-      return response.json();
+      return readZaiBody(response, zcodeStartPlanBalanceUrl());
     }, { signal: deps.signal, deadlineMs: Number(deps.zaiFetchTimeoutMs || deps.fetchTimeoutMs || ZAI_FETCH_TIMEOUT_MS) });
     const usage = parseZcodeStartPlanBalances(payload);
     // Empty balances with an active plan are a legal mid-state (a grant not
@@ -391,6 +418,9 @@ async function fetchZaiLimits(options = {}, deps = {}) {
     });
     // Mirror-key quota on the console-key endpoint; classified errors (429,
     // auth) propagate, empty results keep the lane attempted, not unconfigured.
+    // `entitled` now means discovery found a usable auto credential — since
+    // 3.12.3 stopped writing the entitlement cache, the mirror key's presence
+    // is the only local signal, and the query itself answers entitlement.
     if (discovery.kind === 'coding-quota' && discovery.entitled) {
       const mirrorKey = discovery.credential?.token;
       if (mirrorKey) {
@@ -425,7 +455,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       }
       return emptyLane(true);
     }
-    if (discovery.kind !== 'start-billing' || !discovery.entitled || !discovery.credential) {
+    if (discovery.kind !== 'start-billing' || !discovery.credential) {
       return emptyLane();
     }
     return fetchZcodeBilling(discovery.credential.token);
@@ -643,10 +673,9 @@ function zcodePlanBucketWindow(balance, periodByEntitlement = new Map()) {
     else if (used !== null) usedPercent = clampPercent((used / total) * 100);
   }
   if (usedPercent === null) usedPercent = clampPercent(balance?.percentage);
-  const period = periodByEntitlement.get(JSON.stringify([balance?.plan_id || '', balance?.entitlement_id || '']))
-    || String(balance?.period || '');
+  const period = zcodePeriodFor(periodByEntitlement, balance) || String(balance?.period || '');
   const label = String(balance?.show_name || '').trim() || 'Start Plan';
-  const resetsAt = toIso(balance?.expires_at ?? balance?.period_end);
+  const resetsAt = toIso(zaiBillingTimestamp(balance?.expires_at) ?? zaiBillingTimestamp(balance?.period_end));
   const window = {
     kind: period === 'daily' ? 'daily' : 'billing',
     label,
@@ -666,15 +695,45 @@ function zcodePlanBucketWindow(balance, periodByEntitlement = new Map()) {
   return window;
 }
 
+// The billing gateway's timestamps are Unix seconds, and ZCode's own
+// parseUnixSeconds accepts the string form as readily as a number while
+// treating a non-positive value as absent — a bare 0 must not render as the
+// 1970 epoch. Anything that is not an all-digit string (an ISO string, say)
+// passes through to the shared parser unchanged.
+function zaiBillingTimestamp(value) {
+  const numeric = typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value.trim()) : value;
+  if (typeof numeric === 'number') return numeric > 0 ? numeric : null;
+  return value;
+}
+
+// ZCode matches a balance to its plan through user_plan_id when both sides
+// carry one, falling back to plan_id (normalizeZaiStartPlanBalanceLimits), so
+// both identities are indexed and the subscription-scoped one is tried first.
+function zcodePeriodFor(periodByEntitlement, balance) {
+  const entitlementId = String(balance?.entitlement_id || '').trim();
+  if (!entitlementId) return '';
+  for (const planKey of [balance?.user_plan_id, balance?.plan_id]) {
+    const key = String(planKey || '').trim();
+    if (!key) continue;
+    const period = periodByEntitlement.get(JSON.stringify([key, entitlementId]));
+    if (period) return period;
+  }
+  return '';
+}
+
 function zcodePeriodByEntitlement(payload) {
   const periodByEntitlement = new Map();
   const plans = Array.isArray(payload?.data?.plans) ? payload.data.plans : [];
   for (const plan of plans) {
     const entitlements = Array.isArray(plan?.entitlements) ? plan.entitlements : [];
+    const planKeys = [plan?.user_plan_id, plan?.plan_id]
+      .map((key) => String(key || '').trim())
+      .filter(Boolean);
     for (const entitlement of entitlements) {
       const id = String(entitlement?.entitlement_id || '').trim();
       const period = String(entitlement?.period || '').trim();
-      if (id && period) periodByEntitlement.set(JSON.stringify([plan?.plan_id || '', id]), period);
+      if (!id || !period) continue;
+      for (const planKey of planKeys) periodByEntitlement.set(JSON.stringify([planKey, id]), period);
     }
   }
   return periodByEntitlement;
@@ -690,7 +749,7 @@ function parseZcodeStartPlanBalances(payload) {
     // The API model name is the aggregation grain, independent of the
     // Start/Weekend grant and of any present or future model version.
     const identity = String(balance.show_name || '').trim().toLowerCase();
-    const period = periodByEntitlement.get(JSON.stringify([balance.plan_id || '', balance.entitlement_id || '']))
+    const period = zcodePeriodFor(periodByEntitlement, balance)
       || String(balance.period || '');
     const complete = Number.isFinite(window.limit) && window.limit > 0 && Number.isFinite(window.remaining);
     const key = JSON.stringify([identity,
@@ -769,5 +828,8 @@ module.exports = {
   zaiDashboardUrl,
   parseZaiUsage,
   parseZcodeStartPlanBalances,
-  fetchZaiLimits
+  fetchZaiLimits,
+  // Shared with the team provider: the same BigModel gateways answer with the
+  // same HTTP 200 body envelopes, so the classification lives in one place.
+  readZaiBody
 };

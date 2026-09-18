@@ -151,6 +151,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   ollama: {
     validateCookie: (cookie) => ipcRenderer.invoke('ollama:validateCookie', cookie)
   },
+  factory: {
+    validateApiKey: (apiKey) => ipcRenderer.invoke('factory:validateApiKey', apiKey)
+  },
   opencode: {
     saveCookie: (cookie) => ipcRenderer.invoke('opencode:saveCookie', cookie),
     logout: () => ipcRenderer.invoke('opencode:logout'),
@@ -187,6 +190,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     setAccountEnabled: (id, enabled) => ipcRenderer.invoke('codex:setAccountEnabled', id, enabled),
     switchSystemAccount: (id) => ipcRenderer.invoke('codex:switchSystemAccount', id),
     refreshAccountLimits: (id) => ipcRenderer.invoke('codex:refreshAccountLimits', id),
+    onActiveAccount: (callback) => {
+      const handler = (_event, account) => callback(account);
+      ipcRenderer.on('codex:activeAccount', handler);
+      return () => ipcRenderer.removeListener('codex:activeAccount', handler);
+    },
     onLoginStatus: (callback) => {
       const handler = (_event, status) => callback(status);
       ipcRenderer.on('codex:loginStatus', handler);

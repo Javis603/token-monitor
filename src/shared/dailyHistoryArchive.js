@@ -398,6 +398,33 @@ function liveDayIsGreater(incoming, previous) {
   return dayCost(incoming) !== dayCost(previous);
 }
 
+// A Cursor liveDay keeps the cost of the moment it was captured, while the
+// graph reprices that day's same events on every scan. For Cursor usage both
+// hold, the graph's cost is the current one and the liveDay's only fills a
+// graph cost that is missing. That holds whichever day liveDayIsGreater keeps:
+// a liveDay chosen because another observation grew must not carry a stale
+// Cursor cost along, and a graph day kept because the aggregate cost happened
+// to tie must still take a price only the liveDay has. Every other client keeps
+// the bidirectional repricing liveDayIsGreater allows.
+function withReconciledCursorCosts(day, graphDay, liveDay) {
+  let changed = false;
+  const observations = Object.fromEntries(Object.entries(day.observations).map(([key, observation]) => {
+    const graphObservation = graphDay.observations[key];
+    const liveObservation = liveDay.observations[key];
+    if (normalizeTokscaleClientName(observation.client) !== 'cursor'
+      || !graphObservation
+      || !liveObservation
+      || num(graphObservation.tokens) !== num(liveObservation.tokens)) {
+      return [key, observation];
+    }
+    const cost = num(graphObservation.cost) > 0 ? graphObservation.cost : liveObservation.cost;
+    if (num(cost) === num(observation.cost)) return [key, observation];
+    changed = true;
+    return [key, { ...observation, cost }];
+  }));
+  return changed ? { ...day, observations } : day;
+}
+
 function mergeLiveDayMetadata(liveDay, previousDay) {
   if (!previousDay) return liveDay;
   const observations = Object.fromEntries(Object.entries(liveDay.observations).map(([key, observation]) => {
@@ -485,8 +512,11 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
   for (const [date, liveDay] of Object.entries(normalizedArchive.liveDays || {})) {
     if (hasTodayKey && date > todayKey) continue;
     const previous = currentDays.get(date);
-    if (!previous || liveDayIsGreater(liveDay, previous)) {
-      currentDays.set(date, mergeLiveDayMetadata(liveDay, previous));
+    if (!previous) {
+      currentDays.set(date, liveDay);
+    } else {
+      const selected = liveDayIsGreater(liveDay, previous) ? mergeLiveDayMetadata(liveDay, previous) : previous;
+      currentDays.set(date, withReconciledCursorCosts(selected, previous, liveDay));
     }
   }
 

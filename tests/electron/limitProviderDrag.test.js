@@ -108,12 +108,12 @@ function createDragHarness(config = {}) {
     list,
     captured,
     expandedNow: () => expanded,
-    press: (clientY) => controller.startRowDrag({
+    press: (clientY, target = { closest: () => null }) => controller.startRowDrag({
       button: 0,
       pointerId: 1,
       clientY,
       currentTarget: rows[0],
-      target: { closest: () => null }
+      target
     }, 'a'),
     // Only pointer events carry an id. A window blur has none, and that is
     // exactly what the abort guard's `pointerId != null` branch exists for, so
@@ -169,19 +169,24 @@ test('the reordering list dims its other rows and freezes the accordion', () => 
   assert.match(css, /\.limit-provider-list\.is-reordering \.accordion-animated-container \{ transition: none; \}/);
 });
 
-test('the whole-row lists no longer share the handle drag highlight', () => {
+test('shared-controller lists use the dragging state instead of the legacy handle state', () => {
   const css = readRendererFile('styles.css');
   assert.doesNotMatch(css, /\.settings-panel \.limit-provider-row\.is-dragging/);
   assert.doesNotMatch(css, /\.tool-preference-row\.is-dragging/);
-  // The three handle-based lists keep it.
-  assert.match(css, /\.view-preference-row\.is-dragging/);
-  assert.match(css, /\.home-module-preference-row\.is-dragging/);
-  assert.match(css, /\.home-limit-provider-row\.is-dragging/);
+  assert.doesNotMatch(css, /\.view-preference-row\.is-dragging/);
+  assert.doesNotMatch(css, /\.home-module-preference-row\.is-dragging/);
+  assert.doesNotMatch(css, /\.home-limit-provider-row\.is-dragging/);
+  assert.doesNotMatch(css, /\.status-provider-row\.is-dragging/);
+  assert.match(css, /\.view-preference-row\.dragging,/);
+  assert.match(css, /\.status-provider-row\.dragging \{/);
 });
 
-test('reduced motion drops the transition on both whole-row lists', () => {
+test('reduced motion drops the transition on every shared-controller list', () => {
   const css = readRendererFile('styles.css');
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.tray-composer-item \{ transition: none; \}\s*\.settings-panel \.limit-provider-row \{ transition: none; \}\s*\.tool-preference-row \{ transition: none; \}\s*\.tool-preference-main \.cursor-disclosure-icon \{ transition: none; \}\s*\}/);
+  const block = css.slice(css.lastIndexOf('@media (prefers-reduced-motion: reduce)'));
+  assert.match(block, /\.settings-panel \.limit-provider-row \{ transition: none; \}/);
+  assert.match(block, /\.tool-preference-row \{ transition: none; \}/);
+  assert.match(block, /\.view-preference-row,[\s\S]*?\.status-provider-row \{ transition: none; \}/);
 });
 
 // The grab handle was the only hint that the rows could be reordered, so
@@ -202,6 +207,7 @@ test('the limits section tells the user rows can be dragged', () => {
 test('the renderer loads the drag modules', () => {
   const html = readRendererFile('index.html');
   assert.match(html, /<script src="verticalDragSort\.js"><\/script>/);
+  assert.doesNotMatch(html, /preferenceDragSort\.js/);
   // The controller consumes the geometry module, so it must load after it.
   assert.ok(
     html.indexOf('<script src="verticalDragSort.js">') < html.indexOf('<script src="rowDragController.js">'),
@@ -225,11 +231,14 @@ test('limit provider rows drag from the row itself, not a handle', () => {
   assert.match(body, /cb\.addEventListener\('keydown', \(event\) => onPreferenceOrderKeydown\(event, 'provider', id\)\);/);
 });
 
-test('the other four preference lists keep the drag handle', () => {
+test('the four Main Screen lists keep the drag handle as an affordance', () => {
   const app = readRendererFile('app.js');
   assert.match(app, /function createPreferenceOrderHandle\(\{ kind, id, label, count \}\)/);
   const handleCalls = app.match(/createPreferenceOrderHandle\(\{/g) || [];
   assert.equal(handleCalls.length, 5, 'one definition plus four remaining call sites');
+  const handleBody = app.slice(app.indexOf('function createPreferenceOrderHandle('), app.indexOf('const VIEW_PREFERENCE_SUBGROUPS'));
+  assert.doesNotMatch(handleBody, /pointerdown/);
+  assert.match(handleBody, /aria-keyshortcuts/);
 });
 
 test('a stats repaint mid-drag is deferred instead of replacing the rows', () => {
@@ -289,6 +298,22 @@ test('a press on the row own controls never arms a drag', () => {
   // options panel uses. Unscoped, the guard matches every row and kills the
   // drag entirely.
   assert.match(body, /rowEl\.contains\(excluded\)/);
+});
+
+test('a handle-only list arms the shared controller only from its handle', () => {
+  const harness = createDragHarness({ dragStartSelector: '.preference-order-handle' });
+
+  harness.press(10);
+  harness.dispatch('pointermove', { clientY: 100 });
+  assert.equal(harness.rows[0].classes.has('dragging'), false, 'the row body should not arm a drag');
+
+  const handle = {};
+  harness.press(10, {
+    closest: (selector) => selector === '.preference-order-handle' ? handle : null
+  });
+  harness.dispatch('pointermove', { clientY: 100 });
+  assert.equal(harness.rows[0].classes.has('dragging'), true, 'the handle should retain the latest drag choreography');
+  harness.dispatch('pointerup', { clientY: 100 });
 });
 
 test('the provider main row is one accessible disclosure beside the checkbox', () => {

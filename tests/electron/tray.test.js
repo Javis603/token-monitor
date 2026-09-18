@@ -445,6 +445,29 @@ test('tray context menu complements the primary click with useful commands', () 
   ]);
 });
 
+test('tray context menu offers edge dock controls only where the dock is supported', () => {
+  const patches = [];
+  const unsupported = buildTrayMenuTemplate({ state: { trayContent: 'tokens', windowBehavior: 'floating' } });
+  assert.equal(unsupported.some((item) => item.label === 'Edge Dock'), false);
+
+  const template = buildTrayMenuTemplate({
+    state: { trayContent: 'tokens', windowBehavior: 'floating', edgeDockSupported: true, edgeDockEnabled: false, edgeDockMode: 'always', edgeDockSide: 'left' },
+    onSetEdgeDock: (patch) => patches.push(patch)
+  });
+  const dock = template.find((item) => item.label === 'Edge Dock');
+  assert.ok(dock);
+  assert.equal(template.indexOf(dock), template.findIndex((item) => item.label === 'Window Presentation') + 1);
+  const [show, , autoHide, always, , left, right] = dock.submenu;
+  assert.equal(show.checked, false);
+  assert.equal(always.checked, true);
+  assert.equal(autoHide.checked, false);
+  assert.equal(left.checked, true);
+  show.click();
+  autoHide.click();
+  right.click();
+  assert.deepEqual(patches, [{ edgeDockEnabled: true }, { edgeDockMode: 'autoHide' }, { edgeDockSide: 'right' }]);
+});
+
 test('tray context menu exposes refresh progress and current window mode', () => {
   const template = buildTrayMenuTemplate({
     state: { refreshing: true, trayContent: 'tokens', trayMode: false, windowBehavior: 'desktop' }
@@ -475,6 +498,26 @@ test('tray context menu uses the selected locale for every visible level', () =>
   ]);
   assert.equal(template[4].submenu[0].label, '托盤彈出視窗');
   assert.equal(template[4].submenu.at(-1).label, '固定於桌面');
+});
+
+test('tray context menu shows the macOS Quit shortcut on macOS only', () => {
+  const darwin = buildTrayMenuTemplate({
+    state: { appVersion: '0.58.0', trayContent: 'tokens', trayMode: true },
+    platform: 'darwin'
+  });
+  const quit = darwin.at(-1);
+  assert.equal(quit.label, 'Quit Token Monitor');
+  assert.equal(quit.accelerator, 'Command+Q');
+  // Scoped to macOS because that is where the shortcut is worth echoing, not
+  // because a menu accelerator elsewhere would be unsafe: menu accelerators are
+  // local shortcuts, so they cannot take a key from another application.
+  for (const platform of ['win32', 'linux']) {
+    const template = buildTrayMenuTemplate({
+      state: { appVersion: '0.58.0', trayContent: 'tokens', trayMode: true },
+      platform
+    });
+    assert.equal(template.at(-1).accelerator, undefined);
+  }
 });
 
 test('tray context menu disables unavailable views', () => {

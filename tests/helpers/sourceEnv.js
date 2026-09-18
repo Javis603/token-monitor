@@ -10,6 +10,13 @@
 // instead would drop the coverage they exist for, and is the tempting fix for
 // whoever hits this next.
 const SOURCE_ENV_KEYS = Object.freeze([
+  // Tokscale's effective home, not just its XDG roots: paths::home_dir() prefers
+  // an absolute native $HOME on Windows over the Win32 profile, and resolves
+  // its home-rooted sources through that result. A test that stubs os.homedir()
+  // is still exposed to a real $HOME on a Windows runner, so the variable has to
+  // be cleared like the rest of this list.
+  'HOME',
+  'USERPROFILE',
   'XDG_DATA_HOME',
   'COPILOT_OTEL_FILE_EXPORTER_PATH',
   'CODEX_HOME',

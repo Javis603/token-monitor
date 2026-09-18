@@ -36,7 +36,8 @@ function declaration(rule, property) {
 }
 
 function functionBody(source, name, nextName) {
-  const start = source.indexOf(`function ${name}(`);
+  const asyncStart = source.indexOf(`async function ${name}(`);
+  const start = asyncStart === -1 ? source.indexOf(`function ${name}(`) : asyncStart;
   assert.notEqual(start, -1, `${name} function should exist`);
   const end = source.indexOf(`function ${nextName}(`, start);
   assert.notEqual(end, -1, `${nextName} function should follow ${name}`);
@@ -532,21 +533,10 @@ test('Codex account email masking is an opt-in display-only setting', () => {
 
 test('Codex system account switching is exposed from limits account rows', () => {
   const app = readRendererFile('app.js');
+  const accountControl = fs.readFileSync(path.join(rendererDir, '..', 'providers', 'codex', 'accountControl.js'), 'utf8');
   const renderHead = functionBody(app, 'renderLimitProviderHead', 'renderProviderWindows');
-  assert.match(renderHead, /if \(activeCodexAccount\)/);
   assert.doesNotMatch(renderHead, /showActiveAccount/);
-  assert.match(renderHead, /activeZone\.className = 'limit-account-active-zone'/);
-  assert.match(renderHead, /activePopover\.className = 'limit-account-active-popover'/);
-  assert.match(renderHead, /const activeHint = t\('limits\.codex\.activeAccountHint'\)/);
-  assert.match(renderHead, /activePopover\.textContent = activeHint/);
-  assert.match(renderHead, /activeZone\.addEventListener\('pointerenter', markCodexActiveHintOpened\)/);
-  assert.match(renderHead, /activeZone\.addEventListener\('focusin', markCodexActiveHintOpened\)/);
-  assert.match(renderHead, /activeZone\.addEventListener\('pointerleave', releaseCodexActiveHint\)/);
-  assert.match(renderHead, /activeZone\.addEventListener\('focusout', releaseCodexActiveHint\)/);
-  assert.match(renderHead, /activeZone\.matches\(':hover, :focus-within'\)/);
-  assert.match(renderHead, /activeZone\.append\(title, badge, activePopover\)/);
-  assert.match(renderHead, /badge\.textContent = '\\u2713';/);
-  assert.doesNotMatch(renderHead, /badge\.textContent = 'Active'/);
+  assert.match(renderHead, /codexAccountControl\.render\(\{/);
   // The ✓ tracks state.codexActiveAccount only (the account THIS device's Codex
   // is signed into). It must NOT re-derive "live" from the row being rendered:
   // in sync mode that row can be a remote device's record for a different account.
@@ -554,25 +544,28 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.doesNotMatch(renderHead, /!state\.codexActiveAccount && liveCodexAccount/);
   assert.doesNotMatch(renderHead, /const liveCodexAccount =/);
   assert.match(renderHead, /codexSwitchAccountForProvider\(provider\)/);
-  assert.match(renderHead, /switchZone\.className = 'limit-account-switch-zone'/);
-  assert.match(renderHead, /switchPopover\.className = 'limit-account-switch-popover'/);
-  assert.match(renderHead, /switchButton\.className = 'limit-account-switch-button'/);
-  assert.match(renderHead, /switchZone\.classList\.toggle\('has-opened', state\.codexSwitchPopoverHasOpened\)/);
-  assert.match(renderHead, /state\.codexSwitchPopoverHasOpened = true;/);
-  assert.match(renderHead, /state\.codexSwitchPopoverActive = true;/);
-  assert.match(renderHead, /switchZone\.addEventListener\('pointerenter', markCodexSwitchPopoverOpened\)/);
-  assert.match(renderHead, /switchZone\.addEventListener\('focusin', markCodexSwitchPopoverOpened\)/);
-  assert.match(renderHead, /switchZone\.addEventListener\('pointerleave', releaseCodexSwitchPopover\)/);
-  assert.match(renderHead, /switchZone\.addEventListener\('focusout', releaseCodexSwitchPopover\)/);
-  assert.match(renderHead, /switchZone\.matches\(':hover, :focus-within'\)/);
-  assert.match(renderHead, /state\.codexSwitchPopoverActive = false;/);
-  assert.match(renderHead, /switchZone\.append\(title, switchPopover\)/);
-  assert.match(renderHead, /window\.tokenMonitor\.codex\.switchSystemAccount\(switchAccount\.id\)/);
-  assert.match(renderHead, /state\.codexActiveAccount = result\.activeAccount/);
-  assert.match(renderHead, /window\.tokenMonitor\.codex\.refreshAccountLimits\(switchAccount\.id\)/);
-  assert.match(renderHead, /applyCodexAccountLimitsRefresh\(refreshResult\.providers \|\| \[\]\)/);
+  assert.doesNotMatch(renderHead, /limit-account-switch-zone|limit-account-active-zone/);
   assert.doesNotMatch(renderHead, /refreshStats\(\{ force: true \}/);
   assert.doesNotMatch(renderHead, /titleButton\.className = 'limit-account-title-button'/);
+
+  const control = functionBodyBeforeMarker(
+    accountControl,
+    'createCodexAccountControl',
+    '\n  return { createCodexAccountControl };'
+  );
+  assert.match(control, /zone\.className = 'limit-account-active-zone'/);
+  assert.match(control, /popover\.className = 'limit-account-active-popover'/);
+  assert.match(control, /badge\.textContent = '\\u2713';/);
+  assert.match(control, /zone\.className = 'limit-account-switch-zone'/);
+  assert.match(control, /popover\.className = 'limit-account-switch-popover'/);
+  assert.match(control, /button\.className = 'limit-account-switch-button'/);
+  assert.match(control, /zone\.addEventListener\('pointerenter', markOpened\)/);
+  assert.match(control, /zone\.addEventListener\('focusin', markOpened\)/);
+  assert.match(control, /zone\.addEventListener\('pointerleave', release\)/);
+  assert.match(control, /zone\.addEventListener\('focusout', release\)/);
+  assert.match(control, /controlState\.switchingAccountId/);
+  assert.match(control, /controlState\.errorAccountId/);
+  assert.match(control, /controlState\.renderPending/);
 
   const group = functionBody(app, 'renderCodexAccountGroup', 'renderOpenCodeAccountGroup');
   assert.match(group, /allowSystemSwitch: true/);
@@ -621,16 +614,17 @@ test('Codex system account switching is exposed from limits account rows', () =>
 
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
   assert.match(preload, /switchSystemAccount: \(id\) => ipcRenderer\.invoke\('codex:switchSystemAccount', id\)/);
+  assert.match(preload, /ipcRenderer\.on\('codex:activeAccount', handler\)/);
   assert.match(preload, /refreshAccountLimits: \(id\) => ipcRenderer\.invoke\('codex:refreshAccountLimits', id\)/);
 
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   assert.match(main, /ipcMain\.handle\('codex:switchSystemAccount'/);
-  assert.match(main, /switchCodexSystemAccount\(id\)/);
+  assert.match(main, /ipcMain\.handle\('codex:switchSystemAccount',[\s\S]*?switchCodexSystemAccount\(id\)/);
   assert.match(main, /ipcMain\.handle\('codex:refreshAccountLimits'/);
   assert.match(main, /refreshCodexManagedAccountLimits\(id\)/);
-  assert.match(app, /codexSwitchPopoverHasOpened: false/);
-  assert.match(app, /codexSwitchPopoverActive: false/);
-  assert.match(app, /codexSwitchPopoverRenderPending: false/);
+  assert.match(accountControl, /createCodexAccountControl/);
+  assert.match(readRendererFile('index.html'), /<script src="\.\.\/providers\/codex\/accountControl\.js"><\/script>/);
+  assert.match(readRendererFile(path.join('edgeDock', 'index.html')), /<script src="\.\.\/\.\.\/providers\/codex\/accountControl\.js"><\/script>/);
   assert.match(app, /const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;/);
   assert.match(app, /codexPendingActiveAccount: null/);
   assert.match(app, /codexPendingActiveAccountUntil: 0/);
@@ -644,25 +638,21 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(pendingExpiryBody, /setTimeout\(\(\) =>/);
   assert.match(pendingExpiryBody, /applyCodexActiveAccountFromStats\(\);/);
   assert.match(pendingExpiryBody, /renderLimits\(\);/);
+  assert.match(pendingExpiryBody, /maybeUpdateBarsIcon\(\);/);
   const pendingSetBody = functionBody(app, 'setCodexPendingActiveAccount', 'applyCodexActiveAccountFromStats');
   assert.match(pendingSetBody, /state\.codexPendingActiveAccountUntil = Date\.now\(\) \+ CODEX_PENDING_ACTIVE_GRACE_MS;/);
   assert.match(pendingSetBody, /scheduleCodexPendingActiveAccountExpiry\(\);/);
-  const activeStatsBody = functionBody(app, 'applyCodexActiveAccountFromStats', 'applyCodexAccountLimitsRefresh');
+  const activeStatsBody = functionBody(app, 'applyCodexActiveAccountFromStats', 'renderLimitProviderHead');
   assert.match(activeStatsBody, /Date\.now\(\) < state\.codexPendingActiveAccountUntil/);
   assert.match(activeStatsBody, /state\.codexActiveAccount = pendingAccount;/);
   assert.match(activeStatsBody, /clearCodexPendingActiveAccount\(\);/);
   assert.match(activeStatsBody, /state\.codexActiveAccount = activeAccount;/);
-  const limitsRefreshBody = functionBody(app, 'applyCodexAccountLimitsRefresh', 'renderLimitProviderHead');
-  assert.match(limitsRefreshBody, /applyCodexActiveAccountFromStats\(\);/);
-  assert.match(renderHead, /setCodexPendingActiveAccount\(result\.activeAccount \|\| null\);/);
-  const switchHold = functionBody(app, 'codexSwitchPopoverShouldHoldRender', 'flushPendingCodexSwitchPopoverRender');
-  const switchFlush = functionBody(app, 'flushPendingCodexSwitchPopoverRender', 'codexResetCreditsNode');
-  assert.match(switchHold, /state\.codexSwitchPopoverActive/);
-  assert.match(switchHold, /\.limit-account-switch-zone:hover, \.limit-account-switch-zone:focus-within, \.limit-account-active-zone:hover, \.limit-account-active-zone:focus-within/);
-  assert.match(switchFlush, /state\.codexSwitchPopoverRenderPending/);
-  assert.match(switchFlush, /state\.breakdown !== 'limits'/);
-  assert.match(switchFlush, /renderLimits\(\)/);
-  const switchBody = functionBody(main, 'switchCodexSystemAccount', 'refreshCodexManagedAccountLimits');
+  assert.match(app, /applyCodexOptimisticActiveAccount\(result\.activeAccount\);/);
+  assert.match(app, /window\.tokenMonitor\.codex\.onActiveAccount\?\.\(\(account\) => \{/);
+  assert.doesNotMatch(app, /window\.tokenMonitor\.codex\.refreshAccountLimits\(accountId\)\.then/);
+  assert.match(control, /\.limit-account-switch-zone:hover/);
+  assert.match(control, /\.limit-account-active-zone:focus-within/);
+  const switchBody = functionBody(main, 'performCodexSystemAccountSwitch', 'switchCodexSystemAccount');
   assert.match(switchBody, /const previousAccounts = normalizeCodexManagedAccounts\(settings\.codexManagedAccounts\)/);
   assert.match(switchBody, /liveAuthSnapshot = await snapshotCodexAuthFile\(liveAuthPath\)/);
   assert.match(switchBody, /preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount/);
@@ -694,6 +684,17 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(refreshBody, /result\?\.snapshot \|\| deviceRuntimeHandle\.getSnapshot\(\)\?\.limits/);
   assert.doesNotMatch(refreshBody, /codexManagedAccountsForCollector\(\)/);
   assert.doesNotMatch(refreshBody, /collectLimitsOnce/);
+  const switchGuard = functionBody(main, 'switchCodexSystemAccount', 'switchCodexAccountFromEdgeDock');
+  assert.match(switchGuard, /if \(codexSystemSwitchInFlight\)/);
+  assert.match(switchGuard, /await performCodexSystemAccountSwitch\(id\)/);
+  assert.match(switchGuard, /refreshCodexManagedAccountLimits\(id, 'system-account-switch'\)/);
+  assert.match(switchGuard, /pushCodexActiveAccountToRenderer\(result\.activeAccount\);/);
+  assert.match(switchGuard, /codexPresentationPendingAccountId = codexPresentationActiveAccountId;/);
+  assert.match(switchGuard, /finally \{/);
+  const dockSwitch = functionBody(main, 'switchCodexAccountFromEdgeDock', 'refreshCodexManagedAccountLimits');
+  assert.match(dockSwitch, /await switchCodexSystemAccount\(accountId\)/);
+  assert.doesNotMatch(dockSwitch, /refreshCodexManagedAccountLimits/);
+  assert.doesNotMatch(dockSwitch, /await refreshCodexManagedAccountLimits/);
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   assert.match(renderLimits, /const rowOptions = id === 'codex'\s*\? \{ accountTitle: true, allowSystemSwitch: true \}/s);
   assert.match(renderLimits, /renderLimitProviderRow\(id, label, provider, thirdPartyVisual\?\.color \|\| color, rowOptions\)/);
@@ -701,10 +702,9 @@ test('Codex system account switching is exposed from limits account rows', () =>
     renderLimits,
     /renderLimitProviderRow\(id, label, provider, color, id === 'codex' \? \{[\s\S]*?showActiveBadge: true/
   );
-  assert.match(renderLimits, /const holdCodexSwitchPopoverRender = codexSwitchPopoverShouldHoldRender\(\);/);
+  assert.match(renderLimits, /const holdCodexSwitchPopoverRender = codexAccountControl\.deferRender\(els\.limitsPanel\);/);
   assert.match(renderLimits, /holdLimitDetailTooltipRender \|\| holdCodexSwitchPopoverRender/);
-  assert.match(renderLimits, /if \(holdCodexSwitchPopoverRender\) state\.codexSwitchPopoverRenderPending = true;/);
-  assert.match(renderLimits, /state\.codexSwitchPopoverRenderPending = false;/);
+  assert.doesNotMatch(renderLimits, /codexSwitchPopoverRenderPending/);
 });
 
 test('DeepSeek account panel provides a first-class API key entry', () => {
@@ -735,7 +735,7 @@ test('API key account entries share styling and Copilot uses the folded token en
   const css = readRendererFile('styles.css');
 
   const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
-  assert.match(animationBody, /'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#qoderManualPanel',\n\s*'#traeManualPanel',\n\s*'#zedManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#kimiManualPanel'/);
+  assert.match(animationBody, /'#factoryManualPanel',\n\s*'#kimiManualPanel',\n\s*'#zedManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#qoderManualPanel',\n\s*'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#ollamaManualPanel',\n\s*'#traeManualPanel',\n\s*'#alibabaManualPanel'/);
   assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
 
@@ -743,14 +743,26 @@ test('API key account entries share styling and Copilot uses the folded token en
   // one blanket rule, so what is worth asserting here is that every provider has
   // such a line and that none of them ship visible.
   const html = readRendererFile('index.html');
-  for (const provider of ['deepseek', 'minimax', 'zai', 'zaiteam', 'volcengine', 'qoder', 'trae', 'zed', 'commandcode', 'ollama', 'kimi', 'copilot']) {
+  for (const provider of ['deepseek', 'minimax', 'factory', 'zai', 'zaiteam', 'volcengine', 'qoder', 'trae', 'zed', 'commandcode', 'ollama', 'kimi', 'copilot']) {
     assert.match(html, new RegExp(`id="${provider}ErrorMessage"[^>]*class="[^"]*hidden"`), provider);
   }
-  assert.match(css, /#deepseekManualPanel,\n#minimaxManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#volcengineManualPanel,\n#qoderManualPanel,\n#traeManualPanel,\n#zedManualPanel,\n#commandcodeManualPanel,\n#ollamaManualPanel,\n#mimoManualPanel,\n#kimiManualPanel,\n#copilotManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#zedManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner,\n#alibabaManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#factoryManualPanel,\n#kimiManualPanel,\n#copilotManualPanel,\n#zedManualPanel,\n#commandcodeManualPanel,\n#mimoManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#qoderManualPanel,\n#deepseekManualPanel,\n#minimaxManualPanel,\n#volcengineManualPanel,\n#ollamaManualPanel,\n#traeManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#factoryManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner,\n#zedManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#alibabaManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#zaiApiRegionInput,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#qoderManualPanel select,\n#traeManualPanel input,\n#zedManualPanel textarea,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#alibabaManualPanel textarea,\n#alibabaManualPanel select,\n#copilotManualDetails input\s*\{[\s\S]*?font-size: 12px;/);
-  assert.match(css, /#deepseekManualPanel input,\n#minimaxManualPanel input,\n#zaiManualPanel input,\n#zaiteamManualPanel input,\n#volcengineManualPanel input,\n#qoderManualPanel textarea,\n#traeManualPanel input,\n#zedManualPanel textarea,\n#commandcodeManualPanel textarea,\n#ollamaManualPanel textarea,\n#mimoManualPanel input,\n#mimoManualPanel textarea,\n#kimiManualPanel input,\n#kimiManualPanel textarea,\n#copilotManualDetails input\s*\{[\s\S]*?font-family: monospace;/);
+  {
+    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes("#factoryManualPanel input") && match[2].includes("font-size: 12px;"));
+    assert.ok(rule, 'shared credential input style should exist');
+    for (const selector of ["#factoryManualPanel input", "#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", "#zedManualPanel textarea", "#commandcodeManualPanel textarea", "#mimoManualPanel input", "#mimoManualPanel textarea", "#zaiManualPanel input", "#zaiApiRegionInput", "#zaiteamManualPanel input", "#qoderManualPanel textarea", "#qoderManualPanel select", "#deepseekManualPanel input", "#minimaxManualPanel input", "#volcengineManualPanel input", "#ollamaManualPanel textarea", "#traeManualPanel input", "#alibabaManualPanel textarea", "#alibabaManualPanel select"]) {
+      assert.ok(rule[1].split(',').map((value) => value.trim()).includes(selector), selector);
+    }
+  }
+  {
+    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes("#factoryManualPanel input") && match[2].includes("font-family: monospace;"));
+    assert.ok(rule, 'shared credential input style should exist');
+    for (const selector of ["#factoryManualPanel input", "#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", "#zedManualPanel textarea", "#commandcodeManualPanel textarea", "#mimoManualPanel input", "#mimoManualPanel textarea", "#zaiManualPanel input", "#zaiteamManualPanel input", "#qoderManualPanel textarea", "#deepseekManualPanel input", "#minimaxManualPanel input", "#volcengineManualPanel input", "#ollamaManualPanel textarea", "#traeManualPanel input"]) {
+      assert.ok(rule[1].split(',').map((value) => value.trim()).includes(selector), selector);
+    }
+  }
 
   assert.match(css, /\.thirdparty-field :is\(input, select\)\s*\{[\s\S]*?font-size: 12px;/);
 });
@@ -961,13 +973,12 @@ test('Command Code account panel saves a cookie, enables its provider, and opens
   assert.match(settingsForRenderer, /commandcodeCookieConfigured: Boolean\(currentCommandcodeCookie\(\)\)/);
 });
 
-test('Kimi account panel stores web access separately and opens the allowlisted Code console', () => {
+test('Kimi account panel makes the Code API primary and keeps Web access as a fallback', () => {
   const html = readRendererFile('index.html');
   assert.match(html, /data-i18n="settings\.kimi\.title">Kimi Account<\/span>/);
   assert.match(html, /data-i18n="settings\.kimi\.openBrowser">Open Kimi Code Console<\/button>/);
-  assert.match(html, /settings\.kimi\.step2[\s\S]*Application\/Storage[\s\S]*Cookies[\s\S]*www\.kimi\.com/);
-  assert.match(html, /settings\.kimi\.step3[\s\S]*Find kimi-auth and copy its Value/);
-  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off"[\s\S]*placeholder="kimi-auth=\.\.\."[\s\S]*?<button id="kimiWebAccessTokenSubmit"[\s\S]*?<details class="kimi-api-fallback">[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?<button id="kimiApiKeySubmit"[\s\S]*data-i18n="settings\.kimi\.saveApiKey">/);
+  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?data-i18n-aria-label="settings\.kimi\.apiKeyLabel"[\s\S]*?<button id="kimiApiKeySubmit"[\s\S]*?<details class="kimi-web-fallback">[\s\S]*?settings\.kimi\.step2[\s\S]*?Local Storage[\s\S]*?settings\.kimi\.step3[\s\S]*?access_token[\s\S]*?<textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off"[\s\S]*?data-i18n-aria-label="settings\.kimi\.webTokenLabel"[\s\S]*?placeholder="access_token=\.\.\."[\s\S]*?<button id="kimiWebAccessTokenSubmit"[\s\S]*data-i18n="settings\.kimi\.saveWebToken">/);
+  assert.doesNotMatch(html, /kimi-auth|kimi-api-fallback/);
 
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
@@ -1082,9 +1093,9 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   assert.match(setupBody, /saveSettings\(\{ claudeWebCookie: '' \}\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(claudePlatformUrl\(\)\)/);
   const statusBody = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
-  assert.match(statusBody, /const canClearConfiguredClaude = providerName === 'claude' && configured;/);
+  assert.match(statusBody, /const canClearConfiguredCredential = source === 'settings' && configured;/);
   assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked\)/);
-  assert.match(statusBody, /source !== 'settings' \|\| \(!linked && !canClearConfiguredClaude\)/);
+  assert.match(statusBody, /logoutBtn\.classList\.toggle\('hidden', !canClearConfiguredCredential\)/);
   const urlBody = functionBody(app, 'claudePlatformUrl', 'selectedQoderSite');
   assert.match(urlBody, /return 'https:\/\/claude\.ai\/settings\/usage';/);
 
@@ -1274,6 +1285,190 @@ test('Z.ai global and BigModel CN browser links are allowlisted', () => {
   const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
   assert.match(allowlist, /parsed\.hostname === 'z\.ai' \|\| parsed\.hostname === 'www\.z\.ai'/);
   assert.match(allowlist, /parsed\.hostname === 'bigmodel\.cn' \|\| parsed\.hostname === 'www\.bigmodel\.cn'/);
+});
+
+test('Factory account panel validates an API key before saving and opens the allowlisted API keys page', () => {
+  const html = readRendererFile('index.html');
+  assert.match(html, /<div id="factoryAccountGroup"[\s\S]*?<input id="factoryApiKeyInput" type="password"[\s\S]*?<button id="factoryApiKeySubmit"/);
+  assert.match(html, /automatically detects FACTORY_API_KEY[\s\S]*To use a different Factory API key instead[\s\S]*used only to query Factory plan quotas and Extra Usage balance/);
+
+  const app = readRendererFile('app.js');
+  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
+  assert.match(setupBody, /const validation = await window\.tokenMonitor\.factory\.validateApiKey\(input\.value\);[\s\S]*?if \(!validation\?\.ok\) \{[\s\S]*?factoryApiKeyValidationError\(validation\);[\s\S]*?return;[\s\S]*?await saveSettings\(\{ factoryApiKey: input\.value \}\)/);
+  assert.match(setupBody, /submit\.disabled = true;[\s\S]*?submit\.textContent = t\('settings\.common\.checking'\);[\s\S]*?finally \{[\s\S]*?submit\.disabled = false;[\s\S]*?submit\.textContent = t\('settings\.factory\.saveApiKey'\)/);
+  assert.match(setupBody, /saveSettings\(\{ factoryApiKey: '' \}\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(factoryPlatformUrl\(\)\)/);
+  const urlBody = functionBody(app, 'factoryPlatformUrl', 'zaiteamPlatformUrl');
+  assert.match(urlBody, /return 'https:\/\/app\.factory\.ai\/settings\/api-keys';/);
+
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
+  assert.match(preload, /validateApiKey: \(apiKey\) => ipcRenderer\.invoke\('factory:validateApiKey', apiKey\)/);
+  assert.match(main, /ipcMain\.handle\('factory:validateApiKey', \(_event, raw\) => validateFactoryApiKey\(raw\)\)/);
+  const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
+  assert.match(allowlist, /parsed\.hostname === 'app\.factory\.ai'[\s\S]*parsed\.pathname\.startsWith\('\/settings\/api-keys'\)/);
+  const normalizeKey = functionBody(main, 'normalizeFactoryApiKey', 'currentFactoryApiKey');
+  assert.doesNotMatch(normalizeKey, /factoryEnvApiKey/);
+  assert.equal(runMainFunction(
+    main,
+    'currentFactoryApiKey',
+    'normalizeSecretSetting',
+    'currentFactoryApiKey()',
+    {
+      settings: { factoryApiKey: '' },
+      factoryEnvApiKey: () => 'auto-detected-key',
+      process: { env: {} }
+    }
+  ), 'auto-detected-key');
+});
+
+test('Factory API key validation accepts only a successful provider probe', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const valid = await runMainFunction(
+    main,
+    'validateFactoryApiKey',
+    'normalizeSecretSetting',
+    `validateFactoryApiKey(' fk-live ', {
+      normalizeApiKey: value => value.trim(),
+      providerDeps: { transport: 'electron' },
+      fetchLimits: async (options, deps) => ({
+        status: options.factoryApiKey === 'fk-live' && deps.transport === 'electron' ? 'ok' : 'unavailable'
+      })
+    })`
+  );
+  assert.equal(valid.ok, true);
+  assert.equal(valid.status, 'ok');
+
+  const invalid = await runMainFunction(
+    main,
+    'validateFactoryApiKey',
+    'normalizeSecretSetting',
+    `validateFactoryApiKey('1', {
+      normalizeApiKey: value => value.trim(),
+      providerDeps: {},
+      fetchLimits: async () => {
+        const error = new Error('rejected');
+        error.status = 'unauthorized';
+        throw error;
+      }
+    })`
+  );
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.status, 'unauthorized');
+});
+
+test('Factory API key validation errors distinguish invalid, rate-limited, and unavailable checks', () => {
+  const app = readRendererFile('app.js');
+  const messages = runRendererFunctions(
+    app,
+    ['factoryApiKeyValidationError'],
+    `[
+      factoryApiKeyValidationError({ status: 'unauthorized' }),
+      factoryApiKeyValidationError({ status: 'sourceRateLimited' }),
+      factoryApiKeyValidationError({ status: 'unavailable' })
+    ]`,
+    { t: key => key }
+  );
+  assert.deepEqual(Array.from(messages), [
+    'settings.factory.validationInvalid',
+    'settings.factory.validationRateLimited',
+    'settings.factory.validationUnavailable'
+  ]);
+
+  const i18n = readRendererFile('i18n.js');
+  for (const key of [
+    'settings.factory.validationInvalid',
+    'settings.factory.validationRateLimited',
+    'settings.factory.validationUnavailable'
+  ]) {
+    assert.equal(i18n.match(new RegExp(`'${key.replaceAll('.', '\\.')}':`, 'g'))?.length, 5);
+  }
+});
+
+test('Factory identifies environment and Droid .env credentials separately', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const settingsBody = functionBody(main, 'settingsForRenderer', 'systemDarkTrayUi');
+  assert.match(settingsBody, /resolveFactoryAutomaticApiKey\(\{\}, \{ env: process\.env \}\)/);
+  assert.match(settingsBody, /settings\?\.factoryApiKey \? 'settings' : factoryAutomaticCredential\.source/);
+
+  const app = readRendererFile('app.js');
+  const labels = runRendererFunctions(
+    app,
+    ['apiKeyAccountStatusText'],
+    "[apiKeyAccountStatusText('factory', { status: 'ok' }, true, 'env'), apiKeyAccountStatusText('factory', { status: 'ok' }, true, 'droid-env')]",
+    {
+      limitProviderPresentationApi: { apiKeyAccountStatus: () => 'linked' },
+      t: key => key
+    }
+  );
+  assert.deepEqual(Array.from(labels), ['settings.factory.statusEnv', 'settings.factory.statusDroidEnv']);
+
+  const i18n = readRendererFile('i18n.js');
+  assert.equal((i18n.match(/'settings\.factory\.statusDroidEnv'/g) || []).length, 5);
+});
+
+test('Factory keeps a saved-key Clear action available after validation fails', () => {
+  const app = readRendererFile('app.js');
+  const elements = new Map();
+  for (const suffix of ['AccountStatus', 'OpenBrowser', 'LogoutButton', 'RefreshButton', 'ManualPanel', 'ErrorMessage']) {
+    const classes = new Set(['hidden']);
+    elements.set(`factory${suffix}`, {
+      classList: {
+        add: (...names) => names.forEach(name => classes.add(name)),
+        remove: (...names) => names.forEach(name => classes.delete(name)),
+        toggle: (name, force) => {
+          if (force) classes.add(name);
+          else classes.delete(name);
+        },
+        contains: name => classes.has(name)
+      },
+      textContent: ''
+    });
+  }
+
+  const settings = {
+    factoryCredentialConfigured: true,
+    factoryCredentialSource: 'settings'
+  };
+  let status = 'unauthorized';
+  const render = () => runRendererFunctions(
+    app,
+    ['renderExternalProviderStatus'],
+    "renderExternalProviderStatus('factory')",
+    {
+      externalLimitAccountConfig: {
+        factory: {
+          configuredKey: 'factoryCredentialConfigured',
+          sourceKey: 'factoryCredentialSource',
+          pendingKey: 'factoryPendingCheckSince'
+        }
+      },
+      state: { settings, factoryPendingCheckSince: 0 },
+      document: { getElementById: id => elements.get(id) || null },
+      externalProviderForAccount: () => ({ provider: 'factory', status }),
+      externalProviderAccountLinked: () => false,
+      limitProviderEnabled: () => true,
+      setCursorStatusText: () => {},
+      apiKeyAccountStatusText: () => '',
+      t: key => key,
+      renderSettingsSummaries: () => {},
+      setExternalAccountExpanded: () => {},
+      renderVolcengineAgentOverrideState: () => {},
+      updateQoderUsagePageHint: () => {},
+      alibabaSavedVariant: () => ''
+    }
+  );
+
+  for (status of ['unauthorized', 'unavailable']) {
+    render();
+    assert.equal(elements.get('factoryLogoutButton').classList.contains('hidden'), false, `${status} saved key should remain clearable`);
+  }
+
+  for (const source of ['env', 'droid-env']) {
+    settings.factoryCredentialSource = source;
+    render();
+    assert.equal(elements.get('factoryLogoutButton').classList.contains('hidden'), true, `${source} credentials must not expose Clear`);
+  }
 });
 
 test('opencode status env account avoids saved profile names', () => {
@@ -2759,7 +2954,8 @@ test('a ZCode-discovered GLM login reads as connected, not API-key configured', 
   const statusBody = functionBody(app, 'apiKeyAccountStatusText', 'minimaxPlatformUrl');
   // The linked pill picks the OAuth-style key only for a zcode-auto source;
   // pasted and env keys keep their existing API-key pills.
-  assert.match(statusBody, /providerName === 'zai' && source === 'zcode-auto' \? 'settings\.zai\.statusLinked'/);
+  assert.match(statusBody, /providerName === 'zai' && source === 'zcode-auto'[\s\S]*\? 'settings\.zai\.statusLinked'/);
+  assert.match(statusBody, /providerName === 'factory' && source === 'droid-env'/);
   assert.match(statusBody, /source === 'env' \? `settings\.\$\{providerName\}\.statusEnv` : `settings\.\$\{providerName\}\.statusSet`/);
 
   const i18n = readRendererFile('i18n.js');

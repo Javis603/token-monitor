@@ -5,6 +5,7 @@ const os = require('node:os');
 const { hashKey } = require('./hashKey');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
 const codexSession = require('./providers/codex/sessionMetadata');
+const droidSessionMetadata = require('./providers/droid/sessionMetadata');
 const opencodeSession = require('./providers/opencode/session');
 const kimiSessionMetadata = require('./providers/kimi/sessionMetadata');
 const dshSessionMetadata = require('./providers/dsh/sessionMetadata');
@@ -218,9 +219,10 @@ function fileSessionMetadata(sessionId, filePath, context, existing = {}) {
 // after tokscale first exposes a session id. Kimi and unknown clients retain the
 // existing one-shot id-timestamp fallback.
 const SESSION_METADATA_RESOLVERS = new Map([
-  ['opencode', { resolve: opencodeSession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['claude', { resolve: claudeSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['codex', { resolve: codexSession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
+  ['opencode', { resolve: opencodeSession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
+  ['droid', { resolve: droidSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['kimi', { resolve: kimiSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: false }],
   ['dsh', { resolve: dshSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }]
 ]);

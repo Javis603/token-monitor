@@ -6,6 +6,12 @@
 // caching — the on-disk state is the source of truth for account switches,
 // mirroring how codexAuth re-reads auth.json each refresh).
 //
+// 3.12.3 migration notes: the family selection moved to
+// providerFamilyConnectionSelections[family].kind (the legacy selected-key
+// string is retained but no longer written), the per-plan entitlement cache
+// (coding-plan-cache.json) stopped being written, and provider entries keep a
+// persistent systemDisabledReason instead of a transient enabled flag.
+//
 // Missing files are normal (ZCode not installed) and resolve to kind 'none';
 // malformed JSON is treated the same way rather than surfacing as an error.
 // The credential returned for the billing lane is ZCode's own on-disk mirror
@@ -24,13 +30,34 @@ const ZCODE_PROVIDER_IDS = Object.freeze({
   codingPlan: Object.freeze({ zai: 'builtin:zai-coding-plan', bigmodel: 'builtin:bigmodel-coding-plan' })
 });
 
+// ZCode 3.12.3 moved the family selection to a kind-based field
+// (providerFamilyConnectionSelections[family].kind, its own one-way
+// migration); both plan kinds resolve to the builtin:* entry that carries
+// the mirror credential. An off-peak selection has no GLM plan lane here and
+// maps to nothing — it must not fall back to a frozen legacy selection.
+const SELECTION_KIND_SLOT = Object.freeze({
+  'start-plan': 'startPlan',
+  'individual-coding-plan': 'codingPlan',
+  'team-coding-plan': 'codingPlan'
+});
+
 // api.z.ai endpoints imply the global family; anything else ZCode treats as
 // BigModel-like. Mirrors ZCode's own resolveModelProviderFamilyIdByBaseURL.
 function familyByBaseUrl(baseUrl) {
   return /api\.z\.ai|api\.chatglm\.site/i.test(String(baseUrl || '')) ? 'zai' : 'bigmodel';
 }
 
+// Resolve the selected provider entry. 3.12.3 writes the kind-based selection
+// and leaves the legacy key string in place without updating it, so the new
+// field wins whenever it exists; the legacy string only serves 3.11.x
+// installs. An unrecognised kind (off-peak) yields no lane rather than a
+// stale fallback.
 function selectedProviderId(settings, family) {
+  const kind = String(settings?.providerFamilyConnectionSelections?.[family]?.kind || '').trim();
+  if (kind) {
+    const slot = SELECTION_KIND_SLOT[kind];
+    return slot ? ZCODE_PROVIDER_IDS[slot][family] : '';
+  }
   const selected = String(settings?.modelProviderFamilySelectedKeys?.[family] || '').trim();
   const match = /^(?:coding-plan|preset):(.+)$/.exec(selected);
   return match ? match[1].trim() : '';
@@ -52,15 +79,11 @@ function isCodingPlanProviderId(providerId) {
   return providerId === ZCODE_PROVIDER_IDS.codingPlan.zai || providerId === ZCODE_PROVIDER_IDS.codingPlan.bigmodel;
 }
 
-function entryStatusFor(cache, providerId) {
-  return cache?.entryStatus?.items?.[providerId] || null;
-}
-
 // Resolve which credential the billing lane should present. ZCode stores its
 // login token encrypted in credentials.json (unreadable to us) and mirrors a
 // plain JWT into the provider entry; the mirror is the only readable key, and
-// ZCode rotates it on each login, so a stale mirror is answered by the server
-// as a parameter/auth error and surfaces as unavailable until ZCode refreshes.
+// ZCode rotated it on each login up to 3.11.x, so a stale mirror is answered
+// by the server as a parameter/auth error and surfaces as unavailable.
 function billingCredential(provider) {
   const providerKey = String(provider?.options?.apiKey || '').trim();
   if (providerKey) return { token: providerKey, source: 'zcode-auto' };
@@ -94,41 +117,35 @@ function discoverZcodeConnection(options = {}, deps = {}) {
   const providerId = selectedProviderId(settings, family);
   if (!providerId) return { kind: 'none' };
   const provider = registry.provider?.[providerId] || null;
-  // ZCode persists a family switch across two writes: setting.json flips
-  // first, the provider entry (key mirror, enabled flag) lands after. A
-  // disabled entry means the switch has not settled — skip this round and let
-  // the next refresh read the completed state instead of showing a torn one.
-  if (!provider || provider.enabled === false) return { kind: 'none' };
+  if (!provider) return { kind: 'none' };
+  // 3.12.3 keeps a disabled entry as a persistent state (systemDisabledReason
+  // enumerates five causes); only oauth_provider_inactive means the account
+  // context is gone, and the torn two-write switch 3.11.x produced left a
+  // disabled entry with no reason at all. Both are skipped — every other
+  // reason is a state the lane's own query and error classification answers,
+  // instead of being swallowed here as "not settled".
+  if (provider.enabled === false) {
+    const reason = String(provider.systemDisabledReason || '').trim();
+    if (!reason || reason === 'oauth_provider_inactive') return { kind: 'none' };
+  }
 
   if (isStartPlanProviderId(providerId) || isCodingPlanProviderId(providerId)) {
-    const cache = readJson(path.join(base, 'coding-plan-cache.json'), readFileSync);
-    const entry = entryStatusFor(cache, providerId);
-    const entitled = entry?.status === 'available';
-    const reason = entitled ? '' : String(entry?.reason || 'coding_plan_not_entitled');
     const kind = isStartPlanProviderId(providerId) ? 'start-billing' : 'coding-quota';
-    // credential is present whenever an entitled plan has a readable mirror
-    // key — quota consumers use it against quota, billing consumers against
-    // billing (see below).
-    const credential = entitled ? billingCredential(provider) : null;
-    if (entitled && !credential) {
-      return { kind, family, providerId, entitled: false, reason: 'coding_plan_not_authenticated' };
-    }
-    // Billing is an account-level endpoint: ZCode queries it with the
-    // start-plan entry even while coding-plan is selected
-    // (validateZaiCodingPlanPairAvailability → resolveStartPlan-
-    // Authorization). The enabled flag guards only the *selected*
-    // provider above; an unselected entry still carries its mirror key.
+    const credential = billingCredential(provider);
+    // `entitled` marks a result the lane can actually query. Since 3.12.3
+    // stopped writing the entitlement cache, the mirror key's presence is the
+    // only local signal; the query itself answers entitlement.
+    if (!credential) return { kind, family, providerId, entitled: false, reason: 'coding_plan_not_authenticated' };
+    // Billing is an account-level endpoint: ZCode queries it even while the
+    // coding-plan provider is selected (validateZaiCodingPlanPairAvailability
+    // → validateStartPlanAvailability), so the coding shape carries the
+    // start-plan entry's mirror key alongside its own quota query.
     let billing;
     if (kind === 'coding-quota') {
-      const startProviderId = ZCODE_PROVIDER_IDS.startPlan[family];
-      const startEntry = entryStatusFor(cache, startProviderId);
-      const startProvider = registry.provider?.[startProviderId] || null;
-      const startCredential = startEntry?.status === 'available' && startProvider
-        ? billingCredential(startProvider)
-        : null;
+      const startCredential = billingCredential(registry.provider?.[ZCODE_PROVIDER_IDS.startPlan[family]] || null);
       if (startCredential) billing = { credential: startCredential };
     }
-    return { kind, family, providerId, entitled, reason, ...(credential ? { credential } : {}), ...(billing ? { billing } : {}) };
+    return { kind, family, providerId, entitled: true, credential, ...(billing ? { billing } : {}) };
   }
 
   const baseUrl = String(provider?.options?.baseURL || '').trim();

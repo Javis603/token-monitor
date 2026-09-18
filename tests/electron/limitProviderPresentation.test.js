@@ -788,6 +788,7 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.doesNotMatch(renderLimitSessionsIcon, /limitFillPercent/);
   assert.match(renderLimitSessionsIcon, /·/);
   assert.match(maybeUpdateBarsIcon, /TokenMonitorTrayText\.isGeneratedTrayIconMode\(mode\)/);
+  assert.match(maybeUpdateBarsIcon, /edgeDockAvailable\(\) && state\.settings\?\.edgeDockEnabled === true\) edgeDockComposer\?\.render\(\)/);
   assert.match(maybeUpdateBarsIcon, /trayDataUrlForMode\(mode, 44, colors, \{ trayInk: true \}\)/);
   // The tray ink must come from the platform-aware helper, not the app theme:
   // macOS needs the black its template inversion expects, while a dark Windows
@@ -1194,6 +1195,7 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(main, /showCodexAdditionalLimits: true/);
   assert.match(main, /showCodexAdditionalLimits = parseBoolean\(merged\.showCodexAdditionalLimits, true\)/);
   assert.match(main, /showCodexAdditionalLimits: parseBoolean\(patch\.showCodexAdditionalLimits \?\? settings\.showCodexAdditionalLimits, true\)/);
+  assert.match(main, /showCodexAdditionalLimits: settings\?\.showCodexAdditionalLimits !== false/);
   assert.match(app, /key: 'showCodexAdditionalLimits',[\s\S]*?defaultValue: true/);
   assert.match(renderProviderWindows, /state\.settings\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
   assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);
@@ -1557,7 +1559,7 @@ test('settings provider status waits for stats and refreshes when stats arrive',
     assert.match(statsRender, new RegExp(`${fn}\\(\\);`), `${fn} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
   }
-  for (const provider of ['claude', 'zai', 'volcengine', 'qoder', 'trae', 'commandcode', 'kimi', 'ollama']) {
+  for (const provider of ['claude', 'factory', 'zai', 'volcengine', 'qoder', 'trae', 'commandcode', 'kimi', 'ollama']) {
     assert.match(statsRender, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
   }
@@ -2484,20 +2486,31 @@ test('copilot setup status asks for sign-in instead of an API key', () => {
   );
 });
 
-test('Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama source labels and setup statuses', () => {
+test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama source labels and setup statuses', () => {
+  assert.deepEqual(presentation.limitProviderCapabilityTags('factory'), ['Auto', 'API key']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('zai'), ['Auto', 'Coding Plan', 'API key']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('zaiteam'), ['Team Plan', 'API key']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Coding/Agent Plan', 'API key']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Auto', 'API key', 'CLI']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Auto', 'Desktop app']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'Web']);
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'factory', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zai', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'api' }), 'API');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'cli' }), 'arkcli');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'qoder', source: 'web' }), 'Web');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'trae', source: 'api' }), 'Web');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'workbuddy', source: 'local' }), 'Local');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'ollama', source: 'web' }), 'Web');
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'factory', status: 'notConfigured' }),
+    { label: 'Add API key', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'factory', status: 'unauthorized' }),
+    { label: 'Update API key', tone: 'setup' }
+  );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'zai', status: 'notConfigured' }),
     { label: 'Add API key', tone: 'setup' }
@@ -2563,10 +2576,12 @@ test('Kimi credential statuses are localized in settings', () => {
   assert.match(i18n, /'settings\.limits\.status\.updateCredential': '更新憑證'/);
 });
 
-test('Kimi usage and limits share the canonical provider id and vendor color', () => {
+test('Kimi and Droid limits reuse their tracked-client colors', () => {
   const app = readRendererFile('app.js');
   assert.equal(LIMIT_PROVIDER_LABELS.kimi, 'Kimi');
-  assert.match(app, /const color = id === 'mimo' \? clientColors\.xiaomi : \(clientColors\[id\] \|\| clientColors\.default\)/);
+  assert.match(app, /if \(providerId === 'factory'\) return clientColors\.droid;/);
+  assert.match(app, /if \(providerId === 'mimo'\) return clientColors\.xiaomi;/);
+  assert.match(app, /const color = limitProviderColor\(id\);/);
 });
 
 // A value produced inside a vm realm carries that realm's prototypes, which

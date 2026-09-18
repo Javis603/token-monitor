@@ -1,293 +1,337 @@
 import XCTest
 
 final class WidgetSnapshotDecodingTests: XCTestCase {
-    func testDecodesSchemaV5ActivityTokenTotals() throws {
+    func testTrendChangeSkipsLeadingZeroBuckets() {
+        XCTAssertEqual(
+            WidgetTrendChange.label(for: [
+                WidgetTrendPoint(date: "2026-03", totalTokens: 0),
+                WidgetTrendPoint(date: "2026-04", totalTokens: 100),
+                WidgetTrendPoint(date: "2026-05", totalTokens: 25)
+            ]),
+            "−75%"
+        )
+        XCTAssertEqual(
+            WidgetTrendChange.label(for: [
+                WidgetTrendPoint(date: "2026-04", totalTokens: 100),
+                WidgetTrendPoint(date: "2026-05", totalTokens: 165)
+            ]),
+            "+65%"
+        )
+        XCTAssertEqual(
+            WidgetTrendChange.label(for: [WidgetTrendPoint(date: "2026-04", totalTokens: 0)]),
+            "—"
+        )
+    }
+
+    func testTotalTrendChangeMeasuresCurrentMonthGrowthAgainstPreviousTotal() {
+        XCTAssertEqual(
+            WidgetTrendChange.totalGrowthLabel(
+                totalTokens: 24_489_640_445,
+                currentMonthTokens: 3_115_874_699
+            ),
+            "+15%"
+        )
+        XCTAssertEqual(
+            WidgetTrendChange.totalGrowthLabel(totalTokens: 24_489_640_445, currentMonthTokens: 0),
+            "0%"
+        )
+        XCTAssertEqual(
+            WidgetTrendChange.totalGrowthLabel(totalTokens: 3_115_874_699, currentMonthTokens: 3_115_874_699),
+            "—"
+        )
+    }
+
+    func testDecodesCurrentSchemaFromPeriods() throws {
         let snapshot = try decode("""
-        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00.000Z","activity":{"currentPeriod":"month","activeDays":1,"days":[{"date":"2026-07-16","intensity":4,"totalTokens":37400000}]},"status":{"noData":false}}
-        """)
-
-        XCTAssertEqual(snapshot.schemaVersion, 5)
-        XCTAssertEqual(snapshot.activity.days.first, WidgetActivityDay(date: "2026-07-16", intensity: 4, totalTokens: 37_400_000))
-    }
-
-    func testCompactTokenUnitsFollowPresentationAndLegacyDefaults() throws {
-        let localized = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","presentation":{"numberStyle":"compact","compactTokenUnits":"localized","locale":"zh-TW"},"status":{"noData":true}}
-        """)
-
-        XCTAssertEqual(localized.presentation.compactTokenUnits, "localized")
-        XCTAssertEqual(WidgetFormat.tokens(15_000, style: localized.presentation.numberStyle, presentation: localized.presentation), "1.5萬")
-        XCTAssertEqual(WidgetFormat.tokens(295_116_445, style: localized.presentation.numberStyle, presentation: localized.presentation), "2.95億")
-
-        let legacy = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","presentation":{"numberStyle":"compact","locale":"zh-TW"},"status":{"noData":true}}
-        """)
-
-        XCTAssertEqual(legacy.presentation.compactTokenUnits, "western")
-        XCTAssertEqual(WidgetFormat.tokens(15_000, style: legacy.presentation.numberStyle, presentation: legacy.presentation), "15.0K")
-    }
-
-    func testDecodesSchemaV4ProviderBalances() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":4,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"currentPeriod":"today","totalTokens":100,"updatedAt":"2026-07-17T08:59:00.000Z"}}},"quota":[{"provider":"mimo","status":"ok","balance":{"amount":3.62,"currency":"CNY"},"windows":[]},{"provider":"deepseek","status":"ok","balance":{"amount":9.33,"currency":"USD"},"windows":[]},{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":2}]}],"status":{"noData":false}}
-        """)
-
-        XCTAssertEqual(snapshot.schemaVersion, 4)
-        XCTAssertEqual(snapshot.quota[0].balance, WidgetQuotaBalance(amount: 3.62, currency: "CNY"))
-        XCTAssertEqual(snapshot.quota[1].balance, WidgetQuotaBalance(amount: 9.33, currency: "USD"))
-        XCTAssertNil(snapshot.quota[2].balance)
-    }
-
-    func testDecodesSharedProviderAndWindowSchema() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"openrouter","status":"ok","windows":[{"kind":"billing","metric":"credits","remaining":12.5,"currency":"USD","showMeter":false}]},{"provider":"thirdparty","status":"ok","windows":[{"kind":"weekly","remainingPercent":80}]}],"status":{"noData":false}}
-        """)
-
-        XCTAssertEqual(snapshot.quota.map(\.provider), ["openrouter", "thirdparty"])
-        let credits = try XCTUnwrap(snapshot.quota[0].windows.first)
-        XCTAssertEqual(credits.metric, "credits")
-        XCTAssertEqual(credits.remaining, 12.5)
-        XCTAssertEqual(credits.currency, "USD")
-        XCTAssertFalse(credits.showMeter)
-        XCTAssertEqual(WidgetFormat.quotaValue(snapshot.quota[0]), "$12.50 left")
-        XCTAssertNil(snapshot.quota[1].windows.first?.metric)
-    }
-
-    func testWorkBuddyCreditsAndUnlimitedKeepNativeDisplaySemantics() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"workbuddy","status":"ok","balance":{"amount":63,"currency":"CREDITS"},"windows":[{"kind":"billing","metric":"credits","remaining":63,"currency":"CREDITS","showMeter":false}]},{"provider":"workbuddy","status":"ok","instanceId":"workbuddy-unlimited","windows":[{"kind":"billing","metric":"credits","detail":"unlimited","showMeter":false}]}],"status":{"noData":false}}
-        """)
-
-        XCTAssertEqual(WidgetFormat.quotaValue(snapshot.quota[0]), "63.00 left")
-        XCTAssertEqual(snapshot.quota[1].windows.first?.detail, "unlimited")
-        XCTAssertEqual(WidgetFormat.quotaValue(snapshot.quota[1]), "Unlimited")
-    }
-
-    func testSchemaV6KeepsMultiAccountProviderRowsStableAndPrivate() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"codex","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","instanceId":"codex-a1b2c3d4","displayName":"Codex 1","windows":[{"kind":"weekly","remainingPercent":80}]},{"provider":"codex","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","instanceId":"codex-e5f6a7b8","displayName":"Codex 2","windows":[{"kind":"weekly","remainingPercent":60}]},{"provider":"codex","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","instanceId":"codex-c9d0e1f2","displayName":"Codex 3","windows":[{"kind":"weekly","remainingPercent":40}]}],"status":{"noData":true}}
-        """)
-
-        XCTAssertEqual(snapshot.quota.map(\.id), ["codex-a1b2c3d4", "codex-e5f6a7b8", "codex-c9d0e1f2"])
-        XCTAssertEqual(snapshot.quota.map(\.displayName), ["Codex 1", "Codex 2", "Codex 3"])
-        XCTAssertEqual(Set(snapshot.quota.map(\.id)).count, 3)
-        XCTAssertTrue(snapshot.status.noData)
-        XCTAssertFalse(snapshot.quota.isEmpty)
-    }
-
-    func testLegacyQuotaRowsGetDistinctStableFallbackIDsAndBadRowsDoNotBlankSnapshot() throws {
-        let first = try decode("""
-        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":80}]},{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":60}]},"not-a-provider",{"provider":"openrouter","status":"ok","windows":[]}],"status":{"noData":true}}
-        """)
-        let second = try decode("""
-        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":80}]},{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":60}]},"not-a-provider",{"provider":"openrouter","status":"ok","windows":[]}],"status":{"noData":true}}
-        """)
-
-        XCTAssertEqual(first.quota.count, 3)
-        XCTAssertEqual(Set(first.quota.map(\.id)).count, first.quota.count)
-        XCTAssertEqual(first.quota.map(\.id), second.quota.map(\.id))
-        XCTAssertEqual(first.quota.map(\.provider), ["codex", "codex", "openrouter"])
-    }
-
-    func testLegacyQuotaFallbackIDsIgnoreVolatileQuotaFields() throws {
-        let first = try decode("""
-        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"openrouter","status":"ok","balance":{"amount":12.5,"currency":"USD"},"windows":[{"kind":"billing","remaining":12.5}]}],"status":{"noData":true}}
-        """)
-        let second = try decode("""
-        {"schemaVersion":5,"generatedAt":"2026-07-17T10:00:00.000Z","quota":[{"provider":"openrouter","status":"unavailable","balance":{"amount":3.25,"currency":"USD"},"windows":[{"kind":"billing","remaining":3.25}]}],"status":{"noData":true}}
-        """)
-
-        XCTAssertEqual(first.quota.map(\.id), ["openrouter-single"])
-        XCTAssertEqual(first.quota.map(\.id), second.quota.map(\.id))
-    }
-
-    func testLegacyLimitsUseLossyDecodingForMalformedRows() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":1,"generatedAt":"2026-07-17T09:00:00Z","today":{"totalTokens":12,"costUsd":0.1},"limits":[{"status":"ok"},{"provider":"codex","status":"ok","windows":[]}]}
-        """)
-
-        XCTAssertEqual(snapshot.quota.map(\.provider), ["codex"])
-        XCTAssertEqual(snapshot.overview.totalTokens, 12)
-    }
-
-    func testMissingSourceStaleDefaultsToFalseAndCreditsNeverUsesPercentageMeter() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"thirdparty","status":"ok","windows":[{"kind":"billing","metric":"credits","remaining":4.25,"currency":"USD","showMeter":false}]}],"status":{"isStale":false,"noData":true}}
-        """)
-
-        XCTAssertFalse(snapshot.status.sourceStale)
-        let window = try XCTUnwrap(snapshot.quota.first?.windows.first)
-        XCTAssertEqual(window.metric, "credits")
-        XCTAssertFalse(window.showMeter)
-        XCTAssertNil(window.remainingPercent)
-    }
-
-    func testSourceUpdatedAtDecodesAndSurvivesEveryPeriodSelectionPath() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"totalTokens":1,"updatedAt":"2026-07-17T08:00:00.000Z"}},"month":{"overview":{"totalTokens":2,"updatedAt":"2026-07-17T08:00:00.000Z"}}},"status":{"isStale":true,"sourceStale":true,"sourceUpdatedAt":"2026-07-17T08:00:00.000Z","dataAgeSeconds":3600,"noData":false}}
-        """)
-        let sourceUpdatedAt = try XCTUnwrap(snapshot.status.sourceUpdatedAt)
-
-        XCTAssertEqual(snapshot.selecting(.day).status.sourceUpdatedAt, sourceUpdatedAt)
-        XCTAssertEqual(snapshot.selecting(.month).status.sourceUpdatedAt, sourceUpdatedAt)
-        XCTAssertEqual(snapshot.selecting(.total).status.sourceUpdatedAt, sourceUpdatedAt)
-    }
-
-    func testStalePresentationUsesSourceTimestampInsteadOfFreshSnapshotTime() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"updatedAt":"2026-07-17T08:00:00.000Z"}}},"status":{"isStale":true,"sourceUpdatedAt":"2026-07-17T08:00:00.000Z","dataAgeSeconds":3600,"noData":false}}
-        """)
-
-        XCTAssertEqual(WidgetStalePresentation.trustedUpdatedAt(for: snapshot), snapshot.status.sourceUpdatedAt)
-        XCTAssertNotEqual(WidgetStalePresentation.trustedUpdatedAt(for: snapshot), snapshot.generatedAt)
-    }
-
-    func testStalePresentationOmitsUntrustedGeneratedAtFallback() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"updatedAt":"2026-07-17T09:00:00.000Z"}}},"status":{"isStale":true,"sourceStale":true,"dataAgeSeconds":0,"noData":false}}
-        """)
-
-        XCTAssertNil(WidgetStalePresentation.trustedUpdatedAt(for: snapshot))
-    }
-
-    func testStalePresentationSupportsLegacyAgeAndOverviewTimestamps() throws {
-        let ageSnapshot = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","status":{"isStale":true,"dataAgeSeconds":3600,"noData":false}}
-        """)
-        let ageUpdatedAt = try XCTUnwrap(WidgetStalePresentation.trustedUpdatedAt(for: ageSnapshot))
-        XCTAssertEqual(ageSnapshot.generatedAt.timeIntervalSince(ageUpdatedAt), 3600, accuracy: 0.001)
-
-        let overviewSnapshot = try decode("""
-        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00.000Z","overview":{"updatedAt":"2026-07-17T08:00:00.000Z"},"status":{"isStale":true,"dataAgeSeconds":0,"noData":false}}
-        """)
-        XCTAssertEqual(WidgetStalePresentation.trustedUpdatedAt(for: overviewSnapshot), overviewSnapshot.overview.updatedAt)
-    }
-
-    func testPeriodPolicyLimitsGlobalSelectionToOverviewAndModels() {
-        for page in [WidgetPage.overview, .models] {
-            XCTAssertTrue(WidgetPeriodPolicy.isSelectable(on: page))
-            XCTAssertEqual(WidgetPeriodPolicy.effectivePeriod(for: page, selectedPeriod: .month), .month)
-            XCTAssertEqual(WidgetPeriodPolicy.effectivePeriod(for: page, selectedPeriod: .total), .total)
+        {
+          "schemaVersion": 10,
+          "generatedAt": "2026-07-17T09:00:00.000Z",
+          "periods": {
+            "day": {
+              "overview": {
+                "totalTokens": 1200000,
+                "costUsd": 1.25
+              },
+              "tools": [{"id":"codex","totalTokens":1000000,"costUsd":1.1,"sharePercent":83.3}],
+              "models": [{"id":"gpt-5.6","displayName":"gpt-5.6","totalTokens":900000,"costUsd":0.9,"sharePercent":75}],
+              "activity": {"activeDays":1,"days":[{"date":"2026-07-17","intensity":3,"totalTokens":1200000,"costUsd":1.25}]},
+              "trend": {"points":[{"date":"2026-07-17","totalTokens":1200000,"costUsd":1.25}]}
+            }
+          },
+          "quota": [],
+          "presentation": {"currencyCode":"HKD","currencySymbol":"HK$","currencyRate":7.8,"numberStyle":"compact","compactTokenUnits":"western","showCost":true,"locale":"auto","theme":"system"},
+          "status": {"isStale":false,"sourceUpdatedAt":"2026-07-17T08:59:00.000Z","noData":false}
         }
-        for page in [WidgetPage.quota, .activity, .trend] {
-            XCTAssertFalse(WidgetPeriodPolicy.isSelectable(on: page))
-            XCTAssertEqual(WidgetPeriodPolicy.effectivePeriod(for: page, selectedPeriod: .month), .day)
-            XCTAssertEqual(WidgetPeriodPolicy.effectivePeriod(for: page, selectedPeriod: .total), .day)
+        """)
+
+        XCTAssertEqual(snapshot.schemaVersion, WidgetSnapshot.currentSchemaVersion)
+        XCTAssertEqual(snapshot.overview.totalTokens, 1_200_000)
+        XCTAssertEqual(snapshot.tools.map(\.id), ["codex"])
+        XCTAssertEqual(snapshot.tools.first?.costUsd, 1.1)
+        XCTAssertEqual(snapshot.models.map(\.displayName), ["gpt-5.6"])
+        XCTAssertEqual(snapshot.models.first?.costUsd, 0.9)
+        XCTAssertEqual(snapshot.activity.days.first?.totalTokens, 1_200_000)
+        XCTAssertEqual(snapshot.activity.days.first?.costUsd, 1.25)
+        XCTAssertEqual(snapshot.trend.points.last?.totalTokens, 1_200_000)
+        XCTAssertEqual(snapshot.trend.points.last?.costUsd, 1.25)
+        XCTAssertEqual(snapshot.presentation.currencySymbol, "HK$")
+    }
+
+    func testRejectsUnsupportedSchemas() {
+        for version in 1..<WidgetSnapshot.currentSchemaVersion {
+            XCTAssertThrowsError(
+                try decodeRaw("""
+                {"schemaVersion":\(version),"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{}}}
+                """)
+            )
         }
+        XCTAssertThrowsError(
+            try decodeRaw("""
+            {"schemaVersion":\(WidgetSnapshot.currentSchemaVersion + 1),"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{}}}
+            """)
+        )
     }
 
-    func testMalformedQuotaEntryIsDroppedWithoutDroppingOtherPages() throws {
+    func testRejectsMissingDayPeriodAndInvalidGeneratedTimestamp() {
+        XCTAssertThrowsError(
+            try decodeRaw("""
+            {"schemaVersion":10,"generatedAt":"2026-07-17T09:00:00Z","periods":{"month":{}}}
+            """)
+        )
+        XCTAssertThrowsError(
+            try decodeRaw("""
+            {"schemaVersion":10,"generatedAt":"not-a-date","periods":{"day":{}}}
+            """)
+        )
+    }
+
+    func testMalformedQuotaEntryIsDroppedWithoutBlankingCurrentSnapshot() throws {
         let snapshot = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"totalTokens":12},"models":[{"id":"model-safe","displayName":"safe","totalTokens":12,"sharePercent":100}]}},"quota":[{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":80}]},{"windows":42},{"provider":"openrouter","status":"ok","windows":[]}],"status":{"noData":false}}
+        {
+          "schemaVersion":10,
+          "generatedAt":"2026-07-17T09:00:00Z",
+          "periods":{"day":{"overview":{"totalTokens":42}}},
+          "quota":[
+            {"provider":"codex","instanceId":"codex-a","status":"ok","windows":[]},
+            {"provider":123,"status":"ok"},
+            {"provider":"claude","instanceId":"claude-a","status":"ok","windows":[]}
+          ]
+        }
         """)
 
-        XCTAssertEqual(snapshot.quota.map(\.provider), ["codex", "openrouter"])
-        XCTAssertEqual(snapshot.models.first?.id, "model-safe")
-        XCTAssertFalse(snapshot.isEmpty)
-    }
-
-    func testPageEmptyStatesRemainIndependentWhenOnlyOnePageHasData() throws {
-        let quotaOnly = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00Z","quota":[{"provider":"openrouter","status":"ok","windows":[{"kind":"billing","metric":"credits","remaining":4.25,"currency":"USD","showMeter":false}]}],"status":{"noData":true}}
-        """)
-        XCTAssertTrue(quotaOnly.isEmpty)
-        XCTAssertFalse(quotaOnly.quota.isEmpty)
-        XCTAssertTrue(quotaOnly.selecting(.day).models.isEmpty)
-        XCTAssertFalse(quotaOnly.selecting(.day).quota.isEmpty)
-
-        let modelsOnly = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{"overview":{"totalTokens":0,"costUsd":0},"models":[{"id":"model-safe","displayName":"safe","totalTokens":12,"sharePercent":100}],"activity":{"days":[]},"trend":{"points":[]}}},"status":{"noData":false}}
-        """)
-        XCTAssertFalse(modelsOnly.selecting(.day).models.isEmpty)
-        XCTAssertTrue(modelsOnly.selecting(.day).activity.days.isEmpty)
-        XCTAssertTrue(modelsOnly.selecting(.day).quota.isEmpty)
-
-        let activityOnly = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{"overview":{"totalTokens":0,"costUsd":0},"models":[],"activity":{"activeDays":1,"days":[{"date":"2026-07-16","intensity":1}]},"trend":{"points":[]}}},"status":{"noData":false}}
-        """)
-        XCTAssertFalse(activityOnly.selecting(.day).activity.days.isEmpty)
-        XCTAssertTrue(activityOnly.selecting(.day).trend.points.isEmpty)
-
-        let trendOnly = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{"overview":{"totalTokens":0,"costUsd":0},"models":[],"activity":{"days":[]},"trend":{"points":[{"date":"2026-07-16","totalTokens":12,"costUsd":0.1}]}}},"status":{"noData":false}}
-        """)
-        XCTAssertFalse(trendOnly.selecting(.day).trend.points.isEmpty)
-        XCTAssertTrue(trendOnly.selecting(.day).models.isEmpty)
-    }
-
-    func testLegacyDuplicateModelRowsReceiveDistinctStableIDs() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00Z","models":[{"displayName":"same","totalTokens":10,"sharePercent":50},{"displayName":"same","totalTokens":10,"sharePercent":50}],"status":{"noData":false}}
-        """)
-        XCTAssertEqual(snapshot.models.count, 2)
-        XCTAssertEqual(Set(snapshot.models.map(\.id)).count, 2)
-        XCTAssertEqual(snapshot.models.map(\.id), [snapshot.models[0].id, "\(snapshot.models[0].id)-2"])
-    }
-
-    func testLegacyWindowSchemaDefaultsMetricAndMeterSafely() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":5,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":57}]}],"status":{"noData":false}}
-        """)
-
-        let window = try XCTUnwrap(snapshot.quota.first?.windows.first)
-        XCTAssertNil(window.metric)
-        XCTAssertTrue(window.showMeter)
-    }
-
-    func testSchemaV4ActivityDayDefaultsTokenTotalToZero() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":4,"generatedAt":"2026-07-17T09:00:00.000Z","activity":{"days":[{"date":"2026-07-16","intensity":4}]},"status":{"noData":false}}
-        """)
-
-        XCTAssertEqual(snapshot.activity.days.first?.totalTokens, 0)
-    }
-
-    func testDecodesSchemaV3AndSelectsPeriods() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":3,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"currentPeriod":"today","totalTokens":100,"costUsd":1,"updatedAt":"2026-07-17T08:59:00.000Z"},"models":[{"displayName":"day-model","totalTokens":100,"sharePercent":100}],"activity":{"currentPeriod":"today","activeDays":1,"days":[]},"trend":{"peakTokens":100,"currentTokens":100,"points":[]}},"month":{"overview":{"currentPeriod":"month","totalTokens":200,"costUsd":2,"updatedAt":"2026-07-17T08:59:00.000Z"},"models":[{"displayName":"month-model","totalTokens":200,"sharePercent":100}],"activity":{"currentPeriod":"month","activeDays":2,"days":[]},"trend":{"peakTokens":200,"currentTokens":200,"points":[]}},"total":{"overview":{"currentPeriod":"allTime","totalTokens":300,"costUsd":3,"updatedAt":"2026-07-17T08:59:00.000Z"},"models":[{"displayName":"total-model","totalTokens":300,"sharePercent":100}],"activity":{"currentPeriod":"allTime","activeDays":3,"days":[]},"trend":{"peakTokens":300,"currentTokens":300,"points":[]}}},"quota":[],"presentation":{"currencySymbol":"¥"},"status":{"isStale":false,"dataAgeSeconds":60,"providerConfigured":true,"providerNeedsLogin":false,"noData":false}}
-        """)
-        XCTAssertEqual(snapshot.schemaVersion, 3)
-        XCTAssertEqual(snapshot.overview.totalTokens, 100)
-        XCTAssertEqual(snapshot.selecting(.day).models.first?.displayName, "day-model")
-        XCTAssertEqual(snapshot.selecting(.month).overview.totalTokens, 200)
-        XCTAssertEqual(snapshot.selecting(.total).activity.activeDays, 3)
-        XCTAssertEqual(snapshot.selecting(.total).trend.currentTokens, 300)
-    }
-
-    func testDecodesSchemaV2() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":2,"generatedAt":"2026-07-17T09:00:00.000Z","overview":{"currentPeriod":"today","totalTokens":42000000,"costUsd":14.5,"updatedAt":"2026-07-17T08:59:00.000Z"},"quota":[{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":57}]}],"models":[{"displayName":"GPT-5.6","totalTokens":30000000,"sharePercent":71}],"activity":{"currentPeriod":"month","activeDays":18,"days":[{"date":"2026-07-17","intensity":4}]},"trend":{"peakTokens":5000000,"currentTokens":3000000,"points":[]},"presentation":{"currencyCode":"USD","currencySymbol":"$","currencyRate":1,"numberStyle":"compact","showCost":true},"status":{"isStale":false,"dataAgeSeconds":60,"providerConfigured":true,"providerNeedsLogin":false,"noData":false}}
-        """)
-        XCTAssertEqual(snapshot.schemaVersion, 2)
-        XCTAssertEqual(snapshot.overview.totalTokens, 42_000_000)
-        XCTAssertEqual(snapshot.quota.first?.windows.first?.remainingPercent, 57)
-        XCTAssertEqual(snapshot.models.first?.displayName, "GPT-5.6")
-        XCTAssertEqual(snapshot.activity.activeDays, 18)
-        XCTAssertEqual(snapshot.trend.currentTokens, 3_000_000)
-    }
-
-    func testDecodesLegacyV1WithoutBlankingWidget() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":1,"generatedAt":"2026-07-16T09:00:00.000Z","today":{"totalTokens":42,"costUsd":0.5},"tools":[{"id":"codex","totalTokens":42,"costUsd":0.5}],"limits":[{"provider":"codex","status":"notConfigured","windows":[]}]}
-        """)
-        XCTAssertEqual(snapshot.schemaVersion, 1)
         XCTAssertEqual(snapshot.overview.totalTokens, 42)
-        XCTAssertEqual(snapshot.quota.first?.displayStatus, "Not configured")
-        XCTAssertFalse(snapshot.isEmpty)
+        XCTAssertEqual(snapshot.quota.map(\.provider), ["codex", "claude"])
     }
 
-    func testMissingFieldsUseFallbacksAndDoNotCrash() throws {
-        let snapshot = try decode("{\"schemaVersion\":2,\"generatedAt\":\"2026-07-17T09:00:00Z\",\"overview\":{\"totalTokens\":7},\"presentation\":{\"currencySymbol\":\"¥\"}}")
-        XCTAssertEqual(snapshot.overview.totalTokens, 7)
-        XCTAssertEqual(snapshot.overview.currentPeriod, "today")
-        XCTAssertEqual(snapshot.presentation.currencySymbol, "¥")
-        XCTAssertEqual(snapshot.presentation.currencyRate, 1)
-        XCTAssertTrue(snapshot.quota.isEmpty)
-        XCTAssertTrue(snapshot.models.isEmpty)
+    func testCustomQuotaSelectionNeverFallsBackToUnselectedAccounts() throws {
+        let snapshot = try decode("""
+        {
+          "schemaVersion":10,
+          "generatedAt":"2026-07-17T09:00:00Z",
+          "periods":{"day":{}},
+          "quota":[
+            {"provider":"antigravity","instanceId":"antigravity-a","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","windows":[]},
+            {"provider":"claude","instanceId":"claude-a","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","windows":[]},
+            {"provider":"codex","instanceId":"codex-a","status":"ok","updatedAt":"2026-07-17T08:59:00.000Z","windows":[]}
+          ]
+        }
+        """)
+        let renderedAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T09:00:00Z"))
+
+        XCTAssertEqual(
+            WidgetQuotaSelectionResolver.providers(
+                in: snapshot,
+                mode: .custom,
+                selectedIDs: ["codex-a", "antigravity-a"],
+                limit: 2,
+                at: renderedAt
+            ).map(\.provider),
+            ["codex", "antigravity"]
+        )
+        XCTAssertEqual(
+            WidgetQuotaSelectionResolver.providers(
+                in: snapshot,
+                mode: .custom,
+                selectedIDs: ["missing", "claude-a"],
+                limit: 2,
+                at: renderedAt
+            ).map(\.provider),
+            ["claude"]
+        )
+        XCTAssertTrue(
+            WidgetQuotaSelectionResolver.providers(
+                in: snapshot,
+                mode: .custom,
+                selectedIDs: ["missing", WidgetQuotaSelectionID.currentCodexAccount],
+                limit: 2,
+                at: renderedAt
+            ).isEmpty
+        )
     }
 
-    func testRejectsInvalidGeneratedTimestamp() {
-        XCTAssertThrowsError(try decode("{\"schemaVersion\":2,\"generatedAt\":\"not-a-date\"}"))
+    func testAutomaticQuotaSelectionPrefersFreshAvailableDataAndFallsBackToStaleData() throws {
+        let snapshot = try decode("""
+        {
+          "schemaVersion":10,
+          "generatedAt":"2026-07-17T09:30:00.000Z",
+          "periods":{"day":{}},
+          "quota":[
+            {"provider":"antigravity","instanceId":"antigravity-a","status":"unavailable","updatedAt":"2026-07-17T09:29:00.000Z","windows":[{"kind":"weekly","showMeter":true,"remainingPercent":90}]},
+            {"provider":"claude","instanceId":"claude-a","status":"ok","updatedAt":"2026-07-17T08:00:00.000Z","windows":[{"kind":"weekly","showMeter":true,"remainingPercent":80}]},
+            {"provider":"codex","instanceId":"codex-a","status":"ok","updatedAt":"2026-07-17T09:29:00.000Z","windows":[{"kind":"weekly","showMeter":true,"remainingPercent":70}]},
+            {"provider":"cursor","instanceId":"cursor-a","status":"ok","updatedAt":null,"windows":[{"kind":"weekly","showMeter":true,"remainingPercent":60}]}
+          ]
+        }
+        """)
+        let renderedAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T09:30:00Z"))
+
+        XCTAssertEqual(
+            WidgetQuotaSelectionResolver.providers(
+                in: snapshot,
+                mode: .automatic,
+                selectedIDs: [],
+                limit: 3,
+                at: renderedAt
+            ).map(\.provider),
+            ["codex", "claude", "cursor"]
+        )
+    }
+
+    func testAutomaticQuotaSelectionKeepsStableOrderWithinFreshAccounts() throws {
+        let snapshot = try decode("""
+        {
+          "schemaVersion":10,
+          "generatedAt":"2026-07-17T09:30:00.000Z",
+          "periods":{"day":{}},
+          "quota":[
+            {"provider":"claude","instanceId":"claude-a","status":"ok","updatedAt":"2026-07-17T09:15:00.000Z","windows":[{"kind":"weekly","showMeter":true,"remainingPercent":80}]},
+            {"provider":"codex","instanceId":"codex-a","status":"ok","updatedAt":"2026-07-17T09:29:00.000Z","windows":[{"kind":"weekly","showMeter":true,"remainingPercent":70}]},
+            {"provider":"cursor","instanceId":"cursor-a","status":"ok","updatedAt":"2026-07-17T09:28:00.000Z","windows":[{"kind":"weekly","showMeter":true,"remainingPercent":60}]}
+          ]
+        }
+        """)
+        let renderedAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T09:30:00Z"))
+
+        XCTAssertEqual(
+            WidgetQuotaSelectionResolver.providers(
+                in: snapshot,
+                mode: .automatic,
+                selectedIDs: [],
+                limit: 2,
+                at: renderedAt
+            ).map(\.provider),
+            ["claude", "codex"]
+        )
+    }
+
+    func testQuotaFreshnessTreatsMissingTimestampAsStalePerProvider() throws {
+        let renderedAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T09:30:00Z"))
+        let fresh = WidgetQuotaProvider(
+            instanceId: "fresh",
+            provider: "codex",
+            status: "ok",
+            updatedAt: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T09:29:00Z")),
+            windows: []
+        )
+        let stale = WidgetQuotaProvider(
+            instanceId: "stale",
+            provider: "claude",
+            status: "ok",
+            updatedAt: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T08:00:00Z")),
+            windows: []
+        )
+        let unknown = WidgetQuotaProvider(
+            instanceId: "unknown",
+            provider: "cursor",
+            status: "ok",
+            updatedAt: nil,
+            windows: []
+        )
+        let unavailable = WidgetQuotaProvider(
+            instanceId: "unavailable",
+            provider: "antigravity",
+            status: "unavailable",
+            updatedAt: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T09:29:00Z")),
+            windows: []
+        )
+
+        XCTAssertFalse(
+            WidgetQuotaFreshness.isStale(fresh, at: renderedAt)
+        )
+        XCTAssertTrue(
+            WidgetQuotaFreshness.isStale(stale, at: renderedAt)
+        )
+        XCTAssertTrue(
+            WidgetQuotaFreshness.isStale(unknown, at: renderedAt)
+        )
+        XCTAssertTrue(
+            WidgetQuotaFreshness.isStale(unavailable, at: renderedAt)
+        )
+    }
+
+    func testCurrentSchemaDecodesMaskedAccountLabelsAndTypedQuotaWindows() throws {
+        let snapshot = try decode("""
+        {
+          "schemaVersion":10,
+          "generatedAt":"2026-07-17T09:00:00.000Z",
+          "periods":{"day":{}},
+          "quota":[{
+            "provider":"codex",
+            "instanceId":"codex-a1b2c3d4",
+            "displayName":"Codex",
+            "accountLabel":"a***e@example.com",
+            "isCurrentAccount":true,
+            "status":"ok",
+            "updatedAt":"2026-07-17T08:59:00.000Z",
+            "windows":[{
+              "kind":"billing",
+              "label":"Premium requests",
+              "metric":"credits",
+              "showMeter":false,
+              "usedPercent":35,
+              "windowMinutes":10080,
+              "remaining":9.5,
+              "currency":"USD",
+              "resetsAt":"2026-07-18T09:00:00.000Z",
+              "boundaryKind":"expiry"
+            }]
+          }]
+        }
+        """)
+
+        let provider = try XCTUnwrap(snapshot.quota.first)
+        XCTAssertEqual(provider.displayName, "Codex")
+        XCTAssertEqual(provider.accountLabel, "a***e@example.com")
+        XCTAssertTrue(provider.isCurrentAccount)
+        XCTAssertEqual(provider.windows.first?.label, "Premium requests")
+        XCTAssertEqual(WidgetFormat.windowTitle(try XCTUnwrap(provider.windows.first)), "Premium requests")
+        XCTAssertEqual(provider.windows.first?.metric, "credits")
+        XCTAssertEqual(provider.windows.first?.usedPercent, 35)
+        XCTAssertEqual(provider.windows.first?.windowMinutes, 10_080)
+        XCTAssertEqual(provider.windows.first?.boundaryKind, "expiry")
+        XCTAssertFalse(provider.windows.first?.showMeter ?? true)
+    }
+
+    func testSourceFreshnessUsesCurrentStatusTimestamp() throws {
+        let snapshot = try decode("""
+        {
+          "schemaVersion":10,
+          "generatedAt":"2026-07-17T09:30:00.000Z",
+          "periods":{"day":{"overview":{"updatedAt":"2026-07-17T09:29:00.000Z"}}},
+          "status":{"isStale":true,"sourceStale":true,"sourceUpdatedAt":"2026-07-17T08:00:00.000Z","noData":false}
+        }
+        """)
+
+        XCTAssertTrue(snapshot.isStale(at: snapshot.generatedAt))
+        XCTAssertEqual(
+            WidgetStalePresentation.trustedUpdatedAt(for: snapshot),
+            try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-07-17T08:00:00Z"))
+        )
+    }
+
+    func testWidgetToolLabelsMatchTheDesktopCatalogForMiMoCode() {
+        XCTAssertEqual(WidgetFormat.provider("mimo"), "MiMo")
+        XCTAssertEqual(WidgetFormat.provider("micode"), "MiMo Code")
     }
 
     func testStatusMappingNeverExposesInternalEnums() {
@@ -300,13 +344,15 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
 
     func testQuotaValuePrioritizesBalanceThenPercentThenStatus() {
         let balanceAndPercent = WidgetQuotaProvider(
+            instanceId: "mimo-single",
             provider: "mimo",
             status: "ok",
             updatedAt: nil,
-            windows: [WidgetLimitWindow(kind: "billing", usedPercent: 60, remainingPercent: 40, resetsAt: nil, windowMinutes: nil)],
+            windows: [WidgetLimitWindow(kind: "billing", remainingPercent: 40, resetsAt: nil)],
             balance: WidgetQuotaBalance(amount: 3.62, currency: "CNY")
         )
         let zeroUsd = WidgetQuotaProvider(
+            instanceId: "deepseek-single",
             provider: "deepseek",
             status: "ok",
             updatedAt: nil,
@@ -314,10 +360,11 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             balance: WidgetQuotaBalance(amount: 0, currency: "USD")
         )
         let percentOnly = WidgetQuotaProvider(
+            instanceId: "codex-single",
             provider: "codex",
             status: "ok",
             updatedAt: nil,
-            windows: [WidgetLimitWindow(kind: "weekly", usedPercent: 98, remainingPercent: 2, resetsAt: nil, windowMinutes: nil)]
+            windows: [WidgetLimitWindow(kind: "weekly", remainingPercent: 2, resetsAt: nil)]
         )
 
         XCTAssertEqual(WidgetFormat.quotaValue(balanceAndPercent), "¥3.62 left")
@@ -327,6 +374,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertEqual(WidgetFormat.quotaValue(provider(status: "unauthorized")), "Sign in again")
         XCTAssertEqual(
             WidgetFormat.quotaValue(WidgetQuotaProvider(
+                instanceId: "deepseek-single",
                 provider: "deepseek",
                 status: "ok",
                 updatedAt: nil,
@@ -335,11 +383,85 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             )),
             "HK$9.33 left"
         )
+        XCTAssertEqual(
+            WidgetFormat.quotaValue(WidgetQuotaProvider(
+                instanceId: "workbuddy-single",
+                provider: "workbuddy",
+                status: "ok",
+                updatedAt: nil,
+                windows: [],
+                balance: WidgetQuotaBalance(amount: 63, currency: "CREDITS")
+            )),
+            "63.00 credits left"
+        )
+    }
+
+    func testQuotaWindowValuePreservesCurrencyAndSpendSemantics() {
+        let usd = WidgetLimitWindow(
+            kind: "billing", remainingPercent: nil, resetsAt: nil,
+            metric: "credits", showMeter: false, remaining: 12.5, currency: "USD"
+        )
+        let credits = WidgetLimitWindow(
+            kind: "billing", remainingPercent: nil, resetsAt: nil,
+            metric: "credits", showMeter: false, remaining: 63, currency: "CREDITS"
+        )
+        let spend = WidgetLimitWindow(
+            kind: "billing", remainingPercent: nil, resetsAt: nil,
+            metric: "spend", showMeter: false, used: 2.35, currency: "USD"
+        )
+        let percentage = WidgetLimitWindow(kind: "weekly", remainingPercent: 53, resetsAt: nil)
+
+        XCTAssertEqual(WidgetFormat.windowValue(usd), "$12.50")
+        XCTAssertEqual(WidgetFormat.windowValue(credits), "63.00 credits")
+        XCTAssertEqual(WidgetFormat.windowValue(spend), "$2.35")
+        XCTAssertEqual(WidgetFormat.windowValue(percentage), "53% left")
+    }
+
+    func testQuotaPresentationKeepsBalanceAlongsideQuotaWindows() {
+        let claude = WidgetQuotaProvider(
+            instanceId: "claude-single",
+            provider: "claude",
+            status: "ok",
+            updatedAt: nil,
+            windows: [
+                WidgetLimitWindow(kind: "session", remainingPercent: 89, resetsAt: nil),
+                WidgetLimitWindow(kind: "weekly", remainingPercent: 68, resetsAt: nil),
+                WidgetLimitWindow(
+                    kind: "billing", remainingPercent: nil, resetsAt: nil,
+                    metric: "spend", showMeter: false, used: 2.35, currency: "USD", label: "Usage credits"
+                )
+            ],
+            balance: WidgetQuotaBalance(amount: 113.44, currency: "USD")
+        )
+        let full = WidgetQuotaPresentation.windows(for: claude, limit: 3)
+        let dashboard = WidgetQuotaPresentation.windows(
+            for: claude,
+            limit: 2,
+            reserveBalanceSlot: false
+        )
+
+        XCTAssertEqual(full.map(\.metric), [nil, nil, "credits"])
+        XCTAssertEqual(full.map(WidgetFormat.windowValue), ["89% left", "68% left", "$113.44"])
+        XCTAssertEqual(dashboard.map(\.metric), [nil, nil])
+        XCTAssertEqual(dashboard.map(WidgetFormat.windowValue), ["89% left", "68% left"])
+
+        let thirdParty = WidgetQuotaProvider(
+            instanceId: "thirdparty-gptnb",
+            provider: "thirdparty",
+            status: "ok",
+            updatedAt: nil,
+            windows: [],
+            balance: WidgetQuotaBalance(amount: 39.5, currency: "USD", allTimeSpend: 140.52),
+            accountLabel: "GPTNB"
+        )
+        let thirdPartyWindows = WidgetQuotaPresentation.windows(for: thirdParty, limit: 3)
+        XCTAssertEqual(thirdPartyWindows.map(\.metric), ["credits", "spend"])
+        XCTAssertEqual(thirdPartyWindows.map(WidgetFormat.windowValue), ["$39.50", "$140.52"])
     }
 
     func testQuotaWindowDecodesTypedLifecycleBoundaries() throws {
         let snapshot = try decode("""
-        {"schemaVersion":6,"generatedAt":"2026-07-17T09:00:00.000Z","quota":[{"provider":"kiro","status":"ok","windows":[{"kind":"billing","remainingPercent":50,"resetsAt":"2026-07-24T09:00:00.000Z","boundaryKind":"expiry"},{"kind":"billing","remainingPercent":40,"resetsAt":"2026-07-24T09:00:00.000Z","boundaryKind":"mixed"}]}],"status":{"noData":false}}
+        {"schemaVersion":10,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{}},"quota":[{"provider":"kiro","instanceId":"kiro-a","status":"ok","windows":[{"kind":"billing","showMeter":true,"remainingPercent":50,"resetsAt":"2026-07-24T09:00:00.000Z","boundaryKind":"expiry"},{"kind":"billing","showMeter":true,"remainingPercent":40,"resetsAt":"2026-07-24T09:00:00.000Z","boundaryKind":"mixed"}]}],"status":{"noData":false}}
         """)
         let windows = try XCTUnwrap(snapshot.quota.first?.windows)
         XCTAssertEqual(windows.map(\.boundaryKind), ["expiry", "mixed"])
@@ -347,81 +469,19 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertTrue(WidgetFormat.boundary(windows[1]).hasPrefix("Changes"))
     }
 
-    func testAllFiveIntentPagesAreIndependentValues() {
-        XCTAssertEqual(WidgetPage.allCases.map(\.rawValue), ["overview", "quota", "models", "activity", "trend"])
-        var first = TokenMonitorWidgetConfigurationIntent()
-        var second = TokenMonitorWidgetConfigurationIntent()
-        first.page = .overview
-        second.page = .models
-        XCTAssertNotEqual(first.page, second.page)
-    }
-
-    func testViewModelsPreserveAvailableRowsAndLongNames() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":2,"generatedAt":"2026-07-17T09:00:00Z","overview":{"totalTokens":10},"models":[{"displayName":"A very long provider model name that must stay on one line","totalTokens":7,"sharePercent":70},{"displayName":"Second","totalTokens":2,"sharePercent":20},{"displayName":"Third","totalTokens":1,"sharePercent":10}],"status":{"noData":false}}
-        """)
-        let small = WidgetViewModel.make(snapshot: snapshot, page: .models, layout: .small)
-        let medium = WidgetViewModel.make(snapshot: snapshot, page: .models, layout: .medium)
-        let large = WidgetViewModel.make(snapshot: snapshot, page: .models, layout: .large)
-        XCTAssertTrue(small.primaryValue.hasPrefix("A very long"))
-        XCTAssertEqual(small.rows.count, 2)
-        XCTAssertEqual(medium.rows.count, 2)
-        XCTAssertEqual(large.rows.count, 2)
+    func testQuotaBoundaryUsesAtMostTwoCompactDurationUnits() {
+        XCTAssertEqual(WidgetFormat.compactDuration(seconds: 4 * 3_600), "4h")
+        XCTAssertEqual(WidgetFormat.compactDuration(seconds: 4 * 3_600 + 12 * 60), "4h 12m")
+        XCTAssertEqual(WidgetFormat.compactDuration(seconds: 2 * 86_400 + 59 * 60), "2d 59m")
+        XCTAssertEqual(WidgetFormat.compactDuration(seconds: 30), "1m")
     }
 
     func testWidgetPageDisplayNamesAreLocalized() {
         XCTAssertEqual(WidgetPage.quota.title, "Quota")
-    }
-
-    func testWidgetPageCycleOrderIsStable() {
-        XCTAssertEqual(WidgetPage.overview.next, .quota)
-        XCTAssertEqual(WidgetPage.quota.next, .models)
-        XCTAssertEqual(WidgetPage.models.next, .activity)
-        XCTAssertEqual(WidgetPage.activity.next, .trend)
-        XCTAssertEqual(WidgetPage.trend.next, .overview)
-    }
-
-    func testWidgetPeriodStateDefaultsPersistsAndNormalizes() {
-        let suite = "token-monitor-widget-period-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = WidgetPresentationStateStore(defaults: defaults)
-
-        XCTAssertEqual(store.selectedPeriod(), .day)
-        store.setSelectedPeriod(.month)
-        XCTAssertEqual(store.selectedPeriod(), .month)
-        defaults.set("not-a-period", forKey: WidgetPresentationStateStore.selectedPeriodKey)
-        XCTAssertEqual(store.selectedPeriod(), .day)
-    }
-
-    func testWidgetPageStateDefaultsPersistByFamilyAndNormalize() {
-        let suite = "token-monitor-widget-page-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = WidgetPresentationStateStore(defaults: defaults)
-
-        XCTAssertNil(store.selectedPage(for: .small))
-        XCTAssertNil(store.selectedPage(for: .medium))
-        XCTAssertNil(store.selectedPage(for: .large))
-
-        store.setSelectedPage(.quota, for: .small)
-        store.setSelectedPage(.activity, for: .medium)
-        store.setSelectedPage(.trend, for: .large)
-
-        XCTAssertEqual(store.selectedPage(for: .small), .quota)
-        XCTAssertEqual(store.selectedPage(for: .medium), .activity)
-        XCTAssertEqual(store.selectedPage(for: .large), .trend)
-
-        defaults.set("not-a-page", forKey: WidgetPresentationStateStore.selectedPageKey(for: .medium))
-        XCTAssertNil(store.selectedPage(for: .medium))
-        XCTAssertNil(defaults.string(forKey: WidgetPresentationStateStore.selectedPageKey(for: .medium)))
-
-        store.clearSelectedPage(for: .small)
-        XCTAssertNil(store.selectedPage(for: .small))
-        XCTAssertEqual(store.selectedPage(for: .large), .trend)
-
-        store.clearSelectedPages()
-        XCTAssertNil(store.selectedPage(for: .large))
+        XCTAssertEqual(WidgetPeriod.day.title, "DAY")
+        XCTAssertEqual(WidgetPeriod.day.displayTitle, "TODAY")
+        XCTAssertEqual(WidgetPeriod.month.displayTitle, "MONTH")
+        XCTAssertEqual(WidgetPeriod.total.displayTitle, "TOTAL")
     }
 
     func testActivityDayStatePersistsOnlyForMediumAndLarge() {
@@ -432,16 +492,30 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
 
         store.setSelectedActivityDay("2026-07-16", for: .medium)
         store.setSelectedActivityDay("2026-07-17", for: .large)
-        store.setSelectedActivityDay("2026-07-15", for: .small)
 
         XCTAssertEqual(store.selectedActivityDay(for: .medium), "2026-07-16")
         XCTAssertEqual(store.selectedActivityDay(for: .large), "2026-07-17")
-        XCTAssertNil(store.selectedActivityDay(for: .small))
-        XCTAssertNil(defaults.string(forKey: WidgetPresentationStateStore.selectedActivityDayKey(for: .small)))
 
         store.clearSelectedActivityDay(for: .medium)
         XCTAssertNil(store.selectedActivityDay(for: .medium))
         XCTAssertEqual(store.selectedActivityDay(for: .large), "2026-07-17")
+    }
+
+    func testSelectedActivityDayResolvesItsSnapshotMetrics() {
+        let days = [
+            WidgetActivityDay(date: "2026-07-16", intensity: 2, totalTokens: 12_000_000, costUsd: 4.25),
+            WidgetActivityDay(date: "2026-07-17", intensity: 4, totalTokens: 37_400_000, costUsd: 9.75)
+        ]
+
+        XCTAssertEqual(
+            WidgetActivitySelection.selectedDay(in: days, selectedDate: "2026-07-17"),
+            days[1]
+        )
+        XCTAssertNil(WidgetActivitySelection.selectedDay(in: days, selectedDate: nil))
+        XCTAssertEqual(
+            WidgetActivitySelection.selectedDay(in: days, selectedDate: "2026-07-18"),
+            WidgetActivityDay(date: "2026-07-18", intensity: 0, totalTokens: 0, costUsd: 0)
+        )
     }
 
     func testActivityDayStateClearsInvalidDates() {
@@ -458,7 +532,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         }
     }
 
-    func testSelectActivityDayActionTogglesAndReloadsSpecifiedKind() {
+    func testSelectActivityDayActionTogglesAndReloadsAllWidgets() {
         let suite = "token-monitor-widget-select-activity-day-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -469,8 +543,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             family: .medium,
             date: "2026-07-16",
             store: store,
-            widgetKind: "test.widget.kind",
-            reload: { reloadedKinds.append($0) }
+            reload: { reloadedKinds.append("all") }
         )
         XCTAssertEqual(store.selectedActivityDay(for: .medium), "2026-07-16")
 
@@ -478,123 +551,25 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             family: .medium,
             date: "2026-07-16",
             store: store,
-            widgetKind: "test.widget.kind",
-            reload: { reloadedKinds.append($0) }
+            reload: { reloadedKinds.append("all") }
         )
         XCTAssertNil(store.selectedActivityDay(for: .medium))
-        XCTAssertEqual(reloadedKinds, ["test.widget.kind", "test.widget.kind"])
+        XCTAssertEqual(reloadedKinds, ["all", "all"])
     }
 
-    func testPageCycleClearsOnlyThatFamilyActivitySelection() {
-        let suite = "token-monitor-widget-clear-activity-day-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = WidgetPresentationStateStore(defaults: defaults)
+    func testRefreshActionReloadsWidgetsWithoutOpeningTheApp() {
+        var reloadCount = 0
 
-        store.setSelectedActivityDay("2026-07-16", for: .medium)
-        store.setSelectedActivityDay("2026-07-17", for: .large)
-        WidgetIntentActions.cyclePage(family: .medium, currentPage: .activity, store: store, widgetKind: "kind", reload: { _ in })
-        XCTAssertNil(store.selectedActivityDay(for: .medium))
-        XCTAssertEqual(store.selectedActivityDay(for: .large), "2026-07-17")
-    }
+        WidgetIntentActions.refresh {
+            reloadCount += 1
+        }
 
-    func testPeriodActionsPreserveActivitySelections() {
-        let suite = "token-monitor-widget-preserve-activity-day-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = WidgetPresentationStateStore(defaults: defaults)
-
-        store.setSelectedActivityDay("2026-07-16", for: .medium)
-        store.setSelectedActivityDay("2026-07-17", for: .large)
-        WidgetIntentActions.setPeriod(.month, store: store, widgetKind: "kind", reload: { _ in })
-        XCTAssertEqual(store.selectedActivityDay(for: .medium), "2026-07-16")
-        XCTAssertEqual(store.selectedActivityDay(for: .large), "2026-07-17")
-
-        WidgetIntentActions.cyclePeriod(store: store, widgetKind: "kind", reload: { _ in })
-        XCTAssertEqual(store.selectedActivityDay(for: .medium), "2026-07-16")
-        XCTAssertEqual(store.selectedActivityDay(for: .large), "2026-07-17")
-    }
-
-    func testWidgetPageAndPeriodStateAreIndependent() {
-        let suite = "token-monitor-widget-presentation-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = WidgetPresentationStateStore(defaults: defaults)
-
-        store.setSelectedPeriod(.month)
-        store.setSelectedPage(.models, for: .medium)
-        XCTAssertEqual(store.selectedPeriod(), .month)
-        XCTAssertEqual(store.selectedPage(for: .medium), .models)
-
-        store.setSelectedPage(.activity, for: .medium)
-        XCTAssertEqual(store.selectedPeriod(), .month)
-        XCTAssertEqual(store.selectedPage(for: .medium), .activity)
-
-        store.setSelectedPeriod(.total)
-        XCTAssertEqual(store.selectedPeriod(), .total)
-        XCTAssertEqual(store.selectedPage(for: .medium), .activity)
-        XCTAssertNil(store.lastConfiguredPage(for: .medium))
-    }
-
-    func testWidgetLastConfiguredPagePersistsByFamilyAndNormalizes() {
-        let suite = "token-monitor-widget-config-page-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = WidgetPresentationStateStore(defaults: defaults)
-
-        XCTAssertNil(store.lastConfiguredPage(for: .small))
-        store.setLastConfiguredPage(.models, for: .small)
-        store.setLastConfiguredPage(.activity, for: .large)
-        XCTAssertEqual(store.lastConfiguredPage(for: .small), .models)
-        XCTAssertEqual(store.lastConfiguredPage(for: .large), .activity)
-        XCTAssertNil(store.lastConfiguredPage(for: .medium))
-
-        defaults.set("not-a-page", forKey: WidgetPresentationStateStore.lastConfiguredPageKey(for: .small))
-        XCTAssertNil(store.lastConfiguredPage(for: .small))
-        XCTAssertNil(defaults.string(forKey: WidgetPresentationStateStore.lastConfiguredPageKey(for: .small)))
-
-        store.clearLastConfiguredPage(for: .large)
-        XCTAssertNil(store.lastConfiguredPage(for: .large))
-    }
-
-    func testEffectivePageSyncsRightClickConfigurationWithoutBreakingInteractiveCycle() {
-        let suite = "token-monitor-widget-effective-page-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = WidgetPresentationStateStore(defaults: defaults)
-
-        XCTAssertEqual(store.effectivePage(configuredPage: .overview, for: .medium), .overview)
-        XCTAssertEqual(store.lastConfiguredPage(for: .medium), .overview)
-
-        store.setSelectedPage(.quota, for: .medium)
-        store.setSelectedActivityDay("2026-07-16", for: .medium)
-        XCTAssertEqual(store.effectivePage(configuredPage: .overview, for: .medium), .quota)
-        XCTAssertEqual(store.selectedActivityDay(for: .medium), "2026-07-16")
-
-        XCTAssertEqual(store.effectivePage(configuredPage: .models, for: .medium), .models)
-        XCTAssertEqual(store.lastConfiguredPage(for: .medium), .models)
-        XCTAssertEqual(store.selectedPage(for: .medium), .models)
-        XCTAssertNil(store.selectedActivityDay(for: .medium))
-
-        let pageIntent = CycleWidgetPageIntent(family: .medium, currentPage: store.selectedPage(for: .medium) ?? .overview)
-        XCTAssertEqual(pageIntent.currentPage.next, .activity)
-        XCTAssertEqual(store.selectedPeriod(), .day)
-    }
-
-    func testEffectivePageKeepsExistingInteractivePageOnFirstTimelineAfterUpgrade() {
-        let suite = "token-monitor-widget-upgrade-page-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = WidgetPresentationStateStore(defaults: defaults)
-
-        store.setSelectedPage(.trend, for: .large)
-        XCTAssertEqual(store.effectivePage(configuredPage: .overview, for: .large), .trend)
-        XCTAssertEqual(store.lastConfiguredPage(for: .large), .overview)
-        XCTAssertEqual(store.selectedPage(for: .large), .trend)
+        XCTAssertEqual(reloadCount, 1)
+        XCTAssertFalse(RefreshWidgetIntent.openAppWhenRun)
     }
 
     func testWidgetFamilyScopeMapsSupportedFamiliesOnly() {
-        XCTAssertEqual(WidgetFamilyScope(widgetFamily: .systemSmall), .small)
+        XCTAssertNil(WidgetFamilyScope(widgetFamily: .systemSmall))
         XCTAssertEqual(WidgetFamilyScope(widgetFamily: .systemMedium), .medium)
         XCTAssertEqual(WidgetFamilyScope(widgetFamily: .systemLarge), .large)
     }
@@ -622,11 +597,6 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
             ),
             date
         )
-        XCTAssertEqual(
-            WidgetActivitySelection.detailDay(selectedDate: date, days: days),
-            WidgetActivityDay(date: date, intensity: 0, totalTokens: 0)
-        )
-
         store.setSelectedActivityDay("2020-01-01", for: .large)
         XCTAssertNil(
             WidgetActivitySelection.resolvedDate(
@@ -642,7 +612,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertNil(
             WidgetActivitySelection.resolvedDate(
                 days: days,
-                family: .small,
+                family: nil,
                 referenceDate: reference,
                 store: store,
                 timeZone: .gmt
@@ -650,88 +620,51 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         )
     }
 
-    func testWidgetLayoutMetricsStabilizeHeaderFooterAndPageControl() {
-        let small = WidgetLayoutMetrics.metrics(for: .systemSmall)
-        let medium = WidgetLayoutMetrics.metrics(for: .systemMedium)
-        let large = WidgetLayoutMetrics.metrics(for: .systemLarge)
+    func testActivitySelectionCoverageMatchesEachRenderedFamily() throws {
+        let suite = "token-monitor-widget-family-activity-coverage-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WidgetPresentationStateStore(defaults: defaults)
+        let reference = try utcDate("2026-07-17")
+        let days = [
+            WidgetActivityDay(date: "2026-01-01", intensity: 1, totalTokens: 1),
+            WidgetActivityDay(date: "2026-07-17", intensity: 1, totalTokens: 1)
+        ]
 
-        for metrics in [small, medium, large] {
-            XCTAssertEqual(metrics.outerTopInset, 0)
-            XCTAssertEqual(metrics.outerBottomInset, 0)
-            XCTAssertEqual(metrics.horizontalInset, 0)
-            XCTAssertEqual(metrics.outerInsets.leading, 0)
-            XCTAssertEqual(metrics.outerInsets.trailing, 0)
-        }
-        XCTAssertEqual([small.headerHeight, medium.headerHeight, large.headerHeight], [20, 22, 24])
-        XCTAssertEqual([small.footerHeight, medium.footerHeight, large.footerHeight], [25, 26, 28])
-        XCTAssertEqual(small.pageControlWidth, 108)
-        XCTAssertEqual(medium.pageControlWidth, 112)
-        XCTAssertEqual(large.pageControlWidth, 112)
-        XCTAssertEqual(WidgetLayoutMetrics.metrics(for: .systemSmall).pageControlWidth, small.pageControlWidth)
-    }
+        store.setSelectedActivityDay("2026-03-28", for: .large)
+        XCTAssertNil(
+            WidgetActivitySelection.resolvedDate(
+                days: days,
+                family: .large,
+                referenceDate: reference,
+                store: store,
+                timeZone: .gmt
+            )
+        )
 
-    func testWidgetScaffoldGeometryIsFamilyOnlyAndReservesContentRect() {
-        let families = [WidgetLayoutMetrics.small, .medium, .large]
-        let pages = WidgetPage.allCases
-        let periods = WidgetPeriod.allCases
+        store.setSelectedActivityDay("2026-03-29", for: .large)
+        XCTAssertEqual(
+            WidgetActivitySelection.resolvedDate(
+                days: days,
+                family: .large,
+                referenceDate: reference,
+                store: store,
+                timeZone: .gmt
+            ),
+            "2026-03-29"
+        )
 
-        for metrics in families {
-            let geometry = metrics.scaffoldGeometry
-            XCTAssertEqual(geometry.headerHeight, metrics.headerHeight)
-            XCTAssertEqual(geometry.footerHeight, metrics.footerHeight)
-            XCTAssertEqual(geometry.contentTopReserved, metrics.headerHeight + metrics.contentGap)
-            XCTAssertEqual(geometry.contentBottomReserved, metrics.footerHeight + metrics.contentGap)
-            XCTAssertGreaterThan(geometry.contentHeight(for: 160), 0)
-            XCTAssertLessThan(geometry.contentTopReserved + geometry.contentBottomReserved, 160)
-
-            let expectedFrames = geometry.regionFrames(for: CGSize(width: 280, height: 160))
-            XCTAssertEqual(expectedFrames.header.minY, 0)
-            XCTAssertEqual(expectedFrames.header.height, metrics.headerHeight)
-            XCTAssertEqual(expectedFrames.content.minY, geometry.contentTopReserved)
-            XCTAssertEqual(expectedFrames.footer.maxY, 160)
-            XCTAssertEqual(expectedFrames.footer.height, metrics.footerHeight)
-
-            for _ in pages {
-                for _ in periods {
-                    XCTAssertEqual(geometry, metrics.scaffoldGeometry)
-                    XCTAssertEqual(expectedFrames, metrics.scaffoldGeometry.regionFrames(for: CGSize(width: 280, height: 160)))
-                }
-            }
-        }
-    }
-
-    func testAdaptiveListCapacityFillsBeforeShowingMoreRows() {
-        for count in [0, 1, 2, 4, 6, 10] {
-            for kind in [WidgetListKind.quota, .models] {
-                let full = WidgetListCapacity.plan(itemCount: count, availableHeight: 400, kind: kind)
-                XCTAssertEqual(full.density, .regular)
-                XCTAssertEqual(full.visibleCount, count)
-                XCTAssertEqual(full.hiddenCount, 0)
-            }
-        }
-
-        let mediumFour = WidgetListCapacity.plan(itemCount: 4, availableHeight: 55, kind: .quota)
-        XCTAssertEqual(mediumFour.density, .compact)
-        XCTAssertEqual(mediumFour.visibleCount, 4)
-        XCTAssertEqual(mediumFour.hiddenCount, 0)
-
-        let smallThree = WidgetListCapacity.plan(itemCount: 3, availableHeight: 41, kind: .quota)
-        XCTAssertEqual(smallThree.density, .compact)
-        XCTAssertEqual(smallThree.visibleCount, 3)
-        XCTAssertEqual(smallThree.hiddenCount, 0)
-
-        let constrained = WidgetListCapacity.plan(itemCount: 6, availableHeight: 35, kind: .models)
-        XCTAssertEqual(constrained.density, .summary)
-        XCTAssertEqual(constrained.visibleCount, 2)
-        XCTAssertEqual(constrained.hiddenCount, 4)
-        let occupied = CGFloat(constrained.visibleCount) * constrained.rowHeight
-            + CGFloat(constrained.visibleCount) * constrained.rowSpacing
-            + constrained.moreRowHeight
-        XCTAssertLessThanOrEqual(occupied, 35)
-
-        let summaryOnly = WidgetListCapacity.plan(itemCount: 10, availableHeight: 11, kind: .quota)
-        XCTAssertEqual(summaryOnly.visibleCount, 0)
-        XCTAssertEqual(summaryOnly.hiddenCount, 10)
+        store.setSelectedActivityDay("2026-03-28", for: .medium)
+        XCTAssertEqual(
+            WidgetActivitySelection.resolvedDate(
+                days: days,
+                family: .medium,
+                referenceDate: reference,
+                store: store,
+                timeZone: .gmt
+            ),
+            "2026-03-28"
+        )
     }
 
     func testHeatmapUsesSundayRowsAndCalendarPlaceholders() throws {
@@ -845,39 +778,60 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         }
     }
 
-    func testWidgetPeriodCycleAndIntentOpenBehavior() {
-        XCTAssertEqual(WidgetPeriod.day.next, .month)
-        XCTAssertEqual(WidgetPeriod.month.next, .total)
-        XCTAssertEqual(WidgetPeriod.total.next, .day)
-        XCTAssertFalse(SetWidgetPeriodIntent.openAppWhenRun)
-        XCTAssertFalse(CycleWidgetPeriodIntent.openAppWhenRun)
-        XCTAssertFalse(CycleWidgetPageIntent.openAppWhenRun)
-        XCTAssertFalse(SelectActivityDayIntent.openAppWhenRun)
-
-        let pageIntent = CycleWidgetPageIntent(family: .large, currentPage: .trend)
-        XCTAssertEqual(pageIntent.family, .large)
-        XCTAssertEqual(pageIntent.currentPage, .trend)
-        let dayIntent = SelectActivityDayIntent(family: .large, date: "2026-07-16")
-        XCTAssertEqual(dayIntent.family, .large)
-        XCTAssertEqual(dayIntent.date, "2026-07-16")
-    }
-
-    func testWidgetPeriodSnapshotFallbackDoesNotBlankDay() throws {
+    func testCurrentSchemaRequiresEveryPeriodAndSelectsWithoutFabricatingData() throws {
+        XCTAssertThrowsError(try decodeRaw("""
+        {"schemaVersion":10,"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{"overview":{"totalTokens":7,"costUsd":0},"tools":[],"models":[],"activity":{"activeDays":0,"days":[]},"trend":{"points":[]}}},"quota":[],"presentation":{"currencyCode":"USD","currencySymbol":"$","currencyRate":1,"numberStyle":"compact","compactTokenUnits":"western","showCost":true,"locale":"auto","theme":"system"},"status":{"isStale":false}}
+        """))
         let snapshot = try decode("""
-        {"schemaVersion":2,"generatedAt":"2026-07-17T09:00:00Z","overview":{"totalTokens":7},"presentation":{"currencySymbol":"¥"}}
+        {"periods":{"day":{"overview":{"totalTokens":7}},"month":{"overview":{"totalTokens":11}}},"presentation":{"currencySymbol":"¥"}}
         """)
         XCTAssertEqual(snapshot.selecting(.day).overview.totalTokens, 7)
-        XCTAssertTrue(snapshot.selecting(.month).isEmpty)
+        XCTAssertEqual(snapshot.selecting(.month).overview.totalTokens, 11)
     }
 
     func testStaleStatusWinsOverGeneratedAtThreshold() throws {
-        let snapshot = try decode("{\"schemaVersion\":2,\"generatedAt\":\"2026-07-17T09:00:00Z\",\"status\":{\"isStale\":true,\"noData\":false}}")
+        let snapshot = try decode("{\"schemaVersion\":10,\"generatedAt\":\"2026-07-17T09:00:00Z\",\"periods\":{\"day\":{}},\"status\":{\"isStale\":true,\"noData\":false}}")
         XCTAssertTrue(snapshot.isStale(at: Date(timeIntervalSince1970: 0)))
     }
 
     private func decode(_ json: String) throws -> WidgetSnapshot {
+        let baseline = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(Self.currentSnapshotJSON.utf8)) as? [String: Any])
+        let overrides = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(json.data(using: .utf8))) as? [String: Any])
+        let data = try JSONSerialization.data(withJSONObject: merge(baseline, overrides))
+        return try WidgetSnapshot.decoder.decode(WidgetSnapshot.self, from: data)
+    }
+
+    private func decodeRaw(_ json: String) throws -> WidgetSnapshot {
         try WidgetSnapshot.decoder.decode(WidgetSnapshot.self, from: XCTUnwrap(json.data(using: .utf8)))
     }
+
+    private func merge(_ baseline: [String: Any], _ overrides: [String: Any]) -> [String: Any] {
+        var result = baseline
+        for (key, value) in overrides {
+            if let nestedBaseline = result[key] as? [String: Any],
+               let nestedOverrides = value as? [String: Any] {
+                result[key] = merge(nestedBaseline, nestedOverrides)
+            } else {
+                result[key] = value
+            }
+        }
+        return result
+    }
+
+    private static let currentSnapshotJSON = """
+    {
+      "schemaVersion":10,
+      "generatedAt":"2026-07-17T09:00:00Z",
+      "periods":{
+        "day":{"overview":{"totalTokens":0,"costUsd":0},"tools":[],"models":[],"activity":{"activeDays":0,"days":[]},"trend":{"points":[]}},
+        "month":{"overview":{"totalTokens":0,"costUsd":0},"tools":[],"models":[],"activity":{"activeDays":0,"days":[]},"trend":{"points":[]}},
+        "total":{"overview":{"totalTokens":0,"costUsd":0},"tools":[],"models":[],"activity":{"activeDays":0,"days":[]},"trend":{"points":[]}}
+      },
+      "quota":[],
+      "presentation":{"currencyCode":"USD","currencySymbol":"$","currencyRate":1,"numberStyle":"compact","compactTokenUnits":"western","showCost":true,"locale":"auto","theme":"system"},
+      "status":{"isStale":false,"sourceUpdatedAt":null}
+    }
+    """
 
     private func utcDate(_ value: String) throws -> Date {
         try XCTUnwrap(ISO8601DateFormatter().date(from: "\(value)T00:00:00Z"))
@@ -901,77 +855,10 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     }
 
     private func provider(status: String) -> WidgetQuotaProvider {
-        WidgetQuotaProvider(provider: "codex", status: status, updatedAt: nil, windows: [])
+        WidgetQuotaProvider(instanceId: "codex-single", provider: "codex", status: status, updatedAt: nil, windows: [])
     }
 
     // MARK: - Large Widget Layout Tests
-
-    func testLargeModelFontSizeMatchesQuotaListDensity() {
-        let largePlan = WidgetLargeListLayoutPlan.make(itemCount: 5, availableHeight: 380)
-        let mediumGeometry = WidgetListCapacity.geometry(kind: .models, density: .regular)
-
-        XCTAssertEqual(largePlan.nameFontSize, 11)
-        XCTAssertEqual(largePlan.percentFontSize, 10)
-        XCTAssertEqual(largePlan.tokenFontSize, 9)
-        XCTAssertGreaterThan(largePlan.rowHeight, mediumGeometry.rowHeight)
-        XCTAssertLessThanOrEqual(largePlan.rowHeight, 38)
-    }
-
-    func testLargeModelRowHeightAdaptsToAvailableHeight() {
-        let small = WidgetLargeListLayoutPlan.make(itemCount: 5, availableHeight: 200)
-        let medium = WidgetLargeListLayoutPlan.make(itemCount: 5, availableHeight: 380)
-        let large = WidgetLargeListLayoutPlan.make(itemCount: 5, availableHeight: 600)
-
-        XCTAssertGreaterThanOrEqual(small.rowHeight, 30)
-        XCTAssertLessThanOrEqual(small.rowHeight, 38)
-        XCTAssertGreaterThan(medium.rowHeight, small.rowHeight)
-        XCTAssertGreaterThanOrEqual(large.rowHeight, 30)
-        XCTAssertLessThanOrEqual(large.rowHeight, 38)
-        XCTAssertEqual(large.nameFontSize, 11)
-        XCTAssertEqual(large.percentFontSize, 10)
-        XCTAssertEqual(large.tokenFontSize, 9)
-    }
-
-    func testLargeModelListDoesNotCrowdAllModelsAtTop() {
-        let plan = WidgetLargeListLayoutPlan.make(itemCount: 10, availableHeight: 380)
-        // Large models should read as a peer list to quota, not as title-sized rows.
-        XCTAssertGreaterThanOrEqual(plan.rowHeight, 30)
-        XCTAssertLessThanOrEqual(plan.rowHeight, 38)
-        XCTAssertLessThanOrEqual(plan.nameFontSize, 11)
-        // If we reduce available height, fewer items should show
-        let constrained = WidgetLargeListLayoutPlan.make(itemCount: 10, availableHeight: 200)
-        XCTAssertLessThan(constrained.visibleCount, 10)
-        XCTAssertGreaterThan(constrained.hiddenCount, 0)
-    }
-
-    func testLargeModelMoreRowOnlyWhenOverCapacity() {
-        let exactFit = WidgetLargeListLayoutPlan.make(itemCount: 3, availableHeight: 600)
-        XCTAssertEqual(exactFit.hiddenCount, 0)
-
-        let overCapacity = WidgetLargeListLayoutPlan.make(itemCount: 15, availableHeight: 200)
-        XCTAssertGreaterThan(overCapacity.hiddenCount, 0)
-    }
-
-    func testLargeOverviewShowsMax2Models() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":2,"generatedAt":"2026-07-17T09:00:00Z","overview":{"totalTokens":10},"models":[{"displayName":"A","totalTokens":7,"sharePercent":70},{"displayName":"B","totalTokens":2,"sharePercent":20},{"displayName":"C","totalTokens":1,"sharePercent":10},{"displayName":"D","totalTokens":0,"sharePercent":0},{"displayName":"E","totalTokens":0,"sharePercent":0}],"status":{"noData":false}}
-        """)
-        // modelOverviewRows with limit:2 returns 2 models + "另有 N 项" when count > 2
-        let limit = 2
-        let models = Array(snapshot.models.prefix(limit))
-        XCTAssertEqual(models.count, 2)
-        XCTAssertTrue(snapshot.models.count > limit) // will show "另有 N 项"
-        XCTAssertEqual(snapshot.models.count - limit, 3) // "另有 3 项"
-    }
-
-    func testLargeOverviewShowsAllModelsWhenFewerThanLimit() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":2,"generatedAt":"2026-07-17T09:00:00Z","overview":{"totalTokens":10},"models":[{"displayName":"X","totalTokens":7,"sharePercent":70},{"displayName":"Y","totalTokens":3,"sharePercent":30}],"status":{"noData":false}}
-        """)
-        let limit = 2
-        XCTAssertFalse(snapshot.models.count > limit) // no "另有 N 项"
-        XCTAssertEqual(snapshot.models.count, 2)
-    }
 
     func testLargeHeatmapCellSizeGreaterThan12() {
         let reference = try! utcDate("2026-07-17")
@@ -1031,141 +918,6 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         // Week count depends on Sunday alignment (3-5 weeks)
         XCTAssertGreaterThanOrEqual(layout.weekCount, 3)
         XCTAssertLessThanOrEqual(layout.weekCount, 5)
-    }
-
-    func testLargeOverviewShowsMultipleProviders() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":4,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"currentPeriod":"today","totalTokens":100,"updatedAt":"2026-07-17T08:59:00.000Z"}}},"quota":[{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":2}]},{"provider":"mimo","status":"ok","balance":{"amount":3.62,"currency":"CNY"},"windows":[]},{"provider":"deepseek","status":"ok","balance":{"amount":9.33,"currency":"USD"},"windows":[]},{"provider":"antigravity","status":"notConfigured","windows":[]}],"status":{"noData":false}}
-        """)
-        // sortedQuotaProviders should put balance/percent first
-        let sorted = snapshot.quota.sorted { a, b in
-            func priority(_ p: WidgetQuotaProvider) -> Int {
-                if p.balance != nil || p.windows.first?.remainingPercent != nil { return 0 }
-                if p.status == "unauthorized" || p.status == "sessionExpired" { return 1 }
-                if p.status == "notConfigured" { return 3 }
-                return 2
-            }
-            return priority(a) < priority(b)
-        }
-        // MiMo and DeepSeek have balance, Codex has percent — all should be before antigravity
-        XCTAssertEqual(sorted.count, 4)
-        XCTAssertTrue(sorted[0].provider == "codex" || sorted[0].provider == "mimo" || sorted[0].provider == "deepseek")
-        XCTAssertEqual(sorted.last?.provider, "antigravity")
-    }
-
-    func testHeaderFooterGeometryUnchanged() {
-        let small = WidgetLayoutMetrics.metrics(for: .systemSmall)
-        let medium = WidgetLayoutMetrics.metrics(for: .systemMedium)
-        let large = WidgetLayoutMetrics.metrics(for: .systemLarge)
-
-        XCTAssertEqual(small.headerHeight, 20)
-        XCTAssertEqual(medium.headerHeight, 22)
-        XCTAssertEqual(large.headerHeight, 24)
-        XCTAssertEqual(small.footerHeight, 25)
-        XCTAssertEqual(medium.footerHeight, 26)
-        XCTAssertEqual(large.footerHeight, 28)
-        XCTAssertEqual(small.contentGap, 5)
-        XCTAssertEqual(medium.contentGap, 10)
-        XCTAssertEqual(large.contentGap, 8)
-    }
-
-    func testSmallMediumLayoutUnchanged() {
-        let smallModels = WidgetListCapacity.plan(itemCount: 5, availableHeight: 100, kind: .models)
-        let mediumModels = WidgetListCapacity.plan(itemCount: 5, availableHeight: 200, kind: .models)
-
-        // Small should still use its original geometry
-        let smallGeometry = WidgetListCapacity.geometry(kind: .models, density: .regular)
-        XCTAssertEqual(smallGeometry.rowHeight, 28)
-        XCTAssertEqual(smallGeometry.rowSpacing, 3)
-
-        // These should not be affected by Large changes
-        XCTAssertLessThanOrEqual(smallModels.rowHeight, 28)
-        XCTAssertLessThanOrEqual(mediumModels.rowHeight, 28)
-    }
-
-    // MARK: - Large Overview Quota Tests
-
-    func testLargeOverviewQuotaSortPutsBalanceFirst() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":4,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"currentPeriod":"today","totalTokens":100,"updatedAt":"2026-07-17T08:59:00.000Z"}}},"quota":[{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":2}]},{"provider":"mimo","status":"ok","balance":{"amount":3.62,"currency":"CNY"},"windows":[]},{"provider":"deepseek","status":"ok","balance":{"amount":9.33,"currency":"USD"},"windows":[]},{"provider":"antigravity","status":"notConfigured","windows":[]}],"status":{"noData":false}}
-        """)
-        let sorted = snapshot.quota.sorted { a, b in
-            func priority(_ p: WidgetQuotaProvider) -> Int {
-                if p.balance != nil || p.windows.first?.remainingPercent != nil { return 0 }
-                if p.status == "unauthorized" || p.status == "sessionExpired" { return 1 }
-                if p.status == "notConfigured" { return 3 }
-                return 2
-            }
-            return priority(a) < priority(b)
-        }
-        XCTAssertEqual(snapshot.quota.count, 4)
-        let top3 = Array(sorted.prefix(3))
-        XCTAssertTrue(top3.contains(where: { $0.provider == "mimo" }))
-        XCTAssertTrue(top3.contains(where: { $0.provider == "deepseek" }))
-        XCTAssertEqual(sorted.last?.provider, "antigravity")
-    }
-
-    func testLargeOverviewDoesNotUseSingleQuotaSummary() throws {
-        let snapshot = try decode("""
-        {"schemaVersion":4,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{"overview":{"currentPeriod":"today","totalTokens":100,"updatedAt":"2026-07-17T08:59:00.000Z"}}},"quota":[{"provider":"codex","status":"ok","windows":[{"kind":"weekly","remainingPercent":2}]},{"provider":"mimo","status":"ok","balance":{"amount":3.62,"currency":"CNY"},"windows":[]},{"provider":"deepseek","status":"ok","balance":{"amount":9.33,"currency":"USD"},"windows":[]}],"status":{"noData":false}}
-        """)
-        // quotaSummary only returns first provider
-        let summaryText = WidgetFormat.provider(snapshot.quota[0].provider) + " " + WidgetFormat.quotaValue(snapshot.quota[0])
-        XCTAssertTrue(summaryText.contains("Codex"))
-        // But largeQuotaPreview should show all 3 — the function itself is tested via
-        // snapshot.quota.count >= 3 and sortedQuotaProviders ordering
-        XCTAssertGreaterThanOrEqual(snapshot.quota.count, 3)
-        // MiMo has balance
-        XCTAssertNotNil(snapshot.quota[1].balance)
-        XCTAssertEqual(WidgetFormat.quotaValue(snapshot.quota[1]), "¥3.62 left")
-        // DeepSeek has balance
-        XCTAssertNotNil(snapshot.quota[2].balance)
-        XCTAssertEqual(WidgetFormat.quotaValue(snapshot.quota[2]), "$9.33 left")
-    }
-
-    // MARK: - Activity Cell Size Tests
-
-    func testSmallActivityMaxCellSizeIncreased() {
-        let metrics = WidgetLayoutMetrics.metrics(for: .systemSmall)
-        XCTAssertGreaterThanOrEqual(metrics.activityMaxCellSize, 16)
-    }
-
-    func testMediumActivityMaxCellSizeIncreased() {
-        let metrics = WidgetLayoutMetrics.metrics(for: .systemMedium)
-        XCTAssertGreaterThanOrEqual(metrics.activityMaxCellSize, 18)
-    }
-
-    func testMediumActivityLayoutSplitsSummaryAndHeatmapColumns() {
-        let plan = WidgetMediumActivityLayoutPlan.make(availableSize: CGSize(width: 330, height: 67))
-        XCTAssertGreaterThan(plan.summaryWidth, 130)
-        XCTAssertLessThan(plan.summaryWidth, 150)
-        XCTAssertGreaterThan(plan.heatmapWidth, 170)
-        XCTAssertEqual(plan.summaryWidth + plan.heatmapWidth + plan.spacing, 330, accuracy: 0.001)
-    }
-
-    func testMediumHeatmapKeepsSquareCellsInRightColumn() throws {
-        let reference = try utcDate("2026-07-18")
-        let days = try continuousActivityDays(count: 64, ending: "2026-07-18")
-        let plan = WidgetMediumActivityLayoutPlan.make(availableSize: CGSize(width: 330, height: 67))
-        let layout = WidgetHeatmapLayoutCalculator.make(
-            days: days,
-            referenceDate: reference,
-            availableSize: CGSize(width: plan.heatmapWidth, height: 67),
-            maxWeeks: 14,
-            minCellSize: 5,
-            maxCellSize: 20,
-            spacing: 2,
-            timeZone: .gmt
-        )
-        XCTAssertEqual(layout.weekCount, 10)
-        XCTAssertLessThanOrEqual(layout.weekCount, 14)
-        XCTAssertEqual(layout.cellWidth, layout.cellHeight)
-        XCTAssertGreaterThan(layout.cellHeight, 7.5)
-        XCTAssertEqual(layout.renderedHeight, 7 * layout.cellHeight + 6 * layout.spacing, accuracy: 0.001)
-        XCTAssertLessThanOrEqual(layout.renderedHeight, 67.001)
-        XCTAssertLessThanOrEqual(layout.renderedWidth, plan.heatmapWidth + 0.001)
-        XCTAssertEqual(layout.cells.count, layout.weekCount * 7)
-        XCTAssertEqual(layout.cells.filter { !$0.isFuture && $0.intensity > 0 }.count, days.count)
     }
 
     func testSmallHeatmapShowsMoreWeeksThanBefore() throws {
@@ -1379,15 +1131,15 @@ final class WidgetTimelineProviderPreviewTests: XCTestCase {
 
     private static func writeSnapshotFixture() -> URL {
         let json = """
-        {"schemaVersion":6,"generatedAt":"2026-08-09T07:00:00.000Z",
-         "periods":{"day":{"overview":{"currentPeriod":"today","totalTokens":4242,"costUsd":1.5,
-         "primaryTool":"codex","updatedAt":"2026-08-09T07:00:00.000Z"},"models":[],
-         "activity":{"days":[],"activeDays":0},"trend":{"points":[],"currentTokens":0,"peakTokens":0}}},
+        {"schemaVersion":10,"generatedAt":"2026-08-09T07:00:00.000Z",
+         "periods":{
+           "day":{"overview":{"totalTokens":4242,"costUsd":1.5},"tools":[],"models":[],"activity":{"days":[],"activeDays":0},"trend":{"points":[]}},
+           "month":{"overview":{"totalTokens":0,"costUsd":0},"tools":[],"models":[],"activity":{"days":[],"activeDays":0},"trend":{"points":[]}},
+           "total":{"overview":{"totalTokens":0,"costUsd":0},"tools":[],"models":[],"activity":{"days":[],"activeDays":0},"trend":{"points":[]}}
+         },
          "quota":[],"presentation":{"currencyCode":"USD","currencySymbol":"$","currencyRate":1,
          "numberStyle":"compact","compactTokenUnits":"western","showCost":true,"locale":"auto","theme":"system"},
-         "status":{"isStale":false,"sourceStale":false,"dataAgeSeconds":0,"providerConfigured":true,
-         "providerNeedsLogin":false,"noData":false,"sourceUpdatedAt":"2026-08-09T07:00:00.000Z",
-         "snapshotGeneratedAt":"2026-08-09T07:00:00.000Z"}}
+         "status":{"isStale":false,"sourceUpdatedAt":"2026-08-09T07:00:00.000Z"}}
         """
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("preview-fixture-\(UUID().uuidString).json")

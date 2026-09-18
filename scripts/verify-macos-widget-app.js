@@ -5,6 +5,7 @@ const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 const packageJson = require('../package.json');
 const {
+  classifyAppGroup,
   isTeamPrefixedAppGroup,
   normalizeMacDistributionChannel,
   validateAppGroupForDistribution,
@@ -85,6 +86,13 @@ function entitlementValues(xml, key) {
   return Array.from(match[1].matchAll(/<string>([\s\S]*?)<\/string>/g), (entry) => entry[1]);
 }
 
+function entitlementString(xml, key) {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(xml || '').match(new RegExp(
+    `<key>${escapedKey}</key>\\s*<string>([\\s\\S]*?)</string>`
+  ))?.[1] || null;
+}
+
 function verifyCodesign(filePath, execFileSyncImpl = execFileSync) {
   try {
     execFileSyncImpl('codesign', ['--verify', '--deep', '--strict', '--verbose=2', filePath], {
@@ -93,6 +101,23 @@ function verifyCodesign(filePath, execFileSyncImpl = execFileSync) {
     });
   } catch (_) {
     fail(`codesign verification failed for ${path.basename(filePath)}`);
+  }
+}
+
+function localElectronHelperPaths(appPath) {
+  const appName = path.basename(appPath, '.app');
+  const frameworks = path.join(appPath, 'Contents', 'Frameworks');
+  return ['', ' (GPU)', ' (Plugin)', ' (Renderer)']
+    .map((suffix) => path.join(frameworks, `${appName} Helper${suffix}.app`));
+}
+
+function verifyLocalElectronHelpers(appPath, spawnSyncImpl = spawnSync) {
+  for (const helperPath of localElectronHelperPaths(appPath)) {
+    if (!fs.existsSync(helperPath)) fail(`local preview Electron helper is missing: ${path.basename(helperPath)}`);
+    const entitlements = codesignOutput(helperPath, spawnSyncImpl);
+    if (!hasEntitlement(entitlements, 'com.apple.security.cs.disable-library-validation')) {
+      fail(`${path.basename(helperPath)} cannot load the ad-hoc-signed Electron Framework`);
+    }
   }
 }
 
@@ -121,7 +146,18 @@ function verifyAppGroupSources({ appGroup, config, extensionInfo, appEntitlement
   }
 }
 
-function verifyFormalCodeSignature({ appPath, extensionPath, appGroup, developmentTeam, execFileSyncImpl, spawnSyncImpl }) {
+function verifyFormalCodeSignature({
+  appPath,
+  extensionPath,
+  appGroup,
+  appId,
+  widgetBundleId,
+  developmentTeam,
+  appEntitlements,
+  extensionEntitlements,
+  execFileSyncImpl,
+  spawnSyncImpl
+}) {
   const appSignature = readCodesignMetadata(appPath, execFileSyncImpl, spawnSyncImpl);
   const widgetSignature = readCodesignMetadata(extensionPath, execFileSyncImpl, spawnSyncImpl);
   if (isTeamPrefixedAppGroup(appGroup) && appGroup.slice(0, 10) !== appSignature.teamIdentifier) {
@@ -141,6 +177,36 @@ function verifyFormalCodeSignature({ appPath, extensionPath, appGroup, developme
   }
   if (!widgetSignature.authorities.some((authority) => authority.includes('Developer ID Application'))) {
     fail('Widget extension code signature is missing a Developer ID Application authority');
+  }
+  if (appSignature.identifier !== appId) fail(`main app code signature identifier does not match ${appId}`);
+  if (widgetSignature.identifier !== widgetBundleId) fail(`Widget extension code signature identifier does not match ${widgetBundleId}`);
+  if (classifyAppGroup(appGroup) === 'group-profile') {
+    for (const [label, entitlements, bundleId] of [
+      ['main app', appEntitlements, appId],
+      ['Widget extension', extensionEntitlements, widgetBundleId]
+    ]) {
+      const applicationIdentifier = entitlementString(entitlements, 'com.apple.application-identifier');
+      const teamIdentifier = entitlementString(entitlements, 'com.apple.developer.team-identifier');
+      if (applicationIdentifier !== `${developmentTeam}.${bundleId}`) {
+        fail(`${label} entitlement com.apple.application-identifier does not match its provisioned bundle identifier`);
+      }
+      if (teamIdentifier !== developmentTeam) {
+        fail(`${label} entitlement com.apple.developer.team-identifier does not match DEVELOPMENT_TEAM`);
+      }
+    }
+  }
+  return { appSignature, widgetSignature };
+}
+
+function verifyTeamAppGroupSignature({ appPath, extensionPath, appGroup, execFileSyncImpl, spawnSyncImpl }) {
+  const expectedTeam = appGroup.slice(0, 10);
+  const appSignature = readCodesignMetadata(appPath, execFileSyncImpl, spawnSyncImpl);
+  const widgetSignature = readCodesignMetadata(extensionPath, execFileSyncImpl, spawnSyncImpl);
+  if (appSignature.teamIdentifier !== expectedTeam) {
+    fail(`main app TeamIdentifier ${appSignature.teamIdentifier || '(missing)'} does not authorize Team App Group ${appGroup}`);
+  }
+  if (widgetSignature.teamIdentifier !== expectedTeam) {
+    fail(`Widget extension TeamIdentifier ${widgetSignature.teamIdentifier || '(missing)'} does not authorize Team App Group ${appGroup}`);
   }
   return { appSignature, widgetSignature };
 }
@@ -210,17 +276,15 @@ function verifyMacWidgetApp({
   if (widgetBundleId && extensionInfo.CFBundleIdentifier !== widgetBundleId) fail('Widget bundle identifier does not match configured value');
   verifyAppGroupSources({ appGroup, config, extensionInfo });
   if (extensionInfo.TMWidgetKind !== config.widgetKind) fail('Widget kind differs between Info.plist and widget config');
-  if (extensionInfo.TokenMonitorURLScheme !== config.urlScheme) fail('Widget URL scheme differs between Info.plist and widget config');
-  const urlTypes = Array.isArray(appInfo.CFBundleURLTypes) ? appInfo.CFBundleURLTypes : [];
-  const schemes = urlTypes.flatMap((entry) => Array.isArray(entry.CFBundleURLSchemes) ? entry.CFBundleURLSchemes : []);
-  if (!schemes.includes(config.urlScheme)) fail('packaged app is missing the Widget URL scheme');
   if (!/^\d+\.\d+(?:\.\d+)?$/.test(String(config.marketingVersion || ''))) fail('invalid marketing version');
   if (!/^\d+(?:\.\d+){0,2}$/.test(String(config.bundleVersion || ''))) fail('invalid bundle version');
+  const widgetBundleVersion = String(config.widgetBundleVersion || config.bundleVersion || '');
+  if (!/^\d+(?:\.\d+){0,2}$/.test(widgetBundleVersion)) fail('invalid Widget bundle version');
   if (
     appInfo.CFBundleShortVersionString !== config.marketingVersion
     || appInfo.CFBundleVersion !== config.bundleVersion
     || extensionInfo.CFBundleShortVersionString !== config.marketingVersion
-    || extensionInfo.CFBundleVersion !== config.bundleVersion
+    || extensionInfo.CFBundleVersion !== widgetBundleVersion
   ) {
     fail('app or Widget extension version fields differ from widget config');
   }
@@ -245,7 +309,19 @@ function verifyMacWidgetApp({
         appPath: resolvedApp,
         extensionPath: paths.extension,
         appGroup,
+        appId,
+        widgetBundleId,
         developmentTeam,
+        appEntitlements,
+        extensionEntitlements,
+        execFileSyncImpl,
+        spawnSyncImpl
+      });
+    } else if (isTeamPrefixedAppGroup(appGroup)) {
+      verifyTeamAppGroupSignature({
+        appPath: resolvedApp,
+        extensionPath: paths.extension,
+        appGroup,
         execFileSyncImpl,
         spawnSyncImpl
       });
@@ -257,6 +333,7 @@ function verifyMacWidgetApp({
         fail('formal distribution app failed spctl assessment');
       }
     }
+    if (localDevelopmentSigning) verifyLocalElectronHelpers(resolvedApp, spawnSyncImpl);
   }
 
   if (profileIsRequired({ distributionBuild, localDevelopmentSigning, appGroup })) {
@@ -276,7 +353,7 @@ function verifyMacWidgetApp({
       fail('embedded provisioning profiles use different Team IDs');
     }
   }
-  return { appPath: resolvedApp, architecture: expectedArch, widgetKind: config.widgetKind, urlScheme: config.urlScheme };
+  return { appPath: resolvedApp, architecture: expectedArch, widgetKind: config.widgetKind };
 }
 
 if (require.main === module) {
@@ -313,8 +390,10 @@ module.exports = {
   entitlementValues,
   hasEntitlement,
   readCodesignMetadata,
+  verifyLocalElectronHelpers,
   verifyAppGroupSources,
   verifyFormalCodeSignature,
+  verifyTeamAppGroupSignature,
   verifyMacWidgetApp,
   verifyWidgetAppStructure
 };

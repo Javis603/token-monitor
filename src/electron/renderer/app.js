@@ -23,8 +23,8 @@ const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
-  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
+  'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline', 'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
+  'gemini', 'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
 // Limits rows mark more ids than there are tracked clients: every provider, plus
 // relay ids that only ever appear as a limits row and have no catalog entry.
@@ -73,20 +73,21 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   opencode: 'opencodeCookieGroup',
   cursor: 'cursorAccountGroup',
   antigravity: 'antigravityAccountGroup',
+  factory: 'factoryAccountGroup',
   kimi: 'kimiAccountGroup',
-  zed: 'zedAccountGroup',
   copilot: 'copilotAccountGroup',
+  zed: 'zedAccountGroup',
+  commandcode: 'commandcodeAccountGroup',
   mimo: 'mimoAccountGroup',
   zai: 'zaiAccountGroup',
   zaiteam: 'zaiteamAccountGroup',
+  qoder: 'qoderAccountGroup',
   deepseek: 'deepseekAccountGroup',
   openrouter: 'openrouterAccountGroup',
   minimax: 'minimaxAccountGroup',
   volcengine: 'volcengineAccountGroup',
-  qoder: 'qoderAccountGroup',
-  trae: 'traeAccountGroup',
-  commandcode: 'commandcodeAccountGroup',
   ollama: 'ollamaAccountGroup',
+  trae: 'traeAccountGroup',
   alibaba: 'alibabaAccountGroup',
   thirdparty: 'thirdpartyAccountGroup'
 };
@@ -96,20 +97,21 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   opencode: 'opencodeCookieStatus',
   cursor: 'cursorAccountStatus',
   antigravity: 'antigravityAccountStatus',
+  factory: 'factoryAccountStatus',
   kimi: 'kimiAccountStatus',
-  zed: 'zedAccountStatus',
   copilot: 'copilotApiTokenStatus',
+  zed: 'zedAccountStatus',
+  commandcode: 'commandcodeAccountStatus',
   mimo: 'mimoAccountStatus',
   zai: 'zaiAccountStatus',
   zaiteam: 'zaiteamAccountStatus',
+  qoder: 'qoderAccountStatus',
   deepseek: 'deepseekApiKeyStatus',
   openrouter: 'openrouterStatus',
   minimax: 'minimaxApiKeyStatus',
   volcengine: 'volcengineAccountStatus',
-  qoder: 'qoderAccountStatus',
-  trae: 'traeAccountStatus',
-  commandcode: 'commandcodeAccountStatus',
   ollama: 'ollamaAccountStatus',
+  trae: 'traeAccountStatus',
   alibaba: 'alibabaAccountStatus',
   thirdparty: 'thirdpartyStatus'
 };
@@ -146,6 +148,13 @@ const TRAY_ICON_PROVIDERS = [
 const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.id).join(',');
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
 const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentation;
+const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
+
+function limitProviderColor(providerId) {
+  if (providerId === 'factory') return clientColors.droid;
+  if (providerId === 'mimo') return clientColors.xiaomi;
+  return clientColors[providerId] || clientColors.default;
+}
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
 const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
@@ -158,7 +167,6 @@ const clientDisplayPreferencesApi = window.TokenMonitorClientDisplayPreferences;
 const settingsListFilterApi = window.TokenMonitorSettingsListFilter;
 const customPricingFormApi = window.TokenMonitorCustomPricingForm;
 const viewDisplayPreferencesApi = window.TokenMonitorViewDisplayPreferences;
-const preferenceDragSortApi = window.TokenMonitorPreferenceDragSort;
 const verticalDragSortApi = window.TokenMonitorVerticalDragSort;
 const rowDragControllerApi = window.TokenMonitorRowDragController;
 const homeOverviewApi = window.TokenMonitorHomeOverview;
@@ -175,8 +183,7 @@ const sessionRowsApi = window.TokenMonitorSessionRows;
 const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
 const {
   barScaleMax,
-  createAfterLayoutScheduler,
-  isLargeSessionBreakdown,
+  breakdownPage,
   rowRenderFingerprint,
   rowWidth,
   shouldAnimateBreakdownRows,
@@ -300,7 +307,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '' };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '' };
 state.zedAccountExpanded = false;
 state.zedPendingCheckSince = 0;
 state.toolDetailMode = 'tokens';
@@ -341,17 +348,18 @@ state.fixedPeriodHistoryPromise = null;
 state.fixedPeriodHistoryCoordinator = null;
 state.fixedPeriodSnapshot = null;
 state.periodMenuOpen = false;
+state.sessionPage = 0;
+state.sessionPagerSignature = '';
 let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
-let preferenceDrag = null;
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), liveTokenRate: document.getElementById('liveTokenRate'), liveTokenRateValue: document.getElementById('liveTokenRateValue'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), liveTokenRate: document.getElementById('liveTokenRate'), liveTokenRateValue: document.getElementById('liveTokenRateValue'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), sessionPagerHost: document.getElementById('sessionPagerHost'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
@@ -370,6 +378,13 @@ Object.assign(els, {
   backHomeButton: document.getElementById('backHomeButton'),
   systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
+  edgeDockFeature: document.getElementById('edgeDockFeature'),
+  edgeDockInput: document.getElementById('edgeDockInput'),
+  edgeDockOptions: document.getElementById('edgeDockOptions'),
+  edgeDockSideInputs: Array.from(document.querySelectorAll('input[name="edgeDockSide"]')),
+  edgeDockModeInputs: Array.from(document.querySelectorAll('input[name="edgeDockMode"]')),
+  edgeDockWarnColorsInput: document.getElementById('edgeDockWarnColorsInput'),
+  edgeDockComposer: document.getElementById('edgeDockComposer'),
   trayIconOptions: document.getElementById('trayIconOptions'),
   trayOptions: document.getElementById('trayOptions'),
   hubModeOptions: document.getElementById('hubModeOptions'),
@@ -574,6 +589,29 @@ function compactTokenDisplayOptions() {
 function t(key, params) {
   return i18n.translate(currentLocale(), key, params);
 }
+
+const codexAccountControl = codexAccountControlApi.createCodexAccountControl({
+  document,
+  requestAnimationFrame,
+  translate: t,
+  switchAccount: (accountId) => window.tokenMonitor.codex.switchSystemAccount(accountId),
+  requestRender: () => {
+    renderLimits();
+    renderCodexAccounts();
+    renderSettingsSummaries();
+  },
+  onSwitchFailure: (message) => {
+    state.codexAccountError = message;
+  },
+  onSwitchSuccess: (result, _accountId) => {
+    state.codexAccountError = '';
+    state.settings.codexManagedAccounts = result.accounts || state.settings.codexManagedAccounts || [];
+    applyCodexOptimisticActiveAccount(result.activeAccount);
+  },
+  onPostSwitchError: (error) => {
+    console.log(`[codex] post-switch update failed: ${error?.message || error}`);
+  }
+});
 
 const diagnosticsPanel = window.TokenMonitorDiagnosticsPanel?.createDiagnosticsPanel({
   api: window.tokenMonitor,
@@ -1676,32 +1714,6 @@ const rowBarAnimations = new Map();
 const limitResetNumberAnimations = new Map();
 const rowRenderFingerprints = new WeakMap();
 const toolDetailData = new WeakMap();
-const largeSessionContainmentScheduler = createAfterLayoutScheduler(
-  typeof requestAnimationFrame === 'function' ? requestAnimationFrame : null,
-  typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : null
-);
-
-function updateLargeSessionContainment(enabled, { remeasure = false } = {}) {
-  els.breakdown.classList.toggle('large-session-list', enabled);
-  if (!enabled) {
-    largeSessionContainmentScheduler.cancel();
-    els.breakdown.classList.remove('large-session-list-ready');
-    return;
-  }
-  if (remeasure) {
-    largeSessionContainmentScheduler.cancel();
-    els.breakdown.classList.remove('large-session-list-ready');
-  }
-  if (largeSessionContainmentScheduler.pending() || els.breakdown.classList.contains('large-session-list-ready')) return;
-  // Let Chromium lay out every new row without size containment first. The
-  // `auto` intrinsic size can then retain each row's real block size before
-  // off-screen rendering is enabled, avoiding scroll-geometry corrections.
-  largeSessionContainmentScheduler.schedule(() => {
-    if (els.breakdown.classList.contains('large-session-list')) {
-      els.breakdown.classList.add('large-session-list-ready');
-    }
-  });
-}
 
 function prefersReducedMotion() {
   return motionPreferenceApi.shouldReduceMotion(state.settings?.reduceMotion, reducedMotionMedia?.matches);
@@ -2444,20 +2456,93 @@ function applyHomeListMark(mark, iconKind, color) {
   mark.style.background = color;
 }
 
+function sessionPageButton(direction) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `session-page-button session-page-${direction}`;
+  const icon = document.createElement('span');
+  icon.className = 'session-page-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  button.append(icon);
+  button.addEventListener('click', () => {
+    state.sessionPage += direction === 'previous' ? -1 : 1;
+    state.rowSignature = '';
+    els.breakdown.scrollTop = 0;
+    render();
+  });
+  return button;
+}
+
+function sessionPager() {
+  const pager = document.createElement('nav');
+  pager.className = 'session-pager';
+  const status = document.createElement('span');
+  status.className = 'session-page-status';
+  pager.append(
+    sessionPageButton('previous'),
+    status,
+    sessionPageButton('next')
+  );
+  return pager;
+}
+
+function renderSessionPager(page) {
+  const visible = page?.paginated === true;
+  els.sessionPagerHost.classList.toggle('hidden', !visible);
+  const signature = visible
+    ? JSON.stringify([currentLocale(), page.page, page.pageCount, page.start, page.end, page.total])
+    : '';
+  if (signature === state.sessionPagerSignature) return;
+  state.sessionPagerSignature = signature;
+  if (!visible) {
+    els.sessionPagerHost.replaceChildren();
+    return;
+  }
+  let pager = els.sessionPagerHost.querySelector('.session-pager');
+  if (!pager) {
+    pager = sessionPager();
+    els.sessionPagerHost.append(pager);
+  }
+  pager.setAttribute('aria-label', t('sessions.pagination'));
+  const previous = pager.querySelector('.session-page-previous');
+  const next = pager.querySelector('.session-page-next');
+  for (const [button, labelKey] of [
+    [previous, 'sessions.pagePrevious'],
+    [next, 'sessions.pageNext']
+  ]) {
+    button.setAttribute('aria-label', t(labelKey));
+    button.title = t(labelKey);
+  }
+  previous.disabled = page.page === 0;
+  next.disabled = page.page >= page.pageCount - 1;
+  pager.querySelector('.session-page-status').textContent = t('sessions.pageRange', page);
+}
+
 function renderRows(rows, { incompleteHint = '' } = {}) {
-  const largeSessionList = isLargeSessionBreakdown(state.breakdown, rows.length);
   if (rows.length === 0 && !incompleteHint) {
-    updateLargeSessionContainment(false);
     els.breakdown.replaceChildren();
+    renderSessionPager(null);
     state.rowSignature = '';
     return;
   }
+  const page = breakdownPage(rows, { breakdown: state.breakdown, page: state.sessionPage });
+  state.sessionPage = page.page;
+  renderSessionPager(page);
+  const visibleRows = page.rows;
   const max = barScaleMax(rows);
   const hintText = incompleteHint ? t(incompleteHint) : '';
-  const signature = JSON.stringify([state.breakdown, hintText, rows.map((row) => row.key)]);
+  const signature = JSON.stringify([
+    state.breakdown,
+    hintText,
+    page.page,
+    page.total,
+    visibleRows.map((row) => row.key)
+  ]);
   const children = Array.from(els.breakdown.children);
   const existingHint = children.find((child) => child.classList.contains('breakdown-incomplete-hint'));
-  const existing = new Map(children.filter((child) => child !== existingHint).map((child) => [child.dataset.key, child]));
+  const existing = new Map(children
+    .filter((child) => child !== existingHint)
+    .map((child) => [child.dataset.key, child]));
   const structureChanged = signature !== state.rowSignature;
   const renderContext = {
     breakdown: state.breakdown,
@@ -2466,18 +2551,18 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     locale: currentLocale(),
     showToolIcons: toolIconsEnabled(state.settings?.showToolIcons)
   };
-  const nextFingerprints = new Map(rows.map((row) => [
+  const nextFingerprints = new Map(visibleRows.map((row) => [
     row.key,
     rowRenderFingerprint(row, max, renderContext)
   ]));
-  const rowsChanged = structureChanged || rows.some((row) => (
+  const rowsChanged = structureChanged || visibleRows.some((row) => (
     rowRenderFingerprints.get(existing.get(row.key)) !== nextFingerprints.get(row.key)
   ));
   const liveMotionSnapshot = rowsChanged && !state.periodMotionActive && !state.animateBarsFromZero
     ? captureBreakdownMotion()
     : null;
   if (structureChanged) {
-    const nodes = rows.map((row) => existing.get(row.key) || rowTemplate(row));
+    const nodes = visibleRows.map((row) => existing.get(row.key) || rowTemplate(row));
     if (incompleteHint) {
       const hint = existingHint || document.createElement('p');
       hint.className = 'breakdown-incomplete-hint';
@@ -2488,11 +2573,10 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     els.breakdown.replaceChildren(...nodes);
     state.rowSignature = signature;
   }
-  updateLargeSessionContainment(largeSessionList, { remeasure: structureChanged });
   const current = new Map(Array.from(els.breakdown.children)
     .filter((child) => !child.classList.contains('breakdown-incomplete-hint'))
     .map((child) => [child.dataset.key, child]));
-  for (const rowData of rows) {
+  for (const rowData of visibleRows) {
     const row = current.get(rowData.key);
     if (!row) continue;
     const fingerprint = nextFingerprints.get(rowData.key);
@@ -4455,19 +4539,6 @@ function flushPendingLimitDetailTooltipRender() {
   renderLimits();
 }
 
-function codexSwitchPopoverShouldHoldRender() {
-  if (!state.codexSwitchPopoverActive || !els.limitsPanel) return false;
-  return Boolean(els.limitsPanel.querySelector(
-    '.limit-account-switch-zone:hover, .limit-account-switch-zone:focus-within, .limit-account-active-zone:hover, .limit-account-active-zone:focus-within'
-  ));
-}
-
-function flushPendingCodexSwitchPopoverRender() {
-  if (!state.codexSwitchPopoverRenderPending || state.breakdown !== 'limits') return;
-  state.codexSwitchPopoverRenderPending = false;
-  renderLimits();
-}
-
 function codexResetCreditsNode(resetCredits) {
   const valueText = formatCodexResetCreditsValue(resetCredits);
   if (!valueText) return null;
@@ -4929,16 +5000,6 @@ function codexSwitchAccountForProvider(provider) {
   }) || null;
 }
 
-function codexProviderMatchesProvider(left, right) {
-  if (!left || !right || left.provider !== 'codex' || right.provider !== 'codex') return false;
-  const leftKey = String(left.accountKey || '').trim();
-  const rightKey = String(right.accountKey || '').trim();
-  if (leftKey && rightKey && leftKey === rightKey) return true;
-  const leftEmail = String(left.accountEmail || '').trim().toLowerCase();
-  const rightEmail = String(right.accountEmail || '').trim().toLowerCase();
-  return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
-}
-
 function codexActiveAccountMatchesProvider(provider) {
   return accountIdentityApi.codexAccountMatchesProvider(state.codexActiveAccount, provider);
 }
@@ -4995,6 +5056,7 @@ function scheduleCodexPendingActiveAccountExpiry() {
     renderLimits();
     renderCodexAccounts();
     renderSettingsSummaries();
+    maybeUpdateBarsIcon();
   }, delay);
 }
 
@@ -5006,6 +5068,12 @@ function setCodexPendingActiveAccount(account) {
   state.codexPendingActiveAccount = account;
   state.codexPendingActiveAccountUntil = Date.now() + CODEX_PENDING_ACTIVE_GRACE_MS;
   scheduleCodexPendingActiveAccountExpiry();
+}
+
+function applyCodexOptimisticActiveAccount(account) {
+  if (!account) return;
+  setCodexPendingActiveAccount(account);
+  state.codexActiveAccount = account;
 }
 
 function applyCodexActiveAccountFromStats() {
@@ -5024,35 +5092,6 @@ function applyCodexActiveAccountFromStats() {
     clearCodexPendingActiveAccount();
   }
   state.codexActiveAccount = activeAccount;
-}
-
-function applyCodexAccountLimitsRefresh(providers) {
-  const refreshed = (providers || []).filter((provider) => provider?.provider === 'codex');
-  if (!refreshed.length || !state.stats?.limits) return;
-  const used = new Set();
-  const existingProviders = state.stats.limits.providers || [];
-  const nextProviders = existingProviders.map((provider) => {
-    if (provider?.provider !== 'codex') return provider;
-    const index = refreshed.findIndex((candidate, candidateIndex) => (
-      !used.has(candidateIndex) && codexProviderMatchesProvider(candidate, provider)
-    ));
-    if (index === -1) return provider;
-    used.add(index);
-    return refreshed[index];
-  });
-  refreshed.forEach((provider, index) => {
-    if (!used.has(index)) nextProviders.push(provider);
-  });
-  state.stats = {
-    ...state.stats,
-    limits: {
-      ...state.stats.limits,
-      providers: nextProviders
-    }
-  };
-  applyCodexActiveAccountFromStats();
-  renderLimits();
-  maybeUpdateBarsIcon();
 }
 
 function renderLimitProviderHead(id, label, provider, color, options = {}) {
@@ -5075,119 +5114,12 @@ function renderLimitProviderHead(id, label, provider, color, options = {}) {
   // which would move the ✓ onto the wrong one.
   const activeCodexAccount = options.showActiveBadge && codexActiveAccountMatchesProvider(provider);
   const switchAccount = options.allowSystemSwitch && !activeCodexAccount ? codexSwitchAccountForProvider(provider) : null;
-  if (switchAccount && window.tokenMonitor?.codex?.switchSystemAccount) {
-    const switchZone = document.createElement('span');
-    const switchPopover = document.createElement('span');
-    const switchButton = document.createElement('button');
-    const switching = state.codexSystemSwitchingAccountId === switchAccount.id;
-    const failed = state.codexSystemSwitchErrorAccountId === switchAccount.id && state.codexSystemSwitchError;
-    switchZone.className = 'limit-account-switch-zone';
-    switchZone.classList.toggle('has-opened', state.codexSwitchPopoverHasOpened);
-    switchZone.classList.toggle('is-switching', Boolean(switching));
-    switchZone.classList.toggle('is-error', Boolean(failed));
-    switchPopover.className = 'limit-account-switch-popover';
-    switchButton.type = 'button';
-    switchButton.className = 'limit-account-switch-button';
-    switchButton.disabled = Boolean(state.codexSystemSwitchingAccountId);
-    switchButton.title = failed || t('limits.codex.switchAccountTitle', {
-      account: switchAccount.email || t('settings.codex.unnamedAccount')
-    });
-    switchButton.setAttribute('aria-label', switchButton.title);
-    switchButton.textContent = switching
-      ? t('limits.codex.switching')
-      : failed
-        ? t('limits.codex.switchFailedShort')
-        : t('limits.codex.switchAccount');
-    const markCodexSwitchPopoverOpened = () => {
-      state.codexSwitchPopoverHasOpened = true;
-      state.codexSwitchPopoverActive = true;
-      switchZone.classList.add('has-opened');
-    };
-    const releaseCodexSwitchPopover = () => {
-      requestAnimationFrame(() => {
-        if (switchZone.matches(':hover, :focus-within')) return;
-        state.codexSwitchPopoverActive = false;
-        flushPendingCodexSwitchPopoverRender();
-      });
-    };
-    switchZone.addEventListener('pointerenter', markCodexSwitchPopoverOpened);
-    switchZone.addEventListener('focusin', markCodexSwitchPopoverOpened);
-    switchZone.addEventListener('pointerleave', releaseCodexSwitchPopover);
-    switchZone.addEventListener('focusout', releaseCodexSwitchPopover);
-    switchButton.addEventListener('click', async (event) => {
-      event.stopPropagation();
-      if (state.codexSystemSwitchingAccountId) return;
-      state.codexSystemSwitchingAccountId = switchAccount.id;
-      state.codexSystemSwitchErrorAccountId = '';
-      state.codexSystemSwitchError = '';
-      state.codexSwitchPopoverActive = false;
-      renderLimits();
-      try {
-        const result = await window.tokenMonitor.codex.switchSystemAccount(switchAccount.id);
-        if (!result?.ok) {
-          const message = result?.error || t('limits.codex.switchFailed');
-          state.codexSystemSwitchErrorAccountId = switchAccount.id;
-          state.codexSystemSwitchError = message;
-          state.codexAccountError = message;
-        } else {
-          state.codexAccountError = '';
-          state.settings.codexManagedAccounts = result.accounts || state.settings.codexManagedAccounts || [];
-          setCodexPendingActiveAccount(result.activeAccount || null);
-          state.codexActiveAccount = result.activeAccount;
-          renderLimits();
-          window.tokenMonitor.codex.refreshAccountLimits(switchAccount.id).then((refreshResult) => {
-            if (refreshResult?.ok) applyCodexAccountLimitsRefresh(refreshResult.providers || []);
-            else if (refreshResult?.error) console.log(`[codex] refresh account limits failed: ${refreshResult.error}`);
-          }).catch((refreshError) => {
-            console.log(`[codex] refresh account limits failed: ${refreshError?.message || refreshError}`);
-          });
-        }
-      } catch (error) {
-        const message = error?.message || t('limits.codex.switchFailed');
-        state.codexSystemSwitchErrorAccountId = switchAccount.id;
-        state.codexSystemSwitchError = message;
-        state.codexAccountError = message;
-      } finally {
-        state.codexSystemSwitchingAccountId = '';
-        renderLimits();
-        renderCodexAccounts();
-        renderSettingsSummaries();
-      }
-    });
-    switchPopover.append(switchButton);
-    switchZone.append(title, switchPopover);
-    name.append(switchZone);
-  } else if (activeCodexAccount) {
-    const activeZone = document.createElement('span');
-    const badge = document.createElement('span');
-    const activePopover = document.createElement('span');
-    const activeHint = t('limits.codex.activeAccountHint');
-    activeZone.className = 'limit-account-active-zone';
-    activeZone.tabIndex = 0;
-    activeZone.setAttribute('aria-label', activeHint);
-    badge.className = 'limit-live-badge';
-    badge.textContent = '\u2713';
-    activePopover.className = 'limit-account-active-popover';
-    activePopover.textContent = activeHint;
-    const markCodexActiveHintOpened = () => {
-      state.codexSwitchPopoverActive = true;
-    };
-    const releaseCodexActiveHint = () => {
-      requestAnimationFrame(() => {
-        if (activeZone.matches(':hover, :focus-within')) return;
-        state.codexSwitchPopoverActive = false;
-        flushPendingCodexSwitchPopoverRender();
-      });
-    };
-    activeZone.addEventListener('pointerenter', markCodexActiveHintOpened);
-    activeZone.addEventListener('focusin', markCodexActiveHintOpened);
-    activeZone.addEventListener('pointerleave', releaseCodexActiveHint);
-    activeZone.addEventListener('focusout', releaseCodexActiveHint);
-    activeZone.append(title, badge, activePopover);
-    name.append(activeZone);
-  } else {
-    name.append(title);
-  }
+  name.append(codexAccountControl.render({
+    titleNode: title,
+    active: Boolean(activeCodexAccount),
+    switchAccount: window.tokenMonitor?.codex?.switchSystemAccount ? switchAccount : null,
+    accountLabel: switchAccount?.email || ''
+  }));
   titleBlock.append(name);
   // The multi-account group header has no quota of its own, and its accounts can
   // update at different times (different devices too), so it omits the meta line
@@ -6450,14 +6382,12 @@ function animateLimitResets(snapshot) {
 function renderLimits() {
   if (!els.limitsPanel) return;
   const holdLimitDetailTooltipRender = limitDetailTooltipShouldHoldRender();
-  const holdCodexSwitchPopoverRender = codexSwitchPopoverShouldHoldRender();
+  const holdCodexSwitchPopoverRender = codexAccountControl.deferRender(els.limitsPanel);
   if (holdLimitDetailTooltipRender || holdCodexSwitchPopoverRender) {
     if (holdLimitDetailTooltipRender) state.limitDetailTooltipRenderPending = true;
-    if (holdCodexSwitchPopoverRender) state.codexSwitchPopoverRenderPending = true;
     return;
   }
   state.limitDetailTooltipRenderPending = false;
-  state.codexSwitchPopoverRenderPending = false;
   const limitsEnabled = state.settings?.limitsEnabled !== false;
   const enabled = enabledLimitProviderSet();
   const providers = providersByLimitProviderId(state.stats?.limits?.providers || []);
@@ -6489,9 +6419,7 @@ function renderLimits() {
       state.settings?.subscriptions || [],
       state.settings?.codexManagedAccounts || [],
       state.codexActiveAccount || null,
-      state.codexSystemSwitchingAccountId || '',
-      state.codexSystemSwitchErrorAccountId || '',
-      state.codexSystemSwitchError || '',
+      ...codexAccountControl.stateSignature(),
       state.codexResetForecastBusy,
       state.codexResetForecast || null
     ],
@@ -6517,7 +6445,7 @@ function renderLimits() {
   }
   for (const { id, label } of rows) {
     const visibleProviders = visibleProviderEntries.get(id) || [{ provider: id, status: 'disabled', windows: [] }];
-    const color = id === 'mimo' ? clientColors.xiaomi : (clientColors[id] || clientColors.default);
+    const color = limitProviderColor(id);
     if (id === 'claude' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderClaudeAccountGroup(label, visibleProviders, color));
       continue;
@@ -7394,6 +7322,7 @@ function hidePeriodContentForMessage(message) {
   els.trendsPanel.classList.add('hidden');
   els.sessionDetail.classList.add('hidden');
   els.sessionDetailHead.classList.add('hidden');
+  renderSessionPager(null);
 }
 
 function periodMenuButtons() {
@@ -7680,7 +7609,7 @@ function homeLimitRows() {
     providerOptions,
     enabledProviderIds: Array.from(enabled),
     hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet()),
-    colors: clientColors,
+    colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
     accountColor: (provider, id, fallbackColor) => (
@@ -8445,6 +8374,7 @@ function render() {
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');
   els.shell.classList.toggle('home-mode', state.breakdown === 'home');
+  if (state.breakdown !== 'session' || state.openSession) els.sessionPagerHost.classList.add('hidden');
   els.viewBackRow?.classList.toggle('hidden', state.breakdown === 'home' || !state.homeReturnVisible);
   // Leaving Home only CSS-hides the panel, so its heatmap scroller never sees a
   // pointerleave — dismiss the body-level tooltip here (renderHome covers rerenders).
@@ -8725,6 +8655,7 @@ function setPeriod(period) {
     return false;
   }
   state.period = next;
+  state.sessionPage = 0;
   if (fixedPeriodRangesApi.isDerived(next) && state.fixedPeriodHistoryFailed) {
     void warmFixedPeriodHistory({ retryFailed: true, renderOnComplete: true });
   }
@@ -8741,6 +8672,7 @@ function setBreakdown(breakdown, options = {}) {
   }
   state.homeReturnVisible = options.fromHome === true && state.breakdown === 'home' && next !== 'home';
   state.breakdown = next;
+  state.sessionPage = 0;
   state.rowSignature = '';
   publishViewState();
   return true;
@@ -10085,6 +10017,7 @@ function syncSettingsForm() {
   for (const input of els.floatingBubbleTriggerInputs || []) input.checked = input.value === floatingBubbleTrigger;
   if (els.floatingBubbleContentInput) els.floatingBubbleContentInput.value = normalizeTrayContentValue(state.settings.floatingBubbleContent);
   els.floatingBubbleOptions?.classList.toggle('hidden', state.settings.floatingBubbleEnabled !== true);
+  syncEdgeDockControls();
   const showTrayIcon = state.settings.showTrayIcon !== false;
   if (els.showTrayIconInput) els.showTrayIconInput.checked = showTrayIcon;
   els.trayModeInput.disabled = !showTrayIcon;
@@ -10116,6 +10049,7 @@ function syncSettingsForm() {
   renderDeepseekStatus();
   renderMinimaxStatus();
   renderExternalProviderStatus('claude');
+  renderExternalProviderStatus('factory');
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
@@ -10141,6 +10075,11 @@ function syncSettingsForm() {
   renderSettingsAppUpdateRow();
   renderCodexAccounts();
   renderCustomPricing();
+  const modelAliasGrouping = state.settings?.modelAliasGrouping || 'off';
+  for (const input of document.querySelectorAll('input[name="modelAliasGrouping"]')) {
+    input.checked = input.value === modelAliasGrouping;
+  }
+  modelAliasForm?.syncSettings();
   renderCursorStatus();
 }
 
@@ -10250,19 +10189,6 @@ function preferenceRows(kind) {
   return Array.from(list?.querySelectorAll(selector) || []);
 }
 
-function preferenceOrder(kind) {
-  const attr = preferenceItemAttribute(kind);
-  return preferenceRows(kind).map((row) => row.dataset[attr]).filter(Boolean);
-}
-
-function preferenceRowRects(kind) {
-  const attr = preferenceItemAttribute(kind);
-  return preferenceRows(kind).map((row) => {
-    const rect = row.getBoundingClientRect();
-    return { id: row.dataset[attr], top: rect.top, bottom: rect.bottom };
-  });
-}
-
 function applyPreferenceOrder(kind, order) {
   const list = preferenceListForKind(kind);
   if (!list) return;
@@ -10270,75 +10196,16 @@ function applyPreferenceOrder(kind, order) {
   const rowsById = new Map(preferenceRows(kind).map((row) => [row.dataset[attr], row]));
   for (const id of order || []) {
     const row = rowsById.get(id);
-    if (row) list.appendChild(row);
+    if (!row) continue;
+    list.appendChild(row);
+    const companionId = kind === 'view'
+      ? ({ home: 'homeSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', status: 'serviceProvidersContainer' })[id]
+      : kind === 'homeModule'
+        ? ({ limits: 'homeLimitProviderContainer', trends: 'homeActivitySettingsContainer' })[id]
+        : '';
+    const companion = companionId ? document.getElementById(companionId) : null;
+    if (companion) list.appendChild(companion);
   }
-}
-
-function finishPreferenceDrag() {
-  setPreferencePointerListeners(false);
-  document.querySelectorAll('.is-dragging').forEach((row) => row.classList.remove('is-dragging'));
-  preferenceDrag = null;
-}
-
-function applyPreferenceLiveOrder(kind, clientY) {
-  if (!preferenceDrag) return -1;
-  const currentOrder = preferenceOrder(kind);
-  const nextOrder = preferenceDragSortApi.reorderItemsFromClientY(currentOrder, preferenceRowRects(kind), preferenceDrag.id, clientY);
-  if (nextOrder.join(',') !== currentOrder.join(',')) {
-    applyPreferenceOrder(kind, nextOrder);
-    preferenceDrag.changed = true;
-  }
-  preferenceDrag.order = nextOrder;
-  return nextOrder;
-}
-
-function startPreferenceDrag(event, kind, id) {
-  if (event.currentTarget.disabled) return;
-  event.preventDefault();
-  const order = preferenceOrder(kind);
-  preferenceDrag = { kind, id, pointerId: event.pointerId, originalOrder: order, order, changed: false, handle: event.currentTarget };
-  event.currentTarget.setPointerCapture?.(event.pointerId);
-  event.currentTarget.closest('[data-client], [data-provider], [data-view], [data-status-provider], [data-home-module], [data-home-limit-provider]')?.classList.add('is-dragging');
-  setPreferencePointerListeners(true);
-  applyPreferenceLiveOrder(kind, event.clientY);
-}
-
-function setPreferencePointerListeners(active) {
-  const method = active ? 'addEventListener' : 'removeEventListener';
-  window[method]('pointermove', onPreferencePointerMove, true);
-  window[method]('pointerup', onPreferencePointerUp, true);
-  window[method]('pointercancel', onPreferencePointerCancel, true);
-}
-
-function releasePreferencePointer(pointerId) {
-  const handle = preferenceDrag?.handle;
-  if (handle?.hasPointerCapture?.(pointerId)) {
-    handle.releasePointerCapture(pointerId);
-  }
-}
-
-function onPreferencePointerMove(event) {
-  if (!preferenceDrag || preferenceDrag.pointerId !== event.pointerId) return;
-  event.preventDefault();
-  applyPreferenceLiveOrder(preferenceDrag.kind, event.clientY);
-}
-
-function onPreferencePointerUp(event) {
-  if (!preferenceDrag || preferenceDrag.pointerId !== event.pointerId) return;
-  event.preventDefault();
-  const { kind } = preferenceDrag;
-  const order = applyPreferenceLiveOrder(kind, event.clientY) || preferenceDrag.order;
-  const changed = preferenceDrag.changed;
-  releasePreferencePointer(event.pointerId);
-  finishPreferenceDrag();
-  if (changed) void onPreferenceOrderCommit(kind, order);
-}
-
-function onPreferencePointerCancel(event) {
-  if (!preferenceDrag || preferenceDrag.pointerId !== event.pointerId) return;
-  applyPreferenceOrder(preferenceDrag.kind, preferenceDrag.originalOrder);
-  releasePreferencePointer(event.pointerId);
-  finishPreferenceDrag();
 }
 
 function createPreferenceOrderHandle({ kind, id, label, count }) {
@@ -10357,9 +10224,124 @@ function createPreferenceOrderHandle({ kind, id, label, count }) {
   handle.setAttribute('aria-label', handle.title);
   handle.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Home End');
   handle.disabled = count <= 1;
-  handle.addEventListener('pointerdown', (event) => startPreferenceDrag(event, kind, id));
+  // Main-screen lists keep the handle as both the visible reorder affordance
+  // and the only pointer/keyboard entry point. The row listener below still
+  // delegates the gesture to the shared controller.
   handle.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, kind, id));
   return handle;
+}
+
+const VIEW_PREFERENCE_SUBGROUPS = {
+  home: ['homeSettingsExpanded', 'homeSettingsContainer'],
+  trends: ['trendSettingsExpanded', 'trendSettingsContainer'],
+  project: ['projectSettingsExpanded', 'projectSettingsContainer'],
+  status: ['serviceProvidersExpanded', 'serviceProvidersContainer']
+};
+
+const HOME_MODULE_SUBGROUPS = {
+  limits: ['homeLimitSettingsExpanded', 'homeLimitProviderContainer'],
+  trends: ['homeActivitySettingsExpanded', 'homeActivitySettingsContainer']
+};
+
+function expandedPreferenceSubgroups(definitions) {
+  return Object.entries(definitions)
+    .filter(([, [stateKey]]) => Boolean(state[stateKey]))
+    .map(([id]) => id)
+    .join(',');
+}
+
+function setPreferenceSubgroupsExpanded(definitions, rowSelector, value) {
+  const expanded = new Set(String(value || '').split(',').filter(Boolean));
+  const dataKey = rowSelector === '.view-preference-row' ? 'view' : 'homeModule';
+  for (const [id, [stateKey, containerId]] of Object.entries(definitions)) {
+    const open = expanded.has(id);
+    state[stateKey] = open;
+    const row = Array.from(document.querySelectorAll(rowSelector)).find((candidate) => candidate.dataset[dataKey] === id);
+    const toggle = row?.querySelector('.view-subgroup-toggle');
+    toggle?.classList.toggle('is-expanded', open);
+    toggle?.setAttribute('aria-expanded', String(open));
+    document.getElementById(containerId)?.classList.toggle('hidden', !open);
+  }
+}
+
+function togglePreferenceSubgroup(definitions, rowSelector, id) {
+  const expanded = new Set(expandedPreferenceSubgroups(definitions).split(',').filter(Boolean));
+  if (expanded.has(id)) expanded.delete(id);
+  else expanded.add(id);
+  setPreferenceSubgroupsExpanded(definitions, rowSelector, Array.from(expanded).join(','));
+}
+
+function setViewPreferenceExpanded(value) {
+  setPreferenceSubgroupsExpanded(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', value);
+}
+
+function setHomeModulePreferenceExpanded(value) {
+  setPreferenceSubgroupsExpanded(HOME_MODULE_SUBGROUPS, '.home-module-preference-row', value);
+}
+
+// Main-screen rows retain their six-dot handle as the only drag surface while
+// using the same thresholded controller as Collection and AI Tool Limits.
+// Visibility/configuration controls and nested panels keep their own gestures.
+const MAIN_PREFERENCE_DRAG_EXCLUDED = 'button:not(.preference-order-handle), input, select, textarea, a, label, .accordion-animated-container';
+
+function createMainPreferenceRowDrag({ kind, rowSelector, idKey, settingKey, getExpanded, setExpanded }) {
+  return rowDragControllerApi.createRowDragController({
+    dragSort: verticalDragSortApi,
+    getList: () => preferenceListForKind(kind),
+    getScrollPanel: () => els.settingsPanel,
+    rowSelector,
+    idKey,
+    dragExcluded: MAIN_PREFERENCE_DRAG_EXCLUDED,
+    dragStartSelector: '.preference-order-handle',
+    getExpanded,
+    setExpanded,
+    applyOrder: (order) => applyPreferenceOrder(kind, order),
+    preserveScroll: preserveSettingsPanelScroll,
+    mirrorOrder: (order) => {
+      const value = order.join(',');
+      state.settings = { ...state.settings, [settingKey]: value };
+      return value;
+    },
+    persistOrder: (_order, _id, value) => void saveSettings({ [settingKey]: value }),
+    requestRender: () => renderViewPreferences()
+  });
+}
+
+const viewPreferenceRowDrag = createMainPreferenceRowDrag({
+  kind: 'view',
+  rowSelector: '.view-preference-row[data-view]',
+  idKey: 'view',
+  settingKey: 'viewDisplayOrder',
+  getExpanded: () => expandedPreferenceSubgroups(VIEW_PREFERENCE_SUBGROUPS),
+  setExpanded: setViewPreferenceExpanded
+});
+
+const homeModulePreferenceRowDrag = createMainPreferenceRowDrag({
+  kind: 'homeModule',
+  rowSelector: '.home-module-preference-row[data-home-module]',
+  idKey: 'homeModule',
+  settingKey: 'homeModuleOrder',
+  getExpanded: () => expandedPreferenceSubgroups(HOME_MODULE_SUBGROUPS),
+  setExpanded: setHomeModulePreferenceExpanded
+});
+
+const homeLimitProviderRowDrag = createMainPreferenceRowDrag({
+  kind: 'homeLimitProvider',
+  rowSelector: '.home-limit-provider-row[data-home-limit-provider]',
+  idKey: 'homeLimitProvider',
+  settingKey: 'homeLimitProviderOrder'
+});
+
+const statusProviderRowDrag = createMainPreferenceRowDrag({
+  kind: 'statusProvider',
+  rowSelector: '.status-provider-row[data-status-provider]',
+  idKey: 'statusProvider',
+  settingKey: 'serviceProviderDisplayOrder'
+});
+
+function deferMainPreferenceRender() {
+  return [viewPreferenceRowDrag, homeModulePreferenceRowDrag, homeLimitProviderRowDrag, statusProviderRowDrag]
+    .some((controller) => controller.deferRender());
 }
 
 // The limit provider list drags from the whole row instead of a handle. The
@@ -10383,14 +10365,17 @@ const limitProviderRowDrag = rowDragControllerApi.createRowDragController({
   applyOrder: (order) => applyPreferenceOrder('provider', order),
   preserveScroll: preserveSettingsPanelScroll,
   mirrorOrder: (order) => { state.settings = { ...state.settings, limitProviderOrder: order.join(',') }; },
-  // Saved directly rather than through `onPreferenceOrderCommit`, whose no-op
-  // guard compares against the value `mirrorOrder` just wrote and would drop it.
+  // Saved directly because the controller has already mirrored the order into
+  // local state before a deferred repaint can run.
   persistOrder: (order) => void saveSettings({ limitProviderOrder: order.join(',') }),
   requestRender: () => renderLimitProviderCheckboxes()
 });
 
 function renderViewPreferences() {
   if (!els.viewDisplayList) return;
+  // Every list under Main Screen shares this render path. A settings or stats
+  // repaint during a drag is held until the controller lands or aborts.
+  if (deferMainPreferenceRender()) return;
   const hidden = hiddenViewSet();
   const orderValue = effectiveViewDisplayOrderValue();
   const views = viewDisplayPreferencesApi.orderedViews(VIEW_DISPLAY_OPTIONS, orderValue);
@@ -10438,6 +10423,7 @@ function renderViewPreferences() {
     actions.className = 'tool-preference-actions';
     actions.append(visibility, handle);
     row.append(name, actions);
+    row.addEventListener('pointerdown', (event) => viewPreferenceRowDrag.startRowDrag(event, id));
     els.viewDisplayList.appendChild(row);
     if (id === 'home') {
       row.classList.add('has-subgroup');
@@ -10451,13 +10437,7 @@ function renderViewPreferences() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => {
-        state.homeSettingsExpanded = !state.homeSettingsExpanded;
-        toggle.classList.toggle('is-expanded', state.homeSettingsExpanded);
-        toggle.setAttribute('aria-expanded', String(Boolean(state.homeSettingsExpanded)));
-        const container = document.getElementById('homeSettingsContainer');
-        if (container) container.classList.toggle('hidden', !state.homeSettingsExpanded);
-      });
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
       actions.insertBefore(toggle, visibility);
 
       const listContainer = document.createElement('div');
@@ -10481,13 +10461,7 @@ function renderViewPreferences() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => {
-        state.trendSettingsExpanded = !state.trendSettingsExpanded;
-        toggle.classList.toggle('is-expanded', state.trendSettingsExpanded);
-        toggle.setAttribute('aria-expanded', String(Boolean(state.trendSettingsExpanded)));
-        const container = document.getElementById('trendSettingsContainer');
-        if (container) container.classList.toggle('hidden', !state.trendSettingsExpanded);
-      });
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
       actions.insertBefore(toggle, visibility);
       
       const listContainer = document.createElement('div');
@@ -10511,13 +10485,7 @@ function renderViewPreferences() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => {
-        state.projectSettingsExpanded = !state.projectSettingsExpanded;
-        toggle.classList.toggle('is-expanded', state.projectSettingsExpanded);
-        toggle.setAttribute('aria-expanded', String(Boolean(state.projectSettingsExpanded)));
-        const container = document.getElementById('projectSettingsContainer');
-        if (container) container.classList.toggle('hidden', !state.projectSettingsExpanded);
-      });
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
       actions.insertBefore(toggle, visibility);
 
       const listContainer = document.createElement('div');
@@ -10541,13 +10509,7 @@ function renderViewPreferences() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => {
-        state.serviceProvidersExpanded = !state.serviceProvidersExpanded;
-        toggle.classList.toggle('is-expanded', state.serviceProvidersExpanded);
-        toggle.setAttribute('aria-expanded', String(Boolean(state.serviceProvidersExpanded)));
-        const container = document.getElementById('serviceProvidersContainer');
-        if (container) container.classList.toggle('hidden', !state.serviceProvidersExpanded);
-      });
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
       actions.insertBefore(toggle, actions.firstChild);
       
       const listContainer = document.createElement('div');
@@ -10682,6 +10644,7 @@ function renderHomeLimitProviderList() {
     actions.className = 'tool-preference-actions';
     actions.append(visibility, handle);
     row.append(labelGroup, actions);
+    row.addEventListener('pointerdown', (event) => homeLimitProviderRowDrag.startRowDrag(event, id));
     wrap.append(row);
   }
   return wrap;
@@ -10748,21 +10711,7 @@ function renderHomeSettingsList() {
       toggleIcon.className = 'view-subgroup-icon';
       toggleIcon.setAttribute('aria-hidden', 'true');
       configure.append(toggleIcon);
-      configure.addEventListener('click', () => {
-        if (id === 'limits') {
-          state.homeLimitSettingsExpanded = !state.homeLimitSettingsExpanded;
-          configure.classList.toggle('is-expanded', state.homeLimitSettingsExpanded);
-          configure.setAttribute('aria-expanded', String(Boolean(state.homeLimitSettingsExpanded)));
-          const container = document.getElementById('homeLimitProviderContainer');
-          if (container) container.classList.toggle('hidden', !state.homeLimitSettingsExpanded);
-          return;
-        }
-        state.homeActivitySettingsExpanded = !state.homeActivitySettingsExpanded;
-        configure.classList.toggle('is-expanded', state.homeActivitySettingsExpanded);
-        configure.setAttribute('aria-expanded', String(Boolean(state.homeActivitySettingsExpanded)));
-        const container = document.getElementById('homeActivitySettingsContainer');
-        if (container) container.classList.toggle('hidden', !state.homeActivitySettingsExpanded);
-      });
+      configure.addEventListener('click', () => togglePreferenceSubgroup(HOME_MODULE_SUBGROUPS, '.home-module-preference-row', id));
       actions.append(configure);
     }
     const visibility = document.createElement('button');
@@ -10776,6 +10725,7 @@ function renderHomeSettingsList() {
     const handle = createPreferenceOrderHandle({ kind: 'homeModule', id, label, count: modules.length });
     actions.append(visibility, handle);
     row.append(name, actions);
+    row.addEventListener('pointerdown', (event) => homeModulePreferenceRowDrag.startRowDrag(event, id));
     wrap.append(row);
     if (id === 'limits') {
       const listContainer = document.createElement('div');
@@ -11026,6 +10976,7 @@ function renderServiceProviderList() {
     actions.className = 'tool-preference-actions';
     actions.append(visibility, handle);
     row.append(name, actions);
+    row.addEventListener('pointerdown', (event) => statusProviderRowDrag.startRowDrag(event, id));
     wrap.append(row);
   }
   return wrap;
@@ -12593,32 +12544,6 @@ async function onPreferenceReorder(kind, id, targetIndex) {
   else await onLimitProviderReorder(id, targetIndex);
 }
 
-// Only the handle-based lists commit through here; the two whole-row lists save
-// from their own drag wiring, because this compares against the value they have
-// already mirrored into `state.settings` and would read the write as a no-op.
-async function onPreferenceOrderCommit(kind, order) {
-  const value = (order || []).join(',');
-  if (kind === 'view') {
-    const current = viewDisplayPreferencesApi.normalizeViewDisplayOrder(effectiveViewDisplayOrderValue(), VIEW_DISPLAY_OPTIONS).join(',');
-    if (value !== current) await saveSettings({ viewDisplayOrder: value });
-    return;
-  }
-  if (kind === 'homeModule') {
-    const current = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS).join(',');
-    if (value !== current) await saveSettings({ homeModuleOrder: value });
-    return;
-  }
-  if (kind === 'homeLimitProvider') {
-    const current = limitProviderOrderApi.normalizeLimitProviderOrder(homeLimitProviderOrderValue(), LIMIT_PROVIDERS).join(',');
-    if (value !== current) await saveSettings({ homeLimitProviderOrder: value });
-    return;
-  }
-  if (kind === 'statusProvider') {
-    const current = serviceStatusProviderPreferencesApi.normalizeOrder(state.settings?.serviceProviderDisplayOrder, SERVICE_PROVIDER_OPTIONS).join(',');
-    if (value !== current) await saveSettings({ serviceProviderDisplayOrder: value });
-  }
-}
-
 function onPreferenceOrderKeydown(event, kind, id) {
   const moves = { ArrowUp: 'up', ArrowDown: 'down' };
   if (moves[event.key]) {
@@ -13376,6 +13301,72 @@ els.floatingBubbleInput.addEventListener('change', () => {
   refreshTrayComposers();
   saveSettings({ floatingBubbleEnabled: els.floatingBubbleInput.checked });
 });
+// The dock needs positionable, non-activating windows and a global cursor
+// read; Linux (Wayland in particular) offers neither reliably, so the option is
+// only offered on macOS and Windows.
+function edgeDockAvailable() {
+  const platform = state.appInfo?.platform;
+  return platform === 'darwin' || platform === 'win32';
+}
+
+function syncEdgeDockControls() {
+  if (!els.edgeDockInput) return;
+  const available = edgeDockAvailable();
+  els.edgeDockFeature?.classList.toggle('hidden', !available);
+  const enabled = available && state.settings?.edgeDockEnabled === true;
+  els.edgeDockInput.checked = enabled;
+  els.edgeDockOptions?.classList.toggle('hidden', !enabled);
+  const side = state.settings?.edgeDockSide === 'left' ? 'left' : 'right';
+  for (const input of els.edgeDockSideInputs || []) input.checked = input.value === side;
+  const mode = state.settings?.edgeDockMode === 'always' ? 'always' : 'autoHide';
+  for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
+  if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
+  if (enabled) edgeDockComposer?.render();
+}
+
+const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComposer
+  ? window.TokenMonitorEdgeDockComposer.createEdgeDockComposer({
+    root: els.edgeDockComposer,
+    t,
+    itemsApi: window.TokenMonitorEdgeDockItems,
+    presentationApi: window.TokenMonitorEdgeDockPresentation,
+    getSettings: () => state.settings,
+    getStats: () => state.stats,
+    save: (patch) => saveSettings(patch),
+    providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
+    providerColor: (id) => limitProviderColor(id),
+    hasProviderMark: (id) => limitMarksWithIcon.has(id),
+    maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
+      ? accountIdentityApi.maskEmailAddress(email)
+      : String(email || '')),
+    createRowDrag: (config) => rowDragControllerApi.createRowDragController({
+      dragSort: verticalDragSortApi,
+      getScrollPanel: () => els.settingsPanel,
+      preserveScroll: preserveSettingsPanelScroll,
+      ...config
+    })
+  })
+  : null;
+
+els.edgeDockInput?.addEventListener('change', () => {
+  state.settings.edgeDockEnabled = els.edgeDockInput.checked;
+  els.edgeDockOptions?.classList.toggle('hidden', !els.edgeDockInput.checked);
+  void saveSettings({ edgeDockEnabled: els.edgeDockInput.checked });
+});
+for (const input of els.edgeDockSideInputs || []) {
+  input.addEventListener('change', () => {
+    if (input.checked) void saveSettings({ edgeDockSide: input.value });
+  });
+}
+els.edgeDockWarnColorsInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockWarnColors: els.edgeDockWarnColorsInput.checked });
+});
+for (const input of els.edgeDockModeInputs || []) {
+  input.addEventListener('change', () => {
+    if (input.checked) void saveSettings({ edgeDockMode: input.value });
+  });
+}
+
 for (const input of els.floatingBubbleTriggerInputs || []) {
   input.addEventListener('change', () => {
     if (input.checked) void saveSettings({ floatingBubbleTrigger: input.value });
@@ -13585,6 +13576,15 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   maybeUpdateBarsIcon();
 });
 
+window.tokenMonitor.codex.onActiveAccount?.((account) => {
+  if (!account) return;
+  applyCodexOptimisticActiveAccount(account);
+  renderLimits();
+  renderCodexAccounts();
+  renderSettingsSummaries();
+  maybeUpdateBarsIcon();
+});
+
 reducedMotionMedia?.addEventListener?.('change', () => {
   if (motionPreferenceApi.normalize(state.settings?.reduceMotion) !== 'system') return;
   applyReduceMotionPreference('system');
@@ -13647,6 +13647,7 @@ function renderStatsUpdate() {
   renderDeepseekStatus();
   renderMinimaxStatus();
   renderExternalProviderStatus('claude');
+  renderExternalProviderStatus('factory');
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
@@ -14430,13 +14431,12 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
 }
 
 function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options = {}) {
-  const activeCodex = localLiveCodexProvider();
-  const activeCodexKey = activeCodex?.accountKey
-    && (stats?.limits?.providers || []).some((provider) => (
-      provider?.provider === 'codex' && provider?.accountKey === activeCodex.accountKey
-    ))
-    ? activeCodex.accountKey
-    : '';
+  const codexProviders = (stats?.limits?.providers || []).filter((provider) => provider?.provider === 'codex');
+  const selectedCodexKey = String(state.codexActiveAccount?.accountKey || '').trim();
+  const detectedCodexKey = String(localLiveCodexProvider()?.accountKey || '').trim();
+  const activeCodexKey = [selectedCodexKey, detectedCodexKey].find((accountKey) => (
+    accountKey && codexProviders.some((provider) => provider.accountKey === accountKey)
+  )) || '';
   const resolved = trayLayoutApi.resolveTrayLayout(layout, stats, {
     currency: currentCurrency(),
     ...compactTokenDisplayOptions(),
@@ -14514,8 +14514,12 @@ function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
 }
 
 async function maybeUpdateBarsIcon(options = {}) {
-  if (options.refreshComposers !== false && isSettingsSurfaceVisible()) refreshTrayComposers();
-  else syncCustomTrayClockTimer();
+  if (options.refreshComposers !== false && isSettingsSurfaceVisible()) {
+    refreshTrayComposers();
+    if (edgeDockAvailable() && state.settings?.edgeDockEnabled === true) edgeDockComposer?.render();
+  } else {
+    syncCustomTrayClockTimer();
+  }
   const mode = state.settings?.trayContent;
   if (!window.TokenMonitorTrayText.isGeneratedTrayIconMode(mode)) return;
   if (!window.tokenMonitor.setTrayIcons) return;
@@ -15594,30 +15598,15 @@ const externalLimitAccountConfig = {
     sourceKey: 'claudeWebCookieSource',
     pendingKey: 'claudePendingCheckSince'
   },
-  zai: {
-    configuredKey: 'zaiApiKeyConfigured',
-    sourceKey: 'zaiApiKeySource',
-    pendingKey: 'zaiPendingCheckSince'
+  factory: {
+    configuredKey: 'factoryCredentialConfigured',
+    sourceKey: 'factoryCredentialSource',
+    pendingKey: 'factoryPendingCheckSince'
   },
-  zaiteam: {
-    configuredKey: 'zaiTeamApiKeyConfigured',
-    sourceKey: 'zaiTeamApiKeySource',
-    pendingKey: 'zaiteamPendingCheckSince'
-  },
-  volcengine: {
-    configuredKey: 'volcengineCredentialsConfigured',
-    sourceKey: 'volcengineCredentialsSource',
-    pendingKey: 'volcenginePendingCheckSince'
-  },
-  qoder: {
-    configuredKey: 'qoderCookieConfigured',
-    sourceKey: 'qoderCookieSource',
-    pendingKey: 'qoderPendingCheckSince'
-  },
-  trae: {
-    configuredKey: 'traeAccessTokenConfigured',
-    sourceKey: 'traeAccessTokenSource',
-    pendingKey: 'traePendingCheckSince'
+  kimi: {
+    configuredKey: 'kimiCredentialConfigured',
+    sourceKey: 'kimiCredentialSource',
+    pendingKey: 'kimiPendingCheckSince'
   },
   zed: {
     configuredKey: 'zedCookieConfigured',
@@ -15629,15 +15618,35 @@ const externalLimitAccountConfig = {
     sourceKey: 'commandcodeCookieSource',
     pendingKey: 'commandcodePendingCheckSince'
   },
-  kimi: {
-    configuredKey: 'kimiCredentialConfigured',
-    sourceKey: 'kimiCredentialSource',
-    pendingKey: 'kimiPendingCheckSince'
+  zai: {
+    configuredKey: 'zaiApiKeyConfigured',
+    sourceKey: 'zaiApiKeySource',
+    pendingKey: 'zaiPendingCheckSince'
+  },
+  zaiteam: {
+    configuredKey: 'zaiTeamApiKeyConfigured',
+    sourceKey: 'zaiTeamApiKeySource',
+    pendingKey: 'zaiteamPendingCheckSince'
+  },
+  qoder: {
+    configuredKey: 'qoderCookieConfigured',
+    sourceKey: 'qoderCookieSource',
+    pendingKey: 'qoderPendingCheckSince'
+  },
+  volcengine: {
+    configuredKey: 'volcengineCredentialsConfigured',
+    sourceKey: 'volcengineCredentialsSource',
+    pendingKey: 'volcenginePendingCheckSince'
   },
   ollama: {
     configuredKey: 'ollamaCookieConfigured',
     sourceKey: 'ollamaCookieSource',
     pendingKey: 'ollamaPendingCheckSince'
+  },
+  trae: {
+    configuredKey: 'traeAccessTokenConfigured',
+    sourceKey: 'traeAccessTokenSource',
+    pendingKey: 'traePendingCheckSince'
   },
   alibaba: {
     configuredKey: 'alibabaCookieConfigured',
@@ -15733,7 +15742,11 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
   if (accountStatus === 'linked') {
     // A ZCode-discovered login is an OAuth-style link, not a pasted API key,
     // so it reads as connected the way Zed's linked sessions do.
-    const linkedKey = providerName === 'zai' && source === 'zcode-auto' ? 'settings.zai.statusLinked' : null;
+    const linkedKey = providerName === 'zai' && source === 'zcode-auto'
+      ? 'settings.zai.statusLinked'
+      : providerName === 'factory' && source === 'droid-env'
+        ? 'settings.factory.statusDroidEnv'
+        : null;
     return t(linkedKey || (source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`));
   }
   if (accountStatus === 'invalid') return t(`settings.${providerName}.statusInvalid`);
@@ -15778,6 +15791,10 @@ function zaiPlatformUrl() {
   return region === 'bigmodel-cn'
     ? 'https://bigmodel.cn/coding-plan/personal/usage'
     : 'https://z.ai/manage-apikey/coding-plan/personal/my-plan';
+}
+
+function factoryPlatformUrl() {
+  return 'https://app.factory.ai/settings/api-keys';
 }
 
 function zaiteamPlatformUrl() {
@@ -15889,6 +15906,14 @@ function ollamaValidationError(provider) {
   return t('settings.ollama.validationUnavailable');
 }
 
+function factoryApiKeyValidationError(provider) {
+  if (provider?.status === 'unauthorized') return t('settings.factory.validationInvalid');
+  if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
+    return t('settings.factory.validationRateLimited');
+  }
+  return t('settings.factory.validationUnavailable');
+}
+
 function renderExternalProviderStatus(providerName) {
   const config = externalLimitAccountConfig[providerName];
   const statusEl = document.getElementById(`${providerName}AccountStatus`);
@@ -15945,8 +15970,8 @@ function renderExternalProviderStatus(providerName) {
     manualPanel.classList.remove('hidden');
     openBtn.classList.remove('hidden');
   }
-  const canClearConfiguredClaude = providerName === 'claude' && configured;
-  logoutBtn.classList.toggle('hidden', source !== 'settings' || (!linked && !canClearConfiguredClaude));
+  const canClearConfiguredCredential = source === 'settings' && configured;
+  logoutBtn.classList.toggle('hidden', !canClearConfiguredCredential);
   refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();
 }
@@ -17115,6 +17140,27 @@ function setCursorCheckboxesEnabled(enabled) {
 }
 
 let openCustomPricingForm = null;
+let modelAliasForm = null;
+
+function setupModelAliasesUI() {
+  const toggle = document.getElementById('modelAliasesSettingsToggle');
+  if (!toggle) return;
+  toggle.addEventListener('click', () => setAccountGroupExpanded('modelAliases', !state.modelAliasesExpanded, 'modelAliasesExpanded'));
+  setAccountGroupExpanded('modelAliases', false, 'modelAliasesExpanded');
+  modelAliasForm = window.TokenMonitorModelAliasForm.createModelAliasForm({
+    document, t,
+    getAliases: () => state.settings?.modelAliases || {},
+    getGrouping: () => state.settings?.modelAliasGrouping || 'off',
+    saveAliases: (modelAliases) => saveSettings({ modelAliases })
+  });
+  for (const input of document.querySelectorAll('input[name="modelAliasGrouping"]')) {
+    input.addEventListener('change', async () => {
+      if (!input.checked) return;
+      await saveSettings({ modelAliasGrouping: input.value });
+      modelAliasForm?.syncSettings();
+    });
+  }
+}
 
 function customPricingMeta(ov) {
   const parts = [];
@@ -17849,6 +17895,67 @@ function setupCursorAccountUI() {
         clearMinimaxPendingCheck();
         errorEl.textContent = t('settings.minimax.saveFailed', { message: err.message });
         errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
+  const factoryToggle = document.getElementById('factorySettingsToggle');
+  if (factoryToggle) {
+    factoryToggle.addEventListener('click', () => setExternalAccountExpanded('factory', !state.factoryAccountExpanded));
+    setExternalAccountExpanded('factory', false);
+    renderExternalProviderStatus('factory');
+
+    document.getElementById('factoryOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal(factoryPlatformUrl());
+    });
+
+    document.getElementById('factoryLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ factoryApiKey: '' });
+      clearExternalProviderCheckPending('factory');
+      clearExternalProviderPendingStatus('factory');
+      renderExternalProviderStatus('factory');
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('factoryRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('factoryApiKeySubmit').addEventListener('click', async () => {
+      const input = document.getElementById('factoryApiKeyInput');
+      const errorEl = document.getElementById('factoryErrorMessage');
+      const submit = document.getElementById('factoryApiKeySubmit');
+      errorEl.classList.add('hidden');
+      if (!String(input.value || '').trim()) {
+        errorEl.textContent = t('settings.factory.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      submit.disabled = true;
+      submit.textContent = t('settings.common.checking');
+      try {
+        markExternalProviderCheckPending('factory');
+        const validation = await window.tokenMonitor.factory.validateApiKey(input.value);
+        if (!validation?.ok) {
+          clearExternalProviderCheckPending('factory');
+          renderExternalProviderStatus('factory');
+          errorEl.textContent = factoryApiKeyValidationError(validation);
+          errorEl.classList.remove('hidden');
+          return;
+        }
+        await saveSettings({ factoryApiKey: input.value });
+        input.value = '';
+        renderExternalProviderStatus('factory');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('factory', !externalProviderAccountLinked('factory'));
+        renderExternalProviderStatus('factory');
+      } catch (err) {
+        clearExternalProviderCheckPending('factory');
+        errorEl.textContent = t('settings.factory.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      } finally {
+        submit.disabled = false;
+        submit.textContent = t('settings.factory.saveApiKey');
       }
     });
   }
@@ -18821,19 +18928,20 @@ function initSettingsAnimationWrappers() {
     '.hub-mode-fields',
     '.presence-feature-body',
     '#claudeManualPanel',
-    '#cursorManualPanel',
     '#opencodeManualPanel',
-    '#deepseekManualPanel',
-    '#minimaxManualPanel',
-    '#zaiManualPanel',
-    '#zaiteamManualPanel',
-    '#volcengineManualPanel',
-    '#qoderManualPanel',
-    '#traeManualPanel',
+    '#cursorManualPanel',
+    '#factoryManualPanel',
+    '#kimiManualPanel',
     '#zedManualPanel',
     '#commandcodeManualPanel',
-    '#kimiManualPanel',
+    '#zaiManualPanel',
+    '#zaiteamManualPanel',
+    '#qoderManualPanel',
+    '#deepseekManualPanel',
+    '#minimaxManualPanel',
+    '#volcengineManualPanel',
     '#ollamaManualPanel',
+    '#traeManualPanel',
     '#alibabaManualPanel'
   ].join(', ');
 
@@ -18861,4 +18969,5 @@ initSettingsAnimationWrappers();
 setupSettingsSections();
 setupCursorAccountUI();
 setupCustomPricingUI();
+setupModelAliasesUI();
 init();

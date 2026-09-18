@@ -417,6 +417,73 @@ test('mergeDeviceRecord allows the same runtime to clear Copilot limits', () => 
   assert.equal(merged.limits.providers[0].status, 'notConfigured');
 });
 
+test('mergeDeviceRecord keeps widget Factory limits when a headless agent reports no local API key', () => {
+  const existing = recordWithLimits({
+    agentRuntime: 'electron-widget',
+    limits: {
+      updatedAt: '2026-06-26T08:00:00.000Z',
+      refreshMs: 300000,
+      providers: [
+        {
+          provider: 'factory',
+          accountKey: 'sha256:factory-user',
+          accountLabel: 'Factory Pro',
+          status: 'ok',
+          source: 'api',
+          updatedAt: '2026-06-26T08:00:00.000Z',
+          windows: [{ kind: 'session', label: '5-hour', usedPercent: 20 }]
+        }
+      ]
+    }
+  });
+  const incoming = {
+    deviceId: 'macbook',
+    agentRuntime: 'headless-agent',
+    updatedAt: '2026-06-26T08:01:00.000Z',
+    receivedAt: '2026-06-26T08:01:00.000Z',
+    limits: {
+      updatedAt: '2026-06-26T08:01:00.000Z',
+      refreshMs: 300000,
+      providers: [{ provider: 'factory', status: 'notConfigured', source: '', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] }]
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.limits.providers.length, 1);
+  assert.equal(merged.limits.providers[0].provider, 'factory');
+  assert.equal(merged.limits.providers[0].status, 'ok');
+  assert.equal(merged.limits.providers[0].accountKey, 'sha256:factory-user');
+});
+
+test('mergeDeviceRecord allows the same runtime to clear Factory limits', () => {
+  const existing = recordWithLimits({
+    agentRuntime: 'electron-widget',
+    limits: {
+      updatedAt: '2026-06-26T08:00:00.000Z',
+      refreshMs: 300000,
+      providers: [
+        { provider: 'factory', accountKey: 'sha256:factory-user', status: 'ok', source: 'api', updatedAt: '2026-06-26T08:00:00.000Z', windows: [] }
+      ]
+    }
+  });
+  const incoming = {
+    deviceId: 'macbook',
+    agentRuntime: 'electron-widget',
+    updatedAt: '2026-06-26T08:01:00.000Z',
+    receivedAt: '2026-06-26T08:01:00.000Z',
+    limits: {
+      updatedAt: '2026-06-26T08:01:00.000Z',
+      refreshMs: 300000,
+      providers: [{ provider: 'factory', status: 'notConfigured', source: '', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] }]
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.limits.providers.length, 1);
+  assert.equal(merged.limits.providers[0].provider, 'factory');
+  assert.equal(merged.limits.providers[0].status, 'notConfigured');
+});
+
 test('mergeDeviceRecord preserves distinct Codex and OpenCode accounts from the same incoming limits payload', () => {
   const existing = recordWithLimits({
     limits: {

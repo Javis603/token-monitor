@@ -175,6 +175,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   // installed only there has no host directory, and its usage is merged into the
   // same periods, so it has to count as a source that exists.
   'wsl-home',
+  'amp-threads',
   'antigravity-cli-data',
   'antigravity-ide-source',
   'cherrystudio-transcripts',
@@ -190,6 +191,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'copilot-data',
   'copilot-otel',
   'copilot-otel-exporter',
+  'droid-sessions',
   DSH_SOURCE_CHECK_ID,
   'grok-sessions',
   'grok-unified-log',
