@@ -67,10 +67,10 @@ function kimiCodeSessionsHome(home = os.homedir(), options = {}) {
 }
 
 // Kimi sessions (CLI `session_*`, Work `conv-*`/`ctitle-*`) put their workspace
-// in a sibling state.json (`workDir` / `custom.workspacePath`), not in the wire
-// stream tokscale parses. The session id is the directory name directly under a
-// workspace dir. Enumerate the on-disk session dirs once instead of probing the
-// workspace x requested-session Cartesian product on the Electron main thread.
+// in a sibling state.json, not in the wire stream tokscale parses. The session
+// id is the directory name directly under a workspace dir. Enumerate the
+// on-disk session dirs once instead of probing the workspace x requested-session
+// Cartesian product on the Electron main thread.
 function readKimiSessionStateFiles(roots, sessionIds) {
   const wanted = new Set(sessionIds);
   const found = new Map();
@@ -94,14 +94,34 @@ function readKimiSessionStateFiles(roots, sessionIds) {
   return found;
 }
 
+// The session document exists in two generations on disk. The legacy one (Kimi
+// CLI 0.3x) holds a home-relative `workDir` and ISO-string timestamps; the
+// current `version: 2` one — written by Kimi Code, the CLI and the desktop app
+// alike — holds `cwd` and epoch-millisecond timestamps instead. The runtime
+// itself migrates the legacy document on read (`cwd ?? workDir`,
+// `toEpochMs(createdAt)`), so both spellings and both timestamp shapes have to
+// be accepted here; `custom.*` is the older fallback from before either
+// top-level field existed.
+function timestampValue(value) {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return new Date(value).toISOString();
+  }
+  if (typeof value !== 'string') return '';
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? '' : new Date(parsed).toISOString();
+}
+
 function readKimiStateMetadata(statePath) {
   let state;
   try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (_) { return {}; }
   if (!state || typeof state !== 'object') return {};
   const stringValue = (value) => typeof value === 'string' ? value.trim() : '';
-  const projectPath = stringValue(state.workDir) || stringValue(state.custom?.workspacePath);
-  const startedAt = stringValue(state.createdAt);
-  const lastUsedAt = stringValue(state.updatedAt);
+  const projectPath = stringValue(state.cwd)
+    || stringValue(state.workDir)
+    || stringValue(state.custom?.cwd)
+    || stringValue(state.custom?.workspacePath);
+  const startedAt = timestampValue(state.createdAt);
+  const lastUsedAt = timestampValue(state.updatedAt);
   return {
     ...(projectPath ? { projectPath } : {}),
     ...(startedAt ? { startedAt } : {}),

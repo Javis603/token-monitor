@@ -1521,6 +1521,30 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
     fs.mkdirSync(malformedSess, { recursive: true });
     fs.writeFileSync(path.join(malformedSess, 'state.json'), JSON.stringify({ workDir: { malformed: true } }));
     period.sessions['kimi:session_malformed'] = { client: 'kimi', sessionId: 'session_malformed', totalTokens: 100 };
+    // Kimi Code (CLI and desktop alike) writes the current `version: 2`
+    // document: `cwd` plus epoch-millisecond timestamps, with no `workDir`.
+    const v2Sess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_v2');
+    fs.mkdirSync(v2Sess, { recursive: true });
+    fs.writeFileSync(path.join(v2Sess, 'state.json'), JSON.stringify({
+      id: 'session_v2',
+      version: 2,
+      cwd: path.join(tmp, 'V2Proj'),
+      createdAt: Date.parse('2026-09-18T07:20:51.201Z'),
+      updatedAt: Date.parse('2026-09-18T07:21:09.024Z')
+    }));
+    period.sessions['kimi:session_v2'] = { client: 'kimi', sessionId: 'session_v2', totalTokens: 100 };
+    // A document migrated from the legacy shape keeps both spellings until its
+    // next write; the runtime prefers `cwd`, so this reader has to as well.
+    const migratedSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_migrated');
+    fs.mkdirSync(migratedSess, { recursive: true });
+    fs.writeFileSync(path.join(migratedSess, 'state.json'), JSON.stringify({
+      version: 2,
+      workDir: path.join(tmp, 'LegacyWorkDir'),
+      cwd: path.join(tmp, 'V2Cwd'),
+      createdAt: '2026-09-18T00:00:00.000Z',
+      updatedAt: '2026-09-18T01:00:00.000Z'
+    }));
+    period.sessions['kimi:session_migrated'] = { client: 'kimi', sessionId: 'session_migrated', totalTokens: 100 };
     // Kimi Work: <desktop runtime>/sessions/<workspace>/<conv-*>/state.json,
     // only reachable on darwin because kimiWorkSessionsRoots follows process.platform.
     if (process.platform === 'darwin') {
@@ -1543,6 +1567,12 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
     assert.equal(period.sessions['kimi:session_fallback'].startedAt || '', '', 'malformed timestamps must stay unset');
     assert.equal(period.sessions['kimi:session_fallback'].lastUsedAt || '', '', 'malformed timestamps must stay unset');
     assert.equal(period.sessions['kimi:session_malformed'].projectId || '', '', 'non-string project metadata must stay unset');
+    assert.equal(period.sessions['kimi:session_v2'].projectLabel, 'V2Proj');
+    assert.ok(period.sessions['kimi:session_v2'].projectId, 'v2 session should resolve a projectId');
+    assert.equal(period.sessions['kimi:session_v2'].startedAt, '2026-09-18T07:20:51.201Z', 'epoch-millisecond timestamps must be read');
+    assert.equal(period.sessions['kimi:session_v2'].lastUsedAt, '2026-09-18T07:21:09.024Z', 'epoch-millisecond timestamps must be read');
+    assert.equal(period.sessions['kimi:session_migrated'].projectLabel, 'V2Cwd', 'cwd must outrank the legacy workDir');
+    assert.equal(period.sessions['kimi:session_migrated'].startedAt, '2026-09-18T00:00:00.000Z');
     assert.equal(period.sessions['kimi:conv-missing'].projectId || '', '', 'sessions without state.json must stay project-less');
     if (process.platform === 'darwin') {
       assert.equal(period.sessions['kimi:conv-abc'].projectLabel, 'WorkProj');
