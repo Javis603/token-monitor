@@ -1195,6 +1195,7 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(main, /showCodexAdditionalLimits: true/);
   assert.match(main, /showCodexAdditionalLimits = parseBoolean\(merged\.showCodexAdditionalLimits, true\)/);
   assert.match(main, /showCodexAdditionalLimits: parseBoolean\(patch\.showCodexAdditionalLimits \?\? settings\.showCodexAdditionalLimits, true\)/);
+  assert.match(main, /showCodexAdditionalLimits: settings\?\.showCodexAdditionalLimits !== false/);
   assert.match(app, /key: 'showCodexAdditionalLimits',[\s\S]*?defaultValue: true/);
   assert.match(renderProviderWindows, /state\.settings\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
   assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);

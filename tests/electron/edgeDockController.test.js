@@ -5,6 +5,7 @@ const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
 const { createEdgeDockController } = require('../../src/electron/edgeDock/controller');
+const { EDGE_DOCK_METRICS, edgeDockBubbleBounds } = require('../../src/electron/edgeDock/geometry');
 
 class FakeWebContents extends EventEmitter {
   constructor() {
@@ -113,6 +114,7 @@ function createFixture(options = {}) {
   const ipcMain = new FakeIpcMain();
   const placements = [];
   const accentWindows = [];
+  const accentModes = [];
   const controller = createEdgeDockController({
     BrowserWindow: FakeBrowserWindow,
     ipcMain,
@@ -123,8 +125,9 @@ function createFixture(options = {}) {
     getSettings: () => settings,
     nativeGlass: () => options.nativeGlass === true,
     prefersReducedMotion: () => true,
-    applyWindowsAccentBlur: (win) => {
+    applyWindowsAccentBlur: (win, blurOptions) => {
       accentWindows.push(win);
+      accentModes.push(blurOptions?.mode);
       return options.accentAvailable !== false;
     },
     onPlacementChange: (placement) => {
@@ -142,7 +145,7 @@ function createFixture(options = {}) {
   controller.sync();
   for (const win of FakeBrowserWindow.instances) win.webContents.emit('did-finish-load');
   const windowFor = (surface) => FakeBrowserWindow.instances.filter((win) => !win.destroyed && win.surface === surface).at(-1);
-  return { accentWindows, controller, ipcMain, placements, screen, settings, windowFor };
+  return { accentModes, accentWindows, controller, ipcMain, placements, screen, settings, windowFor };
 }
 
 test('an open card follows its cell id across removal and reorder', (t) => {
@@ -160,6 +163,26 @@ test('an open card follows its cell id across removal and reorder', (t) => {
 
   assert.equal(sentPayload(bubble, 'bubble').cell.id, 'codex');
   assert.equal(sentPayload(rail, 'rail').focusCellId, 'codex');
+  const reordered = edgeDockBubbleBounds({
+    railBounds: rail.bounds,
+    cellIndex: 0,
+    height: 180,
+    workArea: fixture.screen.displays[0].workArea,
+    side: 'right'
+  });
+  assert.equal(bubble.bounds.y, reordered.y);
+
+  fixture.settings.edgeDockSide = 'left';
+  fixture.controller.sync();
+  const moved = edgeDockBubbleBounds({
+    railBounds: rail.bounds,
+    cellIndex: 0,
+    height: 180,
+    workArea: fixture.screen.displays[0].workArea,
+    side: 'left'
+  });
+  assert.equal(bubble.bounds.x, moved.x);
+  assert.ok(bubble.bounds.x > rail.bounds.x);
 
   fixture.controller.setCells([{ id: 'cursor', kind: 'provider', label: 'Cursor' }]);
   assert.equal(sentPayload(rail, 'rail').focusCellId, null);
@@ -210,19 +233,57 @@ test('dragging onto another display moves the dock there and persists its id', a
   assert.equal(fixture.placements.at(-1).side, 'right');
 });
 
-test('Windows Edge Dock follows Acrylic and Accent backdrop settings', (t) => {
+test('Windows Edge Dock keeps both backdrop choices on a shaped transparent material', (t) => {
   const fixture = createFixture({ nativeGlass: true });
   t.after(() => fixture.controller.stop());
   const acrylicWindows = FakeBrowserWindow.instances.slice();
   assert.equal(acrylicWindows.length, 3);
-  assert.ok(acrylicWindows.every((win) => win.options.transparent === false));
-  assert.ok(acrylicWindows.every((win) => win.options.backgroundMaterial === 'acrylic'));
+  assert.ok(acrylicWindows.every((win) => win.options.transparent === true));
+  assert.ok(acrylicWindows.every((win) => win.options.backgroundMaterial === undefined));
   assert.ok(acrylicWindows.filter((win) => win.surface !== 'bubble').every((win) => win.shapeCalls.at(-1)?.length > 0));
+  assert.equal(fixture.accentWindows.length, 2);
+  assert.deepEqual(fixture.accentModes, ['acrylic', 'acrylic']);
+  assert.equal(sentPayload(fixture.windowFor('rail'), 'rail').glass, true);
 
   fixture.settings.windowsBackdrop = 'accent';
   fixture.controller.sync();
   const accentWindows = FakeBrowserWindow.instances.filter((win) => !win.destroyed);
   assert.equal(accentWindows.length, 3);
+  assert.ok(accentWindows.every((win) => win.options.transparent === true));
   assert.ok(accentWindows.every((win) => win.options.backgroundMaterial === undefined));
-  assert.equal(fixture.accentWindows.length, 3);
+  assert.equal(fixture.accentWindows.length, 4);
+  assert.deepEqual(fixture.accentModes.slice(-2), ['blur', 'blur']);
+});
+
+test('Windows keeps shaped click-through regions without native glass and falls back cleanly', (t) => {
+  const plain = createFixture({ nativeGlass: false });
+  t.after(() => plain.controller.stop());
+  assert.equal(plain.accentWindows.length, 0);
+  assert.equal(sentPayload(plain.windowFor('rail'), 'rail').glass, false);
+  assert.ok(['peek', 'rail'].every((surface) => plain.windowFor(surface).shapeCalls.at(-1)?.length > 0));
+
+  const fallback = createFixture({ nativeGlass: true, accentAvailable: false });
+  t.after(() => fallback.controller.stop());
+  assert.equal(fallback.accentWindows.length, 2);
+  assert.equal(sentPayload(fallback.windowFor('rail'), 'rail').glass, false);
+  assert.ok(['peek', 'rail'].every((surface) => fallback.windowFor(surface).shapeCalls.at(-1)?.length > 0));
+});
+
+test('display metric changes hide and remeasure an open card against the new work area', (t) => {
+  const fixture = createFixture();
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const bubble = fixture.windowFor('bubble');
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 400 });
+
+  fixture.screen.displays[0].workArea.height = 300;
+  fixture.screen.emit('display-metrics-changed');
+  assert.equal(bubble.opacity, 0);
+  assert.equal(bubble.ignoreMouse, true);
+  assert.equal(sentPayload(bubble, 'bubble').placed, null);
+
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 400 });
+  assert.equal(bubble.bounds.height, 300 - EDGE_DOCK_METRICS.screenMargin * 2);
+  assert.equal(bubble.opacity, 1);
 });

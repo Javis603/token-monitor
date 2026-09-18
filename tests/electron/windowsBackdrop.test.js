@@ -13,6 +13,8 @@ const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
 const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
 const i18n = fs.readFileSync(path.join(rendererDir, 'i18n.js'), 'utf8');
 const {
+  ACCENT_ENABLE_ACRYLICBLURBEHIND,
+  ACCENT_ENABLE_BLURBEHIND,
   DEFAULT_ACCENT_ARGB,
   applyWindowsAccentBlur,
   createAccentApi
@@ -65,14 +67,18 @@ test('Accent blur passes the native HWND and configured tint to the native adapt
     isDestroyed: () => false
   };
   const api = {
-    apply(hwnd, argb) {
-      calls.push({ hwnd, argb });
+    apply(hwnd, argb, accentState) {
+      calls.push({ hwnd, argb, accentState });
       return true;
     }
   };
 
   assert.equal(applyWindowsAccentBlur(win, { platform: 'win32', api }), true);
-  assert.deepEqual(calls, [{ hwnd: 0x12345678n, argb: DEFAULT_ACCENT_ARGB }]);
+  assert.equal(applyWindowsAccentBlur(win, { platform: 'win32', api, mode: 'blur' }), true);
+  assert.deepEqual(calls, [
+    { hwnd: 0x12345678n, argb: DEFAULT_ACCENT_ARGB, accentState: ACCENT_ENABLE_ACRYLICBLURBEHIND },
+    { hwnd: 0x12345678n, argb: DEFAULT_ACCENT_ARGB, accentState: ACCENT_ENABLE_BLURBEHIND }
+  ]);
   assert.equal(applyWindowsAccentBlur(win, { platform: 'darwin', api }), false);
   assert.equal(applyWindowsAccentBlur({ ...win, isDestroyed: () => true }, { platform: 'win32', api }), false);
 });
@@ -112,11 +118,15 @@ test('native Accent adapter enables a full blur region before applying policy an
   });
   assert.equal(calls[3][1].Attrib, 19);
   assert.deepEqual(calls[3][1].pvData.value, {
-    AccentState: 4,
+    AccentState: ACCENT_ENABLE_ACRYLICBLURBEHIND,
     AccentFlags: 0,
     GradientColor: DEFAULT_ACCENT_ARGB,
     AnimationId: 0
   });
+
+  calls.length = 0;
+  assert.equal(api.apply(7n, DEFAULT_ACCENT_ARGB, ACCENT_ENABLE_BLURBEHIND), true);
+  assert.equal(calls.find(([name]) => name === 'accent')[1].pvData.value.AccentState, ACCENT_ENABLE_BLURBEHIND);
 });
 
 test('native Accent adapter rejects failed DWM setup before applying the Accent policy', () => {

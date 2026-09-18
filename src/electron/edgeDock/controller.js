@@ -44,7 +44,8 @@ function canUseEdgeDock(settings = {}, platform = process.platform) {
 // Every surface is a frameless window whose silhouette (rail shoulders, card
 // tail) is drawn by the renderer from edgeDockShapes.js. On macOS the native
 // material behind it is clipped to the same silhouette through a mask. Windows
-// uses its native Acrylic/Accent backdrop and Electron's shaped-window region.
+// uses a transparent shaped window with Accent blur, and falls back to the
+// renderer's tinted silhouette when that best-effort API is unavailable.
 function createEdgeDockController(deps) {
   const {
     BrowserWindow,
@@ -88,7 +89,9 @@ function createEdgeDockController(deps) {
   let ipcRegistered = false;
   let displayListenersAttached = false;
   const shapes = { peek: null, rail: null, bubble: null };
+  const nativeMaterial = { peek: false, rail: false, bubble: false };
   const lastSent = { peek: '', rail: '', bubble: '' };
+  let windowsMaterialFallbackLogged = false;
 
   function settings() {
     return getSettings() || {};
@@ -198,7 +201,7 @@ function createEdgeDockController(deps) {
 
   function renderPayload(surface) {
     const { side } = placement();
-    const base = { surface, side, platform, osRelease: os.release(), appearance, glass: builtGlass === true, shape: shapes[surface] };
+    const base = { surface, side, platform, osRelease: os.release(), appearance, glass: nativeMaterial[surface] === true, shape: shapes[surface] };
     if (surface === 'rail') {
       return {
         ...base,
@@ -237,7 +240,7 @@ function createEdgeDockController(deps) {
     const material = materialKey !== 'none';
     const macMaterial = mac && material;
     const windowsMaterial = win32 && material;
-    const windowsAccent = materialKey === 'win32:accent';
+    nativeMaterial[surface] = macMaterial ? true : (windowsMaterial ? null : false);
     const win = new BrowserWindow({
       width: surface === 'bubble' ? EDGE_DOCK_METRICS.bubbleWidth : EDGE_DOCK_METRICS.railWidth,
       height: 80,
@@ -255,14 +258,16 @@ function createEdgeDockController(deps) {
       // window has no shape-aware shadow to offer.
       hasShadow: macMaterial,
       backgroundColor: '#00000000',
-      transparent: !windowsMaterial,
+      // DWM's documented Acrylic paints the full native rectangle even after
+      // Electron applies a shaped region. Keep dock surfaces transparent and
+      // attach the shape-aware Accent material only after setShape() below.
+      transparent: true,
       ...(win32 ? { thickFrame: false } : {}),
       ...(mac ? { type: 'panel', acceptFirstMouse: true, roundedCorners: false } : {}),
-      // The material stays attached for the window's lifetime rather than being
-      // detached while hidden: re-attaching builds a new effect view, which
-      // would silently drop the shape mask.
+      // The macOS material stays attached for the window's lifetime rather than
+      // being detached while hidden: re-attaching builds a new effect view,
+      // which would silently drop the shape mask.
       ...(macMaterial ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
-      ...(windowsMaterial && !windowsAccent ? { backgroundMaterial: 'acrylic' } : {}),
       webPreferences: {
         preload: preloadPath,
         contextIsolation: true,
@@ -271,10 +276,6 @@ function createEdgeDockController(deps) {
         backgroundThrottling: false
       }
     });
-    if (windowsAccent && !applyWindowsAccentBlur?.(win)) {
-      logger('[edge-dock] AccentBlurBehind unavailable; falling back to Acrylic');
-      try { win.setBackgroundMaterial?.('acrylic'); } catch (_) {}
-    }
     if (mac) {
       win.setAlwaysOnTop(true, 'floating');
       win.setVisibleOnAllWorkspaces?.(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
@@ -317,7 +318,11 @@ function createEdgeDockController(deps) {
     bubblePlaced = null;
     builtGlass = null;
     builtMaterial = null;
-    for (const surface of SURFACES) shapes[surface] = null;
+    windowsMaterialFallbackLogged = false;
+    for (const surface of SURFACES) {
+      shapes[surface] = null;
+      nativeMaterial[surface] = false;
+    }
   }
 
   function commandsFor(surface, bounds, side) {
@@ -362,11 +367,20 @@ function createEdgeDockController(deps) {
       } catch (error) {
         logger(`[edge-dock] ${surface} mask failed: ${error.message}`);
       }
-    } else if (builtGlass && platform === 'win32') {
+    } else if (platform === 'win32') {
       try {
         win.setShape?.(shapeRectsFromPolygons(toPolygons(closed), width, height));
       } catch (error) {
         logger(`[edge-dock] ${surface} shape failed: ${error.message}`);
+      }
+      if (builtGlass && nativeMaterial[surface] === null) {
+        nativeMaterial[surface] = applyWindowsAccentBlur?.(win, {
+          mode: builtMaterial === 'win32:accent' ? 'blur' : 'acrylic'
+        }) === true;
+        if (!nativeMaterial[surface] && !windowsMaterialFallbackLogged) {
+          windowsMaterialFallbackLogged = true;
+          logger('[edge-dock] shaped Windows blur unavailable; showing the tinted silhouette only');
+        }
       }
     }
     render(surface);
@@ -404,6 +418,7 @@ function createEdgeDockController(deps) {
     if (!current || !alive(windows.rail)) return;
     placeSurface('rail', current.rail);
     placeSurface('peek', current.peek);
+    if (bubbleCell !== null) placeBubble();
   }
 
   function revealRail() {

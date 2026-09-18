@@ -23,8 +23,16 @@ function createMacReader(koffi) {
 function createWindowsReader(koffi) {
   const user32 = koffi.load('user32.dll');
   const getAsyncKeyState = user32.func('short __stdcall GetAsyncKeyState(int vKey)');
+  const getSystemMetrics = user32.func('int __stdcall GetSystemMetrics(int nIndex)');
   const VK_LBUTTON = 0x01;
-  return () => (getAsyncKeyState(VK_LBUTTON) & 0x8000) !== 0;
+  const VK_RBUTTON = 0x02;
+  const SM_SWAPBUTTON = 23;
+  // DOM button 0 means the logical primary button. GetAsyncKeyState instead
+  // addresses physical buttons, so follow the live Windows swap preference.
+  return () => {
+    const primary = getSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON;
+    return (getAsyncKeyState(primary) & 0x8000) !== 0;
+  };
 }
 
 function loadReader(platform) {
@@ -50,4 +58,4 @@ function primaryButtonDown(platform = process.platform) {
   }
 }
 
-module.exports = { primaryButtonDown };
+module.exports = { createWindowsReader, primaryButtonDown };

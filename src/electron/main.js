@@ -5284,6 +5284,7 @@ function edgeDockCellsFor(visibleStats) {
     limitsEnabled: settings?.limitsEnabled !== false,
     limitProviders: settings?.limitProviders,
     limitProviderOrder: settings?.limitProviderOrder,
+    showCodexAdditionalLimits: settings?.showCodexAdditionalLimits !== false,
     liveRate: edgeDockLiveRateSample(visibleStats),
     tokenRateMode: settings?.tokenRateMode
   });

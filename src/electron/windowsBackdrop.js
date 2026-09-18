@@ -9,6 +9,7 @@
 const DEFAULT_ACCENT_ARGB = 0x3a232323;
 
 const WCA_ACCENT_POLICY = 19;
+const ACCENT_ENABLE_BLURBEHIND = 3;
 const ACCENT_ENABLE_ACRYLICBLURBEHIND = 4;
 const DWM_BB_ENABLE = 0x1;
 const DWM_BB_BLURREGION = 0x2;
@@ -62,7 +63,7 @@ function createAccentApi(koffi) {
   const DeleteObject = gdi32.func('bool DeleteObject(void *object)');
 
   return {
-    apply(hwnd, argb) {
+    apply(hwnd, argb, accentState = ACCENT_ENABLE_ACRYLICBLURBEHIND) {
       const region = CreateRectRgn(0, 0, -1, -1);
       if (!region) return false;
       try {
@@ -82,7 +83,7 @@ function createAccentApi(koffi) {
         }) < 0) return false;
 
         const accent = {
-          AccentState: ACCENT_ENABLE_ACRYLICBLURBEHIND,
+          AccentState: accentState,
           AccentFlags: 0,
           GradientColor: argb >>> 0,
           AnimationId: 0
@@ -116,13 +117,18 @@ function applyWindowsAccentBlur(win, options = {}) {
   const api = options.api || loadAccentApi();
   if (!api) return false;
   try {
-    return api.apply(hwndOf(win), options.argb ?? DEFAULT_ACCENT_ARGB) === true;
+    const accentState = options.mode === 'blur'
+      ? ACCENT_ENABLE_BLURBEHIND
+      : ACCENT_ENABLE_ACRYLICBLURBEHIND;
+    return api.apply(hwndOf(win), options.argb ?? DEFAULT_ACCENT_ARGB, accentState) === true;
   } catch (_) {
     return false;
   }
 }
 
 module.exports = {
+  ACCENT_ENABLE_ACRYLICBLURBEHIND,
+  ACCENT_ENABLE_BLURBEHIND,
   DEFAULT_ACCENT_ARGB,
   applyWindowsAccentBlur,
   createAccentApi

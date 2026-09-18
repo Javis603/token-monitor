@@ -549,6 +549,19 @@ test('provider windows keep the collector order so model groups stay together', 
   assert.deepEqual(cell.accounts[0].windows.map((window) => window.label), windows.map((window) => window.label));
 });
 
+test('Codex additional quota windows follow the shared display setting', () => {
+  const windows = [
+    { kind: 'session', label: 'Session', remainingPercent: 70 },
+    { kind: 'daily', label: 'GPT-5.3-Codex-Spark', remainingPercent: 40, additional: true }
+  ];
+  const stats = { limits: { providers: [provider('codex', { windows })] } };
+  const [shown] = buildEdgeDockCells(stats, { showCodexAdditionalLimits: true });
+  assert.deepEqual(shown.accounts[0].windows.map((window) => window.label), ['Session', 'GPT-5.3-Codex-Spark']);
+
+  const [hidden] = buildEdgeDockCells(stats, { showCodexAdditionalLimits: false });
+  assert.deepEqual(hidden.accounts[0].windows.map((window) => window.label), ['Session']);
+});
+
 test('live rate readout reports the selected mode and idle state', () => {
   const [speed] = buildEdgeDockCells({}, { items: [{ type: 'stat', metric: 'liveRate' }], liveRate: { speed: 42, burn: 2520, idle: false } });
   assert.equal(speed.rate, 42);

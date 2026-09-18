@@ -75,12 +75,16 @@
     return ordered;
   }
 
-  function bubbleWindows(provider) {
+  function bubbleWindows(provider, options = {}) {
     return (Array.isArray(provider?.windows) ? provider.windows : [])
       // Kept in the provider's own order: collectors already sequence windows
       // meaningfully (Antigravity lists each model group's 5-hour then weekly),
       // and re-sorting by kind interleaved those groups.
-      .filter((window) => window && !(normalizedId(provider.provider) === 'codex' && window.additional === true))
+      .filter((window) => window && !(
+        options.showCodexAdditionalLimits === false
+        && normalizedId(provider.provider) === 'codex'
+        && window.additional === true
+      ))
       .slice(0, MAX_BUBBLE_WINDOWS)
       .map((window) => {
         const credits = balanceDisplay.isCreditsWindow(window);
@@ -115,7 +119,7 @@
     return { count, expirations };
   }
 
-  function accountSummary(provider) {
+  function accountSummary(provider, options = {}) {
     const selection = trayText.compactLimitSelection(provider);
     return {
       status: provider?.status === 'ok' && !provider?.stale ? 'ok' : (provider?.stale ? 'stale' : 'error'),
@@ -126,7 +130,7 @@
       updatedAt: provider?.updatedAt || provider?.checkedAt || null,
       primaryRemaining: selection ? selection.primaryPercent : null,
       primaryWindow: selection ? selection.primaryWindow : null,
-      windows: bubbleWindows(provider),
+      windows: bubbleWindows(provider, options),
       resetCredits: resetCreditsFor(provider)
     };
   }
@@ -210,7 +214,7 @@
     const hidden = new Set(options.hiddenAccounts || []);
     const accounts = records
       .filter((record) => !record?.accountKey || !hidden.has(record.accountKey))
-      .map((record) => ({ record, summary: accountSummary(record) }));
+      .map((record) => ({ record, summary: accountSummary(record, options) }));
     // Accounts keep the collector's order, as the Limits view lists them. The
     // live Codex account is taken from this device's records alone, so a synced
     // device's login is never marked as the one in use here.
@@ -370,7 +374,8 @@
           localDeviceId: options.localDeviceId,
           codexManagedAccounts: options.codexManagedAccounts,
           activeCodexAccountId: options.activeCodexAccountId,
-          codexResetForecast: options.codexResetForecast
+          codexResetForecast: options.codexResetForecast,
+          showCodexAdditionalLimits: options.showCodexAdditionalLimits
         }));
       }
     }
