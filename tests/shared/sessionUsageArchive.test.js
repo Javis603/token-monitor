@@ -667,6 +667,23 @@ test('linking retries pending Cursor rows only after the cache changed', () => {
   assert.equal(archive.sessions['cursor:cursor-active-2026-08-13T02:10:00.000Z'].supersededBy, `cursor:${CURSOR_UUID}`);
 });
 
+test('a legacy Cursor row captured later is linked from the cache already read', () => {
+  const archive = normalizeSessionUsageArchive(legacyEventArchive([LEGACY_EVENTS[0]]));
+  const cache = cursorUsageEvents(CACHED_EVENTS);
+  updateSessionUsageArchive(archive, cursorSummary([]), NOW, { cursorUsageEvents: cache });
+  assert.equal(archive.sessions[`cursor:${LEGACY_EVENTS[0][0]}`].supersededBy, `cursor:${CURSOR_UUID}`);
+
+  const [lateId, lateTokens] = LEGACY_EVENTS[1];
+  const late = updateSessionUsageArchive(
+    archive,
+    cursorSummary([cursorSession(lateId, lateTokens)]),
+    NOW,
+    { cursorUsageEvents: cache }
+  );
+
+  assert.equal(late.archive.sessions[`cursor:${lateId}`].supersededBy, `cursor:${CURSOR_UUID}`);
+});
+
 test('the Cursor session link survives normalization and is ignored on other rows', () => {
   const archive = legacyEventArchive([['cursor-team-a-2026-08-13T02:42:39', 700]]);
   archive.sessions['cursor:cursor-team-a-2026-08-13T02:42:39'].supersededBy = `cursor:${CURSOR_UUID}`;

@@ -197,8 +197,10 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
 
 // Legacy Cursor rows still waiting for their session link, per in-memory
 // archive. The first call scans the archive once; later calls only add rows a
-// tick captured, and reread the cache only after it changed, so an archive with
-// nothing left to link costs a Set size check per tick.
+// tick captured. A cache that has not changed cannot answer differently for a
+// row it already refused, so those are retried only after it does; a row that
+// has just become pending has never been looked up and is tried at once. An
+// archive with nothing left to link costs a Set size check per tick.
 const pendingLegacyCursorLinks = new WeakMap();
 
 function linkLegacyCursorEvents(archive, changedKeys, readCursorUsageEvents) {
@@ -212,7 +214,9 @@ function linkLegacyCursorEvents(archive, changedKeys, readCursorUsageEvents) {
   }
   for (const key of changedKeys) {
     const entry = archive.sessions[key];
-    if (entry && !entry.supersededBy && isLegacyCursorEntry(entry)) state.keys.add(key);
+    if (!entry || entry.supersededBy || !isLegacyCursorEntry(entry) || state.keys.has(key)) continue;
+    state.keys.add(key);
+    state.signature = null;
   }
   if (state.keys.size === 0) return;
 
