@@ -94,13 +94,21 @@ function readKimiSessionStateFiles(roots, sessionIds) {
   return found;
 }
 
+// `toISOString` throws on an invalid date instead of returning one, and a finite
+// number can still be out of range (`Number.MAX_VALUE` passes `Number.isFinite`).
+// That throw would leave this reader and abort the whole metadata pass, since the
+// resolver is called without containment, so every path validates first.
+function isoFromDate(date) {
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
+
 function timestampValue(value) {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-    return new Date(value).toISOString();
+    return isoFromDate(new Date(value));
   }
   if (typeof value !== 'string') return '';
   const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? '' : new Date(parsed).toISOString();
+  return Number.isNaN(parsed) ? '' : isoFromDate(new Date(parsed));
 }
 
 // The runtime sanitizes the titles it writes through the prompt path (secret
