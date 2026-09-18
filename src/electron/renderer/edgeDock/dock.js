@@ -20,6 +20,15 @@ const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 const { clientColors } = window.TokenMonitorUsageCharts;
 const { LIMIT_PROVIDER_LABELS } = window.TokenMonitorLimitProviders;
 const { CLIENT_LABELS } = window.TokenMonitorClientCatalog;
+// The same predicate the Sessions list uses. The card repaints from its last
+// payload on a timer, so whether a session is still running has to be answered
+// at paint time rather than frozen at push time.
+const sessionLive = window.TokenMonitorSessionLive;
+const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
+  spin: 'edge-dock-session-spin',
+  check: 'edge-dock-session-check',
+  idle: 'edge-dock-session-idle'
+});
 
 const BRAND_VENDOR_COLORS = { ...clientColors };
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -670,20 +679,118 @@ function relativeAgo(value) {
 
 // The provider's newest sessions: what the session was (title, else project,
 // else a short id), its main model, how long ago, and its tokens.
+//
+// The session's context headroom is drawn as a small bar plus its percentage on
+// the meta line. It ADDS to the row rather than taking the right column: the
+// token total is what the row was already for, and headroom is extra, not a
+// replacement. Same Remaining/Used preference as the limits meters and the same
+// colour rule as the Sessions list - neutral while healthy, a colour only as it
+// runs out. Absent for a session whose transcript states no window, which is the
+// normal case rather than an error.
+function contextNode(session) {
+  const context = session?.context;
+  if (!context) return null;
+  const showUsed = appearance().sessionContextMetric !== 'remaining';
+  const percent = showUsed ? context.percentUsed : context.percentLeft;
+  const node = el('span', 'edge-dock-session-context');
+  node.dataset.tone = String(context.tone || '');
+  // The full phrase lives in the tooltip; the line itself stays a bar and a
+  // number so it reads at a glance in the meta row.
+  node.title = t(showUsed ? 'session.contextUsed' : 'session.contextLeft', { percent });
+  const meter = el('span', 'edge-dock-session-context-meter');
+  const fill = el('span', 'edge-dock-session-context-fill');
+  fill.style.setProperty('--bar-scale', String(percent / 100));
+  meter.append(fill);
+  node.append(meter, el('span', 'edge-dock-session-context-value', `${percent}%`));
+  return node;
+}
+
+// Last activity seen for each session, so the running dot can flare on an
+// actual transcript write instead of pulsing forever. Module state on purpose:
+// the comparison is against the previous payload.
+const lastActivityBySession = new Map();
+
+// Only the sessions this card currently lists keep their entry. A session that
+// drops out of the list can never flare again, so holding it would leak one
+// entry per session for the life of the process.
+function pruneActivity(sessions) {
+  const live = new Set(sessions.map((session) => String(session.sessionId || '')));
+  for (const key of lastActivityBySession.keys()) {
+    if (!live.has(key)) lastActivityBySession.delete(key);
+  }
+}
+
+// The state mark, rendered on every row so all titles start at the same x.
+// Three states matching the Sessions list: a spinner while the agent works, a
+// check once the transcript said the turn finished, and a faint dot for a
+// session that has simply gone quiet.
+function stateMark(session, key, state) {
+  const dot = el('span', 'edge-dock-session-dot');
+  dot.setAttribute('aria-hidden', 'true');
+  // The glyphs come from the shared builder, so this card and the Sessions list
+  // cannot drift into different spinner or check shapes.
+  dot.innerHTML = SESSION_STATE_GLYPHS;
+  dot.dataset.state = state;
+  if (state === 'running') dot.title = t('session.running');
+  else if (state === 'ended') dot.title = t('session.finished');
+  const previous = lastActivityBySession.get(key) || 0;
+  const next = Date.parse(session.lastUsedAt || '') || 0;
+  if (next > 0) lastActivityBySession.set(key, next);
+  // Never on a first paint: a card that flares every row as it opens says
+  // nothing about which session just moved. The flare is a one-shot animation
+  // rather than an `infinite` pulse, matching the titlebar dot and the Sessions
+  // list, so an open-but-idle card costs the compositor nothing.
+  if (state === 'running' && previous && next > previous) dot.classList.add('pulse');
+  return dot;
+}
+
 function sessionsNode(sessions) {
   if (!Array.isArray(sessions) || !sessions.length) return null;
+  pruneActivity(sessions);
+  // Re-derived rather than trusted from the pushed cell: the card repaints
+  // every 30s from its last payload, and a session that stopped in between must
+  // stop reading as running (and must stop being counted).
+  // One derivation serves both the count and the marks, from the same shared
+  // predicate the Sessions list uses.
+  const stateByKey = new Map(sessions.map((session) => [String(session.sessionId || ''), sessionLive.sessionActivityState(session)]));
+  const liveCount = [...stateByKey.values()].filter((state) => state === 'running').length;
   const node = el('div', 'edge-dock-sessions');
-  node.append(el('div', 'edge-dock-section-title', t('edgeDock.recentSessions')));
+  // "Recent" was doing no work - every row already carries its own `3m ago` -
+  // while the running count is the one thing the section can say that the rows
+  // cannot. Shown only when something is running: "none running" is noise.
+  const head = el('div', 'edge-dock-section-head');
+  head.append(el('span', 'edge-dock-section-title', t('edgeDock.sessions')));
+  if (liveCount > 0) {
+    head.append(el('span', 'edge-dock-section-count', t('edgeDock.runningCount', { count: liveCount })));
+  }
+  node.append(head);
+  const list = el('div', 'edge-dock-session-list');
   for (const session of sessions) {
     const row = el('div', 'edge-dock-session');
+    const key = String(session.sessionId || '');
+    const state = stateByKey.get(key) || 'idle';
+    row.classList.toggle('is-running', state === 'running');
     const name = session.title || session.projectLabel || session.sessionId.slice(0, 12) || '—';
+    const nameNode = el('span', 'edge-dock-session-name');
+    // The dot sits with the name rather than recolouring it: a green title
+    // made the row read as a different kind of row, and the colour carried no
+    // more information than the dot does.
+    nameNode.append(stateMark(session, key, state));
+    nameNode.append(document.createTextNode(name));
+    // The meta line carries model, age, and (when the transcript stated one)
+    // the context reading, so nothing the row showed before is displaced.
+    const meta = el('span', 'edge-dock-session-meta');
+    meta.append(document.createTextNode([session.model, relativeAgo(session.lastUsedAt)].filter(Boolean).join(' · ')));
+    const context = contextNode(session);
+    if (context) meta.append(context);
     row.append(
-      el('span', 'edge-dock-session-name', name),
+      nameNode,
       el('span', 'edge-dock-session-tokens', formatTokens(session.totalTokens)),
-      el('span', 'edge-dock-session-meta', [session.model, relativeAgo(session.lastUsedAt)].filter(Boolean).join(' · '))
+      meta
     );
-    node.append(row);
+    list.append(row);
   }
+  node.append(list);
   return node;
 }
 

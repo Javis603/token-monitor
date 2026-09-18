@@ -336,6 +336,11 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
       if (meta.title) session.title = meta.title;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
+      // Whether the transcript said the turn finished. Absent for a client
+      // that does not report a boundary, which reads as "still working" and
+      // leaves the reading on the time window.
+      if (meta.turnEnded === true) session.turnEnded = true;
+      else if (meta.turnEnded === false) delete session.turnEnded;
       // Occupancy is only carried when this tick actually read it. A session
       // that has gone quiet long enough to fall outside the read window
       // reports none, which is what makes the UI stop claiming a stale

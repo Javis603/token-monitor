@@ -180,6 +180,9 @@ const subscriptionApi = window.TokenMonitorSubscriptionDisplay;
 const compactTokenApi = window.TokenMonitorCompactTokens;
 const trayLayoutApi = window.TokenMonitorTrayLayout;
 const sessionRowsApi = window.TokenMonitorSessionRows;
+// The shared live-session predicates and glyph builder, also used by the Edge
+// Dock's session rows.
+const sessionLive = window.TokenMonitorSessionLive;
 const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
 const {
   barScaleMax,
@@ -2061,7 +2064,7 @@ function rowTemplate(rowData) {
   // `.row-live` is absolutely positioned over the mark's corner and `.row-context`
   // is the third metrics line; both stay empty and hidden on every row that is
   // not a live session, so the shared template keeps building one shape.
-  row.innerHTML = '<div class="row-head"><div class="row-name"><span class="row-mark"></span><span class="row-live" aria-hidden="true"></span><div class="row-label"><span class="row-title"></span><span class="row-subtitle"></span><span class="row-activity"></span><span class="row-detail"></span></div></div><div class="row-metrics"><div class="row-value"></div><div class="row-cost"></div><div class="row-context hidden"><span class="row-context-meter"><span class="row-context-fill"></span></span><span class="row-context-value"></span></div></div></div><div class="row-body"><div class="bar"><div class="bar-fill"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>';
+  row.innerHTML = `<div class="row-head"><div class="row-name"><span class="row-mark"></span><span class="row-live" aria-hidden="true">${rowLiveMarkup}</span><div class="row-label"><span class="row-title"></span><span class="row-subtitle"></span><span class="row-activity"></span><span class="row-detail"></span></div></div><div class="row-metrics"><div class="row-value"></div><div class="row-cost"></div><div class="row-context hidden"><span class="row-context-meter"><span class="row-context-fill"></span></span><span class="row-context-value"></span></div></div></div><div class="row-body"><div class="bar"><div class="bar-fill"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>`;
   row.querySelector('.row-title').textContent = name;
   row.querySelector('.row-subtitle').textContent = subtitle || '';
   row.querySelector('.row-activity').textContent = activity || '';
@@ -2348,24 +2351,42 @@ function updateRowContext(row, context) {
 // different from one that is generating right now, and an `infinite` animation
 // in an always-open widget never lets the compositor idle. The reduced-motion
 // rules already neutralise every animation, so this needs no guard of its own.
-function updateRowLive(row, running, activityAt) {
+// The same three glyphs the Edge Dock draws, from the shared builder, so the
+// two surfaces cannot drift into different spinner or check shapes.
+const rowLiveMarkup = sessionLive.sessionStateMarkup({
+  spin: 'row-live-spin',
+  check: 'row-live-check',
+  idle: 'row-live-idle'
+});
+
+function updateRowLive(row, activityState, activityAt) {
   const dot = row.querySelector('.row-live');
   if (!dot) return;
-  dot.title = running === true ? (t('session.running') || 'Running') : '';
+  // Three states, not two. A session whose transcript said the turn finished is
+  // over the moment it says so, rather than holding a green dot for the rest of
+  // the time window; one that has merely gone quiet keeps a neutral mark so the
+  // column still reads as a status rather than a blank gutter.
+  const state = activityState === 'running' || activityState === 'ended' ? activityState : 'idle';
+  dot.dataset.state = state;
+  dot.title = state === 'running'
+    ? (t('session.running') || 'Running')
+    : state === 'ended' ? (t('session.finished') || 'Finished') : '';
   const previous = Number(row.dataset.activityAt || 0);
   const next = Number(activityAt) || 0;
   if (next > 0) row.dataset.activityAt = String(next);
   // Never on a first render: a list that flashes every dot as it arrives says
   // nothing about which session just moved.
-  if (running !== true || !previous || next <= previous) return;
+  if (state !== 'running' || !previous || next <= previous) return;
   dot.classList.remove('pulse');
   void dot.offsetWidth;
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, context, sortTime }) {
+function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
+  // `running` still drives the row class for layout, but the mark's own state
+  // comes from `activityState` so the three cases stay distinguishable.
   row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}${running ? ' running' : ''}`;
   row.title = local ? 'This device' : '';
   
@@ -2422,7 +2443,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   row.dataset.motionValue = String(Number(value) || 0);
   row.querySelector('.row-cost').textContent = tokenDataUnavailable === true ? '' : formatCost(cost || 0);
   updateRowContext(row, running === true ? context : null);
-  updateRowLive(row, running === true, sortTime);
+  updateRowLive(row, activityState || (running === true ? 'running' : 'idle'), sortTime);
   const fill = row.querySelector('.bar-fill');
   fill.style.background = barBackground || color;
   applyBarScale(fill, width / 100);

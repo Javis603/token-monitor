@@ -11,11 +11,12 @@
     node ? require('../../../shared/limitBalanceDisplay') : root?.TokenMonitorLimitBalanceDisplay,
     node ? require('../../../shared/limitProviders') : root?.TokenMonitorLimitProviders,
     node ? require('./items') : root?.TokenMonitorEdgeDockItems,
-    node ? require('../accountIdentity') : root?.TokenMonitorAccountIdentity
+    node ? require('../accountIdentity') : root?.TokenMonitorAccountIdentity,
+    node ? require('../../../shared/sessionLive') : root?.TokenMonitorSessionLive
   );
   if (node) module.exports = api;
   if (root) root.TokenMonitorEdgeDockPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity) {
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive) {
   // Every account is listed; the card scrolls when they outgrow the screen.
   const MAX_BUBBLE_ACCOUNTS = 50;
   const MAX_BUBBLE_WINDOWS = 6;
@@ -172,9 +173,13 @@
 
   const RECENT_SESSION_COUNT = 3;
 
-  // The provider's most recently active sessions this month, newest first.
-  // Month detail includes today's sessions; today's collection is the fallback
-  // for payloads that only carry today.
+  // The sessions a provider card lists. Month detail includes today's sessions;
+  // today's collection is the fallback for payloads that only carry today.
+  //
+  // Running is decided here rather than at the renderer, so the count and the
+  // rows are one derivation and cannot disagree. `now` is passed in so the
+  // caller can pin a clock in tests; the renderer recomputes from the same
+  // shared predicate when it repaints between pushes.
   function recentSessionsFor(stats, provider) {
     const byKey = new Map();
     for (const periodKey of ['month', 'today']) {
@@ -187,9 +192,15 @@
         byKey.set(key, { session, lastUsedMs });
       }
     }
-    return [...byKey.values()]
-      .sort((a, b) => b.lastUsedMs - a.lastUsedMs)
-      .slice(0, RECENT_SESSION_COUNT)
+    const ordered = [...byKey.values()].sort((a, b) => b.lastUsedMs - a.lastUsedMs);
+    const runningKeys = new Set(ordered.filter(({ session }) => sessionLive.isRunningSession(session)).map(({ session }) => session.sessionId));
+    const running = ordered.filter(({ session }) => runningKeys.has(session.sessionId));
+    // Running sessions are never truncated by the recent cap: dropping one
+    // would leave the card's "N running" count with no matching row. The cap
+    // only bounds the quiet tail, and the card scrolls when the whole list
+    // outgrows the screen.
+    const quiet = ordered.filter(({ session }) => !runningKeys.has(session.sessionId)).slice(0, RECENT_SESSION_COUNT);
+    return [...running, ...quiet]
       .map(({ session }) => {
         const models = Object.entries(session.models || {}).sort((a, b) => (finite(b[1]) || 0) - (finite(a[1]) || 0));
         return {
@@ -199,7 +210,12 @@
           model: models[0]?.[0] || '',
           totalTokens: finite(session.totalTokens) || 0,
           costUsd: finite(session.costUsd) || 0,
-          lastUsedAt: session.lastUsedAt || session.startedAt || null
+          lastUsedAt: session.lastUsedAt || session.startedAt || null,
+          // Carried onto the projected row, not just used here: the dock renderer
+          // re-derives the state at paint time and needs the boundary to do it.
+          turnEnded: session.turnEnded === true,
+          running: sessionLive.isRunningSession(session),
+          context: sessionLive.sessionContextRow(session) || null
         };
       });
   }
@@ -276,6 +292,7 @@
         currency: balanceDisplay.creditsCurrency(headline.record, headlineWindow)
       }
       : null;
+    const sessions = options.showSessions === false ? [] : recentSessionsFor(options.stats, id);
     return {
       id,
       kind: 'provider',
@@ -287,7 +304,7 @@
       accountCount: accounts.length,
       accounts: projected.slice(0, MAX_BUBBLE_ACCOUNTS).map((account) => account.summary),
       usage: options.showUsage === false ? null : providerUsage(options.stats, id),
-      sessions: options.showSessions === false ? [] : recentSessionsFor(options.stats, id),
+      sessions,
       forecast: id === 'codex' ? options.codexResetForecast || null : null
     };
   }

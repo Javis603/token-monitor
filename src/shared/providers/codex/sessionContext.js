@@ -35,6 +35,18 @@ const TAIL_READ_BUDGETS = [256 * 1024, 1024 * 1024];
 // rebuilt on every tick.
 const contextCache = new Map();
 
+// Same lifetime rule as the context cache above, for the turn-boundary read.
+const turnEndCache = new Map();
+
+// The turn-boundary scan starts at the ordinary tail budget and doubles up to
+// this cap. A boundary is normally within the first window (it is the last
+// thing a turn writes), but a single Codex message can be several megabytes,
+// so the window has to be able to grow past it. The cap keeps a transcript
+// with no boundary at all (an old rollout predating the event) bounded rather
+// than read in full.
+const TURN_READ_START_BYTES = 256 * 1024;
+const TURN_READ_MAX_BYTES = 8 * 1024 * 1024;
+
 function readFileTail(filePath, size, bytes) {
   let fd;
   try {
@@ -110,4 +122,71 @@ function readCodexSessionContext(filePath, deps = {}) {
   return context;
 }
 
-module.exports = { TAIL_READ_BUDGETS, readCodexSessionContext };
+// Whether the last thing this transcript did was finish a turn. Codex writes
+// `task_complete` when the agent stops generating, and `task_started` when it
+// picks the next thing up, so the newest of the two answers the question. A
+// transcript with neither has not had a turn finish yet (or predates the
+// event), which reads as false and leaves the caller on its time window.
+//
+// A turn that was interrupted ends with `turn_aborted` instead: nothing is
+// generating, so that counts as finished too.
+function turnEndMarker(line) {
+  let obj;
+  try { obj = JSON.parse(line); } catch (_) { return ''; }
+  if (!obj || typeof obj !== 'object') return '';
+  const payload = obj.payload && typeof obj.payload === 'object' ? obj.payload : obj;
+  if (payload.type === 'task_complete' || payload.type === 'turn_aborted') return 'end';
+  if (payload.type === 'task_started') return 'start';
+  return '';
+}
+
+function codexTurnEndedFromTail(text) {
+  const lines = text.split('\n');
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index].trim();
+    if (!line) continue;
+    const marker = turnEndMarker(line);
+    if (marker) return marker === 'end';
+  }
+  return false;
+}
+
+/**
+ * True when the newest turn-boundary event in a Codex rollout is a completion.
+ */
+function readCodexTurnEnded(filePath, deps = {}) {
+  const cache = deps.cache || turnEndCache;
+  let stat;
+  try { stat = fs.statSync(filePath); } catch (_) { return false; }
+  const fingerprint = `${stat.size}:${stat.mtimeMs}`;
+  const cached = cache.get(filePath);
+  if (cached?.fingerprint === fingerprint) return cached.turnEnded;
+  let turnEnded = false;
+  let budget = TURN_READ_START_BYTES;
+  while (true) {
+    const text = readFileTail(filePath, stat.size, budget);
+    // A boundary found is an answer either way, and is the newest one because
+    // the scan walks backwards from the end of this tail.
+    if (codexHasTurnBoundary(text)) {
+      turnEnded = codexTurnEndedFromTail(text);
+      break;
+    }
+    // No boundary inside this window: widen. Codex can emit a single message
+    // of several megabytes, so a fixed tail is not enough — one real session
+    // put its last boundary behind two lines that together exceeded 1 MiB.
+    if (stat.size <= budget || budget >= TURN_READ_MAX_BYTES) break;
+    budget = Math.min(budget * 2, TURN_READ_MAX_BYTES);
+  }
+  cache.set(filePath, { fingerprint, turnEnded });
+  return turnEnded;
+}
+
+function codexHasTurnBoundary(text) {
+  return /"type":"(task_complete|task_started|turn_aborted)"/.test(text);
+}
+
+module.exports = {
+  TAIL_READ_BUDGETS,
+  readCodexSessionContext,
+  readCodexTurnEnded
+};

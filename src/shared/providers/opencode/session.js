@@ -59,6 +59,12 @@ function readSessionMeta(sessionIds, deps = {}) {
       const directory = columns.has('directory') ? "COALESCE(directory,'')" : "''";
       const messageColumns = new Set(db.prepare('PRAGMA table_info(message)').all().map((column) => String(column.name)));
       const lastMessageBySession = new Map();
+      // The newest assistant row's `finish` is OpenCode's turn-end signal, the
+      // same fact Claude states as `stop_reason`: `stop` means the model
+      // finished its answer, `tool-calls` means it paused to run tools and is
+      // still mid-turn. Read beside the last-message timestamp so one query
+      // answers both, and only `stop` counts as finished.
+      const lastFinishBySession = new Map();
       if (messageColumns.has('session_id') && (messageColumns.has('data') || messageColumns.has('time_created'))) {
         const jsonCreated = messageColumns.has('data')
           ? "CASE WHEN json_valid(data) THEN CAST(json_extract(data,'$.time.created') AS INTEGER) END"
@@ -71,6 +77,29 @@ function readSessionMeta(sessionIds, deps = {}) {
                             GROUP BY session_id`;
         for (const row of db.prepare(messageSql).all(...ids)) {
           lastMessageBySession.set(String(row.sessionId), row.lastMessageMs);
+        }
+        if (messageColumns.has('data')) {
+          // One row per session: the newest assistant message. Windowed rather
+          // than grouped, because the finish value belongs to that single row
+          // and SQLite's bare-column grouping would pick an arbitrary one.
+          // (A correlated subquery is the obvious alternative, but `inner` is a
+          // reserved word and the resulting syntax error is swallowed by the
+          // caller's catch, which reads as "this session has no metadata".)
+          const finishSql = `SELECT sessionId, finish FROM (
+                               SELECT session_id AS sessionId,
+                                      json_extract(data,'$.finish') AS finish,
+                                      ROW_NUMBER() OVER (
+                                        PARTITION BY session_id
+                                        ORDER BY time_created DESC, id DESC
+                                      ) AS rank
+                               FROM message
+                               WHERE session_id IN (${placeholders})
+                                 AND json_valid(data)
+                                 AND json_extract(data,'$.role') = 'assistant'
+                             ) WHERE rank = 1`;
+          for (const row of db.prepare(finishSql).all(...ids)) {
+            lastFinishBySession.set(String(row.sessionId), String(row.finish || ''));
+          }
         }
       }
       const sql = `SELECT id, COALESCE(title,'') AS title, ${directory} AS directory, time_created AS created
@@ -85,6 +114,10 @@ function readSessionMeta(sessionIds, deps = {}) {
         const lastUsedAt = isoFromMs(lastMessageBySession.get(id)) || startedAt;
         const meta = { startedAt, lastUsedAt, title: String(r.title || '') };
         if (r.directory) meta.projectPath = String(r.directory);
+        // Only a completed answer ends the turn; a `tool-calls` pause is still
+        // work in progress, which is why the flag is omitted rather than set
+        // false — an omitted flag leaves the caller on its time window.
+        if (lastFinishBySession.get(id) === 'stop') meta.turnEnded = true;
         out.set(id, meta);
       }
     } catch (_) { /* skip unreadable db */ } finally {
@@ -118,7 +151,13 @@ function resolveSessionMetadata(sessionIds, context) {
     const identity = resolveProjects ? projectIdentity(meta.projectPath) : {};
     const title = String(meta.title || '').trim();
     if (startedAt || lastUsedAt || identity.projectId || title) {
-      result.set(sessionId, { startedAt, lastUsedAt, ...identity, title });
+      result.set(sessionId, {
+        startedAt,
+        lastUsedAt,
+        ...identity,
+        title,
+        ...(meta.turnEnded === true ? { turnEnded: true } : {})
+      });
     }
   }
   return result;

@@ -101,6 +101,25 @@ test('readCodexSessionContext reports nothing until a transcript states a window
   assert.equal(readCodexSessionContext(file, { cache: new Map() }), null);
   assert.equal(readCodexSessionContext(path.join(dir, 'missing.jsonl'), { cache: new Map() }), null);
 });
+test('the turn-end marker is read from each client transcript that reports one', () => {
+  const dir = tmpDir('turn-end-');
+  const { readCodexTurnEnded } = require('../../src/shared/providers/codex/sessionContext');
+  const event = (payload) => JSON.stringify({ timestamp: '2026-09-18T05:17:32.131Z', type: 'event_msg', payload });
+  const finished = writeRollout(dir, 'finished.jsonl', [event({ type: 'task_started' }), event({ type: 'task_complete' })]);
+  assert.equal(readCodexTurnEnded(finished, { cache: new Map() }), true);
+  // A turn picked up after the last completion is generating again, so the
+  // marker has to clear rather than latch.
+  const generating = writeRollout(dir, 'generating.jsonl', [event({ type: 'task_complete' }), event({ type: 'task_started' })]);
+  assert.equal(readCodexTurnEnded(generating, { cache: new Map() }), false);
+  // An interrupted turn is finished too: nothing is generating.
+  const aborted = writeRollout(dir, 'aborted.jsonl', [event({ type: 'task_started' }), event({ type: 'turn_aborted' })]);
+  assert.equal(readCodexTurnEnded(aborted, { cache: new Map() }), true);
+  // A transcript with no boundary at all reports nothing, which leaves the
+  // caller on its time window rather than guessing.
+  const silent = writeRollout(dir, 'silent.jsonl', [responseLine('no boundary here')]);
+  assert.equal(readCodexTurnEnded(silent, { cache: new Map() }), false);
+  assert.equal(readCodexTurnEnded(path.join(dir, 'missing.jsonl'), { cache: new Map() }), false);
+});
 
 test('readCodexSessionContext escalates the tail budget past one oversized turn', () => {
   const dir = tmpDir('codex-context-big-');

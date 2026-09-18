@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { findSessionFiles, codexSessionFile } = require('../../sessionFiles');
 const { shouldReadSessionContext } = require('../../sessionContext');
-const { readCodexSessionContext } = require('./sessionContext');
+const { readCodexSessionContext, readCodexTurnEnded } = require('./sessionContext');
 
 let sqlite = null;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
@@ -351,6 +351,7 @@ function resolveSessionMetadata(sessionIds, context) {
     useEnvRoot: !deps.scopedHome
   });
   const readContext = deps.readCodexSessionContext || readCodexSessionContext;
+  const readTurnEnded = deps.readCodexTurnEnded || readCodexTurnEnded;
   // The transcript this pass just stat-ed is also where the context window
   // lives, so the reading rides on the same file the timestamp came from. It is
   // attempted only once that timestamp says the session could still be open —
@@ -359,7 +360,11 @@ function resolveSessionMetadata(sessionIds, context) {
     const meta = context.fileSessionMetadata(sessionId, filePath, result.get(sessionId));
     if (!shouldReadSessionContext(meta.lastUsedAt, context.now)) return meta;
     const sessionContext = readContext(filePath);
-    return sessionContext ? { ...meta, ...sessionContext } : meta;
+    // The turn boundary rides the same tail and answers the other half of the
+    // question the window cannot: whether the agent is still generating.
+    const turnEnded = readTurnEnded(filePath);
+    const decorated = sessionContext ? { ...meta, ...sessionContext } : meta;
+    return turnEnded ? { ...decorated, turnEnded: true } : decorated;
   };
   const missingIds = new Set();
   for (const sessionId of sessionIds) {

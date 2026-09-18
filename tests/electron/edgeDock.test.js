@@ -1,7 +1,16 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
+
+// This suite reaches into the renderer for the dock's own row/paint rules.
+const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
+
+function readRendererFile(name) {
+  return fs.readFileSync(path.join(rendererDir, name), 'utf8');
+}
 
 const {
   EDGE_DOCK_METRICS,
@@ -34,6 +43,102 @@ const {
 
 const workArea = { x: 0, y: 25, width: 1440, height: 875 };
 const displayBounds = { x: 0, y: 0, width: 1440, height: 900 };
+
+test('the dock keeps the token total, adds headroom, and dots running rows instead of recolouring them', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
+  const app = readRendererFile('app.js');
+  // The token total must survive: headroom is additional, not a replacement for
+  // the figure the row already carried.
+  assert.match(dock, /el\('span', 'edge-dock-session-tokens', formatTokens\(session\.totalTokens\)\)/);
+  // ...and both live on the same row, with the context reading appended to the
+  // meta line rather than taking the token column.
+  const sessions = dock.slice(dock.indexOf('function sessionsNode('), dock.indexOf('function providerCard('));
+  assert.match(sessions, /edge-dock-session-meta/);
+  assert.match(sessions, /if \(context\) meta\.append\(context\)/);
+  // Running is a dot beside the name, not a recoloured title.
+  assert.match(sessions, /nameNode\.append\(stateMark\(session, key, state\)\)/);
+  assert.match(sessions, /nameNode\.append\(document\.createTextNode\(name\)\)/);
+  assert.doesNotMatch(css, /\.edge-dock-session\.is-running \.edge-dock-session-name\s*\{[^}]*color/);
+  // Three states: a spinner while working, a check once the transcript said the
+  // turn finished, and a faint dot for a session that has gone quiet.
+  assert.match(css, /\.edge-dock-session-spin\s*\{[\s\S]*?color: var\(--success\)/);
+  assert.match(css, /\.edge-dock-session-check\s*\{[\s\S]*?color: var\(--muted\)/);
+  assert.match(css, /\.edge-dock-session-idle::before/);
+  assert.match(css, /edge-dock-session-dot\[data-state="running"\] \.edge-dock-session-spin/);
+  assert.match(css, /edge-dock-session-dot\[data-state="ended"\] \.edge-dock-session-check/);
+  assert.match(css, /edge-dock-session-dot\[data-state="idle"\] \.edge-dock-session-idle/);
+  // The slot is reserved on EVERY row and only painted while running, so the
+  // titles of running and idle rows start at the same x.
+  assert.match(sessions, /const state = stateByKey\.get\(key\) \|\| 'idle'/);
+  // The flare is one-shot, so an idle card animates nothing.
+  // The flare rides along with the spin rather than replacing it, and adds no
+  // `infinite` of its own: a flare always means a write.
+  assert.match(css, /\.edge-dock-session-dot\.pulse \.edge-dock-session-spin \{/);
+  assert.match(css, /edge-dock-session-spin 900ms linear infinite, edge-dock-session-pulse/);
+  // The context reading carries a bar plus the number, and the tone rule is
+  // keyed on headroom so a healthy reading stays neutral.
+  assert.match(css, /edge-dock-session-context-meter/);
+  assert.match(css, /edge-dock-session-context\[data-tone="low"\]/);
+  // `calls` stays English on purpose, matching the Limits view's fixed wording:
+  // it is a billing unit, and every Chinese candidate reads as a different
+  // measure (closer to "invocations") than to billable calls.
+  assert.match(readRendererFile('sessionRows.js'), /formatNumber\(count\)\} \$\{count === 1 \? 'call' : 'calls'\}/);
+  assert.doesNotMatch(app, /callsLabel/);
+  const i18n = readRendererFile('i18n.js');
+  assert.doesNotMatch(i18n, /'session\.calls':/);
+  assert.doesNotMatch(i18n, /'session\.callsOne':/);
+});
+
+test('running sessions are never truncated by the recent cap, and the count matches the rows', () => {
+  const nowIso = new Date().toISOString();
+  const oldIso = new Date(Date.now() - 90 * 60_000).toISOString();
+  const session = (id, lastUsedAt, extra = {}) => ({ client: 'codex', sessionId: id, lastUsedAt, totalTokens: 10, models: { 'gpt-5': 10 }, ...extra });
+  const stats = {
+    periods: {
+      month: { sessions: {
+        'codex:run1': session('run1', nowIso, { contextTokens: 281_012, contextWindow: 950_000, title: 'live one' }),
+        'codex:run2': session('run2', nowIso),
+        'codex:run3': session('run3', nowIso),
+        'codex:run4': session('run4', nowIso),
+        'codex:quiet1': session('quiet1', oldIso),
+        'codex:quiet2': session('quiet2', oldIso)
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [provider('codex')] }
+  };
+  const [codex] = buildEdgeDockCells(stats, {});
+  // Four running sessions exceed the recent cap of three; all four must still
+  // appear, or the card would report a count with no matching rows.
+  assert.deepEqual(codex.sessions.map((entry) => entry.sessionId), ['run1', 'run2', 'run3', 'run4', 'quiet1', 'quiet2']);
+  assert.equal(codex.sessions.filter((entry) => entry.running).length, 4);
+  // The quiet tail is still capped at three, which here is the only two there are.
+  assert.equal(codex.sessions.filter((entry) => !entry.running).length, 2);
+  // Context rides the row for a session whose transcript stated a window, and
+  // is absent (not zero) for one that has gone quiet.
+  assert.deepEqual(codex.sessions[0].context, { contextTokens: 281_012, contextWindow: 950_000, percentLeft: 70, percentUsed: 30, tone: '' });
+  assert.equal(codex.sessions.find((entry) => entry.sessionId === 'quiet1').context, null);
+  // Nothing running is a real answer, not a missing one.
+  const [quietOnly] = buildEdgeDockCells({
+    periods: { month: { sessions: { 'codex:q': session('q', oldIso) } }, today: { sessions: {} } },
+    limits: { providers: [provider('codex')] }
+  }, {});
+  assert.equal(quietOnly.sessions.filter((entry) => entry.running).length, 0);
+});
+
+test('an archived session never counts as running on a dock card', () => {
+  const nowIso = new Date().toISOString();
+  const stats = {
+    periods: {
+      month: { sessions: { 'codex:a': { client: 'codex', sessionId: 'a', lastUsedAt: nowIso, totalTokens: 10, models: { 'gpt-5': 10 }, archived: true } } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [provider('codex')] }
+  };
+  const [codex] = buildEdgeDockCells(stats, {});
+  assert.equal(codex.sessions[0].running, false);
+});
 
 test('edge dock is opt-in and limited to macOS and Windows', () => {
   assert.equal(canUseEdgeDock({}, 'darwin'), false);

@@ -497,6 +497,11 @@ function emptySession(client, id) {
     // is the normal value for everything else.
     contextTokens: 0,
     contextWindow: 0,
+    // `turnEnded` is deliberately absent here. True once the client's own
+    // transcript said the current turn finished, which is how a session stops
+    // reading as running without waiting out the time window — but a default of
+    // `false` would make "this reading carries no boundary" indistinguishable
+    // from "a turn is in progress", and the former must not clear the latter.
     projectId: '',
     projectLabel: '',
     title: '',
@@ -538,6 +543,20 @@ function mergeSession(target, source) {
   if (sourceContextWindow > 0) {
     target.contextWindow = sourceContextWindow;
     target.contextTokens = Math.max(0, Math.round(asNumber(source.contextTokens)));
+  }
+  // A turn end is a transcript reading, not a sum, so it is freshest-wins: the
+  // same session can appear in several periods, and a turn that started after
+  // one of them was decorated has to be able to clear it. Absent means "this
+  // client reports no boundary", which never overwrites a real reading.
+  if (hasOwn(source, 'turnEnded')) {
+    const sourceEnded = source.turnEnded === true;
+    // Strictly newer wins. At the same timestamp a positive claim beats a
+    // negative one: both readings describe the same bytes, and one of them
+    // found a boundary the other did not have in its window. A negative
+    // reading is also what a client with no evidence sends, so letting it win
+    // on a tie would drop the only real answer available.
+    if (sourceLastUsed > targetLastUsed) target.turnEnded = sourceEnded;
+    else if (sourceEnded && sourceLastUsed === targetLastUsed) target.turnEnded = true;
   }
   if (!target.title && source.title) target.title = normalizeSessionTitle(source.title);
   if (!target.sessionKind && source.sessionKind) target.sessionKind = normalizeSessionKind(source.sessionKind);
@@ -614,6 +633,12 @@ function normalizeSession(input, fallbackKey) {
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
   session.contextTokens = Math.max(0, Math.round(asNumber(input.contextTokens ?? input.context_tokens ?? 0)));
   session.contextWindow = Math.max(0, Math.round(asNumber(input.contextWindow ?? input.context_window ?? 0)));
+  // Carried rather than summed, and only when the source actually states it:
+  // `undefined` means "this reading carries no boundary", which is different
+  // from `false` ("a turn is in progress") and must not clear a real reading
+  // when the same session arrives from a source that had no evidence.
+  if (input.turnEnded === true) session.turnEnded = true;
+  else if (input.turnEnded === false) session.turnEnded = false;
   session.projectId = String(input.projectId || input.project_id || '').trim();
   session.projectLabel = String(input.projectLabel || input.project_label || '').trim();
   session.title = normalizeSessionTitle(input.title || input.sessionTitle || input.session_title);

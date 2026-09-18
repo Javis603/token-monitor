@@ -5147,6 +5147,9 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     interfaceFontFamily: source.interfaceFontFamily,
     displayFontFamily: source.displayFontFamily,
     showLimitUsed: source.showLimitUsed,
+    // The dock's session rows carry the same context gauge as the Sessions
+    // list, so its Remaining/Used preference has to reach this renderer too.
+    sessionContextMetric: source.sessionContextMetric,
     maskLimitAccountEmails: source.maskLimitAccountEmails,
     edgeDockWarnColors: source.edgeDockWarnColors === true
   };
