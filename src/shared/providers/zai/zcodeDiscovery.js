@@ -14,9 +14,11 @@
 //
 // Missing files are normal (ZCode not installed) and resolve to kind 'none';
 // malformed JSON is treated the same way rather than surfacing as an error.
-// The credential returned for the billing lane is ZCode's own on-disk mirror
-// key, for in-memory use only — never logged or persisted by the caller.
+// The billing credential (the credential store's zcodejwttoken, or the
+// provider entry's mirror on 3.11.x installs) is for in-memory use only —
+// never logged, persisted, or handed to the renderer.
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -79,11 +81,55 @@ function isCodingPlanProviderId(providerId) {
   return providerId === ZCODE_PROVIDER_IDS.codingPlan.zai || providerId === ZCODE_PROVIDER_IDS.codingPlan.bigmodel;
 }
 
-// Resolve which credential the billing lane should present. ZCode stores its
-// login token encrypted in credentials.json (unreadable to us) and mirrors a
-// plain JWT into the provider entry; the mirror is the only readable key, and
-// ZCode rotated it on each login up to 3.11.x, so a stale mirror is answered
-// by the server as a parameter/auth error and surfaces as unavailable.
+// ZCode 3.12.3 keeps the live session credentials in credentials.json,
+// encrypted with AES-256-GCM under a key derived from machine-local values
+// (no user secret, no OS keychain — the envelope keeps a synced or backed-up
+// file from leaking, it does not gate a same-machine reader). The plaintext
+// mirror this lane used to rely on stopped being refreshed with that release,
+// so the billing credential is decrypted from the store on every call:
+// in memory only, never logged, persisted, or handed to the renderer, and any
+// failure falls back to the mirror a 3.11.x install still carries.
+const ZCODE_CREDENTIAL_ENVELOPE = 'enc:v1:';
+
+// Same derivation as ZCode's own defaultCredentialSecret: an explicit
+// ZCODE_CREDENTIAL_SECRET wins, otherwise machine-local values.
+function credentialSecret(env) {
+  const explicit = String(env?.ZCODE_CREDENTIAL_SECRET || '').trim();
+  if (explicit) return explicit;
+  let username = 'unknown';
+  try { username = os.userInfo().username; } catch (_) {}
+  return `zcode-credential-fallback:${os.platform()}:${os.homedir()}:${username}`;
+}
+
+// Envelope as ZCode writes it: base64url(iv).base64url(authTag).base64url(cipher).
+function decryptZcodeCredential(value, env) {
+  if (typeof value !== 'string' || !value.startsWith(ZCODE_CREDENTIAL_ENVELOPE)) return null;
+  const [ivPart, tagPart, cipherPart] = value.slice(ZCODE_CREDENTIAL_ENVELOPE.length).split('.');
+  if (!ivPart || !tagPart || !cipherPart) return null;
+  try {
+    const key = crypto.createHash('sha256').update(credentialSecret(env)).digest();
+    const iv = Buffer.from(ivPart, 'base64url');
+    const tag = Buffer.from(tagPart, 'base64url');
+    if (iv.length !== 12 || tag.length !== 16) return null;
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    const plain = Buffer.concat([decipher.update(Buffer.from(cipherPart, 'base64url')), decipher.final()]).toString('utf8');
+    return plain || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function storedZcodeJwtCredential(base, readFileSync, env) {
+  const store = readJson(path.join(base, 'credentials.json'), readFileSync);
+  const token = decryptZcodeCredential(store?.zcodejwttoken, env);
+  return token ? { token, source: 'zcode-auto' } : null;
+}
+
+// Resolve which credential the billing lane should present. The live store's
+// JWT is the ZCode-managed token the server rotates; the provider entry's
+// plain mirror is what 3.11.x installations have, and answers as
+// syntax/auth errors once stale.
 function billingCredential(provider) {
   const providerKey = String(provider?.options?.apiKey || '').trim();
   if (providerKey) return { token: providerKey, source: 'zcode-auto' };
@@ -131,18 +177,30 @@ function discoverZcodeConnection(options = {}, deps = {}) {
 
   if (isStartPlanProviderId(providerId) || isCodingPlanProviderId(providerId)) {
     const kind = isStartPlanProviderId(providerId) ? 'start-billing' : 'coding-quota';
-    const credential = billingCredential(provider);
+    // The credential store is read lazily: a quota-shaped selection only
+    // touches it when it needs the billing credential, and at most once per
+    // discovery call.
+    let storedJwt;
+    const liveBillingCredential = () => {
+      if (storedJwt === undefined) storedJwt = storedZcodeJwtCredential(base, readFileSync, env);
+      return storedJwt;
+    };
+    const credential = kind === 'start-billing'
+      ? liveBillingCredential() || billingCredential(provider)
+      : billingCredential(provider);
     // `entitled` marks a result the lane can actually query. Since 3.12.3
-    // stopped writing the entitlement cache, the mirror key's presence is the
+    // stopped writing the entitlement cache, a readable credential is the
     // only local signal; the query itself answers entitlement.
     if (!credential) return { kind, family, providerId, entitled: false, reason: 'coding_plan_not_authenticated' };
     // Billing is an account-level endpoint: ZCode queries it even while the
     // coding-plan provider is selected (validateZaiCodingPlanPairAvailability
-    // → validateStartPlanAvailability), so the coding shape carries the
-    // start-plan entry's mirror key alongside its own quota query.
+    // → validateStartPlanAvailability), so the coding shape carries a billing
+    // credential alongside its own quota query — the live store's JWT first,
+    // the start entry's mirror as the 3.11.x fallback.
     let billing;
     if (kind === 'coding-quota') {
-      const startCredential = billingCredential(registry.provider?.[ZCODE_PROVIDER_IDS.startPlan[family]] || null);
+      const startCredential = liveBillingCredential()
+        || billingCredential(registry.provider?.[ZCODE_PROVIDER_IDS.startPlan[family]] || null);
       if (startCredential) billing = { credential: startCredential };
     }
     return { kind, family, providerId, entitled: true, credential, ...(billing ? { billing } : {}) };

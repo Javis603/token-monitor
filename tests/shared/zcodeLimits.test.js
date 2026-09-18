@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -561,4 +562,77 @@ test('the subscription picker prefers the current-period VALID row over a listed
     { data: [{ productName: 'Only Plan' }] }
   );
   assert.equal(fallback.plan, 'Only Plan');
+});
+
+// The fixture is encrypted exactly the way ZCode's own
+// createCredentialCipherProvider writes it (AES-256-GCM, sha256-derived key,
+// base64url(iv).base64url(tag).base64url(cipher) under an enc:v1: prefix), so
+// the tests prove interop with the real store rather than a hand-rolled shape.
+const TEST_CREDENTIAL_SECRET = 'test-credential-secret';
+
+function encryptCredential(value, secret) {
+  const key = crypto.createHash('sha256').update(secret).digest();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  return `enc:v1:${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${ciphertext.toString('base64url')}`;
+}
+
+test('the billing credential prefers the live credential store over the mirror', () => {
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'start-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-start-plan': { enabled: true, options: { apiKey: 'stale-mirror' } }
+    } }),
+    'credentials.json': JSON.stringify({ zcodejwttoken: encryptCredential('live-jwt', TEST_CREDENTIAL_SECRET) })
+  };
+  const deps = (overrides = {}) => ({
+    readFileSync: fileSystem({ ...files, ...overrides }),
+    homeDir: '/home/test',
+    env: { ZCODE_CREDENTIAL_SECRET: TEST_CREDENTIAL_SECRET }
+  });
+
+  const discovery = discoverZcodeConnection({}, deps());
+  assert.equal(discovery.kind, 'start-billing');
+  assert.equal(discovery.credential.token, 'live-jwt');
+
+  // Every failure shape degrades to the mirror silently: a malformed
+  // envelope, a missing store, and a store encrypted under another machine's
+  // key (the wrong secret must not surface an error).
+  assert.equal(discoverZcodeConnection({}, deps({ 'credentials.json': JSON.stringify({ zcodejwttoken: 'enc:v1:not-valid' }) })).credential.token, 'stale-mirror');
+  assert.equal(discoverZcodeConnection({}, deps({ 'credentials.json': '{' })).credential.token, 'stale-mirror');
+  assert.equal(discoverZcodeConnection({}, deps({
+    'credentials.json': JSON.stringify({ zcodejwttoken: encryptCredential('live-jwt', 'another-machine-secret') })
+  })).credential.token, 'stale-mirror');
+  const noStore = { ...files };
+  delete noStore['credentials.json'];
+  assert.equal(discoverZcodeConnection({}, {
+    readFileSync: fileSystem(noStore), homeDir: '/home/test', env: { ZCODE_CREDENTIAL_SECRET: TEST_CREDENTIAL_SECRET }
+  }).credential.token, 'stale-mirror');
+});
+
+test('a coding-quota selection takes the live billing credential for its billing lane', () => {
+  const discovery = discoverZcodeConnection({}, {
+    readFileSync: fileSystem({
+      'setting.json': JSON.stringify({
+        providerFamilyDomain: 'zai',
+        providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
+      }),
+      'config.json': JSON.stringify({ provider: {
+        'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'coding-mirror' } },
+        'builtin:zai-start-plan': { enabled: false, systemDisabledReason: 'coding_plan_not_entitled', options: { apiKey: 'stale-start-mirror' } }
+      } }),
+      'credentials.json': JSON.stringify({ zcodejwttoken: encryptCredential('live-jwt', TEST_CREDENTIAL_SECRET) })
+    }),
+    homeDir: '/home/test',
+    env: { ZCODE_CREDENTIAL_SECRET: TEST_CREDENTIAL_SECRET }
+  });
+  assert.equal(discovery.kind, 'coding-quota');
+  // Quota keeps the mirror key (the console-shaped credential the quota
+  // endpoint accepts); the billing lane takes the live JWT.
+  assert.equal(discovery.credential.token, 'coding-mirror');
+  assert.equal(discovery.billing.credential.token, 'live-jwt');
 });
