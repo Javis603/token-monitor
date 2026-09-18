@@ -1529,8 +1529,8 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
       id: 'session_v2',
       version: 2,
       cwd: path.join(tmp, 'V2Proj'),
-      createdAt: Date.parse('2026-09-18T07:20:51.201Z'),
-      updatedAt: Date.parse('2026-09-18T07:21:09.024Z')
+      createdAt: Date.parse('2000-01-01T07:20:51.201Z'),
+      updatedAt: Date.parse('2000-01-01T07:21:09.024Z')
     }));
     period.sessions['kimi:session_v2'] = { client: 'kimi', sessionId: 'session_v2', totalTokens: 100 };
     // A document migrated from the legacy shape keeps both spellings until its
@@ -1541,14 +1541,14 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
       version: 2,
       workDir: path.join(tmp, 'LegacyWorkDir'),
       cwd: path.join(tmp, 'V2Cwd'),
-      createdAt: '2026-09-18T00:00:00.000Z',
-      updatedAt: '2026-09-18T01:00:00.000Z'
+      createdAt: '2000-01-01T00:00:00.000Z',
+      updatedAt: '2000-01-01T01:00:00.000Z'
     }));
     period.sessions['kimi:session_migrated'] = { client: 'kimi', sessionId: 'session_migrated', totalTokens: 100 };
     // The runtime's own session name, in all three kinds. Only `generated` (its
     // `chat_title` summary) and `custom` (a user rename) are names; `replaceable`
-    // holds whatever the caller called a prompt, which is why the first two
-    // fixtures below must stay title-less.
+    // holds whatever the caller called a prompt, so that one — and the
+    // placeholder further down — must stay title-less.
     const titledSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_titled');
     fs.mkdirSync(titledSess, { recursive: true });
     fs.writeFileSync(path.join(titledSess, 'state.json'), JSON.stringify({
@@ -1556,8 +1556,8 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
       cwd: path.join(tmp, 'TitledProj'),
       title: '  explain the collector pipeline  ',
       titleKind: 'replaceable',
-      createdAt: Date.parse('2026-09-18T02:00:00.000Z'),
-      updatedAt: Date.parse('2026-09-18T02:00:00.000Z')
+      createdAt: Date.parse('2000-01-01T02:00:00.000Z'),
+      updatedAt: Date.parse('2000-01-01T02:00:00.000Z')
     }));
     period.sessions['kimi:session_titled'] = { client: 'kimi', sessionId: 'session_titled', totalTokens: 100 };
     const generatedSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_generated');
@@ -1567,8 +1567,8 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
       cwd: path.join(tmp, 'TitledProj'),
       title: '  Collector pipeline walkthrough  ',
       titleKind: 'generated',
-      createdAt: Date.parse('2026-09-18T03:00:00.000Z'),
-      updatedAt: Date.parse('2026-09-18T03:00:00.000Z')
+      createdAt: Date.parse('2000-01-01T03:00:00.000Z'),
+      updatedAt: Date.parse('2000-01-01T03:00:00.000Z')
     }));
     period.sessions['kimi:session_generated'] = { client: 'kimi', sessionId: 'session_generated', totalTokens: 100 };
     const customTitleSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_custom_title');
@@ -1577,8 +1577,8 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
       workDir: path.join(tmp, 'CliProj'),
       title: 'renamed by hand',
       isCustomTitle: true,
-      createdAt: '2026-09-18T04:00:00.000Z',
-      updatedAt: '2026-09-18T04:00:00.000Z'
+      createdAt: '2000-01-01T04:00:00.000Z',
+      updatedAt: '2000-01-01T04:00:00.000Z'
     }));
     period.sessions['kimi:session_custom_title'] = { client: 'kimi', sessionId: 'session_custom_title', totalTokens: 100 };
     // The v2 spelling of a user rename — the path a rename in the Kimi app takes
@@ -1592,8 +1592,8 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
       cwd: path.join(tmp, 'TitledProj'),
       titleKind: 'custom',
       title: `  renamed\n\tby   hand ${'x'.repeat(200)}  `,
-      createdAt: Date.parse('2026-09-18T04:30:00.000Z'),
-      updatedAt: Date.parse('2026-09-18T04:30:00.000Z')
+      createdAt: Date.parse('2000-01-01T04:30:00.000Z'),
+      updatedAt: Date.parse('2000-01-01T04:30:00.000Z')
     }));
     period.sessions['kimi:session_custom_v2'] = { client: 'kimi', sessionId: 'session_custom_v2', totalTokens: 100 };
     const badTypeSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_title_type');
@@ -1603,8 +1603,8 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
       cwd: path.join(tmp, 'TitledProj'),
       titleKind: 'custom',
       title: { malformed: true },
-      createdAt: Date.parse('2026-09-18T04:45:00.000Z'),
-      updatedAt: Date.parse('2026-09-18T04:45:00.000Z')
+      createdAt: Date.parse('2000-01-01T04:45:00.000Z'),
+      updatedAt: Date.parse('2000-01-01T04:45:00.000Z')
     }));
     period.sessions['kimi:session_title_type'] = { client: 'kimi', sessionId: 'session_title_type', totalTokens: 100 };
     // `Number.MAX_VALUE` is finite and positive, so it passes the numeric guard
@@ -1630,8 +1630,8 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
       cwd: path.join(tmp, 'TitledProj'),
       title: 'New Session',
       titleKind: 'replaceable',
-      createdAt: Date.parse('2026-09-18T05:00:00.000Z'),
-      updatedAt: Date.parse('2026-09-18T05:00:00.000Z')
+      createdAt: Date.parse('2000-01-01T05:00:00.000Z'),
+      updatedAt: Date.parse('2000-01-01T05:00:00.000Z')
     }));
     period.sessions['kimi:session_placeholder'] = { client: 'kimi', sessionId: 'session_placeholder', totalTokens: 100 };
     // Kimi Work: the envelope shape and the generator prompt are taken from a
@@ -1684,10 +1684,10 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
     assert.equal(period.sessions['kimi:session_malformed'].projectId || '', '', 'non-string project metadata must stay unset');
     assert.equal(period.sessions['kimi:session_v2'].projectLabel, 'V2Proj');
     assert.ok(period.sessions['kimi:session_v2'].projectId, 'v2 session should resolve a projectId');
-    assert.equal(period.sessions['kimi:session_v2'].startedAt, '2026-09-18T07:20:51.201Z', 'epoch-millisecond timestamps must be read');
-    assert.equal(period.sessions['kimi:session_v2'].lastUsedAt, '2026-09-18T07:21:09.024Z', 'epoch-millisecond timestamps must be read');
+    assert.equal(period.sessions['kimi:session_v2'].startedAt, '2000-01-01T07:20:51.201Z', 'epoch-millisecond timestamps must be read');
+    assert.equal(period.sessions['kimi:session_v2'].lastUsedAt, '2000-01-01T07:21:09.024Z', 'epoch-millisecond timestamps must be read');
     assert.equal(period.sessions['kimi:session_migrated'].projectLabel, 'V2Cwd', 'cwd must outrank the legacy workDir');
-    assert.equal(period.sessions['kimi:session_migrated'].startedAt, '2026-09-18T00:00:00.000Z');
+    assert.equal(period.sessions['kimi:session_migrated'].startedAt, '2000-01-01T00:00:00.000Z');
     assert.equal(period.sessions['kimi:session_generated'].title, 'Collector pipeline walkthrough', 'a generated name must be read and trimmed');
     assert.equal(period.sessions['kimi:session_custom_title'].title, 'renamed by hand', 'a v1 isCustomTitle rename must be read');
     const customV2Title = period.sessions['kimi:session_custom_v2'].title;
