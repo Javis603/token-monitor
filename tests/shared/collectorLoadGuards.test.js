@@ -1545,6 +1545,105 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
       updatedAt: '2026-09-18T01:00:00.000Z'
     }));
     period.sessions['kimi:session_migrated'] = { client: 'kimi', sessionId: 'session_migrated', totalTokens: 100 };
+    // The runtime's own session name, in all three kinds. Only `generated` (its
+    // `chat_title` summary) and `custom` (a user rename) are names; `replaceable`
+    // holds whatever the caller called a prompt, which is why the first two
+    // fixtures below must stay title-less.
+    const titledSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_titled');
+    fs.mkdirSync(titledSess, { recursive: true });
+    fs.writeFileSync(path.join(titledSess, 'state.json'), JSON.stringify({
+      version: 2,
+      cwd: path.join(tmp, 'TitledProj'),
+      title: '  explain the collector pipeline  ',
+      titleKind: 'replaceable',
+      createdAt: Date.parse('2026-09-18T02:00:00.000Z'),
+      updatedAt: Date.parse('2026-09-18T02:00:00.000Z')
+    }));
+    period.sessions['kimi:session_titled'] = { client: 'kimi', sessionId: 'session_titled', totalTokens: 100 };
+    const generatedSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_generated');
+    fs.mkdirSync(generatedSess, { recursive: true });
+    fs.writeFileSync(path.join(generatedSess, 'state.json'), JSON.stringify({
+      version: 2,
+      cwd: path.join(tmp, 'TitledProj'),
+      title: '  Collector pipeline walkthrough  ',
+      titleKind: 'generated',
+      createdAt: Date.parse('2026-09-18T03:00:00.000Z'),
+      updatedAt: Date.parse('2026-09-18T03:00:00.000Z')
+    }));
+    period.sessions['kimi:session_generated'] = { client: 'kimi', sessionId: 'session_generated', totalTokens: 100 };
+    const customTitleSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_custom_title');
+    fs.mkdirSync(customTitleSess, { recursive: true });
+    fs.writeFileSync(path.join(customTitleSess, 'state.json'), JSON.stringify({
+      workDir: path.join(tmp, 'CliProj'),
+      title: 'renamed by hand',
+      isCustomTitle: true,
+      createdAt: '2026-09-18T04:00:00.000Z',
+      updatedAt: '2026-09-18T04:00:00.000Z'
+    }));
+    period.sessions['kimi:session_custom_title'] = { client: 'kimi', sessionId: 'session_custom_title', totalTokens: 100 };
+    // The v2 spelling of a user rename — the path a rename in the Kimi app takes
+    // today, and the one that carries dirty text if the value was ever edited by
+    // hand: the persistence layer stores it verbatim, so the reader owns the
+    // display cleaning (collapse to one line, cap the length).
+    const customV2Sess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_custom_v2');
+    fs.mkdirSync(customV2Sess, { recursive: true });
+    fs.writeFileSync(path.join(customV2Sess, 'state.json'), JSON.stringify({
+      version: 2,
+      cwd: path.join(tmp, 'TitledProj'),
+      titleKind: 'custom',
+      title: `  renamed\n\tby   hand ${'x'.repeat(200)}  `,
+      createdAt: Date.parse('2026-09-18T04:30:00.000Z'),
+      updatedAt: Date.parse('2026-09-18T04:30:00.000Z')
+    }));
+    period.sessions['kimi:session_custom_v2'] = { client: 'kimi', sessionId: 'session_custom_v2', totalTokens: 100 };
+    const badTypeSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_title_type');
+    fs.mkdirSync(badTypeSess, { recursive: true });
+    fs.writeFileSync(path.join(badTypeSess, 'state.json'), JSON.stringify({
+      version: 2,
+      cwd: path.join(tmp, 'TitledProj'),
+      titleKind: 'custom',
+      title: { malformed: true },
+      createdAt: Date.parse('2026-09-18T04:45:00.000Z'),
+      updatedAt: Date.parse('2026-09-18T04:45:00.000Z')
+    }));
+    period.sessions['kimi:session_title_type'] = { client: 'kimi', sessionId: 'session_title_type', totalTokens: 100 };
+    // The pre-prompt placeholder is what an unnamed session holds, and must not
+    // become a row label even when it is marked custom-proof (it is not custom).
+    const placeholderSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_placeholder');
+    fs.mkdirSync(placeholderSess, { recursive: true });
+    fs.writeFileSync(path.join(placeholderSess, 'state.json'), JSON.stringify({
+      version: 2,
+      cwd: path.join(tmp, 'TitledProj'),
+      title: 'New Session',
+      titleKind: 'replaceable',
+      createdAt: Date.parse('2026-09-18T05:00:00.000Z'),
+      updatedAt: Date.parse('2026-09-18T05:00:00.000Z')
+    }));
+    period.sessions['kimi:session_placeholder'] = { client: 'kimi', sessionId: 'session_placeholder', totalTokens: 100 };
+    // Kimi Work, verbatim from a live install: a conversation's `replaceable`
+    // title is the daimon kernel's prompt envelope, and the `ctitle-*` sessions
+    // the runtime spawns to name it carry the title generator's system prompt.
+    // Neither is a session name, so neither may reach a row.
+    const workConv = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'conv-envelope');
+    fs.mkdirSync(workConv, { recursive: true });
+    fs.writeFileSync(path.join(workConv, 'state.json'), JSON.stringify({
+      workDir: path.join(tmp, 'WorkConvProj'),
+      title: '<meta awareness="low" timestamp="2026-08-18 11:57" /> hi',
+      isCustomTitle: false,
+      createdAt: '2026-08-18T11:57:00.000Z',
+      updatedAt: '2026-08-18T11:57:00.000Z'
+    }));
+    period.sessions['kimi:conv-envelope'] = { client: 'kimi', sessionId: 'conv-envelope', totalTokens: 100 };
+    const workTitleJob = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'ctitle-generator');
+    fs.mkdirSync(workTitleJob, { recursive: true });
+    fs.writeFileSync(path.join(workTitleJob, 'state.json'), JSON.stringify({
+      workDir: path.join(tmp, 'WorkConvProj'),
+      title: 'Generate a concise title for the conversation below in the user\'s primary language.',
+      isCustomTitle: false,
+      createdAt: '2026-08-18T11:58:00.000Z',
+      updatedAt: '2026-08-18T11:58:00.000Z'
+    }));
+    period.sessions['kimi:ctitle-generator'] = { client: 'kimi', sessionId: 'ctitle-generator', totalTokens: 100 };
     // Kimi Work: <desktop runtime>/sessions/<workspace>/<conv-*>/state.json,
     // only reachable on darwin because kimiWorkSessionsRoots follows process.platform.
     if (process.platform === 'darwin') {
@@ -1573,16 +1672,36 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
     assert.equal(period.sessions['kimi:session_v2'].lastUsedAt, '2026-09-18T07:21:09.024Z', 'epoch-millisecond timestamps must be read');
     assert.equal(period.sessions['kimi:session_migrated'].projectLabel, 'V2Cwd', 'cwd must outrank the legacy workDir');
     assert.equal(period.sessions['kimi:session_migrated'].startedAt, '2026-09-18T00:00:00.000Z');
+    assert.equal(period.sessions['kimi:session_generated'].title, 'Collector pipeline walkthrough', 'a generated name must be read and trimmed');
+    assert.equal(period.sessions['kimi:session_custom_title'].title, 'renamed by hand', 'a v1 isCustomTitle rename must be read');
+    const customV2Title = period.sessions['kimi:session_custom_v2'].title;
+    assert.ok(customV2Title.startsWith('renamed by hand xxx'), `a v2 custom rename must be read and collapsed: ${customV2Title}`);
+    assert.ok(!/\s\s|\n|\t/.test(customV2Title), 'a dirty title must be collapsed to one line');
+    assert.equal(Array.from(customV2Title).length, 160, 'a title must be capped at the shared 160 code points');
+    assert.ok(customV2Title.endsWith('…'), 'a capped title must be marked as truncated');
+    assert.equal(period.sessions['kimi:session_title_type'].title || '', '', 'a non-string title must stay unset');
+    assert.equal(period.sessions['kimi:session_titled'].title || '', '', 'a replaceable prompt copy must stay unset');
+    assert.equal(period.sessions['kimi:session_placeholder'].title || '', '', 'the "New Session" placeholder must stay unset');
+    assert.equal(period.sessions['kimi:conv-envelope'].title || '', '', 'the Work prompt envelope must stay unset');
+    assert.equal(period.sessions['kimi:ctitle-generator'].title || '', '', 'the title generator system prompt must stay unset');
+    assert.equal(period.sessions['kimi:session_xyz'].title || '', '', 'sessions without a title must stay title-less');
     assert.equal(period.sessions['kimi:conv-missing'].projectId || '', '', 'sessions without state.json must stay project-less');
     if (process.platform === 'darwin') {
       assert.equal(period.sessions['kimi:conv-abc'].projectLabel, 'WorkProj');
       assert.ok(period.sessions['kimi:conv-abc'].projectId, 'Kimi Work conv-* session should resolve a projectId');
     }
 
-    // Projects opt-out must strip identity, not just skip it (issue #182).
-    const disabled = { sessions: { 'kimi:session_xyz': { client: 'kimi', sessionId: 'session_xyz', totalTokens: 100 } } };
+    // Projects opt-out must strip identity, not just skip it (issue #182) — and
+    // must keep the session name, which is not identity.
+    const disabled = {
+      sessions: {
+        'kimi:session_xyz': { client: 'kimi', sessionId: 'session_xyz', totalTokens: 100 },
+        'kimi:session_generated': { client: 'kimi', sessionId: 'session_generated', totalTokens: 100 }
+      }
+    };
     applySessionTimestamps({ today: disabled }, tmp, { resolveProjects: false });
     assert.equal(disabled.sessions['kimi:session_xyz'].projectId || '', '', 'resolveProjects=false must not attach a projectId');
+    assert.equal(disabled.sessions['kimi:session_generated'].title, 'Collector pipeline walkthrough', 'resolveProjects=false must keep the session name');
   } finally {
     os.homedir = originalHomedir;
     if (previousKimiCodeHome === undefined) delete process.env.KIMI_CODE_HOME;
