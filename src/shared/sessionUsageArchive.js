@@ -16,7 +16,11 @@ const {
 } = require('./archiveHelpers');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
-const { isLegacyCursorEntry, supersedingCursorSessionId } = require('./providers/cursor/sessionGuard');
+const {
+  isLegacyCursorEntry,
+  legacyCursorLookup,
+  supersedingCursorSessionId
+} = require('./providers/cursor/sessionGuard');
 
 function sessionUsageArchiveDate(deviceRecord, fallback = new Date()) {
   const collectedAt = new Date(deviceRecord?.updatedAt || '');
@@ -86,7 +90,11 @@ function normalizeSessionUsageArchive(value) {
 
     if (!entry.client || !entry.sessionId || Object.keys(entry.periods).length === 0) continue;
     const supersededBy = sessionKey('cursor', String(rawEntry.supersededBy || '').replace(/^cursor:/, ''));
-    if (rawEntry.supersededBy && supersededBy && isLegacyCursorEntry(entry)) entry.supersededBy = supersededBy;
+    const supersededTokens = Math.round(numberValue(rawEntry.supersededTokens));
+    if (rawEntry.supersededBy && supersededBy && supersededTokens > 0 && isLegacyCursorEntry(entry)) {
+      entry.supersededBy = supersededBy;
+      entry.supersededTokens = supersededTokens;
+    }
     normalized.sessions[`${entry.client}:${entry.sessionId}`] = entry;
   }
 
@@ -195,47 +203,80 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
   return { archive, changedKeys };
 }
 
-// Legacy Cursor rows still waiting for their session link, per in-memory
-// archive. The first call scans the archive once; later calls only add rows a
-// tick captured. A cache that has not changed cannot answer differently for a
-// row it already refused, so those are retried only after it does; a row that
-// has just become pending has never been looked up and is tried at once. An
-// archive with nothing left to link costs a Set size check per tick.
+// A legacy Cursor row's link is judged against the lookup it was answered for,
+// which is stored with it, so a row the archive touched for any other reason
+// (a reprice, an expired period pruned) keeps a link that is still true even
+// after the cache it came from is gone. Only a row whose lookup is new or has
+// changed shape is asked again.
+//
+// What survives in memory is just how far the work got: which rows are still
+// unanswered and which cache answered them, so a cache that cannot answer
+// differently is not reread. Rows another writer revised arrive through the
+// archive's own revision list rather than this tick's changes.
 const pendingLegacyCursorLinks = new WeakMap();
 
-function linkLegacyCursorEvents(archive, changedKeys, readCursorUsageEvents) {
+function legacyCursorLinkState(archive) {
   let state = pendingLegacyCursorLinks.get(archive);
-  if (!state) {
-    state = { keys: new Set(), signature: null };
-    for (const [key, entry] of Object.entries(archive.sessions)) {
-      if (!entry.supersededBy && isLegacyCursorEntry(entry)) state.keys.add(key);
-    }
-    pendingLegacyCursorLinks.set(archive, state);
+  if (state) return state;
+  state = { pending: new Map(), signature: null };
+  for (const [key, entry] of Object.entries(archive.sessions)) {
+    if (isLegacyCursorEntry(entry)) trackLegacyCursorRow(state, key, entry);
   }
-  for (const key of changedKeys) {
-    const entry = archive.sessions[key];
-    if (!entry || !isLegacyCursorEntry(entry)) continue;
-    // The lookup is keyed on the row's own timestamp and tokens, and a CSV
-    // second holding a second event grows the row, so a row that changed was
-    // never looked up in this shape. An existing link was answered for the old
-    // shape and is dropped rather than trusted; the row stays pending, so a
-    // cache that catches up later can link it again.
+  pendingLegacyCursorLinks.set(archive, state);
+  return state;
+}
+
+function trackLegacyCursorRow(state, key, entry) {
+  const lookup = legacyCursorLookup(entry);
+  if (!lookup) {
+    state.pending.delete(key);
+    return false;
+  }
+  if (entry.supersededBy && entry.supersededTokens === lookup.totalTokens) {
+    state.pending.delete(key);
+    return false;
+  }
+  // The link was answered for a shape this row no longer has.
+  const staleLink = Boolean(entry.supersededBy);
+  if (staleLink) {
     delete entry.supersededBy;
-    state.keys.add(key);
-    state.signature = null;
+    delete entry.supersededTokens;
   }
-  if (state.keys.size === 0) return;
+  const known = state.pending.get(key);
+  if (!staleLink && known && known.totalTokens === lookup.totalTokens) return false;
+  state.pending.set(key, lookup);
+  state.signature = null;
+  return staleLink;
+}
+
+function linkLegacyCursorEvents(archive, changedKeys, readCursorUsageEvents) {
+  const state = legacyCursorLinkState(archive);
+  const revised = archive.externallyRevisedKeys;
+  if (revised) archive.externallyRevisedKeys = null;
+  for (const key of new Set([...changedKeys, ...(revised || [])])) {
+    const entry = archive.sessions[key];
+    if (!entry) {
+      state.pending.delete(key);
+      continue;
+    }
+    if (isLegacyCursorEntry(entry) && trackLegacyCursorRow(state, key, entry)) changedKeys.add(key);
+  }
+  if (state.pending.size === 0) return;
 
   const usageEvents = readCursorUsageEvents();
   if (!usageEvents || usageEvents.signature === state.signature) return;
   state.signature = usageEvents.signature;
-  for (const key of state.keys) {
+  for (const [key, lookup] of state.pending) {
     const entry = archive.sessions[key];
-    const sessionId = entry ? supersedingCursorSessionId(entry, usageEvents) : null;
-    if (entry && !sessionId) continue;
-    state.keys.delete(key);
-    if (!entry) continue;
+    if (!entry) {
+      state.pending.delete(key);
+      continue;
+    }
+    const sessionId = supersedingCursorSessionId(lookup, usageEvents);
+    if (!sessionId) continue;
     entry.supersededBy = sessionKey('cursor', sessionId);
+    entry.supersededTokens = lookup.totalTokens;
+    state.pending.delete(key);
     changedKeys.add(key);
   }
 }

@@ -31,15 +31,30 @@ function isLegacyCursorEntry(entry) {
   return legacyCursorEventTime({ client: entry?.client, sessionId: entry?.sessionId }) !== null;
 }
 
+// What a lookup is keyed on: the row's event time and its tokens. Every period
+// of a legacy row holds the same single event, so they agree except while a
+// progressive snapshot has refreshed one of them; the largest is the one the
+// cache has to answer for, and a stale smaller period must not relink the row to
+// what it used to be. Stored beside the link, so a row that has not changed
+// shape keeps it however else the archive entry was touched.
+function legacyCursorLookup(entry) {
+  const sessions = Object.values(entry?.periods || {});
+  const time = legacyCursorEventTime(sessions[0]);
+  if (time === null) return null;
+  const totalTokens = Math.max(...sessions.map((session) => Math.round(numberValue(session?.totalTokens))));
+  return totalTokens > 0 ? { time, totalTokens } : null;
+}
+
 // The session ID the JSON cache files a legacy event under, or null when no
-// event, or events in more than one session, match its timestamp and tokens.
-function supersedingCursorSessionId(entry, usageEvents) {
-  const session = entry?.periods?.allTime || Object.values(entry?.periods || {})[0];
-  const time = legacyCursorEventTime(session);
-  const totalTokens = Math.round(numberValue(session?.totalTokens));
-  if (time === null || totalTokens <= 0) return null;
-  const sessionIds = usageEvents.sessionsAt(time, totalTokens);
+// event, or events in more than one session, match that lookup.
+function supersedingCursorSessionId(lookup, usageEvents) {
+  const sessionIds = usageEvents.sessionsAt(lookup.time, lookup.totalTokens);
   return sessionIds.length === 1 ? sessionIds[0] : null;
 }
 
-module.exports = { isLegacyCursorEntry, legacyCursorEventTime, supersedingCursorSessionId };
+module.exports = {
+  isLegacyCursorEntry,
+  legacyCursorEventTime,
+  legacyCursorLookup,
+  supersedingCursorSessionId
+};

@@ -107,6 +107,12 @@ function createSessionUsageArchiveStore(options = {}) {
     `).run(key, String(value));
   }
 
+  // Another writer's rows never pass through this process's capture, so the
+  // Cursor link tracker is told about them separately.
+  function noteExternallyRevised(key) {
+    archive.externallyRevisedKeys = (archive.externallyRevisedKeys || new Set()).add(key);
+  }
+
   function loadRevisedRows(sinceRevision) {
     for (const row of database.prepare(`
       SELECT session_key, entry_json
@@ -117,6 +123,7 @@ function createSessionUsageArchiveStore(options = {}) {
       const entry = parseRow(row);
       if (entry) archive.sessions[row.session_key] = entry;
       else delete archive.sessions[row.session_key];
+      noteExternallyRevised(row.session_key);
     }
   }
 
@@ -291,6 +298,7 @@ function createSessionUsageArchiveStore(options = {}) {
         const entry = parseRow(row);
         if (entry) archive.sessions[row.session_key] = entry;
         else delete archive.sessions[row.session_key];
+        noteExternallyRevised(row.session_key);
       }
       revision = storedRevision;
     }
