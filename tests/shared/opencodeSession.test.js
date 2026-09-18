@@ -102,8 +102,9 @@ maybe('readSessionMeta reports a finished turn only when the newest assistant me
   });
   assert.equal(ocs.readSessionMeta(['silent'], { dbPaths: [silent], sqlite }).get('silent').turnEnded, undefined);
 
-  // A user message after the last assistant one does not change the reading:
-  // the turn boundary is what the model last did.
+  // A prompt accepted after the last completion starts the next turn, so the
+  // previous `stop` no longer describes it. Reporting the stale completion here
+  // marked a session that had just been prompted as finished.
   const trailing = makeDb({
     session: { id: 'trail', title: 'trail', created: T0, updated: T0 + 2000 },
     messages: [
@@ -111,7 +112,16 @@ maybe('readSessionMeta reports a finished turn only when the newest assistant me
       { id: 'd2', role: 'user', createdMs: T0 + 2000 }
     ]
   });
-  assert.equal(ocs.readSessionMeta(['trail'], { dbPaths: [trailing], sqlite }).get('trail').turnEnded, true);
+  assert.equal(ocs.readSessionMeta(['trail'], { dbPaths: [trailing], sqlite }).get('trail').turnEnded, undefined);
+  // A tool-calls pause is still mid-turn, and only the newest row decides.
+  const paused = makeDb({
+    session: { id: 'pause', title: 'pause', created: T0, updated: T0 + 2000 },
+    messages: [
+      { id: 'e1', role: 'assistant', createdMs: T0, finish: 'tool-calls', tokens: {}, cost: 0 },
+      { id: 'e2', role: 'assistant', createdMs: T0 + 1000, finish: 'stop', tokens: {}, cost: 0 }
+    ]
+  });
+  assert.equal(ocs.readSessionMeta(['pause'], { dbPaths: [paused], sqlite }).get('pause').turnEnded, true);
 });
 
 maybe('the reader still answers for every session after the turn-end query', () => {

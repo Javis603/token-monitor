@@ -714,10 +714,18 @@ const lastActivityBySession = new Map();
 // drops out of the list can never flare again, so holding it would leak one
 // entry per session for the life of the process.
 function pruneActivity(sessions) {
-  const live = new Set(sessions.map((session) => String(session.sessionId || '')));
+  const live = new Set(sessions.map(sessionKey));
   for (const key of lastActivityBySession.keys()) {
     if (!live.has(key)) lastActivityBySession.delete(key);
   }
+}
+
+// The canonical key the projection carried, so the state map, the flare cache
+// and the row lookup all identify a record the same way. Two clients can carry
+// the same sessionId, and keying on it alone let one client's state paint onto
+// the other's row.
+function sessionKey(session) {
+  return String(session?.key || session?.sessionId || '');
 }
 
 // The state mark, rendered on every row so all titles start at the same x.
@@ -752,7 +760,7 @@ function sessionsNode(sessions) {
   // stop reading as running (and must stop being counted).
   // One derivation serves both the count and the marks, from the same shared
   // predicate the Sessions list uses.
-  const stateByKey = new Map(sessions.map((session) => [String(session.sessionId || ''), sessionLive.sessionActivityState(session)]));
+  const stateByKey = new Map(sessions.map((session) => [sessionKey(session), sessionLive.sessionActivityState(session)]));
   const liveCount = [...stateByKey.values()].filter((state) => state === 'running').length;
   const node = el('div', 'edge-dock-sessions');
   // "Recent" was doing no work - every row already carries its own `3m ago` -
@@ -767,10 +775,17 @@ function sessionsNode(sessions) {
   const list = el('div', 'edge-dock-session-list');
   for (const session of sessions) {
     const row = el('div', 'edge-dock-session');
-    const key = String(session.sessionId || '');
+    const key = sessionKey(session);
     const state = stateByKey.get(key) || 'idle';
     row.classList.toggle('is-running', state === 'running');
-    const name = session.title || session.projectLabel || session.sessionId.slice(0, 12) || '—';
+    const name = session.title || session.projectLabel || String(session.sessionId || '').slice(0, 12) || '—';
+    // The mark itself is decorative (aria-hidden) because a bare glyph says
+    // nothing to a screen reader, and its `title` only reaches pointer users.
+    // The translated state therefore rides the row's accessible name, which is
+    // the only place a non-visual user can get it.
+    const stateLabel = state === 'running' ? t('session.running')
+      : state === 'ended' ? t('session.finished') : '';
+    if (stateLabel) row.setAttribute('aria-label', `${name} · ${stateLabel}`);
     const nameNode = el('span', 'edge-dock-session-name');
     // The dot sits with the name rather than recolouring it: a green title
     // made the row read as a different kind of row, and the colour carried no

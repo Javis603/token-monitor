@@ -324,7 +324,16 @@ function foldDshSessionState(text, previous = {}) {
     }
     if (event?.type === 'request/context') {
       const window = positiveTokenCount(data?.contextWindow);
-      if (window) contextWindow = window;
+      // A new window starts a new budget. Switching model mid-conversation (or a
+      // compaction) changes the denominator, so the previous occupancy is no
+      // longer a share of it: keeping it paired a full 200k reading with a
+      // freshly granted 1M window and reported the session as nearly empty. The
+      // next usage chunk repopulates the occupancy for the new window, and a
+      // repeat of the same window changes nothing.
+      if (window && window !== contextWindow) {
+        contextWindow = window;
+        contextTokens = 0;
+      }
       continue;
     }
     if (data?.chunk?.type !== 'usage') continue;

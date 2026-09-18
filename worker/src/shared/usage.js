@@ -539,10 +539,23 @@ function mergeSession(target, source) {
   // Occupancy is a snapshot, not a sum. The two halves move together and must
   // never be mixed across sources, so a source carrying a window replaces both
   // and one carrying none leaves both alone.
+  //
+  // A snapshot also has a time, so it is freshest-wins rather than
+  // last-merge-wins. The same session arrives from several periods and devices
+  // (in month and in today, from this device and from a synced one), and
+  // without this the older reading won whenever it happened to be merged last,
+  // which made the gauge depend on iteration order. The source's own
+  // `lastUsedAt` is that time, because the reading is taken from the transcript
+  // the timestamp describes. A tie accepts, since both describe the same bytes,
+  // and a target that has no reading at all takes the source's: absent means
+  // this device never read a transcript, not that the reading is empty.
   const sourceContextWindow = Math.max(0, Math.round(asNumber(source.contextWindow)));
   if (sourceContextWindow > 0) {
-    target.contextWindow = sourceContextWindow;
-    target.contextTokens = Math.max(0, Math.round(asNumber(source.contextTokens)));
+    const targetContextWindow = Math.max(0, Math.round(asNumber(target.contextWindow)));
+    if (targetContextWindow <= 0 || sourceLastUsed >= targetLastUsed) {
+      target.contextWindow = sourceContextWindow;
+      target.contextTokens = Math.max(0, Math.round(asNumber(source.contextTokens)));
+    }
   }
   // A turn end is a transcript reading, not a sum, so it is freshest-wins: the
   // same session can appear in several periods, and a turn that started after

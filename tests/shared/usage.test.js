@@ -1407,4 +1407,34 @@ test('merging a session keeps one source occupancy rather than summing two', () 
   });
   assert.equal(partial.periods.today.sessions[key].contextTokens, 100);
   assert.equal(partial.periods.today.sessions[key].contextWindow, 200_000);
+
+  // A snapshot is freshest-wins, not last-merge-wins. The same session arrives
+  // from several periods and synced devices; without this the older reading won
+  // whenever it happened to be merged last, which made the gauge depend on
+  // iteration order. Here the stale reading is merged after the fresh one and
+  // must still lose.
+  const timed = (contextTokens, contextWindow, lastUsedAt) => ({
+    client: 'codex',
+    sessionId: 'rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111',
+    totalTokens: 5,
+    contextTokens,
+    contextWindow,
+    lastUsedAt
+  });
+  const fresh = timed(140, 200_000, '2026-09-18T05:10:00.000Z');
+  const stale = timed(20, 200_000, '2026-09-18T05:00:00.000Z');
+  const ordered = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: fresh, b: stale } }
+  });
+  assert.equal(ordered.periods.today.sessions[key].contextTokens, 140, 'a stale snapshot merged last must not win');
+
+  // A device that never read a transcript has no reading at all, which is not
+  // the same as an empty one, so it must not block a real reading either way.
+  const unknown = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: session(0, 0), b: fresh } }
+  });
+  assert.equal(unknown.periods.today.sessions[key].contextTokens, 140);
+  assert.equal(unknown.periods.today.sessions[key].contextWindow, 200_000);
 });

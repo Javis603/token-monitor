@@ -85,8 +85,14 @@ function readSessionMeta(sessionIds, deps = {}) {
           // (A correlated subquery is the obvious alternative, but `inner` is a
           // reserved word and the resulting syntax error is swallowed by the
           // caller's catch, which reads as "this session has no metadata".)
-          const finishSql = `SELECT sessionId, finish FROM (
+          // The boundary belongs to the newest message, not to the newest
+          // assistant message: a prompt accepted after a completion has already
+          // started the next turn, so that completion no longer describes the
+          // current one. Taking the newest assistant row unconditionally latched
+          // the previous `stop` and marked a freshly prompted session finished.
+          const finishSql = `SELECT sessionId, role, finish FROM (
                                SELECT session_id AS sessionId,
+                                      json_extract(data,'$.role') AS role,
                                       json_extract(data,'$.finish') AS finish,
                                       ROW_NUMBER() OVER (
                                         PARTITION BY session_id
@@ -95,9 +101,11 @@ function readSessionMeta(sessionIds, deps = {}) {
                                FROM message
                                WHERE session_id IN (${placeholders})
                                  AND json_valid(data)
-                                 AND json_extract(data,'$.role') = 'assistant'
                              ) WHERE rank = 1`;
           for (const row of db.prepare(finishSql).all(...ids)) {
+            // Only a completion that is still the newest word counts; when the
+            // newest row is the user's, the turn is open again.
+            if (String(row.role || '') !== 'assistant') continue;
             lastFinishBySession.set(String(row.sessionId), String(row.finish || ''));
           }
         }

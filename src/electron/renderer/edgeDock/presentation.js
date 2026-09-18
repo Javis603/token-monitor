@@ -192,12 +192,16 @@
         byKey.set(key, { session, lastUsedMs });
       }
     }
-    const ordered = [...byKey.values()].sort((a, b) => b.lastUsedMs - a.lastUsedMs);
+    // The canonical `client:sessionId` key identifies a record, not the bare
+    // sessionId: two clients can carry the same id, and collapsing them onto one
+    // key made their states overwrite each other while the rows stayed distinct.
+    const ordered = [...byKey.entries()]
+      .map(([key, value]) => ({ key, ...value }))
+      .sort((a, b) => b.lastUsedMs - a.lastUsedMs);
     // One derivation for the run/quiet split and for the field the rows carry,
     // from the same shared function the card repaints with.
-    const stateByKey = new Map(ordered.map(({ session }) => [String(session.sessionId || ''), sessionLive.sessionActivityState(session)]));
-    const runningKeys = new Set(ordered.filter(({ session }) => stateByKey.get(String(session.sessionId || '')) === 'running').map(({ session }) => session.sessionId));
-    const running = ordered.filter(({ session }) => runningKeys.has(session.sessionId));
+    const stateByKey = new Map(ordered.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
+    const running = ordered.filter(({ key }) => stateByKey.get(key) === 'running');
     // The cap is a budget for the whole list, not a second allowance stacked on
     // top of the running rows. Adding the running ones to a full quiet tail made
     // the card grow by one the moment a session went live - three idle rows plus
@@ -207,14 +211,18 @@
     // budget they leave; if more than the cap is running, all of them show and the
     // list scrolls rather than hiding live work.
     const quiet = ordered
-      .filter(({ session }) => !runningKeys.has(session.sessionId))
+      .filter(({ key }) => stateByKey.get(key) !== 'running')
       .slice(0, Math.max(0, RECENT_SESSION_COUNT - running.length));
     return [...running, ...quiet]
-      .map(({ session }) => {
+      .map(({ key, session }) => {
         const models = Object.entries(session.models || {}).sort((a, b) => (finite(b[1]) || 0) - (finite(a[1]) || 0));
         return {
           title: String(session.title || ''),
           projectLabel: String(session.projectLabel || ''),
+          // Carried so the renderer keys its state map and its flare cache on
+          // the same identity this projection used, instead of re-deriving one
+          // from sessionId and colliding two clients.
+          key,
           sessionId: String(session.sessionId || ''),
           model: models[0]?.[0] || '',
           totalTokens: finite(session.totalTokens) || 0,
@@ -223,7 +231,7 @@
           // Carried onto the projected row, not just used here: the dock renderer
           // re-derives the state at paint time and needs the boundary to do it.
           turnEnded: session.turnEnded === true,
-          running: stateByKey.get(String(session.sessionId || '')) === 'running',
+          running: stateByKey.get(key) === 'running',
           // The same gate the Sessions list uses, so one surface cannot show a
           // gauge for a session the other has already dropped it from.
           context: sessionLive.sessionContextForRow(session) || null
