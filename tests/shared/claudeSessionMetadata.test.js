@@ -20,8 +20,6 @@ function fixture(lines) {
   return { dir, file };
 }
 
-test('Claude session metadata reads the persisted AI title without exposing prompts', (t) => {
-
 test('readSessionTurnEnded follows the newest stop_reason, and tool_use is not an end', (t) => {
   // Claude stamps every assistant record with why it stopped. `tool_use` means
   // it paused to run tools and is still mid-turn; anything else means nothing
@@ -61,6 +59,7 @@ test('readSessionTurnEnded follows the newest stop_reason, and tool_use is not a
   assert.equal(readSessionTurnEnded(both.file, { cache }), true);
   assert.equal(readSessionTitle(both.file, { cache }), 'Shared pass');
 });
+test('Claude session metadata reads the persisted AI title without exposing prompts', (t) => {
   const { dir, file } = fixture([
     JSON.stringify({ type: 'user', message: { content: 'private prompt' } }),
     JSON.stringify({ type: 'ai-title', aiTitle: '  Improve   session list  ' }),

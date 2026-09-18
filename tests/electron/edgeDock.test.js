@@ -44,8 +44,6 @@ const {
 const workArea = { x: 0, y: 25, width: 1440, height: 875 };
 const displayBounds = { x: 0, y: 0, width: 1440, height: 900 };
 
-test('the dock keeps the token total, adds headroom, and dots running rows instead of recolouring them', () => {
-
 test('every renderer stylesheet is brace-balanced', () => {
   // A splice that leaves an orphaned rule tail unbalances the file, and a stray
   // closing brace makes every later rule parse as part of a bogus block. That is
@@ -68,8 +66,6 @@ test('every renderer stylesheet is brace-balanced', () => {
     assert.equal(depth, 0, `${name} ends with ${depth} unclosed block(s)`);
   }
 });
-
-test('the dock state mark uses the repo loader asset and a stroked check', () => {
 
 test('the Sessions list uses a plain dot, not the dock card glyph stack', () => {
   // This row already leads with the client's own icon, so a spinner or check
@@ -108,6 +104,7 @@ test('both surfaces decide the context readout with one shared gate', () => {
   assert.match(rows, /context: sessionContextForRow\(session, now\)/);
   assert.match(presentation, /context: sessionLive\.sessionContextForRow\(session\)/);
 });
+test('the dock state mark uses the repo loader asset and a stroked check', () => {
   const markup = require('../../src/shared/sessionLive').sessionStateMarkup({
     spin: 'edge-dock-session-spin',
     check: 'edge-dock-session-check',
@@ -123,6 +120,7 @@ test('both surfaces decide the context readout with one shared gate', () => {
   assert.doesNotMatch(markup, /fill="currentColor"/);
   assert.match(markup, /<span class="edge-dock-session-idle"><\/span>/);
 });
+test('the dock keeps the token total, adds headroom, and dots running rows instead of recolouring them', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const css = readRendererFile(path.join('edgeDock', 'dock.css'));
   const app = readRendererFile('app.js');
@@ -214,8 +212,6 @@ test('running sessions are never truncated by the recent cap, and the count matc
   assert.equal(quietOnly.sessions[0].context, null);
 });
 
-test('an archived session never counts as running on a dock card', () => {
-
 test('the session cap is a total budget, so one going live does not add a row', () => {
   // The card showed three idle rows and then four the moment one of them started
   // running, because the running rows were added on top of a full quiet list.
@@ -275,6 +271,7 @@ test('the session cap is a total budget, so one going live does not add a row', 
   const small = build({ 'codex:q1': session('q1', oldIso), 'codex:q2': session('q2', nowIso) });
   assert.equal(small.sessions.length, 2);
 });
+test('an archived session never counts as running on a dock card', () => {
   const nowIso = new Date().toISOString();
   const stats = {
     periods: {

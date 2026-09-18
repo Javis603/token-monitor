@@ -185,6 +185,41 @@ test('readDshSessionState takes the window of the model the session switched to'
   assert.equal(state.contextTokens, 220);
 });
 
+test('readDshSessionState clears a stale occupancy when the window changes', () => {
+  const dir = tmpDir('dsh-context-reset-');
+  const file = path.join(dir, 'session.jsonl');
+  // A session that carried 190k of a 200k window and was then granted a 1M one:
+  // the old occupancy is not a share of the new denominator, so keeping it would
+  // report a nearly empty session. Nothing measured against the new window yet
+  // means no reading until a usage chunk states one.
+  fs.writeFileSync(file, [
+    JSON.stringify({ type: 'request/context', data: { contextWindow: 200_000 } }),
+    JSON.stringify({ type: 'assistant/chunk', data: { chunk: { type: 'usage', usage: { inputTokens: 189_000, outputTokens: 1_000 } } } }),
+    JSON.stringify({ type: 'request/context', data: { contextWindow: 1_000_000 } }),
+    ''
+  ].join('\n'));
+  const switched = readDshSessionState(file);
+  assert.equal(switched.contextWindow, 1_000_000);
+  assert.equal(switched.contextTokens, 0, 'the old occupancy must not be re-paired with a new window');
+
+  // A usage chunk against the new window restores a real reading.
+  fs.appendFileSync(file, JSON.stringify({ type: 'assistant/chunk', data: { chunk: { type: 'usage', usage: { inputTokens: 300_000, outputTokens: 5_000 } } } }) + '\n');
+  const repopulated = readDshSessionState(file, { offset: 0 });
+  assert.equal(repopulated.contextWindow, 1_000_000);
+  assert.equal(repopulated.contextTokens, 305_000);
+
+  // Re-stating the same window is not a reset: a per-request record repeats it.
+  const sameDir = tmpDir('dsh-context-same-');
+  const sameFile = path.join(sameDir, 'session.jsonl');
+  fs.writeFileSync(sameFile, [
+    JSON.stringify({ type: 'request/context', data: { contextWindow: 200_000 } }),
+    JSON.stringify({ type: 'assistant/chunk', data: { chunk: { type: 'usage', usage: { inputTokens: 50_000, outputTokens: 1_000 } } } }),
+    JSON.stringify({ type: 'request/context', data: { contextWindow: 200_000 } }),
+    ''
+  ].join('\n'));
+  assert.equal(readDshSessionState(sameFile).contextTokens, 51_000);
+});
+
 test('applySessionMetadata stamps context only on a session recent enough to still be open', () => {
   const home = tmpDir('codex-home-');
   const sessionsDir = path.join(home, '.codex', 'sessions', '2026', '09', '18');
