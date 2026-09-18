@@ -449,9 +449,14 @@ test('main section holds views; appearance is its own section; window holds beha
 
   const presenceGroup = windowSection.slice(presenceIndex);
   assert.match(presenceGroup, /id="floatingBubbleInput"/);
+  assert.match(presenceGroup, /id="edgeDockInput"/);
   assert.match(presenceGroup, /id="showTrayIconInput"/);
   assert.match(presenceGroup, /id="trayModeInput"/);
   assert.equal((presenceGroup.match(/value="limitsAllSessions"/g) || []).length, 2);
+
+  const edgeDockIndex = presenceGroup.indexOf('id="edgeDockInput"');
+  const floatingBubbleIndex = presenceGroup.indexOf('id="floatingBubbleInput"');
+  assert.ok(edgeDockIndex < floatingBubbleIndex, 'Edge Dock should lead the secondary surface settings');
 
   const showTrayIconIndex = presenceGroup.indexOf('id="showTrayIconInput"');
   const trayIconOptionsIndex = presenceGroup.indexOf('id="trayIconOptions"');
