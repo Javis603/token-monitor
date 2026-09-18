@@ -358,3 +358,16 @@ test('fetchAntigravityLimits keeps the OAuth plan when quota data is unavailable
   assert.equal(result[0].status, 'unavailable');
   assert.deepEqual(result[0].windows, []);
 });
+
+test('fetchAntigravityLimits returns unauthorized when probe throws unauthorized status', async () => {
+  const result = await fetchAntigravityLimits({}, {
+    antigravityProbe: async () => {
+      const err = new Error('missing CSRF token');
+      err.status = 'unauthorized';
+      throw err;
+    }
+  });
+  assert.equal(result.provider, 'antigravity');
+  assert.equal(result.status, 'unauthorized');
+  assert.equal(result.windows.length, 0);
+});

@@ -43,7 +43,9 @@ function mapAntigravitySnapshot(snapshot, { nowMs, source = 'rpc', account = nul
     : (snapshot?.pools || []).map((pool) => ({
         kind: 'weekly',
         label: pool.name,
-        usedPercent: Math.max(0, Math.min(100, (1 - pool.remainingFraction) * 100)),
+        usedPercent: typeof pool.remainingFraction === 'number'
+          ? Math.max(0, Math.min(100, (1 - pool.remainingFraction) * 100))
+          : null,
         resetsAt: pool.resetTime || null,
         windowMinutes: null
       }));

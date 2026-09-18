@@ -316,6 +316,33 @@ test('callLs throws unavailable on 500', async () => {
   }
 });
 
+test('callLs classifies a CSRF-mentioning error body as unauthorized even on a non-401/403 status', async () => {
+  const { port, close } = await startStubHttpServer((req, res) => {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ code: 'invalid_argument', message: 'missing CSRF token' }));
+  });
+  try {
+    const err = await probe.callLs({ scheme: 'http', port, csrfToken: '', method: 'RetrieveUserQuotaSummary', body: {} }).catch((e) => e);
+    assert.equal(err.status, 'unauthorized');
+    assert.equal(err.httpStatus, 400);
+  } finally {
+    await close();
+  }
+});
+
+test('callLs falls back to statusFromHttpCode when a non-200 body does not mention csrf', async () => {
+  const { port, close } = await startStubHttpServer((req, res) => {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ code: 'invalid_argument', message: 'bad request' }));
+  });
+  try {
+    const err = await probe.callLs({ scheme: 'http', port, csrfToken: 'tok', method: 'GetUserStatus', body: {} }).catch((e) => e);
+    assert.equal(err.status, 'unavailable');
+  } finally {
+    await close();
+  }
+});
+
 test('_modelsFromConfigs filters blacklist and entries without quotaInfo', () => {
   const configs = [
     { label: 'Gemini 3 Pro (High)',  modelOrAlias: { model: 'MODEL_GEMINI_3_PRO_HIGH' },  quotaInfo: { remainingFraction: 0.7, resetTime: '2026-06-03T03:00:00Z' } },
@@ -779,4 +806,32 @@ test('probe surfaces notConfigured from detectProcessInfo', async () => {
     detectProcessInfo: async () => { throw probe._errorWithStatus('notConfigured', 'not running'); }
   }).catch((e) => e);
   assert.equal(err.status, 'notConfigured');
+});
+
+test('parseProcessLine requires --csrf_token for agy.exe in hub mode without token', () => {
+  const line = '9001 C:\\Users\\j\\.antigravity\\agy.exe --hub --hub-port=55555 --app_data_dir=antigravity';
+  assert.equal(probe._parseProcessLine(line), null);
+});
+
+test('parseProcessLine extracts --hub-port and requires CSRF for hub-mode CLI with token', () => {
+  const line = '9001 C:\\Users\\j\\.antigravity\\agy.exe --hub --hub-port=55555 --csrf_token=abc123 --app_data_dir=antigravity';
+  const info = probe._parseProcessLine(line);
+  assert.equal(info.pid, 9001);
+  assert.equal(info.kind, 'cli');
+  assert.equal(info.hubPort, 55555);
+  assert.equal(info.csrfToken, 'abc123');
+});
+
+test('parseProcessLine allows bare agy CLI without hub flag and without CSRF (legacy behavior)', () => {
+  const line = '60123 /Users/example/.antigravity/bin/agy language-server --stdio';
+  const info = probe._parseProcessLine(line);
+  assert.equal(info.pid, 60123);
+  assert.equal(info.kind, 'cli');
+  assert.equal(info.csrfToken, '');
+  assert.equal(info.hubPort, null);
+});
+
+test('parseProcessLine returns null for interactive agy agent sessions', () => {
+  const line = '28668 "C:\\Users\\yuwell\\AppData\\Local\\agy\\bin\\agy.exe" --mode=accept-edits --dangerously-skip-permissions';
+  assert.equal(probe._parseProcessLine(line), null);
 });
