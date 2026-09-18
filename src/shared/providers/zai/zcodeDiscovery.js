@@ -104,9 +104,14 @@ function credentialSecret(env) {
   const explicit = String(env?.ZCODE_CREDENTIAL_SECRET || '').trim();
   if (explicit) return explicit;
   if (machineCredentialSecret === null) {
-    let username = 'unknown';
-    try { username = os.userInfo().username; } catch (_) {}
-    machineCredentialSecret = `zcode-credential-fallback:${os.platform()}:${os.homedir()}:${username}`;
+    // Only a successful derivation is kept: caching the "unknown" fallback
+    // would pin one transient directory-service failure for the whole process,
+    // and on a machine with no mirror every later decrypt would keep failing.
+    try {
+      machineCredentialSecret = `zcode-credential-fallback:${os.platform()}:${os.homedir()}:${os.userInfo().username}`;
+    } catch (_) {
+      return `zcode-credential-fallback:${os.platform()}:${os.homedir()}:unknown`;
+    }
   }
   return machineCredentialSecret;
 }

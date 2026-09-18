@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -764,4 +765,39 @@ test('the store entry is chosen by the profile identity, not by entry order', ()
     env: { ZCODE_CREDENTIAL_SECRET: TEST_CREDENTIAL_SECRET }
   });
   assert.equal(discovery.credential.token, 'current-account-key');
+});
+
+test('a transient userInfo failure does not pin the machine-derived secret', () => {
+  // The only fixture that exercises the machine fallback — every other store
+  // test passes an explicit secret — so it is encrypted with the string this
+  // process would derive. A directory-service hiccup must not cache the
+  // "unknown" variant: that would fail every later decrypt for the rest of the
+  // process, and a machine with no mirror would stay dark until a restart.
+  // The successful call below fills that process-level cache for the rest of
+  // this file, which is harmless: the explicit-secret tests never consult it.
+  const machineSecret = `zcode-credential-fallback:${os.platform()}:${os.homedir()}:${os.userInfo().username}`;
+  const identity = 'machine-identity';
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'mirror-fallback' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      'oauth:zai:user_info': encryptCredential(JSON.stringify({ user_id: identity }), machineSecret),
+      [`account-provider:coding-plan:account:zai-individual-coding-plan:account:${identity}:api-key`]:
+        encryptCredential('machine-account-key', machineSecret)
+    })
+  };
+  const deps = { readFileSync: fileSystem(files), homeDir: '/home/test', env: {} };
+  const realUserInfo = os.userInfo;
+  try {
+    os.userInfo = () => { throw new Error('directory service unavailable'); };
+    assert.equal(discoverZcodeConnection({}, deps).credential.token, 'mirror-fallback');
+  } finally {
+    os.userInfo = realUserInfo;
+  }
+  assert.equal(discoverZcodeConnection({}, deps).credential.token, 'machine-account-key');
 });
