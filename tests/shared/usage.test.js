@@ -947,7 +947,7 @@ test('extractUsageFromTokscale keeps the canonical Command Code client id', () =
   assert.equal(period.clients.commandcode, 19);
 });
 
-test('normalizeClientName folds both Kilo sources together and maps both Oh My Pi ids to pi', () => {
+test('normalizeClientName folds both Kilo sources together and keeps Oh My Pi separate from Pi', () => {
   const period = extractUsageFromTokscale([
     { client: 'kilo', model: 'x', totalTokens: 5 },
     { client: 'kilocode', model: 'x', totalTokens: 13 },
@@ -956,7 +956,11 @@ test('normalizeClientName folds both Kilo sources together and maps both Oh My P
   ]);
 
   assert.equal(period.clients.kilo, 18);
-  assert.equal(period.clients.pi, 18);
+  // Oh My Pi and Pi are two products with two roots. Both of its spellings
+  // resolve to the `omp` id, which must stay distinct from `pi` so the two rows
+  // do not silently re-merge on the way to the dashboard.
+  assert.equal(period.clients.omp, 18);
+  assert.equal(period.clients.pi, undefined);
   assert.ok(!('kilocode' in period.clients));
 });
 

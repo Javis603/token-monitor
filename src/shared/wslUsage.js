@@ -84,7 +84,7 @@ const MARKER_CLIENTS = {
   '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks': 'cline',
   '.local/share/amp/threads': 'amp',
   '.pi/agent/sessions': 'pi',
-  '.omp/agent/sessions': 'pi',
+  '.omp/agent/sessions': 'omp',
   '.local/share/zed/threads/threads.db': 'zed',
   '.local/share/kilo/kilo.db': 'kilo',
   '.config/Code/User/globalStorage/kilocode.kilo-code/tasks': 'kilo',

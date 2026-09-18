@@ -2073,7 +2073,12 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
   os.homedir = () => tmp;
   try {
     const { clientDataDirPresence, watchPathsForClients } = freshCollector();
-    const dirs = watchPathsForClients('pi,zed,kilo,micode,zcode,kiro,codebuddy,workbuddy');
+    // `omp` is tracked explicitly: Oh My Pi is its own client, so its root is
+    // watched for the client that owns it rather than through `pi`. The two
+    // roots are asserted together because a split that stopped watching one of
+    // them would still pass every other check in this file.
+    const tracked = 'pi,omp,zed,kilo,micode,zcode,kiro,codebuddy,workbuddy';
+    const dirs = watchPathsForClients(tracked);
     assert.ok(dirs.includes(path.join(tmp, '.pi', 'agent', 'sessions')));
     assert.ok(dirs.includes(path.join(tmp, '.omp', 'agent', 'sessions')));
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'zed', 'threads')));
@@ -2098,8 +2103,8 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     assert.ok(dirs.includes(path.join(tmp, '.codebuddy', 'projects')));
     assert.ok(dirs.includes(path.join(tmp, '.workbuddy', 'projects')));
     assert.ok(dirs.includes(path.join(tmp, '.workbuddy-ai', 'projects')));
-    assert.deepEqual(clientDataDirPresence('pi,zed,kilo,micode,zcode,kiro,codebuddy,workbuddy'), {
-      pi: true, zed: true, kilo: true, micode: true, zcode: true, kiro: true, codebuddy: true, workbuddy: true
+    assert.deepEqual(clientDataDirPresence('pi,omp,zed,kilo,micode,zcode,kiro,codebuddy,workbuddy'), {
+      pi: true, omp: true, zed: true, kilo: true, micode: true, zcode: true, kiro: true, codebuddy: true, workbuddy: true
     });
   } finally {
     os.homedir = originalHomedir;

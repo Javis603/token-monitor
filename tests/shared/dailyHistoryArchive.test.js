@@ -674,19 +674,56 @@ test('lazy write ownership is checked after the archive read', () => {
   assert.equal(writes, 0);
 });
 
-test('durable archive canonicalizes OMP into Pi before identity and reconstruction', () => {
+
+test('durable archive keeps Oh My Pi and Pi as separate clients', () => {
   const archive = captureDailyHistoryArchive({}, graph('2026-07-18', [
     client('pi', 'gpt', 10, 1, 1),
     client('omp', 'gpt', 20, 2, 1)
   ]), { todayKey: '2026-07-18' });
   const observations = Object.values(archive.days['2026-07-18'].observations);
-  assert.equal(observations.length, 1);
-  assert.equal(observations[0].client, 'pi');
-  assert.equal(observations[0].tokens, 30);
+  assert.equal(observations.length, 2);
+  const byClient = Object.fromEntries(observations.map((o) => [o.client, o.tokens]));
+  assert.deepEqual(byClient, { pi: 10, omp: 20 });
 
   const restored = historyFrom(graphFromDailyHistoryArchive([], archive, { todayKey: '2026-07-18' }));
-  assert.equal(restored.daily[0].perClient.pi.tokens, 30);
-  assert.equal(Object.hasOwn(restored.daily[0].perClient, 'omp'), false);
+  assert.equal(restored.daily[0].perClient.pi.tokens, 10);
+  assert.equal(restored.daily[0].perClient.omp.tokens, 20);
+});
+
+// The split reverses a merge, so a day the archive already holds under the
+// merged id cannot be replayed as two rows: the merged row already contains the
+// split client, and adding it again would count that usage twice. Days captured
+// while the two ids were one therefore keep the merged identity.
+test('durable archive folds a merged-era day back together instead of double counting', () => {
+  const mergedArchive = {
+    version: 1,
+    days: {
+      '2026-08-01': {
+        date: '2026-08-01',
+        activeTimeMs: 0,
+        observations: [{ client: 'pi', modelId: 'gpt', tokens: 30, cost: 3, messages: 2 }]
+      }
+    }
+  };
+  const archive = captureDailyHistoryArchive(mergedArchive, graph('2026-08-01', [
+    client('pi', 'gpt', 10, 1, 1),
+    client('omp', 'gpt', 20, 2, 1)
+  ]), { todayKey: '2026-08-25' });
+  const day = archive.days['2026-08-01'];
+  const total = Object.values(day.observations).reduce((sum, o) => sum + o.tokens, 0);
+  assert.equal(total, 30, 'the merged day must not gain a second row for the same usage');
+  assert.equal(Object.keys(day.observations).length, 1);
+});
+
+// A day the archive never saw is not retroactively merged: nothing merged
+// exists to be counted twice, so the scan keeps reporting the real split.
+test('durable archive does not merge a day it never observed', () => {
+  const archive = captureDailyHistoryArchive({ version: 1, days: {} }, graph('2026-08-01', [
+    client('pi', 'gpt', 10, 1, 1),
+    client('omp', 'gpt', 20, 2, 1)
+  ]), { todayKey: '2026-08-25' });
+  const day = archive.days['2026-08-01'];
+  assert.equal(Object.keys(day.observations).length, 2);
 });
 
 test('durable reconstruction preserves client-specific reasoning output without recounting it', () => {
@@ -715,4 +752,58 @@ test('clearDailyHistoryArchive removes persisted data and accepts a missing file
     error.code = 'ENOENT';
     throw error;
   } }), false);
+});
+
+// The rule that keeps a post-split day from being absorbed into Pi forever.
+// Every test above starts from an empty archive and sees Pi and Oh My Pi in the
+// same scan, which is the easy case. In real use a day is captured the first time
+// either client is seen, and Pi being seen first used to be enough to fold Oh My
+// Pi into it for good: the archive held `pi`, not `omp`, so every later scan of
+// that day was folded. Provenance is what separates the two cases now — a day
+// this version wrote carries its generation, and only a day without one may fold.
+test('durable archive keeps a day separate when Pi is captured before Oh My Pi', () => {
+  // Morning: only Pi. This is a legitimate post-split state, not a merged day.
+  const morning = captureDailyHistoryArchive({ version: 1, days: {} }, graph('2026-09-20', [
+    client('pi', 'gpt', 10, 1, 1)
+  ]), { todayKey: '2026-09-20' });
+  assert.equal(
+    morning.days['2026-09-20'].clientIdentityGeneration, 2,
+    'a day this version writes must be marked, or it can never be split again'
+  );
+
+  // Afternoon: both clients. Oh My Pi must stay its own row.
+  const archive = captureDailyHistoryArchive(morning, graph('2026-09-20', [
+    client('pi', 'gpt', 10, 1, 1),
+    client('omp', 'gpt', 20, 2, 1)
+  ]), { todayKey: '2026-09-20' });
+  const observations = Object.values(archive.days['2026-09-20'].observations);
+  const byClient = Object.fromEntries(observations.map((o) => [o.client, o.tokens]));
+  assert.deepEqual(byClient, { pi: 10, omp: 20 });
+});
+
+// The other direction: a true pre-split day must keep folding, or replaying its
+// post-split scan would count Oh My Pi twice.
+test('durable archive still folds a pre-split day that carries no generation', () => {
+  const legacy = {
+    version: 1,
+    days: {
+      '2026-09-01': {
+        date: '2026-09-01',
+        activeTimeMs: 0,
+        // No clientIdentityGeneration: written before the split existed.
+        observations: [{ client: 'pi', modelId: 'gpt', tokens: 100, cost: 1, messages: 3 }]
+      }
+    }
+  };
+  const archive = captureDailyHistoryArchive(legacy, graph('2026-09-01', [
+    client('pi', 'gpt', 60, 0.6, 2),
+    client('omp', 'gpt', 40, 0.4, 1)
+  ]), { todayKey: '2026-09-16' });
+  const observations = Object.values(archive.days['2026-09-01'].observations);
+  assert.equal(observations.length, 1, 'the merged day must stay one row');
+  assert.equal(observations[0].tokens, 100, 'the merged total must be preserved, not doubled');
+  assert.equal(
+    archive.days['2026-09-01'].clientIdentityGeneration, undefined,
+    'folding a legacy day must not silently promote it to a post-split day'
+  );
 });

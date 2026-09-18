@@ -5,7 +5,6 @@
 const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 
 const TOKSCALE_CLIENT_ALIASES = new Map([
-  ['omp', 'pi'],
   ['kilocode', 'kilo']
 ]);
 

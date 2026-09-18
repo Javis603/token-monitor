@@ -241,6 +241,10 @@ function normalizeClientName(value) {
   if (raw.includes('grok')) return 'grok';
   if (raw === 'droid') return 'droid';
   if (raw.includes('copilot')) return 'copilot';
+  // Oh My Pi before the generic Pi test: its display name contains "Pi" as a
+  // word, so the Pi heuristic would otherwise capture it. Tokscale reports the
+  // id `omp`; these spellings only appear when a caller passes a display name.
+  if (raw === 'omp' || /^oh[\s_-]*my[\s_-]*pi$/.test(raw)) return 'omp';
   if (/\bpi\b/.test(raw)) return 'pi';
   if (raw.includes('zed')) return 'zed';
   if (/^kilo[\s_-]*code$/.test(raw)) return 'kilo';

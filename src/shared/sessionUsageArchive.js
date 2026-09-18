@@ -16,6 +16,7 @@ const {
 } = require('./archiveHelpers');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
+const { splitClientIdFor } = require('./clientIdentitySplits');
 
 function sessionUsageArchiveDate(deviceRecord, fallback = new Date()) {
   const collectedAt = new Date(deviceRecord?.updatedAt || '');
@@ -279,6 +280,17 @@ function addArchivedSession(period, session, archiveKey = null) {
   addSessionBreakdown(period, archived);
 }
 
+// The session id is product-owned: the Pi-format header id is written by the
+// client that produced the file, so one id belongs to exactly one product. That
+// is what makes this an identity question rather than a heuristic.
+function isLiveUnderSplitId(period, entry, session) {
+  const split = splitClientIdFor(session?.client);
+  if (!split) return false;
+  const sessionId = String(session?.sessionId || entry?.sessionId || '').trim();
+  if (!sessionId) return false;
+  return Boolean(period?.sessions?.[`${split}:${sessionId}`]);
+}
+
 function shouldApplyPeriod(periodName, entry, now) {
   const window = entry?.periodWindows?.[periodName] || {};
   if (periodName === 'today') return (window.day || entry.day) === localDay(now);
@@ -321,6 +333,12 @@ function applySessionUsageArchive(summary, archive, options = {}) {
       if (!hasSummaryPeriod(next, periodName)) continue;
       const period = targetFor(periodName);
       if (period.sessions[archiveKey]) continue;
+      // An archived session captured while two clients shared one row is keyed
+      // under the merged id, so the live split-id copy of the same session is a
+      // different key. The split id's own scan is the authoritative source now —
+      // it reports the same bytes the merged row was built from — so skip the
+      // archived copy rather than adding it on top.
+      if (isLiveUnderSplitId(period, entry, session)) continue;
       addArchivedSession(period, session, archiveKey);
     }
   }

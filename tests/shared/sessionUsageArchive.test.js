@@ -527,3 +527,64 @@ test('reapplying an archive never invents a period the preview omitted', () => {
   assert.equal('allTime' in visible, false);
   assert.equal(visible.today.sessions['opencode:o1'].archived, true);
 });
+
+// A client identity split (clientIdentitySplits.js) reverses a merge. A session
+// captured while two clients shared one row is keyed under the merged id, so the
+// split id reporting the same session live is a different key — and `allTime`
+// never expires, so counting both would inflate the lifetime total permanently.
+// The session id is written by the producing client, so one id belongs to exactly
+// one product, which is what makes this an identity question rather than a guess.
+test('a session captured before the split is not counted twice once it is live under the split id', () => {
+  const session = (client, id, tokens) => ({
+    client, sessionId: id, totalTokens: tokens, costUsd: 0, models: { gpt: tokens }
+  });
+  const record = (sessions) => ({
+    updatedAt: '2026-09-05T10:00:00.000Z',
+    periods: { today: { sessions }, month: { sessions }, allTime: { sessions } }
+  });
+
+  // Archived while Pi and Oh My Pi shared the `pi` identity.
+  const archive = captureSessionUsageArchive({}, record({ 'pi:ompSes1': session('pi', 'ompSes1', 500) }), new Date('2026-09-05T10:00:00.000Z'));
+  assert.deepEqual(Object.keys(archive.sessions), ['pi:ompSes1']);
+
+  // The same session is now reported by the split client.
+  const live = {
+    today: { totalTokens: 500, sessions: { 'omp:ompSes1': session('omp', 'ompSes1', 500) } },
+    month: { totalTokens: 500, sessions: { 'omp:ompSes1': session('omp', 'ompSes1', 500) } },
+    allTime: { totalTokens: 500, sessions: { 'omp:ompSes1': session('omp', 'ompSes1', 500) } }
+  };
+  const visible = applySessionUsageArchive(live, archive, { now: new Date('2026-09-05T12:00:00.000Z') });
+  assert.equal(visible.allTime.totalTokens, 500);
+  assert.deepEqual(Object.keys(visible.allTime.sessions), ['omp:ompSes1']);
+
+  // allTime is the period that matters: it never expires, so a next-day apply
+  // must not resurrect the archived copy either.
+  const nextDay = applySessionUsageArchive(live, archive, { now: new Date('2026-09-06T12:00:00.000Z') });
+  assert.equal(nextDay.allTime.totalTokens, 500);
+});
+
+// The archived copy is still how a genuinely deleted split-client session stays
+// counted: suppression keys off the session being live under the split id.
+test('a deleted split-client session is still restored from the archive', () => {
+  const session = { client: 'pi', sessionId: 'ompGone1', totalTokens: 500, costUsd: 0, models: { gpt: 500 } };
+  const archive = captureSessionUsageArchive({}, {
+    updatedAt: '2026-09-05T10:00:00.000Z',
+    periods: { today: { sessions: { 'pi:ompGone1': session } }, month: { sessions: { 'pi:ompGone1': session } }, allTime: { sessions: { 'pi:ompGone1': session } } }
+  }, new Date('2026-09-05T10:00:00.000Z'));
+  const empty = { today: { totalTokens: 0, sessions: {} }, month: { totalTokens: 0, sessions: {} }, allTime: { totalTokens: 0, sessions: {} } };
+  const visible = applySessionUsageArchive(empty, archive, { now: new Date('2026-09-06T12:00:00.000Z') });
+  assert.equal(visible.allTime.totalTokens, 500);
+  assert.deepEqual(Object.keys(visible.allTime.sessions), ['pi:ompGone1']);
+});
+
+// A genuine Pi session must never be suppressed by the split rule.
+test('a Pi session is unaffected by the Oh My Pi split', () => {
+  const session = { client: 'pi', sessionId: 'piSes7', totalTokens: 700, costUsd: 0, models: { gpt: 700 } };
+  const archive = captureSessionUsageArchive({}, {
+    updatedAt: '2026-09-05T10:00:00.000Z',
+    periods: { today: { sessions: { 'pi:piSes7': session } }, month: { sessions: { 'pi:piSes7': session } }, allTime: { sessions: { 'pi:piSes7': session } } }
+  }, new Date('2026-09-05T10:00:00.000Z'));
+  const empty = { today: { totalTokens: 0, sessions: {} }, month: { totalTokens: 0, sessions: {} }, allTime: { totalTokens: 0, sessions: {} } };
+  const visible = applySessionUsageArchive(empty, archive, { now: new Date('2026-09-06T12:00:00.000Z') });
+  assert.equal(visible.allTime.totalTokens, 700);
+});
