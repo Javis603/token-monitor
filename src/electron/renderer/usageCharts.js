@@ -442,7 +442,11 @@
     if (/llama|meta|muse-spark(?:-|$)/.test(name)) return 'meta';
     if (/mistral|mixtral|codestral/.test(name)) return 'mistral';
     if (/qwen|qwq|qvq|qmodel/.test(name)) return 'qwen';
-    if (/kimi|moonshot|k2d6-agent|k3-agent/.test(name)) return 'kimi';
+    // Kimi's coding-plan catalog also serves bare `k2`/`k3` ids with no `kimi`
+    // prefix (`k3`, `k3-256k`), which the substring test cannot see. The
+    // delimited-token rule mirrors Tokscale's provider identity, and the two
+    // `-agent` ids stay explicit because their suffix is alphanumeric.
+    if (/kimi|moonshot|k2d6-agent|k3-agent/.test(name) || /(?:^|[^a-z0-9])k[23](?:[^a-z0-9]|$)/.test(name)) return 'kimi';
     if (/chatglm|\bglm-|\bzai\b|z\.ai|zhipu/.test(name)) return 'zai';
     if (/cohere|command-r/.test(name)) return 'cohere';
     if (/mimo|xiaomi/.test(name)) return 'xiaomi';
