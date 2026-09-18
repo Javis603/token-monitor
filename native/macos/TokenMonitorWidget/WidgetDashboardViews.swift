@@ -653,10 +653,10 @@ enum WidgetVendorIdentity {
     /// explicit for the same reason as in the renderer — their suffix is
     /// alphanumeric, so they are not delimited.
     private static func hasDelimitedKimiCodingPlanID(_ value: String) -> Bool {
-        containsDelimitedToken(value, "k2") || containsDelimitedToken(value, "k3")
+        containsDelimitedToken("k2", in: value) || containsDelimitedToken("k3", in: value)
     }
 
-    private static func containsDelimitedToken(_ haystack: String, _ needle: String) -> Bool {
+    private static func containsDelimitedToken(_ needle: String, in haystack: String) -> Bool {
         var searchStart = haystack.startIndex
         while let found = haystack.range(of: needle, range: searchStart..<haystack.endIndex) {
             let beforeOK = found.lowerBound == haystack.startIndex

@@ -797,9 +797,9 @@ test('macOS Widget model vendor marks cover the Kimi coding-plan ids', () => {
   );
   assert.match(
     widgetDashboardSource,
-    /private static func hasDelimitedKimiCodingPlanID\(_ value: String\) -> Bool \{[\s\S]{0,140}containsDelimitedToken\(value, "k2"\) \|\| containsDelimitedToken\(value, "k3"\)/
+    /private static func hasDelimitedKimiCodingPlanID\(_ value: String\) -> Bool \{[\s\S]{0,140}containsDelimitedToken\("k2", in: value\) \|\| containsDelimitedToken\("k3", in: value\)/
   );
-  assert.match(widgetDashboardSource, /private static func containsDelimitedToken\(_ haystack: String, _ needle: String\) -> Bool \{/);
+  assert.match(widgetDashboardSource, /private static func containsDelimitedToken\(_ needle: String, in haystack: String\) -> Bool \{/);
 });
 
 test('macOS Widget packaging keeps the canonical Token Monitor app identity', () => {
