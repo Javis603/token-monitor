@@ -214,7 +214,13 @@ function linkLegacyCursorEvents(archive, changedKeys, readCursorUsageEvents) {
   }
   for (const key of changedKeys) {
     const entry = archive.sessions[key];
-    if (!entry || entry.supersededBy || !isLegacyCursorEntry(entry) || state.keys.has(key)) continue;
+    if (!entry || !isLegacyCursorEntry(entry)) continue;
+    // The lookup is keyed on the row's own timestamp and tokens, and a CSV
+    // second holding a second event grows the row, so a row that changed was
+    // never looked up in this shape. An existing link was answered for the old
+    // shape and is dropped rather than trusted; the row stays pending, so a
+    // cache that catches up later can link it again.
+    delete entry.supersededBy;
     state.keys.add(key);
     state.signature = null;
   }
