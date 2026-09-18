@@ -90,11 +90,7 @@ function normalizeSessionUsageArchive(value) {
 
     if (!entry.client || !entry.sessionId || Object.keys(entry.periods).length === 0) continue;
     const supersededBy = sessionKey('cursor', String(rawEntry.supersededBy || '').replace(/^cursor:/, ''));
-    const supersededTokens = Math.round(numberValue(rawEntry.supersededTokens));
-    if (rawEntry.supersededBy && supersededBy && supersededTokens > 0 && isLegacyCursorEntry(entry)) {
-      entry.supersededBy = supersededBy;
-      entry.supersededTokens = supersededTokens;
-    }
+    if (rawEntry.supersededBy && supersededBy && isLegacyCursorEntry(entry)) entry.supersededBy = supersededBy;
     normalized.sessions[`${entry.client}:${entry.sessionId}`] = entry;
   }
 
@@ -203,80 +199,28 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
   return { archive, changedKeys };
 }
 
-// A legacy Cursor row's link is judged against the lookup it was answered for,
-// which is stored with it, so a row the archive touched for any other reason
-// (a reprice, an expired period pruned) keeps a link that is still true even
-// after the cache it came from is gone. Only a row whose lookup is new or has
-// changed shape is asked again.
-//
-// What survives in memory is just how far the work got: which rows are still
-// unanswered and which cache answered them, so a cache that cannot answer
-// differently is not reread. Rows another writer revised arrive through the
-// archive's own revision list rather than this tick's changes.
-const pendingLegacyCursorLinks = new WeakMap();
-
-function legacyCursorLinkState(archive) {
-  let state = pendingLegacyCursorLinks.get(archive);
-  if (state) return state;
-  state = { pending: new Map(), signature: null };
-  for (const [key, entry] of Object.entries(archive.sessions)) {
-    if (isLegacyCursorEntry(entry)) trackLegacyCursorRow(state, key, entry);
-  }
-  pendingLegacyCursorLinks.set(archive, state);
-  return state;
-}
-
-function trackLegacyCursorRow(state, key, entry) {
-  const lookup = legacyCursorLookup(entry);
-  if (!lookup) {
-    state.pending.delete(key);
-    return false;
-  }
-  if (entry.supersededBy && entry.supersededTokens === lookup.totalTokens) {
-    state.pending.delete(key);
-    return false;
-  }
-  // The link was answered for a shape this row no longer has.
-  const staleLink = Boolean(entry.supersededBy);
-  if (staleLink) {
-    delete entry.supersededBy;
-    delete entry.supersededTokens;
-  }
-  const known = state.pending.get(key);
-  if (!staleLink && known && known.totalTokens === lookup.totalTokens) return false;
-  state.pending.set(key, lookup);
-  state.signature = null;
-  return staleLink;
-}
-
+// Every capture asks the Cursor JSON cache about the legacy rows that still
+// have no link, and a link, once written, is never revisited: the row is one
+// event, and the only way its tokens can change is tokscale folding another
+// event of the same CSV second into it, which is either the same conversation
+// (the link still names it) or a second one (no single event ever matched, so
+// there was no link to invalidate). Deriving the work from the archive on each
+// pass is also what makes a row another writer added arrive on its own.
 function linkLegacyCursorEvents(archive, changedKeys, readCursorUsageEvents) {
-  const state = legacyCursorLinkState(archive);
-  const revised = archive.externallyRevisedKeys;
-  if (revised) archive.externallyRevisedKeys = null;
-  for (const key of new Set([...changedKeys, ...(revised || [])])) {
-    const entry = archive.sessions[key];
-    if (!entry) {
-      state.pending.delete(key);
-      continue;
-    }
-    if (isLegacyCursorEntry(entry) && trackLegacyCursorRow(state, key, entry)) changedKeys.add(key);
+  const pending = [];
+  for (const [key, entry] of Object.entries(archive.sessions)) {
+    if (entry.supersededBy || !isLegacyCursorEntry(entry)) continue;
+    const lookup = legacyCursorLookup(entry);
+    if (lookup) pending.push([key, entry, lookup]);
   }
-  if (state.pending.size === 0) return;
+  if (pending.length === 0) return;
 
   const usageEvents = readCursorUsageEvents();
-  if (!usageEvents || usageEvents.signature === state.signature) return;
-  state.signature = usageEvents.signature;
-  for (const [key, lookup] of state.pending) {
-    const entry = archive.sessions[key];
-    if (!entry) {
-      state.pending.delete(key);
-      continue;
-    }
+  if (!usageEvents) return;
+  for (const [key, entry, lookup] of pending) {
     const sessionId = supersedingCursorSessionId(lookup, usageEvents);
     if (!sessionId) continue;
     entry.supersededBy = sessionKey('cursor', sessionId);
-    entry.supersededTokens = lookup.totalTokens;
-    state.pending.delete(key);
     changedKeys.add(key);
   }
 }

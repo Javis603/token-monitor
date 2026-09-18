@@ -654,19 +654,6 @@ for (const [name, events] of [
   });
 }
 
-test('linking retries pending Cursor rows only after the cache changed', () => {
-  const archive = normalizeSessionUsageArchive(legacyEventArchive(LEGACY_EVENTS));
-  const unchanged = cursorUsageEvents([]);
-  updateSessionUsageArchive(archive, cursorSummary([]), NOW, { cursorUsageEvents: unchanged });
-  updateSessionUsageArchive(archive, cursorSummary([]), NOW, { cursorUsageEvents: unchanged });
-  assert.equal(archive.sessions['cursor:cursor-active-2026-08-13T02:10:00.000Z'].supersededBy, undefined);
-  assert.equal(unchanged.lookups(), LEGACY_EVENTS.length);
-
-  const synced = cursorUsageEvents(CACHED_EVENTS, 'cache-v2');
-  updateSessionUsageArchive(archive, cursorSummary([]), NOW, { cursorUsageEvents: synced });
-  assert.equal(archive.sessions['cursor:cursor-active-2026-08-13T02:10:00.000Z'].supersededBy, `cursor:${CURSOR_UUID}`);
-});
-
 test('a legacy Cursor row captured later is linked from the cache already read', () => {
   const archive = normalizeSessionUsageArchive(legacyEventArchive([LEGACY_EVENTS[0]]));
   const cache = cursorUsageEvents(CACHED_EVENTS);
@@ -701,32 +688,6 @@ test('a pending legacy Cursor row grown by a later capture is looked up again', 
   assert.equal(grown.archive.sessions[`cursor:${legacyId}`].supersededBy, `cursor:${CURSOR_UUID}`);
 });
 
-test('a linked legacy Cursor row that changes drops the stale link and stays pending', () => {
-  const [legacyId, tokens] = LEGACY_EVENTS[1];
-  const archive = normalizeSessionUsageArchive(legacyEventArchive([[legacyId, tokens]]));
-  const cache = cursorUsageEvents(CACHED_EVENTS);
-  updateSessionUsageArchive(archive, cursorSummary([]), NOW, { cursorUsageEvents: cache });
-  assert.equal(archive.sessions[`cursor:${legacyId}`].supersededBy, `cursor:${CURSOR_UUID}`);
-
-  const changed = updateSessionUsageArchive(
-    archive,
-    cursorSummary([cursorSession(legacyId, tokens + 40)]),
-    NOW,
-    { cursorUsageEvents: cache }
-  );
-  assert.equal(changed.archive.sessions[`cursor:${legacyId}`].supersededBy, undefined);
-  assert.equal(changed.changedKeys.has(`cursor:${legacyId}`), true);
-
-  // The row is still pending, so a cache that catches up links it again.
-  const relinked = updateSessionUsageArchive(
-    changed.archive,
-    cursorSummary([]),
-    NOW,
-    { cursorUsageEvents: cursorUsageEvents([['2026-08-13T02:42:39.510Z', 'conv-late', tokens + 40]], 'cache-v3') }
-  );
-  assert.equal(relinked.archive.sessions[`cursor:${legacyId}`].supersededBy, 'cursor:conv-late');
-});
-
 function linkedLegacyArchive(periodNames = ['allTime']) {
   const [legacyId, tokens] = LEGACY_EVENTS[1];
   const entry = legacyEventArchive([[legacyId, tokens]]).sessions[`cursor:${legacyId}`];
@@ -736,6 +697,30 @@ function linkedLegacyArchive(periodNames = ['allTime']) {
   assert.equal(archive.sessions[`cursor:${legacyId}`].supersededBy, `cursor:${CURSOR_UUID}`);
   return { archive, legacyId, tokens };
 }
+
+test('linking reads the Cursor cache only while a row is still unlinked', () => {
+  const archive = normalizeSessionUsageArchive(legacyEventArchive(LEGACY_EVENTS));
+  const cache = cursorUsageEvents(CACHED_EVENTS);
+  updateSessionUsageArchive(archive, cursorSummary([]), NOW, { cursorUsageEvents: cache });
+  const lookups = cache.lookups();
+  assert.equal(lookups, LEGACY_EVENTS.length);
+
+  updateSessionUsageArchive(archive, cursorSummary([]), NOW, { cursorUsageEvents: cache });
+  assert.equal(cache.lookups(), lookups);
+});
+
+test('a legacy Cursor row that grows after it was linked keeps that link', () => {
+  const { archive, legacyId, tokens } = linkedLegacyArchive();
+
+  const grown = updateSessionUsageArchive(
+    archive,
+    cursorSummary([cursorSession(legacyId, tokens + 40)]),
+    NOW,
+    { cursorUsageEvents: cursorUsageEvents([], 'cache-purged') }
+  );
+
+  assert.equal(grown.archive.sessions[`cursor:${legacyId}`].supersededBy, `cursor:${CURSOR_UUID}`);
+});
 
 test('a repriced legacy Cursor row keeps its link after the cache is gone', () => {
   const { archive, legacyId, tokens } = linkedLegacyArchive();
@@ -762,44 +747,16 @@ test('pruning an expired period keeps a legacy Cursor link after the cache is go
   assert.equal(next.archive.sessions[`cursor:${legacyId}`].supersededBy, `cursor:${CURSOR_UUID}`);
 });
 
-test('a progressive snapshot does not relink a legacy Cursor row from a stale period', () => {
-  const { archive, legacyId, tokens } = linkedLegacyArchive(['today', 'allTime']);
-  const cache = cursorUsageEvents(CACHED_EVENTS);
-
-  // Only `today` has the second event of that CSV second so far.
-  const partial = updateSessionUsageArchive(
-    archive,
-    { today: { sessions: { [`cursor:${legacyId}`]: cursorSession(legacyId, tokens + 40) } } },
-    NOW,
-    { cursorUsageEvents: cache }
-  );
-
-  assert.equal(partial.archive.sessions[`cursor:${legacyId}`].supersededBy, undefined);
-  assert.equal(partial.archive.sessions[`cursor:${legacyId}`].periods.allTime.totalTokens, tokens);
-});
-
 test('the Cursor session link survives normalization and is ignored on other rows', () => {
-  const archive = legacyEventArchive([
-    ['cursor-team-a-2026-08-13T02:42:39', 700],
-    ['cursor-team-b-2026-08-13T02:42:39', 700]
-  ]);
-  Object.assign(archive.sessions['cursor:cursor-team-a-2026-08-13T02:42:39'], {
-    supersededBy: `cursor:${CURSOR_UUID}`,
-    supersededTokens: 700
-  });
-  // A link with no lookup recorded cannot be revalidated, so it is dropped.
-  archive.sessions['cursor:cursor-team-b-2026-08-13T02:42:39'].supersededBy = `cursor:${CURSOR_UUID}`;
+  const archive = legacyEventArchive([['cursor-team-a-2026-08-13T02:42:39', 700]]);
+  archive.sessions['cursor:cursor-team-a-2026-08-13T02:42:39'].supersededBy = `cursor:${CURSOR_UUID}`;
   archive.sessions[`cursor:${CURSOR_UUID}`] = {
     ...legacyEventArchive([[CURSOR_UUID, 1000]]).sessions[`cursor:${CURSOR_UUID}`],
-    supersededBy: 'cursor:other',
-    supersededTokens: 1000
+    supersededBy: 'cursor:other'
   };
   const normalized = normalizeSessionUsageArchive(archive);
 
-  const linked = normalized.sessions['cursor:cursor-team-a-2026-08-13T02:42:39'];
-  assert.equal(linked.supersededBy, `cursor:${CURSOR_UUID}`);
-  assert.equal(linked.supersededTokens, 700);
-  assert.equal(normalized.sessions['cursor:cursor-team-b-2026-08-13T02:42:39'].supersededBy, undefined);
+  assert.equal(normalized.sessions['cursor:cursor-team-a-2026-08-13T02:42:39'].supersededBy, `cursor:${CURSOR_UUID}`);
   assert.equal(normalized.sessions[`cursor:${CURSOR_UUID}`].supersededBy, undefined);
 });
 

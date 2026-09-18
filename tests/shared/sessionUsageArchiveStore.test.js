@@ -754,8 +754,7 @@ test('a legacy Cursor session link is committed and survives reopening the store
   assert.equal(linked, 'cursor:conv-1');
 });
 
-for (const refreshFirst of [true, false]) {
-test(`a legacy Cursor row another writer left pending is linked by this process (refresh: ${refreshFirst})`, (t) => {
+test('a legacy Cursor row another writer added is linked by this process', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const legacyId = 'cursor-active-2026-08-13T02:42:39.510Z';
@@ -769,34 +768,23 @@ test(`a legacy Cursor row another writer left pending is linked by this process 
   });
   const capturedAt = new Date('2026-09-15T08:00:00.000Z');
   const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
-  // One cache both stores read, answering for whatever tokens it currently holds.
-  let cache = { signature: 'cache-v1', totalTokens: 700 };
   const cursorUsageEvents = () => ({
-    signature: cache.signature,
+    signature: 'synced',
     sessionsAt: (time, tokens) => (
-      time === Date.parse('2026-08-13T02:42:39.510Z') && tokens === cache.totalTokens ? ['conv-1'] : []
+      time === Date.parse('2026-08-13T02:42:39.510Z') && tokens === 700 ? ['conv-1'] : []
     )
   });
 
+  // This process scans the archive before the row exists.
   const reader = createSessionUsageArchiveStore({ ...options, cursorUsageEvents });
-  reader.capture({ allTime: { sessions: { [`cursor:${legacyId}`]: cursorSession(legacyId, 700) } } }, capturedAt);
-  assert.equal(reader.read(capturedAt).sessions[`cursor:${legacyId}`].supersededBy, 'cursor:conv-1');
+  reader.capture({ allTime: { sessions: {} } }, capturedAt);
 
-  // Another writer grows the row past what the cache can answer for, so the
-  // link is dropped and the row is left pending in the database.
-  const writer = createSessionUsageArchiveStore({ ...options, cursorUsageEvents });
-  writer.capture({ allTime: { sessions: { [`cursor:${legacyId}`]: cursorSession(legacyId, 740) } } }, capturedAt);
+  const writer = createSessionUsageArchiveStore(options);
+  writer.capture({ allTime: { sessions: { [`cursor:${legacyId}`]: cursorSession(legacyId, 700) } } }, capturedAt);
   writer.close();
-  if (refreshFirst) {
-    assert.equal(reader.refresh(capturedAt).sessions[`cursor:${legacyId}`].supersededBy, undefined);
-  }
 
-  // This process has already scanned the archive, so the row it never captured
-  // itself still has to reach its link tracker once the cache catches up.
-  cache = { signature: 'cache-v2', totalTokens: 740 };
   reader.capture({ allTime: { sessions: {} } }, capturedAt);
   const linked = reader.read(capturedAt).sessions[`cursor:${legacyId}`].supersededBy;
   reader.close();
   assert.equal(linked, 'cursor:conv-1');
 });
-}

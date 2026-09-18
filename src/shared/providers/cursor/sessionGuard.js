@@ -34,9 +34,8 @@ function isLegacyCursorEntry(entry) {
 // What a lookup is keyed on: the row's event time and its tokens. Every period
 // of a legacy row holds the same single event, so they agree except while a
 // progressive snapshot has refreshed one of them; the largest is the one the
-// cache has to answer for, and a stale smaller period must not relink the row to
-// what it used to be. Stored beside the link, so a row that has not changed
-// shape keeps it however else the archive entry was touched.
+// cache has to answer for, and a stale smaller period must not answer for a
+// shape the row has already grown past.
 function legacyCursorLookup(entry) {
   const sessions = Object.values(entry?.periods || {});
   const time = legacyCursorEventTime(sessions[0]);
