@@ -117,6 +117,10 @@ function decryptZcodeCredential(value, env) {
   const [ivPart, tagPart, cipherPart] = value.slice(ZCODE_CREDENTIAL_ENVELOPE.length).split('.');
   if (!ivPart || !tagPart || !cipherPart) return null;
   try {
+    // ZCode derives every store entry with sha256, and its store can only be
+    // decrypted by reproducing that derivation — a slower KDF would break
+    // interop rather than harden anything here.
+    // codeql[js/insufficient-password-hash] interop-mandated derivation, not password storage
     const key = crypto.createHash('sha256').update(credentialSecret(env)).digest();
     const iv = Buffer.from(ivPart, 'base64url');
     const tag = Buffer.from(tagPart, 'base64url');
