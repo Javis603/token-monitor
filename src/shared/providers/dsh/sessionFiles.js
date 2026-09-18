@@ -298,6 +298,12 @@ function foldDshSessionState(text, previous = {}) {
   let title = persistedDshSessionTitle(previous.title);
   let contextWindow = positiveTokenCount(previous.contextWindow);
   let contextTokens = positiveTokenCount(previous.contextTokens);
+  // Whether the newest turn boundary in the log is a completion. DSH brackets
+  // every turn with `turn/start` and `turn/end`, and the end carries why it
+  // stopped: `completed`, or `aborted`/`error` with the cause. All three mean
+  // nothing is generating, so the kind is not consulted - only which of the two
+  // boundaries came last.
+  let turnEnded = previous.turnEnded === true;
   for (const line of String(text || '').split(/\r?\n/)) {
     if (!line.trim()) continue;
     let event;
@@ -306,6 +312,14 @@ function foldDshSessionState(text, previous = {}) {
     if (event?.type === 'session/title') {
       const nextTitle = persistedDshSessionTitle(data?.title);
       if (nextTitle) title = nextTitle;
+      continue;
+    }
+    if (event?.type === 'turn/end') {
+      turnEnded = true;
+      continue;
+    }
+    if (event?.type === 'turn/start') {
+      turnEnded = false;
       continue;
     }
     if (event?.type === 'request/context') {
@@ -318,7 +332,7 @@ function foldDshSessionState(text, previous = {}) {
       + positiveTokenCount(data.chunk.usage?.outputTokens);
     if (occupied) contextTokens = occupied;
   }
-  return { title, contextWindow, contextTokens };
+  return { title, contextWindow, contextTokens, turnEnded };
 }
 
 function dshSessionFileIdentity(stat) {
@@ -375,7 +389,7 @@ function decodeSessionAppend(filePath, buffer) {
 // record/frame remains eligible for retry.
 function readDshSessionState(filePath, previous = {}) {
   let stat;
-  try { stat = fs.statSync(filePath); } catch (_) { return { title: '', contextWindow: 0, contextTokens: 0, offset: 0, size: 0, mtimeMs: 0 }; }
+  try { stat = fs.statSync(filePath); } catch (_) { return { title: '', contextWindow: 0, contextTokens: 0, turnEnded: false, offset: 0, size: 0, mtimeMs: 0 }; }
   const size = Number(stat.size) || 0;
   const mtimeMs = Number(stat.mtimeMs) || 0;
   const identity = dshSessionFileIdentity(stat);
@@ -441,7 +455,7 @@ function readDshSessionState(filePath, previous = {}) {
     // preserving the older fingerprint makes the next tick retry it.
     return previous && typeof previous === 'object'
       ? previous
-      : { title: '', contextWindow: 0, contextTokens: 0, offset: 0, size: 0, mtimeMs: 0 };
+      : { title: '', contextWindow: 0, contextTokens: 0, turnEnded: false, offset: 0, size: 0, mtimeMs: 0 };
   } finally {
     if (fd !== undefined) {
       try { fs.closeSync(fd); } catch (_) {}

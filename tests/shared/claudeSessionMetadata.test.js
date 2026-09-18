@@ -21,6 +21,46 @@ function fixture(lines) {
 }
 
 test('Claude session metadata reads the persisted AI title without exposing prompts', (t) => {
+
+test('readSessionTurnEnded follows the newest stop_reason, and tool_use is not an end', (t) => {
+  // Claude stamps every assistant record with why it stopped. `tool_use` means
+  // it paused to run tools and is still mid-turn; anything else means nothing
+  // further is being generated. Treating tool_use as an end would mark almost
+  // every working session as finished, which is the opposite mistake.
+  const { readSessionTurnEnded } = require('../../src/shared/providers/claude/sessionMetadata');
+  const assistant = (stop) => JSON.stringify({ type: 'assistant', message: { id: `msg_${stop}`, stop_reason: stop } });
+
+  const ended = fixture([assistant('tool_use'), assistant('end_turn')]);
+  t.after(() => fs.rmSync(ended.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(ended.file, { cache: new Map() }), true);
+
+  // The newest record wins: a tool_use after an end_turn is working again.
+  const working = fixture([assistant('end_turn'), assistant('tool_use')]);
+  t.after(() => fs.rmSync(working.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(working.file, { cache: new Map() }), false);
+
+  // max_tokens and stop_sequence are ends too: generation stopped.
+  const truncated = fixture([assistant('max_tokens')]);
+  t.after(() => fs.rmSync(truncated.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(truncated.file, { cache: new Map() }), true);
+
+  // A transcript that never recorded one reports false rather than guessing.
+  const silent = fixture([JSON.stringify({ type: 'user', message: { content: 'hi' } })]);
+  t.after(() => fs.rmSync(silent.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(silent.file, { cache: new Map() }), false);
+  assert.equal(readSessionTurnEnded('', { cache: new Map() }), false);
+
+  // The title still resolves from the same shared index, so asking for both
+  // costs one pass rather than two.
+  const both = fixture([
+    JSON.stringify({ type: 'ai-title', aiTitle: 'Shared pass' }),
+    assistant('end_turn')
+  ]);
+  t.after(() => fs.rmSync(both.dir, { recursive: true, force: true }));
+  const cache = new Map();
+  assert.equal(readSessionTurnEnded(both.file, { cache }), true);
+  assert.equal(readSessionTitle(both.file, { cache }), 'Shared pass');
+});
   const { dir, file } = fixture([
     JSON.stringify({ type: 'user', message: { content: 'private prompt' } }),
     JSON.stringify({ type: 'ai-title', aiTitle: '  Improve   session list  ' }),

@@ -27,6 +27,14 @@ function applyMetadataLine(state, line) {
     } else if (entry?.type === 'ai-title') {
       const candidate = cleanTitle(entry.aiTitle);
       if (candidate) state.aiTitle = candidate;
+    } else if (entry?.type === 'assistant') {
+      // Claude stamps every assistant record with why it stopped. `tool_use`
+      // means it paused to run tools and is still mid-turn; anything else
+      // (`end_turn`, `stop_sequence`, `max_tokens`) means nothing further is
+      // being generated. Titles and this boundary ride one pass, so the turn
+      // state costs no extra read.
+      const stopReason = entry.message?.stop_reason;
+      if (typeof stopReason === 'string' && stopReason) state.stopReason = stopReason;
     }
   } catch (_) { /* skip partial or unrelated lines */ }
 }
@@ -88,6 +96,7 @@ function emptyIndex() {
   return {
     customTitle: '',
     aiTitle: '',
+    stopReason: '',
     trailing: Buffer.alloc(0),
     droppingLongLine: false
   };
@@ -118,6 +127,7 @@ function readSessionTitle(filePath, deps = {}) {
       ? {
         customTitle: cached.customTitle || '',
         aiTitle: cached.aiTitle || '',
+        stopReason: cached.stopReason || '',
         trailing: Buffer.isBuffer(cached.trailing) ? Buffer.from(cached.trailing) : Buffer.alloc(0),
         droppingLongLine: cached.droppingLongLine === true
       }
@@ -144,6 +154,25 @@ function readSessionTitle(filePath, deps = {}) {
   }
 }
 
+/**
+ * The session's own account of whether a turn is still in progress. Claude
+ * writes `stop_reason` on every assistant record, so the newest one is the
+ * answer: `tool_use` means it is mid-turn running tools, anything else means
+ * nothing further is being generated. Shares the title scan and its cache, so
+ * asking for both costs one pass over the file.
+ */
+function readSessionTurnEnded(filePath, deps = {}) {
+  const file = String(filePath || '');
+  if (!file) return false;
+  const cache = deps.cache || titleCache;
+  // Reading the title first populates or refreshes the shared index; an
+  // unchanged file short-circuits both through the same size+mtime check.
+  readSessionTitle(file, deps);
+  const cached = cache.get(file);
+  const stopReason = String(cached?.stopReason || '');
+  return stopReason !== '' && stopReason !== 'tool_use';
+}
+
 function resolveSessionMetadata(sessionIds, context) {
   const { deps, home, metadata } = context;
   const result = new Map();
@@ -159,7 +188,16 @@ function resolveSessionMetadata(sessionIds, context) {
       metadata.get(`claude:${sessionId}`)
     );
     const title = readSessionTitle(filePath, deps.claudeMetadataDeps);
-    result.set(sessionId, { ...meta, ...(title ? { title } : {}) });
+    // The turn boundary rides the same scan and its cache, so asking for it
+    // costs no second pass. Reported for every session rather than only a recent
+    // one: it is what stops a session reading as running, and gating it on the
+    // time window would keep a finished session green for that whole window.
+    const turnEnded = readSessionTurnEnded(filePath, deps.claudeMetadataDeps);
+    result.set(sessionId, {
+      ...meta,
+      ...(title ? { title } : {}),
+      ...(turnEnded ? { turnEnded: true } : {})
+    });
   };
   const projectFiles = findSessionFiles(roots.projects, sessionIds);
   for (const [sessionId, filePath] of projectFiles) applyFile(sessionId, filePath);
@@ -174,5 +212,6 @@ module.exports = {
   TITLE_READ_CHUNK_BYTES,
   cleanTitle,
   readSessionTitle,
+  readSessionTurnEnded,
   resolveSessionMetadata
 };

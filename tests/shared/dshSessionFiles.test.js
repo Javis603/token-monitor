@@ -243,6 +243,38 @@ test('decodeSessionText reads raw .jsonl without decompression', () => {
 });
 
 test('readDshSessionState folds and preserves the latest persisted title', () => {
+
+test('readDshSessionState reports the newest turn boundary, not just the last one seen', () => {
+  // DSH brackets every turn with `turn/start` and `turn/end`, so the newest of
+  // the two is the answer. A `turn/end` that carries a reason is still an end:
+  // completed, aborted and errored all mean nothing is generating.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-turn-'));
+  const file = path.join(root, 'session.jsonl');
+  try {
+    const ev = (type, data = {}) => JSON.stringify({ type, seq: 1, time: 1, data });
+    fs.writeFileSync(file, [
+      ev('turn/start', { turn: 1 }),
+      ev('turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      ''
+    ].join('\n'));
+    assert.equal(readDshSessionState(file, {}).turnEnded, true);
+
+    // A later turn/start means it is working again, so the flag must clear.
+    fs.appendFileSync(file, `${ev('turn/start', { turn: 2 })}\n`);
+    assert.equal(readDshSessionState(file, {}).turnEnded, false);
+
+    // An interrupted turn still ends it.
+    fs.appendFileSync(file, `${ev('turn/end', { turn: 2, reason: { kind: 'aborted', reason: { kind: 'user' } } })}\n`);
+    assert.equal(readDshSessionState(file, {}).turnEnded, true);
+
+    // A log with no boundary at all reports false rather than guessing.
+    const bare = path.join(root, 'bare.jsonl');
+    fs.writeFileSync(bare, `${JSON.stringify({ type: 'session/title', seq: 1, data: { title: 'x' } })}\n`);
+    assert.equal(readDshSessionState(bare, {}).turnEnded, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-'));
   const file = path.join(root, 'session.jsonl');
   try {

@@ -132,10 +132,16 @@ function resolveSessionMetadata(sessionIds, context) {
     // current enough to report, and is shared with the providers whose
     // readings do cost a file read.
     const live = shouldReadSessionContext(lastUsedAt || startedAt, context.now);
+    // The turn boundary comes out of the same fold as the title and the context
+    // pair, so no extra read is spent on it. It is reported for every session,
+    // not only a recent one: whether the transcript said the turn finished is
+    // what stops a session reading as running, and the recency window would
+    // otherwise keep it green for its whole length.
     result.set(sessionId, {
       startedAt: startedAt || lastUsedAt,
       lastUsedAt: lastUsedAt || startedAt,
       ...(sessionState?.title ? { title: sessionState.title } : {}),
+      ...(sessionState?.turnEnded === true ? { turnEnded: true } : {}),
       ...(live ? { contextWindow: sessionState?.contextWindow, contextTokens: sessionState?.contextTokens } : {})
     });
   }
