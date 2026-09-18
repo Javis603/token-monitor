@@ -58,6 +58,7 @@
     { id: 'zed', label: 'Zed' },
     { id: 'kilo', label: 'Kilo' },
     { id: 'commandcode', label: 'Command Code' },
+    { id: 'mcode', label: 'MiniMax Code' },
     { id: 'micode', label: 'MiMo Code', defaultTracked: false },
     { id: 'zcode', label: 'ZCode' },
     { id: 'kiro', label: 'Kiro' },

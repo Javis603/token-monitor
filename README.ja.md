@@ -26,7 +26,7 @@
 
 ## Token Monitor とは
 
-Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 37+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップウィジェットです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。
+Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 38+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップウィジェットです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。
 
 ## 対応ツール
 
@@ -52,6 +52,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`、VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — 拡張機能のログは Linux およびリモート/WSL のみ | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/mcode.png" width="28" alt="MiniMax Code" /> | MiniMax Code | デスクトップアプリ（`~/.minimax/v2/sessions/`）、Tokscale headless capture（`~/.config/tokscale/headless/mcode/`、`tokscale headless mcode` 経由） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/`（`projects/`、`cli/db/db.sqlite`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage および `kiro-cli` DB | ✅ | ✅ | — |
@@ -123,7 +124,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 
 ### 使用量の追跡
 
-- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 30+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
+- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 31+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
 - **リアルタイムトークンレート** — 生成速度を `tok/s`、総消費を `tok/min` で表示する任意のライブ表示
 - **セッション別詳細** — セッションを開くとプロンプトごとのトークン、各応答のトークン分割・使用ツールまで展開（ローカル transcript/DB を必要時のみ読み込み、同期しない）
 - **キャッシュヒット統計** — ツール・モデルをクリックすると入力トークン（キャッシュ hit/miss）、出力トークン、ヒット率の詳細
