@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const { hashKey } = require('./hashKey');
+const { normalizeSessionContext } = require('./sessionContext');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
 const codexSession = require('./providers/codex/sessionMetadata');
 const droidSessionMetadata = require('./providers/droid/sessionMetadata');
@@ -276,10 +277,14 @@ function sessionMetadataMap(periods, home = os.homedir(), deps = {}) {
 
   const resolvers = deps.sessionMetadataResolvers || SESSION_METADATA_RESOLVERS;
   const attributed = sessionsWithProject(periods);
+  // One clock for the whole pass, so two providers resolved in the same tick
+  // cannot disagree about whether a session is recent enough to read.
+  const now = Number.isFinite(deps.now) ? deps.now : Date.now();
   const contextFor = (client) => ({
     deps,
     home,
     metadata,
+    now,
     resolveProjects,
     projectIdentity,
     isoFromDate,
@@ -331,6 +336,12 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
       if (meta.title) session.title = meta.title;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
+      // Occupancy is only carried when this tick actually read it. A session
+      // that has gone quiet long enough to fall outside the read window
+      // reports none, which is what makes the UI stop claiming a stale
+      // reading is current.
+      const sessionContext = normalizeSessionContext(meta);
+      if (sessionContext) Object.assign(session, sessionContext);
     }
   }
 }

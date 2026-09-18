@@ -461,3 +461,120 @@ test('session layout keeps page chrome consistent and scrolls long labels on one
   assert.match(renderer, /function setHoverMarqueeText\([^]*?element\.removeAttribute\('title'\);\n}/);
   assert.doesNotMatch(renderer, /function setHoverMarqueeText\([^]*?element\.title\s*=/);
 });
+
+test('a session still being written to is marked running and shows its context headroom', () => {
+  const now = new Date(2026, 8, 18, 12, 30);
+  const minutesAgo = (minutes) => new Date(now.getTime() - minutes * 60_000).toISOString();
+  const rows = sessionRowsForPeriod({
+    sessions: {
+      'codex:live': {
+        client: 'codex',
+        sessionId: 'rollout-2026-09-18T11-44-50-019e76fc-dddd-eeee-ffff-222222222222',
+        totalTokens: 24_870_232,
+        costUsd: 21.91,
+        models: { 'gpt-5.5': 24_870_232 },
+        messageCount: 184,
+        contextTokens: 190_867,
+        contextWindow: 950_000,
+        lastUsedAt: minutesAgo(2)
+      },
+      'codex:quiet': {
+        client: 'codex',
+        sessionId: 'rollout-2026-09-18T09-47-36-019e76fc-aaaa-bbbb-cccc-111111111111',
+        totalTokens: 20_548_311,
+        costUsd: 17.59,
+        models: { 'gpt-5.5': 20_548_311 },
+        messageCount: 160,
+        lastUsedAt: minutesAgo(90)
+      }
+    }
+  }, { clientLabels, clientColors, now });
+
+  const live = rows.find((row) => row.key === 'session:codex:live');
+  assert.equal(live.running, true);
+  assert.deepEqual(live.context, {
+    contextTokens: 190_867,
+    contextWindow: 950_000,
+    percentLeft: 80,
+    percentUsed: 20,
+    tone: ''
+  });
+  // The activity line keeps exactly what it carried before: it is one
+  // ellipsizing line, so a headroom reading appended here would be paid for by
+  // dropping the timestamp.
+  assert.match(live.subtitle, /^\d{2}:\d{2} · 184 msgs$/);
+
+  const quiet = rows.find((row) => row.key === 'session:codex:quiet');
+  assert.equal(quiet.running, undefined);
+  assert.equal(quiet.context, undefined);
+});
+
+test('context headroom only takes on a colour as it runs out', () => {
+  const now = new Date(2026, 8, 18, 12, 30);
+  const toneAt = (contextTokens) => {
+    const rows = sessionRowsForPeriod({
+      sessions: {
+        'codex:tight': {
+          client: 'codex',
+          sessionId: 'rollout-2026-09-18T11-44-50-019e76fc-dddd-eeee-ffff-444444444444',
+          totalTokens: 1_000,
+          models: { 'gpt-5.5': 1_000 },
+          contextTokens,
+          contextWindow: 200_000,
+          lastUsedAt: new Date(now.getTime() - 60_000).toISOString()
+        }
+      }
+    }, { clientLabels, clientColors, now });
+    return rows[0].context;
+  };
+
+  assert.equal(toneAt(40_000).tone, '');
+  assert.equal(toneAt(140_000).tone, 'caution');
+  assert.equal(toneAt(180_000).tone, 'low');
+  // The boundaries themselves belong to the more serious tone.
+  assert.equal(toneAt(200_000 * 0.7).tone, 'caution');
+  assert.equal(toneAt(200_000 * 0.9).tone, 'low');
+  // Both readings of the gauge are published so the Remaining/Used preference
+  // can flip the label without the two ever disagreeing by a point.
+  assert.deepEqual(toneAt(190_000), {
+    contextTokens: 190_000,
+    contextWindow: 200_000,
+    percentLeft: 5,
+    percentUsed: 95,
+    tone: 'low'
+  });
+});
+
+test('an archived session is never running and a half-read context is not shown', () => {
+  const now = new Date(2026, 8, 18, 12, 30);
+  const rows = sessionRowsForPeriod({
+    sessions: {
+      'codex:archived': {
+        client: 'codex',
+        sessionId: 'rollout-2026-09-18T12-20-00-019e76fc-aaaa-bbbb-cccc-333333333333',
+        totalTokens: 100,
+        models: { 'gpt-5.5': 100 },
+        archived: true,
+        contextTokens: 5_000,
+        contextWindow: 200_000,
+        lastUsedAt: new Date(now.getTime() - 60_000).toISOString()
+      },
+      'claude:windowless': {
+        client: 'claude',
+        sessionId: '214c24d5-aaaa-bbbb-cccc-f87e',
+        totalTokens: 200,
+        models: { 'claude-opus-5': 200 },
+        contextTokens: 5_000,
+        lastUsedAt: new Date(now.getTime() - 60_000).toISOString()
+      }
+    }
+  }, { clientLabels, clientColors, now, archivedLabel: 'Archived' });
+
+  const archived = rows.find((row) => row.key === 'session:codex:archived');
+  assert.equal(archived.running, undefined);
+  assert.equal(archived.context, undefined);
+
+  const windowless = rows.find((row) => row.key === 'session:claude:windowless');
+  assert.equal(windowless.running, true);
+  assert.equal(windowless.context, undefined);
+});

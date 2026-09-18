@@ -3697,6 +3697,93 @@ html.is-windows .settings-panel select option {
   content: 'you';
 }
 .row.local.stale .row-name::after { display: none; }
+/* A session whose transcript is still being appended to. The dot sits on the
+   tool mark's corner — where presence belongs, and where it can be scanned down
+   the left edge of the list — rather than in the text, which is a single
+   ellipsizing line already carrying the title, the model and the timestamp.
+   Absolutely positioned so a running row never shifts against the rows around
+   it.
+
+   Painted with --success, never --accent: "this is alive" is a semantic state,
+   and --accent is the user's own colour (the obsidian preset sets it to a near
+   white, which would leave the dot indistinguishable from the mark it sits on).
+   --success is the variable this codebase keeps independent of the custom
+   accent for exactly this reason, and it darkens on light themes. */
+.row-name { position: relative; }
+.row-live { display: none; }
+.row.running .row-live {
+  display: block;
+  position: absolute;
+  top: 8px;
+  left: 6px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--success);
+  /* The ring separates the dot from the mark it overlaps; --panel-rgb flips
+     with the theme, so it stays a separation rather than becoming a dark spot
+     on a light background. */
+  box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 4px rgba(var(--success-rgb), 0.55);
+}
+/* One-shot flare when that session's transcript actually grew, matching the
+   titlebar dot's rule: no `infinite`, so a list of open-but-idle sessions costs
+   the compositor nothing and a heartbeat means "generating right now" rather
+   than merely "not closed". The ring is repeated on every stop because a
+   box-shadow list is animated as a whole. */
+.row.running .row-live.pulse {
+  animation: row-live-pulse 1.2s ease-out;
+}
+@keyframes row-live-pulse {
+  0%   { box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 3px rgba(var(--success-rgb), 0.45); }
+  35%  { box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 10px rgba(var(--success-rgb), 0.95); }
+  100% { box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 4px rgba(var(--success-rgb), 0.55); }
+}
+/* How much of the running session's context window is left, as the third line
+   of the metrics column. A gauge rather than a sentence: headroom only matters
+   as it runs out, which a shrinking bar says at a glance and 10px grey text
+   does not. The metrics column is two lines tall inside a four-line row, so
+   this lands in existing empty space and clears the detail chevron pinned to
+   the row's bottom-right. */
+.row-context {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.1;
+}
+.row-context-meter {
+  width: 20px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(var(--sunken-rgb), 0.46);
+}
+.row-context-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  /* Neutral while healthy. Colour here is reserved for headroom that is running
+     out, so the green beside it keeps meaning exactly one thing ("this session
+     is alive") and a coloured gauge is always worth a look. Uses the
+     border/overlay system, which flips with the theme. */
+  background: rgba(var(--line-rgb), 0.55);
+  transform: scaleX(var(--bar-scale, 0));
+  transform-origin: left center;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* The heads-up, then the boundary where a client starts rewriting the
+   conversation to make room — the only moment the number is worth interrupting
+   for. Both are semantic colours, never the customisable accent. */
+.row-context[data-tone="caution"] { color: var(--yellow); }
+.row-context[data-tone="caution"] .row-context-fill { background: var(--yellow); }
+.row-context[data-tone="low"] { color: var(--orange); }
+.row-context[data-tone="low"] .row-context-fill { background: var(--orange); }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .row-context-fill { transition: none; }
+}
 .shell.session-mode .breakdown {
   gap: 7px;
 }

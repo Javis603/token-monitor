@@ -943,6 +943,13 @@ function propagateTodayProjects(today, periods) {
       }
       if (session.title && !target.title) target.title = session.title;
       if (session.sessionKind && !target.sessionKind) target.sessionKind = session.sessionKind;
+      // Context occupancy replaces rather than fills a gap: the delta-derived
+      // periods carry whatever the last full scan read, which is older than
+      // this tick's reading by construction.
+      if (Number(session.contextWindow) > 0) {
+        target.contextWindow = session.contextWindow;
+        target.contextTokens = session.contextTokens;
+      }
       if (session.startedAt && (!target.startedAt || Date.parse(session.startedAt) < Date.parse(target.startedAt))) {
         target.startedAt = session.startedAt;
       }

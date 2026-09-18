@@ -513,6 +513,11 @@ function defaultSettings() {
     heatmapMetric: 'cost',
     modelRankingMetric: 'tokens',
     homeActiveDaysWindow: 'all',
+    // How a live session's context gauge reads. That direction is a choice the
+    // gauge cannot make on its own, so it is stated here rather than assumed:
+    // `used` is what the Sessions view and this app's own readouts show, while
+    // the clients' default footers tend to lead with what is left.
+    sessionContextMetric: 'used',
     periodMonthMode: 'month',
     themeColors: {},
     vendorColors: {},
@@ -688,6 +693,17 @@ function normalizeHomeActiveDaysWindow(value, fallback = 'all') {
   if (next === 'year') return 'year';
   if (next === 'all') return 'all';
   return fallback === 'year' ? 'year' : 'all';
+}
+
+// The context gauge's own preference, deliberately separate from
+// showLimitUsed (AI Tool Limits): that one describes provider quota meters,
+// where 'remaining' is the headline number a plan is sold on. A session's
+// context window is a working budget the model is spending down, and the
+// clients themselves lead with used, so the two do not have to agree.
+function normalizeSessionContextMetric(value, fallback = 'used') {
+  const next = String(value || '').trim();
+  if (next === 'used' || next === 'remaining') return next;
+  return fallback === 'remaining' ? 'remaining' : 'used';
 }
 
 function normalizeCollectionIntervalMs(value, fallback = DEFAULT_COLLECTION_INTERVAL_MS) {
@@ -2591,6 +2607,7 @@ function readSettings() {
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
+    merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
@@ -7093,6 +7110,7 @@ app.whenReady().then(() => {
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
     if (patch.heatmapMetric !== undefined) normalizedPatch.heatmapMetric = normalizeHeatmapMetric(patch.heatmapMetric, settings.heatmapMetric);
     if (patch.homeActiveDaysWindow !== undefined) normalizedPatch.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(patch.homeActiveDaysWindow, settings.homeActiveDaysWindow);
+    if (patch.sessionContextMetric !== undefined) normalizedPatch.sessionContextMetric = normalizeSessionContextMetric(patch.sessionContextMetric, settings.sessionContextMetric);
     settings = normalizeWindowBehaviorSettings({
       ...settings,
       ...normalizedPatch,
@@ -7168,6 +7186,7 @@ app.whenReady().then(() => {
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
+      sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),

@@ -1360,3 +1360,51 @@ test('aggregateDevices falls back to UTC-day compare for old agents without peri
   }], 10 * 60 * 1000, Date.parse('2026-06-26T06:00:00.000Z'));
   assert.equal(kept.periods.today.totalTokens, 7);
 });
+
+test('a session carries its context occupancy through the device record', () => {
+  const record = normalizeDeviceRecord({
+    deviceId: 'm1',
+    updatedAt: '2026-09-18T06:00:00.000Z',
+    today: {
+      totalTokens: 10,
+      sessions: {
+        'codex:live': {
+          client: 'codex',
+          sessionId: 'rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111',
+          totalTokens: 10,
+          contextTokens: 190_867,
+          contextWindow: 950_000
+        }
+      }
+    }
+  });
+  const session = record.periods.today.sessions['codex:rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111'];
+  assert.equal(session.contextTokens, 190_867);
+  assert.equal(session.contextWindow, 950_000);
+});
+
+test('merging a session keeps one source occupancy rather than summing two', () => {
+  const session = (contextTokens, contextWindow) => ({
+    client: 'codex',
+    sessionId: 'rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111',
+    totalTokens: 5,
+    ...(contextWindow ? { contextTokens, contextWindow } : {})
+  });
+  const merged = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: session(100, 200_000), b: session(140, 200_000) } }
+  });
+  const key = 'codex:rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111';
+  assert.equal(merged.periods.today.sessions[key].contextTokens, 140);
+  assert.equal(merged.periods.today.sessions[key].contextWindow, 200_000);
+
+  // A partition with no reading leaves the one that has it alone, instead of
+  // zeroing a live session every time it is merged with a period that only
+  // carries totals.
+  const partial = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: session(100, 200_000), b: session(0, 0) } }
+  });
+  assert.equal(partial.periods.today.sessions[key].contextTokens, 100);
+  assert.equal(partial.periods.today.sessions[key].contextWindow, 200_000);
+});

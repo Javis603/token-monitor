@@ -87,6 +87,75 @@
     return compactSessionTime(session?.lastUsedAt || session?.startedAt, now);
   }
 
+  // How recently a session's transcript must have been written to for it to
+  // count as running. This is a display window, not the collector's read
+  // window: the collector reads context for a wider span so a session that
+  // pauses mid-task keeps its reading, while "running" has to mean now. It is
+  // sized to outlast one model turn — the collector's watcher reacts to a
+  // transcript write within seconds, so nothing here waits on a poll.
+  const RUNNING_SESSION_WINDOW_MS = 10 * 60 * 1000;
+
+  function isRunningSession(session, now) {
+    const last = validDate(session?.lastUsedAt);
+    if (!last) return false;
+    const elapsed = now.getTime() - last.getTime();
+    // A transcript timestamped slightly ahead of this clock is a clock
+    // difference, not a session from the future, and is still running.
+    return elapsed <= RUNNING_SESSION_WINDOW_MS;
+  }
+
+  // Both halves are read from the client's own transcript and only for a
+  // session recent enough to still be open, so their absence is the normal
+  // case (every client whose transcript we do not read, and every session that
+  // has gone quiet) rather than an error worth showing.
+  function sessionContextWindow(session) {
+    const contextTokens = finiteNumber(session?.contextTokens);
+    const contextWindow = finiteNumber(session?.contextWindow);
+    if (contextTokens <= 0 || contextWindow <= 0) return null;
+    // A transcript reporting more than its window fits means the two disagree;
+    // report no headroom rather than a negative one.
+    const percentLeft = Math.max(0, Math.round(((contextWindow - contextTokens) / contextWindow) * 100));
+    // Derived rather than rounded a second time, so the two readings of the
+    // same gauge can never disagree by a point at a .5 boundary.
+    return { contextTokens, contextWindow, percentLeft, percentUsed: 100 - percentLeft };
+  }
+
+  // Headroom is a gauge, not a sentence: the row publishes the numbers and the
+  // renderer draws a meter in the metrics column. Keeping it out of the
+  // activity line matters — that line is a one-line text queue that ellipsizes,
+  // so anything appended there is paid for by dropping the timestamp.
+  //
+  // Only a running row gets one, even though the collector reads context over a
+  // wider window than "running" covers: that slack exists so the value is ready
+  // the moment a row goes live, not so a quiet session can keep showing a gauge
+  // nobody can tell is current. Dot and gauge are one state.
+  // Colour is reserved for headroom that is actually running out. A gauge that
+  // is coloured while healthy spends most of a window's life saying nothing —
+  // and on a running row it would be the same green as the live dot beside it,
+  // so one colour would carry two unrelated meanings. Neutral until it matters
+  // leaves green meaning exactly one thing in the list: this session is alive.
+  //
+  // `low` is where a client stops merely being tight: Codex auto-compacts at
+  // `model_auto_compact_token_limit`, which its own tooling defaults to a tenth
+  // of the window. `caution` is the heads-up before that.
+  const CONTEXT_TONES = [
+    { tone: 'low', maxPercentLeft: 10 },
+    { tone: 'caution', maxPercentLeft: 30 }
+  ];
+
+  function contextTone(percentLeft) {
+    for (const { tone, maxPercentLeft } of CONTEXT_TONES) {
+      if (percentLeft <= maxPercentLeft) return tone;
+    }
+    return '';
+  }
+
+  function sessionContextRow(session) {
+    const context = sessionContextWindow(session);
+    if (!context) return undefined;
+    return { ...context, tone: contextTone(context.percentLeft) };
+  }
+
   function textValue(value) {
     return typeof value === 'string' ? value.trim() : '';
   }
@@ -167,11 +236,14 @@
       sessionActivityLabel(session, now),
       messageLabel(session)
     ].filter(Boolean);
+    const running = isRunningSession(session, now);
     return {
       key: `session:${key}`,
       kind: 'session',
       name: titleParts.join(' · '),
       subtitle: subtitleParts.join(' · '),
+      running: running || undefined,
+      context: running ? sessionContextRow(session) : undefined,
       detail: sessionIdLabel(session?.sessionId || key),
       value,
       tokenDataUnavailable,
@@ -206,6 +278,9 @@
         const sessionId = session?.sessionId || key;
         const archived = session?.archived === true || session?.deleted === true || session?.sourceDeleted === true;
         const sessionTitle = textValue(session?.title);
+        // An archived session is not running whatever its timestamp says: the
+        // source it was read from is gone, so nothing can still be appending.
+        const running = !archived && isRunningSession(session, now);
         const activityParts = [
           archived ? archivedLabel : '',
           sessionActivityLabel(session, now),
@@ -223,6 +298,8 @@
           color: colors[client] || (modelLabel && colorForModel ? colorForModel(modelLabel) : stable(key, palette)),
           stale: false,
           archived: archived || undefined,
+          running: running || undefined,
+          context: running ? sessionContextRow(session) : undefined,
           client,
           backgroundReview: isBackgroundReviewSession(session) || undefined,
           sortTime: sessionTimestampValue(session),
@@ -304,7 +381,10 @@
     compactSessionTime,
     groupBackgroundReviewRows,
     handleBreakdownRowKeydown,
+    CONTEXT_TONES,
+    RUNNING_SESSION_WINDOW_MS,
     sessionBreakdownIncomplete,
+    sessionContextWindow,
     sessionIdLabel,
     sessionRowsForPeriod
   };

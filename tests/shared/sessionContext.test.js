@@ -1,0 +1,207 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+
+const { CONTEXT_READ_WINDOW_MS, normalizeSessionContext, shouldReadSessionContext } = require('../../src/shared/sessionContext');
+const { readCodexSessionContext, TAIL_READ_BUDGETS } = require('../../src/shared/providers/codex/sessionContext');
+const { readDshSessionState } = require('../../src/shared/providers/dsh/sessionFiles');
+const { applySessionMetadata } = require('../../src/shared/sessionMetadata');
+
+const tmpDirs = [];
+
+test.after(() => {
+  for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+function tmpDir(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tmpDirs.push(dir);
+  return dir;
+}
+
+function tokenCountLine({ total, window: contextWindow, info }) {
+  return JSON.stringify({
+    timestamp: '2026-09-18T05:17:32.131Z',
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: info === null ? null : {
+        total_token_usage: { input_tokens: 999999, output_tokens: 1, total_tokens: 1000000 },
+        last_token_usage: { input_tokens: total - 1, output_tokens: 1, total_tokens: total },
+        model_context_window: contextWindow
+      }
+    }
+  });
+}
+
+function responseLine(text) {
+  return JSON.stringify({ type: 'response_item', payload: { type: 'message', text } });
+}
+
+function writeRollout(dir, name, lines) {
+  const filePath = path.join(dir, name);
+  fs.writeFileSync(filePath, `${lines.join('\n')}\n`);
+  return filePath;
+}
+
+test('shouldReadSessionContext keeps the read to sessions that could still be open', () => {
+  const now = Date.parse('2026-09-18T12:00:00.000Z');
+  const inside = new Date(now - CONTEXT_READ_WINDOW_MS + 1000).toISOString();
+  const outside = new Date(now - CONTEXT_READ_WINDOW_MS - 1000).toISOString();
+  assert.equal(shouldReadSessionContext(inside, now), true);
+  assert.equal(shouldReadSessionContext(outside, now), false);
+  assert.equal(shouldReadSessionContext('', now), false);
+  assert.equal(shouldReadSessionContext('not a date', now), false);
+  // A transcript stamped ahead of this clock was just written, not written in
+  // the future.
+  assert.equal(shouldReadSessionContext(new Date(now + 60_000).toISOString(), now), true);
+});
+
+test('normalizeSessionContext requires both halves and reports overflow as reported', () => {
+  assert.deepEqual(normalizeSessionContext({ contextTokens: 120, contextWindow: 200 }), { contextTokens: 120, contextWindow: 200 });
+  assert.equal(normalizeSessionContext({ contextTokens: 0, contextWindow: 200 }), null);
+  assert.equal(normalizeSessionContext({ contextTokens: 120, contextWindow: 0 }), null);
+  assert.equal(normalizeSessionContext(null), null);
+  assert.deepEqual(normalizeSessionContext({ contextTokens: 300, contextWindow: 200 }), { contextTokens: 300, contextWindow: 200 });
+});
+
+test('readCodexSessionContext reads the newest reported window and last request', () => {
+  const dir = tmpDir('codex-context-');
+  const file = writeRollout(dir, 'rollout.jsonl', [
+    tokenCountLine({ total: 10_000, window: 258_400 }),
+    responseLine('a turn'),
+    tokenCountLine({ total: 190_867, window: 950_000 }),
+    responseLine('trailing output')
+  ]);
+  assert.deepEqual(readCodexSessionContext(file, { cache: new Map() }), {
+    contextTokens: 190_867,
+    contextWindow: 950_000
+  });
+});
+
+test('readCodexSessionContext walks past a token_count that carries no usage', () => {
+  const dir = tmpDir('codex-context-null-');
+  const file = writeRollout(dir, 'rollout.jsonl', [
+    tokenCountLine({ total: 42_000, window: 258_400 }),
+    tokenCountLine({ info: null })
+  ]);
+  assert.deepEqual(readCodexSessionContext(file, { cache: new Map() }), {
+    contextTokens: 42_000,
+    contextWindow: 258_400
+  });
+});
+
+test('readCodexSessionContext reports nothing until a transcript states a window', () => {
+  const dir = tmpDir('codex-context-none-');
+  const file = writeRollout(dir, 'rollout.jsonl', [responseLine('no usage yet'), 'not json at all']);
+  assert.equal(readCodexSessionContext(file, { cache: new Map() }), null);
+  assert.equal(readCodexSessionContext(path.join(dir, 'missing.jsonl'), { cache: new Map() }), null);
+});
+
+test('readCodexSessionContext escalates the tail budget past one oversized turn', () => {
+  const dir = tmpDir('codex-context-big-');
+  const filler = responseLine('x'.repeat(4096));
+  const lines = [tokenCountLine({ total: 77_000, window: 400_000 })];
+  // More than the first budget of trailing output, so the newest reading is
+  // only reachable on the second, larger read.
+  while (lines.join('\n').length < TAIL_READ_BUDGETS[0] + 64 * 1024) lines.push(filler);
+  const file = writeRollout(dir, 'rollout.jsonl', lines);
+  assert.deepEqual(readCodexSessionContext(file, { cache: new Map() }), {
+    contextTokens: 77_000,
+    contextWindow: 400_000
+  });
+});
+
+test('readCodexSessionContext re-reads only when the transcript changes', () => {
+  const dir = tmpDir('codex-context-cache-');
+  const file = writeRollout(dir, 'rollout.jsonl', [tokenCountLine({ total: 5_000, window: 200_000 })]);
+  const cache = new Map();
+  assert.deepEqual(readCodexSessionContext(file, { cache }), { contextTokens: 5_000, contextWindow: 200_000 });
+  assert.equal(cache.size, 1);
+
+  // An unchanged transcript answers from the cache rather than from the file:
+  // replacing the cached reading in place is visible only if nothing is read.
+  const [entry] = [...cache.values()];
+  cache.set(file, { ...entry, context: { contextTokens: 1, contextWindow: 2 } });
+  assert.deepEqual(readCodexSessionContext(file, { cache }), { contextTokens: 1, contextWindow: 2 });
+
+  fs.appendFileSync(file, `${tokenCountLine({ total: 9_000, window: 200_000 })}\n`);
+  assert.deepEqual(readCodexSessionContext(file, { cache }), { contextTokens: 9_000, contextWindow: 200_000 });
+});
+
+test('readDshSessionState folds the stated window and the newest occupancy', () => {
+  const dir = tmpDir('dsh-context-');
+  const file = path.join(dir, 'session.jsonl');
+  fs.writeFileSync(file, [
+    JSON.stringify({ type: 'session', id: 'session-1', createdAt: 1787137365000 }),
+    JSON.stringify({ type: 'request/context', data: { provider: 'lmstudio', model: 'qwen3.6-35b-a3b', contextWindow: 262_144 } }),
+    JSON.stringify({ type: 'assistant/chunk', data: { turn: 1, step: 1, chunk: { type: 'usage', usage: { inputTokens: 1_715, outputTokens: 51 } } } }),
+    JSON.stringify({ type: 'assistant/chunk', data: { turn: 1, step: 2, chunk: { type: 'usage', usage: { inputTokens: 1_869, outputTokens: 50 } } } }),
+    // A provider that reports nothing for a request must not erase the reading
+    // the previous one gave.
+    JSON.stringify({ type: 'assistant/chunk', data: { turn: 2, step: 1, chunk: { type: 'usage', usage: { inputTokens: 0, outputTokens: 0 } } } }),
+    ''
+  ].join('\n'));
+  const state = readDshSessionState(file);
+  assert.equal(state.contextWindow, 262_144);
+  assert.equal(state.contextTokens, 1_919);
+});
+
+test('readDshSessionState takes the window of the model the session switched to', () => {
+  const dir = tmpDir('dsh-context-switch-');
+  const file = path.join(dir, 'session.jsonl');
+  fs.writeFileSync(file, [
+    JSON.stringify({ type: 'request/context', data: { contextWindow: 131_072 } }),
+    JSON.stringify({ type: 'assistant/chunk', data: { chunk: { type: 'usage', usage: { inputTokens: 100, outputTokens: 10 } } } }),
+    JSON.stringify({ type: 'request/context', data: { contextWindow: 262_144 } }),
+    JSON.stringify({ type: 'assistant/chunk', data: { chunk: { type: 'usage', usage: { inputTokens: 200, outputTokens: 20 } } } }),
+    ''
+  ].join('\n'));
+  const state = readDshSessionState(file);
+  assert.equal(state.contextWindow, 262_144);
+  assert.equal(state.contextTokens, 220);
+});
+
+test('applySessionMetadata stamps context only on a session recent enough to still be open', () => {
+  const home = tmpDir('codex-home-');
+  const sessionsDir = path.join(home, '.codex', 'sessions', '2026', '09', '18');
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  const liveId = 'rollout-2026-09-18T05-00-00-01a0affa-4ffd-7653-a02c-785f96f419ce';
+  const staleId = 'rollout-2026-09-18T01-00-00-01a0affa-4ffd-7653-a02c-785f96f419cf';
+  const now = Date.parse('2026-09-18T06:00:00.000Z');
+  for (const [id, minutesAgo] of [[liveId, 2], [staleId, 240]]) {
+    const file = path.join(sessionsDir, `${id}.jsonl`);
+    fs.writeFileSync(file, `${JSON.stringify({
+      timestamp: new Date(now - minutesAgo * 60_000).toISOString(),
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: { total_tokens: 123_456 },
+          model_context_window: 950_000
+        }
+      }
+    })}\n`);
+  }
+  const session = (id) => ({ client: 'codex', sessionId: id, totalTokens: 1, models: {}, modelCosts: {}, providers: {} });
+  const periods = {
+    today: {
+      sessions: {
+        [`codex:${liveId}`]: session(liveId),
+        [`codex:${staleId}`]: session(staleId)
+      }
+    }
+  };
+  applySessionMetadata(periods, home, { now, env: {}, resolveProjects: false });
+
+  const live = periods.today.sessions[`codex:${liveId}`];
+  assert.equal(live.contextTokens, 123_456);
+  assert.equal(live.contextWindow, 950_000);
+  const stale = periods.today.sessions[`codex:${staleId}`];
+  assert.equal(stale.contextTokens, undefined);
+  assert.equal(stale.contextWindow, undefined);
+});

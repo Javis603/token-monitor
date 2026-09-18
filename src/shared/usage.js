@@ -488,6 +488,12 @@ function emptySession(client, id) {
     reasoningTokens: 0,
     startedAt: '',
     lastUsedAt: '',
+    // What the session's context window currently holds and how big it is.
+    // Both are read from the client's own transcript (tokscale reports
+    // neither) and only for a session recent enough to still be open, so 0/0
+    // is the normal value for everything else.
+    contextTokens: 0,
+    contextWindow: 0,
     projectId: '',
     projectLabel: '',
     title: '',
@@ -521,6 +527,14 @@ function mergeSession(target, source) {
     target.projectLabel = String(source.projectLabel || '');
   } else if (target.projectId === sourceProjectId && !target.projectLabel && source.projectLabel) {
     target.projectLabel = String(source.projectLabel);
+  }
+  // Occupancy is a snapshot, not a sum. The two halves move together and must
+  // never be mixed across sources, so a source carrying a window replaces both
+  // and one carrying none leaves both alone.
+  const sourceContextWindow = Math.max(0, Math.round(asNumber(source.contextWindow)));
+  if (sourceContextWindow > 0) {
+    target.contextWindow = sourceContextWindow;
+    target.contextTokens = Math.max(0, Math.round(asNumber(source.contextTokens)));
   }
   if (!target.title && source.title) target.title = normalizeSessionTitle(source.title);
   if (!target.sessionKind && source.sessionKind) target.sessionKind = normalizeSessionKind(source.sessionKind);
@@ -595,6 +609,8 @@ function normalizeSession(input, fallbackKey) {
   session.messageCount = Math.max(0, Math.round(firstNumber(input, MESSAGE_COUNT_KEYS)));
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
+  session.contextTokens = Math.max(0, Math.round(asNumber(input.contextTokens ?? input.context_tokens ?? 0)));
+  session.contextWindow = Math.max(0, Math.round(asNumber(input.contextWindow ?? input.context_window ?? 0)));
   session.projectId = String(input.projectId || input.project_id || '').trim();
   session.projectLabel = String(input.projectLabel || input.project_label || '').trim();
   session.title = normalizeSessionTitle(input.title || input.sessionTitle || input.session_title);

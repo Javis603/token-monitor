@@ -282,17 +282,43 @@ function persistedDshSessionTitle(value) {
   return typeof value === 'string' && value.length > 0 ? value : '';
 }
 
-function foldDshSessionTitle(text, initialTitle = '') {
-  let title = persistedDshSessionTitle(initialTitle);
+function positiveTokenCount(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
+}
+
+// DSH states its own context window rather than leaving it to be guessed from
+// the model name: every request records the window the provider was called
+// with (`request/context`), and every streamed usage chunk records what that
+// request's prompt actually occupied. Both fold latest-wins, because a session
+// that switches model mid-conversation gets a different window and the newest
+// usage chunk is the current occupancy. A zero-token usage chunk is a provider
+// reporting nothing, not an emptied context, so it never replaces a reading.
+function foldDshSessionState(text, previous = {}) {
+  let title = persistedDshSessionTitle(previous.title);
+  let contextWindow = positiveTokenCount(previous.contextWindow);
+  let contextTokens = positiveTokenCount(previous.contextTokens);
   for (const line of String(text || '').split(/\r?\n/)) {
     if (!line.trim()) continue;
     let event;
     try { event = JSON.parse(line); } catch (_) { continue; }
-    if (event?.type !== 'session/title') continue;
-    const nextTitle = persistedDshSessionTitle(event.data?.title);
-    if (nextTitle) title = nextTitle;
+    const data = event?.data;
+    if (event?.type === 'session/title') {
+      const nextTitle = persistedDshSessionTitle(data?.title);
+      if (nextTitle) title = nextTitle;
+      continue;
+    }
+    if (event?.type === 'request/context') {
+      const window = positiveTokenCount(data?.contextWindow);
+      if (window) contextWindow = window;
+      continue;
+    }
+    if (data?.chunk?.type !== 'usage') continue;
+    const occupied = positiveTokenCount(data.chunk.usage?.inputTokens)
+      + positiveTokenCount(data.chunk.usage?.outputTokens);
+    if (occupied) contextTokens = occupied;
   }
-  return title;
+  return { title, contextWindow, contextTokens };
 }
 
 function dshSessionFileIdentity(stat) {
@@ -341,14 +367,15 @@ function decodeSessionAppend(filePath, buffer) {
   return decodeZstdText(buffer);
 }
 
-// DSH titles are durable `session/title` events and use latest-wins folding.
-// Retain the last complete JSONL/zstd boundary and decode only new bytes when
-// the previous file identity and bounded head/tail fingerprint still match. Any
-// replacement or rewrite resets the fold, while a torn final record/frame
-// remains eligible for retry.
-function readDshSessionTitle(filePath, previous = {}) {
+// DSH titles are durable `session/title` events and use latest-wins folding,
+// as do the context window and its occupancy — one pass over the same bytes
+// folds all three. Retain the last complete JSONL/zstd boundary and decode only
+// new bytes when the previous file identity and bounded head/tail fingerprint
+// still match. Any replacement or rewrite resets the fold, while a torn final
+// record/frame remains eligible for retry.
+function readDshSessionState(filePath, previous = {}) {
   let stat;
-  try { stat = fs.statSync(filePath); } catch (_) { return { title: '', offset: 0, size: 0, mtimeMs: 0 }; }
+  try { stat = fs.statSync(filePath); } catch (_) { return { title: '', contextWindow: 0, contextTokens: 0, offset: 0, size: 0, mtimeMs: 0 }; }
   const size = Number(stat.size) || 0;
   const mtimeMs = Number(stat.mtimeMs) || 0;
   const identity = dshSessionFileIdentity(stat);
@@ -365,7 +392,7 @@ function readDshSessionTitle(filePath, previous = {}) {
       && Number.isSafeInteger(previousOffset) && previousOffset >= 0 && previousOffset <= previousSize
       && dshSessionContinuityMatches(fd, previous, previousSize);
     const start = appendOnly ? previousOffset : 0;
-    let title = persistedDshSessionTitle(appendOnly ? previous.title : '');
+    let state = foldDshSessionState('', appendOnly ? previous : {});
     const isZstd = filePath.endsWith('.jsonl.zstd');
     let position = start;
     let consumed = 0;
@@ -382,7 +409,7 @@ function readDshSessionTitle(filePath, previous = {}) {
 
       if (isZstd) {
         const decoded = decodeZstdBuffer(pending, scanZstdFrames(pending));
-        title = foldDshSessionTitle(decoded.text, title);
+        state = foldDshSessionState(decoded.text, state);
         consumed += decoded.decodedEnd;
         pending = pending.subarray(decoded.decodedEnd);
         stoppedOnError = decoded.stoppedOnError;
@@ -390,7 +417,7 @@ function readDshSessionTitle(filePath, previous = {}) {
         const lastNewline = pending.lastIndexOf(0x0a);
         if (lastNewline >= 0) {
           const complete = lastNewline + 1;
-          title = foldDshSessionTitle(pending.subarray(0, complete).toString('utf8'), title);
+          state = foldDshSessionState(pending.subarray(0, complete).toString('utf8'), state);
           consumed += complete;
           pending = pending.subarray(complete);
         }
@@ -399,10 +426,10 @@ function readDshSessionTitle(filePath, previous = {}) {
     if (filePath.endsWith('.jsonl.zstd') && !stoppedOnError && pending.length > 0) {
       // A live final frame may be torn but still contain complete JSONL rows.
       // Fold those rows now, while retaining the frame boundary for replay.
-      title = foldDshSessionTitle(decodeSessionAppend(filePath, pending).text, title);
+      state = foldDshSessionState(decodeSessionAppend(filePath, pending).text, state);
     }
     return {
-      title,
+      ...state,
       offset: start + consumed,
       size,
       mtimeMs,
@@ -414,7 +441,7 @@ function readDshSessionTitle(filePath, previous = {}) {
     // preserving the older fingerprint makes the next tick retry it.
     return previous && typeof previous === 'object'
       ? previous
-      : { title: '', offset: 0, size: 0, mtimeMs: 0 };
+      : { title: '', contextWindow: 0, contextTokens: 0, offset: 0, size: 0, mtimeMs: 0 };
   } finally {
     if (fd !== undefined) {
       try { fs.closeSync(fd); } catch (_) {}
@@ -504,7 +531,7 @@ module.exports = {
   isDshSessionLogName,
   preferredDshSessionFileInDirectory,
   readDshSessionHeader,
-  readDshSessionTitle,
+  readDshSessionState,
   resolveDshSessionsRoot,
   scanZstdFrames,
   zstdAvailable
