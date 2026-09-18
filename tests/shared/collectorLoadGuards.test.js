@@ -1634,18 +1634,20 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
       updatedAt: Date.parse('2026-09-18T05:00:00.000Z')
     }));
     period.sessions['kimi:session_placeholder'] = { client: 'kimi', sessionId: 'session_placeholder', totalTokens: 100 };
-    // Kimi Work, verbatim from a live install: a conversation's `replaceable`
-    // title is the daimon kernel's prompt envelope, and the `ctitle-*` sessions
-    // the runtime spawns to name it carry the title generator's system prompt.
-    // Neither is a session name, so neither may reach a row.
+    // Kimi Work: the envelope shape and the generator prompt are taken from a
+    // live install (the timestamps are synthesised). A conversation's
+    // `replaceable` title is the daimon kernel's prompt envelope, and the
+    // `ctitle-*` sessions the runtime spawns to name it carry the title
+    // generator's system prompt. Neither is a session name, so neither may
+    // reach a row.
     const workConv = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'conv-envelope');
     fs.mkdirSync(workConv, { recursive: true });
     fs.writeFileSync(path.join(workConv, 'state.json'), JSON.stringify({
       workDir: path.join(tmp, 'WorkConvProj'),
-      title: '<meta awareness="low" timestamp="2026-08-18 11:57" /> hi',
+      title: '<meta awareness="low" timestamp="2000-01-01 00:00" /> hi',
       isCustomTitle: false,
-      createdAt: '2026-08-18T11:57:00.000Z',
-      updatedAt: '2026-08-18T11:57:00.000Z'
+      createdAt: '2000-01-01T00:00:00.000Z',
+      updatedAt: '2000-01-01T00:00:00.000Z'
     }));
     period.sessions['kimi:conv-envelope'] = { client: 'kimi', sessionId: 'conv-envelope', totalTokens: 100 };
     const workTitleJob = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'ctitle-generator');
@@ -1654,8 +1656,8 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
       workDir: path.join(tmp, 'WorkConvProj'),
       title: 'Generate a concise title for the conversation below in the user\'s primary language.',
       isCustomTitle: false,
-      createdAt: '2026-08-18T11:58:00.000Z',
-      updatedAt: '2026-08-18T11:58:00.000Z'
+      createdAt: '2000-01-01T00:01:00.000Z',
+      updatedAt: '2000-01-01T00:01:00.000Z'
     }));
     period.sessions['kimi:ctitle-generator'] = { client: 'kimi', sessionId: 'ctitle-generator', totalTokens: 100 };
     // Kimi Work: <desktop runtime>/sessions/<workspace>/<conv-*>/state.json,
