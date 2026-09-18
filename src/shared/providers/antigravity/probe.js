@@ -82,7 +82,7 @@ function preferredPlanInfoName(planInfo) {
 }
 
 function isLanguageServerCommand(lowerCommand) {
-  return /(^|[/\\])language(?:_|-)server(?:[_-][a-z0-9]+)*(?:\.exe)?(\s|$)/.test(lowerCommand);
+  return /(?:^|[\s/\\])language(?:_|-)server(?:[_-][a-z0-9]+)*(?:\.exe)?(\s|$)/.test(lowerCommand);
 }
 
 function isAntigravityCommand(lowerCommand) {
@@ -98,7 +98,9 @@ function isAntigravityCommand(lowerCommand) {
 // (e.g. `/opt/imagytool/...`, `legacy-agent`) do not match.
 function isAntigravityCliCommand(lowerCommand) {
   if (/(^|[/\\])(antigravity-cli|antigravity_cli)([\s/\\]|$)/.test(lowerCommand)) return true;
-  if (/(^|[/\\])agy(\.exe)?(\s|$)/.test(lowerCommand)) return true;
+  if (/(^|[/\\])agy(\.exe)?(\s|$)/.test(lowerCommand)) {
+    return isLanguageServerCommand(lowerCommand) || /(?:^|\s)--hub(?:\s|=|$)/.test(lowerCommand);
+  }
   return false;
 }
 
@@ -171,16 +173,21 @@ function parseProcessLine(line) {
   const kind = antigravityProcessKind(lower);
   if (!kind) return null;
   const csrfToken = extractFlag('--csrf_token', command);
+  const isHubMode = /(?:^|\s)--hub(?:\s|=|$)/.test(command);
+  const hubPort = extractPortFlag('--hub-port', command);
   // Desktop app/IDE language servers authenticate local requests with
   // `--csrf_token`; tokenless matches are skipped so a later valid process can
-  // still be used. The CLI language server exposes no token flag and needs none.
-  if (kind !== 'cli' && !csrfToken) return null;
+  // still be used. The CLI language server exposes no token flag and needs none,
+  // EXCEPT when running in hub mode (--hub flag), which acts as a network-facing
+  // RPC service and requires CSRF protection like app/IDE.
+  if ((kind !== 'cli' || isHubMode) && !csrfToken) return null;
   return {
     pid,
     kind,
     csrfToken: csrfToken || '',
     extensionPort: extractPortFlag('--extension_server_port', command),
     extensionCsrfToken: extractFlag('--extension_server_csrf_token', command),
+    hubPort: hubPort,
     commandLine: command
   };
 }
@@ -371,7 +378,20 @@ function callLs({
           catch (err) { reject(errorWithStatus('unavailable', `parse error: ${err.message}`)); }
           return;
         }
-        const error = errorWithStatus(statusFromHttpCode(res.statusCode), `${method} returned ${res.statusCode}`);
+        let status = statusFromHttpCode(res.statusCode);
+        // Check if the error response body mentions CSRF (e.g., Connect-RPC style
+        // "invalid_argument" for "missing CSRF token"). If so, classify as
+        // unauthorized regardless of HTTP status code.
+        try {
+          const parsed = JSON.parse(text);
+          const message = String(parsed?.message || parsed?.error || '').toLowerCase();
+          if (message.includes('csrf')) {
+            status = 'unauthorized';
+          }
+        } catch (_) {
+          // If body is not JSON or parse fails, fall back to status from HTTP code.
+        }
+        const error = errorWithStatus(status, `${method} returned ${res.statusCode}`);
         error.httpStatus = res.statusCode;
         reject(error);
       });
@@ -511,6 +531,19 @@ function collapsePools(models) {
 
 function endpointCandidates(processInfo, listenPorts) {
   const candidates = [];
+  // Try explicit hub port first if available (most authoritative and fastest).
+  if (processInfo.hubPort) {
+    candidates.push({
+      scheme: 'https',
+      port: processInfo.hubPort,
+      csrfToken: processInfo.csrfToken
+    });
+    candidates.push({
+      scheme: 'http',
+      port: processInfo.hubPort,
+      csrfToken: processInfo.csrfToken
+    });
+  }
   for (const port of listenPorts) {
     candidates.push({ scheme: 'https', port, csrfToken: processInfo.csrfToken });
     candidates.push({ scheme: 'http',  port, csrfToken: processInfo.csrfToken });
