@@ -747,6 +747,9 @@ test('a legacy Cursor session link is committed and survives reopening the store
   linking.close();
 
   const reopened = createSessionUsageArchiveStore(options);
-  t.after(() => reopened.close());
-  assert.equal(reopened.read(capturedAt).sessions[`cursor:${legacyId}`].supersededBy, 'cursor:conv-1');
+  const linked = reopened.read(capturedAt).sessions[`cursor:${legacyId}`].supersededBy;
+  // Windows cannot remove the directory while the database is open, and the
+  // cleanup hook above runs first.
+  reopened.close();
+  assert.equal(linked, 'cursor:conv-1');
 });
