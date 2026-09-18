@@ -200,12 +200,13 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
 }
 
 // Every capture asks the Cursor JSON cache about the legacy rows that still
-// have no link, and a link, once written, is never revisited: the row is one
-// event, and the only way its tokens can change is tokscale folding another
-// event of the same CSV second into it, which is either the same conversation
-// (the link still names it) or a second one (no single event ever matched, so
-// there was no link to invalidate). Deriving the work from the archive on each
-// pass is also what makes a row another writer added arrive on its own.
+// have no link, and a link, once written, is never revisited. A legacy row is
+// one CSV event, keyed on that event's full timestamp, so its tokens can only
+// change if tokscale folds a second event carrying the very same timestamp into
+// it: that event is either in the conversation the link already names, or in a
+// second one, in which case no single event ever matched the row and there was
+// no link to invalidate. Deriving the work from the archive on each pass is
+// also what makes a row another writer added arrive on its own.
 function linkLegacyCursorEvents(archive, changedKeys, readCursorUsageEvents) {
   const pending = [];
   for (const [key, entry] of Object.entries(archive.sessions)) {
