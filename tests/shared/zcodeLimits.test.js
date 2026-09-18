@@ -131,22 +131,26 @@ test('discoverZcodeConnection maps the 3.12.3 kind selection and falls back to t
 });
 
 test('a disabled entry only blocks discovery when the account context is gone', () => {
-  const disabled = (enabled, systemDisabledReason) => discoveryDeps({
+  // The entry is composed here instead of through positional reason strings:
+  // a string argument carrying ZCode's reason codes makes CodeQL classify the
+  // fixture call itself as password data, and the taint then follows the
+  // returned deps into the store read's key derivation.
+  const startEntry = (entry) => discoveryDeps({
     ...HAPPY_FILES,
     'config.json': JSON.stringify({ provider: {
-      'builtin:zai-start-plan': { enabled, systemDisabledReason, options: { apiKey: 'zcode-mirror-jwt' } }
+      'builtin:zai-start-plan': { options: { apiKey: 'zcode-mirror-jwt' }, ...entry }
     } })
   });
   // A persistent not-entitled state (the shape a subscription-less 3.12.3
   // install carries) is queryable — the lane's own error classification
   // answers it, so discovery must not swallow it as "not settled".
-  assert.equal(discoverZcodeConnection({}, disabled(false, 'coding_plan_not_entitled')).credential.token, 'zcode-mirror-jwt');
-  assert.equal(discoverZcodeConnection({}, disabled(false, 'coding_plan_auth_failed')).credential.token, 'zcode-mirror-jwt');
+  assert.equal(discoverZcodeConnection({}, startEntry({ enabled: false, systemDisabledReason: 'coding_plan_not_entitled' })).credential.token, 'zcode-mirror-jwt');
+  assert.equal(discoverZcodeConnection({}, startEntry({ enabled: false, systemDisabledReason: 'coding_plan_auth_failed' })).credential.token, 'zcode-mirror-jwt');
   // The inactive account context and the reason-less torn switch 3.11.x wrote
   // are the only disabled shapes that keep the lane off.
-  assert.equal(discoverZcodeConnection({}, disabled(false, 'oauth_provider_inactive')).kind, 'none');
-  assert.equal(discoverZcodeConnection({}, disabled(false, undefined)).kind, 'none');
-  assert.equal(discoverZcodeConnection({}, disabled(true, undefined)).kind, 'start-billing');
+  assert.equal(discoverZcodeConnection({}, startEntry({ enabled: false, systemDisabledReason: 'oauth_provider_inactive' })).kind, 'none');
+  assert.equal(discoverZcodeConnection({}, startEntry({ enabled: false })).kind, 'none');
+  assert.equal(discoverZcodeConnection({}, startEntry({ enabled: true })).kind, 'start-billing');
 });
 
 test('discoverZcodeConnection follows a redirected data base dir', () => {
