@@ -198,11 +198,17 @@
     const stateByKey = new Map(ordered.map(({ session }) => [String(session.sessionId || ''), sessionLive.sessionActivityState(session)]));
     const runningKeys = new Set(ordered.filter(({ session }) => stateByKey.get(String(session.sessionId || '')) === 'running').map(({ session }) => session.sessionId));
     const running = ordered.filter(({ session }) => runningKeys.has(session.sessionId));
-    // Running sessions are never truncated by the recent cap: dropping one
-    // would leave the card's "N running" count with no matching row. The cap
-    // only bounds the quiet tail, and the card scrolls when the whole list
-    // outgrows the screen.
-    const quiet = ordered.filter(({ session }) => !runningKeys.has(session.sessionId)).slice(0, RECENT_SESSION_COUNT);
+    // The cap is a budget for the whole list, not a second allowance stacked on
+    // top of the running rows. Adding the running ones to a full quiet tail made
+    // the card grow by one the moment a session went live - three idle rows plus
+    // the running one, when the session that started was already one of the
+    // three. Running rows are kept preferentially (dropping one would leave the
+    // card's "N running" count with no matching row), and the tail fills whatever
+    // budget they leave; if more than the cap is running, all of them show and the
+    // list scrolls rather than hiding live work.
+    const quiet = ordered
+      .filter(({ session }) => !runningKeys.has(session.sessionId))
+      .slice(0, Math.max(0, RECENT_SESSION_COUNT - running.length));
     return [...running, ...quiet]
       .map(({ session }) => {
         const models = Object.entries(session.models || {}).sort((a, b) => (finite(b[1]) || 0) - (finite(a[1]) || 0));

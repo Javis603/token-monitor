@@ -195,25 +195,86 @@ test('running sessions are never truncated by the recent cap, and the count matc
     limits: { providers: [provider('codex')] }
   };
   const [codex] = buildEdgeDockCells(stats, {});
-  // Four running sessions exceed the recent cap of three; all four must still
-  // appear, or the card would report a count with no matching rows.
-  assert.deepEqual(codex.sessions.map((entry) => entry.sessionId), ['run1', 'run2', 'run3', 'run4', 'quiet1', 'quiet2']);
+  // Four running sessions exceed the recent cap of three, so all four appear and
+  // the list scrolls: the cap must never hide live work. No quiet row fits in
+  // the budget they consume.
+  assert.deepEqual(codex.sessions.map((entry) => entry.sessionId), ['run1', 'run2', 'run3', 'run4']);
   assert.equal(codex.sessions.filter((entry) => entry.running).length, 4);
-  // The quiet tail is still capped at three, which here is the only two there are.
-  assert.equal(codex.sessions.filter((entry) => !entry.running).length, 2);
   // Context rides the row for a session whose transcript stated a window, and
   // is absent (not zero) for one that has gone quiet.
   assert.deepEqual(codex.sessions[0].context, { contextTokens: 281_012, contextWindow: 950_000, percentLeft: 70, percentUsed: 30, tone: '' });
-  assert.equal(codex.sessions.find((entry) => entry.sessionId === 'quiet1').context, null);
   // Nothing running is a real answer, not a missing one.
   const [quietOnly] = buildEdgeDockCells({
     periods: { month: { sessions: { 'codex:q': session('q', oldIso) } }, today: { sessions: {} } },
     limits: { providers: [provider('codex')] }
   }, {});
   assert.equal(quietOnly.sessions.filter((entry) => entry.running).length, 0);
+  // A quiet row has no reading to carry, which is a distinct fact from having
+  // one that rounds to nothing.
+  assert.equal(quietOnly.sessions[0].context, null);
 });
 
 test('an archived session never counts as running on a dock card', () => {
+
+test('the session cap is a total budget, so one going live does not add a row', () => {
+  // The card showed three idle rows and then four the moment one of them started
+  // running, because the running rows were added on top of a full quiet list.
+  // The cap bounds the whole list; running rows are kept preferentially and the
+  // tail fills only what they leave.
+  const nowIso = new Date().toISOString();
+  const oldIso = new Date(Date.now() - 90 * 60_000).toISOString();
+  const session = (id, lastUsedAt) => ({ client: 'codex', sessionId: id, lastUsedAt, totalTokens: 10, models: { 'gpt-5': 10 } });
+  const build = (sessions) => buildEdgeDockCells({
+    periods: { month: { sessions }, today: { sessions: {} } },
+    limits: { providers: [provider('codex')] }
+  }, {})[0];
+
+  // Three quiet sessions: three rows, as before.
+  const quiet = build({
+    'codex:q1': session('q1', oldIso),
+    'codex:q2': session('q2', oldIso),
+    'codex:q3': session('q3', oldIso),
+    'codex:q4': session('q4', oldIso)
+  });
+  assert.deepEqual(quiet.sessions.map((entry) => entry.sessionId), ['q1', 'q2', 'q3']);
+
+  // The same list with one of them running still totals three, not four: the
+  // session that started was already one of the three.
+  const oneLive = build({
+    'codex:q1': session('q1', nowIso),
+    'codex:q2': session('q2', oldIso),
+    'codex:q3': session('q3', oldIso),
+    'codex:q4': session('q4', oldIso)
+  });
+  assert.equal(oneLive.sessions.length, 3, 'one live session must not grow the list');
+  assert.deepEqual(oneLive.sessions.map((entry) => entry.sessionId), ['q1', 'q2', 'q3']);
+  assert.equal(oneLive.sessions.filter((entry) => entry.running).length, 1);
+  assert.equal(oneLive.sessions.filter((entry) => !entry.running).length, 2);
+
+  // Two live: one quiet row is left to fill the remaining slot.
+  const twoLive = build({
+    'codex:q1': session('q1', nowIso),
+    'codex:q2': session('q2', nowIso),
+    'codex:q3': session('q3', oldIso),
+    'codex:q4': session('q4', oldIso)
+  });
+  assert.deepEqual(twoLive.sessions.map((entry) => entry.sessionId), ['q1', 'q2', 'q3']);
+  assert.equal(twoLive.sessions.filter((entry) => entry.running).length, 2);
+
+  // Exactly the cap running: no quiet row fits.
+  const threeLive = build({
+    'codex:q1': session('q1', nowIso),
+    'codex:q2': session('q2', nowIso),
+    'codex:q3': session('q3', nowIso),
+    'codex:q4': session('q4', oldIso)
+  });
+  assert.deepEqual(threeLive.sessions.map((entry) => entry.sessionId), ['q1', 'q2', 'q3']);
+  assert.equal(threeLive.sessions.filter((entry) => !entry.running).length, 0);
+
+  // Fewer sessions than the cap are all shown.
+  const small = build({ 'codex:q1': session('q1', oldIso), 'codex:q2': session('q2', nowIso) });
+  assert.equal(small.sessions.length, 2);
+});
   const nowIso = new Date().toISOString();
   const stats = {
     periods: {
