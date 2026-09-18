@@ -30,10 +30,13 @@ the raw value, so a blank export would resolve to the root-level `/sessions`.
 | Session metadata (project fallback, timestamps, name) | collector enrichment, through `providers/kimi/sessionMetadata.js` | the session's sibling `state.json` |
 | Limits | the Kimi limits provider, with its own credential | the Kimi Code API and the web console, independent of any of the above |
 
-The scan is the first source for attribution: when a session's slug is in `workspaces.json` (or its
-id/dir in `session_index.jsonl`) the row arrives attributed, and the resolver is only the answer for
-everything the indexes miss — a relocated home, a copied `sessions/` tree, a deleted index. That is
-why the resolver reads the workspace out of `state.json` instead of re-deriving it.
+The scan attributes from the root indexes: a session whose slug is in `workspaces.json` (or whose
+id/dir is in `session_index.jsonl`) arrives with a project, and for the sessions those indexes miss —
+a relocated home, a copied `sessions/` tree, a deleted index — the resolver is the only answer, which
+is why it reads the workspace out of the sibling `state.json`. When both answer, the resolver's path
+is the one applied: clients that carry their own path (kimi, droid, opencode) stay unconditional by
+design, while the transcript-reading resolvers skip their expensive read for a session the scan
+already attributed.
 
 Only `usage.record` lines count, and only with `usageScope: "turn"`. `step.end` repeats the same
 usage in the same turn (skipped to avoid double counting), and `"session"`-scoped records are the
