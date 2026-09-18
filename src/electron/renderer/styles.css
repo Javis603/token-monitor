@@ -3697,112 +3697,48 @@ html.is-windows .settings-panel select option {
   content: 'you';
 }
 .row.local.stale .row-name::after { display: none; }
-/* A session's own state, drawn on the tool mark's corner - where presence
-   belongs, and where it can be scanned down the left edge of the list - rather
-   than in the text, which is a single ellipsizing line already carrying the
-   title, the model and the timestamp. Absolutely positioned so the row never
-   shifts against the rows around it.
+/* A session whose transcript is still being appended to. The dot sits on the
+   tool mark's corner - where presence belongs, and where it can be scanned down
+   the left edge of the list - rather than in the text, which is a single
+   ellipsizing line already carrying the title, the model and the timestamp.
+   Absolutely positioned so a running row never shifts against the rows around
+   it.
 
-   Three states, because two could not tell "generating" from "the window is
-   still open", which is the distinction that made a finished run keep its
-   green for the rest of the time window:
-
-     running  a spinner, because the agent is working right now
-     ended    a check, because the transcript said the turn finished
-     idle     a neutral dot, so the gutter reads as a status, not a blank
+   A dot, not a glyph: this row already leads with the client's own icon, and a
+   spinner or check drawn over it reads as part of that logo. The card surface
+   has no icon to compete with, so it carries the richer states instead; here the
+   old idiom stands - green means active right now - and every other state simply
+   draws nothing.
 
    Painted with --success, never --accent: "this is alive" is a semantic state,
    and --accent is the user's own colour (the obsidian preset sets it to a near
-   white, which would leave the mark indistinguishable against the icon it
-   overlaps). --success is the variable this codebase keeps independent of the
-   custom accent for exactly this reason, and it darkens on light themes. */
+   white, which would leave the dot indistinguishable from the mark it sits on).
+   --success is the variable this codebase keeps independent of the custom
+   accent for exactly this reason, and it darkens on light themes. */
 .row-name { position: relative; }
 .row-live { display: none; }
-.row.running .row-live,
-.row-live[data-state="ended"],
-.row-live[data-state="idle"] {
+/* Absolutely positioned so a running row never shifts against its neighbours. */
+ .row-live.is-active { display: block; position: absolute; top: 8px; left: 6px; }
+.row-live-dot {
   display: block;
-  position: absolute;
-  /* Same centre the old 5px dot occupied, so no row moved when the mark grew
-     into a glyph. */
-  top: 5.5px;
-  left: 3.5px;
-  width: 10px;
-  height: 10px;
-}
-/* The glyphs are stacked and one is revealed at a time, so switching state on a
-   live row never rebuilds the node (which would restart the spinner from zero).
-   The backdrop ring separates the glyph from the mark it overlaps; --panel-rgb
-   flips with the theme, so it stays a separation rather than becoming a dark
-   spot on a light background. */
-.row-live > * {
-  position: absolute;
-  inset: 0;
-  display: none;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: rgb(var(--panel-rgb));
-  box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb));
-}
-.row-live[data-state="running"] .row-live-spin,
-.row-live[data-state="ended"] .row-live-check,
-.row-live[data-state="idle"] .row-live-idle { display: block; }
-
-/* Running: the spinner turns while the agent is generating, and stops the
-   moment it is not - this is the only perpetual animation in the app, and it is
-   bounded by real work rather than by the widget being open. The spokes are
-   drawn with currentColor at reduced opacity and the leading one at full, which
-   reads as rotation even in a still frame. */
-.row-live-spin {
-  color: var(--success);
-  animation: row-live-spin 900ms linear infinite;
-}
-.row-live-spin line {
-  stroke: currentColor;
-  stroke-width: 2.4;
-  stroke-linecap: round;
-  opacity: 0.28;
-}
-.row-live-spin line:first-child { opacity: 1; }
-.row-live-spin line:nth-child(2) { opacity: 0.86; }
-.row-live-spin line:nth-child(3) { opacity: 0.72; }
-.row-live-spin line:nth-child(4) { opacity: 0.58; }
-.row-live-spin line:nth-child(5) { opacity: 0.44; }
-.row-live-spin line:nth-child(6) { opacity: 0.34; }
-@keyframes row-live-spin { to { transform: rotate(360deg); } }
-
-/* Ended: the transcript said the turn finished. Muted rather than green, since
-   nothing is alive here - it is a receipt, not a status light. */
-.row-live-check { color: var(--muted); }
-.row-live-check path { fill: currentColor; }
-
-/* Idle: quiet longer than the window, with nothing claiming it is live. Kept
-   faint enough to disappear in a scan but present, so the column is a status
-   rather than a gutter that is sometimes empty. */
-.row-live-idle { background: transparent; }
-.row-live-idle::before {
-  content: '';
-  position: absolute;
-  top: 2.5px;
-  left: 2.5px;
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: rgba(var(--line-rgb), 0.42);
+  background: var(--success);
+  /* The ring separates the dot from the mark it overlaps; --panel-rgb flips
+     with the theme, so it stays a separation rather than becoming a dark spot
+     on a light background. */
+  box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 4px rgba(var(--success-rgb), 0.55);
 }
-
 /* One-shot flare when that session's transcript actually grew, matching the
-   titlebar dot's rule. Kept alongside the spinner: the spin says "working", the
-   flare says "wrote just now", and on a quiet tick neither is running. */
-.row.running .row-live-spin.pulse { animation: row-live-spin 900ms linear infinite, row-live-pulse 1.2s ease-out; }
+   titlebar dot's rule: no `infinite`, so a list of open-but-idle sessions costs
+   the compositor nothing and a heartbeat means "generating right now" rather
+   than merely "not closed". */
+.row-live.is-active.pulse .row-live-dot { animation: row-live-pulse 1.2s ease-out; }
 @keyframes row-live-pulse {
-  0%   { filter: drop-shadow(0 0 2px rgba(var(--success-rgb), 0.45)); }
-  35%  { filter: drop-shadow(0 0 6px rgba(var(--success-rgb), 0.95)); }
-  100% { filter: drop-shadow(0 0 2px rgba(var(--success-rgb), 0.55)); }
-}
-@media (prefers-reduced-motion: reduce) {
-  :root:not([data-reduce-motion="off"]) .row-live-spin { animation: none; }
+  0%   { box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 3px rgba(var(--success-rgb), 0.45); }
+  35%  { box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 10px rgba(var(--success-rgb), 0.95); }
+  100% { box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 4px rgba(var(--success-rgb), 0.55); }
 }
 /* How much of the running session's context window is left, as the third line
    of the metrics column. A gauge rather than a sentence: headroom only matters

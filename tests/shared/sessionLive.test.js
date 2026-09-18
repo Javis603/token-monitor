@@ -72,12 +72,18 @@ test('both renderers read the shared predicate rather than keeping their own cop
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   // The Sessions list takes the predicate instead of reimplementing it...
   assert.match(rows, /TokenMonitorSessionLive/);
-  assert.match(rows, /sessionLive\.isRunningSession/);
+  // ...deriving the running boolean from the three-state value rather than
+  // computing the same fact a second way.
+  assert.match(rows, /sessionActivityState\(session, now\)/);
+  assert.match(rows, /const running = activityState === 'running'/);
+  // It must not call the boolean predicate at all - the comment above names it,
+  // so match a call rather than the bare word.
+  assert.doesNotMatch(rows, /isRunningSession\(/);
   assert.doesNotMatch(rows, /RUNNING_SESSION_WINDOW_MS = 10 \* 60 \* 1000/);
   // ...and the dock's cell projection does the same, because the count it
   // reports and the rows it renders have to come from one derivation.
   assert.match(presentation, /TokenMonitorSessionLive/);
-  assert.match(presentation, /sessionLive\.isRunningSession/);
+  assert.match(presentation, /sessionLive\.sessionActivityState/);
   // The dock recomputes running at paint time from the same predicate, because
   // it repaints from its last payload on a timer and a session that stopped in
   // between must stop reading as running.

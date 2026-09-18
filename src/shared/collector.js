@@ -950,6 +950,13 @@ function propagateTodayProjects(today, periods) {
         target.contextWindow = session.contextWindow;
         target.contextTokens = session.contextTokens;
       }
+      // The turn boundary is a transcript reading too, and it has to be copied
+      // in BOTH directions. Copying only `true` left a stale `true` in a derived
+      // period after its session picked the next turn back up, so the dock card
+      // (which reads month first) showed a finished session while the Sessions
+      // list, reading the freshly scanned today, showed it running.
+      if (session.turnEnded === true) target.turnEnded = true;
+      else delete target.turnEnded;
       if (session.startedAt && (!target.startedAt || Date.parse(session.startedAt) < Date.parse(target.startedAt))) {
         target.startedAt = session.startedAt;
       }

@@ -193,7 +193,10 @@
       }
     }
     const ordered = [...byKey.values()].sort((a, b) => b.lastUsedMs - a.lastUsedMs);
-    const runningKeys = new Set(ordered.filter(({ session }) => sessionLive.isRunningSession(session)).map(({ session }) => session.sessionId));
+    // One derivation for the run/quiet split and for the field the rows carry,
+    // from the same shared function the card repaints with.
+    const stateByKey = new Map(ordered.map(({ session }) => [String(session.sessionId || ''), sessionLive.sessionActivityState(session)]));
+    const runningKeys = new Set(ordered.filter(({ session }) => stateByKey.get(String(session.sessionId || '')) === 'running').map(({ session }) => session.sessionId));
     const running = ordered.filter(({ session }) => runningKeys.has(session.sessionId));
     // Running sessions are never truncated by the recent cap: dropping one
     // would leave the card's "N running" count with no matching row. The cap
@@ -214,8 +217,10 @@
           // Carried onto the projected row, not just used here: the dock renderer
           // re-derives the state at paint time and needs the boundary to do it.
           turnEnded: session.turnEnded === true,
-          running: sessionLive.isRunningSession(session),
-          context: sessionLive.sessionContextRow(session) || null
+          running: stateByKey.get(String(session.sessionId || '')) === 'running',
+          // The same gate the Sessions list uses, so one surface cannot show a
+          // gauge for a session the other has already dropped it from.
+          context: sessionLive.sessionContextForRow(session) || null
         };
       });
   }

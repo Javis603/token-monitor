@@ -117,36 +117,43 @@
     return { ...context, tone: contextTone(context.percentLeft) };
   }
 
+  // Whether a row should show its headroom reading, decided in one place because
+  // two surfaces render the same session and disagreeing about this is visible:
+  // the dock card was showing a gauge for a session the Sessions list had already
+  // stopped showing one for.
+  //
+  // The reading is current while the session is still within the recency window,
+  // so it survives the moment a turn ends - a gauge that vanishes the instant
+  // work stops is worse than one that stays until the session goes quiet. Once
+  // idle, nothing about the reading is still actionable and the row drops it.
+  function sessionContextForRow(session, now = Date.now()) {
+    if (sessionActivityState(session, now) === 'idle') return undefined;
+    return sessionContextRow(session);
+  }
+
   // The three state glyphs, as markup, so both renderers draw the same shapes
   // and only name their CSS classes differently. Six spokes with one leading at
   // full opacity read as rotation even in a still frame, which is why the
   // spinner needs no image asset.
-  const SPIN_SPOKES = Array.from({ length: 6 }, (_, index) => {
-    const angle = (index * 60) * Math.PI / 180;
-    const round = (value) => (Math.round(value * 100) / 100).toFixed(2);
-    return {
-      x1: round(5 + Math.cos(angle) * 1.1),
-      y1: round(5 + Math.sin(angle) * 1.1),
-      x2: round(5 + Math.cos(angle) * 3.4),
-      y2: round(5 + Math.sin(angle) * 3.4)
-    };
-  });
-  // Bootstrap's check-circle, whose two paths are the ring and the tick.
-  const CHECK_PATHS = [
-    'M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16',
-    'm10.97 4.97-.02.022-3.473 4.425-2.093-2.094a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-1.071-1.05'
-  ];
+  // The check is drawn here as a stroked circle plus a stroked tick, replacing a
+  // filled check-circle artwork: a filled ring scaled from a 16px viewBox down to
+  // 10px leaves its inner and outer edges about half a pixel apart, which is the
+  // roughness that prompted this. Strokes stay crisp at this size and match the
+  // repo's other action icons, which are all stroke-based. Nothing here is copied
+  // from an icon set, so there is no third-party notice to add.
+  const CHECK_PATHS = ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18', 'm8.7 12.2 2.1 2.1 4.5-4.6'];
 
   function sessionStateMarkup(classes = {}) {
     const turn = String(classes.spin || 'spin');
     const check = String(classes.check || 'check');
     const idle = String(classes.idle || 'idle');
-    const spokes = SPIN_SPOKES
-      .map((s) => `<line x1="${s.x1}" y1="${s.y1}" x2="${s.x2}" y2="${s.y2}" />`)
-      .join('');
     const tick = CHECK_PATHS.map((d) => `<path d="${d}"/>`).join('');
-    return `<svg class="${turn}" viewBox="0 0 10 10">${spokes}</svg>`
-      + `<svg class="${check}" viewBox="0 0 16 16">${tick}</svg>`
+    // The spinner is an empty hook: its shape comes from the repo's own
+    // `icons/actions/spinner.svg` applied as a CSS mask, exactly as the
+    // refresh button already does, so the one loader asset is not redrawn here.
+    return `<span class="${turn}"></span>`
+      + `<svg class="${check}" viewBox="0 0 24 24" fill="none" stroke="currentColor"`
+      + ` stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${tick}</svg>`
       + `<span class="${idle}"></span>`;
   }
 
@@ -157,6 +164,7 @@
     isArchivedSession,
     isRunningSession,
     sessionActivityState,
+    sessionContextForRow,
     sessionContextRow,
     sessionContextWindow,
     sessionStateMarkup

@@ -15,12 +15,8 @@
   const sessionLive = typeof module === 'object' && module.exports
     ? require('../../shared/sessionLive')
     : root?.TokenMonitorSessionLive;
-  const isRunningSession = sessionLive.isRunningSession;
   const sessionActivityState = sessionLive.sessionActivityState;
-  const sessionContextWindow = sessionLive.sessionContextWindow;
-  const sessionContextRow = sessionLive.sessionContextRow;
-  const CONTEXT_TONES = sessionLive.CONTEXT_TONES;
-  const RUNNING_SESSION_WINDOW_MS = sessionLive.RUNNING_WINDOW_MS;
+  const sessionContextForRow = sessionLive.sessionContextForRow;
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
 
   function finiteNumber(value) {
@@ -191,15 +187,23 @@
       sessionActivityLabel(session, now),
       messageLabel(session)
     ].filter(Boolean);
-    const running = isRunningSession(session, now);
+    // One derivation, not two: the boolean is a projection of the three-state
+    // value, so a row can never be marked running by one reading and idle by the
+    // other. `isRunningSession` itself delegates to `sessionActivityState` for the
+    // same reason.
+    const activityState = sessionActivityState(session, now);
+    const running = activityState === 'running';
     return {
       key: `session:${key}`,
       kind: 'session',
       name: titleParts.join(' · '),
       subtitle: subtitleParts.join(' · '),
       running: running || undefined,
-      activityState: sessionActivityState(session, now),
-      context: running ? sessionContextRow(session) : undefined,
+      activityState,
+      // Decided by the shared gate, not by `running`: it follows the recency
+      // window so the reading survives the turn ending, and the dock's card
+      // calls the same function so the two cannot disagree.
+      context: sessionContextForRow(session, now),
       detail: sessionIdLabel(session?.sessionId || key),
       value,
       tokenDataUnavailable,
@@ -234,10 +238,12 @@
         const sessionId = session?.sessionId || key;
         const archived = session?.archived === true || session?.deleted === true || session?.sourceDeleted === true;
         const sessionTitle = textValue(session?.title);
-        // An archived session is not running whatever its timestamp says: the
-        // source it was read from is gone, so nothing can still be appending.
-        const running = !archived && isRunningSession(session, now);
-        const activityState = archived ? 'idle' : sessionActivityState(session, now);
+        // One derivation, as above. An archived session is idle whatever its
+        // timestamp says: the source it was read from is gone, so nothing can
+        // still be appending, which is what `sessionActivityState` already
+        // enforces through `isArchivedSession`.
+        const activityState = sessionActivityState(session, now);
+        const running = activityState === 'running';
         const activityParts = [
           archived ? archivedLabel : '',
           sessionActivityLabel(session, now),
@@ -257,7 +263,7 @@
           archived: archived || undefined,
           running: running || undefined,
           activityState,
-          context: running ? sessionContextRow(session) : undefined,
+          context: sessionContextForRow(session, now),
           client,
           backgroundReview: isBackgroundReviewSession(session) || undefined,
           sortTime: sessionTimestampValue(session),
@@ -339,10 +345,7 @@
     compactSessionTime,
     groupBackgroundReviewRows,
     handleBreakdownRowKeydown,
-    CONTEXT_TONES,
-    RUNNING_SESSION_WINDOW_MS,
     sessionBreakdownIncomplete,
-    sessionContextWindow,
     sessionIdLabel,
     sessionRowsForPeriod
   };

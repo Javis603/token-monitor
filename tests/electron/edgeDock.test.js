@@ -45,6 +45,84 @@ const workArea = { x: 0, y: 25, width: 1440, height: 875 };
 const displayBounds = { x: 0, y: 0, width: 1440, height: 900 };
 
 test('the dock keeps the token total, adds headroom, and dots running rows instead of recolouring them', () => {
+
+test('every renderer stylesheet is brace-balanced', () => {
+  // A splice that leaves an orphaned rule tail unbalances the file, and a stray
+  // closing brace makes every later rule parse as part of a bogus block. That is
+  // what silently stripped the Codex card's account-row rules and pushed the plan
+  // label onto its own line: nothing failed, one brace was just off.
+  for (const name of ['styles.css', path.join('edgeDock', 'dock.css')]) {
+    const css = readRendererFile(name);
+    let depth = 0;
+    let firstUnbalanced = 0;
+    let line = 1;
+    for (const char of css) {
+      if (char === '\n') line += 1;
+      if (char === '{') depth += 1;
+      if (char === '}') {
+        depth -= 1;
+        if (depth < 0 && !firstUnbalanced) firstUnbalanced = line;
+      }
+    }
+    assert.equal(firstUnbalanced, 0, `${name} closes a block that was never opened (line ${firstUnbalanced})`);
+    assert.equal(depth, 0, `${name} ends with ${depth} unclosed block(s)`);
+  }
+});
+
+test('the dock state mark uses the repo loader asset and a stroked check', () => {
+
+test('the Sessions list uses a plain dot, not the dock card glyph stack', () => {
+  // This row already leads with the client's own icon, so a spinner or check
+  // drawn at its corner reads as part of that logo. The card has no such icon,
+  // which is why the richer states live there and the old dot idiom stays here.
+  const app = readRendererFile('app.js');
+  const styles = readRendererFile('styles.css');
+  assert.match(app, /rowLiveMarkup = '<span class="row-live-dot"><\/span>'/);
+  assert.doesNotMatch(app, /sessionStateMarkup\(\{/);
+  assert.doesNotMatch(styles, /row-live-spin|row-live-check|row-live-idle/);
+  assert.match(styles, /\.row-live-dot\s*\{[\s\S]*?background: var\(--success\)/);
+  // The dot is drawn only while the agent works, so a quiet row shows nothing.
+  assert.match(app, /dot\.classList\.toggle\('is-active', active\)/);
+  assert.match(app, /const active = activityState === 'running'/);
+});
+
+test('both surfaces decide the context readout with one shared gate', () => {
+  // The dock card was showing a gauge for a session the Sessions list had
+  // already dropped it from, because the two gated on different states.
+  const sessionLive = require('../../src/shared/sessionLive');
+  const now = Date.parse('2026-09-18T12:00:00.000Z');
+  const fresh = new Date(now - 30_000).toISOString();
+  const old = new Date(now - sessionLive.RUNNING_WINDOW_MS - 1).toISOString();
+  const withContext = (extra) => ({ contextTokens: 150_000, contextWindow: 200_000, ...extra });
+  // Working: shown.
+  assert.equal(sessionLive.sessionContextForRow(withContext({ lastUsedAt: fresh }), now).percentUsed, 75);
+  // Turn just ended: still shown. The reading outlives the run, so the gauge
+  // does not blink away the moment an answer lands.
+  assert.ok(sessionLive.sessionContextForRow(withContext({ lastUsedAt: fresh, turnEnded: true }), now));
+  // Gone quiet: dropped. Nothing about it is current any more.
+  assert.equal(sessionLive.sessionContextForRow(withContext({ lastUsedAt: old }), now), undefined);
+  assert.equal(sessionLive.sessionContextForRow(withContext({ lastUsedAt: old, turnEnded: true }), now), undefined);
+  // Both renderers call it rather than gating on the running boolean.
+  const rows = readRendererFile('sessionRows.js');
+  const presentation = readRendererFile(path.join('edgeDock', 'presentation.js'));
+  assert.match(rows, /context: sessionContextForRow\(session, now\)/);
+  assert.match(presentation, /context: sessionLive\.sessionContextForRow\(session\)/);
+});
+  const markup = require('../../src/shared/sessionLive').sessionStateMarkup({
+    spin: 'edge-dock-session-spin',
+    check: 'edge-dock-session-check',
+    idle: 'edge-dock-session-idle'
+  });
+  // The spin element is an empty hook for the CSS mask; drawing spokes inline
+  // again would be a second loader that can drift from icons/actions/spinner.svg.
+  assert.match(markup, /<span class="edge-dock-session-spin"><\/span>/);
+  assert.doesNotMatch(markup, /<line /);
+  // The check is stroked, not filled: a filled ring scaled down to 10px leaves
+  // its edges about half a pixel apart, which reads as roughness.
+  assert.match(markup, /<svg class="edge-dock-session-check"[^>]*fill="none"[^>]*stroke="currentColor"/);
+  assert.doesNotMatch(markup, /fill="currentColor"/);
+  assert.match(markup, /<span class="edge-dock-session-idle"><\/span>/);
+});
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const css = readRendererFile(path.join('edgeDock', 'dock.css'));
   const app = readRendererFile('app.js');
@@ -68,6 +146,15 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   assert.match(css, /edge-dock-session-dot\[data-state="running"\] \.edge-dock-session-spin/);
   assert.match(css, /edge-dock-session-dot\[data-state="ended"\] \.edge-dock-session-check/);
   assert.match(css, /edge-dock-session-dot\[data-state="idle"\] \.edge-dock-session-idle/);
+  // The spinner is the repo's own loader asset applied as a mask, not a second
+  // loader drawn by hand. It carries NO CSS rotation: that file animates its own
+  // spokes, and rotating the masked copy as well would spin it twice, with the
+  // glyph's 45-degree symmetry aliasing a rigid rotation to ~8x the rate.
+  assert.match(css, /\.edge-dock-session-spin\s*\{[\s\S]*?mask: url\("\.\.\/icons\/actions\/spinner\.svg"\)/);
+  assert.doesNotMatch(css, /animation:\s*edge-dock-session-spin/);
+  assert.doesNotMatch(css, /@keyframes edge-dock-session-spin/);
+  // The asset itself has to keep the SMIL that mask relies on.
+  assert.match(readRendererFile(path.join('icons', 'actions', 'spinner.svg')), /<animate attributeName="opacity"/);
   // The slot is reserved on EVERY row and only painted while running, so the
   // titles of running and idle rows start at the same x.
   assert.match(sessions, /const state = stateByKey\.get\(key\) \|\| 'idle'/);
@@ -75,7 +162,6 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   // The flare rides along with the spin rather than replacing it, and adds no
   // `infinite` of its own: a flare always means a write.
   assert.match(css, /\.edge-dock-session-dot\.pulse \.edge-dock-session-spin \{/);
-  assert.match(css, /edge-dock-session-spin 900ms linear infinite, edge-dock-session-pulse/);
   // The context reading carries a bar plus the number, and the tone rule is
   // keyed on headroom so a healthy reading stays neutral.
   assert.match(css, /edge-dock-session-context-meter/);

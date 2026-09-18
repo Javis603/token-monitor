@@ -180,9 +180,6 @@ const subscriptionApi = window.TokenMonitorSubscriptionDisplay;
 const compactTokenApi = window.TokenMonitorCompactTokens;
 const trayLayoutApi = window.TokenMonitorTrayLayout;
 const sessionRowsApi = window.TokenMonitorSessionRows;
-// The shared live-session predicates and glyph builder, also used by the Edge
-// Dock's session rows.
-const sessionLive = window.TokenMonitorSessionLive;
 const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
 const {
   barScaleMax,
@@ -2317,9 +2314,9 @@ function setActiveToolDetailMode(mode) {
 }
 
 // The live-session pair: a dot on the tool mark for "this is being written to
-// right now", and a fuel gauge for how much of its context window is left. Both
-// are drawn only while the row is running, so a list of several hundred past
-// sessions is untouched.
+// right now", and a fuel gauge for how much of its context window is left. The
+// dot is drawn only while the agent is working and the gauge only while the
+// session is recent, so a list of several hundred past sessions is untouched.
 function updateRowContext(row, context) {
   const gauge = row.querySelector('.row-context');
   if (!gauge) return;
@@ -2351,32 +2348,33 @@ function updateRowContext(row, context) {
 // different from one that is generating right now, and an `infinite` animation
 // in an always-open widget never lets the compositor idle. The reduced-motion
 // rules already neutralise every animation, so this needs no guard of its own.
-// The same three glyphs the Edge Dock draws, from the shared builder, so the
-// two surfaces cannot drift into different spinner or check shapes.
-const rowLiveMarkup = sessionLive.sessionStateMarkup({
-  spin: 'row-live-spin',
-  check: 'row-live-check',
-  idle: 'row-live-idle'
-});
+// A session row already leads with the client's own icon, so its state mark is a
+// small dot at the icon's corner rather than the dock card's glyph stack: a
+// spinner or a check drawn over a vendor logo reads as part of the logo and
+// muddies it, and the card has no such icon to compete with.
+//
+// The old idiom is kept - a green dot means "active right now" - with the dot
+// simply not drawn once the transcript says the turn is over. No spinner, no
+// check, no idle placeholder: a quiet row shows nothing, exactly as before.
+const rowLiveMarkup = '<span class="row-live-dot"></span>';
 
 function updateRowLive(row, activityState, activityAt) {
   const dot = row.querySelector('.row-live');
   if (!dot) return;
-  // Three states, not two. A session whose transcript said the turn finished is
-  // over the moment it says so, rather than holding a green dot for the rest of
-  // the time window; one that has merely gone quiet keeps a neutral mark so the
-  // column still reads as a status rather than a blank gutter.
-  const state = activityState === 'running' || activityState === 'ended' ? activityState : 'idle';
-  dot.dataset.state = state;
-  dot.title = state === 'running'
-    ? (t('session.running') || 'Running')
-    : state === 'ended' ? (t('session.finished') || 'Finished') : '';
+  // Only one thing is drawn here, and only while the agent is working: the dot
+  // is absent for every other state, which is what a session list full of past
+  // sessions should look like. The turn-end boundary is still read, so the dot
+  // clears the moment the transcript says the answer is finished rather than
+  // holding green until the recency window expires.
+  const active = activityState === 'running';
+  dot.classList.toggle('is-active', active);
+  dot.title = active ? (t('session.running') || 'Running') : '';
   const previous = Number(row.dataset.activityAt || 0);
   const next = Number(activityAt) || 0;
   if (next > 0) row.dataset.activityAt = String(next);
   // Never on a first render: a list that flashes every dot as it arrives says
   // nothing about which session just moved.
-  if (state !== 'running' || !previous || next <= previous) return;
+  if (!active || !previous || next <= previous) return;
   dot.classList.remove('pulse');
   void dot.offsetWidth;
   dot.classList.add('pulse');
@@ -2386,7 +2384,8 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
-  // comes from `activityState` so the three cases stay distinguishable.
+  // comes from `activityState`, which is what reads the transcript's turn-end
+  // boundary rather than only the recency window.
   row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}${running ? ' running' : ''}`;
   row.title = local ? 'This device' : '';
   
@@ -2442,7 +2441,11 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
   row.querySelector('.row-cost').textContent = tokenDataUnavailable === true ? '' : formatCost(cost || 0);
-  updateRowContext(row, running === true ? context : null);
+  // The row builder already applied the shared gate (recent enough to have a
+  // reading), so this draws whatever arrived rather than re-deciding from
+  // `running` - that second gate is exactly what made the dock card and this
+  // list disagree about whether a session still had a gauge.
+  updateRowContext(row, context);
   updateRowLive(row, activityState || (running === true ? 'running' : 'idle'), sortTime);
   const fill = row.querySelector('.bar-fill');
   fill.style.background = barBackground || color;
