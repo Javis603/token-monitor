@@ -19,7 +19,6 @@
 })(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive) {
   // Every account is listed; the card scrolls when they outgrow the screen.
   const MAX_BUBBLE_ACCOUNTS = 50;
-  const MAX_BUBBLE_WINDOWS = 6;
 
   function normalizedId(value) {
     return String(value || '').trim().toLowerCase();
@@ -40,18 +39,6 @@
   function clampPercent(value) {
     const number = finite(value);
     return number === null ? null : Math.max(0, Math.min(100, number));
-  }
-
-  // Remaining percentage for any window, credits included. Credits windows have
-  // no wire percentage; the balance helper derives the display-only meter.
-  function windowRemaining(window, provider) {
-    if (balanceDisplay.isCreditsWindow(window)) {
-      return clampPercent(balanceDisplay.creditsMeterPercent(provider, window));
-    }
-    const remaining = clampPercent(window?.remainingPercent);
-    if (remaining !== null) return remaining;
-    const used = clampPercent(window?.usedPercent);
-    return used === null ? null : 100 - used;
   }
 
   function providerOrder(providers, options = {}) {
@@ -76,63 +63,7 @@
     return ordered;
   }
 
-  function bubbleWindows(provider, options = {}) {
-    return (Array.isArray(provider?.windows) ? provider.windows : [])
-      // Kept in the provider's own order: collectors already sequence windows
-      // meaningfully (Antigravity lists each model group's 5-hour then weekly),
-      // and re-sorting by kind interleaved those groups.
-      .filter((window) => window && !(
-        options.showCodexAdditionalLimits === false
-        && normalizedId(provider.provider) === 'codex'
-        && window.additional === true
-      ))
-      .slice(0, MAX_BUBBLE_WINDOWS)
-      .map((window) => {
-        const credits = balanceDisplay.isCreditsWindow(window);
-        return {
-          label: String(window.label || ''),
-          kind: String(window.kind || ''),
-          remainingPercent: window.showMeter === false ? null : windowRemaining(window, provider),
-          credits: credits
-            ? {
-              amount: balanceDisplay.creditsAmount(provider, window),
-              currency: balanceDisplay.creditsCurrency(provider, window)
-            }
-            : null,
-          resetsAt: window.resetsAt || null,
-          resetDescription: window.resetDescription || '',
-          boundaryKind: window.boundaryKind || '',
-          // The inputs `limitWindowText()` reads. They ride the projection
-          // rather than the formatted string, because the card repaints from
-          // its last payload on a timer and the used/remaining display mode can
-          // flip between pushes — formatting here would freeze it at push time.
-          metric: String(window.metric || ''),
-          limitId: String(window.limitId || ''),
-          showMeter: window.showMeter !== false,
-          used: finite(window.used),
-          limit: finite(window.limit),
-          remaining: finite(window.remaining),
-          currency: String(window.currency || ''),
-          detail: String(window.detail || '')
-        };
-      });
-  }
-
-  // Codex banks full-limit resets; the Limits view lists how many are held and
-  // when each expires, and so does the dock.
-  function resetCreditsFor(provider) {
-    const credits = provider?.resetCredits;
-    const count = Math.floor(finite(credits?.availableCount) || 0);
-    if (count <= 0) return null;
-    const expirations = (Array.isArray(credits.expirations) ? credits.expirations : [credits.nextExpiresAt])
-      .map((value) => Date.parse(value || ''))
-      .filter(Number.isFinite)
-      .sort((a, b) => a - b)
-      .map((ms) => new Date(ms).toISOString());
-    return { count, expirations };
-  }
-
-  function accountSummary(provider, options = {}) {
+  function accountSummary(provider) {
     const selection = trayText.compactLimitSelection(provider);
     return {
       status: provider?.status === 'ok' && !provider?.stale ? 'ok' : (provider?.stale ? 'stale' : 'error'),
@@ -144,8 +75,11 @@
       stale: provider?.stale === true,
       primaryRemaining: selection ? selection.primaryPercent : null,
       primaryWindow: selection ? selection.primaryWindow : null,
-      windows: bubbleWindows(provider, options),
-      resetCredits: resetCreditsFor(provider)
+      // The card renders its quota rows from the shared Limits view, which
+      // reads the collector record itself. Projecting the windows here is what
+      // made the card a second, less-informed implementation of the same rows:
+      // it could only show what this function had remembered to copy.
+      record: provider || null
     };
   }
 
@@ -262,7 +196,7 @@
     const hidden = new Set(options.hiddenAccounts || []);
     const accounts = records
       .filter((record) => !record?.accountKey || !hidden.has(record.accountKey))
-      .map((record) => ({ record, summary: accountSummary(record, options) }));
+      .map((record) => ({ record, summary: accountSummary(record) }));
     // Accounts keep the collector's order, as the Limits view lists them. The
     // live Codex account is taken from this device's records alone, so a synced
     // device's login is never marked as the one in use here.
@@ -423,8 +357,7 @@
           localDeviceId: options.localDeviceId,
           codexManagedAccounts: options.codexManagedAccounts,
           activeCodexAccountId: options.activeCodexAccountId,
-          codexResetForecast: options.codexResetForecast,
-          showCodexAdditionalLimits: options.showCodexAdditionalLimits
+          codexResetForecast: options.codexResetForecast
         }));
       }
     }

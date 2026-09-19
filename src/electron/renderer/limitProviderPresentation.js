@@ -265,6 +265,37 @@
     return remainingMs >= -Math.max(0, Number(resetNowGraceMs) || 0) ? 0 : null;
   }
 
+  // "4h 26m" — coarse enough that a row does not rewrite itself every second,
+  // which is what a quota meter wants and a stopwatch does not.
+  function limitDurationText(ms) {
+    const totalMinutes = Math.max(0, Math.round(Number(ms || 0) / 60000));
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m`;
+    return '<1m';
+  }
+
+  // The line under a quota meter: when the window turns over, or when the thing
+  // it measures expires. Shared rather than re-derived per surface — the Limits
+  // page and the edge dock render the same meters, and a window that says
+  // "Expires" on one and "Reset" on the other is describing two different
+  // products.
+  function limitBoundaryText(window) {
+    const diffMs = limitResetRemainingMs(window?.resetsAt);
+    if (diffMs === null) return '';
+    const mixed = window?.boundaryKind === 'mixed';
+    const prefix = window?.boundaryKind === 'expiry'
+      ? 'Expires'
+      : mixed
+        ? 'Changes in'
+        : 'Reset';
+    if (diffMs === 0) return mixed ? 'Changes now' : `${prefix} now`;
+    return `${prefix} ${limitDurationText(diffMs)}`;
+  }
+
   // The "live" Codex account is the one THIS device's Codex app/CLI is currently
   // signed into (sourceDetail app/cli/unknown). Managed accounts added inside
   // Token Monitor report sourceDetail 'managed' and are NOT live. A remote
@@ -507,6 +538,8 @@
     limitProviderMainDeviceLabel,
     namedApiProfileStatus,
     limitProviderProvenance,
+    limitBoundaryText,
+    limitDurationText,
     limitResetRemainingMs,
     limitProviderSourceLabel,
     limitProviderStatusLabel,

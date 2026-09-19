@@ -5147,6 +5147,11 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     interfaceFontFamily: source.interfaceFontFamily,
     displayFontFamily: source.displayFontFamily,
     showLimitUsed: source.showLimitUsed,
+    // The card's quota rows are built by the same view as the Limits page, so
+    // the two display preferences that view reads have to reach this renderer
+    // as well — otherwise the card silently renders a different page's answer.
+    showCodexAdditionalLimits: source.showCodexAdditionalLimits,
+    claudePrepaidBalanceEnabled: source.claudePrepaidBalanceEnabled,
     // The dock's session rows carry the same context gauge as the Sessions
     // list, so its Remaining/Used preference has to reach this renderer too.
     sessionContextMetric: source.sessionContextMetric,
@@ -5305,7 +5310,6 @@ function edgeDockCellsFor(visibleStats) {
     limitsEnabled: settings?.limitsEnabled !== false,
     limitProviders: settings?.limitProviders,
     limitProviderOrder: settings?.limitProviderOrder,
-    showCodexAdditionalLimits: settings?.showCodexAdditionalLimits !== false,
     liveRate: edgeDockLiveRateSample(visibleStats),
     tokenRateMode: settings?.tokenRateMode
   });

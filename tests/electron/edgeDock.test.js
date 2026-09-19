@@ -787,28 +787,30 @@ test('derived periods read History totals and stay unknown until they arrive', (
   assert.deepEqual(ready.clients.map((client) => client.client), ['claude']);
 });
 
-test('provider windows keep the collector order so model groups stay together', () => {
+// The card's quota rows are built by the Limits view's own builder, which reads
+// the collector record. A projection here is what made the card a second,
+// less-informed implementation of those rows — every field it forgot to copy
+// was a row the card could not draw — so the record rides across untouched and
+// the window-level decisions (ordering, Codex's additional-limit preference)
+// stay in the one builder that makes them.
+test('the card carries the collector record the shared Limits view renders from', () => {
   const windows = [
     { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 90 },
     { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 80 },
     { kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: 70 },
     { kind: 'weekly', label: 'Claude/GPT weekly', remainingPercent: 60 }
   ];
-  const [cell] = buildEdgeDockCells({ limits: { providers: [provider('antigravity', { windows })] } }, {});
-  assert.deepEqual(cell.accounts[0].windows.map((window) => window.label), windows.map((window) => window.label));
-});
+  const record = provider('antigravity', { windows });
+  const [cell] = buildEdgeDockCells({ limits: { providers: [record] } }, {});
+  assert.deepEqual(cell.accounts[0].record, record);
 
-test('Codex additional quota windows follow the shared display setting', () => {
-  const windows = [
+  const codexWindows = [
     { kind: 'session', label: 'Session', remainingPercent: 70 },
     { kind: 'daily', label: 'GPT-5.3-Codex-Spark', remainingPercent: 40, additional: true }
   ];
-  const stats = { limits: { providers: [provider('codex', { windows })] } };
-  const [shown] = buildEdgeDockCells(stats, { showCodexAdditionalLimits: true });
-  assert.deepEqual(shown.accounts[0].windows.map((window) => window.label), ['Session', 'GPT-5.3-Codex-Spark']);
-
-  const [hidden] = buildEdgeDockCells(stats, { showCodexAdditionalLimits: false });
-  assert.deepEqual(hidden.accounts[0].windows.map((window) => window.label), ['Session']);
+  const codexRecord = provider('codex', { windows: codexWindows });
+  const [codex] = buildEdgeDockCells({ limits: { providers: [codexRecord] } }, {});
+  assert.deepEqual(codex.accounts[0].record.windows, codexWindows);
 });
 
 test('live rate readout reports the selected mode and idle state', () => {

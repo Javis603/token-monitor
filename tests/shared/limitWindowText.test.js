@@ -146,11 +146,17 @@ test('both renderers paint from the shared modules, not their own copies', () =>
   // One age formatter, called by both, replacing three hand-rolled copies.
   assert.match(app, /limitProviderPresentationApi\.limitProviderFreshness\(provider\)/);
   assert.match(dock, /limitPresentationApi\.limitProviderFreshness\(account\)/);
-  // The card's money-first rule defers to the window's own reading.
-  assert.match(dock, /!text\.percentLeads && window\.credits/);
   assert.doesNotMatch(app, /function formatUpdatedAge\(/);
   assert.doesNotMatch(dock, /function updatedText\(/);
   // The card's separate staleness line is gone with the wording it explained.
   assert.doesNotMatch(dock, /edgeDock\.stale/);
   assert.doesNotMatch(read('src/electron/renderer/i18n.js'), /edgeDock\.stale/);
+
+  // The wording module is reached through the shared view now: the card builds
+  // the Limits page's rows rather than a second set that reads the same text.
+  assert.match(dock, /limitWindowsView\.renderProviderWindows\(record, color\)/);
+  assert.match(dock, /limitWindowText: limitWindowTextApi\.limitWindowText/);
+  for (const name of ['windowNode', 'windowGrid', 'appendWindows', 'meterNode', 'windowValueText']) {
+    assert.doesNotMatch(dock, new RegExp(`function ${name}\\(`), `${name} should come from the shared view`);
+  }
 });

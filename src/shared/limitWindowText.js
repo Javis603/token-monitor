@@ -9,10 +9,10 @@
 // the same window is worded differently by the surface that has room for a
 // denominator and the one that does not.
 //
-// Layout deliberately stays with each renderer. A full-width row on the Limits
-// page and a half-width cell in a narrow dock card genuinely want different
-// pairing and wrapping rules, and forcing those to converge would be a
-// regression dressed up as consistency. Only the text converges.
+// Layout is not here — it is in `limitWindowsView.js`, the row builder both
+// surfaces call. This module answers only what a window reads, which is the
+// question a Node-side caller (the tray, the macOS widget snapshot) can ask
+// without a DOM.
 //
 // `value` is an override: `null` means "render the percentage the meter shows",
 // which is the common case. `detail` is the absolute figure that sits under the

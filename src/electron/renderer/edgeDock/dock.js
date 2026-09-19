@@ -18,6 +18,9 @@ const glassRenderingApi = window.TokenMonitorGlassRendering;
 const limitPresentationApi = window.TokenMonitorLimitProviderPresentation;
 const limitWindowLabels = window.TokenMonitorLimitWindowLabels;
 const limitWindowTextApi = window.TokenMonitorLimitWindowText;
+const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
+const limitWindowsViewApi = window.TokenMonitorLimitWindowsView;
+const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMode;
 const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 const { clientColors } = window.TokenMonitorUsageCharts;
 const { LIMIT_PROVIDER_LABELS } = window.TokenMonitorLimitProviders;
@@ -234,47 +237,88 @@ function percentText(remainingPercent) {
   return shown === null ? '--' : `${Math.round(shown)}%`;
 }
 
-// Limit figures use the Limits view's fixed English wording ("43% left",
-// "Reset 4h 26m", "Updated just now"): provider window labels such as
-// "Monthly" or "Gemini 5-hour" arrive in English, and translating only the
-// words around them produced a mixed card that read worse than either.
-// The shared wording, resolved at paint time so a flipped display mode is
-// picked up by the next repaint rather than the next push.
-function windowText(providerId, window) {
-  return limitWindowTextApi.limitWindowText({ provider: providerId }, window, {
-    showLimitUsed: appearance().showLimitUsed === true,
-    formatCompact: formatTokens
-  });
+// The card's quota rows are the Limits page's quota rows: the same builder,
+// the same DOM, the same CSS (this page loads ../styles.css for exactly that).
+// It used to be a second implementation that had been told less — no spend
+// line under a balance, no denominator under a money pool, no info tooltips at
+// all — and every provider that needed special treatment had to be taught twice.
+//
+// Everything the builder reads from a page is handed to it here. The dock has
+// no renderer state of its own beyond the last pushed payload, so the settings
+// accessor is the appearance projection and the formatting is this page's.
+function optionalFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
-function windowValueText(providerId, window) {
-  const text = windowText(providerId, window);
-  if (text.value) return text.value;
-  // A balance with no quota behind it reads as the money itself. A money pool
-  // that does have a denominator keeps the meter's percentage on top, with the
-  // amount on the line below — the Limits view's reading of the same window.
-  if (!text.percentLeads && window.credits && window.credits.amount !== null && window.credits.amount !== undefined) {
-    return balanceDisplay.formatCompactMoney(window.credits.amount, window.credits.currency);
-  }
-  const showUsed = appearance().showLimitUsed === true;
-  const shown = presentation.displayPercent(window.remainingPercent, showUsed);
-  if (shown === null) return '--';
-  return `${Math.round(shown)}% ${showUsed ? 'used' : 'left'}`;
+function colorWithAlpha(color, alpha) {
+  const rgb = parseColor(color);
+  return rgb ? `rgba(${rgb.join(', ')}, ${alpha})` : `rgba(183, 234, 212, ${alpha})`;
 }
 
-function windowLabel(providerId, window) {
-  return limitWindowLabels.limitWindowLabel(providerId, window, 'Limit');
+// The widget animates a meter from zero when a view is entered; the dock card
+// is built in a hidden staging layer and measured before it is shown, so it
+// only sets the value.
+function applyBarScale(fill, scale) {
+  fill.style.setProperty('--bar-scale', String(Math.max(0, Math.min(1, Number(scale) || 0))));
 }
 
-function boundaryText(window) {
-  const at = Date.parse(window.resetsAt || '');
-  if (!Number.isFinite(at)) return window.resetDescription || '';
-  const remaining = at - Date.now();
-  const mixed = window.boundaryKind === 'mixed';
-  const prefix = window.boundaryKind === 'expiry' ? 'Expires' : mixed ? 'Changes in' : 'Reset';
-  if (remaining <= 0) return mixed ? 'Changes now' : `${prefix} now`;
-  return `${prefix} ${presentation.formatResetDuration(remaining)}`;
+// A tooltip the pointer is inside has to survive the countdown repaint, the
+// same hold the Limits page keeps. Without it the 30-second tick replaces the
+// card out from under an open tooltip and it vanishes mid-read.
+const limitTooltip = {
+  opened: false,
+  active: false,
+  pending: false
+};
+
+function limitTooltipShouldHoldRender() {
+  if (!limitTooltip.active) return false;
+  return Boolean(contentLayer.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
 }
+
+const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
+  document,
+  t,
+  settings: appearance,
+  currentLocale: () => state.locale,
+  presentation: limitPresentationApi,
+  motion: limitResetMotionApi,
+  tooltip: {
+    hasOpened: () => limitTooltip.opened,
+    markOpened() {
+      limitTooltip.opened = true;
+      limitTooltip.active = true;
+    },
+    release() {
+      requestAnimationFrame(() => {
+        if (limitTooltipShouldHoldRender()) return;
+        limitTooltip.active = false;
+        if (!limitTooltip.pending) return;
+        limitTooltip.pending = false;
+        if (state.payload?.cell) renderBubble(state.payload);
+      });
+    }
+  },
+  formatCompact: formatTokens,
+  formatMoney: balanceDisplay.formatMoney,
+  formatCompactMoney: balanceDisplay.formatCompactMoney,
+  formatPercent: (value) => (Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'),
+  formatDuration: presentation.formatResetDuration,
+  formatLimitBoundary: limitPresentationApi.limitBoundaryText,
+  limitFillPercent,
+  limitModeSuffix,
+  optionalFiniteNumber,
+  colorWithAlpha,
+  applyBarScale,
+  creditsAmount: balanceDisplay.creditsAmount,
+  creditsMeterPercent: balanceDisplay.creditsMeterPercent,
+  isCreditsWindow: balanceDisplay.isCreditsWindow,
+  spendWindow: balanceDisplay.spendWindow,
+  limitWindowLabel: limitWindowLabels.limitWindowLabel,
+  limitWindowText: limitWindowTextApi.limitWindowText
+});
 
 // Same wording as the Limits view: a stale row says "Stale · 54m ago" on both,
 // rather than the card reporting a plain update time and explaining staleness
@@ -512,103 +556,6 @@ function indexFromTarget(target) {
 
 // ---- Detail card ------------------------------------------------------------
 
-// Meters match the widget's Limits view: a 6px bar on a tint of the provider's
-// own colour, the fill following the used/remaining display mode, and weekly
-// or longer windows a shade lighter than the session window above them.
-function meterNode(window, color) {
-  const meter = el('div', 'edge-dock-meter');
-  const rgb = parseColor(color);
-  if (rgb) meter.style.background = `rgba(${rgb.join(', ')}, 0.16)`;
-  const fill = el('div', 'edge-dock-meter-fill');
-  fill.style.background = color;
-  fill.style.opacity = window.kind === 'session' ? '0.95' : '0.78';
-  const shown = presentation.displayPercent(window.remainingPercent, appearance().showLimitUsed === true);
-  fill.style.transform = `scaleX(${Math.max(0, Math.min(100, shown ?? 0)) / 100})`;
-  meter.append(fill);
-  return meter;
-}
-
-function windowNode(providerId, window, color, labelOverride = '') {
-  const node = el('div', 'edge-dock-window');
-  const head = el('div', 'edge-dock-window-head');
-  const value = el('span', 'edge-dock-window-value', windowValueText(providerId, window));
-  value.dataset.severity = displaySeverity(window.remainingPercent);
-  head.append(el('span', 'edge-dock-window-label', labelOverride || windowLabel(providerId, window)), value);
-  node.append(head);
-  if (window.remainingPercent !== null && window.remainingPercent !== undefined) node.append(meterNode(window, color));
-  // Reset time on the left, the absolute figure on the right — the Limits
-  // view's split line, in a card that is narrow enough to need both to be short.
-  const boundary = boundaryText(window);
-  const detail = windowText(providerId, window).detail;
-  if (boundary || detail) {
-    const foot = el('div', 'edge-dock-window-foot');
-    foot.append(el('span', 'edge-dock-window-reset', boundary));
-    if (detail) foot.append(el('span', 'edge-dock-window-detail', detail));
-    node.append(foot);
-  }
-  return node;
-}
-
-// Windows labelled "<group> 5-hour" / "<group> weekly" (Antigravity's model
-// pools) are shown under one group heading, the same hierarchy as the Limits
-// view. Anything that does not fully parse keeps the flat list.
-function windowGroups(windows) {
-  const parsed = windows.map((window) => ({
-    window,
-    label: limitPresentationApi?.antigravityQuotaWindow?.(window) || null
-  }));
-  if (parsed.length < 2 || parsed.some((entry) => !entry.label)) return null;
-  const groups = new Map();
-  for (const entry of parsed) {
-    const key = entry.label.groupLabel;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(entry);
-  }
-  return groups.size > 1 ? [...groups] : null;
-}
-
-// A metered short window (session/daily/weekly) sits in a half-width column
-// beside its neighbour, as in the Limits view; balances, monthly pools and an
-// unpaired window take the full width.
-function pairable(window) {
-  return ['session', 'daily', 'weekly'].includes(window.kind)
-    && !window.credits
-    && window.remainingPercent !== null && window.remainingPercent !== undefined;
-}
-
-function windowGrid(providerId, entries, color) {
-  const grid = el('div', 'edge-dock-windows');
-  for (let index = 0; index < entries.length; index += 1) {
-    const entry = entries[index];
-    const next = entries[index + 1];
-    const node = windowNode(providerId, entry.window, color, entry.label);
-    if (next && pairable(entry.window) && pairable(next.window)) {
-      grid.append(node, windowNode(providerId, next.window, color, next.label));
-      index += 1;
-    } else {
-      node.classList.add('is-wide');
-      grid.append(node);
-    }
-  }
-  return grid;
-}
-
-function appendWindows(block, providerId, windows, color) {
-  const groups = windowGroups(windows);
-  if (!groups) {
-    block.append(windowGrid(providerId, windows.map((window) => ({ window, label: '' })), color));
-    return;
-  }
-  for (const [label, entries] of groups) {
-    const group = el('div', 'edge-dock-window-group');
-    group.append(
-      el('div', 'edge-dock-window-group-title', label),
-      windowGrid(providerId, entries.map((entry) => ({ window: entry.window, label: entry.label.windowLabel })), color)
-    );
-    block.append(group);
-  }
-}
-
 function usageTile(label, usage) {
   const tile = el('div', 'edge-dock-usage-tile');
   tile.append(
@@ -617,22 +564,6 @@ function usageTile(label, usage) {
   );
   if (usage) tile.append(el('span', 'edge-dock-usage-cost', formatCost(usage.costUsd)));
   return tile;
-}
-
-// Banked Codex resets, as the Limits view lists them: how many, and how long
-// until each expires.
-function resetCreditsNode(credits) {
-  if (!credits?.count) return null;
-  const row = el('div', 'edge-dock-detail-row');
-  row.append(el('span', '', `${credits.count} reset${credits.count === 1 ? '' : 's'}`));
-  const now = Date.now();
-  const times = credits.expirations.slice(0, 3).map((value) => {
-    const remaining = Date.parse(value) - now;
-    return remaining <= 0 ? 'now' : presentation.formatResetDuration(remaining);
-  });
-  if (credits.expirations.length > 3) times.push(`+${credits.expirations.length - 3}`);
-  if (times.length) row.append(el('span', 'edge-dock-detail-value', times.join(' · ')));
-  return row;
 }
 
 function forecastDate(value) {
@@ -874,14 +805,15 @@ function providerCard(cell) {
       if (account.planLabel && accountTitle(account)) name.append(el('span', 'edge-dock-pill', account.planLabel));
       block.append(name);
     }
-    const windows = account.windows || [];
-    if (windows.length) {
-      appendWindows(block, cell.provider, windows, color);
+    // The quota rows — meters, spend and balance lines, banked resets, info
+    // tooltips — are the Limits page's, built from the collector record rather
+    // than from a projection of it.
+    const record = account.record;
+    if (record?.windows?.length) {
+      block.append(limitWindowsView.renderProviderWindows(record, color));
     } else if (account.status !== 'ok') {
       block.append(el('div', 'edge-dock-note', t('edgeDock.unavailable')));
     }
-    const credits = resetCreditsNode(account.resetCredits);
-    if (credits) block.append(credits);
     accounts.append(block);
   }
   if (!cell.accounts.length) accounts.append(el('div', 'edge-dock-note', t('edgeDock.unavailable')));
@@ -970,13 +902,13 @@ function statCard(cell) {
   for (const client of cell.clients) {
     const color = readableColor(clientColors[client.client] || clientColors.default);
     const row = el('div', 'edge-dock-client');
-    const meter = el('div', 'edge-dock-meter');
-    const rgb = parseColor(color);
-    if (rgb) meter.style.background = `rgba(${rgb.join(', ')}, 0.16)`;
-    const fill = el('div', 'edge-dock-meter-fill');
+    // The same bar as the quota meters above it, built by the same helper.
+    const meter = el('div', 'limit-meter');
+    meter.style.background = colorWithAlpha(color, 0.16);
+    const fill = el('div', 'limit-meter-fill');
     fill.style.background = color;
     fill.style.opacity = '0.95';
-    fill.style.transform = `scaleX(${Math.max(0.02, client.tokens / top)})`;
+    applyBarScale(fill, Math.max(0.02, client.tokens / top));
     meter.append(fill);
     row.append(
       markNode(client.client, color),
@@ -1039,7 +971,16 @@ function render(payload) {
   updateShape(payload);
   if (surface === 'peek') renderPeek(payload);
   else if (surface === 'rail') renderRail(payload);
-  else if (!codexAccountControl.deferRender(contentLayer)) renderBubble(payload);
+  else if (!deferBubbleRender()) renderBubble(payload);
+}
+
+// A repaint replaces the whole card, so it waits for whatever the pointer is
+// currently inside: an account control mid-gesture, or an open detail tooltip.
+function deferBubbleRender() {
+  if (codexAccountControl.deferRender(contentLayer)) return true;
+  if (!limitTooltipShouldHoldRender()) return false;
+  limitTooltip.pending = true;
+  return true;
 }
 
 bridge.onRender(render);
@@ -1048,7 +989,7 @@ setInterval(() => {
   if (
     surface === 'bubble'
     && state.payload?.cell
-    && !codexAccountControl.deferRender(contentLayer)
+    && !deferBubbleRender()
   ) renderBubble(state.payload);
 }, 30_000);
 bridge.ready();

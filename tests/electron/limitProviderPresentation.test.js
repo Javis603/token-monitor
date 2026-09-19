@@ -18,6 +18,8 @@ const {
   apiKeyAccountStatus,
   codexAdditionalQuotaDisplayName,
   isCodexLiveAccount,
+  limitBoundaryText,
+  limitDurationText,
   limitProviderDisplayLabel,
   limitProviderCapabilityTags,
   limitProviderCompactWindowLabel,
@@ -344,21 +346,26 @@ function runHomeLimitModule(rows, boundaryLabels = {}) {
 
 test('Limits and Home distinguish resets, expiries, and simultaneous boundaries', () => {
   const app = readRendererFile('app.js');
-  const formatBoundary = functionBody(app, 'formatLimitBoundary', 'formatDuration');
-  const formatDuration = functionBody(app, 'formatDuration', 'formatActiveDuration');
   const limitWindow = viewBody('limitWindowNode', 'renderProviderWindows');
   const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
 
-  const labels = vm.runInNewContext(
-    `${formatBoundary}\n${formatDuration}\n[\n`
-      + `formatLimitBoundary({ resetsAt: 'future' }),\n`
-      + `formatLimitBoundary({ resetsAt: 'future', boundaryKind: 'expiry' }),\n`
-      + `formatLimitBoundary({ resetsAt: 'future', boundaryKind: 'mixed' }),\n`
-      + `formatLimitBoundary({ resetsAt: 'now', boundaryKind: 'expiry' }),\n`
-      + `formatLimitBoundary({ resetsAt: 'now', boundaryKind: 'mixed' })\n]`,
-    { limitProviderPresentationApi: { limitResetRemainingMs: (value) => value === 'now' ? 0 : 60 * 60 * 1000 } }
+  // The wording lives beside the reset arithmetic it reads, so the Limits page
+  // and the edge dock render the same line from the same function.
+  const at = (ms) => new Date(Date.now() + ms).toISOString();
+  const future = at(60 * 60 * 1000 + 2000);
+  const now = at(-1000);
+  assert.deepEqual(
+    [
+      limitBoundaryText({ resetsAt: future }),
+      limitBoundaryText({ resetsAt: future, boundaryKind: 'expiry' }),
+      limitBoundaryText({ resetsAt: future, boundaryKind: 'mixed' }),
+      limitBoundaryText({ resetsAt: now, boundaryKind: 'expiry' }),
+      limitBoundaryText({ resetsAt: now, boundaryKind: 'mixed' })
+    ],
+    ['Reset 1h 0m', 'Expires 1h 0m', 'Changes in 1h 0m', 'Expires now', 'Changes now']
   );
-  assert.deepEqual(Array.from(labels), ['Reset 1h 0m', 'Expires 1h 0m', 'Changes in 1h 0m', 'Expires now', 'Changes now']);
+  assert.equal(limitBoundaryText({ resetsAt: '' }), '');
+  assert.match(app, /const formatLimitBoundary = limitProviderPresentationApi\.limitBoundaryText;/);
   assert.match(limitWindow, /window\?\.resetsAt\s*\? formatLimitBoundary\(window\)/);
   assert.match(homeLimits, /window\.resetsAt\s*\?\s*formatLimitBoundary\(window\)/);
   assert.doesNotMatch(app, /noActiveLimitWindow|formatResetDuration/);
@@ -1280,7 +1287,9 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(main, /showCodexAdditionalLimits: true/);
   assert.match(main, /showCodexAdditionalLimits = parseBoolean\(merged\.showCodexAdditionalLimits, true\)/);
   assert.match(main, /showCodexAdditionalLimits: parseBoolean\(patch\.showCodexAdditionalLimits \?\? settings\.showCodexAdditionalLimits, true\)/);
-  assert.match(main, /showCodexAdditionalLimits: settings\?\.showCodexAdditionalLimits !== false/);
+  // The edge dock builds the same rows from the same view, so the preference
+  // reaches that renderer through its appearance projection.
+  assert.match(main, /showCodexAdditionalLimits: source\.showCodexAdditionalLimits,/);
   assert.match(app, /key: 'showCodexAdditionalLimits',[\s\S]*?defaultValue: true/);
   assert.match(renderProviderWindows, /settings\(\)\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
   assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);
@@ -1357,7 +1366,6 @@ test('Codex additional quota labels omit a redundant period unless one name has 
 
 function runClaudePrepaidGrantRows(app, tranches, currency, now) {
   const optionalNumber = functionBody(app, 'optionalFiniteNumber', 'formatHomeLimitWindowValue');
-  const duration = functionBody(app, 'formatDuration', 'formatActiveDuration');
   const dateLabel = viewBody('expiryDateLabel', 'codexResetCreditsNode');
   const grantRows = viewBody('claudePrepaidGrantRows', 'claudeBalanceNode');
   const context = {
@@ -1372,10 +1380,11 @@ function runClaudePrepaidGrantRows(app, tranches, currency, now) {
     },
     Intl,
     currentLocale: () => 'en-US',
-    formatMoney: (value, code) => `${code === 'USD' ? '$' : `${code} `}${Number(value).toFixed(2)}`
+    formatMoney: (value, code) => `${code === 'USD' ? '$' : `${code} `}${Number(value).toFixed(2)}`,
+    formatDuration: limitDurationText
   };
   vm.runInNewContext(
-    `${optionalNumber}\n${duration}\n${dateLabel}\n${grantRows}\n`
+    `${optionalNumber}\n${dateLabel}\n${grantRows}\n`
       + `result = claudePrepaidGrantRows(${JSON.stringify(tranches)}, ${JSON.stringify(currency)});`,
     context
   );
