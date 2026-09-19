@@ -82,6 +82,22 @@ test('the card edge spends none of the quota row separator the page needs', () =
   assert.match(rule[1], /padding-bottom: 0;/);
 });
 
+test('a single-account card keeps the rule above the Codex forecast', () => {
+  // The page draws that rule only inside a provider group, and a card with one
+  // account has no group — so the card has to draw its own, or the separator
+  // under the quota rows appears for two Codex accounts and disappears for one.
+  // The page's half of this is asserted in codexResetForecastDom.test.js.
+  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
+  const rule = css.match(/^\.edge-dock-accounts > \.limit-row > \.codex-reset-forecast::before\s*\{([^}]*)\}/m);
+  assert.ok(rule, 'the card must draw the separator the page only draws in a group');
+  assert.match(rule[1], /linear-gradient/);
+  assert.match(rule[1], /rgba\(var\(--line-rgb\), 0\.075\) 22%/);
+  // Reached from the row rather than from the group class: the group is exactly
+  // the shape that does not need this rule, so requiring it would put the line
+  // back to being a multi-account-only affordance.
+  assert.doesNotMatch(rule[0], /limit-row-group/);
+});
+
 test('the Sessions list uses a plain dot, not the dock card glyph stack', () => {
   // This row already leads with the client's own icon, so a spinner or check
   // drawn at its corner reads as part of that logo. The card has no such icon,

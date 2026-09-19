@@ -311,22 +311,22 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   padding-bottom: 0;
 }
 
-.edge-dock-account {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
 /* Separators are the Limits view's feathered hairline (fading out at both
    ends), not a solid rule. */
-.edge-dock-account + .edge-dock-account,
-.edge-dock-forecast,
 .edge-dock-sessions {
   position: relative;
   padding-top: 10px;
 }
-.edge-dock-account + .edge-dock-account::before,
-.edge-dock-forecast::before,
-.edge-dock-sessions::before {
+/* The forecast is a section of the card too, so the card draws it a separator
+   as well. The page only draws one inside a provider group (styles.css
+   `.limit-row-group > .codex-reset-forecast::before`), and a card showing a
+   single account has no group — so the card covers both shapes here, and the
+   rule above the forecast cannot be there for several accounts and missing for
+   one. The forecast keeps its own 8px of top padding rather than the 10px an
+   `.edge-dock-sessions` block sits under, which is what the page's group rule
+   leaves it at, so one account and several read alike either way. */
+.edge-dock-sessions::before,
+.edge-dock-accounts > .limit-row > .codex-reset-forecast::before {
   position: absolute;
   top: 0;
   right: 0;
@@ -574,13 +574,13 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
    widget stylesheet this page also loads — including the two-column grid, so a
    card pairs Session with Weekly exactly as the page does. What is left here is
    what a 280px card needs that a resizable page does not. */
-.edge-dock-account .limit-windows {
+.edge-dock-accounts .limit-windows {
   gap: 9px 12px;
 }
 /* The tooltip is `width: max-content` and grows leftward from its trigger. On
    the page that has the whole window to grow into; here the window is the card,
    so a wide one would run off the edge instead of wrapping. */
-.edge-dock-account .limit-detail-tooltip {
+.edge-dock-accounts .limit-detail-tooltip {
   max-width: 248px;
 }
 
