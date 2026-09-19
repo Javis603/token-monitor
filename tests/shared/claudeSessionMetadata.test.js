@@ -132,6 +132,32 @@ test('readSessionTurnEnded follows the newest stop_reason, and tool_use is not a
   t.after(() => fs.rmSync(bigMeta.dir, { recursive: true, force: true }));
   assert.equal(readSessionTurnEnded(bigMeta.file, { cache: new Map() }), true, 'an oversized meta record is not a prompt');
 
+  // An oversized ASSISTANT record closes with the field that decides the turn,
+  // and on a record larger than one 256 KiB read chunk those closing bytes
+  // arrive in the next chunk. They used to be dropped before the fragment scan
+  // ran, so the reading from before the record survived: a huge answer that
+  // paused for tools still looked like the finished turn it replaced.
+  const bigAssistant = (stopReason) => JSON.stringify({
+    type: 'assistant',
+    message: { id: `msg_${stopReason}`, content: Huge, stop_reason: stopReason }
+  });
+  const stopped = fixture([assistant('end_turn'), bigAssistant('tool_use')]);
+  t.after(() => fs.rmSync(stopped.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(stopped.file, { cache: new Map() }), false, 'the oversized assistant paused for tools');
+
+  const finished = fixture([assistant('tool_use'), bigAssistant('end_turn')]);
+  t.after(() => fs.rmSync(finished.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(finished.file, { cache: new Map() }), true, 'the oversized assistant finished the turn');
+
+  // A transcript being written right now has no trailing newline at all, so the
+  // oversized record ends at EOF rather than at a newline.
+  const unterminated = fixture([]);
+  t.after(() => fs.rmSync(unterminated.dir, { recursive: true, force: true }));
+  fs.writeFileSync(unterminated.file, bigAssistant('end_turn'));
+  assert.equal(readSessionTurnEnded(unterminated.file, { cache: new Map() }), true, 'an oversized record at EOF is still read');
+  fs.writeFileSync(unterminated.file, bigAssistant('tool_use'));
+  assert.equal(readSessionTurnEnded(unterminated.file, { cache: new Map() }), false, '...and its reason is the newer one');
+
   // The title still resolves from the same shared index, so asking for both
   // costs one pass rather than two.
   const both = fixture([

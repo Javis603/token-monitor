@@ -401,7 +401,28 @@ function decodeSessionAppend(filePath, buffer) {
 // record/frame remains eligible for retry.
 function readDshSessionState(filePath, previous = {}) {
   let stat;
-  try { stat = fs.statSync(filePath); } catch (_) { return { title: '', contextWindow: 0, contextTokens: 0, turnEnded: false, offset: 0, size: 0, mtimeMs: 0 }; }
+  try {
+    stat = fs.statSync(filePath);
+  } catch (_) {
+    // Reading the file failed, which is not evidence about the turn at all.
+    // It must not answer `false`: that value means "a turn is under
+    // way", and it is the only thing that can clear a `true` recorded by
+    // an earlier tick — so a transcript that was renamed, re-encoded or
+    // transiently unlinked would turn a finished session back into a
+    // running one. The state carried forward is kept as it was, and a cold
+    // read reports no boundary rather than inventing one. This matches what
+    // the read-failure path further down already does.
+    const carried = typeof previous?.turnEnded === 'boolean' ? previous.turnEnded : undefined;
+    return {
+      title: '',
+      contextWindow: 0,
+      contextTokens: 0,
+      ...(carried === undefined ? {} : { turnEnded: carried }),
+      offset: 0,
+      size: 0,
+      mtimeMs: 0
+    };
+  }
   const size = Number(stat.size) || 0;
   const mtimeMs = Number(stat.mtimeMs) || 0;
   const identity = dshSessionFileIdentity(stat);

@@ -501,3 +501,50 @@ test('indexDshSessionHeaders prefers the versioned transcript of a session', { s
   assert.equal(index.get('session-1').filePath, versioned, 'the live transcript must win over the stale copy');
   assert.equal(index.get('session-1').createdAt, 1750000000000);
 });
+
+// A stat failure is not evidence about the turn. Answering `false` there (which
+// is what this used to do) means "a turn is under way", and that is the only
+// value that can clear a `true` recorded by an earlier tick — so a transcript
+// that was renamed, re-encoded or transiently unlinked between ticks turned a
+// finished session back into a running one.
+test('readDshSessionState reports no boundary when the file cannot be read', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-stat-fail-'));
+  try {
+    const missing = path.join(root, 'gone.jsonl');
+
+    // A cold read has nothing to carry forward, so it must report unknown.
+    assert.equal(readDshSessionState(missing, {}).turnEnded, undefined);
+
+    // A read that fails after an earlier tick recorded a completion keeps that
+    // reading rather than overwriting it with a guess.
+    assert.equal(readDshSessionState(missing, { turnEnded: true, offset: 0, size: 0, mtimeMs: 0 }).turnEnded, true);
+    assert.equal(readDshSessionState(missing, { turnEnded: false, offset: 0, size: 0, mtimeMs: 0 }).turnEnded, false);
+
+    // The reachable sequence is discovered-then-vanished: the resolver only
+    // answers for a session whose file it has already indexed, so the second
+    // call is the one that used to report an active turn for a file it could
+    // no longer read.
+    const sessionMetadata = require('../../src/shared/providers/dsh/sessionMetadata');
+    const liveDir = path.join(root, '.dsh', 'sessions', 'proj', 'session-vanish');
+    fs.mkdirSync(liveDir, { recursive: true });
+    const live = path.join(liveDir, 'session.jsonl');
+    fs.writeFileSync(live, [
+      JSON.stringify({ type: 'session', id: 'session-vanish', createdAt: 1750000000000 }),
+      JSON.stringify({ type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } }),
+      JSON.stringify({ type: 'turn/end', seq: 2, time: 1, data: { turn: 1, reason: { kind: 'completed' } } }),
+      ''
+    ].join('\n'));
+    const resolve = () => sessionMetadata.resolveSessionMetadata(new Set(['session-vanish']), {
+      deps: {}, home: root, metadata: new Map(), now: Date.now(), resolveProjects: false,
+      projectIdentity: () => ({}),
+      isoFromDate: (d) => (Number.isFinite(Number(d)) && Number(d) > 0 ? new Date(Number(d)).toISOString() : '')
+    });
+    assert.equal(resolve().get('session-vanish').turnEnded, true, 'the completion is read from the file');
+    // The transcript is renamed or re-encoded between ticks.
+    fs.rmSync(live);
+    const after = resolve();
+    assert.notEqual(after.get('session-vanish')?.turnEnded, false, 'a file that vanished must not report an active turn');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

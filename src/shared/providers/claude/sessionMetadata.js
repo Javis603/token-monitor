@@ -86,8 +86,13 @@ function consumeMetadataBytes(state, chunk) {
   for (let index = 0; index < bytes.length; index += 1) {
     if (bytes[index] !== 0x0a) continue;
     if (state.droppingLongLine) {
-      // The record that just ended was oversized, so only its bounded head and
-      // tail were kept. The turn boundary still has to be read out of it.
+      // The bytes between the last cut and this newline belong to the record
+      // that is ending, so they are folded into the tail before it is read.
+      // Without this the scan saw only the stale tail, and a record closes
+      // with the field that matters: a 300 KiB assistant record puts its
+      // `stop_reason` in the next read chunk, so the previous reading
+      // survived and the row kept a turn state the transcript had replaced.
+      keepLongLineTail(state, bytes.subarray(lineStart, index));
       applyLongLineFragments(state);
       state.droppingLongLine = false;
     } else {
@@ -131,7 +136,13 @@ function scanRange(fd, start, length, state, fsApi) {
   // A complete final JSONL record is valid even when the writer omitted its
   // newline. Keep the bytes as trailing state too, so a partial concurrent
   // write can still be completed on the next append-only scan.
-  if (!state.droppingLongLine && state.trailing.length > 0) {
+  if (state.droppingLongLine) {
+    // The oversized record ended at EOF instead of at a newline, which is what
+    // a transcript being written right now looks like. Its boundary still has
+    // to be read, and the tail was already kept by the caller of this loop.
+    applyLongLineFragments(state);
+    state.droppingLongLine = false;
+  } else if (state.trailing.length > 0) {
     applyMetadataLine(state, state.trailing);
   }
 }
