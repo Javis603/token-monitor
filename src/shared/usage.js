@@ -628,8 +628,11 @@ function sessionFromRow(row) {
   // (coder, explore, general, mavis, verifier, worker). Carry the
   // agent name onto the session so daily-history-archive and the
   // sessions panel can split per-agent totals. Empty for every other
-  // client because their rows never set this field.
-  const agent = String(row.agent || row.agent_name || '').trim();
+  // client because their rows never set this field. normalizeDbRow
+  // in src/shared/providers/mavis/usage.js maps the SQLite
+  // `agent_name` column to a camelCase `agentName`, so that is the
+  // field name we look for here.
+  const agent = String(row.agentName || row.agent || '').trim();
   if (agent) session.agent = agent;
   let model = detectModel(row, client);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
