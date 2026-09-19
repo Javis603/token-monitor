@@ -152,8 +152,12 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   assert.match(sessions, /nameNode\.append\(document\.createTextNode\(name\)\)/);
   assert.doesNotMatch(css, /\.edge-dock-session\.is-running \.edge-dock-session-name\s*\{[^}]*color/);
   // Three states: a spinner while working, a check once the transcript said the
-  // turn finished, and a faint dot for a session that has gone quiet.
-  assert.match(css, /\.edge-dock-session-spin\s*\{[\s\S]*?color: var\(--success\)/);
+  // turn finished, and a faint dot for a session that has gone quiet. The
+  // running glyph is monochrome like the other two — its spokes animate, so the
+  // state is already being said — but it wears the card's primary ink rather
+  // than `--muted`, so the live row is not weighed the same as the finished one.
+  assert.match(css, /\.edge-dock-session-spin \{\n {2}background: currentColor;\n {2}color: var\(--text\);/);
+  assert.doesNotMatch(css, /\.edge-dock-session-spin \{[^}]*--success/);
   assert.match(css, /\.edge-dock-session-check\s*\{[\s\S]*?color: var\(--muted\)/);
   assert.match(css, /\.edge-dock-session-idle::before/);
   assert.match(css, /edge-dock-session-dot\[data-state="running"\] \.edge-dock-session-spin/);
@@ -175,6 +179,15 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   // The flare rides along with the spin rather than replacing it, and adds no
   // `infinite` of its own: a flare always means a write.
   assert.match(css, /\.edge-dock-session-dot\.pulse \.edge-dock-session-spin \{/);
+  // Its glow is neutral too, so the flare cannot be the loudest green thing in a
+  // card whose running state no longer uses green at all.
+  assert.match(css, /@keyframes edge-dock-session-pulse \{[\s\S]*?rgba\(var\(--overlay-rgb\), 0\.62\)/);
+  assert.doesNotMatch(css, /@keyframes edge-dock-session-pulse \{[^}]*--success-rgb/);
+  // Reduced motion swaps the spinner for a still dot, and it is the card's ink
+  // rather than a hue too: a solid dot beside the quiet rows' faint one is the
+  // reading, so the dock spends no colour on the running state anywhere.
+  assert.match(css, /data-state="running"\] \.edge-dock-session-idle::before,\n[\s\S]*?background: var\(--text\)/);
+  assert.doesNotMatch(css, /edge-dock-session-(spin|idle)[^;]*--success/);
   // The context reading carries a bar plus the number, and the tone rule is
   // keyed on headroom so a healthy reading stays neutral.
   assert.match(css, /edge-dock-session-context-meter/);

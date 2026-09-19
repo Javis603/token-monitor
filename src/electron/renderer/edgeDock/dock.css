@@ -430,13 +430,29 @@ html.edge-dock-no-material .edge-dock-shape-fill {
 
 /* Running: the only perpetual animation in the dock, and it is bounded by real
    work rather than by the card being open. The shape is the repo's own
-   actions/spinner.svg applied as a mask, matching the Sessions list and the
-   refresh button. Its rotation comes from that file's own SMIL; adding a CSS
-   rotation here would spin it twice, and the 45-degree symmetry of the glyph
-   makes a rigid rotation alias to roughly eight times the intended rate. */
+   actions/spinner.svg applied as a mask, the same asset the refresh button
+   masks. Its rotation comes from that file's own SMIL; adding a CSS rotation
+   here would spin it twice, and the 45-degree symmetry of the glyph makes a
+   rigid rotation alias to roughly eight times the intended rate.
+
+   Painted in the card's own ink rather than `--success`. The spokes fade in
+   sequence, so the glyph is never a still picture of a wheel and the motion
+   carries "working" by itself; a hue over the top of that says nothing the
+   motion has not already said, and the refresh button makes the same call — it
+   masks this asset in its own text colour too. Everything else in the column is
+   monochrome (the context gauge only leaves neutral for yellow or orange), so a
+   green wheel read as a different kind of thing set down among the text.
+
+   `--text` and not `--muted`: running is the state this column exists to report,
+   so it should not weigh the same as the ended check it replaces — bright and
+   moving, muted and still, faint and quiet, in that order.
+
+   The Sessions list keeps its green, which is not the same disagreement: there
+   the mark is a still 5px dot, where colour is all the "alive" it has. What the
+   two surfaces have to agree on is which state a session reads as. */
 .edge-dock-session-spin {
   background: currentColor;
-  color: var(--success);
+  color: var(--text);
   -webkit-mask: url("../icons/actions/spinner.svg") center / contain no-repeat;
   mask: url("../icons/actions/spinner.svg") center / contain no-repeat;
 }
@@ -459,14 +475,17 @@ html.edge-dock-no-material .edge-dock-shape-fill {
 }
 
 /* One-shot flare when the transcript actually grew, matching the Sessions list:
-   no `infinite` of its own, so the flare always means a write. */
+   no `infinite` of its own, so the flare always means a write. The glow is the
+   overlay colour rather than `--success-rgb`, so it stays the spinner's own
+   neutral — a green halo around a grey wheel would be the one thing in the card
+   louder than the state it is announcing. */
 .edge-dock-session-dot.pulse .edge-dock-session-spin {
   animation: edge-dock-session-pulse 1.2s ease-out;
 }
 @keyframes edge-dock-session-pulse {
-  0%   { filter: drop-shadow(0 0 2px rgba(var(--success-rgb), 0.45)); }
-  35%  { filter: drop-shadow(0 0 6px rgba(var(--success-rgb), 0.95)); }
-  100% { filter: drop-shadow(0 0 2px rgba(var(--success-rgb), 0.55)); }
+  0%   { filter: drop-shadow(0 0 2px rgba(var(--overlay-rgb), 0.30)); }
+  35%  { filter: drop-shadow(0 0 6px rgba(var(--overlay-rgb), 0.62)); }
+  100% { filter: drop-shadow(0 0 2px rgba(var(--overlay-rgb), 0.36)); }
 }
 .edge-dock-session-tokens { color: var(--text); font-size: 11.5px; text-align: right; }
 .edge-dock-session-meta {
@@ -757,15 +776,19 @@ html.edge-dock-reduced-motion .edge-dock-root * {
   transition: none !important;
 }
 /* The blanket rule above stops CSS animations but not the spinner's own SMIL, so
-   reduced motion swaps the spinner for a still dot. Tinted for the running
-   state, matching the Sessions list, so "working, held still" does not read as
-   "quiet". */
+   reduced motion swaps the spinner for a still dot. Solid in the card's own ink
+   rather than `--success`: the weight is what carries the state here, a solid dot
+   against the idle dot's 22% one, which is the same trade the spinner makes with
+   motion and needs no hue to make. The Sessions list paints its still dot green
+   because there it is the only mark a session ever gets — every other state
+   draws nothing — so the hue is what stops it reading as a stray dot. Here the
+   quiet rows keep their faint one, and the contrast is the reading. */
 html[data-reduce-motion="on"] .edge-dock-session-dot[data-state="running"] .edge-dock-session-spin,
 html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge-dock-session-spin { display: none; }
 html[data-reduce-motion="on"] .edge-dock-session-dot[data-state="running"] .edge-dock-session-idle,
 html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge-dock-session-idle { display: block; }
 html[data-reduce-motion="on"] .edge-dock-session-dot[data-state="running"] .edge-dock-session-idle::before,
-html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge-dock-session-idle::before { background: var(--success); }
+html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge-dock-session-idle::before { background: var(--text); }
 
 /* Text for assistive technology only. The session glyphs are decorative and
    their `title` reaches pointer users alone, so the translated state is
