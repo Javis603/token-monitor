@@ -1,0 +1,25 @@
+name: Web
+on:
+  pull_request:
+    paths: ['web/**', 'src/shared/**', '.github/workflows/web.yml']
+  push:
+    branches: [main]
+    paths: ['web/**', 'src/shared/**', '.github/workflows/web.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - run: npm run web:verify
+      - run: npm run web:build
