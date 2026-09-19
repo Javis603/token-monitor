@@ -11,6 +11,7 @@ const {
   homeDeviceRows,
   homeLimitAccounts,
   homeLimitAccountsForProviders,
+  homeLimitsAwaitingFirstData,
   homeModelRows,
   longRangePeakDayTokens,
   homeToolRows,
@@ -323,6 +324,36 @@ test('homeLimitAccountsForProviders includes Grok billing and DeepSeek balance r
   assert.deepEqual(rows[1].windows.map((window) => [window.kind, window.metric, window.label, window.remainingPercent, window.remaining, window.currency, window.value]), [
     ['billing', 'credits', 'Balance', 100, 4.61, 'CNY', '']
   ]);
+});
+
+test('homeLimitsAwaitingFirstData is false once every enabled provider has reported', () => {
+  const awaiting = homeLimitsAwaitingFirstData({
+    providers: [{ provider: 'claude' }, { provider: 'zai' }],
+    providerOptions: [{ id: 'claude' }, { id: 'zai' }],
+    enabledProviderIds: ['claude', 'zai']
+  });
+  assert.equal(awaiting, false);
+});
+
+test('homeLimitsAwaitingFirstData is true when an enabled provider has no entry yet (cold start)', () => {
+  const awaiting = homeLimitsAwaitingFirstData({
+    providers: [{ provider: 'claude' }],
+    providerOptions: [{ id: 'claude' }, { id: 'zai' }],
+    enabledProviderIds: ['claude', 'zai']
+  });
+  assert.equal(awaiting, true);
+});
+
+test('homeLimitsAwaitingFirstData is false when every candidate provider is hidden', () => {
+  // An empty enabledProviderIds means "no restriction" here, matching
+  // homeLimitAccountsForProviders' own convention -- hiding is what actually
+  // excludes a provider from the check.
+  assert.equal(homeLimitsAwaitingFirstData({
+    providers: [],
+    providerOptions: [{ id: 'claude' }],
+    enabledProviderIds: ['claude'],
+    hiddenProviderIds: ['claude']
+  }), false);
 });
 
 test('homeLimitAccountsForProviders includes MiMo Token Plan status and balance', () => {

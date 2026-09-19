@@ -7741,7 +7741,14 @@ function renderHomeLimitModule() {
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
-    empty.textContent = t('home.noLimits');
+    const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
+    const awaitingFirstData = homeOverviewApi.homeLimitsAwaitingFirstData({
+      providers: state.stats?.limits?.providers || [],
+      providerOptions: limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, providerOrder),
+      enabledProviderIds: Array.from(enabledLimitProviderSet()),
+      hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet())
+    });
+    empty.textContent = t(awaitingFirstData ? 'home.limitsInitializing' : 'home.noLimits');
     body.append(empty);
     return module;
   }
