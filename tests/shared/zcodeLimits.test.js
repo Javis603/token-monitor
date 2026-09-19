@@ -157,11 +157,11 @@ test('a disabled entry only blocks discovery when the account context is gone', 
 });
 
 test('discoverZcodeConnection follows a redirected data base dir', () => {
-  // ZCode resolves its base as ZCODE_DATA_BASE_DIR (Windows installs may
-  // also set ZCODE_WINDOWS_APP_INSTALL_DIR), then HOME, then os.homedir().
-  // The fixture keys on the full joined path, so a regression that drops
-  // the env redirect (reads $HOME/.zcode/v2 instead) misses the fixture
-  // and this test fails — a basename-only fixture cannot tell them apart.
+  // ZCode resolves its base as ZCODE_DATA_BASE_DIR, then HOME, then
+  // os.homedir(). The fixture keys on the full joined path, so a regression
+  // that drops the env redirect (reads $HOME/.zcode/v2 instead) misses the
+  // fixture and this test fails — a basename-only fixture cannot tell them
+  // apart.
   const env = { ZCODE_DATA_BASE_DIR: '/opt/zcode-data' };
   const reads = [];
   const track = (readFileSync) => (filePath) => {
@@ -175,12 +175,19 @@ test('discoverZcodeConnection follows a redirected data base dir', () => {
     `expected a read under /opt/zcode-data, got ${reads.join(', ')}`
   );
 
+  // ZCODE_WINDOWS_APP_INSTALL_DIR is not part of that chain: the app declares
+  // the constant and nothing reads it, so an install that sets it must still
+  // resolve the data base from the home dir rather than from the install dir.
   reads.length = 0;
   const windowsDeps = { readFileSync: track(fileSystem(HAPPY_FILES)), homeDir: 'C:\\Users\\test', env: { ZCODE_WINDOWS_APP_INSTALL_DIR: 'D:\\zcode' } };
   assert.equal(discoverZcodeConnection({}, windowsDeps).kind, 'start-billing');
   assert.ok(
-    reads.some((p) => p === path.join('D:\\zcode', '.zcode', 'v2', 'setting.json')),
-    `expected a read under D:\\zcode, got ${reads.join(', ')}`
+    reads.some((p) => p === path.join('C:\\Users\\test', '.zcode', 'v2', 'setting.json')),
+    `expected a read under the home dir, got ${reads.join(', ')}`
+  );
+  assert.ok(
+    !reads.some((p) => String(p).startsWith('D:\\zcode')),
+    `expected no read under the install dir, got ${reads.join(', ')}`
   );
 });
 

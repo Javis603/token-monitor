@@ -187,12 +187,16 @@ function billingCredential(provider) {
   return null;
 }
 
-// ZCode resolves its data base as env ZCODE_DATA_BASE_DIR (Windows installs
-// may also set ZCODE_WINDOWS_APP_INSTALL_DIR), then HOME, then os.homedir()
-// — join(<base>, '.zcode', 'v2'). Mirrors that chain so an env-redirected
-// install is found, the same way CODEX_HOME redirects the Codex roots.
+// ZCode resolves its data base as env ZCODE_DATA_BASE_DIR, then HOME, then
+// os.homedir() — join(<base>, '.zcode', 'v2'). Mirrors that chain so an
+// env-redirected install is found, the same way CODEX_HOME redirects the Codex
+// roots. ZCODE_WINDOWS_APP_INSTALL_DIR is deliberately absent from it: ZCode
+// declares that constant and nothing reads it (verified in 3.12.3 and 3.14.0,
+// in the app and in the CLI it bundles), and it names the install directory
+// rather than the data base — honouring it would look in the wrong place on a
+// Windows install that sets it and lose the lane silently.
 function zcodeDataBaseDir(env = process.env, homeDir = os.homedir()) {
-  const fromEnv = String(env.ZCODE_DATA_BASE_DIR || env.ZCODE_WINDOWS_APP_INSTALL_DIR || '').trim();
+  const fromEnv = String(env.ZCODE_DATA_BASE_DIR || '').trim();
   if (fromEnv) return fromEnv;
   return String(env.HOME || '').trim() || homeDir;
 }
