@@ -118,11 +118,11 @@ function timestampValue(value) {
 // The runtime sanitizes the titles it writes through the prompt path (secret
 // redaction, whitespace collapse, 200-character cap), but its persistence layer
 // accepts any string — `setTitle` stores the caller's value verbatim — so this
-// reader owns the display cleaning, the way every resolver does: collapse the
-// whitespace a hand-edited or future-client document may carry, and cap the
-// length the shared scan path already caps titles at (usage.js caps at 160 code
-// points, so a row never sees a longer name from either source).
-const TITLE_MAX_CODE_POINTS = 160;
+// reader owns the display cleaning: collapse the whitespace a hand-edited or
+// future-client document may carry, and cap the length at the same 96 code
+// points the claude and codex resolvers use, since a name is only ever read
+// from the runtime's own summary or a user rename.
+const TITLE_MAX_CODE_POINTS = 96;
 
 function cleanTitle(value) {
   if (typeof value !== 'string') return '';
@@ -208,6 +208,7 @@ function resolveSessionMetadata(sessionIds, context) {
 }
 
 module.exports = {
+  TITLE_MAX_CODE_POINTS,
   kimiCodeSessionsHome,
   kimiWorkSessionsRoots,
   readKimiSessionStateFiles,
