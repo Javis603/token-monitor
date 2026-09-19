@@ -79,7 +79,8 @@ const {
   createSelfSyncThrottle,
   createSourceSyncQueue,
   mergeSelfSyncSelection,
-  SELF_SYNC_KINDS
+  SELF_SYNC_KINDS,
+  SYNC_MIN_INTERVAL_MS
 } = require('./selfSyncThrottle');
 const {
   LIMITS_RESET_BOUNDARY_MAX_TIMER_MS,
@@ -1190,25 +1191,29 @@ async function collectUsageOnce(options) {
     try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
   };
   if (normalizedClients) {
-    const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
-    await maybeSyncCursor(syncClients, options.logger, {
-      minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'cursor'),
-      signal: options.signal,
-      timeoutMs: options.selfSyncTimeoutMs,
-      terminationOptions: options.subprocessTerminationOptions,
-      onTerminationUnconfirmed: () => reportTerminationUnconfirmed('cursor-sync'),
-      onFailure: options.onSelfSyncFailed
-    });
-    await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
-      minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'antigravity'),
-      run: options.runAntigravitySync,
-      syncLockPath: options.antigravitySyncLockPath,
-      signal: options.signal,
-      timeoutMs: options.selfSyncTimeoutMs,
-      terminationOptions: options.subprocessTerminationOptions,
-      onTerminationUnconfirmed: () => reportTerminationUnconfirmed('antigravity-sync'),
-      onFailure: options.onSelfSyncFailed
-    });
+    if (options.skipSelfSync !== true) {
+      const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
+      await maybeSyncCursor(syncClients, options.logger, {
+        minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'cursor'),
+        signal: options.signal,
+        timeoutMs: options.selfSyncTimeoutMs,
+        terminationOptions: options.subprocessTerminationOptions,
+        onTerminationUnconfirmed: () => reportTerminationUnconfirmed('cursor-sync'),
+        onAttempt: options.onSelfSyncAttempt,
+        onFailure: options.onSelfSyncFailed
+      });
+      await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
+        minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'antigravity'),
+        run: options.runAntigravitySync,
+        syncLockPath: options.antigravitySyncLockPath,
+        signal: options.signal,
+        timeoutMs: options.selfSyncTimeoutMs,
+        terminationOptions: options.subprocessTerminationOptions,
+        onTerminationUnconfirmed: () => reportTerminationUnconfirmed('antigravity-sync'),
+        onAttempt: options.onSelfSyncAttempt,
+        onFailure: options.onSelfSyncFailed
+      });
+    }
     throwIfAborted(options.signal);
     if (includesProma && (!targetRequested || targetClients.includes('proma'))) {
       try {
@@ -3047,6 +3052,14 @@ function startCollector(options) {
   let debounceTimer = null;
   let intervalTimer = null;
   let stopped = false;
+  // The widget can show a complete local scan before a cache-backed provider's
+  // optional sync finishes. Once that first record is published, a targeted tick
+  // refreshes only the self-synced clients and reconciles their today partitions.
+  let startupSelfSyncPending = false;
+  // A targeted refresh can satisfy one deferred client before the catch-up tick;
+  // keep the remaining clients separate so they are not synced twice.
+  let startupSelfSyncPendingClients = new Set();
+  let startupSelfSyncRetryTimer = null;
   let lastTickAttemptAt = 0;
   let lastTickSuccessAt = 0;
   let lastTickFailureAt = 0;
@@ -3112,6 +3125,45 @@ function startCollector(options) {
       return 'targeted';
     }
     return tickOptions.todayOnly === true ? 'today' : 'full';
+  }
+
+  function startupSelfSyncRetryDelayMs() {
+    let waitMs = 0;
+    const home = options.homeDir || os.homedir();
+    for (const client of startupSelfSyncPendingClients) {
+      // No Antigravity source means there is no sync work to wait for.
+      if (client === 'antigravity' && !antigravityDataPresent(home)) continue;
+      waitMs = Math.max(
+        waitMs,
+        selfSyncThrottle.msUntilDue(client, SYNC_MIN_INTERVAL_MS)
+      );
+    }
+    return waitMs > 0
+      ? clampTimerDelayMs(Math.max(watchDebounceMs, waitMs), watchDebounceMs)
+      : 0;
+  }
+
+  function scheduleStartupSelfSync() {
+    if (stopped || !startupSelfSyncPending || startupSelfSyncRetryTimer || tickInFlight) return;
+    const delayMs = startupSelfSyncRetryDelayMs();
+    if (delayMs === 0) {
+      const sourceSelfSync = sourceSyncQueue.takeDue();
+      const targetClients = [...new Set([
+        ...startupSelfSyncPendingClients,
+        ...(sourceSelfSync || [])
+      ])];
+      void runTick('startup-self-sync', {
+        todayOnly: true,
+        targetClients,
+        forceSelfSync: [...startupSelfSyncPendingClients],
+        ...(sourceSelfSync ? { sourceSelfSync } : {})
+      });
+      return;
+    }
+    startupSelfSyncRetryTimer = setTimeout(() => {
+      startupSelfSyncRetryTimer = null;
+      scheduleStartupSelfSync();
+    }, delayMs);
   }
 
   function timestampOrNull(value) {
@@ -3220,6 +3272,9 @@ function startCollector(options) {
     const targetAnchorReady = canTargetTodayPartitions(anchor, requestedTargetClients);
     const anchored = Boolean(tickOptions.todayOnly && anchor && anchor.dateKey === todayKey);
     const refreshWsl = Boolean(tickOptions.refreshWsl);
+    const skipSelfSync = options.deferSelfSyncOnStartup === true && !initialCollectionComplete;
+    const selfSyncAttempted = new Set();
+    const selfSyncFailed = new Set();
     const hadPreviousFailure = tickHadFailure;
     lastTickAttemptAt = tickStartedAt;
     lastTickReasonCode = tickReasonCode(reason);
@@ -3254,15 +3309,20 @@ function startCollector(options) {
         } : null,
         forceSelfSync: tickOptions.forceSelfSync ?? null,
         sourceSelfSync: tickOptions.sourceSelfSync ?? null,
+        skipSelfSync,
         reasonixNativeSessionsEnabled,
         reasonixNativeSessionCache,
+        onSelfSyncAttempt: (kind) => selfSyncAttempted.add(kind),
         // Both selections name clients whose pending source event this tick has
         // already consumed — the queue's drain for one, its acknowledgement for
         // the other — so either is a legitimate restore.
-        onSelfSyncFailed: (kind) => sourceSyncQueue.restore(
-          mergeSelfSyncSelection(tickOptions.sourceSelfSync, tickOptions.acknowledgedSourceSync) || [],
-          kind
-        ),
+        onSelfSyncFailed: (kind) => {
+          selfSyncFailed.add(kind);
+          sourceSyncQueue.restore(
+            mergeSelfSyncSelection(tickOptions.sourceSelfSync, tickOptions.acknowledgedSourceSync) || [],
+            kind
+          );
+        },
         targetClients: anchored && targetAnchorReady ? requestedTargetClients : [],
         todayOnlyAnchor: anchored ? anchor : null,
         wslAnchor: anchored ? wslAnchor : null,
@@ -3435,6 +3495,27 @@ function startCollector(options) {
         collectedActivityRevision = Math.max(collectedActivityRevision, tickOptions.activityRevision);
         initialCollectionComplete = true;
       }
+      if (!skipSelfSync && startupSelfSyncPending) {
+        const home = options.homeDir || os.homedir();
+        for (const client of startupSelfSyncPendingClients) {
+          if (selfSyncFailed.has(client)) continue;
+          if (
+            selfSyncAttempted.has(client)
+            || (client === 'antigravity' && !antigravityDataPresent(home))
+          ) {
+            startupSelfSyncPendingClients.delete(client);
+          }
+        }
+        startupSelfSyncPending = startupSelfSyncPendingClients.size > 0;
+        if (!startupSelfSyncPending && startupSelfSyncRetryTimer) {
+          clearTimeout(startupSelfSyncRetryTimer);
+          startupSelfSyncRetryTimer = null;
+        }
+      }
+      if (skipSelfSync && selfSyncedClients.length > 0) {
+        startupSelfSyncPendingClients = new Set(selfSyncedClients);
+        startupSelfSyncPending = true;
+      }
       return true;
     } catch (error) {
       if (stopped) return;
@@ -3559,6 +3640,7 @@ function startCollector(options) {
         pendingWaiters = [];
         resolveWaiters(waiters, false);
       }
+      if (!stopped && startupSelfSyncPending) scheduleStartupSelfSync();
     }
   }
 
@@ -3784,6 +3866,10 @@ function startCollector(options) {
     runtimeAbortController.abort(new Error('collector stopped'));
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
+    if (startupSelfSyncRetryTimer) {
+      clearTimeout(startupSelfSyncRetryTimer);
+      startupSelfSyncRetryTimer = null;
+    }
     clearRolloverHistoryRetry();
     sourceSyncQueue.stop();
     closeWatchers({ skipClose: options.skipCloseWatchers === true });
