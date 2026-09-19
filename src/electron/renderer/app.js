@@ -4894,6 +4894,15 @@ const {
   spendWindow
 } = window.TokenMonitorLimitBalanceDisplay;
 
+const { limitWindowLabel } = window.TokenMonitorLimitWindowLabels;
+
+// The name of one of `provider`'s windows. Only the kind-derived defaults live
+// in the shared helper; a provider that names its pool something of its own
+// ("Credits", "Token Spend") still passes that in as the fallback.
+function providerWindowLabel(provider, window, fallback = '') {
+  return limitWindowLabel(provider?.provider, window, fallback);
+}
+
 function optionalFiniteNumber(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
@@ -5238,17 +5247,17 @@ function renderProviderWindows(provider, color) {
       ? []
       : (provider.windows || []).filter((window) => window?.additional === true);
     if (session) {
-      const sessionNode = limitWindowNode(session.label || 'Session', session, color, 0.95);
+      const sessionNode = limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95);
       if (!weekly && !monthly) sessionNode.classList.add('limit-window-wide');
       windows.append(sessionNode);
     }
     if (weekly) {
-      const weeklyNode = limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68);
+      const weeklyNode = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68);
       if (!session && !monthly) weeklyNode.classList.add('limit-window-wide');
       windows.append(weeklyNode);
     }
     if (monthly) {
-      const monthlyNode = limitWindowNode(monthly.label || 'Monthly', monthly, color, 0.68);
+      const monthlyNode = limitWindowNode(providerWindowLabel(provider, monthly), monthly, color, 0.68);
       monthlyNode.classList.add('limit-window-wide');
       windows.append(monthlyNode);
     }
@@ -5305,7 +5314,7 @@ function renderProviderWindows(provider, color) {
       const weeklyWindows = windowsForKind(provider, 'weekly');
       const visibleWindows = weeklyWindows.length > 0 ? weeklyWindows : [null];
       for (const quotaWindow of visibleWindows) {
-        const node = limitWindowNode(quotaWindow?.label || 'Weekly', quotaWindow, color, 0.78);
+        const node = limitWindowNode(providerWindowLabel(provider, quotaWindow, 'Weekly'), quotaWindow, color, 0.78);
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
@@ -5318,11 +5327,11 @@ function renderProviderWindows(provider, color) {
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
     const monthly = windowForKind(provider, 'billing');
-    if (session) windows.append(limitWindowNode('Session', session, color, 0.95));
-    if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
+    if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
+    if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
     // Monthly spans the full row (like Balance) so it never leaves a half-empty grid cell.
     if (monthly) {
-      const node = limitWindowNode('Monthly', monthly, color, 0.5);
+      const node = limitWindowNode(providerWindowLabel(provider, monthly), monthly, color, 0.5);
       node.classList.add('limit-window-wide');
       windows.append(node);
     }
@@ -5481,7 +5490,7 @@ function renderProviderWindows(provider, color) {
     windows.classList.add('limit-windows-grok');
     const monthly = windowForKind(provider, 'billing');
     if (monthly) {
-      const node = limitWindowNode(monthly.label || 'Monthly', monthly, color, 0.68);
+      const node = limitWindowNode(providerWindowLabel(provider, monthly), monthly, color, 0.68);
       node.classList.add('limit-window-wide');
       windows.append(node);
     }
@@ -5489,7 +5498,7 @@ function renderProviderWindows(provider, color) {
     windows.classList.add('limit-windows-copilot');
     const billingWindows = windowsForKind(provider, 'billing');
     for (const billing of billingWindows) {
-      const node = limitWindowNode(billing?.label || 'Monthly', billing, color, 0.68);
+      const node = limitWindowNode(providerWindowLabel(provider, billing), billing, color, 0.68);
       node.classList.add('limit-window-wide');
       windows.append(node);
     }
@@ -5523,7 +5532,7 @@ function renderProviderWindows(provider, color) {
     const monthlyWindows = billingWindows.filter((window) => !window?.metric && !window?.limitId);
     const balanceWindow = (provider.windows || []).find((window) => window?.metric === 'credits');
     const nodes = [
-      session && limitWindowNode(session.label || '5-hour', session, color, 0.95),
+      session && limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95),
       ...dailyWindows.map((window, index) => limitWindowNode(
         window.label || (dailyWindows.length > 1 ? `Daily ${index + 1}` : 'Daily'),
         window,
@@ -5532,7 +5541,7 @@ function renderProviderWindows(provider, color) {
         null,
         window.detail || formatZcodeTokensDetail(window)
       )),
-      weekly && limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68),
+      weekly && limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68),
       ...planBuckets.map((window) => limitWindowNode(
         window.label || 'Start Plan',
         window,
@@ -5573,10 +5582,10 @@ function renderProviderWindows(provider, color) {
     const weekly = windowForKind(provider, 'weekly');
     const monthly = windowForKind(provider, 'billing');
     const nodes = [
-      session && limitWindowNode(session.label || '5-hour', session, color, 0.95),
-      daily && limitWindowNode('Daily', daily, color, 0.78),
+      session && limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95),
+      daily && limitWindowNode(providerWindowLabel(provider, daily), daily, color, 0.78),
       weekly && limitWindowNode('Weekly', weekly, color, 0.68),
-      monthly && limitWindowNode('Monthly', monthly, color, 0.68)
+      monthly && limitWindowNode(providerWindowLabel(provider, monthly), monthly, color, 0.68)
     ].filter(Boolean);
     if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
     windows.append(...nodes);
@@ -5651,18 +5660,18 @@ function renderProviderWindows(provider, color) {
     const fiveHour = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
     if (fiveHour) {
-      const node = limitWindowNode('5-hour', fiveHour, color, 0.95);
+      const node = limitWindowNode(providerWindowLabel(provider, fiveHour), fiveHour, color, 0.95);
       if (!weekly) node.classList.add('limit-window-wide');
       windows.append(node);
     }
     if (weekly) {
-      const node = limitWindowNode('Weekly', weekly, color, 0.68);
+      const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68);
       if (!fiveHour) node.classList.add('limit-window-wide');
       windows.append(node);
     }
     for (const credits of windowsForKind(provider, 'billing')) {
       const node = limitWindowNode(
-        credits.label || 'Monthly',
+        providerWindowLabel(provider, credits),
         credits,
         color,
         0.5,
@@ -5680,18 +5689,18 @@ function renderProviderWindows(provider, color) {
     const weekly = windowForKind(provider, 'weekly');
     const monthly = windowForKind(provider, 'billing');
     if (fiveHour) {
-      const node = limitWindowNode(fiveHour.label || '5-hour', fiveHour, color, 0.95);
+      const node = limitWindowNode(providerWindowLabel(provider, fiveHour), fiveHour, color, 0.95);
       if (!weekly) node.classList.add('limit-window-wide');
       windows.append(node);
     }
     if (weekly) {
-      const node = limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68);
+      const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68);
       if (!fiveHour) node.classList.add('limit-window-wide');
       windows.append(node);
     }
     if (monthly) {
       const node = limitWindowNode(
-        monthly.label || 'Monthly',
+        providerWindowLabel(provider, monthly),
         monthly,
         color,
         0.5,
@@ -5710,21 +5719,21 @@ function renderProviderWindows(provider, color) {
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
     if (billing) {
-      const node = limitWindowNode(billing.label || 'Monthly', billing, color, 0.68);
+      const node = limitWindowNode(providerWindowLabel(provider, billing), billing, color, 0.68);
       node.classList.add('limit-window-wide');
       windows.append(node);
     }
     if (session) {
-      const node = limitWindowNode(session.label || '5-hour', session, color, 0.95);
+      const node = limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95);
       if (!weekly) node.classList.add('limit-window-wide');
       windows.append(node);
     }
-    if (weekly) windows.append(limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68));
+    if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
   } else if (provider.provider === 'ollama') {
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
     if (session) {
-      const node = limitWindowNode('Session', session, color, 0.95);
+      const node = limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95);
       if (!weekly) node.classList.add('limit-window-wide');
       windows.append(node);
     }
@@ -5735,9 +5744,9 @@ function renderProviderWindows(provider, color) {
     // weekly the response actually has, and nothing when a bucket is absent — no
     // empty placeholder — so the scoped bar appears only while the promo is live.
     const session = windowForKind(provider, 'session');
-    if (session) windows.append(limitWindowNode(session.label || 'Session', session, color, 0.95));
+    if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
     for (const weekly of windowsForKind(provider, 'weekly')) {
-      const node = limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68);
+      const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68);
       // The all-models weekly pairs with Session in the two-column grid; a
       // model-scoped weekly (the "Fable only" promo cap) has no partner, so span
       // the full row instead of leaving a half-empty cell.
@@ -5764,8 +5773,8 @@ function renderProviderWindows(provider, color) {
     // session + weekly pair and any future session/weekly provider.)
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
-    if (session) windows.append(limitWindowNode(session.label || 'Session', session, color, 0.95));
-    if (weekly) windows.append(limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68));
+    if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
+    if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
   }
   return windows;
 }

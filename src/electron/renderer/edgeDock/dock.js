@@ -16,6 +16,7 @@ const balanceDisplay = window.TokenMonitorLimitBalanceDisplay;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const limitPresentationApi = window.TokenMonitorLimitProviderPresentation;
+const limitWindowLabels = window.TokenMonitorLimitWindowLabels;
 const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 const { clientColors } = window.TokenMonitorUsageCharts;
 const { LIMIT_PROVIDER_LABELS } = window.TokenMonitorLimitProviders;
@@ -246,10 +247,8 @@ function windowValueText(window) {
   return `${Math.round(shown)}% ${showUsed ? 'used' : 'left'}`;
 }
 
-const WINDOW_KIND_LABELS = { session: 'Session', daily: 'Daily', weekly: 'Weekly', billing: 'Monthly' };
-
-function windowLabel(window) {
-  return window.label || WINDOW_KIND_LABELS[window.kind] || 'Limit';
+function windowLabel(providerId, window) {
+  return limitWindowLabels.limitWindowLabel(providerId, window, 'Limit');
 }
 
 function boundaryText(window) {
@@ -519,12 +518,12 @@ function meterNode(window, color) {
   return meter;
 }
 
-function windowNode(window, color, labelOverride = '') {
+function windowNode(providerId, window, color, labelOverride = '') {
   const node = el('div', 'edge-dock-window');
   const head = el('div', 'edge-dock-window-head');
   const value = el('span', 'edge-dock-window-value', windowValueText(window));
   value.dataset.severity = displaySeverity(window.remainingPercent);
-  head.append(el('span', 'edge-dock-window-label', labelOverride || windowLabel(window)), value);
+  head.append(el('span', 'edge-dock-window-label', labelOverride || windowLabel(providerId, window)), value);
   node.append(head);
   if (window.remainingPercent !== null && window.remainingPercent !== undefined) node.append(meterNode(window, color));
   const boundary = boundaryText(window);
@@ -559,14 +558,14 @@ function pairable(window) {
     && window.remainingPercent !== null && window.remainingPercent !== undefined;
 }
 
-function windowGrid(entries, color) {
+function windowGrid(providerId, entries, color) {
   const grid = el('div', 'edge-dock-windows');
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index];
     const next = entries[index + 1];
-    const node = windowNode(entry.window, color, entry.label);
+    const node = windowNode(providerId, entry.window, color, entry.label);
     if (next && pairable(entry.window) && pairable(next.window)) {
-      grid.append(node, windowNode(next.window, color, next.label));
+      grid.append(node, windowNode(providerId, next.window, color, next.label));
       index += 1;
     } else {
       node.classList.add('is-wide');
@@ -576,17 +575,17 @@ function windowGrid(entries, color) {
   return grid;
 }
 
-function appendWindows(block, windows, color) {
+function appendWindows(block, providerId, windows, color) {
   const groups = windowGroups(windows);
   if (!groups) {
-    block.append(windowGrid(windows.map((window) => ({ window, label: '' })), color));
+    block.append(windowGrid(providerId, windows.map((window) => ({ window, label: '' })), color));
     return;
   }
   for (const [label, entries] of groups) {
     const group = el('div', 'edge-dock-window-group');
     group.append(
       el('div', 'edge-dock-window-group-title', label),
-      windowGrid(entries.map((entry) => ({ window: entry.window, label: entry.label.windowLabel })), color)
+      windowGrid(providerId, entries.map((entry) => ({ window: entry.window, label: entry.label.windowLabel })), color)
     );
     block.append(group);
   }
@@ -854,7 +853,7 @@ function providerCard(cell) {
     if (account.status === 'stale') block.append(el('div', 'edge-dock-note is-warning', t('edgeDock.stale')));
     const windows = account.windows || [];
     if (windows.length) {
-      appendWindows(block, windows, color);
+      appendWindows(block, cell.provider, windows, color);
     } else if (account.status !== 'ok') {
       block.append(el('div', 'edge-dock-note', t('edgeDock.unavailable')));
     }

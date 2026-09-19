@@ -10,6 +10,7 @@ const compactTokenApi = require('../../src/shared/compactTokens');
 const limitProviderOrderApi = require('../../src/electron/renderer/limitProviderOrder');
 const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
+const { limitWindowLabel } = require('../../src/shared/limitWindowLabels');
 
 const {
   antigravityQuotaWindow,
@@ -906,7 +907,7 @@ test('Grok renders its single Monthly billing window full-width instead of an em
 
   assert.match(renderProviderWindows, /provider\.provider === 'grok'/);
   assert.match(renderProviderWindows, /windowForKind\(provider, 'billing'\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\(monthly\.label \|\| 'Monthly', monthly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, monthly\), monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /limit-window-wide/);
 });
 
@@ -1098,8 +1099,8 @@ test('Ollama renders Session and Weekly usage windows', () => {
   assert.match(renderProviderWindows, /provider\.provider === 'ollama'/);
   assert.match(renderProviderWindows, /windowForKind\(provider, 'session'\)/);
   assert.match(renderProviderWindows, /windowForKind\(provider, 'weekly'\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\('Session', session/);
-  assert.match(renderProviderWindows, /limitWindowNode\('Weekly', weekly/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, session\), session/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, weekly\), weekly/);
 });
 
 test('Volcengine renders quota windows as paired rows with an odd final window full-width', () => {
@@ -1111,10 +1112,10 @@ test('Volcengine renders quota windows as paired rows with an odd final window f
   assert.match(renderProviderWindows, /const daily = windowForKind\(provider, 'daily'\);/);
   assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
   assert.match(renderProviderWindows, /const monthly = windowForKind\(provider, 'billing'\);/);
-  assert.match(renderProviderWindows, /limitWindowNode\(session\.label \|\| '5-hour', session, color, 0\.95\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\('Daily', daily, color, 0\.78\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\('Weekly', weekly, color, 0\.68\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\('Monthly', monthly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, session\), session, color, 0\.95\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, daily\), daily, color, 0\.78\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, weekly\), weekly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, monthly\), monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /if \(nodes\.length % 2 === 1\) nodes\.at\(-1\)\.classList\.add\('limit-window-wide'\)/);
   assert.match(renderProviderWindows, /windows\.append\(\.\.\.nodes\)/);
 });
@@ -1132,6 +1133,7 @@ test('Z.ai and Team keep all billing windows and render MCP full width after pai
       windowForKind: (p, kind) => p.windows.find(w => w.kind === kind),
       windowsForKind: (p, kind) => p.windows.filter(w => w.kind === kind),
       limitWindowNode: (label, window, _color, _tone, _value, detail) => Object.assign(makeNode(), { label, window, detail }),
+      providerWindowLabel: (p, window, fallback = '') => limitWindowLabel(p?.provider, window, fallback),
       provider: { provider, windows: [
         { kind: 'weekly', label: 'Weekly' },
         { kind: 'billing', label: 'MCP' },
@@ -1163,7 +1165,7 @@ test('Copilot renders monthly Premium and Chat quotas as billing windows', () =>
   assert.match(renderProviderWindows, /provider\.provider === 'copilot'/);
   assert.match(renderProviderWindows, /const billingWindows = windowsForKind\(provider, 'billing'\);/);
   assert.match(renderProviderWindows, /for \(const billing of billingWindows\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\(billing\?\.label \|\| 'Monthly', billing, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, billing\), billing, color, 0\.68\)/);
 });
 
 test('Codex renders Monthly quota and manual reset credits below rolling windows', () => {
@@ -1190,7 +1192,7 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(renderProviderWindows, /const monthly = codexCanonicalWindow\(provider, 'billing'\);/);
   assert.match(renderProviderWindows, /if \(!weekly && !monthly\) sessionNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(renderProviderWindows, /if \(!session && !monthly\) weeklyNode\.classList\.add\('limit-window-wide'\);/);
-  assert.match(renderProviderWindows, /limitWindowNode\(monthly\.label \|\| 'Monthly', monthly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, monthly\), monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /monthlyNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(main, /showCodexAdditionalLimits: true/);
   assert.match(main, /showCodexAdditionalLimits = parseBoolean\(merged\.showCodexAdditionalLimits, true\)/);
