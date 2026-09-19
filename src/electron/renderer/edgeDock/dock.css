@@ -274,16 +274,15 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   position: relative;
   padding-top: 10px;
 }
-/* The forecast is a section of the card too, so the card draws it a separator
-   as well. The page only draws one inside a provider group (styles.css
-   `.limit-row-group > .codex-reset-forecast::before`), and a card showing a
-   single account has no group — so the card covers both shapes here, and the
-   rule above the forecast cannot be there for several accounts and missing for
-   one. The forecast keeps its own 8px of top padding rather than the 10px an
-   `.edge-dock-sessions` block sits under, which is what the page's group rule
-   leaves it at, so one account and several read alike either way. */
-.edge-dock-sessions::before,
-.edge-dock-accounts > .limit-row > .codex-reset-forecast::before {
+/* One separator, declared once: the rule above the reset forecast is the Limits
+   view's (styles.css `.codex-reset-forecast::before`), and this page loads that
+   stylesheet, so the card is covered by it in both shapes — a single account and
+   a group. The card used to compensate here for a page rule scoped to
+   `.limit-row-group`, which is exactly the kind of second copy that drifts. The
+   forecast keeps its own 8px of top padding rather than the 10px an
+   `.edge-dock-sessions` block sits under, so the gap below the line is the
+   page's either way. */
+.edge-dock-sessions::before {
   position: absolute;
   top: 0;
   right: 0;

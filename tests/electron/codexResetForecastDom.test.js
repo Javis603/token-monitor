@@ -42,7 +42,14 @@ test('single and multi-account Codex rows render one forecast entry', () => {
   assert.match(styles, /\.codex-reset-forecast \{/);
   assert.match(styles, /\.limit-row:has\(> \.codex-reset-forecast\)\s*\{[^}]*padding-bottom: 7px;/s);
   assert.doesNotMatch(styles, /\.codex-reset-forecast\s*\{[^}]*border-top:/s);
-  assert.match(styles, /\.limit-account-row \+ \.limit-account-row::before,\s*\.limit-row-group > \.codex-reset-forecast::before\s*\{[^}]*linear-gradient/s);
+  // Unscoped, because the forecast has exactly two parents — a solo row and a
+  // group — and it is appended to neither as an account row, so one selector
+  // reaches every shape it is drawn in. Scoping it to the group is what made the
+  // rule appear under several accounts and go missing under one; the dock card,
+  // which is built on this same row, then showed only the missing half. The
+  // card's half of that is asserted in edgeDock.test.js.
+  assert.match(styles, /\.limit-account-row \+ \.limit-account-row::before,\s*\.codex-reset-forecast::before\s*\{[^}]*linear-gradient/s);
+  assert.doesNotMatch(styles, /\.limit-row-group > \.codex-reset-forecast/);
 });
 
 test('forecast details use the shared accessible tooltip without repeating third-party copy in the row', () => {

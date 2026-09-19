@@ -82,20 +82,19 @@ test('the card edge spends none of the quota row separator the page needs', () =
   assert.match(rule[1], /padding-bottom: 0;/);
 });
 
-test('a single-account card keeps the rule above the Codex forecast', () => {
-  // The page draws that rule only inside a provider group, and a card with one
-  // account has no group — so the card has to draw its own, or the separator
-  // under the quota rows appears for two Codex accounts and disappears for one.
-  // The page's half of this is asserted in codexResetForecastDom.test.js.
-  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
-  const rule = css.match(/^\.edge-dock-accounts > \.limit-row > \.codex-reset-forecast::before\s*\{([^}]*)\}/m);
-  assert.ok(rule, 'the card must draw the separator the page only draws in a group');
-  assert.match(rule[1], /linear-gradient/);
-  assert.match(rule[1], /rgba\(var\(--line-rgb\), 0\.075\) 22%/);
-  // Reached from the row rather than from the group class: the group is exactly
-  // the shape that does not need this rule, so requiring it would put the line
-  // back to being a multi-account-only affordance.
-  assert.doesNotMatch(rule[0], /limit-row-group/);
+test('the card takes the forecast separator from the page instead of redrawing it', () => {
+  // The rule above the reset forecast belongs to the Limits view — styles.css
+  // draws it for both of the shapes the forecast is appended to — and the card
+  // is built on that same row in a document that loads that stylesheet, so the
+  // card needs no rule of its own. A second copy is only a thing to drift: the
+  // page's rule used to be scoped to `.limit-row-group`, and the card's own copy
+  // existed to cover the single-account shape that scoping left out.
+  const css = readRendererFile(path.join('edgeDock', 'dock.css')).replace(/\/\*[\s\S]*?\*\//g, ' ');
+  assert.doesNotMatch(css, /\.codex-reset-forecast::before/);
+  assert.match(
+    readRendererFile(path.join('edgeDock', 'index.html')),
+    /<link rel="stylesheet" href="\.\.\/styles\.css" \/>/
+  );
 });
 
 test('the Sessions list uses a plain dot, not the dock card glyph stack', () => {
