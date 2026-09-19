@@ -420,33 +420,38 @@ function liveDayIsGreater(incoming, previous) {
 // Cursor cost along, and a graph day kept because the aggregate cost happened
 // to tie must still take a price only the liveDay has. Qoder also refreshes its
 // missing-price provenance from the graph; other clients retain their rules.
-function withReconciledCurrentCosts(day, graphDay, liveDay) {
+function withReconciledCurrentCosts(day, graphDay, liveDay, freshGraphDay) {
   let changed = false;
   const observations = Object.fromEntries(Object.entries(day.observations).map(([key, observation]) => {
     const graphObservation = graphDay.observations[key];
     const liveObservation = liveDay.observations[key];
+    const freshGraphObservation = freshGraphDay?.observations?.[key];
     const client = normalizeTokscaleClientName(observation.client);
-    if (!graphObservation
-      || !liveObservation
-      || num(graphObservation.tokens) !== num(liveObservation.tokens)) {
-      return [key, observation];
-    }
     // Qoder's graph is rebuilt with the current pricing lookup, while liveDay
     // is a durable snapshot. For the exact same usage the graph is therefore
     // authoritative even when the resolved price is a legitimate zero. Copy
     // its known subtotal and replace (or clear) the old missing-price marker.
-    if (client === 'qodercn') {
-      const graphUnpriced = Math.min(num(graphObservation.tokens), Math.max(0, num(graphObservation.unpricedTokens)));
-      const sameCost = num(graphObservation.cost) === num(observation.cost);
+    if (client === 'qodercn'
+      && freshGraphObservation
+      && liveObservation
+      && num(freshGraphObservation.tokens) === num(liveObservation.tokens)
+      && num(observation.tokens) === num(freshGraphObservation.tokens)
+      && (Object.prototype.hasOwnProperty.call(freshGraphObservation, 'unpricedTokens')
+        || Object.prototype.hasOwnProperty.call(liveObservation, 'unpricedTokens'))) {
+      const graphUnpriced = Math.min(num(freshGraphObservation.tokens), Math.max(0, num(freshGraphObservation.unpricedTokens)));
+      const sameCost = num(freshGraphObservation.cost) === num(observation.cost);
       const sameUnpriced = graphUnpriced === num(observation.unpricedTokens);
       if (sameCost && sameUnpriced) return [key, observation];
       changed = true;
-      const next = { ...observation, cost: graphObservation.cost };
+      const next = { ...observation, cost: freshGraphObservation.cost };
       if (graphUnpriced > 0) next.unpricedTokens = graphUnpriced;
       else delete next.unpricedTokens;
       return [key, next];
     }
-    if (client !== 'cursor') return [key, observation];
+    if (client !== 'cursor'
+      || !graphObservation
+      || !liveObservation
+      || num(graphObservation.tokens) !== num(liveObservation.tokens)) return [key, observation];
     const cost = num(graphObservation.cost) > 0 ? graphObservation.cost : liveObservation.cost;
     if (num(cost) === num(observation.cost)) return [key, observation];
     changed = true;
@@ -530,7 +535,8 @@ function graphTimeMetrics(graphs, activeTimeMs) {
 }
 
 function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
-  const currentDays = observationsFromGraphs(graphs);
+  const freshDays = observationsFromGraphs(graphs);
+  const currentDays = new Map(freshDays);
   const normalizedArchive = normalizeDailyHistoryArchive(archive);
   const todayKey = String(options.todayKey || '').slice(0, 10);
   const hasTodayKey = DAY_KEY_RE.test(todayKey);
@@ -546,7 +552,7 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
       currentDays.set(date, liveDay);
     } else {
       const selected = liveDayIsGreater(liveDay, previous) ? mergeLiveDayMetadata(liveDay, previous) : previous;
-      currentDays.set(date, withReconciledCurrentCosts(selected, previous, liveDay));
+      currentDays.set(date, withReconciledCurrentCosts(selected, previous, liveDay, freshDays.get(date)));
     }
   }
 
