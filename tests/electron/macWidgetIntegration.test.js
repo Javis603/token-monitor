@@ -785,6 +785,23 @@ test('each Widget family has a purpose-built composition', () => {
   assert.match(widgetDashboardSource, /\(width\|height\)=\["'\]1em\["'\]/);
 });
 
+test('macOS Widget model vendor marks cover the Kimi coding-plan ids', () => {
+  // The widget classifies raw model names itself (the snapshot ships display
+  // names), so its Kimi rule has to stay in step with the renderer's
+  // modelVendorFor — the `k2d6-agent`/`k3-agent` forms whose suffix is
+  // alphanumeric, plus the bare `k2`/`k3` coding-plan ids behind a delimited
+  // token test.
+  assert.match(
+    widgetDashboardSource,
+    /value\.contains\("kimi"\) \|\| value\.contains\("moonshot"\) \|\| value\.contains\("k2d6-agent"\) \|\| value\.contains\("k3-agent"\) \|\| hasDelimitedKimiCodingPlanID\(value\)/
+  );
+  assert.match(
+    widgetDashboardSource,
+    /private static func hasDelimitedKimiCodingPlanID\(_ value: String\) -> Bool \{[\s\S]{0,140}containsDelimitedToken\("k2", in: value\) \|\| containsDelimitedToken\("k3", in: value\)/
+  );
+  assert.match(widgetDashboardSource, /private static func containsDelimitedToken\(_ needle: String, in haystack: String\) -> Bool \{/);
+});
+
 test('macOS Widget packaging keeps the canonical Token Monitor app identity', () => {
   assert.equal(packageJson.scripts['mac:local'], undefined);
   assert.equal(packageJson.scripts['mac:local:open'], undefined);

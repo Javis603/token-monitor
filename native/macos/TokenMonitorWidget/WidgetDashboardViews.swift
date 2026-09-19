@@ -641,9 +641,36 @@ enum WidgetVendorIdentity {
         if value.contains("llama") || value.contains("meta") { return "meta" }
         if value.contains("mistral") || value.contains("mixtral") || value.contains("codestral") { return "mistral" }
         if value.contains("qwen") { return "qwen" }
-        if value.contains("kimi") || value.contains("moonshot") { return "kimi" }
+        if value.contains("kimi") || value.contains("moonshot") || value.contains("k2d6-agent") || value.contains("k3-agent") || hasDelimitedKimiCodingPlanID(value) { return "kimi" }
         if value.contains("glm") || value.contains("zai") { return "zai" }
         return "default"
+    }
+
+    /// Kimi's coding-plan catalog also serves bare `k2`/`k3` ids with no `kimi`
+    /// prefix (`k3`, `k3-256k`), so the substring tests above cannot see them.
+    /// The delimited-token rule mirrors Tokscale's provider identity: the token
+    /// must be bounded by non-alphanumeric ASCII. `k2d6-agent`/`k3-agent` stay
+    /// explicit for the same reason as in the renderer — their suffix is
+    /// alphanumeric, so they are not delimited.
+    private static func hasDelimitedKimiCodingPlanID(_ value: String) -> Bool {
+        containsDelimitedToken("k2", in: value) || containsDelimitedToken("k3", in: value)
+    }
+
+    private static func containsDelimitedToken(_ needle: String, in haystack: String) -> Bool {
+        var searchStart = haystack.startIndex
+        while let found = haystack.range(of: needle, range: searchStart..<haystack.endIndex) {
+            let beforeOK = found.lowerBound == haystack.startIndex
+                || !isASCIIAlphanumeric(haystack[haystack.index(before: found.lowerBound)])
+            let afterOK = found.upperBound == haystack.endIndex
+                || !isASCIIAlphanumeric(haystack[found.upperBound])
+            if beforeOK && afterOK { return true }
+            searchStart = haystack.index(after: found.lowerBound)
+        }
+        return false
+    }
+
+    private static func isASCIIAlphanumeric(_ character: Character) -> Bool {
+        character.isASCII && (character.isLetter || character.isNumber)
     }
 
     static func iconName(for vendorID: String) -> String {

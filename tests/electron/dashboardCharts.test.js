@@ -58,6 +58,15 @@ test('modelVendorFor maps families and modelColor falls back deterministically',
   assert.equal(modelVendorFor('k2d6-agent'), 'kimi');
   assert.equal(modelVendorFor('k3-agent'), 'kimi');
   assert.equal(modelVendorFor('k3-agent-swarm'), 'kimi');
+  // Kimi's coding-plan catalog serves bare `k2`/`k3` ids with no `kimi` prefix,
+  // and the token has to stay delimited so a name that merely contains one is
+  // left unclassified.
+  assert.equal(modelVendorFor('k3'), 'kimi');
+  assert.equal(modelVendorFor('k3-256k'), 'kimi');
+  assert.equal(modelVendorFor('kimi/k3-256k'), 'kimi');
+  assert.equal(modelVendorFor('kimi-for-coding'), 'kimi');
+  assert.equal(modelVendorFor('sk3-256k'), null);
+  assert.equal(modelVendorFor('k3flash'), null);
   assert.equal(modelVendorFor('doubao-seed-1.6'), 'doubao');
   assert.equal(modelVendorFor('hy3'), 'hunyuan');
   assert.equal(modelVendorFor('hy4-preview'), 'hunyuan');
