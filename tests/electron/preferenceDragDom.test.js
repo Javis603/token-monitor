@@ -488,7 +488,7 @@ test('main section holds views; appearance is its own section; window holds beha
   // hidden so an unknown platform never flashes an unsupported control.
   assert.match(presenceGroup, /id="hideAppIconRow"[^>]*class="[^"]*hidden"/);
   const app = readRendererFile('app.js');
-  assert.match(app, /const supported = platform === 'win32' \|\| platform === 'darwin';/);
+  assert.match(app, /const supported = platform === 'win32' \|\| platform === 'linux' \|\| platform === 'darwin';/);
   assert.match(app, /const applies = supported && showTrayIcon && !trayMode;/);
   assert.doesNotMatch(
     presenceGroup,

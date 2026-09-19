@@ -23,6 +23,8 @@ const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
+const { normalizeCodexAccountAliases } = require('../shared/accountDisplayPreferences');
+const { RESIZE_EDGES, resizeBounds } = require('./windowResize');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
 const { runAntigravityOAuthLogin } = require('./providers/antigravity/oauthLogin');
@@ -33,6 +35,7 @@ const {
 } = require('./providers/workbuddy/localAuth');
 const { createElectronLimitsFetch } = require('./limitsFetch');
 const {
+  checkpointWindowState,
   expandedBoundsForCollapse,
   normalWindowBounds,
   persistWindowState,
@@ -379,6 +382,12 @@ const {
 } = require('./nativeMaterialVisibility');
 
 if (!app.isPackaged) loadDotEnv();
+// WSLg can expose a GPU device that Chromium repeatedly fails to initialize,
+// leaving only the transparent frameless window outline. Keep software
+// rendering opt-in so normal desktop installs retain hardware acceleration.
+if (parseBoolean(process.env.TOKEN_MONITOR_DISABLE_HARDWARE_ACCELERATION, false)) {
+  app.disableHardwareAcceleration();
+}
 
 const APP_NAME = 'Token Monitor';
 const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
@@ -401,6 +410,7 @@ function appWindowIcon() {
 
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
+const WINDOW_BOUNDS_CHECKPOINT_MS = 10 * 1000;
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
 const CSP_HEADER = [
   "default-src 'self'",
@@ -433,6 +443,7 @@ const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends']
 const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
 
 let mainWindow = null;
+let windowResizeState = null;
 let mainWindowNativeBlurEnabled = false;
 let dashboardWindow = null;
 let dashboardWindowNativeBlurEnabled = false;
@@ -581,6 +592,8 @@ function defaultSettings() {
     cursorManualAccountIds: [],
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
+    hideLimitAccountEmails: false,
+    codexAccountAliases: {},
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
     // The key OpenCode stores for itself needs no setup, so tracking it is the
     // default. This turns that off for a machine that is signed in to an account
@@ -2131,6 +2144,7 @@ function restoredBounds() {
 }
 
 let persistBoundsTimer = null;
+let windowBoundsCheckpointTimer = null;
 let floatingBubbleAutoCollapseTimer = null;
 const floatingBubbleState = { collapsed: false, side: null, collapsedBounds: null, expandedBounds: null, suppressNextCollapse: false, contentSize: null };
 let mainWindowChrome = { collapsedFloatingBubble: false };
@@ -2138,6 +2152,20 @@ let mainWindowChrome = { collapsedFloatingBubble: false };
 function stopPersistBoundsTimer() {
   if (persistBoundsTimer) clearTimeout(persistBoundsTimer);
   persistBoundsTimer = null;
+}
+
+function checkpointMainWindowBounds() {
+  return checkpointWindowState(mainWindow, settings, saveSettings, floatingBubbleState);
+}
+
+function startWindowBoundsCheckpoints() {
+  if (windowBoundsCheckpointTimer) clearInterval(windowBoundsCheckpointTimer);
+  windowBoundsCheckpointTimer = setInterval(checkpointMainWindowBounds, WINDOW_BOUNDS_CHECKPOINT_MS);
+}
+
+function stopWindowBoundsCheckpoints() {
+  if (windowBoundsCheckpointTimer) clearInterval(windowBoundsCheckpointTimer);
+  windowBoundsCheckpointTimer = null;
 }
 
 function floatingBubblePayload() {
@@ -2627,6 +2655,8 @@ function readSettings() {
       merged.serviceStatusRefreshMs = normalizeServiceStatusRefreshMs(saved.serviceStatusRefreshMs);
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
+    merged.codexAccountAliases = normalizeCodexAccountAliases(merged.codexAccountAliases);
+    merged.hideLimitAccountEmails = parseBoolean(merged.hideLimitAccountEmails, false);
     merged.antigravityManagedAccounts = normalizeAntigravityManagedAccounts(merged.antigravityManagedAccounts);
     merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
     if (saved.keepAboveTaskbar !== undefined) {
@@ -2951,9 +2981,15 @@ function applyWindowSettings() {
     mainWindow.setIgnoreMouseEvents(behavior.mousePassthrough);
   }
   if (typeof mainWindow.setFocusable === 'function') mainWindow.setFocusable(behavior.focusable);
-  if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(skipTaskbarForSettings(settings));
+  applySkipTaskbar(mainWindow);
   if (!behavior.focusable && typeof mainWindow.blur === 'function') mainWindow.blur();
   syncTaskbarZOrder();
+}
+
+function applySkipTaskbar(target = mainWindow) {
+  if (!target || target.isDestroyed()) return;
+  if (typeof target.setSkipTaskbar !== 'function') return;
+  target.setSkipTaskbar(floatingBubbleState.collapsed || skipTaskbarForSettings(settings));
 }
 
 function nativeBlurEnabled(source = settings) {
@@ -6680,7 +6716,14 @@ function createWindow(boundsOverride, options = {}) {
   });
   win.on('resized', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
   win.on('moved', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
-  win.on('show', syncTaskbarZOrder);
+  win.on('show', () => {
+    // Linux window managers apply skip-taskbar to a mapped window. WSLg also
+    // recreates the Windows-side shell surface while showing it, so repeat the
+    // setting once that surface exists instead of relying only on construction.
+    applySkipTaskbar(win);
+    setTimeout(() => applySkipTaskbar(win), 150);
+    syncTaskbarZOrder();
+  });
   win.on('restore', syncTaskbarZOrder);
   win.on('hide', stopTaskbarZOrderKeeper);
   win.on('minimize', stopTaskbarZOrderKeeper);
@@ -6954,6 +6997,7 @@ app.whenReady().then(() => {
   });
   applyMacActivationPolicy();
   createWindow();
+  startWindowBoundsCheckpoints();
   syncLoginItemSettingFromOs();
   configureWindowToggleShortcut();
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
@@ -7205,6 +7249,8 @@ app.whenReady().then(() => {
       limitsRefreshMs: normalizeLimitsRefreshMs(patch.limitsRefreshMs ?? settings.limitsRefreshMs),
       showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
+      hideLimitAccountEmails: parseBoolean(patch.hideLimitAccountEmails ?? settings.hideLimitAccountEmails, false),
+      codexAccountAliases: normalizeCodexAccountAliases(patch.codexAccountAliases ?? settings.codexAccountAliases),
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
       codexResetForecastEnabled: parseBoolean(patch.codexResetForecastEnabled ?? settings.codexResetForecastEnabled, false),
       showCodexAdditionalLimits: parseBoolean(patch.showCodexAdditionalLimits ?? settings.showCodexAdditionalLimits, true),
@@ -7392,6 +7438,33 @@ app.whenReady().then(() => {
   });
   ipcMain.on('window:viewState', (_event, patch) => {
     updateRendererViewState(patch);
+  });
+  ipcMain.on('window:resizeBegin', (event, edge, point) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const behavior = describeWindowBehavior(settings);
+    if (win !== mainWindow || !behavior.resizable || mainWindowChrome.collapsedFloatingBubble) return;
+    if (win.isDestroyed() || win.isMaximized() || win.isFullScreen()) return;
+    if (!RESIZE_EDGES.has(edge) || !Number.isFinite(point?.x) || !Number.isFinite(point?.y)) return;
+    windowResizeState = {
+      sender: event.sender,
+      win,
+      edge,
+      origin: { x: Number(point.x), y: Number(point.y) },
+      bounds: win.getBounds()
+    };
+  });
+  ipcMain.on('window:resizeUpdate', (event, point) => {
+    const active = windowResizeState;
+    if (!active || active.sender !== event.sender || active.win.isDestroyed()) return;
+    if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)) return;
+    const bounds = resizeBounds(active.bounds, active.edge, {
+      x: Number(point.x) - active.origin.x,
+      y: Number(point.y) - active.origin.y
+    }, WINDOW_LIMITS);
+    if (bounds) active.win.setBounds(bounds);
+  });
+  ipcMain.on('window:resizeEnd', (event) => {
+    if (windowResizeState?.sender === event.sender) windowResizeState = null;
   });
   ipcMain.handle('floatingBubble:expand', () => expandFloatingBubble());
   ipcMain.handle('floatingBubble:peek', () => expandFloatingBubble({ focus: false }));
@@ -8673,6 +8746,8 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 // for and deliberately no preventDefault: taking the quit over would cancel an
 // OS-initiated logout or restart on macOS.
 app.on('before-quit', () => {
+  checkpointMainWindowBounds();
+  stopWindowBoundsCheckpoints();
   quitRequested = true;
   antigravityOAuthLoginController?.abort();
   resetMacWidgetReloadThrottle();

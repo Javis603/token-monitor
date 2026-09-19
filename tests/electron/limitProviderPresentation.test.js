@@ -3353,6 +3353,7 @@ test('the settings row is titled by account and carries the plan name in its met
       account,
       state: { settings: {} },
       subscriptionProviderLabel: (id) => id,
+      limitAccountTitle: (_id, entry) => entry?.accountName || entry?.accountEmail || '',
       accountIdentityApi: {
         accountTitleLabel: (entry) => entry?.accountName || entry?.accountEmail || ''
       }
@@ -3376,6 +3377,7 @@ test('the settings row is titled by account and carries the plan name in its met
       account,
       state: { settings: {} },
       subscriptionProviderLabel: (id) => id,
+      limitAccountTitle: (_id, entry) => entry?.accountName || entry?.accountEmail || '',
       accountIdentityApi: {
         accountTitleLabel: (entry) => entry?.accountName || entry?.accountEmail || ''
       },

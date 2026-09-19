@@ -18,6 +18,9 @@ const {
 const TITLE_FUNCTIONS = [
   'limitAccountTitle',
   'limitAccountEmailsMasked',
+  'limitAccountEmailsHidden',
+  'accountWithoutEmail',
+  'codexAccountAlias',
   'limitAccountDefaultTitle',
   'codexAccountTitle',
   'opencodeAccountTitle',
@@ -65,10 +68,10 @@ function runTitle(source, expression, context = {}) {
   return vm.runInNewContext(`${snippets.join('\n')}\n${expression}`, context);
 }
 
-function titleContext(maskLimitAccountEmails) {
+function titleContext(maskLimitAccountEmails, settings = {}) {
   return {
     accountIdentityApi: { accountEmailLabel, accountTitleLabel, codexAccountDisplayLabel, maskEmailAddress },
-    state: { settings: { maskLimitAccountEmails } },
+    state: { settings: { maskLimitAccountEmails, ...settings } },
     t: (key) => (key === 'settings.codex.personalWorkspace' ? 'Personal' : key)
   };
 }
@@ -114,6 +117,33 @@ test('account email masking is applied by the shared limits title resolver', () 
   );
 });
 
+test('account email hiding removes the address and Codex aliases take precedence', () => {
+  const app = readRendererFile('app.js');
+  const provider = "{ provider: 'codex', accountKey: 'sha256:work', accountEmail: 'private@example.com' }";
+
+  assert.equal(
+    runTitle(app, `limitAccountTitle('codex', ${provider}, 0)`, titleContext(false, {
+      hideLimitAccountEmails: true
+    })),
+    'Account 1'
+  );
+  assert.equal(
+    runTitle(app, `limitAccountTitle('codex', ${provider}, 0)`, titleContext(false, {
+      hideLimitAccountEmails: true,
+      codexAccountAliases: { 'sha256:work': '工作账号' }
+    })),
+    '工作账号'
+  );
+  assert.equal(
+    runTitle(
+      app,
+      "limitAccountTitle('claude', { accountEmail: 'private@example.com' }, 0)",
+      titleContext(false, { hideLimitAccountEmails: true })
+    ),
+    'Account 1'
+  );
+});
+
 // The Home cards used to keep their own provider branches and leaked raw Claude
 // addresses while the limits panel masked them. Every provider now resolves
 // through one table, and a provider that is missing from it must still mask.
@@ -154,10 +184,13 @@ test('title resolution matches between the limits panel and Home', () => {
   }
   assert.match(app, /limitAccountTitle\(providerId, provider, index, providers\)/);
   assert.match(app, /limitAccountTitle\(id, provider, index, providerEntries\)/);
-  // The tray renders account text outside the title resolver, so it reads the
-  // same setting rather than its own.
+  // The tray uses the shared resolver for fully hidden labels and the same
+  // masking preference for its already-resolved account text.
   const customTrayLayout = balancedBlock(app, 'function renderCustomTrayLayout(');
-  assert.match(customTrayLayout, /item\.metric === 'account'\s*&& limitAccountEmailsMasked\(\)/);
+  assert.match(
+    customTrayLayout,
+    /limitAccountEmailsHidden\(\)[\s\S]*limitAccountTitle\(provider\.provider, provider, 0, \[provider\]\)[\s\S]*limitAccountEmailsMasked\(\)/
+  );
   assert.match(customTrayLayout, /state\.codexActiveAccount\?\.accountKey/);
   assert.match(customTrayLayout, /\[selectedCodexKey, detectedCodexKey\]\.find/);
   assert.match(customTrayLayout, /activeAccountKeys: activeCodexKey \? \{ codex: activeCodexKey \} : \{\}/);

@@ -364,6 +364,7 @@ const els = {
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
+  hideLimitAccountEmailsInput: document.getElementById('hideLimitAccountEmailsInput'),
   fixedPeriodMessage: document.getElementById('fixedPeriodMessage'),
   toolDetailFooter: document.getElementById('toolDetailFooter'),
   toolDetailFooterTokens: document.getElementById('toolDetailFooterTokens'),
@@ -3016,14 +3017,15 @@ function limitProvidersForSubscriptions() {
 function subscriptionAccountChoices() {
   const visible = limitProvidersForSubscriptions()
     .filter((provider) => provider?.provider && provider.status !== 'notConfigured');
-  return visible.map((provider, index) => ({
-    provider,
-    value: subscriptionAccountValue(provider),
-    label: accountIdentityApi.accountTitleLabel(provider, visible, {
-      maskEmail: state.settings?.maskLimitAccountEmails === true,
-      index
-    }) || subscriptionProviderLabel(provider.provider)
-  }));
+  return visible.map((provider) => {
+    const peers = visible.filter((candidate) => candidate.provider === provider.provider);
+    return {
+      provider,
+      value: subscriptionAccountValue(provider),
+      label: limitAccountTitle(provider.provider, provider, peers.indexOf(provider), peers)
+        || subscriptionProviderLabel(provider.provider)
+    };
+  });
 }
 
 function subscriptionAccountValue(provider) {
@@ -3504,9 +3506,7 @@ function subscriptionRowAccountLabel(subscription, account) {
     accountName: subscription.binding?.profileName,
     accountEmail: subscription.binding?.accountEmail
   };
-  return accountIdentityApi.accountTitleLabel(identity, [identity], {
-    maskEmail: state.settings?.maskLimitAccountEmails === true
-  });
+  return limitAccountTitle(subscription.provider, identity, 0, [identity]);
 }
 
 function subscriptionRowMeta(subscription, account) {
@@ -5198,12 +5198,32 @@ function renderLimitProviderHead(id, label, provider, color, options = {}) {
   // which would move the ✓ onto the wrong one.
   const activeCodexAccount = options.showActiveBadge && codexActiveAccountMatchesProvider(provider);
   const switchAccount = options.allowSystemSwitch && !activeCodexAccount ? codexSwitchAccountForProvider(provider) : null;
+  const switchAccountLabel = codexAccountAlias(switchAccount)
+    || (limitAccountEmailsHidden()
+      ? t('settings.codex.accountFallback', { number: Number(options.accountIndex || 0) + 1 })
+      : (limitAccountEmailsMasked()
+        ? accountIdentityApi.maskEmailAddress(switchAccount?.email)
+        : switchAccount?.email))
+    || t('settings.codex.unnamedAccount');
   name.append(codexAccountControl.render({
     titleNode: title,
     active: Boolean(activeCodexAccount),
     switchAccount: window.tokenMonitor?.codex?.switchSystemAccount ? switchAccount : null,
-    accountLabel: switchAccount?.email || ''
+    accountLabel: switchAccountLabel
   }));
+  if (options.allowAccountRename && provider?.provider === 'codex' && provider.accountKey) {
+    const rename = document.createElement('button');
+    rename.type = 'button';
+    rename.className = 'limit-account-rename';
+    rename.textContent = '\u270e';
+    rename.dataset.tooltip = t('limits.codex.renameAccount');
+    rename.setAttribute('aria-label', rename.dataset.tooltip);
+    rename.addEventListener('click', (event) => {
+      event.stopPropagation();
+      void renameCodexAccount(provider, Number(options.accountIndex || 0));
+    });
+    name.append(rename);
+  }
   titleBlock.append(name);
   // The multi-account group header has no quota of its own, and its accounts can
   // update at different times (different devices too), so it omits the meta line
@@ -6099,21 +6119,48 @@ function limitAccountTitle(id, provider, index, providerEntries = [provider]) {
     : limitAccountDefaultTitle(provider, index, providerEntries);
 }
 
-// maskLimitAccountEmails is display-only: it hides the address on the limits
-// surfaces without changing what is collected, synced, or stored.
+// Email privacy is display-only: it never changes the identity used for account
+// matching, collection, sync, or storage.
 function limitAccountEmailsMasked() {
   return state.settings?.maskLimitAccountEmails === true;
 }
 
+function limitAccountEmailsHidden() {
+  return state.settings?.hideLimitAccountEmails === true;
+}
+
+function accountWithoutEmail(account) {
+  if (!account || !limitAccountEmailsHidden()) return account;
+  const copy = { ...account };
+  delete copy.email;
+  delete copy.accountEmail;
+  const name = String(copy.accountName || '').trim();
+  if (name.includes('@')) delete copy.accountName;
+  return copy;
+}
+
+function codexAccountAlias(provider) {
+  const accountKey = String(provider?.accountKey || '').trim();
+  return accountKey
+    ? String(state.settings?.codexAccountAliases?.[accountKey] || '').trim()
+    : '';
+}
+
 function limitAccountDefaultTitle(provider, index, providerEntries = [provider]) {
-  return accountIdentityApi.accountTitleLabel(provider, providerEntries, {
+  const visibleProvider = accountWithoutEmail(provider);
+  const visibleEntries = providerEntries.map(accountWithoutEmail);
+  return accountIdentityApi.accountTitleLabel(visibleProvider, visibleEntries, {
     maskEmail: limitAccountEmailsMasked(),
     index
   }) || `Account ${index + 1}`;
 }
 
 function codexAccountTitle(provider, index, providers = [provider]) {
-  const label = accountIdentityApi.codexAccountDisplayLabel(provider, providers, {
+  const alias = codexAccountAlias(provider);
+  if (alias) return alias;
+  const visibleProvider = accountWithoutEmail(provider);
+  const visibleProviders = providers.map(accountWithoutEmail);
+  const label = accountIdentityApi.codexAccountDisplayLabel(visibleProvider, visibleProviders, {
     maskEmail: limitAccountEmailsMasked(),
     index,
     // Limits presents raw account data such as email and Plus/Pro labels, so
@@ -6124,6 +6171,76 @@ function codexAccountTitle(provider, index, providers = [provider]) {
   // Never fall back to the plan label here — "Plus" as a title reads like an
   // account name. The plan still shows on the right via limitProviderPlan().
   return `Account ${index + 1}`;
+}
+
+function requestCodexAccountAlias(provider, index, currentAlias) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    const form = document.createElement('form');
+    const heading = document.createElement('strong');
+    const description = document.createElement('p');
+    const input = document.createElement('input');
+    const actions = document.createElement('div');
+    const cancel = document.createElement('button');
+    const save = document.createElement('button');
+
+    dialog.className = 'account-alias-dialog';
+    form.className = 'account-alias-dialog-form';
+    form.method = 'dialog';
+    heading.textContent = t('limits.codex.renameAccount');
+    description.textContent = t('limits.codex.renamePrompt', {
+      account: currentAlias || codexAccountTitle(provider, index)
+    });
+    input.type = 'text';
+    input.className = 'account-alias-input';
+    input.maxLength = 80;
+    input.value = currentAlias;
+    input.autocomplete = 'off';
+    input.setAttribute('aria-label', heading.textContent);
+    actions.className = 'account-alias-dialog-actions';
+    cancel.type = 'submit';
+    cancel.value = 'cancel';
+    cancel.className = 'account-alias-cancel';
+    cancel.textContent = t('settings.common.cancel');
+    save.type = 'submit';
+    save.value = 'save';
+    save.className = 'account-alias-save';
+    save.textContent = t('settings.common.save');
+    actions.append(cancel, save);
+    form.append(heading, description, input, actions);
+    dialog.append(form);
+    document.body.append(dialog);
+    dialog.addEventListener('close', () => {
+      const result = dialog.returnValue === 'save' ? input.value : null;
+      dialog.remove();
+      resolve(result);
+    }, { once: true });
+    dialog.showModal();
+    requestAnimationFrame(() => {
+      input.focus();
+      input.select();
+    });
+  });
+}
+
+async function renameCodexAccount(provider, index = 0) {
+  const accountKey = String(provider?.accountKey || '').trim();
+  if (!accountKey || document.querySelector('.account-alias-dialog')) return;
+  const currentAlias = codexAccountAlias(provider);
+  const nextValue = await requestCodexAccountAlias(provider, index, currentAlias);
+  if (nextValue === null) return;
+  const alias = String(nextValue)
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim()
+    .slice(0, 80);
+  const aliases = { ...(state.settings?.codexAccountAliases || {}) };
+  if (alias) aliases[accountKey] = alias;
+  else delete aliases[accountKey];
+  await saveSettings({ codexAccountAliases: aliases });
+  renderCodexAccounts();
+  renderSubscriptionSettings();
+  refreshTrayComposers();
+  void maybeUpdateBarsIcon();
 }
 
 function renderCodexAccountGroup(label, providers, color) {
@@ -6141,6 +6258,8 @@ function renderCodexAccountGroup(label, providers, color) {
       accountRow: true,
       accountTitle: true,
       allowSystemSwitch: true,
+      allowAccountRename: Boolean(provider.accountKey),
+      accountIndex: index,
       showActiveBadge: true,
       showIcon: false
     }));
@@ -6172,7 +6291,10 @@ function renderClaudeAccountGroup(label, providers, color) {
 }
 
 function mimoSettingsAccountTitle(account, index) {
-  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
+  const email = String(account?.accountEmail || '').trim();
+  if (limitAccountEmailsHidden()) return `Account ${index + 1}`;
+  return (limitAccountEmailsMasked() ? accountIdentityApi.maskEmailAddress(email) : email)
+    || `Account ${index + 1}`;
 }
 
 function renderMimoAccountGroup(label, providers, color) {
@@ -6493,6 +6615,8 @@ function renderLimits() {
     settings: [
       state.settings?.showLimitSource === true,
       state.settings?.maskLimitAccountEmails === true,
+      state.settings?.hideLimitAccountEmails === true,
+      state.settings?.codexAccountAliases || {},
       state.settings?.showLimitUsed === true,
       state.settings?.showToolIcons !== false,
       state.settings?.claudePrepaidBalanceEnabled !== false,
@@ -6569,7 +6693,13 @@ function renderLimits() {
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
     const thirdPartyVisual = id === 'thirdparty' ? thirdPartyAdapterVisual(provider, color) : null;
     const rowOptions = id === 'codex'
-      ? { accountTitle: true, allowSystemSwitch: true }
+      ? {
+          accountTitle: true,
+          allowSystemSwitch: true,
+          allowAccountRename: Boolean(provider?.accountKey),
+          accountIndex: 0,
+          ...(codexAccountAlias(provider) ? { title: codexAccountAlias(provider) } : {})
+        }
       : id === 'thirdparty'
         ? {
             planText: thirdPartyPlanText(provider),
@@ -9979,12 +10109,11 @@ let settingsDomSyncPending = false;
 // checked state is kept in settings so the preference survives the excursion.
 function syncHideAppIconControl(showTrayIcon, trayMode) {
   if (!els.hideAppIconInput) return;
-  // Windows drops the entry through setSkipTaskbar() and macOS through the
-  // accessory activation policy. Electron exposes neither on Linux — the
-  // toggle would save and change nothing — so the row is not offered there,
-  // and starts hidden until appInfo says which platform this is.
+  // Windows and Linux drop the entry through setSkipTaskbar(), while macOS
+  // uses the accessory activation policy. The row starts hidden until appInfo
+  // says which platform this is.
   const platform = state.appInfo?.platform;
-  const supported = platform === 'win32' || platform === 'darwin';
+  const supported = platform === 'win32' || platform === 'linux' || platform === 'darwin';
   const applies = supported && showTrayIcon && !trayMode;
   els.hideAppIconInput.checked = applies && state.settings.hideAppIcon === true;
   els.hideAppIconRow?.classList.toggle('hidden', !applies);
@@ -10031,6 +10160,8 @@ function syncSettingsForm() {
   }
   els.showLimitSourceInput.checked = Boolean(state.settings.showLimitSource);
   els.maskLimitAccountEmailsInput.checked = Boolean(state.settings.maskLimitAccountEmails);
+  els.hideLimitAccountEmailsInput.checked = Boolean(state.settings.hideLimitAccountEmails);
+  els.maskLimitAccountEmailsInput.disabled = Boolean(state.settings.hideLimitAccountEmails);
   renderSubscriptionSettings();
   const showLimitUsed = state.settings.showLimitUsed ? 'used' : 'remaining';
   for (const input of els.showLimitUsedInputs || []) input.checked = input.value === showLimitUsed;
@@ -13194,6 +13325,17 @@ els.maskLimitAccountEmailsInput.addEventListener('change', async () => {
   await saveSettings({ maskLimitAccountEmails: els.maskLimitAccountEmailsInput.checked });
   renderLimits();
 });
+els.hideLimitAccountEmailsInput.addEventListener('change', async () => {
+  await saveSettings({ hideLimitAccountEmails: els.hideLimitAccountEmailsInput.checked });
+  renderLimits();
+  renderCodexAccounts();
+  renderAntigravityStatus();
+  renderMimoStatus();
+  renderCursorStatus();
+  renderSubscriptionSettings();
+  refreshTrayComposers();
+  void maybeUpdateBarsIcon();
+});
 els.subscriptionAddToggle?.addEventListener('click', () => {
   const opening = els.subscriptionAddDetails?.classList.contains('hidden');
   if (opening) {
@@ -14605,13 +14747,21 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
     liveTokenRates: options.liveTokenRates || displayLiveTokenRateSamples(),
     liveTokenRateFormatter: options.liveTokenRateFormatter || ((value) => formatLiveTokenRate(value))
   });
-  const items = resolved.items.map((item) => (
-    item.type === 'text'
-      && item.metric === 'account'
-      && limitAccountEmailsMasked()
+  const items = resolved.items.map((item) => {
+    if (item.type !== 'text' || item.metric !== 'account') return item;
+    const provider = item.selection?.providerRecord;
+    if (limitAccountEmailsHidden()) {
+      return {
+        ...item,
+        text: provider
+          ? limitAccountTitle(provider.provider, provider, 0, [provider])
+          : t('settings.codex.accountFallback', { number: 1 })
+      };
+    }
+    return limitAccountEmailsMasked()
       ? { ...item, text: accountIdentityApi.maskEmailAddress(item.text) }
-      : item
-  ));
+      : item;
+  });
   const segments = items.map((item) => renderCustomTrayItemCanvas(item, height, colors, options));
   if (!segments.length) return null;
   const gap = Math.max(1, Math.round(height * 0.03));
@@ -14738,12 +14888,17 @@ function trayComposerAccountChoices(provider) {
   const raw = provider === 'auto'
     ? LIMIT_PROVIDERS.flatMap((entry) => trayLayoutApi.accountOptions(stats, entry.id))
     : trayLayoutApi.accountOptions(stats, provider);
-  return raw.map((entry) => ({
-    value: entry.value,
-    label: entry.label,
-    detail: LIMIT_PROVIDERS.find((providerEntry) => providerEntry.id === entry.provider?.provider)?.label || entry.provider?.provider || '',
-    icon: trayComposerProviderIcon(entry.provider?.provider)
-  }));
+  return raw.map((entry) => {
+    const peers = raw
+      .map((candidate) => candidate.provider)
+      .filter((candidate) => candidate?.provider === entry.provider?.provider);
+    return {
+      value: entry.value,
+      label: limitAccountTitle(entry.provider?.provider, entry.provider, peers.indexOf(entry.provider), peers),
+      detail: LIMIT_PROVIDERS.find((providerEntry) => providerEntry.id === entry.provider?.provider)?.label || entry.provider?.provider || '',
+      icon: trayComposerProviderIcon(entry.provider?.provider)
+    };
+  });
 }
 
 function trayComposerSourcePreview(source) {
@@ -15306,8 +15461,15 @@ function renderCodexAccounts() {
     listEl.append(empty);
   } else {
     const codexProviders = localProviderStatuses('codex');
-    for (const account of accounts) {
+    for (const [index, account] of accounts.entries()) {
       const enabled = account.enabled !== false;
+      const accountName = codexAccountAlias(account)
+        || (limitAccountEmailsHidden()
+          ? t('settings.codex.accountFallback', { number: index + 1 })
+          : (limitAccountEmailsMasked()
+            ? accountIdentityApi.maskEmailAddress(account.email)
+            : account.email))
+        || t('settings.codex.accountFallback', { number: index + 1 });
       const row = document.createElement('div');
       row.className = 'managed-account-row';
       row.classList.toggle('disabled', !enabled);
@@ -15316,13 +15478,13 @@ function renderCodexAccounts() {
       input.type = 'checkbox';
       input.checked = account.enabled !== false;
       input.setAttribute('aria-label', t('settings.codex.toggleAccount', {
-        account: account.email || t('settings.codex.unnamedAccount')
+        account: accountName
       }));
       const main = document.createElement('div');
       main.className = 'managed-account-main';
       const email = document.createElement('div');
       email.className = 'managed-account-email';
-      email.textContent = account.email || t('settings.codex.unnamedAccount');
+      email.textContent = accountName;
       main.append(email);
       input.addEventListener('change', async () => {
         input.disabled = true;
@@ -15353,6 +15515,16 @@ function renderCodexAccounts() {
       ].filter((value, index, values) => value && values.indexOf(value) === index);
       info.textContent = accountMetadata.join(' · ');
       info.title = accountMetadata.join(' · ');
+      const rename = document.createElement('button');
+      rename.type = 'button';
+      rename.className = 'managed-account-rename';
+      rename.textContent = '\u270e';
+      rename.dataset.tooltip = t('limits.codex.renameAccount');
+      rename.setAttribute('aria-label', rename.dataset.tooltip);
+      rename.disabled = !account.accountKey;
+      rename.addEventListener('click', () => {
+        void renameCodexAccount(account, index);
+      });
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.className = 'managed-account-remove';
@@ -15365,7 +15537,7 @@ function renderCodexAccounts() {
           remove.classList.add('confirming');
           remove.textContent = '✓';
           remove.title = t('settings.codex.removeConfirm', {
-            account: account.email || t('settings.codex.unnamedAccount')
+            account: accountName
           });
           return;
         }
@@ -15383,7 +15555,7 @@ function renderCodexAccounts() {
         renderCodexAccounts();
         renderSettingsSummaries();
       });
-      right.append(info, remove);
+      right.append(info, rename, remove);
       row.append(input, main, right);
       listEl.append(row);
     }
@@ -15502,7 +15674,11 @@ function renderAntigravityStatus() {
   const antigravityProviders = localProviderStatuses('antigravity');
   accounts.forEach((account, index) => {
     const enabled = account.enabled !== false;
-    const accountName = String(account.accountEmail || account.accountLabel || '').trim()
+    const accountEmail = String(account.accountEmail || '').trim();
+    const accountName = (limitAccountEmailsHidden()
+      ? String(account.accountLabel || '').trim()
+      : (limitAccountEmailsMasked() ? accountIdentityApi.maskEmailAddress(accountEmail) : accountEmail)
+        || String(account.accountLabel || '').trim())
       || t('settings.antigravity.accountFallback', { number: index + 1 });
     const row = document.createElement('div');
     row.className = 'managed-account-row';
@@ -15538,12 +15714,12 @@ function renderAntigravityStatus() {
     const info = document.createElement('span');
     info.className = 'managed-account-info';
     const accountKey = String(account.accountKey || '').trim();
-    const accountEmail = String(account.accountEmail || '').trim().toLowerCase();
+    const normalizedAccountEmail = String(account.accountEmail || '').trim().toLowerCase();
     const provider = antigravityProviders.find((candidate) => {
       const providerKey = String(candidate?.accountKey || '').trim();
       const providerEmail = String(candidate?.accountEmail || '').trim().toLowerCase();
       if (accountKey && providerKey) return accountKey === providerKey;
-      return Boolean(accountEmail && providerEmail && accountEmail === providerEmail);
+      return Boolean(normalizedAccountEmail && providerEmail && normalizedAccountEmail === providerEmail);
     });
     const planLabel = limitProviderPresentationApi.limitProviderDisplayLabel(provider?.accountLabel);
     const statusLabel = provider && provider.status !== 'ok'
@@ -17192,13 +17368,19 @@ function renderCursorStatus() {
     empty.textContent = t('settings.cursor.empty');
     listEl.append(empty);
   } else {
-    for (const account of accounts) {
+    for (const [index, account] of accounts.entries()) {
       const enabled = account.enabled !== false;
       const row = document.createElement('div');
       row.className = 'managed-account-row';
       row.classList.toggle('disabled', !enabled);
       const fallbackId = String(account.id || '');
-      const accountName = account.email || account.label || (fallbackId ? `…${fallbackId.slice(-8)}` : t('settings.cursor.unnamedAccount'));
+      const email = String(account.email || '').trim();
+      const accountName = (limitAccountEmailsHidden()
+        ? String(account.label || '').trim()
+        : (limitAccountEmailsMasked() ? accountIdentityApi.maskEmailAddress(email) : email)
+          || String(account.label || '').trim())
+        || t('settings.antigravity.accountFallback', { number: index + 1 })
+        || (fallbackId ? `…${fallbackId.slice(-8)}` : t('settings.cursor.unnamedAccount'));
       const input = document.createElement('input');
       input.className = 'managed-account-checkbox';
       input.type = 'checkbox';

@@ -211,5 +211,8 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     }
   },
   minimize: () => ipcRenderer.send('window:minimize'),
-  close: () => ipcRenderer.send('window:close')
+  close: () => ipcRenderer.send('window:close'),
+  beginWindowResize: (edge, point) => ipcRenderer.send('window:resizeBegin', edge, point),
+  updateWindowResize: (point) => ipcRenderer.send('window:resizeUpdate', point),
+  endWindowResize: () => ipcRenderer.send('window:resizeEnd')
 });

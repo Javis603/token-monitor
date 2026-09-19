@@ -473,7 +473,7 @@ test('Codex account panel supports per-account enable toggles without showing ti
   assert.match(body, /accountIdentityApi\.codexManagedAccountPlanLabel\(account, codexProviders\)/);
   assert.match(body, /: t\('settings\.codex\.disabled'\)/);
   assert.match(body, /info\.textContent = accountMetadata\.join\(' · '\);/);
-  assert.match(body, /right\.append\(info, remove\)/);
+  assert.match(body, /right\.append\(info, rename, remove\)/);
   assert.match(body, /row\.append\(input, main, right\)/);
   assert.doesNotMatch(
     body,
@@ -529,6 +529,36 @@ test('Codex account email masking is an opt-in display-only setting', () => {
   assert.match(app, /renderLimits\(\);/);
 
   // Title rendering for every provider lives in limitAccountTitles.test.js.
+});
+
+test('account emails can be fully hidden and Codex accounts can be renamed', () => {
+  const app = readRendererFile('app.js');
+  const html = readRendererFile('index.html');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+
+  assert.match(html, /<input id="hideLimitAccountEmailsInput" type="checkbox" \/>/);
+  assert.match(html, /data-i18n="settings\.limits\.hideAccountEmails"/);
+
+  const defaults = functionBody(main, 'defaultSettings', 'normalizeCollectionMode');
+  assert.match(defaults, /hideLimitAccountEmails:\s*false/);
+  assert.match(defaults, /codexAccountAliases:\s*\{\}/);
+
+  const updateHandler = main.slice(
+    main.indexOf("ipcMain.handle('settings:update'"),
+    main.indexOf("ipcMain.handle('settings:openConfig'")
+  );
+  assert.match(updateHandler, /hideLimitAccountEmails:\s*parseBoolean\(/);
+  assert.match(updateHandler, /codexAccountAliases:\s*normalizeCodexAccountAliases\(/);
+
+  assert.match(app, /hideLimitAccountEmailsInput: document\.getElementById\('hideLimitAccountEmailsInput'\)/);
+  assert.match(app, /saveSettings\(\{ hideLimitAccountEmails: els\.hideLimitAccountEmailsInput\.checked \}\)/);
+  assert.match(app, /saveSettings\(\{ codexAccountAliases: aliases \}\)/);
+  assert.match(app, /rename\.className = 'limit-account-rename'/);
+  assert.match(app, /rename\.className = 'managed-account-rename'/);
+  assert.match(app, /dialog\.className = 'account-alias-dialog'/);
+  assert.match(app, /dialog\.showModal\(\)/);
+  assert.match(app, /rename\.dataset\.tooltip = t\('limits\.codex\.renameAccount'\)/);
+  assert.doesNotMatch(app, /window\.prompt\(/);
 });
 
 test('Codex system account switching is exposed from limits account rows', () => {
@@ -696,7 +726,7 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.doesNotMatch(dockSwitch, /refreshCodexManagedAccountLimits/);
   assert.doesNotMatch(dockSwitch, /await refreshCodexManagedAccountLimits/);
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  assert.match(renderLimits, /const rowOptions = id === 'codex'\s*\? \{ accountTitle: true, allowSystemSwitch: true \}/s);
+  assert.match(renderLimits, /const rowOptions = id === 'codex'[\s\S]*?allowSystemSwitch: true,[\s\S]*?allowAccountRename: Boolean\(provider\?\.accountKey\)/);
   assert.match(renderLimits, /renderLimitProviderRow\(id, label, provider, thirdPartyVisual\?\.color \|\| color, rowOptions\)/);
   assert.doesNotMatch(
     renderLimits,

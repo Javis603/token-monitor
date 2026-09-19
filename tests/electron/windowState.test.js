@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  checkpointWindowState,
   expandedBoundsForCollapse,
   isWindowMaximized,
   normalWindowBounds,
@@ -109,6 +110,47 @@ test('persists changed bounds and maximization state in one save', () => {
   assert.equal(persistWindowState(settings, saveSettings, bounds, false), true);
   assert.equal(settings.windowMaximized, false);
   assert.equal(saves, 2);
+});
+
+test('periodic checkpoints persist normal window geometry without native move events', () => {
+  const bounds = { x: 840, y: 120, width: 420, height: 720 };
+  const settings = { trayMode: false, windowBounds: null, windowMaximized: false };
+  let saves = 0;
+
+  assert.equal(checkpointWindowState(
+    fakeWindow({ bounds }),
+    settings,
+    () => { saves += 1; }
+  ), true);
+  assert.deepEqual(settings.windowBounds, bounds);
+  assert.equal(settings.windowMaximized, false);
+  assert.equal(saves, 1);
+  assert.equal(checkpointWindowState(fakeWindow({ bounds }), settings, () => { saves += 1; }), false);
+  assert.equal(saves, 1, 'an unchanged minute does not rewrite settings.json');
+});
+
+test('periodic checkpoints do not replace normal bounds with transient window modes', () => {
+  const saved = { x: 40, y: 50, width: 360, height: 700 };
+  for (const [window, settings, bubbleState] of [
+    [fakeWindow({ maximized: true }), { windowBounds: saved }, {}],
+    [fakeWindow({ minimized: true }), { windowBounds: saved }, {}],
+    [fakeWindow(), { trayMode: true, windowBounds: saved }, {}],
+    [fakeWindow(), { windowBounds: saved }, { collapsed: true }]
+  ]) {
+    let saves = 0;
+    assert.equal(checkpointWindowState(window, settings, () => { saves += 1; }, bubbleState), false);
+    assert.deepEqual(settings.windowBounds, saved);
+    assert.equal(saves, 0);
+  }
+});
+
+test('main process checkpoints bounds every ten seconds and once before quit', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  assert.match(main, /const WINDOW_BOUNDS_CHECKPOINT_MS = 10 \* 1000;/);
+  assert.match(main, /setInterval\(checkpointMainWindowBounds, WINDOW_BOUNDS_CHECKPOINT_MS\)/);
+  assert.match(main, /createWindow\(\);\s*startWindowBoundsCheckpoints\(\);/);
+  const beforeQuit = main.match(/app\.on\('before-quit',[\s\S]*?\n}\);/)[0];
+  assert.match(beforeQuit, /checkpointMainWindowBounds\(\);\s*stopWindowBoundsCheckpoints\(\);/);
 });
 
 test('keeps normal bounds across a maximized rebuild and unmaximize', () => {

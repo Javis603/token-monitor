@@ -104,6 +104,16 @@ function persistWindowState(settings, saveSettings, bounds, maximized) {
   return true;
 }
 
+// WSLg does not reliably deliver every native moved/resized event. A periodic
+// checkpoint reads the window directly, independently of those notifications.
+// Tray popovers and collapsed bubbles own different geometry and must not
+// overwrite the normal window's saved position.
+function checkpointWindowState(window, settings, saveSettings, bubbleState = {}) {
+  if (settings?.trayMode === true || bubbleState?.collapsed === true) return false;
+  if (!shouldPersistWindowBounds(window)) return false;
+  return persistWindowState(settings, saveSettings, normalWindowBounds(window), false);
+}
+
 function rebuildWindowBounds(window, state = {}) {
   if (state.collapsed === true && state.expandedBounds) return state.expandedBounds;
   const bounds = normalWindowBounds(window);
@@ -113,6 +123,7 @@ function rebuildWindowBounds(window, state = {}) {
 }
 
 module.exports = {
+  checkpointWindowState,
   expandedBoundsForCollapse,
   isWindowMaximized,
   normalWindowBounds,

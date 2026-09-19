@@ -206,6 +206,36 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .titlebar.period-menu-open { z-index: 13; }
 .shell.desktop-mode .titlebar { -webkit-app-region: no-drag; }
+
+/* Frameless windows normally rely on the host window manager for edge resize.
+   WSLg exposes the resize style to Windows but does not forward those edge
+   drags, so these transparent handles provide the same interaction in-app. */
+.window-resize-handle {
+  position: fixed;
+  z-index: 10000;
+  -webkit-app-region: no-drag;
+  touch-action: none;
+}
+.window-resize-n,
+.window-resize-s { left: 10px; right: 10px; height: 7px; cursor: ns-resize; }
+.window-resize-e,
+.window-resize-w { top: 10px; bottom: 10px; width: 7px; cursor: ew-resize; }
+.window-resize-n { top: 0; }
+.window-resize-s { bottom: 0; }
+.window-resize-e { right: 0; }
+.window-resize-w { left: 0; }
+.window-resize-ne,
+.window-resize-se,
+.window-resize-sw,
+.window-resize-nw { width: 14px; height: 14px; }
+.window-resize-ne { top: 0; right: 0; cursor: nesw-resize; }
+.window-resize-se { right: 0; bottom: 0; cursor: nwse-resize; }
+.window-resize-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+.window-resize-nw { top: 0; left: 0; cursor: nwse-resize; }
+.shell.desktop-mode .window-resize-handle,
+.shell.tray-mode .window-resize-handle { display: none; }
+html.is-window-resizing,
+html.is-window-resizing * { user-select: none !important; }
 .titlebar > div:first-child { min-width: 0; flex: 1 1 auto; }
 .app-title {
   display: flex;
@@ -1274,6 +1304,31 @@ span.settings-note.settings-item-desc {
   opacity: 1;
   color: var(--red);
   background: rgba(255, 91, 91, 0.12);
+}
+.managed-account-rename {
+  position: relative;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  opacity: 0.55;
+}
+.managed-account-rename:hover,
+.managed-account-rename:focus-visible {
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent);
+  opacity: 1;
+}
+.managed-account-rename:disabled {
+  display: none;
 }
 .codex-login-output {
   max-height: 120px;
@@ -3997,6 +4052,120 @@ html.is-windows .settings-panel select option {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.limit-account-rename {
+  position: relative;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  opacity: 0.55;
+}
+.limit-account-rename:hover,
+.limit-account-rename:focus-visible {
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent);
+  opacity: 1;
+}
+[data-tooltip]::after {
+  position: absolute;
+  z-index: 10001;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  padding: 5px 7px;
+  border: 1px solid rgba(var(--line-rgb), 0.2);
+  border-radius: 6px;
+  background: rgba(var(--glass-rgb), 0.96);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24);
+  color: var(--text);
+  content: attr(data-tooltip);
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 1.2;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 3px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  white-space: nowrap;
+}
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.account-alias-dialog {
+  width: min(300px, calc(100vw - 36px));
+  padding: 0;
+  border: 1px solid rgba(var(--line-rgb), 0.25);
+  border-radius: 12px;
+  background: rgba(var(--glass-rgb), 0.98);
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.38);
+  color: var(--text);
+}
+.account-alias-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+.account-alias-dialog-form {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+.account-alias-dialog-form strong {
+  font-size: 13px;
+}
+.account-alias-dialog-form p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.account-alias-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px 9px;
+  border: 1px solid rgba(var(--line-rgb), 0.3);
+  border-radius: 7px;
+  outline: none;
+  background: rgba(var(--sunken-rgb), 0.48);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+.account-alias-input:focus {
+  border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.12);
+}
+.account-alias-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.account-alias-dialog-actions button {
+  min-width: 54px;
+  padding: 6px 10px;
+  border: 1px solid rgba(var(--line-rgb), 0.24);
+  border-radius: 7px;
+  background: rgba(var(--overlay-rgb), 0.06);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+.account-alias-dialog-actions .account-alias-save {
+  border-color: rgba(var(--accent-rgb), 0.34);
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent);
 }
 .limit-meta {
   overflow: hidden;
