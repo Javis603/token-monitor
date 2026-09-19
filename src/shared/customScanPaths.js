@@ -21,8 +21,20 @@ const CUSTOM_SCAN_PATH_LIMIT_ERRORS = Object.freeze({
 // that appear healthy but contribute no usage. Token Monitor's Kilo row combines
 // the `kilo` CLI database and `kilocode` extension sources; the former rejects
 // extra roots, so persisted Kilo roots are forwarded to the latter.
+// LiveAgent is a locally parsed client that never enters Tokscale, so a
+// custom root cannot be scanned for it by Tokscale. It still gets the same
+// per-client custom path settings here: the collector forwards each
+// configured directory into the matching local adapter, which resolves the
+// database file inside it. Other
+// locally parsed clients (Proma, Qoder, ...) plus the two Tokscale clients with
+// scanner-specific storage requirements (OpenCode, Cursor) stay hidden so their
+// panel entries cannot collect paths that would contribute nothing. Pi Desktop
+// is deliberately not in this set: the `pi` custom roots remain Tokscale
+// session roots, and the desktop database has its own
+// TOKEN_MONITOR_PI_DESKTOP_DB_PATH override.
+const LOCALLY_PARSED_CUSTOM_SCAN_CLIENTS = new Set(['liveagent']);
 const UNSUPPORTED_CUSTOM_SCAN_CLIENTS = new Set([
-  ...LOCALLY_PARSED_CLIENT_IDS,
+  ...LOCALLY_PARSED_CLIENT_IDS.filter((id) => !LOCALLY_PARSED_CUSTOM_SCAN_CLIENTS.has(id)),
   'opencode',
   'cursor'
 ]);
@@ -101,7 +113,9 @@ function customScanPathEntries(value, options = {}) {
 
 function tokscaleExtraDirsEnv(value, inherited = '', options = {}) {
   const additions = customScanPathEntries(value, options).flatMap(({ client, dir }) => (
-    tokscaleCustomScanClientIds(client).map((scanId) => `${scanId}:${dir}`)
+    // Locally parsed roots are consumed by the JS adapters, never by Tokscale,
+    // so forwarding them into TOKSCALE_EXTRA_DIRS would only confuse scans.
+    LOCALLY_PARSED_CLIENT_IDS.includes(client) ? [] : tokscaleCustomScanClientIds(client).map((scanId) => `${scanId}:${dir}`)
   ));
   return [String(inherited || '').trim(), ...additions].filter(Boolean).join(',');
 }
@@ -109,6 +123,7 @@ function tokscaleExtraDirsEnv(value, inherited = '', options = {}) {
 module.exports = {
   CUSTOM_SCAN_PATH_LIMIT_ERRORS,
   CUSTOM_SCAN_CLIENT_IDS,
+  LOCALLY_PARSED_CUSTOM_SCAN_CLIENTS,
   MAX_CUSTOM_SCAN_PATHS,
   MAX_CUSTOM_SCAN_PATHS_PER_CLIENT,
   customScanPathLimitError,
