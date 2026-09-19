@@ -3056,23 +3056,35 @@ function watcherOptions(usePolling, ignored) {
   };
 }
 
-function isQoderCnSelfWatchEvent(filePath, rootsByClient = {}) {
-  if (!filePath || !path.basename(filePath).endsWith('.db-shm')) return false;
-  const resolved = path.resolve(filePath);
-  return (rootsByClient.qodercn || [])
-    .some((root) => resolved.startsWith(path.resolve(root) + path.sep));
-}
+// Clients whose own read-only scan recreates the SQLite shared-memory index
+// (`<db>-shm`) without a real data change — dropping the sidecar event
+// breaks the scan -> shm-write -> scan restart loop. Measured on darwin
+// for zcode: 0 shm changes while idle over 40s, then 20 of 20 consecutive
+// `tokscale zcode --today` scans rewrote db.sqlite-shm. The same shape
+// was already fixed for Qoder CN (#301). Adding a client to this list
+// asserts a measurement rather than a hunch.
+//
+// Mavis (MiniMax Code) joins the list: `~/.minimax/v2/sqlite/runtime-state.sqlite`
+// is opened read-only by `providers/mavis/usage.js`, which still maps
+// the shared-memory index and rewrites `<db>-shm` even when no row has
+// changed. The real data signal lives in the database and its `-wal`, so
+// only the sidecar is dropped.
+const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['qodercn', 'zcode', 'mavis']);
 
-// Mavis (MiniMax Code) reads `~/.minimax/v2/sqlite/runtime-state.sqlite`
-// in read-only mode, which still maps the SQLite shared-memory index and
-// rewrites `<db>-shm` even when no real change happened. Watching that
-// sidecar would restart the scan that produced it. The real data signal
-// lives in the database and its `-wal`; only the sidecar is dropped here.
-function isMavisSelfWatchEvent(filePath, rootsByClient = {}) {
-  if (!filePath || !path.basename(filePath).endsWith('-shm')) return false;
+function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
+  // Match SQLite's wal-index suffix, not one client's database basename:
+  // ZCode's file is db.sqlite-shm, whose name does not contain `.db-`.
+  // The suffix is required to be one of the SQLite extensions this
+  // collector's clients use, so the match cannot widen into an
+  // unrelated `-shm` sidecar, and it never matches the -wal or the
+  // database itself.
+  const name = path.basename(String(filePath || ''));
+  if (!/^[^/]+\.(?:db|sqlite|sqlite3)-shm$/.test(name)) return false;
   const resolved = path.resolve(filePath);
-  return (rootsByClient.mavis || [])
-    .some((root) => resolved.startsWith(path.resolve(root) + path.sep));
+  return SELF_WATCHED_SQLITE_SIDECAR_CLIENTS.some((client) =>
+    (rootsByClient[client] || [])
+      .some((root) => resolved.startsWith(path.resolve(root) + path.sep))
+  );
 }
 
 function startCollector(options) {
@@ -3817,10 +3829,11 @@ function startCollector(options) {
       // in local.db / local.db-wal, so drop *.db-shm events under the
       // qodercn roots only. (hermes/micode may share this pattern upstream —
       // out of scope here, their watch behaviour is left untouched.)
-      if (isQoderCnSelfWatchEvent(filePath, rootsByClient)) return;
-      // Same self-watch story as Qoder CN, but for the mavis / pi-agent
-      // SQLite under ~/.minimax/v2/sqlite/ (runtime-state.sqlite's `-shm`).
-      if (isMavisSelfWatchEvent(filePath, rootsByClient)) return;
+      // Drop the wal-index sidecar of clients whose own scan recreates it,
+      // so the collector cannot re-trigger itself. See
+      // SELF_WATCHED_SQLITE_SIDECAR_CLIENTS for the measured per-client
+      // evidence (Qoder CN #301, ZCode #709, Mavis this commit).
+      if (isSelfWatchSqliteSidecarEvent(filePath, rootsByClient)) return;
       activityRevision += 1;
       if (tickPending) {
         pendingActivityRevision = pendingActivityRevision === null
@@ -4061,8 +4074,7 @@ module.exports = {
   // read or pin a client's floor directly instead of inferring it from tick
   // timings; the collector never takes a second instance.
   selfSyncThrottle,
-  isQoderCnSelfWatchEvent,
-  isMavisSelfWatchEvent,
+  isSelfWatchSqliteSidecarEvent,
   shouldIncludeHistory,
   spawnTokscaleHelp,
   startCollector,
