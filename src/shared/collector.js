@@ -955,6 +955,27 @@ function propagateTodayProjects(today, periods) {
       if (session.lastUsedAt && (!target.lastUsedAt || Date.parse(session.lastUsedAt) > Date.parse(target.lastUsedAt))) {
         target.lastUsedAt = session.lastUsedAt;
       }
+      // Context occupancy is replaced rather than gap-filled: the derived
+      // periods carry the last full scan's reading, which is older than this
+      // tick's by construction. The copy is unconditional, including a cleared
+      // pair — the fresh scan is the authority, and a tick that read no valid
+      // pair (a DSH model switch drops the occupancy until the next usage chunk
+      // measures against the new window) must clear the stale one rather than
+      // leave the derived period showing a gauge the fresh scan dropped. The
+      // dock card reads month first, so it was the surface that displayed it.
+      target.contextWindow = Number(session.contextWindow) || 0;
+      target.contextTokens = Number(session.contextTokens) || 0;
+      // The turn boundary is copied in all three states, matching what the
+      // fresh scan said: `true` finished, `false` open, absent unknown. Copying
+      // only `true` left a stale `true` in a derived period after its session
+      // picked the next turn back up, and collapsing `false` into "delete" lost the
+      // one value that can clear it — the dock card reads month first, so it kept
+      // showing a finished session while today showed it running.
+      if (session.turnEnded === true || session.turnEnded === false) {
+        target.turnEnded = session.turnEnded;
+      } else {
+        delete target.turnEnded;
+      }
     }
   }
 }
@@ -3042,6 +3063,18 @@ function isQoderCnSelfWatchEvent(filePath, rootsByClient = {}) {
     .some((root) => resolved.startsWith(path.resolve(root) + path.sep));
 }
 
+// Mavis (MiniMax Code) reads `~/.minimax/v2/sqlite/runtime-state.sqlite`
+// in read-only mode, which still maps the SQLite shared-memory index and
+// rewrites `<db>-shm` even when no real change happened. Watching that
+// sidecar would restart the scan that produced it. The real data signal
+// lives in the database and its `-wal`; only the sidecar is dropped here.
+function isMavisSelfWatchEvent(filePath, rootsByClient = {}) {
+  if (!filePath || !path.basename(filePath).endsWith('-shm')) return false;
+  const resolved = path.resolve(filePath);
+  return (rootsByClient.mavis || [])
+    .some((root) => resolved.startsWith(path.resolve(root) + path.sep));
+}
+
 function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
@@ -3785,6 +3818,9 @@ function startCollector(options) {
       // qodercn roots only. (hermes/micode may share this pattern upstream —
       // out of scope here, their watch behaviour is left untouched.)
       if (isQoderCnSelfWatchEvent(filePath, rootsByClient)) return;
+      // Same self-watch story as Qoder CN, but for the mavis / pi-agent
+      // SQLite under ~/.minimax/v2/sqlite/ (runtime-state.sqlite's `-shm`).
+      if (isMavisSelfWatchEvent(filePath, rootsByClient)) return;
       activityRevision += 1;
       if (tickPending) {
         pendingActivityRevision = pendingActivityRevision === null
@@ -4026,6 +4062,7 @@ module.exports = {
   // timings; the collector never takes a second instance.
   selfSyncThrottle,
   isQoderCnSelfWatchEvent,
+  isMavisSelfWatchEvent,
   shouldIncludeHistory,
   spawnTokscaleHelp,
   startCollector,

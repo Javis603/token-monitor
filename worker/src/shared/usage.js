@@ -661,6 +661,17 @@ function normalizeSession(input, fallbackKey) {
   const session = emptySession(client, id);
   const components = sessionTokenComponents(input);
   Object.assign(session, components);
+  // Mavis provider writes the per-sub-agent name (coder / explore / general /
+  // mavis / verifier / worker) onto each row. `normalizeDbRow` already mapped
+  // the runtime's snake_case `agent_name` to camelCase `agentName`, so that
+  // is the field the session row carries when it reaches this layer.
+  // `mergeSession` is a no-op when source.agent is empty (line 585) so a
+  // session that never observed an agent name simply keeps the empty
+  // default from `emptySession()`.
+  if (input.agent != null) {
+    const agent = String(input.agent).trim();
+    if (agent) session.agent = agent;
+  }
   const componentTotal = components.inputTokens + components.outputTokens + components.cacheReadTokens + components.cacheWriteTokens; // reasoning is a subset of output — see TOKEN_COMPONENT_KEYS
   session.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? input.tokens ?? componentTotal)));
   session.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
