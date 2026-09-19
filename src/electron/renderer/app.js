@@ -1276,17 +1276,6 @@ function formatActiveDuration(ms) {
   if (minutes > 0) return `${minutes}m`;
   return '0m';
 }
-function formatUpdatedAge(value) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return 'Update unknown';
-  const diffMs = Math.max(0, Date.now() - date.getTime());
-  if (diffMs < 45_000) return 'Updated just now';
-  const minutes = Math.round(diffMs / 60000);
-  if (minutes < 60) return `Updated ${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `Updated ${hours}h ago`;
-  return `Updated ${Math.round(hours / 24)}d ago`;
-}
 function versionText(value) {
   return value ? `v${value}` : 'unknown';
 }
@@ -2938,8 +2927,11 @@ function limitProviderProvenance(provider) {
 
 function limitProviderMeta(provider, provenance = null) {
   const sourceDevice = limitProviderPresentationApi.limitProviderMainDeviceLabel(provenance, { showSource: Boolean(state.settings?.showLimitSource) });
+  // The freshness wording is shared with the edge dock so a row cannot read as
+  // stale on one surface and merely old on the other.
+  const freshness = limitProviderPresentationApi.limitProviderFreshness(provider);
   if (provider.stale) {
-    const parts = ['Stale', formatUpdatedAge(provider.updatedAt).replace('Updated ', '')];
+    const parts = [freshness.text];
     if (sourceDevice) parts.push(sourceDevice);
     return parts.join(' · ');
   }
@@ -2950,7 +2942,7 @@ function limitProviderMeta(provider, provenance = null) {
       if (sourceLabel) parts.push(sourceLabel);
     }
     if (sourceDevice) parts.push(sourceDevice);
-    return `${formatUpdatedAge(provider.updatedAt)}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
+    return `${freshness.text}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
   }
   return limitStatusLabel(provider.status, false);
 }
@@ -4492,32 +4484,6 @@ function formatLimitAmount(value) {
   return `$${number.toFixed(2)}`;
 }
 
-function formatCursorSpendValue(window) {
-  const used = optionalFiniteNumber(window?.used);
-  const limit = optionalFiniteNumber(window?.limit);
-  if (used === null) return '';
-  const usedText = formatMoney(used, window?.currency || 'USD');
-  return limit !== null && limit > 0
-    ? `${usedText} / ${formatMoney(limit, window?.currency || 'USD')}`
-    : usedText;
-}
-
-// Zed's billing rows follow the Command Code shape: the headline and bar carry
-// the percentage, and the absolute figure sits under the bar — money for Token
-// Spend, a raw count for metered Edit Predictions. Both follow showLimitUsed,
-// so the number under the bar can never contradict the bar's own direction.
-// Unlimited Edit Predictions have no numbers at all; formatLimitWindowValue
-// already turns their `detail` into the translated headline.
-function formatZedBillingDetail(window) {
-  const used = optionalFiniteNumber(window?.used);
-  const limit = optionalFiniteNumber(window?.limit);
-  if (used === null || limit === null || limit <= 0) return '';
-  const showUsed = Boolean(state.settings?.showLimitUsed);
-  if (window?.limitId === 'zed.edit-predictions') return formatLimitCount(window, showUsed);
-  const currency = window?.currency || 'USD';
-  return `${formatMoney(showUsed ? used : Math.max(0, limit - used), currency)} / ${formatMoney(limit, currency)}`;
-}
-
 function formatBalanceAmount(value, source) {
   return formatMoney(value, source?.currency);
 }
@@ -4529,50 +4495,6 @@ function formatBalanceSpendAmount(value, balance) {
 // Absolute count for windows that expose units (credits). It follows the same
 // display mode as percent bars: remaining/total in quota mode, used/total in
 // used mode.
-function formatLimitCount(window, showUsed = false) {
-  const used = Number(window?.used);
-  const limit = Number(window?.limit);
-  if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return '';
-  const trim = (n) => Number(Math.max(0, n).toFixed(2)).toString();
-  return `${trim(showUsed ? used : limit - used)}/${trim(limit)}`;
-}
-
-// Command Code credits are USD, so the count under the bar is money rather than
-// the raw units formatLimitCount prints: "$8.78 / $10.00", or nothing at all for
-// a pool with no allowance (the headline already carries its amount).
-function formatCommandcodeCreditsDetail(window) {
-  const remaining = Number(window?.remaining);
-  const limit = Number(window?.limit);
-  if (!Number.isFinite(remaining) || !Number.isFinite(limit) || limit <= 0) return '';
-  const showUsed = Boolean(state.settings?.showLimitUsed);
-  const value = showUsed ? Math.max(0, limit - remaining) : remaining;
-  return `${formatMoney(value, window?.currency)} / ${formatMoney(limit, window?.currency)}`;
-}
-
-// ZCode plan buckets are token pools, so their detail counts tokens: "124M /
-// 305M" (remaining mode) or "181M / 305M" (used mode), from the same values
-// the meter derives from. Nothing when either side is missing — a bucket
-// without absolute units keeps its percentage-only look.
-function formatZcodeTokensDetail(window) {
-  const remaining = optionalFiniteNumber(window?.remaining);
-  const limit = optionalFiniteNumber(window?.limit);
-  if (remaining === null || limit === null || limit <= 0) return '';
-  const showUsed = Boolean(state.settings?.showLimitUsed);
-  const value = showUsed ? Math.max(0, limit - remaining) : remaining;
-  return `${formatCompact(value)} / ${formatCompact(limit)}`;
-}
-
-// One-line Overage value: "12.5 credits · $3.20" (credits used, then est. cost).
-// Either piece may be absent; the row only renders when at least one is present.
-function formatKiroOverageValue(window) {
-  const parts = [];
-  const credits = Number(window?.used);
-  if (Number.isFinite(credits)) parts.push(`${Number(credits.toFixed(2))} credits`);
-  const cost = Number(window?.remaining);
-  if (Number.isFinite(cost)) parts.push(formatLimitAmount(cost));
-  return parts.join(' · ');
-}
-
 function formatCodexResetCreditsValue(resetCredits) {
   const available = Number(resetCredits?.availableCount);
   if (!Number.isFinite(available)) return '';
@@ -4895,6 +4817,17 @@ const {
 } = window.TokenMonitorLimitBalanceDisplay;
 
 const { limitWindowLabel } = window.TokenMonitorLimitWindowLabels;
+const { limitWindowText } = window.TokenMonitorLimitWindowText;
+
+// What a window's headline and sub-line read, from the module the edge dock
+// also paints from. Only the two renderer-state inputs are supplied here; the
+// wording itself is not this file's business any more.
+function providerWindowText(provider, window) {
+  return limitWindowText(provider, window, {
+    showLimitUsed: Boolean(state.settings?.showLimitUsed),
+    formatCompact: (value) => formatCompact(value)
+  });
+}
 
 // The name of one of `provider`'s windows. Only the kind-derived defaults live
 // in the shared helper; a provider that names its pool something of its own
@@ -5276,10 +5209,8 @@ function renderProviderWindows(provider, color) {
   } else if (provider.provider === 'cursor') {
     windows.classList.add('limit-windows-cursor');
     for (const quotaWindow of provider.windows || []) {
-      const valueOverride = quotaWindow.metric === 'spend'
-        ? formatCursorSpendValue(quotaWindow)
-        : null;
-      const node = limitWindowNode(quotaWindow.label || 'Quota', quotaWindow, color, 0.68, valueOverride);
+      const text = providerWindowText(provider, quotaWindow);
+      const node = limitWindowNode(quotaWindow.label || 'Quota', quotaWindow, color, 0.68, text.value, text.detail);
       node.classList.add('limit-window-wide');
       windows.append(node);
     }
@@ -5529,7 +5460,7 @@ function renderProviderWindows(provider, color) {
         color,
         0.95,
         null,
-        formatZedBillingDetail(billing)
+        providerWindowText(provider, billing).detail
       );
       node.classList.add('limit-window-wide');
       if (unlimitedEditPredictions) node.classList.add('limit-window-no-reset');
@@ -5555,7 +5486,7 @@ function renderProviderWindows(provider, color) {
         color,
         0.78,
         null,
-        window.detail || formatZcodeTokensDetail(window)
+        providerWindowText(provider, window).detail
       )),
       weekly && limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68),
       ...planBuckets.map((window) => limitWindowNode(
@@ -5564,7 +5495,7 @@ function renderProviderWindows(provider, color) {
         color,
         0.68,
         null,
-        window.detail || formatZcodeTokensDetail(window)
+        providerWindowText(provider, window).detail
       ))
     ].filter(Boolean);
     if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
@@ -5614,7 +5545,7 @@ function renderProviderWindows(provider, color) {
       if (billing?.showMeter === false) {
         // Overage: a single compact line like Cursor's "Credits $0.00" (no bar,
         // no reset) with the credits used and estimated cost joined on the right.
-        const node = limitWindowNode(billing.label || 'Overage', billing, color, 0.6, formatKiroOverageValue(billing));
+        const node = limitWindowNode(billing.label || 'Overage', billing, color, 0.6, providerWindowText(provider, billing).value);
         node.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(node);
       } else {
@@ -5624,7 +5555,7 @@ function renderProviderWindows(provider, color) {
           color,
           0.68,
           null,
-          formatLimitCount(billing, Boolean(state.settings?.showLimitUsed))
+          providerWindowText(provider, billing).detail
         );
         node.classList.add('limit-window-wide');
         windows.append(node);
@@ -5640,7 +5571,7 @@ function renderProviderWindows(provider, color) {
         color,
         0.68,
         null,
-        formatLimitCount(credits, Boolean(state.settings?.showLimitUsed))
+        providerWindowText(provider, credits).detail
       );
       node.classList.add('limit-window-wide');
       windows.append(node);
@@ -5692,7 +5623,7 @@ function renderProviderWindows(provider, color) {
         color,
         0.5,
         null,
-        formatCommandcodeCreditsDetail(credits)
+        providerWindowText(provider, credits).detail
       );
       node.classList.add('limit-window-wide');
       // A grant with no known plan allowance has no meter, so there is no bar
@@ -5721,7 +5652,7 @@ function renderProviderWindows(provider, color) {
         color,
         0.5,
         null,
-        monthly.detail || ''
+        providerWindowText(provider, monthly).detail
       );
       node.classList.add('limit-window-wide');
       windows.append(node);
@@ -5773,10 +5704,13 @@ function renderProviderWindows(provider, color) {
     // set, "$2.35 spent" without one. Absent entirely when credits are off.
     const usageCredits = spendWindow(provider);
     if (usageCredits) {
-      const value = usageCredits.limit === null
-        ? `${formatMoney(usageCredits.used, usageCredits.currency)} spent`
-        : `${formatMoney(usageCredits.used, usageCredits.currency)} / ${formatMoney(usageCredits.limit, usageCredits.currency)}`;
-      const node = limitWindowNode('Usage credits', usageCredits, color, 0.5, value);
+      const node = limitWindowNode(
+        'Usage credits',
+        usageCredits,
+        color,
+        0.5,
+        providerWindowText(provider, usageCredits).value
+      );
       node.classList.add('limit-window-wide', 'limit-window-no-reset');
       windows.append(node);
     }

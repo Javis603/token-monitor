@@ -17,6 +17,7 @@ const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const limitPresentationApi = window.TokenMonitorLimitProviderPresentation;
 const limitWindowLabels = window.TokenMonitorLimitWindowLabels;
+const limitWindowTextApi = window.TokenMonitorLimitWindowText;
 const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 const { clientColors } = window.TokenMonitorUsageCharts;
 const { LIMIT_PROVIDER_LABELS } = window.TokenMonitorLimitProviders;
@@ -237,8 +238,22 @@ function percentText(remainingPercent) {
 // "Reset 4h 26m", "Updated just now"): provider window labels such as
 // "Monthly" or "Gemini 5-hour" arrive in English, and translating only the
 // words around them produced a mixed card that read worse than either.
-function windowValueText(window) {
-  if (window.credits && window.credits.amount !== null && window.credits.amount !== undefined) {
+// The shared wording, resolved at paint time so a flipped display mode is
+// picked up by the next repaint rather than the next push.
+function windowText(providerId, window) {
+  return limitWindowTextApi.limitWindowText({ provider: providerId }, window, {
+    showLimitUsed: appearance().showLimitUsed === true,
+    formatCompact: formatTokens
+  });
+}
+
+function windowValueText(providerId, window) {
+  const text = windowText(providerId, window);
+  if (text.value) return text.value;
+  // A balance with no quota behind it reads as the money itself. A money pool
+  // that does have a denominator keeps the meter's percentage on top, with the
+  // amount on the line below — the Limits view's reading of the same window.
+  if (!text.percentLeads && window.credits && window.credits.amount !== null && window.credits.amount !== undefined) {
     return balanceDisplay.formatCompactMoney(window.credits.amount, window.credits.currency);
   }
   const showUsed = appearance().showLimitUsed === true;
@@ -261,16 +276,11 @@ function boundaryText(window) {
   return `${prefix} ${presentation.formatResetDuration(remaining)}`;
 }
 
-function updatedText(value) {
-  const at = Date.parse(value || '');
-  if (!Number.isFinite(at)) return '';
-  const diffMs = Math.max(0, Date.now() - at);
-  if (diffMs < 45_000) return 'Updated just now';
-  const minutes = Math.round(diffMs / 60000);
-  if (minutes < 60) return `Updated ${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `Updated ${hours}h ago`;
-  return `Updated ${Math.round(hours / 24)}d ago`;
+// Same wording as the Limits view: a stale row says "Stale · 54m ago" on both,
+// rather than the card reporting a plain update time and explaining staleness
+// in a separate line underneath.
+function freshnessOf(account) {
+  return limitPresentationApi.limitProviderFreshness(account);
 }
 
 function accountTitle(account) {
@@ -521,13 +531,21 @@ function meterNode(window, color) {
 function windowNode(providerId, window, color, labelOverride = '') {
   const node = el('div', 'edge-dock-window');
   const head = el('div', 'edge-dock-window-head');
-  const value = el('span', 'edge-dock-window-value', windowValueText(window));
+  const value = el('span', 'edge-dock-window-value', windowValueText(providerId, window));
   value.dataset.severity = displaySeverity(window.remainingPercent);
   head.append(el('span', 'edge-dock-window-label', labelOverride || windowLabel(providerId, window)), value);
   node.append(head);
   if (window.remainingPercent !== null && window.remainingPercent !== undefined) node.append(meterNode(window, color));
+  // Reset time on the left, the absolute figure on the right — the Limits
+  // view's split line, in a card that is narrow enough to need both to be short.
   const boundary = boundaryText(window);
-  if (boundary) node.append(el('span', 'edge-dock-window-reset', boundary));
+  const detail = windowText(providerId, window).detail;
+  if (boundary || detail) {
+    const foot = el('div', 'edge-dock-window-foot');
+    foot.append(el('span', 'edge-dock-window-reset', boundary));
+    if (detail) foot.append(el('span', 'edge-dock-window-detail', detail));
+    node.append(foot);
+  }
   return node;
 }
 
@@ -827,8 +845,12 @@ function providerCard(cell) {
   nameRow.append(headControl);
   if (single?.planLabel) nameRow.append(el('span', 'edge-dock-pill', single.planLabel));
   head.append(nameRow);
-  const singleUpdated = single ? updatedText(single.updatedAt) : '';
-  if (singleUpdated) head.append(el('span', 'edge-dock-card-subtitle', singleUpdated));
+  if (single) {
+    const freshness = freshnessOf(single);
+    const subtitle = el('span', 'edge-dock-card-subtitle', freshness.text);
+    if (freshness.tone === 'stale') subtitle.classList.add('is-warning');
+    head.append(subtitle);
+  }
   card.append(head);
 
   const accounts = el('div', 'edge-dock-accounts');
@@ -844,13 +866,14 @@ function providerCard(cell) {
       // account in use here (check badge plus a "Local" hint), a row that can be
       // switched to (hover reveals Switch), or a plain title.
       names.append(accountControl(account, titleNode));
-      const updated = updatedText(account.updatedAt);
-      if (updated) names.append(el('span', 'edge-dock-card-subtitle', updated));
+      const freshness = freshnessOf(account);
+      const updated = el('span', 'edge-dock-card-subtitle', freshness.text);
+      if (freshness.tone === 'stale') updated.classList.add('is-warning');
+      names.append(updated);
       name.append(names);
       if (account.planLabel && accountTitle(account)) name.append(el('span', 'edge-dock-pill', account.planLabel));
       block.append(name);
     }
-    if (account.status === 'stale') block.append(el('div', 'edge-dock-note is-warning', t('edgeDock.stale')));
     const windows = account.windows || [];
     if (windows.length) {
       appendWindows(block, cell.provider, windows, color);

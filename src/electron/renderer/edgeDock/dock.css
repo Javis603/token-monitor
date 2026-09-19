@@ -264,6 +264,7 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.edge-dock-card-subtitle.is-warning { color: var(--orange); }
 .edge-dock-card-title {
   min-width: 0;
   line-height: 1.25;
@@ -548,6 +549,7 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
 .edge-dock-window.is-wide { grid-column: 1 / -1; }
 .edge-dock-windows .edge-dock-window-head { gap: 6px; font-size: 11px; }
 .edge-dock-windows .edge-dock-window-reset { font-size: 10px; }
+.edge-dock-windows .edge-dock-window-detail { font-size: 10px; }
 .edge-dock-window-head {
   display: flex;
   justify-content: space-between;
@@ -579,6 +581,26 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
   transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .edge-dock-window-reset { font-size: 10.5px; color: var(--muted); }
+/* Reset time and absolute figure share one line, as the Limits view splits it.
+   The figure may not shrink: "$47.42 / $70.00" is the point of the row, while a
+   long reset time can ellipsize. */
+.edge-dock-window-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.edge-dock-window-foot .edge-dock-window-reset {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.edge-dock-window-detail {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--muted);
+}
 
 .edge-dock-note { font-size: 11px; color: var(--muted); }
 .edge-dock-note.is-warning { color: var(--orange); }
@@ -752,6 +774,7 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
 .edge-dock-windows .edge-dock-window-head { font-size: 10px; }
 .edge-dock-window-reset,
 .edge-dock-windows .edge-dock-window-reset { font-size: 9px; }
+.edge-dock-window-detail { font-size: 9px; }
 .edge-dock-window-group-title { font-size: 10px; font-weight: 400; color: var(--text); }
 .edge-dock-detail-row { font-size: 9px; }
 .edge-dock-forecast-title { font-size: 10px; }

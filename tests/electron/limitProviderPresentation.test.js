@@ -11,6 +11,7 @@ const limitProviderOrderApi = require('../../src/electron/renderer/limitProvider
 const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 const { limitWindowLabel } = require('../../src/shared/limitWindowLabels');
+const { limitWindowText } = require('../../src/shared/limitWindowText');
 
 const {
   antigravityQuotaWindow,
@@ -255,6 +256,20 @@ function runProviderSpendNode(source, balance) {
   return JSON.parse(JSON.stringify(context.result));
 }
 
+// Window wording now lives in src/shared/limitWindowText.js, painted by both
+// the Limits view and the edge dock, so these assert the module's output rather
+// than the shape of the renderer's source.
+function windowText(providerId, window, options = {}) {
+  return limitWindowText({ provider: providerId }, window, {
+    showLimitUsed: options.showLimitUsed === true,
+    formatCompact: (value) => compactTokenApi.formatCompactTokens(
+      value,
+      options.unitSystem || 'western',
+      options.locale || 'en'
+    )
+  });
+}
+
 function runCodexAdditionalWindowLabel(window, siblingWindows) {
   const app = readRendererFile('app.js');
   const formatter = functionBody(app, 'codexAdditionalWindowLabel', 'antigravityQuotaGroups');
@@ -265,16 +280,21 @@ function runCodexAdditionalWindowLabel(window, siblingWindows) {
 }
 
 test('Cursor limits render every normalized quota and format on-demand spend explicitly', () => {
-  const app = readRendererFile('app.js');
-  const spendValue = functionBody(app, 'formatCursorSpendValue', 'formatBalanceAmount');
-  const windows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const windows = functionBody(readRendererFile('app.js'), 'renderProviderWindows', 'renderLimitProviderRow');
 
-  assert.match(spendValue, /formatMoney\(used, window\?\.currency \|\| 'USD'\)/);
-  assert.match(spendValue, /limit !== null && limit > 0/);
   assert.match(windows, /for \(const quotaWindow of provider\.windows \|\| \[\]\)/);
-  assert.match(windows, /quotaWindow\.metric === 'spend'/);
-  assert.match(windows, /formatCursorSpendValue\(quotaWindow\)/);
   assert.doesNotMatch(windows, /visibleWindows = billingWindows\.length > 0 \? billingWindows : \[null\]/);
+
+  // A spend meter's headline is the money, keyed on the wire metric rather than
+  // on the provider id, so it reads the same wherever the window is painted.
+  const capped = { kind: 'billing', metric: 'spend', used: 12.4, limit: 20, currency: 'USD' };
+  const uncapped = { kind: 'billing', metric: 'spend', used: 12.4, currency: 'USD' };
+  assert.equal(windowText('cursor', capped).value, '$12.40 / $20.00');
+  assert.equal(windowText('cursor', uncapped).value, '$12.40 spent');
+  // Same window, same words, whichever provider reported it.
+  assert.deepEqual(windowText('claude', uncapped), windowText('cursor', uncapped));
+  // A quota window without the marker keeps the percentage headline.
+  assert.equal(windowText('cursor', { kind: 'billing', label: 'Requests', usedPercent: 40 }).value, null);
 });
 
 function runHomeLimitModule(rows, boundaryLabels = {}) {
@@ -924,7 +944,7 @@ test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with
   // value: a valueOverride also disables the showLimitUsed flip for the row.
   assert.match(
     renderProviderWindows,
-    /limitWindowNode\(\s*billing\?\.label \|\| 'Token Spend',\s*billing,\s*color,\s*0\.95,\s*null,\s*formatZedBillingDetail\(billing\)\s*\)/
+    /limitWindowNode\(\s*billing\?\.label \|\| 'Token Spend',\s*billing,\s*color,\s*0\.95,\s*null,\s*providerWindowText\(provider, billing\)\.detail\s*\)/
   );
   assert.doesNotMatch(renderProviderWindows, /settings\.subscriptions\.renewsOn|renewalDetail/);
   assert.doesNotMatch(renderProviderWindows, /zed\.billing-cycle|zed\.overdue-invoices/);
@@ -932,17 +952,7 @@ test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with
 });
 
 test('Zed details follow showLimitUsed: counts for Edit Predictions, money for Token Spend', () => {
-  const app = readRendererFile('app.js');
-  const formatter = functionBody(app, 'formatZedBillingDetail', 'formatBalanceAmount');
-  const limitCount = functionBody(app, 'formatLimitCount', 'formatCommandcodeCreditsDetail');
-  const renderDetail = (window, showLimitUsed = false) => vm.runInNewContext(
-    `${formatter}\n${limitCount}\nformatZedBillingDetail(${JSON.stringify(window)});`,
-    {
-      state: { settings: { showLimitUsed } },
-      optionalFiniteNumber: (value) => Number.isFinite(Number(value)) ? Number(value) : null,
-      formatMoney: (value, currency) => `${currency === 'USD' ? '$' : `${currency} `}${Number(value).toFixed(2)}`
-    }
-  );
+  const renderDetail = (window, showLimitUsed = false) => windowText('zed', window, { showLimitUsed }).detail;
 
   const editPredictions = { limitId: 'zed.edit-predictions', used: 500, limit: 2000 };
   const tokenSpend = { limitId: 'zed.token-spend', used: 2.5, limit: 10, currency: 'USD' };
@@ -1057,8 +1067,13 @@ test('Qoder renders its single Credits billing window full-width', () => {
 
   assert.match(renderProviderWindows, /provider\.provider === 'qoder'/);
   assert.match(renderProviderWindows, /const credits = windowForKind\(provider, 'billing'\);/);
-  assert.match(renderProviderWindows, /formatLimitCount\(credits, Boolean\(state\.settings\?\.showLimitUsed\)\)/);
+  assert.match(renderProviderWindows, /providerWindowText\(provider, credits\)\.detail/);
   assert.match(renderProviderWindows, /limit-window-wide/);
+
+  // Raw units under the bar, following the display mode.
+  const credits = { kind: 'billing', label: 'Credits', used: 120, limit: 500 };
+  assert.equal(windowText('qoder', credits).detail, '380/500');
+  assert.equal(windowText('qoder', credits, { showLimitUsed: true }).detail, '120/500');
 });
 
 test('Kimi renders 5-hour and Weekly above one full-width Monthly window', () => {
@@ -1069,7 +1084,11 @@ test('Kimi renders 5-hour and Weekly above one full-width Monthly window', () =>
   assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
   assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
   assert.match(renderProviderWindows, /const monthly = windowForKind\(provider, 'billing'\);/);
-  assert.match(renderProviderWindows, /monthly\.detail \|\| ''/);
+  assert.match(renderProviderWindows, /providerWindowText\(provider, monthly\)\.detail/);
+  // Kimi is one of only two providers whose window `detail` is shown under the
+  // bar; for everyone else the field serves another purpose and stays hidden.
+  assert.equal(windowText('kimi', { kind: 'billing', detail: 'Kimi 40% · Code 60%' }).detail, 'Kimi 40% · Code 60%');
+  assert.equal(windowText('copilot', { kind: 'billing', detail: 'Unlimited' }).detail, '');
   assert.match(renderProviderWindows, /node\.classList\.add\('limit-window-wide'\);/);
 });
 
@@ -1083,14 +1102,17 @@ test('Command Code renders 5-hour and Weekly above full-width credit windows', (
   // The monthly grant and any rollover top-up are both billing windows, so the
   // branch loops rather than picking one.
   assert.match(renderProviderWindows, /for \(const credits of windowsForKind\(provider, 'billing'\)\)/);
-  assert.match(renderProviderWindows, /formatCommandcodeCreditsDetail\(credits\)/);
+  assert.match(renderProviderWindows, /providerWindowText\(provider, credits\)\.detail/);
   assert.match(renderProviderWindows, /if \(credits\.showMeter === false\) node\.classList\.add\('limit-window-no-reset'\);/);
 
-  // Money, not raw credit counts: the detail under the bar is currency-formatted.
-  const detail = functionBody(app, 'formatCommandcodeCreditsDetail', 'formatKiroOverageValue');
-  assert.match(detail, /formatMoney\(value, window\?\.currency\)/);
-  assert.match(detail, /formatMoney\(limit, window\?\.currency\)/);
-  assert.match(detail, /state\.settings\?\.showLimitUsed/);
+  // Money, not raw credit counts, and the percentage keeps the headline: the
+  // grant's bar is a percentage, so replacing the headline with the amount
+  // would leave the bar and its own label disagreeing.
+  const grant = { kind: 'billing', metric: 'credits', label: 'Monthly', remaining: 47.42, limit: 70, currency: 'USD' };
+  assert.deepEqual(windowText('commandcode', grant), { value: null, detail: '$47.42 / $70.00', percentLeads: true });
+  assert.equal(windowText('commandcode', grant, { showLimitUsed: true }).detail, '$22.58 / $70.00');
+  // A top-up with no published allowance has no denominator and so no detail.
+  assert.equal(windowText('commandcode', { kind: 'billing', metric: 'credits', label: 'Top-up', remaining: 5, currency: 'USD' }).detail, '');
 });
 
 test('Ollama renders Session and Weekly usage windows', () => {
@@ -1134,6 +1156,7 @@ test('Z.ai and Team keep all billing windows and render MCP full width after pai
       windowsForKind: (p, kind) => p.windows.filter(w => w.kind === kind),
       limitWindowNode: (label, window, _color, _tone, _value, detail) => Object.assign(makeNode(), { label, window, detail }),
       providerWindowLabel: (p, window, fallback = '') => limitWindowLabel(p?.provider, window, fallback),
+      providerWindowText: (p, window) => limitWindowText(p, window, { showLimitUsed: false }),
       provider: { provider, windows: [
         { kind: 'weekly', label: 'Weekly' },
         { kind: 'billing', label: 'MCP' },
@@ -4988,17 +5011,11 @@ test('GLM Home daily windows retain returned model names instead of the generic 
 });
 
 test('Z.ai token-pool windows print an absolute token pair through the detail slot', () => {
-  const app = readRendererFile('app.js');
-  const body = functionBody(app, 'formatZcodeTokensDetail', 'formatKiroOverageValue');
-  const detail = (window, showLimitUsed, unitSystem = 'western', locale = 'en') => vm.runInNewContext(
-    `${body}\nformatZcodeTokensDetail(window)`,
-    {
-      window,
-      optionalFiniteNumber: (value) => { const n = Number(value); return Number.isFinite(n) ? n : null; },
-      formatCompact: (value) => compactTokenApi.formatCompactTokens(value, unitSystem, locale),
-      state: { settings: { showLimitUsed } }
-    }
-  );
+  const detail = (window, showLimitUsed, unitSystem = 'western', locale = 'en') => windowText(
+    'zai',
+    window,
+    { showLimitUsed, unitSystem, locale }
+  ).detail;
   const pool = { limit: 305_000_000, remaining: 195_850_553 };
   assert.equal(detail(pool, false), '195.9M / 305M');
   assert.equal(detail(pool, true), '109.1M / 305M');

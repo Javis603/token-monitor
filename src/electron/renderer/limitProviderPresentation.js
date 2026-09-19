@@ -290,6 +290,37 @@
       || (providerName === 'zed' && source === 'web');
   }
 
+  // How long ago a provider row was refreshed, and whether that reading is
+  // still trusted. One function because the Limits view and the edge dock used
+  // to word this differently off the same `provider.stale` flag — the page said
+  // "Stale · 55m ago" while the card said "Updated 54m ago" and added a
+  // separate warning line, which read like two different conditions.
+  //
+  // `tone` is what a surface decorates with; the words do not change with it.
+  function limitProviderFreshness(provider, options = {}) {
+    const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+    const at = Date.parse(provider?.updatedAt || provider?.checkedAt || '');
+    if (!Number.isFinite(at)) {
+      return { text: provider?.stale ? 'Stale' : 'Update unknown', age: '', tone: provider?.stale ? 'stale' : 'unknown' };
+    }
+    const diffMs = Math.max(0, nowMs - at);
+    let age;
+    if (diffMs < 45_000) {
+      age = 'just now';
+    } else {
+      const minutes = Math.round(diffMs / 60000);
+      if (minutes < 60) {
+        age = `${minutes}m ago`;
+      } else {
+        const hours = Math.round(minutes / 60);
+        age = hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
+      }
+    }
+    return provider?.stale
+      ? { text: `Stale · ${age}`, age, tone: 'stale' }
+      : { text: `Updated ${age}`, age, tone: 'ok' };
+  }
+
   function limitProviderStatusLabel(provider = {}) {
     const providerName = providerId(provider);
     const status = statusId(provider);
@@ -470,6 +501,7 @@
     limitProviderCompactWindowLabel,
     limitProviderCompactWindowPeriodLabel,
     limitProviderCompactWindows,
+    limitProviderFreshness,
     limitProviderDisplayLabel,
     limitProviderPlanDisplayLabel,
     limitProviderMainDeviceLabel,

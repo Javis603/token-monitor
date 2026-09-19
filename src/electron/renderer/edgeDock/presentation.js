@@ -101,7 +101,19 @@
             : null,
           resetsAt: window.resetsAt || null,
           resetDescription: window.resetDescription || '',
-          boundaryKind: window.boundaryKind || ''
+          boundaryKind: window.boundaryKind || '',
+          // The inputs `limitWindowText()` reads. They ride the projection
+          // rather than the formatted string, because the card repaints from
+          // its last payload on a timer and the used/remaining display mode can
+          // flip between pushes — formatting here would freeze it at push time.
+          metric: String(window.metric || ''),
+          limitId: String(window.limitId || ''),
+          showMeter: window.showMeter !== false,
+          used: finite(window.used),
+          limit: finite(window.limit),
+          remaining: finite(window.remaining),
+          currency: String(window.currency || ''),
+          detail: String(window.detail || '')
         };
       });
   }
@@ -129,6 +141,7 @@
       accountName: String(provider?.accountName || ''),
       accountEmail: String(provider?.accountEmail || ''),
       updatedAt: provider?.updatedAt || provider?.checkedAt || null,
+      stale: provider?.stale === true,
       primaryRemaining: selection ? selection.primaryPercent : null,
       primaryWindow: selection ? selection.primaryWindow : null,
       windows: bubbleWindows(provider, options),
