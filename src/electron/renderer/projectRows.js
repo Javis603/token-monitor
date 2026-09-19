@@ -52,11 +52,12 @@
           const tokens = Math.max(0, Number(value || 0));
           if (tokens > 0) clientTokens[client] = tokens;
         }
-        if (!projects.has(key)) projects.set(key, { key, name, value: 0, cost: 0, clients: new Set(), clientTokens: Object.create(null) });
+        if (!projects.has(key)) projects.set(key, { key, name, value: 0, cost: 0, unpricedTokens: 0, clients: new Set(), clientTokens: Object.create(null) });
         const project = projects.get(key);
         project.name = deterministicProjectLabel(project.name, name);
         project.value += Math.max(0, Number(entry.tokens || 0));
         project.cost += Number(entry.costUsd || 0);
+        project.unpricedTokens += Math.max(0, Number(entry.unpricedTokens || 0));
         for (const [client, tokens] of Object.entries(clientTokens)) {
           project.clients.add(client);
           project.clientTokens[client] = (Object.prototype.hasOwnProperty.call(project.clientTokens, client) ? project.clientTokens[client] : 0) + tokens;
@@ -67,12 +68,13 @@
         const label = String(session?.projectLabel || '').trim().normalize('NFC');
         const key = canonicalProjectKey(label);
         if (!key || !label) continue;
-        if (!projects.has(key)) projects.set(key, { key, name: label, value: 0, cost: 0, clients: new Set(), clientTokens: Object.create(null) });
+        if (!projects.has(key)) projects.set(key, { key, name: label, value: 0, cost: 0, unpricedTokens: 0, clients: new Set(), clientTokens: Object.create(null) });
         const project = projects.get(key);
         project.name = deterministicProjectLabel(project.name, label);
         const sessionTokens = Math.max(0, Number(session.totalTokens || 0));
         project.value += sessionTokens;
         project.cost += Number(session.costUsd || 0);
+        project.unpricedTokens += Math.max(0, Number(session.unpricedTokens || 0));
         if (session.client) {
           project.clients.add(session.client);
           project.clientTokens[session.client] = (Object.prototype.hasOwnProperty.call(project.clientTokens, session.client) ? project.clientTokens[session.client] : 0) + sessionTokens;
@@ -84,7 +86,7 @@
       const name = String(entry.label || rawKey || '').trim().normalize('NFC');
       const key = canonicalProjectKey(name || rawKey);
       if (!key || !name) continue;
-      if (!projects.has(key)) projects.set(key, { key, name, value: 0, cost: 0, clients: new Set(), clientTokens: Object.create(null) });
+      if (!projects.has(key)) projects.set(key, { key, name, value: 0, cost: 0, unpricedTokens: 0, clients: new Set(), clientTokens: Object.create(null) });
       const project = projects.get(key);
       project.name = deterministicProjectLabel(project.name, name);
       project.value += Math.max(0, Number(entry.tokens || 0));
@@ -112,7 +114,7 @@
         const key = canonicalProjectKey(name);
         const tokens = Math.max(0, Number(session.totalTokens || 0));
         if (!key || !name || tokens <= 0) continue;
-        if (!projects.has(key)) projects.set(key, { key, name, value: 0, cost: 0, clients: new Set(), clientTokens: Object.create(null) });
+        if (!projects.has(key)) projects.set(key, { key, name, value: 0, cost: 0, unpricedTokens: 0, clients: new Set(), clientTokens: Object.create(null) });
         const project = projects.get(key);
         project.name = deterministicProjectLabel(project.name, name);
         project.value += tokens;

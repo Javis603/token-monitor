@@ -34,6 +34,17 @@ test('attribution rows use the union of token and cost keys', () => {
   );
 });
 
+test('attribution rows retain unpriced-token provenance without changing known rows', () => {
+  assert.deepEqual(
+    attributionRows({ qodercn: 100 }, { qodercn: 1.25 }, { qodercn: 40 }),
+    [{ key: 'qodercn', value: 100, cost: 1.25, unpricedTokens: 40 }]
+  );
+  assert.deepEqual(
+    attributionRows({ codex: 10 }, { codex: 0 }, {}),
+    [{ key: 'codex', value: 10, cost: 0 }]
+  );
+});
+
 test('attribution rows discard empty and invalid entries', () => {
   assert.deepEqual(
     attributionRows({ empty: 0, invalid: 'nope' }, { empty: 0, invalid: Infinity }),
@@ -174,8 +185,8 @@ test('Tool and Model breakdowns consume the shared token-or-cost rows', () => {
   const index = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   assert.ok(index.indexOf('usageAttributionRows.js') < index.indexOf('app.js'));
-  assert.match(app, /periodAttributionRows\(period, period\?\.clients, period\?\.clientCosts\)/);
-  assert.match(app, /periodAttributionRows\(period, period\?\.models, period\?\.modelCosts\)/);
+  assert.match(app, /periodAttributionRows\(period, period\?\.clients, period\?\.clientCosts, period\?\.clientUnpricedTokens\)/);
+  assert.match(app, /periodAttributionRows\(period, period\?\.models, period\?\.modelCosts, period\?\.modelUnpricedTokens\)/);
   assert.match(app, /visibleAttributionRows\(rows, formatCost\)/);
   assert.match(app, /attributionValue\(/);
 });

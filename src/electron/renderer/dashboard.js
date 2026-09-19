@@ -9,6 +9,7 @@ const compactTokenApi = window.TokenMonitorCompactTokens;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const fontSettingsApi = window.TokenMonitorFontSettings;
 const statsRenderSchedulerApi = window.TokenMonitorStatsRenderScheduler;
+const costPresentationApi = window.TokenMonitorCostPresentation;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
 // Canonical brand colours, captured before any override (clientColors is shared
@@ -267,6 +268,11 @@ function formatCostCompact(usd) {
     state.locale
   );
 }
+function formatCostAvailability(usd, unpricedTokens, formatter = formatCost) {
+  return costPresentationApi.formatCostAvailability(usd, unpricedTokens, formatter, {
+    partial: t('cost.partial'), unknown: t('cost.unavailable')
+  });
+}
 function shortDate(key) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(key)); return m ? `${Number(m[2])}/${Number(m[3])}` : String(key); }
 function axisEvery(list) { return Math.max(1, Math.ceil(list.length / 9)); }
 // Local, not UTC: the heatmap's day cells are local-day scoped, so a UTC "today"
@@ -498,7 +504,7 @@ function renderActivity() {
     ? charts.heatmapSvg(heat, { monthLabel: (m) => monthLabel(m.label), initialHidden: hideHeatmapForEntry })
     : '';
   animateHeatmapEntry();
-  state.dayMap = new Map((state.history?.daily || []).map((d) => [String(d.date).slice(0, 10), { tokens: Number(d.tokens || 0), cost: Number(d.cost || 0) }]));
+  state.dayMap = new Map((state.history?.daily || []).map((d) => [String(d.date).slice(0, 10), { tokens: Number(d.tokens || 0), cost: Number(d.cost || 0), unpricedTokens: Number(d.unpricedTokens || 0) }]));
   const cards = charts.statsCards(state.history?.summary || {});
   const LABELS = {
     totalTokens: 'dashboard.stat.totalTokens', totalCost: 'dashboard.stat.totalCost',
@@ -508,7 +514,7 @@ function renderActivity() {
   };
   els.cards.innerHTML = charts.statsCardsHtml(cards, {
     label: (k) => t(LABELS[k] || k),
-    format: (c) => (c.kind === 'cost' ? formatCostCompact(c.value)
+    format: (c) => (c.kind === 'cost' ? formatCostAvailability(c.value, state.history?.summary?.unpricedTokens, formatCostCompact)
       : c.kind === 'duration' ? formatDurationCompact(c.value)
         : c.kind === 'model' ? (c.value || '—') : formatCompact(c.value))
   });
@@ -607,7 +613,7 @@ function showHeatTooltip(date, day, ev) {
   const costLabel = state.locale.startsWith('zh') ? '花費' : 'Cost';
   let html = `<div class="tt-head">${longDate(date)}</div>`;
   html += `<div class="tt-row"><span class="tt-name">${tokLabel}</span><span class="tt-val">${formatCompact(tokens)}</span></div>`;
-  if (cost > 0) html += `<div class="tt-row"><span class="tt-name">${costLabel}</span><span class="tt-val">${formatCost(cost)}</span></div>`;
+  if (cost > 0 || Number(day?.unpricedTokens || 0) > 0) html += `<div class="tt-row"><span class="tt-name">${costLabel}</span><span class="tt-val">${formatCostAvailability(cost, day?.unpricedTokens)}</span></div>`;
   els.tooltip.innerHTML = html;
   positionTooltip(ev);
 }

@@ -24,6 +24,7 @@ function normalizeObservation(value) {
   const modelId = String(value.modelId || value.model || value.model_id || 'unknown');
   const tokens = Math.max(0, Math.round(num(value.tokens)));
   const cost = Math.max(0, num(value.cost));
+  const unpricedTokens = Math.min(tokens, Math.max(0, Math.round(num(value.unpricedTokens))));
   const messages = Math.max(0, Math.round(num(value.messages)));
   const reasoningTokens = Math.max(0, Math.round(num(value.reasoningTokens ?? value.reasoning_tokens)));
   const rawCacheReadTokens = Math.max(0, Math.round(num(value.cacheReadTokens ?? value.cache_read_tokens)));
@@ -58,6 +59,7 @@ function normalizeObservation(value) {
       : {}),
     tokens,
     cost,
+    ...(unpricedTokens > 0 ? { unpricedTokens } : {}),
     messages,
     ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {}),
     ...(tokenComponentsAvailable ? {
@@ -77,6 +79,7 @@ function addObservation(previous, candidate) {
     providerId: candidate.providerId || previous.providerId,
     tokens: previous.tokens + candidate.tokens,
     cost: previous.cost + candidate.cost,
+    unpricedTokens: num(previous.unpricedTokens) + num(candidate.unpricedTokens),
     messages: previous.messages + candidate.messages,
     reasoningTokens: num(previous.reasoningTokens) + num(candidate.reasoningTokens),
     tokenComponentsAvailable: previous.tokenComponentsAvailable === true
@@ -269,12 +272,13 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
 function periodLiveDay(period, date) {
   if (!period || typeof period !== 'object' || !DAY_KEY_RE.test(date)) return null;
   const observations = new Map();
-  const addObservation = (client, modelId, tokens, cost) => {
+  const addObservation = (client, modelId, tokens, cost, unpricedTokens = 0) => {
     const observation = {
       client,
       modelId,
       tokens: Math.max(0, Math.round(num(tokens))),
       cost: Math.max(0, num(cost)),
+      unpricedTokens: Math.min(Math.max(0, Math.round(num(tokens))), Math.max(0, Math.round(num(unpricedTokens)))),
       messages: 0
     };
     const key = observationKey(observation);
@@ -285,12 +289,16 @@ function periodLiveDay(period, date) {
     }
     previous.tokens += observation.tokens;
     previous.cost += observation.cost;
+    previous.unpricedTokens = num(previous.unpricedTokens) + num(observation.unpricedTokens);
   };
   const clientModels = period.clientModels && typeof period.clientModels === 'object'
     ? period.clientModels
     : {};
   const clientModelCosts = period.clientModelCosts && typeof period.clientModelCosts === 'object'
     ? period.clientModelCosts
+    : {};
+  const clientModelUnpricedTokens = period.clientModelUnpricedTokens && typeof period.clientModelUnpricedTokens === 'object'
+    ? period.clientModelUnpricedTokens
     : {};
   const clients = period.clients && typeof period.clients === 'object' ? period.clients : {};
   const clientCosts = period.clientCosts && typeof period.clientCosts === 'object' ? period.clientCosts : {};
@@ -306,7 +314,7 @@ function periodLiveDay(period, date) {
     for (const modelId of modelIds) {
       const modelTokens = Math.max(0, Math.round(num(models[modelId])));
       const modelCost = Math.max(0, num(clientModelCosts[client]?.[modelId]));
-      addObservation(client, modelId, modelTokens, modelCost);
+      addObservation(client, modelId, modelTokens, modelCost, clientModelUnpricedTokens[client]?.[modelId]);
       modeledTokens += modelTokens;
       modeledCost += modelCost;
     }
@@ -315,7 +323,9 @@ function periodLiveDay(period, date) {
     const remainderTokens = Math.max(0, clientTokens - modeledTokens);
     const remainderCost = Math.max(0, clientCost - modeledCost);
     if (modelIds.length === 0 || remainderTokens > 0 || remainderCost > 0) {
-      addObservation(client, 'unknown', remainderTokens, remainderCost);
+      const clientUnpriced = Math.max(0, Math.round(num(period.clientUnpricedTokens?.[client])));
+      const modeledUnpriced = Object.values(clientModelUnpricedTokens[client] || {}).reduce((sum, value) => sum + num(value), 0);
+      addObservation(client, 'unknown', remainderTokens, remainderCost, Math.max(0, clientUnpriced - modeledUnpriced));
     }
   }
 
@@ -329,7 +339,8 @@ function periodLiveDay(period, date) {
       'unknown',
       'unknown',
       Math.max(0, totalTokens - observedTokens),
-      Math.max(0, totalCost - observedCost)
+      Math.max(0, totalCost - observedCost),
+      Math.max(0, num(period.unpricedTokens) - observed.reduce((sum, observation) => sum + num(observation.unpricedTokens), 0))
     );
   }
 
@@ -395,7 +406,10 @@ function liveDayIsGreater(incoming, previous) {
   if (qualityDifference !== 0) return qualityDifference > 0;
   // Equal usage can receive a corrected price in either direction. The later
   // live observation is authoritative once its provenance quality is equal.
-  return dayCost(incoming) !== dayCost(previous);
+  if (dayCost(incoming) !== dayCost(previous)) return true;
+  const unpriced = (day) => Object.values(day?.observations || {})
+    .reduce((sum, observation) => sum + num(observation.unpricedTokens), 0);
+  return unpriced(incoming) !== unpriced(previous);
 }
 
 // A Cursor liveDay keeps the cost of the moment it was captured, while the
@@ -404,19 +418,35 @@ function liveDayIsGreater(incoming, previous) {
 // graph cost that is missing. That holds whichever day liveDayIsGreater keeps:
 // a liveDay chosen because another observation grew must not carry a stale
 // Cursor cost along, and a graph day kept because the aggregate cost happened
-// to tie must still take a price only the liveDay has. Every other client keeps
-// the bidirectional repricing liveDayIsGreater allows.
-function withReconciledCursorCosts(day, graphDay, liveDay) {
+// to tie must still take a price only the liveDay has. Qoder also refreshes its
+// missing-price provenance from the graph; other clients retain their rules.
+function withReconciledCurrentCosts(day, graphDay, liveDay) {
   let changed = false;
   const observations = Object.fromEntries(Object.entries(day.observations).map(([key, observation]) => {
     const graphObservation = graphDay.observations[key];
     const liveObservation = liveDay.observations[key];
-    if (normalizeTokscaleClientName(observation.client) !== 'cursor'
-      || !graphObservation
+    const client = normalizeTokscaleClientName(observation.client);
+    if (!graphObservation
       || !liveObservation
       || num(graphObservation.tokens) !== num(liveObservation.tokens)) {
       return [key, observation];
     }
+    // Qoder's graph is rebuilt with the current pricing lookup, while liveDay
+    // is a durable snapshot. For the exact same usage the graph is therefore
+    // authoritative even when the resolved price is a legitimate zero. Copy
+    // its known subtotal and replace (or clear) the old missing-price marker.
+    if (client === 'qodercn') {
+      const graphUnpriced = Math.min(num(graphObservation.tokens), Math.max(0, num(graphObservation.unpricedTokens)));
+      const sameCost = num(graphObservation.cost) === num(observation.cost);
+      const sameUnpriced = graphUnpriced === num(observation.unpricedTokens);
+      if (sameCost && sameUnpriced) return [key, observation];
+      changed = true;
+      const next = { ...observation, cost: graphObservation.cost };
+      if (graphUnpriced > 0) next.unpricedTokens = graphUnpriced;
+      else delete next.unpricedTokens;
+      return [key, next];
+    }
+    if (client !== 'cursor') return [key, observation];
     const cost = num(graphObservation.cost) > 0 ? graphObservation.cost : liveObservation.cost;
     if (num(cost) === num(observation.cost)) return [key, observation];
     changed = true;
@@ -516,7 +546,7 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
       currentDays.set(date, liveDay);
     } else {
       const selected = liveDayIsGreater(liveDay, previous) ? mergeLiveDayMetadata(liveDay, previous) : previous;
-      currentDays.set(date, withReconciledCursorCosts(selected, previous, liveDay));
+      currentDays.set(date, withReconciledCurrentCosts(selected, previous, liveDay));
     }
   }
 
@@ -549,6 +579,7 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
             ? { unclassifiedTokens: num(observation.unclassifiedTokens) }
             : {}),
           cost: observation.cost,
+          ...(num(observation.unpricedTokens) > 0 ? { unpricedTokens: num(observation.unpricedTokens) } : {}),
           messages: observation.messages
         }))
     }));

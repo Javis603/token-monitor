@@ -182,6 +182,7 @@ function emptyPeriod() {
     capabilities: { tokenComponents: true, throughput: true },
     totalTokens: 0,
     costUsd: 0,
+    unpricedTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     outputTokens: 0,
@@ -209,18 +210,21 @@ function emptyPeriod() {
     timedDurationMs: 0,
     clients: {},
     clientCosts: {},
+    clientUnpricedTokens: {},
     clientCacheReads: {},
     clientCacheWrites: {},
     clientOutputs: {},
     clientUnclassifiedTokens: {},
     models: {},
     modelCosts: {},
+    modelUnpricedTokens: {},
     modelCacheReads: {},
     modelCacheWrites: {},
     modelOutputs: {},
     modelUnclassifiedTokens: {},
     clientModels: {},
     clientModelCosts: {},
+    clientModelUnpricedTokens: {},
     projects: Object.create(null),
     sessions: {}
   };
@@ -312,6 +316,8 @@ function addProjectInto(projects, rawKey, source) {
   target.label = deterministicProjectLabel(target.label, label || rawKey);
   target.tokens += Math.max(0, Math.round(asNumber(source.tokens ?? source.totalTokens)));
   target.costUsd += asNumber(source.costUsd ?? source.cost);
+  const unpricedTokens = Math.max(0, Math.round(asNumber(source.unpricedTokens)));
+  if (unpricedTokens > 0) target.unpricedTokens = asNumber(target.unpricedTokens) + unpricedTokens;
   for (const [client, tokens] of Object.entries(source.clients || {})) {
     const clientKey = normalizeClientName(client);
     if (!clientKey) continue;
@@ -340,6 +346,8 @@ function projectRollupFromSessions(sessions) {
     const tokens = Math.max(0, Math.round(asNumber(session.totalTokens)));
     project.tokens += tokens;
     project.costUsd += asNumber(session.costUsd);
+    const unpricedTokens = Math.max(0, Math.round(asNumber(session.unpricedTokens)));
+    if (unpricedTokens > 0) project.unpricedTokens = asNumber(project.unpricedTokens) + unpricedTokens;
     const client = normalizeClientName(session.client);
     if (client && tokens > 0) {
       project.clients[client] = (hasOwn(project.clients, client) ? project.clients[client] : 0) + tokens;
@@ -483,6 +491,7 @@ function emptySession(client, id) {
     sessionId: id,
     totalTokens: 0,
     costUsd: 0,
+    unpricedTokens: 0,
     messageCount: 0,
     inputTokens: 0,
     outputTokens: 0,
@@ -508,6 +517,7 @@ function emptySession(client, id) {
     sessionKind: '',
     models: {},
     modelCosts: {},
+    modelUnpricedTokens: {},
     providers: {}
   };
 }
@@ -517,6 +527,7 @@ const sessionsWithLiveSource = new WeakSet();
 function mergeSession(target, source) {
   target.totalTokens += Math.max(0, Math.round(asNumber(source.totalTokens)));
   target.costUsd += asNumber(source.costUsd);
+  target.unpricedTokens += Math.max(0, Math.round(asNumber(source.unpricedTokens)));
   target.messageCount += Math.max(0, Math.round(asNumber(source.messageCount)));
   target.inputTokens += Math.max(0, Math.round(asNumber(source.inputTokens)));
   target.outputTokens += Math.max(0, Math.round(asNumber(source.outputTokens)));
@@ -581,6 +592,10 @@ function mergeSession(target, source) {
     const key = normalizeModelNameForClient(model, target.client);
     if (key) target.modelCosts[key] = (target.modelCosts[key] || 0) + asNumber(cost);
   }
+  for (const [model, tokens] of Object.entries(source.modelUnpricedTokens || {})) {
+    const key = normalizeModelNameForClient(model, target.client);
+    if (key) target.modelUnpricedTokens[key] = (target.modelUnpricedTokens[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
+  }
   for (const [provider, tokens] of Object.entries(source.providers || {})) {
     const key = normalizeProviderName(provider);
     if (key) target.providers[key] = (target.providers[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
@@ -611,6 +626,7 @@ function sessionFromRow(row) {
   const session = emptySession(client, id);
   session.totalTokens = Math.max(0, Math.round(tokenValueForClient(row, client)));
   session.costUsd = costValue(row);
+  session.unpricedTokens = Math.min(session.totalTokens, Math.max(0, Math.round(asNumber(row.unpricedTokens))));
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
   Object.assign(session, sessionTokenComponents(row));
   session.outputTokens = Math.max(0, Math.round(outputValueForClient(row, client)));
@@ -624,6 +640,7 @@ function sessionFromRow(row) {
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
   if (model && session.costUsd > 0) session.modelCosts[model] = (session.modelCosts[model] || 0) + session.costUsd;
+  if (model && session.unpricedTokens > 0) session.modelUnpricedTokens[model] = session.unpricedTokens;
   const provider = normalizeProviderName(row.provider);
   if (provider && session.totalTokens > 0) session.providers[provider] = (session.providers[provider] || 0) + session.totalTokens;
   return session;
@@ -641,6 +658,7 @@ function normalizeSession(input, fallbackKey) {
   const componentTotal = components.inputTokens + components.outputTokens + components.cacheReadTokens + components.cacheWriteTokens; // reasoning is a subset of output — see TOKEN_COMPONENT_KEYS
   session.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? input.tokens ?? componentTotal)));
   session.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
+  session.unpricedTokens = Math.min(session.totalTokens, Math.max(0, Math.round(asNumber(input.unpricedTokens))));
   session.messageCount = Math.max(0, Math.round(firstNumber(input, MESSAGE_COUNT_KEYS)));
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
@@ -666,6 +684,12 @@ function normalizeSession(input, fallbackKey) {
     for (const [model, value] of Object.entries(input.modelCosts)) {
       const key = normalizeModelNameForClient(model, client);
       if (key) session.modelCosts[key] = (session.modelCosts[key] || 0) + asNumber(value);
+    }
+  }
+  if (input.modelUnpricedTokens && typeof input.modelUnpricedTokens === 'object') {
+    for (const [model, value] of Object.entries(input.modelUnpricedTokens)) {
+      const key = normalizeModelNameForClient(model, client);
+      if (key) session.modelUnpricedTokens[key] = (session.modelUnpricedTokens[key] || 0) + Math.max(0, Math.round(asNumber(value)));
     }
   }
   if (input.providers && typeof input.providers === 'object') {
@@ -705,6 +729,7 @@ function normalizePeriod(input, options = {}) {
   period.capabilities.tokenComponents = componentCapability === true
     || (componentCapability !== false && (period.totalTokens === 0 || hasLegacyComponentShape));
   period.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
+  period.unpricedTokens = Math.min(period.totalTokens, Math.max(0, Math.round(asNumber(input.unpricedTokens))));
   period.cacheReadTokens = Math.max(0, Math.round(asNumber(input.cacheReadTokens ?? input.cache_read_tokens ?? 0)));
   period.cacheWriteTokens = Math.max(0, Math.round(asNumber(input.cacheWriteTokens ?? input.cache_write_tokens ?? 0)));
   period.outputTokens = Math.max(0, Math.round(asNumber(input.outputTokens ?? input.output_tokens ?? 0)));
@@ -771,6 +796,13 @@ function normalizePeriod(input, options = {}) {
       if (key) period.clientCosts[key] = (period.clientCosts[key] || 0) + asNumber(value);
     }
   }
+  if (input.clientUnpricedTokens && typeof input.clientUnpricedTokens === 'object') {
+    for (const [client, value] of Object.entries(input.clientUnpricedTokens)) {
+      const key = normalizeClientName(client);
+      const tokens = Math.max(0, Math.round(asNumber(value)));
+      if (key && tokens > 0) period.clientUnpricedTokens[key] = (period.clientUnpricedTokens[key] || 0) + tokens;
+    }
+  }
   if (input.models && typeof input.models === 'object') {
     for (const [model, value] of Object.entries(input.models)) {
       const key = normalizeModelName(model);
@@ -802,6 +834,13 @@ function normalizePeriod(input, options = {}) {
       if (key) period.modelCosts[key] = (period.modelCosts[key] || 0) + asNumber(value);
     }
   }
+  if (input.modelUnpricedTokens && typeof input.modelUnpricedTokens === 'object') {
+    for (const [model, value] of Object.entries(input.modelUnpricedTokens)) {
+      const key = normalizeModelName(model);
+      const tokens = Math.max(0, Math.round(asNumber(value)));
+      if (key && tokens > 0) period.modelUnpricedTokens[key] = (period.modelUnpricedTokens[key] || 0) + tokens;
+    }
+  }
   if (input.clientModels && typeof input.clientModels === 'object') {
     for (const [client, models] of Object.entries(input.clientModels)) {
       const clientKey = normalizeClientName(client);
@@ -823,6 +862,19 @@ function normalizePeriod(input, options = {}) {
         if (!modelKey) continue;
         if (!period.clientModelCosts[clientKey]) period.clientModelCosts[clientKey] = {};
         period.clientModelCosts[clientKey][modelKey] = (period.clientModelCosts[clientKey][modelKey] || 0) + asNumber(value);
+      }
+    }
+  }
+  if (input.clientModelUnpricedTokens && typeof input.clientModelUnpricedTokens === 'object') {
+    for (const [client, models] of Object.entries(input.clientModelUnpricedTokens)) {
+      const clientKey = normalizeClientName(client);
+      if (!clientKey || !models || typeof models !== 'object') continue;
+      for (const [model, value] of Object.entries(models)) {
+        const modelKey = normalizeModelNameForClient(model, clientKey);
+        const tokens = Math.max(0, Math.round(asNumber(value)));
+        if (!modelKey || tokens <= 0) continue;
+        if (!period.clientModelUnpricedTokens[clientKey]) period.clientModelUnpricedTokens[clientKey] = {};
+        period.clientModelUnpricedTokens[clientKey][modelKey] = (period.clientModelUnpricedTokens[clientKey][modelKey] || 0) + tokens;
       }
     }
   }
@@ -857,6 +909,10 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const client = detectedClient;
   const tokens = tokenValueForClient(row, client);
   const cost = costValue(row);
+  const unpricedTokens = Math.min(
+    Math.max(0, Math.round(tokens)),
+    Math.max(0, Math.round(asNumber(row.unpricedTokens)))
+  );
   const cacheRead = Math.max(0, Math.round(firstNumber(row, CACHE_READ_TOKEN_KEYS)));
   const cacheWrite = Math.max(0, Math.round(firstNumber(row, CACHE_WRITE_TOKEN_KEYS)));
   const output = Math.max(0, Math.round(outputValueForClient(row, client)));
@@ -871,6 +927,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;
+  period.unpricedTokens += unpricedTokens;
   period.cacheReadTokens += cacheRead;
   period.cacheWriteTokens += cacheWrite;
   period.outputTokens += output;
@@ -884,6 +941,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
     if (output > 0) period.clientOutputs[client] = (period.clientOutputs[client] || 0) + output;
   }
   if (client && cost > 0) period.clientCosts[client] = (period.clientCosts[client] || 0) + cost;
+  if (client && unpricedTokens > 0) period.clientUnpricedTokens[client] = (period.clientUnpricedTokens[client] || 0) + unpricedTokens;
   if (model && tokens > 0) {
     period.models[model] = (period.models[model] || 0) + Math.round(tokens);
     if (cacheRead > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cacheRead;
@@ -891,6 +949,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
     if (output > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + output;
   }
   if (model && cost > 0) period.modelCosts[model] = (period.modelCosts[model] || 0) + cost;
+  if (model && unpricedTokens > 0) period.modelUnpricedTokens[model] = (period.modelUnpricedTokens[model] || 0) + unpricedTokens;
   if (client && model && tokens > 0) {
     if (!period.clientModels[client]) period.clientModels[client] = {};
     period.clientModels[client][model] = (period.clientModels[client][model] || 0) + Math.round(tokens);
@@ -898,6 +957,10 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   if (client && model && cost > 0) {
     if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
     period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + cost;
+  }
+  if (client && model && unpricedTokens > 0) {
+    if (!period.clientModelUnpricedTokens[client]) period.clientModelUnpricedTokens[client] = {};
+    period.clientModelUnpricedTokens[client][model] = (period.clientModelUnpricedTokens[client][model] || 0) + unpricedTokens;
   }
   const session = sessionFromRow(row);
   if (session) addSession(period, session);
@@ -1028,6 +1091,7 @@ function normalizeDeviceRecord(record) {
 function addClientModelUsage(target, source, client) {
   const models = source.clientModels?.[client];
   const costs = source.clientModelCosts?.[client];
+  const unpriced = source.clientModelUnpricedTokens?.[client];
   for (const [model, tokens] of Object.entries(models || {})) {
     target.models[model] = (target.models[model] || 0) + tokens;
     if (!target.clientModels[client]) target.clientModels[client] = {};
@@ -1058,6 +1122,11 @@ function addClientModelUsage(target, source, client) {
     target.modelCosts[model] = (target.modelCosts[model] || 0) + cost;
     if (!target.clientModelCosts[client]) target.clientModelCosts[client] = {};
     target.clientModelCosts[client][model] = (target.clientModelCosts[client][model] || 0) + cost;
+  }
+  for (const [model, tokens] of Object.entries(unpriced || {})) {
+    target.modelUnpricedTokens[model] = (target.modelUnpricedTokens[model] || 0) + tokens;
+    if (!target.clientModelUnpricedTokens[client]) target.clientModelUnpricedTokens[client] = {};
+    target.clientModelUnpricedTokens[client][model] = (target.clientModelUnpricedTokens[client][model] || 0) + tokens;
   }
 }
 
@@ -1108,9 +1177,12 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
       const cost = source.clientCosts?.[client] || 0;
       target.totalTokens += tokens;
       target.costUsd += cost;
+      const unpricedTokens = Math.max(0, Math.round(asNumber(source.clientUnpricedTokens?.[client])));
+      target.unpricedTokens += unpricedTokens;
       target.clients[client] = tokens;
       preservedClients.add(client);
       if (cost > 0) target.clientCosts[client] = cost;
+      if (unpricedTokens > 0) target.clientUnpricedTokens[client] = unpricedTokens;
       const cacheRead = Math.min(tokens, asNumber(source.clientCacheReads?.[client]));
       const cacheWrite = Math.min(tokens - cacheRead, asNumber(source.clientCacheWrites?.[client]));
       const output = Math.min(tokens - cacheRead - cacheWrite, asNumber(source.clientOutputs?.[client]));
@@ -1366,6 +1438,7 @@ function addPeriodInto(target, source) {
     && source.capabilities?.throughput === true;
   target.totalTokens += source.totalTokens;
   target.costUsd += source.costUsd;
+  target.unpricedTokens += source.unpricedTokens;
   target.cacheReadTokens += source.cacheReadTokens;
   target.cacheWriteTokens += source.cacheWriteTokens;
   target.outputTokens += source.outputTokens;
@@ -1381,6 +1454,7 @@ function addPeriodInto(target, source) {
     if (source.clientUnclassifiedTokens?.[client]) target.clientUnclassifiedTokens[client] = (target.clientUnclassifiedTokens[client] || 0) + source.clientUnclassifiedTokens[client];
   }
   for (const [client, cost] of Object.entries(source.clientCosts)) target.clientCosts[client] = (target.clientCosts[client] || 0) + cost;
+  for (const [client, tokens] of Object.entries(source.clientUnpricedTokens || {})) target.clientUnpricedTokens[client] = (target.clientUnpricedTokens[client] || 0) + tokens;
   for (const [model, tokens] of Object.entries(source.models)) {
     target.models[model] = (target.models[model] || 0) + tokens;
     if (source.modelCacheReads?.[model]) target.modelCacheReads[model] = (target.modelCacheReads[model] || 0) + source.modelCacheReads[model];
@@ -1389,6 +1463,7 @@ function addPeriodInto(target, source) {
     if (source.modelUnclassifiedTokens?.[model]) target.modelUnclassifiedTokens[model] = (target.modelUnclassifiedTokens[model] || 0) + source.modelUnclassifiedTokens[model];
   }
   for (const [model, cost] of Object.entries(source.modelCosts)) target.modelCosts[model] = (target.modelCosts[model] || 0) + cost;
+  for (const [model, tokens] of Object.entries(source.modelUnpricedTokens || {})) target.modelUnpricedTokens[model] = (target.modelUnpricedTokens[model] || 0) + tokens;
   for (const [client, models] of Object.entries(source.clientModels)) {
     if (!target.clientModels[client]) target.clientModels[client] = {};
     for (const [model, tokens] of Object.entries(models)) {
@@ -1399,6 +1474,12 @@ function addPeriodInto(target, source) {
     if (!target.clientModelCosts[client]) target.clientModelCosts[client] = {};
     for (const [model, cost] of Object.entries(models)) {
       target.clientModelCosts[client][model] = (target.clientModelCosts[client][model] || 0) + cost;
+    }
+  }
+  for (const [client, models] of Object.entries(source.clientModelUnpricedTokens || {})) {
+    if (!target.clientModelUnpricedTokens[client]) target.clientModelUnpricedTokens[client] = {};
+    for (const [model, tokens] of Object.entries(models)) {
+      target.clientModelUnpricedTokens[client][model] = (target.clientModelUnpricedTokens[client][model] || 0) + tokens;
     }
   }
   for (const [key, project] of Object.entries(source.projects || {})) addProjectInto(target.projects, key, project);

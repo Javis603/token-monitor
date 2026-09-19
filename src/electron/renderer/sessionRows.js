@@ -212,6 +212,7 @@
       // as the cumulative token total. Do not hide it merely because the
       // period cannot be split exactly.
       cost: tokenDataUnavailable ? 0 : finiteNumber(session?.reportedCostUsd),
+      unpricedTokens: tokenDataUnavailable ? 0 : finiteNumber(session?.unpricedTokens),
       sessionDetailAvailable: session?.sessionDetailAvailable === true,
       color: colors[client] || stable(key, palette),
       stale: false,
@@ -258,6 +259,7 @@
           detail: sessionIdLabel(sessionId),
           value,
           cost: finiteNumber(session?.costUsd),
+          unpricedTokens: finiteNumber(session?.unpricedTokens),
           color: colors[client] || (modelLabel && colorForModel ? colorForModel(modelLabel) : stable(key, palette)),
           stale: false,
           archived: archived || undefined,
@@ -287,6 +289,7 @@
     if (reviews.length === 0) return primary;
     const value = reviews.reduce((sum, row) => sum + finiteNumber(row.value), 0);
     const cost = reviews.reduce((sum, row) => sum + finiteNumber(row.cost), 0);
+    const unpricedTokens = reviews.reduce((sum, row) => sum + finiteNumber(row.unpricedTokens), 0);
     const sortTime = reviews.reduce((max, row) => Math.max(max, finiteNumber(row.sortTime)), 0);
     const orderedReviews = [...reviews].sort((a, b) => finiteNumber(b.sortTime) - finiteNumber(a.sortTime));
     const latest = orderedReviews[0] || null;
@@ -308,6 +311,7 @@
       detail: countLabel,
       value,
       cost,
+      unpricedTokens,
       barValue: value,
       color: reviews[0]?.color || fallbackColors[0],
       stale: false,
