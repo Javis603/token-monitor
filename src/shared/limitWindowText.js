@@ -130,41 +130,55 @@
     const showUsed = options.showLimitUsed === true;
     const compact = typeof options.formatCompact === 'function' ? options.formatCompact : null;
     const metric = normalizedId(window.metric);
+    const kind = normalizedId(window.kind);
 
     // A spend meter is money already consumed, whatever provider reports it.
     // Keyed on the wire marker rather than an id list, so a provider that grows
     // one does not need a line here.
     if (metric === 'spend') return result(spendValue(window), '');
 
+    // Every rule below is scoped to the window kind its provider applies it to.
+    // The scoping is not decoration: Command Code's 5-hour and weekly windows
+    // are USD rate limits, so an unscoped money rule gave them a "$13.90 /
+    // $14.00" line the Limits view never showed, and in a narrow card that
+    // second figure pushed the reset time into an ellipsis.
+    const billing = kind === 'billing';
+
     if (id === 'commandcode') {
       // The grant is money but the bar is a percentage, so the amount goes
       // under the bar rather than replacing the headline. A pool with no known
       // allowance has no denominator and so no second line.
+      if (!billing) return EMPTY;
       return result(null, moneyOfRemaining(window, showUsed), window.showMeter !== false);
     }
 
     if (id === 'kiro') {
+      if (!billing) return EMPTY;
       // Overage has no meter and no denominator: one compact line, no bar.
       if (window.showMeter === false) return result(overageValue(window), '');
       return result(null, rawCount(window, showUsed));
     }
 
-    if (id === 'qoder') return result(null, rawCount(window, showUsed));
+    if (id === 'qoder') return billing ? result(null, rawCount(window, showUsed)) : EMPTY;
 
     if (id === 'zed') {
+      if (!billing) return EMPTY;
       if (window.limitId === 'zed.edit-predictions') return result(null, rawCount(window, showUsed));
       return result(null, moneyOfUsed(window, showUsed));
     }
 
     if (id === 'zai' || id === 'zaiteam') {
-      // Plan buckets are token pools; the collector's own detail wins when it
-      // set one.
+      // Token pools only: the daily windows and the plan buckets, which are the
+      // billing windows carrying a plan id. The rolling 5-hour and weekly
+      // windows are percentages and stay bare, as does the MCP bucket.
+      const pool = kind === 'daily' || (billing && Boolean(window.limitId));
+      if (!pool) return EMPTY;
       return result(null, window.detail || (compact ? counted(window, showUsed, compact) : ''));
     }
 
     // Kimi's single shared membership meter ships its Kimi-vs-Code composition
     // as `detail` and is the only other provider that shows one.
-    if (id === 'kimi') return result(null, window.detail || '');
+    if (id === 'kimi') return billing ? result(null, window.detail || '') : EMPTY;
 
     // Everything else has no second line. `detail` is deliberately NOT surfaced
     // by default: several providers carry one for a different purpose — Zed and

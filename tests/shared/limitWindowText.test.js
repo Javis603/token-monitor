@@ -56,6 +56,34 @@ test('a meterless overage is one line with no bar behind it', () => {
   assert.equal(text('kiro', { kind: 'billing', used: 120, limit: 500 }).detail, '380/500');
 });
 
+// Each provider's rule applies to the window kind the Limits view applies it
+// to, and no other. Command Code's rolling limits are USD, so an unscoped money
+// rule handed them a denominator line the page never showed — and in a narrow
+// card that second figure pushed "Reset 4h 6m" into "Res…".
+test('a provider rule only touches the window kind it belongs to', () => {
+  const fiveHour = { kind: 'session', used: 0.1, limit: 14, remaining: 13.9, currency: 'USD' };
+  const weekly = { kind: 'weekly', used: 28.43, limit: 35, remaining: 6.57, currency: 'USD' };
+  assert.equal(text('commandcode', fiveHour).detail, '');
+  assert.equal(text('commandcode', weekly).detail, '');
+  assert.equal(
+    text('commandcode', { kind: 'billing', metric: 'credits', remaining: 41.57, limit: 70, currency: 'USD' }).detail,
+    '$41.57 / $70.00'
+  );
+
+  // Z.ai prints a token pair for its daily windows and its plan buckets (the
+  // billing windows carrying a plan id), not for the rolling percentages or
+  // the MCP bucket, which has no id.
+  assert.equal(text('zai', { kind: 'session', remaining: 100, limit: 200 }).detail, '');
+  assert.equal(text('zai', { kind: 'weekly', remaining: 100, limit: 200 }).detail, '');
+  assert.equal(text('zai', { kind: 'billing', label: 'MCP', remaining: 100, limit: 200 }).detail, '');
+  assert.equal(text('zai', { kind: 'daily', remaining: 100, limit: 200 }).detail, '100 / 200');
+  assert.equal(text('zai', { kind: 'billing', limitId: 'zcode-model:x', remaining: 100, limit: 200 }).detail, '100 / 200');
+
+  for (const id of ['kiro', 'qoder', 'zed', 'kimi']) {
+    assert.equal(text(id, { kind: 'session', used: 1, limit: 4, detail: 'x' }).detail, '', id);
+  }
+});
+
 test('a window with no absolute units keeps its percentage-only look', () => {
   for (const id of ['kiro', 'qoder', 'zed', 'zai']) {
     assert.deepEqual(text(id, { kind: 'billing', usedPercent: 40 }), { value: null, detail: '', percentLeads: false }, id);
@@ -71,7 +99,7 @@ test('a window with no absolute units keeps its percentage-only look', () => {
 test('the wire detail is shown only where it means a figure under the bar', () => {
   const window = { kind: 'billing', detail: 'Kimi 40% · Code 60%' };
   assert.equal(text('kimi', window).detail, 'Kimi 40% · Code 60%');
-  assert.equal(text('zai', window).detail, 'Kimi 40% · Code 60%');
+  assert.equal(text('zai', { ...window, limitId: 'zcode-model:x' }).detail, 'Kimi 40% · Code 60%');
   for (const id of ['copilot', 'codex', 'grok', 'openrouter', 'thirdparty', 'zed']) {
     assert.equal(text(id, { kind: 'billing', detail: 'Unlimited' }).detail, '', id);
   }

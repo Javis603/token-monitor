@@ -954,8 +954,8 @@ test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with
 test('Zed details follow showLimitUsed: counts for Edit Predictions, money for Token Spend', () => {
   const renderDetail = (window, showLimitUsed = false) => windowText('zed', window, { showLimitUsed }).detail;
 
-  const editPredictions = { limitId: 'zed.edit-predictions', used: 500, limit: 2000 };
-  const tokenSpend = { limitId: 'zed.token-spend', used: 2.5, limit: 10, currency: 'USD' };
+  const editPredictions = { kind: 'billing', limitId: 'zed.edit-predictions', used: 500, limit: 2000 };
+  const tokenSpend = { kind: 'billing', limitId: 'zed.token-spend', used: 2.5, limit: 10, currency: 'USD' };
 
   // Quota mode: the detail mirrors the bar, which fills with what is left.
   assert.equal(renderDetail(editPredictions), '1500/2000');
@@ -963,7 +963,7 @@ test('Zed details follow showLimitUsed: counts for Edit Predictions, money for T
   assert.equal(renderDetail(editPredictions, true), '500/2000');
   assert.equal(renderDetail(tokenSpend, true), '$2.50 / $10.00');
   // Unlimited Edit Predictions carry no numbers; the headline says it instead.
-  assert.equal(renderDetail({ limitId: 'zed.edit-predictions', detail: 'Unlimited' }), '');
+  assert.equal(renderDetail({ kind: 'billing', limitId: 'zed.edit-predictions', detail: 'Unlimited' }), '');
 });
 
 test('Zed compact windows label unlimited Edit Predictions without a fake reset', () => {
@@ -5013,7 +5013,7 @@ test('GLM Home daily windows retain returned model names instead of the generic 
 test('Z.ai token-pool windows print an absolute token pair through the detail slot', () => {
   const detail = (window, showLimitUsed, unitSystem = 'western', locale = 'en') => windowText(
     'zai',
-    window,
+    { kind: 'daily', ...window },
     { showLimitUsed, unitSystem, locale }
   ).detail;
   const pool = { limit: 305_000_000, remaining: 195_850_553 };
