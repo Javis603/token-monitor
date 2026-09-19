@@ -22,10 +22,10 @@ const modules = [
 ];
 
 test('defaultHomeModulePreferences keeps the full Home module order and hides new modules', () => {
-  assert.equal(DEFAULT_HOME_MODULE_ORDER, 'limits,tool,device,model,trends');
+  assert.equal(DEFAULT_HOME_MODULE_ORDER, 'limits,tool,device,model,trends,liveRate');
   assert.deepEqual(defaultHomeModulePreferences(), {
-    homeModuleOrder: 'limits,tool,device,model,trends',
-    hiddenHomeModules: 'tool,device'
+    homeModuleOrder: 'limits,tool,device,model,trends,liveRate',
+    hiddenHomeModules: 'tool,device,liveRate'
   });
 });
 

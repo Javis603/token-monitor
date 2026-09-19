@@ -322,8 +322,20 @@ test('two-line information normalizes, discovers, and resolves live token rates'
   }).items;
   assert.equal(resolved.rows[0].text, '1080 TPM');
   assert.equal(resolved.rows[0].available, true);
-  assert.equal(resolved.rows[0].provider, 'app');
+  assert.equal(resolved.rows[0].metric, 'liveTokenRate');
   assert.equal(preferredRowProvider(resolved.rows, 0), 'app');
+  // An idle sample keeps its metric on the resolved row: the canvas renderer
+  // keys the full-ink exception for live rates on that field, so dropping it
+  // would grey the reading out again.
+  const [idleResolved] = resolveTrayLayout(normalized, stats, {
+    nowMs: now,
+    liveTokenRates: {
+      device: { speed: 18, burn: 1080, idle: true }
+    },
+    liveTokenRateFormatter: (value) => String(value)
+  }).items;
+  assert.equal(idleResolved.rows[0].available, false);
+  assert.equal(idleResolved.rows[0].metric, 'liveTokenRate');
 });
 
 test('live token rate discovery combines enabled compact display surfaces', () => {
