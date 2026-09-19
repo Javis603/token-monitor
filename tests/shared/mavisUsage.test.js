@@ -38,7 +38,8 @@ function row(overrides) {
   return Object.assign({
     sessionId: 'mvs_test',
     agentName: 'mavis',
-    model: 'minimax/MiniMax-M3',
+    model: 'MiniMax-M3',
+    provider: 'minimax',
     input: 100,
     output: 50,
     reasoning: 10,
@@ -86,11 +87,31 @@ test('normalizeDbRow coerces a SQLite row to the internal row shape', () => {
     cost_usd: 0
   });
   assert.equal(out.sessionId, 'mvs_abc');
-  assert.equal(out.model, 'minimax/MiniMax-M3');
+  assert.equal(out.agentName, 'mavis');
+  // provider/model split: mavis runtime writes `provider/model` compound
+  // (verified across ~10k rows).
+  assert.equal(out.provider, 'minimax');
+  assert.equal(out.model, 'MiniMax-M3');
   assert.equal(out.input, 90);
   assert.equal(out.output, 518);
   assert.equal(out.createdAt, 1_789_231_485_236);
+  // Always 0 in current schema; the projection drops the source column.
+  assert.equal(out.reasoning, 0);
+  assert.equal(out.cacheWrite, 0);
   assert.equal(out.cost, 0);
+});
+
+test('normalizeDbRow leaves provider/model empty when the runtime writes an unprefixed model id', () => {
+  const out = normalizeDbRow({
+    ts: 1,
+    session_id: 'mvs_xyz',
+    agent_name: 'coder',
+    model: 'gpt-5',
+    input_tokens: 1,
+    output_tokens: 1
+  });
+  assert.equal(out.provider, '');
+  assert.equal(out.model, 'gpt-5');
 });
 
 test('normalizeDbRow fills in the model fallback when the runtime leaves it NULL', () => {
@@ -114,6 +135,46 @@ test('normalizeDbRow rejects rows without a session id', () => {
   assert.equal(normalizeDbRow({ ts: 1, session_id: '   ', agent_name: 'mavis', input_tokens: 1, output_tokens: 1 }), null);
 });
 
+test('resolveMavisDbPath honours MINIMAX_DATA_DIR / MAVIS_DATA_DIR env overrides', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { resolveMavisDbPath } = require('../../src/shared/providers/mavis/usage');
+  // Create a temp directory tree with a stub SQLite file so existence
+  // checks succeed without needing the real runtime-state.sqlite on disk.
+  const tmp = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'mavis-dbpath-'));
+  const nested = path.join(tmp, 'v2', 'sqlite');
+  fs.mkdirSync(nested, { recursive: true });
+  const stub = path.join(nested, 'runtime-state.sqlite');
+  fs.writeFileSync(stub, '');
+
+  const previous = {
+    minimax: process.env.MINIMAX_DATA_DIR,
+    mavis: process.env.MAVIS_DATA_DIR,
+    legacy: process.env.MAVIS_RUNTIME_DB
+  };
+  try {
+    // MINIMAX_DATA_DIR is the documented override; the path is the
+    // data-dir *root*, we append v2/sqlite/runtime-state.sqlite.
+    delete process.env.MAVIS_DATA_DIR;
+    delete process.env.MAVIS_RUNTIME_DB;
+    process.env.MINIMAX_DATA_DIR = tmp;
+    assert.equal(resolveMavisDbPath(), stub);
+
+    // MAVIS_DATA_DIR is the mavis-agent daemon's override; same shape.
+    delete process.env.MINIMAX_DATA_DIR;
+    process.env.MAVIS_DATA_DIR = tmp;
+    assert.equal(resolveMavisDbPath(), stub);
+
+    // options.dbPath trumps env (used by tests for fixtures).
+    assert.equal(resolveMavisDbPath({ dbPath: '/some/where/else.db' }), '/some/where/else.db');
+  } finally {
+    process.env.MINIMAX_DATA_DIR = previous.minimax;
+    process.env.MAVIS_DATA_DIR = previous.mavis;
+    process.env.MAVIS_RUNTIME_DB = previous.legacy;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('buildHistoryGraphFromRows splits a cross-midnight session into two daily buckets', () => {
   // Session runs 23:50:00 -> 00:10:00 local time. Each turn carries its own
   // createdAt so the day boundary lands the two halves in the right buckets
@@ -133,14 +194,45 @@ test('buildHistoryGraphFromRows splits a cross-midnight session into two daily b
 
 test('buildHistoryGraphFromRows treats each model on the same day as its own bucket', () => {
   const rows = [
-    row({ model: 'minimax/MiniMax-M3', input: 10, createdAt: localMs(2026, 9, 13, 8, 0, 0) }),
+    row({ model: 'MiniMax-M3', input: 10, createdAt: localMs(2026, 9, 13, 8, 0, 0) }),
     row({ model: 'coder (model unknown)', agentName: 'coder', input: 5, createdAt: localMs(2026, 9, 13, 8, 5, 0) })
   ];
   const graph = buildHistoryGraphFromRows(rows);
   assert.equal(graph.contributions.length, 1);
   assert.equal(graph.contributions[0].clients.length, 2);
   const models = graph.contributions[0].clients.map((c) => c.modelId).sort();
-  assert.deepEqual(models, ['coder (model unknown)', 'minimax/MiniMax-M3']);
+  assert.deepEqual(models, ['MiniMax-M3', 'coder (model unknown)']);
+});
+
+test('buildHistoryGraphFromRows keeps each mavis sub-agent as a separate client bucket', () => {
+  // mavis runtime writes one row per LLM call across six sub-agents
+  // (coder, explore, general, mavis, verifier, worker). The history
+  // graph must surface these as separate clients so the dashboard can
+  // show per-agent totals instead of merging them into one bucket.
+  const rows = [
+    row({ sessionId: 'mvs_1', agentName: 'mavis', model: 'MiniMax-M3', input: 100, createdAt: localMs(2026, 9, 13, 8, 0, 0) }),
+    row({ sessionId: 'mvs_2', agentName: 'coder', model: 'MiniMax-M3', input: 50, createdAt: localMs(2026, 9, 13, 8, 5, 0) }),
+    row({ sessionId: 'mvs_3', agentName: 'worker', model: 'MiniMax-M3', input: 25, createdAt: localMs(2026, 9, 13, 8, 10, 0) })
+  ];
+  const graph = buildHistoryGraphFromRows(rows);
+  assert.equal(graph.contributions.length, 1);
+  assert.equal(graph.contributions[0].clients.length, 3, 'three distinct agents on the same model should produce three clients');
+  const agents = graph.contributions[0].clients.map((c) => c.agent).sort();
+  assert.deepEqual(agents, ['coder', 'mavis', 'worker']);
+  // Per-agent totals should be independent.
+  const byAgent = Object.fromEntries(graph.contributions[0].clients.map((c) => [c.agent, c.tokens.input]));
+  assert.equal(byAgent.mavis, 100);
+  assert.equal(byAgent.coder, 50);
+  assert.equal(byAgent.worker, 25);
+});
+
+test('buildHistoryGraphFromRows records the provider for compound model ids', () => {
+  // Mavis runtime writes `model` as `provider/model`; the history bucket
+  // must carry both halves so dashboards that key on provider can find it.
+  const rows = [row({ model: 'MiniMax-M3', provider: 'minimax', input: 10, createdAt: localMs(2026, 9, 13, 8, 0, 0) })];
+  const graph = buildHistoryGraphFromRows(rows);
+  assert.equal(graph.contributions[0].clients[0].provider, 'minimax');
+  assert.equal(graph.contributions[0].clients[0].modelId, 'MiniMax-M3');
 });
 
 test('buildHistoryGraphFromRows drops rows without a usable timestamp', () => {

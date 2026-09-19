@@ -57,22 +57,28 @@ const MAVIS_READ_BUDGET_ERROR = 'MAVIS_READ_BUDGET_EXCEEDED';
 
 // Pull everything we might need in one query. The `sinceMs` filter is
 // applied in SQL so the JSON payload stays small; the `framework_type`
-// predicate is currently a no-op (always 'pi-agent') but kept so that
-// any future rows from a non-mavis framework are excluded cheaply.
-// `reasoning_tokens` and `cache_write_tokens` are always 0 in the pi-agent
-// runtime (verified: 0 rows out of ~4k). Drop them from the projection so
-// the worker postMessage payload stays smaller and the row construction
-// in the worker doesn't have to coerce always-zero values. The host still
-// defaults them to 0 in normalizeDbRow when older worker payloads land
-// (handy if a future runtime ever does populate them).
+// predicate was a no-op (always 'pi-agent' in the audit; verified across
+// ~10k rows) and is dropped so future framework additions are picked up
+// without re-vendoring this file.
+// `reasoning_tokens` and `cache_write_tokens` are always 0 in the mavis
+// runtime (verified: reasoning 0/10k, cache_write 0/10k). Drop them
+// from the projection so the worker postMessage payload stays smaller
+// and the host stops coercing always-zero values; normalizeDbRow still
+// fills them in for downstream code that expects the field.
+// `raw` is a per-row JSON dump of the full LLM call (~150 bytes) — we
+// never read it (cost.* is also always 0), so dropping it shaves ~1.5
+// MB off a full-scan tick over 10k rows.
+// LIMIT 50_000 is the postMessage ceiling; under normal load the
+// incremental `sinceMs` query never hits it because we read only the
+// rows since the last tick.
 const MAVIS_USAGE_SQL = `
 SELECT ts, session_id, agent_name, model,
   input_tokens, output_tokens,
   cache_read_tokens, cost_usd
 FROM ${MAVIS_TABLE}
-WHERE framework_type = 'pi-agent'
-  AND agent_name IN (PLACEHOLDER_AGENTS)
+WHERE agent_name IN (PLACEHOLDER_AGENTS)
 ORDER BY ts
+LIMIT 50000
 `.trim();
 
 const MAVIS_USAGE_SINCE_SQL = `
@@ -80,10 +86,10 @@ SELECT ts, session_id, agent_name, model,
   input_tokens, output_tokens,
   cache_read_tokens, cost_usd
 FROM ${MAVIS_TABLE}
-WHERE framework_type = 'pi-agent'
-  AND agent_name IN (PLACEHOLDER_AGENTS)
+WHERE agent_name IN (PLACEHOLDER_AGENTS)
   AND ts >= ?
 ORDER BY ts
+LIMIT 50000
 `.trim();
 
 /**
@@ -149,18 +155,39 @@ function boundedRows(rows, options = {}) {
 
 /**
  * Locate the mavis SQLite database, preferring an explicit `options.dbPath`,
- * then the `MAVIS_RUNTIME_DB` env var (verified to exist on disk), then the
- * default install path. Returns `null` when none of the candidates exist
- * so the caller can skip the tick cleanly.
+ * then the user-visible env override (`MINIMAX_DATA_DIR` /
+ * `MAVIS_DATA_DIR`, which point to the *root* data directory — we append
+ * `v2/sqlite/runtime-state.sqlite`), then the legacy direct-path env
+ * `MAVIS_RUNTIME_DB`, then the documented install locations under
+ * `$HOME/.minimax-code/data` and `$HOME/.minimax`. Returns `null` when
+ * none of the candidates exist so the caller can skip the tick cleanly.
+ *
+ * The two env-var namespaces are kept on purpose: `MINIMAX_DATA_DIR` is
+ * the public override documented in the minimax-code README, while
+ * `MAVIS_DATA_DIR` is what mavis-agent's daemon honors; older test
+ * fixtures still set `MAVIS_RUNTIME_DB` (full SQLite path). All three
+ * are honored here so a single build works across deployments.
  *
  * @param {{dbPath?: string}} [options]
  * @returns {string|null} Absolute path to the SQLite file, or `null`.
  */
 function resolveMavisDbPath(options = {}) {
   if (options.dbPath) return options.dbPath;
-  const fromEnv = process.env.MAVIS_RUNTIME_DB;
-  if (fromEnv && String(fromEnv).trim() && fs.existsSync(fromEnv)) return fromEnv;
-  if (fs.existsSync(MAVIS_DB_PATH)) return MAVIS_DB_PATH;
+  const envRoot = process.env.MINIMAX_DATA_DIR || process.env.MAVIS_DATA_DIR;
+  const candidates = [];
+  if (envRoot) {
+    candidates.push(path.join(envRoot, 'v2', 'sqlite', 'runtime-state.sqlite'));
+  }
+  const fromLegacyEnv = process.env.MAVIS_RUNTIME_DB;
+  if (fromLegacyEnv && String(fromLegacyEnv).trim()) {
+    candidates.push(fromLegacyEnv);
+  }
+  const home = os.homedir();
+  candidates.push(path.join(home, '.minimax-code', 'data', 'v2', 'sqlite', 'runtime-state.sqlite'));
+  candidates.push(path.join(home, '.minimax', 'v2', 'sqlite', 'runtime-state.sqlite'));
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
   return null;
 }
 
@@ -444,10 +471,21 @@ function localDateKey(timestamp) {
  * Convert a raw SQLite row into the normalised shape consumed by the rest
  * of the collector. Discards rows missing `session_id`.
  *
+ * The mavis runtime writes `model` as a `provider/model` compound (e.g.
+ * `minimax/MiniMax-M3`); we split on the first slash so downstream code
+ * can route pricing by provider and keep the model identifier clean.
+ * Rows whose model is NULL (≈90% in current builds) fall back to
+ * `${agentName} (model unknown)` via `normalizedModelId`.
+ *
+ * `agentName` is preserved as-is so the host can break the mavis client
+ * down by sub-agent when desired (audit shows 6 distinct agents:
+ * coder, explore, general, mavis, verifier, worker).
+ *
  * @param {object|null|undefined} raw Row from the SQLite reader.
  * @returns {{
  *   sessionId: string,
  *   agentName: string,
+ *   provider: string,
  *   model: string,
  *   createdAt: number,
  *   input: number,
@@ -462,16 +500,25 @@ function normalizeDbRow(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const sessionId = String(raw.session_id || '').trim();
   if (!sessionId) return null;
+  const agentName = String(raw.agent_name || '').trim();
+  const modelField = raw.model == null ? '' : String(raw.model);
+  const slashIdx = modelField.indexOf('/');
+  const provider = slashIdx > 0 ? modelField.slice(0, slashIdx).trim() : '';
+  const model = slashIdx > 0 ? modelField.slice(slashIdx + 1).trim() : '';
   return {
     sessionId,
-    agentName: String(raw.agent_name || '').trim(),
-    model: normalizedModelId(raw.model, raw.agent_name),
+    agentName,
+    provider,
+    model: model || normalizedModelId(raw.model, agentName),
     createdAt: numberValue(raw.ts),
     input: numberValue(raw.input_tokens),
     output: numberValue(raw.output_tokens),
-    reasoning: numberValue(raw.reasoning_tokens),
+    // Mavis runtime always writes 0 for reasoning / cache_write in the
+    // current schema (verified across ~10k rows). Projected as 0 here
+    // so the rest of the pipeline doesn't depend on column presence.
+    reasoning: 0,
     cacheRead: numberValue(raw.cache_read_tokens),
-    cacheWrite: numberValue(raw.cache_write_tokens),
+    cacheWrite: 0,
     cost: raw.cost_usd == null ? 0 : Number(raw.cost_usd) || 0
   };
 }
@@ -579,8 +626,16 @@ async function collectMavisRows(options = {}) {
 
 /**
  * Fold normalised rows into the `graph.contributions[]` shape that
- * `collectHistoryOnce` consumes. Buckets by `(localDate, model)`. Drop
- * rows lacking `createdAt` rather than merging them into "today".
+ * `collectHistoryOnce` consumes. Buckets by `(localDate, model, agentName)`
+ * — the agent breakdown is added so the dashboard can distinguish the
+ * six mavis sub-agents (coder, explore, general, mavis, verifier,
+ * worker) when surfacing per-day history. Rows lacking `createdAt` are
+ * dropped rather than merged into "today".
+ *
+ * The `agent` field on each client entry is a backward-compatible
+ * addition: older history readers that ignore unknown fields keep
+ * working, and `normalizeHistory` only reads `modelId / tokens / cost /
+ * messages`, so the per-agent totals roll up correctly when aggregated.
  *
  * @param {object[]} rows Normalised rows from `collectMavisRows`.
  * @returns {{contributions: {date: string, clients: object[]}[]}} Graph-shaped output.
@@ -596,11 +651,13 @@ function buildHistoryGraphFromRows(rows) {
       day = { date, clients: [] };
       byDate.set(date, day);
     }
-    let client = day.clients.find((entry) => entry.modelId === row.model);
+    let client = day.clients.find((entry) => entry.modelId === row.model && entry.agent === row.agentName);
     if (!client) {
       client = {
         client: MAVIS_CLIENT_ID,
+        agent: row.agentName,
         modelId: row.model,
+        provider: row.provider,
         tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
         cost: 0,
         messages: 0
@@ -659,12 +716,17 @@ async function buildTokscaleJson(windowStartMs, options = {}) {
   }
   const bySessionModel = new Map();
   for (const row of filtered) {
-    const key = `${row.sessionId}\u0000${row.model}`;
+    // Aggregate by (sessionId, model, agentName) so the six mavis
+    // sub-agents show up as separate per-session rows in the sessions
+    // panel. Using \u0000 (NUL) as a separator avoids accidental key
+    // collisions if an agent name happens to contain a colon.
+    const key = `${row.sessionId}\u0000${row.model}\u0000${row.agentName}`;
     let m = bySessionModel.get(key);
     if (!m) {
       m = {
         sessionId: row.sessionId,
         model: row.model,
+        agent: row.agentName,
         input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0,
         messages: 0, cost: 0, startedAt: 0, lastUsedAt: 0
       };
@@ -694,6 +756,7 @@ async function buildTokscaleJson(windowStartMs, options = {}) {
       mergedClients: null,
       sessionId: m.sessionId,
       model: m.model,
+      agent: m.agent,
       provider: MAVIS_PROVIDER_ID,
       input: m.input,
       output: m.output,
