@@ -241,50 +241,7 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   gap: 3px;
   min-width: 0;
 }
-.edge-dock-card-name-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.edge-dock-card-name-row .edge-dock-card-title { flex: 1 1 auto; }
 .edge-dock-card-head .edge-dock-mark { width: 15px; height: 15px; flex: 0 0 auto; }
-.edge-dock-card-titles {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.edge-dock-card-subtitle {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 10.5px;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.edge-dock-card-subtitle.is-warning { color: var(--orange); }
-.edge-dock-card-title {
-  min-width: 0;
-  line-height: 1.25;
-  font-size: 13px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.edge-dock-pill {
-  flex: 0 0 auto;
-  max-width: 45%;
-  padding: 0;
-  border-radius: 999px;
-  font-size: 10.5px;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .edge-dock-accounts {
   display: flex;
@@ -341,19 +298,6 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   );
   content: '';
 }
-
-.edge-dock-detail-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  color: var(--muted);
-  font-size: 10.5px;
-}
-.edge-dock-detail-value { color: var(--text); white-space: nowrap; }
-.edge-dock-forecast { display: grid; gap: 3px; }
-.edge-dock-forecast-title { color: var(--text); font-size: 11px; font-weight: 600; }
-.edge-dock-forecast-detail { color: var(--muted); font-size: 10.5px; }
 
 /* Shrinkable, unlike the rest of the card: the card is clamped to the work
    area, so a block that refuses to shrink is clipped rather than scrolled. The
@@ -534,42 +478,6 @@ html.edge-dock-no-material .edge-dock-shape-fill {
 .edge-dock-session-context[data-tone="low"] .edge-dock-session-context-fill { background: var(--orange); }
 html[data-reduce-motion="on"] .edge-dock-session-context-fill { transition: none; }
 html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none; }
-.edge-dock-account-name {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-}
-.edge-dock-account-title {
-  overflow: hidden;
-  color: var(--text);
-  font-size: 11.5px;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* The account rows reuse the Limits view's own .limit-account-switch-zone and
-   .limit-account-active-zone from styles.css, so the Switch button, the ✓ badge
-   and the "Local" hint have the widget's spacing rather than a lookalike. Only
-   the flex context differs: the card stacks its titles in a column, and a flex
-   column stretches its children, which would push the zone (and the popover
-   anchored to its right edge) out to the full card width. Shrink it back to the
-   title it wraps, and let the header variant keep taking its row's free space. */
-.edge-dock-card-titles > .limit-account-switch-zone,
-.edge-dock-card-titles > .limit-account-active-zone {
-  align-self: flex-start;
-  max-width: 100%;
-}
-.edge-dock-card-name-row > .limit-account-switch-zone,
-.edge-dock-card-name-row > .limit-account-active-zone {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-/* The dock's titles carry .limit-name-title beside their own class, so the
-   widget's zone rules (hover glow, reduced-motion, the block box the ellipsis
-   needs) apply here verbatim instead of being restated. */
-
 /* The quota rows are the Limits view's own DOM (.limit-*), styled by the
    widget stylesheet this page also loads — including the two-column grid, so a
    card pairs Session with Weekly exactly as the page does. What is left here is
@@ -586,19 +494,6 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
 
 .edge-dock-note { font-size: 11px; color: var(--muted); }
 .edge-dock-note.is-warning { color: var(--orange); }
-
-.edge-dock-stat-total {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-.edge-dock-stat-total strong {
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-}
-.edge-dock-stat-total span { color: var(--muted); }
 
 /* Token usage for the provider: two equal tiles, each a caption, the token
    figure and its cost, left-aligned on a shared baseline grid. */
@@ -733,17 +628,12 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
 }
 
 /* ---- Type scale ----------------------------------------------------------
-   The card uses the Limits view's own sizes (styles.css .limit-*): name 12,
-   account 11, meta/plan/window text 10, reset lines 9. Larger type made the
-   card denser than the view it mirrors. */
+   Only the card's own blocks are sized here. Its Limits rows are the view's,
+   and the view states their sizes already (styles.css .limit-*), so a size
+   spelled out against one of its selectors is a second answer to a question
+   that has one — and it is the card's copy that goes wrong when the view's type
+   changes. */
 .edge-dock-card { font-size: 11px; }
-.edge-dock-card-title { font-size: 12px; }
-.edge-dock-account-title { font-size: 11px; }
-.edge-dock-card-subtitle,
-.edge-dock-pill { font-size: 10px; }
-.edge-dock-detail-row { font-size: 9px; }
-.edge-dock-forecast-title { font-size: 10px; }
-.edge-dock-forecast-detail { font-size: 9px; }
 .edge-dock-note { font-size: 10px; }
 .edge-dock-section-title { font-size: 10px; }
 .edge-dock-session-name,
