@@ -24,13 +24,15 @@ function clientSet(value) {
 
 function archivedPeriod(input) {
   const normalized = normalizePeriod({ sessions: input?.sessions });
+  const totalTokens = Math.max(0, Math.round(numberValue(input?.totalTokens)));
+  const models = normalizedModelMap(input?.models);
   return {
-    totalTokens: Math.max(0, Math.round(numberValue(input?.totalTokens))),
+    totalTokens,
     costUsd: numberValue(input?.costUsd),
-    unpricedTokens: Math.max(0, Math.round(numberValue(input?.unpricedTokens))),
-    models: normalizedModelMap(input?.models),
+    unpricedTokens: Math.min(totalTokens, Math.max(0, Math.round(numberValue(input?.unpricedTokens)))),
+    models,
     modelCosts: normalizedModelMap(input?.modelCosts, false),
-    modelUnpricedTokens: normalizedModelMap(input?.modelUnpricedTokens),
+    modelUnpricedTokens: boundedTokenMap(normalizedModelMap(input?.modelUnpricedTokens), models),
     sessions: normalized.sessions
   };
 }
@@ -53,6 +55,16 @@ function normalizedModelMap(input, roundTokens = true) {
     if (!key) continue;
     const next = roundTokens ? Math.max(0, Math.round(numberValue(value))) : numberValue(value);
     if (next > 0) result[key] = (result[key] || 0) + next;
+  }
+  return result;
+}
+
+function boundedTokenMap(values, usageBuckets) {
+  const result = {};
+  for (const [key, value] of Object.entries(values || {})) {
+    const cap = Math.max(0, Math.round(numberValue(usageBuckets?.[key])));
+    const tokens = Math.min(cap, Math.max(0, Math.round(numberValue(value))));
+    if (cap > 0 && tokens > 0) result[key] = tokens;
   }
   return result;
 }

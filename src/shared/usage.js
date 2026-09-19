@@ -699,6 +699,25 @@ function normalizeSession(input, fallbackKey) {
   return session;
 }
 
+function boundedUnpricedTokenMap(values, usageBuckets) {
+  const bounded = {};
+  for (const [key, value] of Object.entries(values || {})) {
+    const cap = Math.max(0, Math.round(asNumber(usageBuckets?.[key])));
+    const tokens = Math.min(cap, Math.max(0, Math.round(asNumber(value))));
+    if (cap > 0 && tokens > 0) bounded[key] = tokens;
+  }
+  return bounded;
+}
+
+function boundedClientModelUnpricedTokenMap(values, usageBuckets) {
+  const bounded = {};
+  for (const [client, models] of Object.entries(values || {})) {
+    const modelsForClient = boundedUnpricedTokenMap(models, usageBuckets?.[client]);
+    if (Object.keys(modelsForClient).length > 0) bounded[client] = modelsForClient;
+  }
+  return bounded;
+}
+
 function normalizePeriod(input, options = {}) {
   const period = emptyPeriod();
   if (!input || typeof input !== 'object') {
@@ -875,6 +894,15 @@ function normalizePeriod(input, options = {}) {
       }
     }
   }
+  // Provenance maps are additive while their keys are normalized. Bound them
+  // after that aggregation so spelling collisions cannot exceed the same
+  // normalized usage bucket, and discard keys with no matching usage.
+  period.clientUnpricedTokens = boundedUnpricedTokenMap(period.clientUnpricedTokens, period.clients);
+  period.modelUnpricedTokens = boundedUnpricedTokenMap(period.modelUnpricedTokens, period.models);
+  period.clientModelUnpricedTokens = boundedClientModelUnpricedTokenMap(
+    period.clientModelUnpricedTokens,
+    period.clientModels
+  );
   if (input.sessions && typeof input.sessions === 'object') {
     for (const [key, value] of Object.entries(input.sessions)) {
       const session = normalizeSession(value, key);
