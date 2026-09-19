@@ -7,7 +7,7 @@ const {
   macWidgetHistorySourceKey,
   resetMacWidgetHistoryCache,
   resolveMacWidgetHistory
-} = require('../../src/electron/macWidgetHistory');
+} = require('../../src/electron/macWidget/history');
 
 function history(label) {
   return { daily: [{ date: '2026-08-09', totalTokens: 1, label }], monthly: [], summary: { label } };

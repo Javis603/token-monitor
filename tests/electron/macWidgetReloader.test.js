@@ -10,7 +10,7 @@ const {
   requestMacWidgetReload,
   resetMacWidgetReloadThrottle,
   resolveWidgetReloaderPath
-} = require('../../src/electron/macWidgetReloader');
+} = require('../../src/electron/macWidget/reloader');
 
 test('resolves the packaged Widget reloader only on macOS', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-reloader-'));

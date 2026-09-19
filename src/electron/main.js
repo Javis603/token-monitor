@@ -251,18 +251,18 @@ const {
   prepareMacWidgetSnapshotUpdate,
   resolveMacWidgetSnapshotPath,
   syncMacWidgetSnapshotDirectory
-} = require('./macWidgetBridge');
-const { createMacWidgetSnapshotController } = require('./macWidgetSnapshotController');
-const { macWidgetHistorySourceKey, resolveMacWidgetHistory } = require('./macWidgetHistory');
+} = require('./macWidget/bridge');
+const { createMacWidgetSnapshotController } = require('./macWidget/snapshotController');
+const { macWidgetHistorySourceKey, resolveMacWidgetHistory } = require('./macWidget/history');
 const {
   macWidgetHistoryCachePath,
   readMacWidgetHistoryCache,
   writeMacWidgetHistoryCache
-} = require('./macWidgetHistoryStore');
-const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServicesRecovery');
+} = require('./macWidget/historyStore');
+const { createMacWidgetLaunchServicesRecovery } = require('./macWidget/launchServicesRecovery');
 const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
-const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
-const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidgetDemand');
+const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidget/reloader');
+const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidget/demand');
 const linuxAutostart = require('./linuxAutostart');
 const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
 const {
