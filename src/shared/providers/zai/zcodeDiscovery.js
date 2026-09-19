@@ -36,16 +36,21 @@ const ZCODE_PROVIDER_IDS = Object.freeze({
 // (providerFamilyConnectionSelections[family].kind, its own one-way
 // migration); both plan kinds resolve to the builtin:* entry whose account the
 // credential is resolved for — the store's key where it exists, that entry's
-// mirror otherwise. An off-peak selection has no GLM plan lane here and maps
-// to nothing — it must not fall back to a frozen legacy selection.
+// mirror otherwise. That field's schema accepts exactly three kinds; an
+// off-peak account is an access mode on the provider entry
+// (config.access.mode), never a selection, and a kind this map does not know
+// maps to nothing rather than falling back to a frozen legacy selection.
 const SELECTION_KIND_SLOT = Object.freeze({
   'start-plan': 'startPlan',
   'individual-coding-plan': 'codingPlan',
   'team-coding-plan': 'codingPlan'
 });
 
-// api.z.ai endpoints imply the global family; anything else ZCode treats as
-// BigModel-like. Mirrors ZCode's own resolveModelProviderFamilyIdByBaseURL.
+// api.z.ai endpoints imply the global family; anything else is treated as
+// BigModel-like. ZCode's own table keys each family on a registered root domain
+// (z.ai, bigmodel.cn); this is an independent host test over the entry's
+// baseURL that defaults to bigmodel, and it only labels a lane discovery has
+// already declined to query.
 function familyByBaseUrl(baseUrl) {
   return /api\.z\.ai|api\.chatglm\.site/i.test(String(baseUrl || '')) ? 'zai' : 'bigmodel';
 }
@@ -53,8 +58,7 @@ function familyByBaseUrl(baseUrl) {
 // Resolve the selected provider entry. 3.12.3 writes the kind-based selection
 // and leaves the legacy key string in place without updating it, so the new
 // field wins whenever it exists; the legacy string only serves 3.11.x
-// installs. An unrecognised kind (off-peak) yields no lane rather than a
-// stale fallback.
+// installs. An unrecognised kind yields no lane rather than a stale fallback.
 function selectedProviderId(settings, family) {
   const kind = String(settings?.providerFamilyConnectionSelections?.[family]?.kind || '').trim();
   if (kind) {
@@ -251,8 +255,10 @@ function discoverZcodeConnection(options = {}, deps = {}) {
     // only local signal; the query itself answers entitlement.
     if (!credential) return { kind, family, providerId, entitled: false, reason: 'coding_plan_not_authenticated' };
     // Billing is an account-level endpoint: ZCode queries it even while the
-    // coding-plan provider is selected (validateZaiCodingPlanPairAvailability
-    // → validateStartPlanAvailability), so the coding shape carries a billing
+    // coding-plan provider is selected, because its family pass validates every
+    // plan provider the family has (validateFamilyAccountProviders) and the
+    // start-plan leg of that pass is the billing call
+    // (validateStartPlanAvailability). So the coding shape carries a billing
     // credential alongside its own quota query — the live store's JWT first,
     // the start entry's mirror as the 3.11.x fallback.
     let billing;

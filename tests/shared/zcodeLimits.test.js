@@ -116,8 +116,10 @@ test('discoverZcodeConnection maps the 3.12.3 kind selection and falls back to t
   const team = discoverZcodeConnection({}, discoveryDeps({ ...kind('team-coding-plan'), 'config.json': codingRegistry }));
   assert.equal(team.kind, 'coding-quota');
 
-  // An off-peak selection has no GLM plan lane; it must not fall back to the
-  // frozen legacy string (which still points at the start plan here).
+  // A kind the map does not know yields no lane and must not fall back to the
+  // frozen legacy string (which still points at the start plan here). off-peak
+  // stands in for that kind: the app carries it as an access mode rather than a
+  // selection, so this pins the defensive path, not a shape that can be written.
   const offPeak = discoverZcodeConnection({}, discoveryDeps({ ...kind('off-peak'), 'config.json': codingRegistry }));
   assert.equal(offPeak.kind, 'none');
 
@@ -469,8 +471,9 @@ test('discoverZcodeConnection re-reads disk on every call — an account switch 
 
 test('a coding-quota selection also surfaces the start-plan billing credential', () => {
   // ZCode queries billing with the start-plan entry even while coding-plan is
-  // selected (validateZaiCodingPlanPairAvailability); the unselected entry
-  // keeps enabled:false and still carries its mirror key.
+  // selected (validateFamilyAccountProviders validates every plan provider the
+  // family has, and its start-plan leg is the billing call); the unselected
+  // entry keeps enabled:false and still carries its mirror key.
   const files = {
     'setting.json': JSON.stringify({
       providerFamilyDomain: 'zai',
