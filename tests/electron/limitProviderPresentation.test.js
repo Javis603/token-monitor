@@ -1158,6 +1158,65 @@ test('Z.ai and Team keep all billing windows and render MCP full width after pai
   }
 });
 
+// The Zen balance now ships as a `credits` window as well as the provider-level
+// `balanceUsd`, so every surface can find it. On a Zen-only account that window
+// is the only billing-kind window there is, which is exactly where picking "the
+// billing window" by kind would meter prepaid money as a monthly grant.
+test('OpenCode reads the Zen balance from its credits window without metering it as Monthly', () => {
+  const app = readRendererFile('app.js');
+  const render = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const makeNode = () => {
+    const node = {
+      children: [],
+      classes: new Set(),
+      classList: { add(...values) { values.forEach((value) => node.classes.add(value)); } },
+      append(...children) { node.children.push(...children); }
+    };
+    return node;
+  };
+  const context = {
+    document: { createElement: makeNode },
+    windowForKind: (p, kind) => p.windows.find((w) => w.kind === kind) || null,
+    windowsForKind: (p, kind) => p.windows.filter((w) => w.kind === kind),
+    isCreditsWindow: (w) => w?.metric === 'credits',
+    creditsAmount: (_p, w) => (typeof w?.remaining === 'number' ? w.remaining : null),
+    optionalFiniteNumber: (value) => (Number.isFinite(Number(value)) && value !== null && value !== '' ? Number(value) : null),
+    formatLimitAmount: (value) => `$${Number(value).toFixed(2)}`,
+    providerWindowLabel: (p, window, fallback = '') => limitWindowLabel(p?.provider, window, fallback),
+    limitWindowNode: (label, window, _color, _tone, value) => Object.assign(makeNode(), { label, window, value })
+  };
+  const balanceWindow = { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 8.5, currency: 'USD', showMeter: false };
+
+  // Zen only: the balance must be the Balance row, and nothing may claim Monthly.
+  context.provider = { provider: 'opencode', windows: [balanceWindow] };
+  const zenOnly = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  assert.deepEqual(Array.from(zenOnly.children, (n) => n.label), ['Balance']);
+  assert.equal(zenOnly.children[0].value, '$8.50');
+  assert.equal(zenOnly.children[0].window.showMeter, false);
+
+  // Go + Zen: the grant keeps Monthly, the balance still reads off its window.
+  context.provider = { provider: 'opencode', windows: [
+    { kind: 'session', usedPercent: 25 },
+    { kind: 'billing', used: 21, limit: 60 },
+    balanceWindow
+  ] };
+  const both = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  assert.deepEqual(Array.from(both.children, (n) => n.label), ['Session', 'Monthly', 'Balance']);
+  assert.equal(both.children[1].window.limit, 60, 'Monthly is the Go grant, not the balance');
+  assert.equal(both.children[2].value, '$8.50');
+
+  // A record synced from a device on an older build carries only balanceUsd.
+  context.provider = { provider: 'opencode', windows: [{ kind: 'session', usedPercent: 25 }], balanceUsd: 3.25 };
+  const legacy = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  assert.deepEqual(Array.from(legacy.children, (n) => n.label), ['Session', 'Balance']);
+  assert.equal(legacy.children[1].value, '$3.25');
+
+  // A pure-Go account has no balance at all and must not grow a phantom row.
+  context.provider = { provider: 'opencode', windows: [{ kind: 'session', usedPercent: 25 }] };
+  const goOnly = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  assert.deepEqual(Array.from(goOnly.children, (n) => n.label), ['Session']);
+});
+
 test('Copilot renders monthly Premium and Chat quotas as billing windows', () => {
   const app = readRendererFile('app.js');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');

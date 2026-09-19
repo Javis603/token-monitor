@@ -5326,7 +5326,13 @@ function renderProviderWindows(provider, color) {
     // surface the Zen balance as a full-width, no-meter note when present.
     const session = windowForKind(provider, 'session');
     const weekly = windowForKind(provider, 'weekly');
-    const monthly = windowForKind(provider, 'billing');
+    // The Zen balance is a billing-kind `credits` window, so it has to come out
+    // of the list before the Go grant is looked up by kind: on a Zen-only
+    // account it is the only billing window there is, and metering money as a
+    // monthly quota is exactly the mistake the `credits` marker exists to stop.
+    const balanceWindow = (provider.windows || []).find((window) => isCreditsWindow(window)) || null;
+    const monthly = (provider.windows || [])
+      .find((window) => window.kind === 'billing' && window !== balanceWindow) || null;
     if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
     if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
     // Monthly spans the full row (like Balance) so it never leaves a half-empty grid cell.
@@ -5338,10 +5344,20 @@ function renderProviderWindows(provider, color) {
     // Balance is a Zen-only concept. Show it only when a real balance number came
     // back (incl. $0.00). It can't key off `source === 'web'` anymore — Go usage is
     // now fetched over the web too, so a pure-Go account (no Zen, balanceUsd null)
-    // must not get a phantom `Balance —` line.
-    const hasBalance = typeof provider.balanceUsd === 'number' && Number.isFinite(provider.balanceUsd);
-    if (hasBalance) {
-      const node = limitWindowNode('Balance', { showMeter: false }, color, 0.68, formatLimitAmount(provider.balanceUsd));
+    // must not get a phantom `Balance —` line. The window is preferred over the
+    // provider-level `balanceUsd`, which stays readable so a record synced from a
+    // device on an older build still shows its balance.
+    const balanceAmount = balanceWindow
+      ? creditsAmount(provider, balanceWindow)
+      : optionalFiniteNumber(provider.balanceUsd);
+    if (balanceAmount !== null) {
+      const node = limitWindowNode(
+        providerWindowLabel(provider, balanceWindow, 'Balance'),
+        { showMeter: false },
+        color,
+        0.68,
+        formatLimitAmount(balanceAmount)
+      );
       node.classList.add('limit-window-wide');
       windows.append(node);
     }
