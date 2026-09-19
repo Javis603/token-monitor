@@ -70,7 +70,7 @@
     { id: 'cherrystudio', label: 'Cherry Studio' },
     { id: 'lmstudio', label: 'LM Studio' },
     { id: 'unsloth', label: 'Unsloth' },
-    { id: 'mavis', label: 'Mavis (MiniMax Code)', locallyParsed: true }
+    { id: 'mavis', label: 'Minimax Code', locallyParsed: true }
   ].map((client) => Object.freeze({
     defaultTracked: true,
     locallyParsed: false,
