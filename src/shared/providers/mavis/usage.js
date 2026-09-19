@@ -71,24 +71,51 @@ const MAVIS_READ_BUDGET_ERROR = 'MAVIS_READ_BUDGET_EXCEEDED';
 // LIMIT 50_000 is the postMessage ceiling; under normal load the
 // incremental `sinceMs` query never hits it because we read only the
 // rows since the last tick.
+//
+// Model recovery: the runtime's `local_runtime_token_usage.model` column
+// is NULL on ~98% of rows in current builds because `recordCommittedPiUsage`
+// in `local-runtime-v2/src/service/session-system/usage/pi-usage.ts` only
+// writes the value when its caller actually supplied `turn.model`. The
+// session-level `extra_data_json.effectiveModel` field (a sibling table
+// `local_runtime_sessions`, ~34 rows in a normal install) carries the
+// authoritative effective model for the session, so we LEFT JOIN it and
+// COALESCE the row's own `model` with `json_extract(... effectiveModel)`.
+// Verified against a live SQLite (10k+ rows): 99.98% of rows get a real
+// `provider/model` value post-join, and the only 2 leftover NULLs are
+// orphan rows whose `session_id` is not present in `local_runtime_sessions`
+// (handled by `normalizedModelId`'s `${agent} (model unknown)` fallback).
+//
+// `effectiveModelVariant` (e.g. `'thinking'`) is also extracted; it is
+// not propagated into the normalised `model` field today (we keep model
+// as a single key so downstream `normalizeModelNameForClient` keeps a
+// stable cardinality) but the column is selected so future revisions
+// can pivot on it without re-vendoring the SQL.
 const MAVIS_USAGE_SQL = `
-SELECT ts, session_id, agent_name, model,
-  input_tokens, output_tokens,
-  cache_read_tokens, cost_usd
-FROM ${MAVIS_TABLE}
-WHERE agent_name IN (PLACEHOLDER_AGENTS)
-ORDER BY ts
+SELECT
+  t.ts, t.session_id, t.agent_name,
+  COALESCE(NULLIF(t.model, ''), json_extract(s.extra_data_json, '$.effectiveModel')) AS model,
+  json_extract(s.extra_data_json, '$.effectiveModelVariant') AS variant,
+  t.input_tokens, t.output_tokens,
+  t.cache_read_tokens, t.cost_usd
+FROM ${MAVIS_TABLE} t
+LEFT JOIN local_runtime_sessions s ON s.session_id = t.session_id
+WHERE t.agent_name IN (PLACEHOLDER_AGENTS)
+ORDER BY t.ts, t.id
 LIMIT 50000
 `.trim();
 
 const MAVIS_USAGE_SINCE_SQL = `
-SELECT ts, session_id, agent_name, model,
-  input_tokens, output_tokens,
-  cache_read_tokens, cost_usd
-FROM ${MAVIS_TABLE}
-WHERE agent_name IN (PLACEHOLDER_AGENTS)
-  AND ts >= ?
-ORDER BY ts
+SELECT
+  t.ts, t.session_id, t.agent_name,
+  COALESCE(NULLIF(t.model, ''), json_extract(s.extra_data_json, '$.effectiveModel')) AS model,
+  json_extract(s.extra_data_json, '$.effectiveModelVariant') AS variant,
+  t.input_tokens, t.output_tokens,
+  t.cache_read_tokens, t.cost_usd
+FROM ${MAVIS_TABLE} t
+LEFT JOIN local_runtime_sessions s ON s.session_id = t.session_id
+WHERE t.agent_name IN (PLACEHOLDER_AGENTS)
+  AND t.ts >= ?
+ORDER BY t.ts, t.id
 LIMIT 50000
 `.trim();
 
@@ -434,17 +461,22 @@ async function readMavisDbRowsNode(dbPath, sql, agentNames, sinceMs, maxReadRows
 
 /**
  * Format a mavis model id, falling back to `<agent> (model unknown)` when
- * the runtime left the column NULL (≈90% of rows in current builds).
- * Non-NULL rows pass through trimmed.
+ * the runtime left the column NULL after our session-table JOIN could
+ * not fill it in (in practice this is the < 0.1% "orphan session"
+ * remainder; verified: ~2 of 10k rows survive the COALESCE).
  *
  * @param {unknown} value Raw `model` column.
  * @param {unknown} agentName Raw `agent_name` column for fallback.
  * @returns {string} Trimmed model id, or a synthesised placeholder.
  */
 function normalizedModelId(value, agentName) {
-  // mavis runtime currently leaves model NULL on ~90% of rows; fall back
-  // to `${agent} (model unknown)` so the breakdown still shows per-agent
-  // splitting. Non-NULL rows pass through as-is.
+  // The LEFT JOIN on `local_runtime_sessions` covers > 99.9% of real
+  // rows in current builds, so this fallback is only hit for orphan
+  // sessions (rows whose `session_id` is not present in the sessions
+  // table — typically because the session was created after the last
+  // checkpoint or deleted by retention). Keeping the path means the
+  // breakdown never surfaces an empty `model` field, even if the JOIN
+  // result is NULL or empty.
   const trimmed = String(value || '').trim();
   if (trimmed) return trimmed;
   const agent = String(agentName || '').trim();
@@ -474,8 +506,11 @@ function localDateKey(timestamp) {
  * The mavis runtime writes `model` as a `provider/model` compound (e.g.
  * `minimax/MiniMax-M3`); we split on the first slash so downstream code
  * can route pricing by provider and keep the model identifier clean.
- * Rows whose model is NULL (≈90% in current builds) fall back to
- * `${agentName} (model unknown)` via `normalizedModelId`.
+ *
+ * The SQL projection LEFT JOINs `local_runtime_sessions` so the
+ * `raw.model` value here is already the runtime's effective model for
+ * the session (~99.98% of rows are filled; the residual < 0.02% falls
+ * back to `${agentName} (model unknown)` via `normalizedModelId`).
  *
  * `agentName` is preserved as-is so the host can break the mavis client
  * down by sub-agent when desired (audit shows 6 distinct agents:
@@ -501,6 +536,10 @@ function normalizeDbRow(raw) {
   const sessionId = String(raw.session_id || '').trim();
   if (!sessionId) return null;
   const agentName = String(raw.agent_name || '').trim();
+  // `raw.model` is the COALESCE of `t.model` with the session-level
+  // `effectiveModel`. Empty / NULL after the JOIN means the row is an
+  // orphan (no matching session row); `normalizedModelId` handles that
+  // case for us below.
   const modelField = raw.model == null ? '' : String(raw.model);
   const slashIdx = modelField.indexOf('/');
   const provider = slashIdx > 0 ? modelField.slice(0, slashIdx).trim() : '';

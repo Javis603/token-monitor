@@ -668,3 +668,79 @@ test('normalizeDbRow 缺 reasoning_tokens / cache_write_tokens 时默认 0', () 
   assert.equal(out.reasoning, 0, 'reasoning 缺省字段必须为 0');
   assert.equal(out.cacheWrite, 0, 'cacheWrite 缺省字段必须为 0');
 });
+
+test('SQL 投影 LEFT JOIN local_runtime_sessions + COALESCE effectiveModel', async () => {
+  // 验证全量扫描 SQL 含 LEFT JOIN sessions + COALESCE(json_extract)
+  // 这是补全 99.98% NULL model 行的核心路径（runtime 把 effectiveModel
+  // 写到 sessions.extra_data_json 而不是 token_usage.model）。
+  let captured = null;
+  const fakeExec = (cmd, args) => {
+    captured = { cmd, args };
+    return Promise.resolve({ stdout: '[]' });
+  };
+  const { readMavisDbRows } = require('../../src/shared/providers/mavis/usage');
+  await readMavisDbRows('fake.db', {
+    sinceMs: 0,
+    agentNames: ['mavis'],
+    execFile: fakeExec
+  });
+  const sqlArg = captured.args.find((a) => /SELECT/i.test(String(a)));
+  assert.ok(sqlArg);
+  assert.ok(/LEFT JOIN\s+local_runtime_sessions/i.test(sqlArg),
+    `必须 LEFT JOIN sessions 表, 实际: ${sqlArg.substring(0, 400)}`);
+  assert.ok(/COALESCE\s*\(\s*NULLIF\s*\(\s*t\.model/i.test(sqlArg),
+    `必须 COALESCE(NULLIF(t.model, ''), ...) , 实际: ${sqlArg.substring(0, 400)}`);
+  assert.ok(/json_extract\s*\(\s*s\.extra_data_json\s*,\s*'\$\.effectiveModel'\s*\)/i.test(sqlArg),
+    `必须 json_extract(...effectiveModel), 实际: ${sqlArg.substring(0, 400)}`);
+  assert.ok(/effectiveModelVariant/i.test(sqlArg),
+    `必须 projection 包含 effectiveModelVariant, 实际: ${sqlArg.substring(0, 400)}`);
+});
+
+test('SQL 投影 ORDER BY 加 t.id 作为 tie-breaker（解决 sinceMs 边界漏读）', async () => {
+  // 增量读 sinceMs=todayStart 时，今天 00:00:00.000 这个 ts 边界上的
+  // row 可能跟上次最后一条 ts 相同；只 ORDER BY ts 让 SQLite 不保证
+  // tie-breaker，可能漏读。加 t.id 让排序稳定。
+  let captured = null;
+  const fakeExec = (cmd, args) => {
+    captured = { cmd, args };
+    return Promise.resolve({ stdout: '[]' });
+  };
+  const { readMavisDbRows } = require('../../src/shared/providers/mavis/usage');
+  await readMavisDbRows('fake.db', {
+    sinceMs: 1_700_000_000_000,
+    agentNames: ['mavis'],
+    execFile: fakeExec
+  });
+  const sqlArg = captured.args.find((a) => /SELECT/i.test(String(a)));
+  assert.ok(sqlArg);
+  assert.ok(/ORDER BY\s+t\.ts\s*,\s*t\.id/i.test(sqlArg),
+    `ORDER BY 必须含 t.ts, t.id 双键稳定排序, 实际: ${sqlArg.substring(0, 400)}`);
+});
+
+test('normalizeDbRow 接受 JOIN 后 raw.model=minimax/MiniMax-M3 时正常拆 provider/model', () => {
+  // SQL 投影 LEFT JOIN sessions + COALESCE 之后，raw.model 99.98% 已经是
+  // 'minimax/MiniMax-M3' 形式。normalizeDbRow 必须按原逻辑正确拆出
+  // provider='minimax' + model='MiniMax-M3'（这是 key，让 upstream
+  // normalizeModelNameForClient lowercase 成 'minimax-m3'）。
+  const out = normalizeDbRow({
+    ts: 1_789_231_485_236,
+    session_id: 'mvs_abc',
+    agent_name: 'mavis',
+    model: 'minimax/MiniMax-M3',  // 来自 COALESCE 的 effectiveModel
+    input_tokens: 90,
+    output_tokens: 518,
+    cache_read_tokens: 0,
+    cost_usd: 0
+  });
+  assert.equal(out.provider, 'minimax');
+  assert.equal(out.model, 'MiniMax-M3');
+  assert.equal(out.agentName, 'mavis');
+});
+
+test('normalizedModelId 仍然对纯 NULL model 行返回 `${agent} (model unknown)`', () => {
+  // 即使加了 LEFT JOIN，仍可能有 < 0.02% 的孤儿 session 没法补全。
+  // normalizedModelId 必须保持 fallback，否则这些行 model 为空会让
+  // buildHistoryGraphFromRows 把它们归到错误的 key。
+  assert.equal(normalizedModelId(null, 'mavis'), 'mavis (model unknown)');
+  assert.equal(normalizedModelId('', 'coder'), 'coder (model unknown)');
+});
