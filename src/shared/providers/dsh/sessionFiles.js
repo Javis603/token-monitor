@@ -326,17 +326,18 @@ function foldDshSessionState(text, previous = {}) {
       continue;
     }
     if (event?.type === 'request/context') {
-      const window = positiveTokenCount(data?.contextWindow);
-      // A new window starts a new budget. Switching model mid-conversation (or a
-      // compaction) changes the denominator, so the previous occupancy is no
-      // longer a share of it: keeping it paired a full 200k reading with a
-      // freshly granted 1M window and reported the session as nearly empty. The
-      // next usage chunk repopulates the occupancy for the new window, and a
-      // repeat of the same window changes nothing.
-      if (window && window !== contextWindow) {
-        contextWindow = window;
-        contextTokens = 0;
-      }
+      // Every one of these is a route or capacity change, not a per-request
+      // record: across the DSH transcripts on this machine there are 52 of them
+      // against 400 usage chunks, and each carries the provider and model it
+      // switches to. So a new one always starts a new budget, and the reading
+      // from the route it replaces is not a share of it. Comparing the window
+      // value instead missed the cases where the value happens to be equal —
+      // deepseek-v4-flash to deepseek-v4-pro both advertise 1M, and the old
+      // route's occupancy was reported as the new one's — and missed a route
+      // that advertises no capacity at all, where the stale pair was kept
+      // indefinitely. Clearing both is what the next usage chunk repopulates.
+      contextWindow = positiveTokenCount(data?.contextWindow);
+      contextTokens = 0;
       continue;
     }
     if (data?.chunk?.type !== 'usage') continue;

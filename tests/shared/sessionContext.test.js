@@ -220,16 +220,36 @@ test('readDshSessionState clears a stale occupancy when the window changes', () 
   assert.equal(repopulated.contextWindow, 1_000_000);
   assert.equal(repopulated.contextTokens, 305_000);
 
-  // Re-stating the same window is not a reset: a per-request record repeats it.
+  // A route change resets even when the advertised window is unchanged. These
+  // records mark a provider/model/capacity change rather than a request — a real
+  // DSH transcript here switches deepseek-v4-flash to deepseek-v4-pro, and both
+  // advertise 1M — so the previous route's occupancy is not the new one's and
+  // the reading has to wait for a usage chunk that belongs to the new route.
   const sameDir = tmpDir('dsh-context-same-');
   const sameFile = path.join(sameDir, 'session.jsonl');
   fs.writeFileSync(sameFile, [
-    JSON.stringify({ type: 'request/context', data: { contextWindow: 200_000 } }),
+    JSON.stringify({ type: 'request/context', data: { provider: 'p', model: 'a', contextWindow: 1_000_000 } }),
     JSON.stringify({ type: 'assistant/chunk', data: { chunk: { type: 'usage', usage: { inputTokens: 50_000, outputTokens: 1_000 } } } }),
-    JSON.stringify({ type: 'request/context', data: { contextWindow: 200_000 } }),
+    JSON.stringify({ type: 'request/context', data: { provider: 'p', model: 'b', contextWindow: 1_000_000 } }),
     ''
   ].join('\n'));
-  assert.equal(readDshSessionState(sameFile).contextTokens, 51_000);
+  const sameWindow = readDshSessionState(sameFile);
+  assert.equal(sameWindow.contextWindow, 1_000_000);
+  assert.equal(sameWindow.contextTokens, 0, 'an unchanged window is still a new route');
+
+  // A route that advertises no capacity clears the old one rather than leaving
+  // a gauge that never belonged to it.
+  const noneDir = tmpDir('dsh-context-none-');
+  const noneFile = path.join(noneDir, 'session.jsonl');
+  fs.writeFileSync(noneFile, [
+    JSON.stringify({ type: 'request/context', data: { model: 'a', contextWindow: 200_000 } }),
+    JSON.stringify({ type: 'assistant/chunk', data: { chunk: { type: 'usage', usage: { inputTokens: 189_000, outputTokens: 1_000 } } } }),
+    JSON.stringify({ type: 'request/context', data: { model: 'b' } }),
+    ''
+  ].join('\n'));
+  const noWindow = readDshSessionState(noneFile);
+  assert.equal(noWindow.contextWindow, 0, 'a route with no stated capacity has no gauge');
+  assert.equal(noWindow.contextTokens, 0);
 });
 
 test('applySessionMetadata stamps context only on a session recent enough to still be open', () => {
