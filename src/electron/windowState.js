@@ -25,6 +25,30 @@ function normalWindowBounds(window) {
   }
 }
 
+// Move a window onto another display while keeping where it sat *on* that
+// display: the offset between the two origins is carried over, so a window parked
+// in a corner lands in the same corner of the target screen instead of being
+// re-centred. A window larger than the target work area is shrunk to fit, and the
+// result is clamped so the window cannot end up off-screen. Displays above or to
+// the left of the primary one have negative origins, which is why the offsets are
+// added rather than the window being placed at the target's origin.
+function boundsOnDisplay(bounds, from, to) {
+  if (!bounds || !to || !to.workArea) return null;
+  const area = to.workArea;
+  const origin = to.bounds || area;
+  const fromOrigin = from?.bounds || from?.workArea || null;
+  const dx = fromOrigin ? origin.x - fromOrigin.x : area.x - bounds.x;
+  const dy = fromOrigin ? origin.y - fromOrigin.y : area.y - bounds.y;
+  const width = Math.min(bounds.width, area.width);
+  const height = Math.min(bounds.height, area.height);
+  return {
+    x: Math.max(area.x, Math.min(Math.round(bounds.x + dx), area.x + area.width - width)),
+    y: Math.max(area.y, Math.min(Math.round(bounds.y + dy), area.y + area.height - height)),
+    width,
+    height
+  };
+}
+
 function shouldPersistWindowBounds(window) {
   return Boolean(normalWindowBounds(window) && !isWindowMaximized(window));
 }
@@ -113,6 +137,7 @@ function rebuildWindowBounds(window, state = {}) {
 }
 
 module.exports = {
+  boundsOnDisplay,
   expandedBoundsForCollapse,
   isWindowMaximized,
   normalWindowBounds,

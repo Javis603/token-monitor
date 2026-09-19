@@ -487,7 +487,13 @@ function createTray({
   };
   refreshContextMenu();
 
-  tray.on('click', () => onToggle(tray));
+  // Electron fills the click event's `bounds` and `position` from the window that
+  // actually received the click, but the tray rectangle is not a reliable way to
+  // find the display on macOS: the status item is mirrored onto every menu bar
+  // while Tray.getBounds() resolves one fixed window (see popoverAnchor). The
+  // pointer is the one signal that survives that mirroring, so read it here,
+  // while the click is still what moved it.
+  tray.on('click', (_event, _bounds, position) => onToggle(tray, pointerPoint(position, electron)));
   tray.on('right-click', () => {
     tray.popUpContextMenu(buildMenu());
   });
@@ -497,26 +503,76 @@ function createTray({
   return tray;
 }
 
-function popoverBounds(tray, popoverWidth, popoverHeight) {
-  const { screen } = require('electron');
+// The cursor first, the event's own position second. A tray click always happens
+// under the pointer, but an activation that did not come from a click (VoiceOver,
+// for one) does not carry a usable position.
+function pointerPoint(position, electron = require('electron')) {
+  try {
+    const cursor = electron?.screen?.getCursorScreenPoint?.();
+    if (cursor && Number.isFinite(Number(cursor.x)) && Number.isFinite(Number(cursor.y))) {
+      return { x: Number(cursor.x), y: Number(cursor.y) };
+    }
+  } catch (_) { /* fall through to the event position */ }
+  if (position && Number.isFinite(Number(position.x)) && Number.isFinite(Number(position.y))) {
+    return { x: Number(position.x), y: Number(position.y) };
+  }
+  return null;
+}
+
+function pointInside(point, area) {
+  return Boolean(point && area) &&
+    point.x >= area.x && point.x < area.x + area.width &&
+    point.y >= area.y && point.y < area.y + area.height;
+}
+
+// Which display the popover belongs on, and where on it to hang the popover from.
+//
+// The display is chosen from the pointer, never from the tray rectangle. On macOS
+// Tray.getBounds() resolves `[status_item_view_ window].frame` — one view inside
+// one window, with no display parameter — so it describes the primary display's
+// menu bar even when the icon was clicked on another screen; feeding it to
+// getDisplayNearestPoint() maps an anchor that never moved back onto the display
+// it already belonged to.
+//
+// The tray rectangle is still the better horizontal anchor when it genuinely sits
+// on the display we chose, so it is used there and ignored otherwise. `onTray`
+// tells the caller which case it got, since the vertical placement differs: a
+// usable rectangle gives the icon's bottom edge, a fallback gives the menu bar.
+function popoverAnchor({ trayBounds, cursor, display }) {
+  const icon = trayBounds && trayBounds.width > 0
+    ? { x: trayBounds.x + trayBounds.width / 2, y: trayBounds.y }
+    : null;
+  if (icon && pointInside(icon, display.bounds)) {
+    return { x: icon.x, top: trayBounds.y + (trayBounds.height || 0), onTray: true };
+  }
+  return { x: cursor.x, top: cursor.y, onTray: false };
+}
+
+function popoverBounds(tray, popoverWidth, popoverHeight, options = {}) {
+  const {
+    screen = require('electron').screen,
+    clickPoint = null,
+    platform = process.platform
+  } = options;
   const trayBounds = tray?.getBounds?.() || { x: 0, y: 0, width: 0, height: 0 };
-  const cursor = screen.getCursorScreenPoint();
-  const anchor = trayBounds.width > 0
-    ? { x: trayBounds.x + trayBounds.width / 2, y: trayBounds.y, height: trayBounds.height }
-    : { x: cursor.x, y: cursor.y, height: 0 };
-  const display = screen.getDisplayNearestPoint({ x: anchor.x, y: anchor.y });
+  const cursor = clickPoint || screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint({ x: cursor.x, y: cursor.y });
   const wa = display.workArea;
+  const anchor = popoverAnchor({ trayBounds, cursor, display });
 
   let x = Math.round(anchor.x - popoverWidth / 2);
   x = Math.max(wa.x + 4, Math.min(x, wa.x + wa.width - popoverWidth - 4));
 
   let y;
-  if (process.platform === 'darwin') {
-    y = Math.round(anchor.y + (anchor.height || 0) + 4);
+  if (platform === 'darwin') {
+    // Every display runs its own menu bar on macOS, so workArea.y is the lower
+    // edge of this display's menu bar whether or not the tray rectangle was
+    // usable as an anchor.
+    y = Math.round((anchor.onTray ? anchor.top : wa.y) + 4);
   } else {
     // Windows / Linux: tray icon usually sits near the bottom; open above.
-    y = Math.round(anchor.y - popoverHeight - 8);
-    if (y < wa.y + 4) y = Math.round(anchor.y + (anchor.height || 0) + 8);
+    y = Math.round(anchor.top - popoverHeight - 8);
+    if (y < wa.y + 4) y = Math.round(anchor.top + 8);
   }
   y = Math.max(wa.y + 4, Math.min(y, wa.y + wa.height - popoverHeight - 4));
 
@@ -535,6 +591,9 @@ module.exports = {
   isBarsTrayIconMode,
   pickUsageTrayIconId,
   pickWorstLimit,
+  pointInside,
+  pointerPoint,
+  popoverAnchor,
   popoverBounds,
   prepareTrayIconForPlatform,
   primaryDisplayScaleFactor,
