@@ -70,7 +70,7 @@ it.
 
 The resolver owns the display cleaning, because the persistence layer stores a `setTitle` value
 verbatim even though the prompt path sanitizes (secret redaction, whitespace collapse, 200-character
-cap): names are collapsed to one line and capped at the 160 code points the shared scan path uses.
+cap): names are collapsed to one line and capped at the same 96 code points the claude and codex resolvers use.
 Titles stay local — the Hub strips session text at ingress — and Session Detail remains unsupported
 for Kimi.
 

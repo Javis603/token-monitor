@@ -1502,6 +1502,7 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
   try {
     delete process.env.KIMI_CODE_HOME;
     const { applySessionTimestamps } = freshCollector();
+    const { TITLE_MAX_CODE_POINTS } = require('../../src/shared/providers/kimi/sessionMetadata');
     const period = { sessions: {} };
     // Kimi Code CLI: ~/.kimi-code/sessions/<workspace>/<session_*>/state.json
     const cliSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_xyz');
@@ -1693,7 +1694,11 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
     const customV2Title = period.sessions['kimi:session_custom_v2'].title;
     assert.ok(customV2Title.startsWith('renamed by hand xxx'), `a v2 custom rename must be read and collapsed: ${customV2Title}`);
     assert.ok(!/\s\s|\n|\t/.test(customV2Title), 'a dirty title must be collapsed to one line');
-    assert.equal(Array.from(customV2Title).length, 160, 'a title must be capped at the shared 160 code points');
+    assert.equal(
+      Array.from(customV2Title).length,
+      TITLE_MAX_CODE_POINTS,
+      'a title must be capped at the resolver family’s code-point limit'
+    );
     assert.ok(customV2Title.endsWith('…'), 'a capped title must be marked as truncated');
     assert.equal(period.sessions['kimi:session_title_type'].title || '', '', 'a non-string title must stay unset');
     assert.equal(period.sessions['kimi:session_out_of_range'].startedAt || '', '', 'an out-of-range timestamp must stay unset');
