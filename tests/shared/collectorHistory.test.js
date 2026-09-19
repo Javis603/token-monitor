@@ -554,6 +554,23 @@ test('collectHistoryOnce builds Proma-only history without starting tokscale gra
   assert.equal(history.daily[0].perClient.proma.messages, 1);
 });
 
+test('collectHistoryOnce merges Mavis history with tokscale graph history', async () => {
+  // Mavis (MiniMax Code / pi-agent local SQLite) parses locally and feeds the
+  // collector its own graph alongside proma / qoderCn. The merge is what makes
+  // daily-history-archive.json and the merged summary.history see Mavis data.
+  const mavisGraph = {
+    contributions: [{ date: '2026-06-07', clients: [
+      { client: 'mavis', modelId: 'mavis (model unknown)', tokens: { input: 7, output: 3, cacheRead: 1, cacheWrite: 0, reasoning: 0 }, cost: 0.01, messages: 2 }
+    ] }]
+  };
+  const history = await collectHistoryOnce({
+    clients: 'claude', mavisGraph, todayKey: '2026-06-07', runGraph: async () => SAMPLE_GRAPH
+  });
+  assert.equal(history.daily[0].tokens, 41);
+  assert.equal(history.daily[0].perClient.mavis.tokens, 11);
+  assert.equal(history.daily[0].perClient.mavis.messages, 2);
+});
+
 test('collectHistoryOnce skips graph collection when history is disabled', async () => {
   let graphCalled = false;
   const history = await collectHistoryOnce({

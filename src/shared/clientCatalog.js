@@ -69,7 +69,8 @@
     { id: 'dsh', label: 'DeepSeek Harness' },
     { id: 'cherrystudio', label: 'Cherry Studio' },
     { id: 'lmstudio', label: 'LM Studio' },
-    { id: 'unsloth', label: 'Unsloth' }
+    { id: 'unsloth', label: 'Unsloth' },
+    { id: 'mavis', label: 'Minimax Code', locallyParsed: true }
   ].map((client) => Object.freeze({
     defaultTracked: true,
     locallyParsed: false,
