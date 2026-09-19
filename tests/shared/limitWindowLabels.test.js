@@ -83,7 +83,7 @@ test('the default is display-only and never written onto the wire', () => {
   // collector set. Defaulting inside normalizeLimitWindow would erase that.
   const core = read('src/shared/limits/core.js');
   assert.doesNotMatch(core, /limitWindowLabels/);
-  assert.match(read('src/electron/renderer/app.js'), /if \(weekly\.label\) node\.classList\.add\('limit-window-wide'\)/);
+  assert.match(read('src/electron/renderer/limitWindowsView.js'), /if \(weekly\.label\) node\.classList\.add\('limit-window-wide'\)/);
 
   const { normalizeLimitWindow } = require('../../src/shared/limits/core');
   const normalized = normalizeLimitWindow({ kind: 'session', used: 1, limit: 4 });

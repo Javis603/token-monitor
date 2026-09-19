@@ -97,6 +97,7 @@ test('motion keys preserve account and window identity without exposing labels',
 test('renderer wires reset motion before app boot and respects reduced motion', () => {
   const html = fs.readFileSync(path.join(root, 'src/electron/renderer/index.html'), 'utf8');
   const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limitWindowsView.js'), 'utf8');
   const css = fs.readFileSync(path.join(root, 'src/electron/renderer/styles.css'), 'utf8');
 
   assert.ok(html.indexOf('<script src="limitResetMotion.js"></script>') < html.indexOf('<script src="app.js"></script>'));
@@ -107,7 +108,9 @@ test('renderer wires reset motion before app boot and respects reduced motion', 
   assert.match(app, /LIMIT_RESET_MOTION_EASING/);
   assert.match(app, /const duration = limitResetMotionApi\.durationMs\(from, to\);/);
   assert.match(app, /animateLimitResetCompletion\(fill, duration\);/);
-  assert.match(app, /const fillPercent = limitResetMotionApi\.displayPercent\([\s\S]*limitFillPercent\(remaining, used, showUsed\)[\s\S]*\);/);
+  // The meter itself is built by the shared view the edge dock also renders
+  // from, so the motion module reaches it as an injected dependency.
+  assert.match(view, /const fillPercent = motion\.displayPercent\([\s\S]*limitFillPercent\(remaining, used, showUsed\)[\s\S]*\);/);
   assert.match(app, /requestAnimationFrame\(\(startedAt\) => \{/);
   assert.match(app, /duration,\s*startedAt\s*\);/);
   assert.match(app, /delay: Math\.max\(0, duration - LIMIT_RESET_GLOW_LEAD_MS\)/);

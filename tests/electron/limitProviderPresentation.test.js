@@ -222,6 +222,20 @@ function functionBody(source, name, nextName) {
   return source.slice(start, endLineStart);
 }
 
+// The Limits rows moved to limitWindowsView.js, which the edge dock renders
+// from too, so a provider's markup is built once rather than twice. These read
+// whichever file now holds the function.
+function limitsViewSource() {
+  return readRendererFile('limitWindowsView.js');
+}
+
+function viewBody(name, nextName = '') {
+  // The last function in the module is followed by its export block, so slice
+  // against a sentinel placed ahead of that rather than the end of the file.
+  const source = limitsViewSource().replace(/\n\s*return \{\n\s*antigravityQuotaGroups,/, '\nfunction __endOfView__() {}\n    return {\n      antigravityQuotaGroups,');
+  return functionBody(source, name, nextName || '__endOfView__');
+}
+
 function runLocalProviderStatus(source, state, providerName) {
   const localDeviceHelper = functionBody(source, 'localDeviceLimitsProviders', 'localProviderStatus');
   const localProviderHelper = functionBody(source, 'localProviderStatus', 'deepseekAccountLinked');
@@ -240,9 +254,9 @@ function runLocalLiveCodexProvider(source, state) {
 }
 
 function runProviderSpendNode(source, balance) {
-  const optionalNumber = functionBody(source, 'optionalFiniteNumber', 'formatLimitWindowValue');
-  const spendEntries = functionBody(source, 'providerSpendEntries', 'limitNoteRowNode');
-  const spendNode = functionBody(source, 'providerSpendNode', 'thirdPartySpendNode');
+  const optionalNumber = functionBody(source, 'optionalFiniteNumber', 'formatHomeLimitWindowValue');
+  const spendEntries = viewBody('providerSpendEntries', 'limitNoteRowNode');
+  const spendNode = viewBody('providerSpendNode', 'thirdPartySpendNode');
   const context = {
     formatMoney: (value, currency) => `${currency} ${Number(value).toFixed(2)}`,
     formatBalanceSpendAmount: (value, balance) => `${balance?.currency || ''} ${Number(value).toFixed(2)}`.trim(),
@@ -271,16 +285,15 @@ function windowText(providerId, window, options = {}) {
 }
 
 function runCodexAdditionalWindowLabel(window, siblingWindows) {
-  const app = readRendererFile('app.js');
-  const formatter = functionBody(app, 'codexAdditionalWindowLabel', 'antigravityQuotaGroups');
+  const formatter = viewBody('codexAdditionalWindowLabel', 'antigravityQuotaGroups');
   return vm.runInNewContext(
     `${formatter}\ncodexAdditionalWindowLabel(${JSON.stringify(window)}, ${JSON.stringify(siblingWindows)});`,
-    { limitProviderPresentationApi: { codexAdditionalQuotaDisplayName } }
+    { presentationApi: { codexAdditionalQuotaDisplayName } }
   );
 }
 
 test('Cursor limits render every normalized quota and format on-demand spend explicitly', () => {
-  const windows = functionBody(readRendererFile('app.js'), 'renderProviderWindows', 'renderLimitProviderRow');
+  const windows = viewBody('renderProviderWindows');
 
   assert.match(windows, /for \(const quotaWindow of provider\.windows \|\| \[\]\)/);
   assert.doesNotMatch(windows, /visibleWindows = billingWindows\.length > 0 \? billingWindows : \[null\]/);
@@ -333,7 +346,7 @@ test('Limits and Home distinguish resets, expiries, and simultaneous boundaries'
   const app = readRendererFile('app.js');
   const formatBoundary = functionBody(app, 'formatLimitBoundary', 'formatDuration');
   const formatDuration = functionBody(app, 'formatDuration', 'formatActiveDuration');
-  const limitWindow = functionBody(app, 'limitWindowNode', 'providersByLimitProviderId');
+  const limitWindow = viewBody('limitWindowNode', 'renderProviderWindows');
   const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
 
   const labels = vm.runInNewContext(
@@ -706,7 +719,7 @@ test('capability tags are settings-only and do not alter the main Limits panel',
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  const renderHead = functionBody(app, 'renderLimitProviderHead', 'renderProviderWindows');
+  const renderHead = functionBody(app, 'renderLimitProviderHead', 'codexResetForecastDate');
   const renderMeta = functionBody(app, 'limitProviderMeta', 'limitProviderPlan');
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'onToolTrackingToggle');
 
@@ -922,8 +935,7 @@ test('Grok renders its single Monthly billing window full-width instead of an em
   // Grok only exposes a billing window. The default render branch draws
   // session+weekly, which would leave Grok with no visible bar. A dedicated
   // grok branch must surface the billing window as a wide row.
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'grok'/);
   assert.match(renderProviderWindows, /windowForKind\(provider, 'billing'\)/);
@@ -932,8 +944,7 @@ test('Grok renders its single Monthly billing window full-width instead of an em
 });
 
 test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with a Limits icon', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
   const css = readRendererFile('styles.css');
 
   assert.match(renderProviderWindows, /provider\.provider === 'zed'/);
@@ -989,9 +1000,8 @@ test('Zed compact windows label unlimited Edit Predictions without a fake reset'
 });
 
 test('WorkBuddy renders unlimited enterprise credits without requiring a numeric balance', () => {
-  const app = readRendererFile('app.js');
-  const valueFunction = functionBody(app, 'creditsBalanceValue', 'mimoTokenPlanWindowFromBalance');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const valueFunction = viewBody('creditsBalanceValue', 'mimoTokenPlanWindowFromBalance');
+  const renderProviderWindows = viewBody('renderProviderWindows');
   const value = vm.runInNewContext(
     `${valueFunction}\ncreditsBalanceValue({ balance: { amount: null, currency: 'CREDITS' } }, { detail: 'unlimited', remaining: null });`,
     {
@@ -1016,12 +1026,11 @@ test('WorkBuddy renders unlimited enterprise credits without requiring a numeric
 });
 
 test('Antigravity groups returned quota windows under dynamic model-family headings', () => {
-  const app = readRendererFile('app.js');
-  const quotaGroups = functionBody(app, 'antigravityQuotaGroups', 'formatLimitAmount');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const quotaGroups = viewBody('antigravityQuotaGroups', 'formatLimitAmount');
+  const renderProviderWindows = viewBody('renderProviderWindows');
   const css = readRendererFile('styles.css');
 
-  const context = { limitProviderPresentationApi: { antigravityQuotaWindow } };
+  const context = { presentationApi: { antigravityQuotaWindow } };
   const grouped = vm.runInNewContext(`${quotaGroups}\nantigravityQuotaGroups({ windows: [
     { kind: 'session', label: 'Gemini 5-hour' },
     { kind: 'weekly', label: 'Gemini weekly' },
@@ -1048,7 +1057,7 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
   ] });`, context);
   assert.deepEqual(JSON.parse(JSON.stringify(legacy)), []);
 
-  assert.match(quotaGroups, /limitProviderPresentationApi\.antigravityQuotaWindow\(window\)/);
+  assert.match(quotaGroups, /presentationApi\.antigravityQuotaWindow\(window\)/);
   assert.match(quotaGroups, /groups\.set\(entry\.groupLabel, \[\]\)/);
   assert.match(quotaGroups, /entries\.some\(\(entry\) => entry === null\)/);
   assert.match(renderProviderWindows, /provider\.provider === 'antigravity'/);
@@ -1062,8 +1071,7 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
 });
 
 test('Qoder renders its single Credits billing window full-width', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'qoder'/);
   assert.match(renderProviderWindows, /const credits = windowForKind\(provider, 'billing'\);/);
@@ -1077,8 +1085,7 @@ test('Qoder renders its single Credits billing window full-width', () => {
 });
 
 test('Kimi renders 5-hour and Weekly above one full-width Monthly window', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'kimi'/);
   assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
@@ -1093,8 +1100,7 @@ test('Kimi renders 5-hour and Weekly above one full-width Monthly window', () =>
 });
 
 test('Command Code renders 5-hour and Weekly above full-width credit windows', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'commandcode'/);
   assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
@@ -1116,8 +1122,7 @@ test('Command Code renders 5-hour and Weekly above full-width credit windows', (
 });
 
 test('Ollama renders Session and Weekly usage windows', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
   assert.match(renderProviderWindows, /provider\.provider === 'ollama'/);
   assert.match(renderProviderWindows, /windowForKind\(provider, 'session'\)/);
   assert.match(renderProviderWindows, /windowForKind\(provider, 'weekly'\)/);
@@ -1126,8 +1131,7 @@ test('Ollama renders Session and Weekly usage windows', () => {
 });
 
 test('Volcengine renders quota windows as paired rows with an odd final window full-width', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'volcengine'/);
   assert.match(renderProviderWindows, /const session = windowForKind\(provider, 'session'\);/);
@@ -1143,8 +1147,7 @@ test('Volcengine renders quota windows as paired rows with an odd final window f
 });
 
 test('Z.ai and Team keep all billing windows and render MCP full width after paired quotas', () => {
-  const app = readRendererFile('app.js');
-  const render = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const render = viewBody('renderProviderWindows');
   const node = () => ({ children: [], classes: new Set(),
     classList: { add(...values) { values.forEach(value => this.owner.classes.add(value)); } },
     append(...children) { this.children.push(...children); } });
@@ -1186,8 +1189,7 @@ test('Z.ai and Team keep all billing windows and render MCP full width after pai
 // is the only billing-kind window there is, which is exactly where picking "the
 // billing window" by kind would meter prepaid money as a monthly grant.
 test('OpenCode reads the Zen balance from its credits window without metering it as Monthly', () => {
-  const app = readRendererFile('app.js');
-  const render = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const render = viewBody('renderProviderWindows');
   const makeNode = () => {
     const node = {
       children: [],
@@ -1241,8 +1243,7 @@ test('OpenCode reads the Zen balance from its credits window without metering it
 });
 
 test('Copilot renders monthly Premium and Chat quotas as billing windows', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'copilot'/);
   assert.match(renderProviderWindows, /const billingWindows = windowsForKind\(provider, 'billing'\);/);
@@ -1254,17 +1255,17 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
-  const codexAdditionalWindowLabel = functionBody(app, 'codexAdditionalWindowLabel', 'antigravityQuotaGroups');
-  const resetCreditsValue = functionBody(app, 'formatCodexResetCreditsValue', 'codexResetCreditExpirationDates');
-  const resetCreditExpirationDates = functionBody(app, 'codexResetCreditExpirationDates', 'codexResetCreditExpiryLabel');
-  const resetCreditExpiryLabel = functionBody(app, 'codexResetCreditExpiryLabel', 'codexResetCreditExpiryDetailLabel');
-  const resetCreditExpiryDetailLabel = functionBody(app, 'codexResetCreditExpiryDetailLabel', 'expiryDateLabel');
-  const resetCreditExpiryDateLabel = functionBody(app, 'expiryDateLabel', 'limitDetailTooltipShouldHoldRender');
+  const renderProviderWindows = viewBody('renderProviderWindows');
+  const codexAdditionalWindowLabel = viewBody('codexAdditionalWindowLabel', 'antigravityQuotaGroups');
+  const resetCreditsValue = viewBody('formatCodexResetCreditsValue', 'codexResetCreditExpirationDates');
+  const resetCreditExpirationDates = viewBody('codexResetCreditExpirationDates', 'codexResetCreditExpiryLabel');
+  const resetCreditExpiryLabel = viewBody('codexResetCreditExpiryLabel', 'codexResetCreditExpiryDetailLabel');
+  const resetCreditExpiryDetailLabel = viewBody('codexResetCreditExpiryDetailLabel', 'expiryDateLabel');
+  const resetCreditExpiryDateLabel = viewBody('expiryDateLabel', 'codexResetCreditsNode');
   // Sliced to the next function, not to `renderLimitProviderHead`: the wider slice
   // swept in the shared tooltip builder, so these assertions passed on code that
   // isn't Codex's.
-  const codexResetCreditsNode = functionBody(app, 'codexResetCreditsNode', 'providerSpendEntries');
+  const codexResetCreditsNode = viewBody('codexResetCreditsNode', 'providerSpendEntries');
   const limitDetailTooltipShouldHoldRender = functionBody(app, 'limitDetailTooltipShouldHoldRender', 'flushPendingLimitDetailTooltipRender');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
 
@@ -1281,7 +1282,7 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(main, /showCodexAdditionalLimits: parseBoolean\(patch\.showCodexAdditionalLimits \?\? settings\.showCodexAdditionalLimits, true\)/);
   assert.match(main, /showCodexAdditionalLimits: settings\?\.showCodexAdditionalLimits !== false/);
   assert.match(app, /key: 'showCodexAdditionalLimits',[\s\S]*?defaultValue: true/);
-  assert.match(renderProviderWindows, /state\.settings\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
+  assert.match(renderProviderWindows, /settings\(\)\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
   assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);
   assert.match(renderProviderWindows, /additionalNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(codexAdditionalWindowLabel, /if \(!name\) return period \|\| 'Additional limit';/);
@@ -1355,10 +1356,10 @@ test('Codex additional quota labels omit a redundant period unless one name has 
 });
 
 function runClaudePrepaidGrantRows(app, tranches, currency, now) {
-  const optionalNumber = functionBody(app, 'optionalFiniteNumber', 'formatLimitWindowValue');
+  const optionalNumber = functionBody(app, 'optionalFiniteNumber', 'formatHomeLimitWindowValue');
   const duration = functionBody(app, 'formatDuration', 'formatActiveDuration');
-  const dateLabel = functionBody(app, 'expiryDateLabel', 'limitDetailTooltipShouldHoldRender');
-  const grantRows = functionBody(app, 'claudePrepaidGrantRows', 'claudeBalanceNode');
+  const dateLabel = viewBody('expiryDateLabel', 'codexResetCreditsNode');
+  const grantRows = viewBody('claudePrepaidGrantRows', 'claudeBalanceNode');
   const context = {
     Date: class FrozenDate extends Date {
       constructor(...args) {
@@ -1425,11 +1426,10 @@ test('Claude prepaid grants keep three cells when a grant has no usable expiry',
 });
 
 test('The detail tooltip widens its grid and pads short rows for three-column entries', () => {
-  const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  const infoNode = functionBody(app, 'limitDetailInfoNode', 'providerSpendNode');
-  const grantRows = functionBody(app, 'claudePrepaidGrantRows', 'claudeBalanceNode');
-  const balanceNode = functionBody(app, 'claudeBalanceNode', 'optionalFiniteNumber');
+  const infoNode = viewBody('limitDetailInfoNode', 'providerSpendNode');
+  const grantRows = viewBody('claudePrepaidGrantRows', 'claudeBalanceNode');
+  const balanceNode = viewBody('claudeBalanceNode', 'providerWindowText');
 
   assert.match(infoNode, /const columns = entries\.reduce\(\(widest, entry\) => Math\.max\(widest, entry\.length\), 0\);/);
   assert.match(infoNode, /columns > 2 \? 'limit-detail-tooltip-triple' : ''/);
@@ -1450,7 +1450,7 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   const homeLabel = functionBody(app, 'homeLimitWindowLabel', 'renderHomeLimitModule');
   const homeRows = functionBody(app, 'homeLimitRows', 'homeLimitWindowLabel');
   const homeModule = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
-  const valueFormatter = functionBody(app, 'formatHomeLimitWindowValue', 'mimoTokenPlanWindowFromBalance');
+  const valueFormatter = functionBody(app, 'formatHomeLimitWindowValue', 'providersByLimitProviderId');
 
   assert.match(homeLabel, /if \(window\?\.kind === 'billing'\) \{/);
   assert.match(homeLabel, /limitProviderCompactWindowLabel\(providerId, window, visibleWindows\)/);
@@ -1486,16 +1486,15 @@ test('tray bars draw the resolved primary window on top and preserve an empty lo
 });
 
 test('DeepSeek main Limits row preserves the intentional month-spend balance meter', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
   const balanceWindow = readSharedFile('limitBalanceDisplay.js');
   const styles = readRendererFile('styles.css');
 
   assert.match(renderProviderWindows, /\{ remainingPercent: creditsMeterPercent\(provider, null\) \},/);
   assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide', 'limit-window-no-reset'\);/);
   assert.match(renderProviderWindows, /const spendNode = providerSpendNode\(balance\);/);
-  assert.match(app, /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
-  assert.match(app, /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
+  assert.match(limitsViewSource(), /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
+  assert.match(limitsViewSource(), /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
   assert.doesNotMatch(renderProviderWindows, /Month \(since tracking\)/);
   assert.doesNotMatch(renderProviderWindows, /monthSinceTracking \? 'Month \(since tracking\)' : 'Month'/);
   // The month-spend denominator now lives in the shared balance module.
@@ -1544,8 +1543,7 @@ test('shared spend presentation preserves zeroes and omits missing periods', () 
 });
 
 test('Balance and token quota values omit the redundant left suffix', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /'Balance',\s*\{ \.\.\.balanceWindow, label: 'Balance' \},\s*color,\s*0\.95,\s*formatMoney\(balanceAmount, currency\)/);
   assert.match(renderProviderWindows, /const meterPercent = creditsMeterPercent\(provider, quotaWindow\);/);
@@ -1557,9 +1555,8 @@ test('Balance and token quota values omit the redundant left suffix', () => {
 });
 
 test('MiMo main Limits row falls back to balance plan fields for Token Plan', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
-  const tokenPlanFallback = functionBody(app, 'mimoTokenPlanWindowFromBalance', 'limitWindowNode');
+  const renderProviderWindows = viewBody('renderProviderWindows');
+  const tokenPlanFallback = viewBody('mimoTokenPlanWindowFromBalance', 'limitWindowNode');
 
   assert.match(renderProviderWindows, /const balance = provider\.balance \|\| null;/);
   assert.match(renderProviderWindows, /const tokenPlan = windowForKind\(provider, 'billing'\) \|\| mimoTokenPlanWindowFromBalance\(balance\);/);
@@ -1578,8 +1575,8 @@ test('MiMo main Limits row falls back to balance plan fields for Token Plan', ()
 
 test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', () => {
   const app = readRendererFile('app.js');
-  const optionalNumber = functionBody(app, 'optionalFiniteNumber', 'formatLimitWindowValue');
-  const tokenPlanFallback = functionBody(app, 'mimoTokenPlanWindowFromBalance', 'limitWindowNode');
+  const optionalNumber = functionBody(app, 'optionalFiniteNumber', 'formatHomeLimitWindowValue');
+  const tokenPlanFallback = viewBody('mimoTokenPlanWindowFromBalance', 'limitWindowNode');
   const context = {};
   vm.runInNewContext(`${optionalNumber}\n${tokenPlanFallback}\nresult = mimoTokenPlanWindowFromBalance({
     planUsed: null,
@@ -1591,10 +1588,9 @@ test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', (
 });
 
 test('MiMo expired Token Plan renders a localized status without a meter', () => {
-  const app = readRendererFile('app.js');
   const i18n = readRendererFile('i18n.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
-  const tokenPlanFallback = functionBody(app, 'mimoTokenPlanWindowFromBalance', 'limitWindowNode');
+  const renderProviderWindows = viewBody('renderProviderWindows');
+  const tokenPlanFallback = viewBody('mimoTokenPlanWindowFromBalance', 'limitWindowNode');
 
   assert.match(renderProviderWindows, /balance\?\.planStatus === 'expired'/);
   assert.match(renderProviderWindows, /\{ showMeter: false \}, color, 0\.68, t\('limits\.mimo\.planExpired'\)/);

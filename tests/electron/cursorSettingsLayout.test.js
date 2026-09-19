@@ -44,6 +44,7 @@ function functionBody(source, name, nextName) {
   return source.slice(start, end);
 }
 
+
 function functionBodyBeforeMarker(source, name, marker) {
   const start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} function should exist`);
@@ -534,7 +535,7 @@ test('Codex account email masking is an opt-in display-only setting', () => {
 test('Codex system account switching is exposed from limits account rows', () => {
   const app = readRendererFile('app.js');
   const accountControl = fs.readFileSync(path.join(rendererDir, '..', 'providers', 'codex', 'accountControl.js'), 'utf8');
-  const renderHead = functionBody(app, 'renderLimitProviderHead', 'renderProviderWindows');
+  const renderHead = functionBody(app, 'renderLimitProviderHead', 'codexResetForecastDate');
   assert.doesNotMatch(renderHead, /showActiveAccount/);
   assert.match(renderHead, /codexAccountControl\.render\(\{/);
   // The ✓ tracks state.codexActiveAccount only (the account THIS device's Codex
