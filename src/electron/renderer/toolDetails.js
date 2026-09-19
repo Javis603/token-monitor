@@ -18,11 +18,12 @@
     if (!clientKey) return [];
     const models = period?.clientModels?.[clientKey];
     const costs = period?.clientModelCosts?.[clientKey];
-    if ((!models || typeof models !== 'object') && (!costs || typeof costs !== 'object')) return [];
+    const unpriced = period?.clientModelUnpricedTokens?.[clientKey];
+    if ((!models || typeof models !== 'object') && (!costs || typeof costs !== 'object') && (!unpriced || typeof unpriced !== 'object')) return [];
 
     const total = amount(period?.clients?.[clientKey]);
     const totalCost = amount(period?.clientCosts?.[clientKey]);
-    return usageAttributionRowsApi.attributionRows(models, costs, {
+    return usageAttributionRowsApi.attributionRows(models, costs, unpriced, {
       totalValue: total,
       totalCost
     })
@@ -34,6 +35,7 @@
           name: row.key,
           value,
           cost,
+          ...(amount(row.unpricedTokens) > 0 ? { unpricedTokens: amount(row.unpricedTokens) } : {}),
           percent: total > 0 ? Math.min(100, value / total * 100) : 0,
           unattributed: row.unattributed === true
         };

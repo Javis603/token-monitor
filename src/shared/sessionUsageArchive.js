@@ -48,7 +48,7 @@ function normalizedSessionFrom(value, fallbackKey) {
 }
 
 function hasSessionUsage(session) {
-  return numberValue(session?.totalTokens) > 0 || numberValue(session?.costUsd) > 0;
+  return numberValue(session?.totalTokens) > 0 || numberValue(session?.costUsd) > 0 || numberValue(session?.unpricedTokens) > 0;
 }
 
 function normalizeSessionUsageArchive(value) {
@@ -278,12 +278,14 @@ function addArchivedSession(period, session, archiveKey = null) {
   period.sessions[key] = archived;
   const tokens = Math.max(0, Math.round(numberValue(archived.totalTokens)));
   const cost = numberValue(archived.costUsd);
+  const unpricedTokens = Math.min(tokens, Math.max(0, Math.round(numberValue(archived.unpricedTokens))));
   const cacheRead = Math.max(0, Math.round(numberValue(archived.cacheReadTokens)));
   const cacheWrite = Math.max(0, Math.round(numberValue(archived.cacheWriteTokens)));
   const output = Math.max(0, Math.round(numberValue(archived.outputTokens)));
 
   period.totalTokens += tokens;
   period.costUsd += cost;
+  period.unpricedTokens += unpricedTokens;
   period.cacheReadTokens += cacheRead;
   period.cacheWriteTokens += cacheWrite;
   period.outputTokens += output;
@@ -295,6 +297,7 @@ function addArchivedSession(period, session, archiveKey = null) {
   }
   if (tokens > 0) period.clients[archived.client] = (period.clients[archived.client] || 0) + tokens;
   if (cost > 0) period.clientCosts[archived.client] = (period.clientCosts[archived.client] || 0) + cost;
+  if (unpricedTokens > 0) period.clientUnpricedTokens[archived.client] = (period.clientUnpricedTokens[archived.client] || 0) + unpricedTokens;
 
   for (const [model, modelTokens] of Object.entries(archived.models || {})) {
     const next = Math.max(0, Math.round(numberValue(modelTokens)));
@@ -309,6 +312,13 @@ function addArchivedSession(period, session, archiveKey = null) {
     period.modelCosts[model] = (period.modelCosts[model] || 0) + next;
     if (!period.clientModelCosts[archived.client]) period.clientModelCosts[archived.client] = {};
     period.clientModelCosts[archived.client][model] = (period.clientModelCosts[archived.client][model] || 0) + next;
+  }
+  for (const [model, modelUnpricedTokens] of Object.entries(archived.modelUnpricedTokens || {})) {
+    const next = Math.min(numberValue(archived.models?.[model]), Math.max(0, Math.round(numberValue(modelUnpricedTokens))));
+    if (next <= 0) continue;
+    period.modelUnpricedTokens[model] = (period.modelUnpricedTokens[model] || 0) + next;
+    if (!period.clientModelUnpricedTokens[archived.client]) period.clientModelUnpricedTokens[archived.client] = {};
+    period.clientModelUnpricedTokens[archived.client][model] = (period.clientModelUnpricedTokens[archived.client][model] || 0) + next;
   }
 
   addSessionBreakdown(period, archived);

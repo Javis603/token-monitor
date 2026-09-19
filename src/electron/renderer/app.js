@@ -21,6 +21,7 @@ const wslStatusPresentationApi = window.TokenMonitorWslStatusPresentation;
 const statsRenderSchedulerApi = window.TokenMonitorStatsRenderScheduler;
 const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
+const costPresentationApi = window.TokenMonitorCostPresentation;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
   'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline', 'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
@@ -1206,6 +1207,11 @@ function compactMonthLabel(label) {
 }
 function currentCurrency() { return currencyApi.normalizeCurrency(state.settings?.currency); }
 function formatCost(value) { return currencyApi.formatCurrencyFromUsd(value, currentCurrency()); }
+function formatCostAvailability(value, unpricedTokens) {
+  return costPresentationApi.formatCostAvailability(value, unpricedTokens, formatCost, {
+    partial: t('cost.partial'), unknown: t('cost.unavailable')
+  });
+}
 function applyEffectiveCurrencyRates() {
   if (state.settings?.currencyRatesEffective) currencyApi.configureRates(state.settings.currencyRatesEffective);
 }
@@ -2266,7 +2272,7 @@ function renderToolDetailAccordion(accordionInner, detail) {
 
   if (mode === 'models' && hasModels) {
     for (const model of modelRows) {
-      const metric = model.value > 0 ? formatNumber(model.value) : formatCost(model.cost);
+      const metric = model.value > 0 ? formatNumber(model.value) : formatCostAvailability(model.cost, model.unpricedTokens);
       const label = model.unattributed === true ? labels.unclassified : model.name;
       appendAccordionMetricRow(content, label, metric, model.value > 0 ? model.percent : null, 'tool-model-row');
     }
@@ -2380,7 +2386,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, sortTime }) {
+function updateRow(row, { name, subtitle, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2440,7 +2446,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
-  row.querySelector('.row-cost').textContent = tokenDataUnavailable === true ? '' : formatCost(cost || 0);
+  row.querySelector('.row-cost').textContent = tokenDataUnavailable === true ? '' : formatCostAvailability(cost || 0, unpricedTokens);
   // The row builder already applied the shared gate (recent enough to have a
   // reading), so this draws whatever arrived rather than re-deciding from
   // `running` - that second gate is exactly what made the dock card and this
@@ -2515,7 +2521,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   const tokenLabel = tokenDataUnavailable === true
     ? (t('detailTokenUnavailable') || 'Unavailable')
     : formatNumber(value);
-  const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0)}`;
+  const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCostAvailability(cost || 0, unpricedTokens)}`;
   sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
     interactive,
     hasAccordion,
@@ -2751,6 +2757,7 @@ function deviceRowsForPeriod() {
       name: deviceLabel(device),
       value: breakdown.totalTokens,
       cost: Number(period.costUsd || 0),
+      unpricedTokens: Number(period.unpricedTokens || 0),
       color: deviceColor(Boolean(device.stale)),
       stale: Boolean(device.stale),
       platform: device.platform || '',
@@ -2782,8 +2789,8 @@ function attributionComponent(period, field, key) {
   );
 }
 
-function periodAttributionRows(period, values, costs) {
-  const rows = usageAttributionRowsApi.attributionRows(values, costs, {
+function periodAttributionRows(period, values, costs, unpricedTokens) {
+  const rows = usageAttributionRowsApi.attributionRows(values, costs, unpricedTokens, {
     totalValue: period?.totalTokens,
     totalCost: period?.costUsd
   });
@@ -2791,8 +2798,8 @@ function periodAttributionRows(period, values, costs) {
 }
 
 function toolRowsForPeriod(period) {
-  const clientRows = periodAttributionRows(period, period?.clients, period?.clientCosts)
-    .map(({ key: client, value, cost }) => ({ key: client, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client), modelRows: toolDetailsApi.visibleModelRowsForTool(period, client, formatCost) }));
+  const clientRows = periodAttributionRows(period, period?.clients, period?.clientCosts, period?.clientUnpricedTokens)
+    .map(({ key: client, value, cost, unpricedTokens }) => ({ key: client, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, unpricedTokens, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client), modelRows: toolDetailsApi.visibleModelRowsForTool(period, client, formatCostAvailability) }));
   if (clientRows.length > 0) {
     const usageSortedRows = clientRows.sort((a, b) => b.value - a.value);
     return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, state.settings?.clientDisplayOrder, state.settings?.hiddenClients, KNOWN_CLIENTS, state.settings?.pinnedClients);
@@ -2802,11 +2809,12 @@ function toolRowsForPeriod(period) {
 }
 
 function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRankingMetric) {
-  const modelRows = periodAttributionRows(period, period?.models, period?.modelCosts).map(({ key: model, value, cost, unattributed }) => ({
+  const modelRows = periodAttributionRows(period, period?.models, period?.modelCosts, period?.modelUnpricedTokens).map(({ key: model, value, cost, unpricedTokens, unattributed }) => ({
     key: model,
     name: model === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : model,
     value,
     cost,
+    unpricedTokens,
     unattributed,
     color: modelColor(model),
     stale: false,
@@ -8419,7 +8427,7 @@ function render() {
     cancelNumberAnimation();
     els.totalTokens.textContent = fixedUnavailable ? '—' : formatNumber(Number(period.totalTokens || 0));
     updateTotalCompact(fixedUnavailable ? 0 : Number(period.totalTokens || 0));
-    els.cost.textContent = fixedUnavailable ? '' : formatCost(period.costUsd || 0);
+    els.cost.textContent = fixedUnavailable ? '' : formatCostAvailability(period.costUsd || 0, period.unpricedTokens);
     state.currentTotal = fixedUnavailable ? 0 : Number(period.totalTokens || 0);
     hidePeriodContentForMessage(fixedPeriodMessage(state.fixedPeriodSnapshot, detailUnavailable ? state.breakdown : ''));
     renderFloatingBubbleContent();
@@ -8453,7 +8461,7 @@ function render() {
     updateTotalCompact(nextTotal);
   }
   state.currentTotal = nextTotal;
-  els.cost.textContent = formatCost(period.costUsd || 0);
+  els.cost.textContent = formatCostAvailability(period.costUsd || 0, period.unpricedTokens);
   renderTokenRate();
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');

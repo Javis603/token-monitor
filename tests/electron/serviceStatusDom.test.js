@@ -403,7 +403,7 @@ test('row accordions expose keyboard and aria interactions', () => {
   assert.match(app, /hasAccordion,/);
   assert.match(app, /expanded: row\.classList\.contains\('expanded'\)/);
   assert.match(app, /\$\{name\}, \$\{t\('dashboard\.stat\.totalTokens'\)\}/);
-  assert.match(app, /\$\{t\('dashboard\.stat\.totalCost'\)\}: \$\{formatCost\(cost \|\| 0\)\}/);
+  assert.match(app, /\$\{t\('dashboard\.stat\.totalCost'\)\}: \$\{formatCostAvailability\(cost \|\| 0, unpricedTokens\)\}/);
 });
 
 test('project accordions retain unchanged DOM between live refreshes', () => {

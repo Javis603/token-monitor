@@ -11,6 +11,7 @@ const { historyRevision, num } = require('../shared/history');
 const MODEL_MAP_FIELDS = [
   'models',
   'modelCosts',
+  'modelUnpricedTokens',
   'modelCacheReads',
   'modelCacheWrites',
   'modelOutputs',
@@ -70,7 +71,7 @@ function collectUsageModelIds(value, modelIds = new Set()) {
   if (!value || typeof value !== 'object') return modelIds;
   addModelId(modelIds, value.model);
   for (const field of MODEL_MAP_FIELDS) addModelMapIds(modelIds, value[field]);
-  for (const field of ['clientModels', 'clientModelCosts']) addClientModelIds(modelIds, value[field]);
+  for (const field of ['clientModels', 'clientModelCosts', 'clientModelUnpricedTokens']) addClientModelIds(modelIds, value[field]);
   for (const field of ['sessions', 'projects']) {
     for (const row of Object.values(value[field] || {})) collectUsageModelIds(row, modelIds);
   }
@@ -83,10 +84,12 @@ function collectHistoryModelIds(history, modelIds = new Set()) {
     for (const row of Array.isArray(history[field]) ? history[field] : []) {
       addModelMapIds(modelIds, row?.perModel);
       addClientModelIds(modelIds, row?.clientModelCosts);
+      addClientModelIds(modelIds, row?.clientModelUnpricedTokens);
     }
   }
   addModelId(modelIds, history.summary?.favoriteModel);
   addClientModelIds(modelIds, history.summary?.clientModelCosts);
+  addClientModelIds(modelIds, history.summary?.clientModelUnpricedTokens);
   for (const device of Array.isArray(history.deviceHistories) ? history.deviceHistories : []) {
     for (const period of Object.values(device?.periods || {})) collectUsageModelIds(period, modelIds);
     collectHistoryModelIds(device?.history, modelIds);
@@ -143,6 +146,7 @@ const USAGE_PROJECTIONS = [
   ...MODEL_MAP_FIELDS.map((field) => [field, foldModelMap]),
   ['clientModels', foldClientModelMaps],
   ['clientModelCosts', foldClientModelMaps],
+  ['clientModelUnpricedTokens', foldClientModelMaps],
   ['sessions', projectNestedUsage],
   ['projects', projectNestedUsage]
 ];
@@ -196,7 +200,8 @@ function projectHistoryRow(row, resolve) {
   const clientModelCosts = row.clientModelCosts
     ? mapValues(row.clientModelCosts, (models) => foldModelMap(models, resolve))
     : row.clientModelCosts;
-  if (!regroups && clientModelCosts === row.clientModelCosts) return row;
+  const clientModelUnpricedTokens = foldClientModelMaps(row.clientModelUnpricedTokens, resolve);
+  if (!regroups && clientModelCosts === row.clientModelCosts && clientModelUnpricedTokens === row.clientModelUnpricedTokens) return row;
   const result = { ...row };
   if (regroups) {
     const grouped = new Map();
@@ -207,6 +212,7 @@ function projectHistoryRow(row, resolve) {
     result.perModel = Object.fromEntries(grouped);
   }
   if (row.clientModelCosts) result.clientModelCosts = clientModelCosts;
+  if (row.clientModelUnpricedTokens) result.clientModelUnpricedTokens = clientModelUnpricedTokens;
   return result;
 }
 
@@ -274,15 +280,17 @@ function projectSummary(history, resolve, semantics) {
   const clientModelCosts = summary.clientModelCosts
     ? mapValues(summary.clientModelCosts, (models) => foldModelMap(models, resolve))
     : summary.clientModelCosts;
+  const clientModelUnpricedTokens = foldClientModelMaps(summary.clientModelUnpricedTokens, resolve);
   // No leader means no per-model rows anywhere: nothing to re-rank, and inventing
   // one here would fill in a value the producer deliberately left empty.
   const favorite = original
     ? (semantics === 'preview' ? resolve(original) : projectedLeader(history, resolve, semantics, resolve(original)))
     : summary.favoriteModel;
-  if (favorite === summary.favoriteModel && clientModelCosts === summary.clientModelCosts) return summary;
+  if (favorite === summary.favoriteModel && clientModelCosts === summary.clientModelCosts && clientModelUnpricedTokens === summary.clientModelUnpricedTokens) return summary;
   const result = { ...summary };
   result.favoriteModel = favorite;
   if (summary.clientModelCosts) result.clientModelCosts = clientModelCosts;
+  if (summary.clientModelUnpricedTokens) result.clientModelUnpricedTokens = clientModelUnpricedTokens;
   return result;
 }
 
