@@ -2009,6 +2009,22 @@ function clientSourceRoots(clientsCsv, options = {}) {
   add('lmstudio', ['lmstudio-server-logs', path.join(lmStudioHome, 'server-logs')]);
   const unslothHome = nonBlankEnvPath('UNSLOTH_STUDIO_HOME', path.join(home, '.unsloth', 'studio'), env);
   add('unsloth', ['unsloth-db', unslothHome, path.join(unslothHome, 'studio.db')]);
+  const devinCliDb = platform === 'win32'
+    ? path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'devin', 'cli', 'sessions.db')
+    : path.join(home, '.local', 'share', 'devin', 'cli', 'sessions.db');
+  const devinDesktopAcpRoots = [
+    ...(platform === 'darwin'
+      ? [path.join(home, 'Library', 'Application Support', 'Devin', 'User', 'acp-events')]
+      : []),
+    path.join(home, '.config', 'Devin', 'User', 'acp-events'),
+    path.join(home, '.config', 'devin', 'User', 'acp-events'),
+    path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Devin', 'User', 'acp-events')
+  ];
+  add(
+    'devin-cli',
+    ['devin-cli-data', path.dirname(devinCliDb), devinCliDb],
+    ...[...new Set(devinDesktopAcpRoots)].map((dir) => ['devin-desktop-events', dir, null, true])
+  );
   const customScanPaths = normalizeCustomScanPaths(options.customScanPaths, { platform });
   for (const [client, dirs] of Object.entries(customScanPaths)) {
     if (!enabled.has(client)) continue;
@@ -2208,6 +2224,7 @@ const ZED_DB_WATCH_PATTERN = /^threads\.db(?:-(?:wal|shm))?$/;
 const COPILOT_DB_WATCH_PATTERN = /^data\.db(?:-(?:wal|shm))?$/;
 const ZCODE_DB_WATCH_PATTERN = /^db\.sqlite(?:-(?:wal|shm))?$/;
 const UNSLOTH_DB_WATCH_PATTERN = /^studio\.db(?:-(?:wal|shm))?$/;
+const DEVIN_DB_WATCH_PATTERN = /^sessions\.db(?:-(?:wal|shm))?$/;
 const GROK_UNIFIED_LOG_FILE = 'unified.jsonl';
 // Tokscale scans only these two CodeBuddy extension log subtrees. Keep their
 // recursive layout intact, but prune unrelated siblings under Logs before
@@ -2418,6 +2435,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // other recursive subtree is pruned before chokidar descends into it.
   bound('micode', candidates.micode || [], directChildOnly((name) => MICODE_DB_WATCH_PATTERN.test(name)));
   bound('unsloth', candidates.unsloth || [], directChildOnly((name) => UNSLOTH_DB_WATCH_PATTERN.test(name)));
+  bound('devin-cli', candidates['devin-cli'] || [], directChildOnly((name) => DEVIN_DB_WATCH_PATTERN.test(name)));
   // The dual-source Grok scanner derives exactly logs/unified.jsonl from each
   // Grok home.
   bound('grok', withBasename('grok', 'logs'), directChildOnly((name) => name === GROK_UNIFIED_LOG_FILE));

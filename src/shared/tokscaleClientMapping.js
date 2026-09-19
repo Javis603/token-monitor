@@ -19,6 +19,9 @@ const TOKSCALE_CLIENT_GROUPS = Object.freeze({
   kilo: Object.freeze({
     aliases: Object.freeze(['kilocode']),
     customScanIds: Object.freeze(['kilocode'])
+  }),
+  'devin-cli': Object.freeze({
+    aliases: Object.freeze(['devin-desktop'])
   })
 });
 

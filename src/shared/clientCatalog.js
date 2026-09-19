@@ -69,7 +69,8 @@
     { id: 'dsh', label: 'DeepSeek Harness' },
     { id: 'cherrystudio', label: 'Cherry Studio' },
     { id: 'lmstudio', label: 'LM Studio' },
-    { id: 'unsloth', label: 'Unsloth' }
+    { id: 'unsloth', label: 'Unsloth' },
+    { id: 'devin-cli', label: 'Devin' }
   ].map((client) => Object.freeze({
     defaultTracked: true,
     locallyParsed: false,
@@ -93,7 +94,7 @@
   // Keep it minimal anyway. This is a label lookup, so an id belongs here only
   // when a row that can actually appear would otherwise render as the bare id —
   // not as a cheap way to register a client.
-  const NON_CATALOG_CLIENT_LABELS = Object.freeze({ gemini: 'Gemini' });
+  const NON_CATALOG_CLIENT_LABELS = Object.freeze({ gemini: 'Gemini', devin: 'Devin', 'devin-desktop': 'Devin Desktop' });
 
   const CLIENT_IDS = Object.freeze(CLIENT_CATALOG.map((client) => client.id));
   const DEFAULT_CLIENT_IDS = Object.freeze(

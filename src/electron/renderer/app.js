@@ -23,7 +23,7 @@ const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline', 'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
+  'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline', 'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth', 'devin-cli', 'devin',
   'gemini', 'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
 // Limits rows mark more ids than there are tracked clients: every provider, plus
